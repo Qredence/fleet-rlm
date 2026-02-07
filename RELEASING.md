@@ -1,6 +1,45 @@
 # Releasing `fleet-rlm` to PyPI
 
-This project uses a manual token-based publish flow:
+This project supports both automated and manual release workflows.
+
+## Automated Release (Recommended)
+
+Use the GitHub Actions workflow for a fully automated release:
+
+1. Go to **Actions** → **Release to PyPI** in the GitHub repository
+2. Click **Run workflow**
+3. Enter the version number (e.g., `0.1.0`)
+4. Approve the TestPyPI environment deployment
+5. Once smoke tests pass, approve the PyPI environment deployment
+
+The workflow will:
+
+- Run all preflight checks (tests, linting)
+- Build and verify distributions
+- Upload to TestPyPI and run smoke tests
+- Upload to PyPI after approval
+- Create a GitHub release with the git tag
+
+### Prerequisites for Automated Release
+
+Configure GitHub environments and OIDC trusted publishing:
+
+1. **TestPyPI Environment:**
+   - Create environment: `testpypi`
+   - Configure OIDC trusted publisher at https://test.pypi.org/manage/account/publishing/
+   - Set workflow: `release.yml`, environment: `testpypi`
+
+2. **PyPI Environment:**
+   - Create environment: `pypi`
+   - Add required reviewers for production approval
+   - Configure OIDC trusted publisher at https://pypi.org/manage/account/publishing/
+   - Set workflow: `release.yml`, environment: `pypi`
+
+OIDC eliminates the need for API tokens - GitHub uses temporary credentials via OpenID Connect.
+
+## Manual Release
+
+If you prefer manual control or need to troubleshoot, follow this token-based publish flow:
 
 1. Build and validate artifacts locally
 2. Upload to TestPyPI
