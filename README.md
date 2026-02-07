@@ -101,6 +101,7 @@ uv run fleet-rlm --help
 # Run a basic demo
 uv run fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
 
+# Doc-analysis commands require --docs-path
 # Extract architecture from documentation
 uv run fleet-rlm run-architecture \
     --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
@@ -108,6 +109,19 @@ uv run fleet-rlm run-architecture \
 
 # Extract API endpoints
 uv run fleet-rlm run-api-endpoints --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
+
+# Find error patterns
+uv run fleet-rlm run-error-patterns --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
+
+# Inspect trajectory on a document sample
+uv run fleet-rlm run-trajectory \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --chars 5000
+
+# Use custom regex tool
+uv run fleet-rlm run-custom-tool \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --chars 5000
 
 # Check Modal secrets are configured
 uv run fleet-rlm check-secret
@@ -174,7 +188,7 @@ uv run fleet-rlm check-secret
 ## Package Structure
 
 ```
-src/rlm_dspy_modal/
+src/fleet_rlm/
 ├── __init__.py      # Package exports
 ├── cli.py           # Typer CLI interface
 ├── config.py        # Environment configuration
@@ -254,10 +268,15 @@ make format
 # Run all checks
 make check
 
+# Run release validation (lint, tests, build, twine check)
+make release-check
+
 # Install pre-commit hooks
 make precommit-install
 make precommit-run
 ```
+
+Release process documentation is in [`RELEASING.md`](RELEASING.md), including the TestPyPI-first workflow.
 
 ---
 

@@ -88,7 +88,9 @@ async def test_model(
     start_time = datetime.now()
     try:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-        async with session.post(url, headers=headers, json=payload, timeout=timeout) as response:
+        async with session.post(
+            url, headers=headers, json=payload, timeout=timeout
+        ) as response:
             elapsed = (datetime.now() - start_time).total_seconds()
 
             if response.status == 200:
@@ -138,7 +140,9 @@ async def test_model(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Test LiteLLM /v1/responses for chat models in config.yaml")
+    parser = argparse.ArgumentParser(
+        description="Test LiteLLM /v1/responses for chat models in config.yaml"
+    )
     parser.add_argument(
         "--config",
         default="config/config.yaml",
@@ -177,7 +181,11 @@ async def main() -> int:
         return 1
 
     config_arg_path = Path(args.config)
-    config_path = config_arg_path if config_arg_path.is_absolute() else (repo_root / config_arg_path)
+    config_path = (
+        config_arg_path
+        if config_arg_path.is_absolute()
+        else (repo_root / config_arg_path)
+    )
     if not config_path.exists():
         print(f"Config file not found: {config_path}")
         return 1
@@ -230,7 +238,9 @@ async def main() -> int:
             failed_count += 1
 
     print("=" * 80)
-    print(f"SUMMARY: {working_count} working, {failed_count} failed out of {len(models)} models tested")
+    print(
+        f"SUMMARY: {working_count} working, {failed_count} failed out of {len(models)} models tested"
+    )
     print("=" * 80)
     return 0
 

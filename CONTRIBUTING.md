@@ -154,8 +154,8 @@ def my_function(param1: str, param2: int) -> dict[str, str]:
 
 ### Project-Specific Conventions
 
-- **Package Structure**: All source code under `src/rlm_dspy_modal/`
-- **Testing**: Tests in `rlm_content/tests/` mirroring the source structure
+- **Package Structure**: All source code under `src/fleet_rlm/`
+- **Testing**: Tests in `tests/` mirroring the source structure
 - **Environment Config**: Use `.env` for local development, never commit it
 - **Secrets**: Use Modal secrets for API keys, never hardcode them
 
@@ -170,15 +170,15 @@ def my_function(param1: str, param2: int) -> dict[str, str]:
 uv run pytest
 
 # Run specific test file
-uv run pytest rlm_content/tests/test_cli_smoke.py
+uv run pytest tests/test_cli_smoke.py
 
 # Run with coverage
-uv run pytest --cov=rlm_dspy_modal --cov-report=html
+uv run pytest --cov=fleet_rlm --cov-report=html
 ```
 
 ### Writing Tests
 
-- Place tests in `rlm_content/tests/` directory
+- Place tests in `tests/` directory
 - Use `pytest` as the test framework
 - Use descriptive test names: `test_function_name_expected_behavior`
 - Mock external dependencies (DSPy, Modal) using `monkeypatch`
@@ -309,7 +309,8 @@ uv add <package>          # Add a new dependency
 # Code Quality
 make format               # Format code with ruff
 make lint                 # Check linting
-make check                # Run both format and lint
+make check                # Run lint + tests
+make release-check        # Run lint + tests + build + twine checks
 
 # Testing
 make test                 # Run all tests
@@ -328,6 +329,8 @@ uv run fleet-rlm --help   # Direct CLI help
 uv run modal setup        # Authenticate Modal
 uv run modal volume create rlm-volume-dspy  # Create volume
 ```
+
+For package publication workflow (TestPyPI then PyPI), see [RELEASING.md](RELEASING.md).
 
 ---
 
