@@ -1,0 +1,8 @@
+<!-- Chunk 1689: bytes 6717418-6717590, type=class -->
+class StubStreamResponse(dspy.streaming.StreamResponse):
+    """Stub StreamResponse class for testing."""
+
+    def __init__(self, chunk: str):
+        self.chunk = chunk
+
+

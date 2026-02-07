@@ -1,0 +1,30 @@
+<!-- Chunk 2101: bytes 8026684-8027656, type=function -->
+def test_validation_warnings_for_missing_sections(temp_skills_root: Path) -> None:
+    """Test v2 skill validation with missing optional sections generates warnings."""
+    skill_dir = temp_skills_root / "general/testing"
+    skill_dir.mkdir(parents=True)
+    # NOTE: No subdirectories - they are optional in v2
+
+    # v2: SKILL.md with frontmatter and required "When to Use" section
+    # Missing: Overview, Quick Start (these generate warnings, not errors)
+    skill_md = """---
+name: test-skill
+description: A test skill for validation.
+---
+
+# Test Skill
+
+## When to Use This Skill
+Use this when testing the validator.
+"""
+    (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+
+    validator = SkillValidator(temp_skills_root)
+    results = validator.validate_complete(skill_dir)
+
+    assert results["passed"] is True
+    assert results["errors"] == []
+    # Should have warnings about missing Overview, Quick Start, etc.
+    assert results["warnings"]
+
+

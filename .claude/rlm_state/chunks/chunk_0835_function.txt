@@ -1,0 +1,10 @@
+<!-- Chunk 835: bytes 2890276-2890534, type=function -->
+def test_job_manager_memory_first():
+    """Test that manager returns memory before DB."""
+    manager = JobManager()
+    job = JobState(job_id="test-2")
+    
+    manager.memory.set("test-2", job)
+    assert manager.get_job("test-2") == job  # From memory
+
+

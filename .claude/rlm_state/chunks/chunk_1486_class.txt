@@ -1,0 +1,21 @@
+<!-- Chunk 1486: bytes 6327100-6327708, type=class -->
+class TooManyRequestsException(SkillFleetAPIError):
+    """Too many requests exception for rate limiting."""
+
+    status_code: int = 429
+
+    def __init__(self, detail: str = "Too many requests", retry_after: int | None = None) -> None:
+        """
+        Initialize rate limit exception.
+
+        Args:
+            detail: Error message
+            retry_after: Optional seconds until retry is allowed
+
+        """
+        headers = None
+        if retry_after is not None:
+            headers = {"Retry-After": str(retry_after)}
+        super().__init__(detail=detail, status_code=429, headers=headers)
+
+

@@ -1,0 +1,62 @@
+<!-- Chunk 1969: bytes 7880050-7882066, type=class -->
+class TestListSkills:
+    """Tests for GET /api/v1/skills endpoint."""
+
+    def test_list_skills_success(self, client):
+        """Test listing all skills."""
+        with patch("skill_fleet.api.v1.skills.list_skills") as mock_list:
+            mock_list.return_value = [
+                {"skill_id": "skill-1", "name": "Skill 1"},
+                {"skill_id": "skill-2", "name": "Skill 2"},
+            ]
+
+            response = client.get("/api/v1/skills")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert isinstance(data, list)
+            assert len(data) == 2
+
+    def test_list_skills_empty(self, client):
+        """Test listing skills when none exist."""
+        with patch("skill_fleet.api.v1.skills.list_skills") as mock_list:
+            mock_list.return_value = []
+
+            response = client.get("/api/v1/skills")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data == []
+
+    def test_list_skills_with_filters(self, client):
+        """Test listing skills with query filters."""
+        with patch("skill_fleet.api.v1.skills.list_skills") as mock_list:
+            mock_list.return_value = [
+                {"skill_id": "skill-1", "name": "Python Skill", "status": "active"}
+            ]
+
+            response = client.get("/api/v1/skills?status=active&search=python")
+
+            assert response.status_code == 200
+            mock_list.assert_called_once()
+
+
+============================================================
+END FILE: tests/api/v1/test_skills.py
+============================================================
+
+============================================================
+FILE: tests/cli/test_cli_commands.py
+============================================================
+
+"""Tests for CLI commands."""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from skill_fleet.cli.app import app
+from skill_fleet.cli.main import create_skill, validate_skill
+
+
+@pytest.fixture

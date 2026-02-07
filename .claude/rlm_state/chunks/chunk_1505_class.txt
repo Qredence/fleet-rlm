@@ -1,0 +1,10 @@
+<!-- Chunk 1505: bytes 6356718-6356982, type=class -->
+class QuestionType(StrEnum):
+    """Type of HITL question."""
+
+    BOOLEAN = "boolean"  # Yes/No question
+    SINGLE_CHOICE = "single"  # Pick one from options
+    MULTI_CHOICE = "multi"  # Pick multiple from options
+    FREE_TEXT = "text"  # Open text response
+
+

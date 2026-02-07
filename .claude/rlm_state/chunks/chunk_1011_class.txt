@@ -1,0 +1,24 @@
+<!-- Chunk 1011: bytes 3557895-3558351, type=class -->
+class UnderstandingSignature(dspy.Signature):
+    """Improved signature."""
+    pass
+```
+
+**Migration Storage** (in signature files):
+```python
+MIGRATIONS = {
+    "1.0 -> 2.0": {
+        "renamed_fields": {
+            "task": "intent",
+            "context": "background"
+        },
+        "added_fields": {
+            "domain": Literal["python", "web", ...]
+        },
+        "removed_fields": ["debug_mode"]
+    }
+}
+```
+
+**Manager Class**:
+```python

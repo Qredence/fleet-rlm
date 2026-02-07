@@ -1,0 +1,44 @@
+<!-- Chunk 879: bytes 3140243-3141207, type=class -->
+class Phase2GenerationModule(dspy.Module):
+    """Phase 2 orchestrator: generate content and optionally incorporate feedback."""
+```
+
+**Implementation**: Orchestrates ContentGenerator and FeedbackIncorporator.
+
+**Input:**
+```python
+skill_metadata: Any
+content_plan: str
+generation_instructions: str
+parent_skills_content: str
+dependency_summaries: str
+user_feedback: str = ""
+change_requests: str = ""
+```
+
+**Output:**
+```python
+{
+    "skill_content": str,
+    "usage_examples": list[UsageExample],
+    "best_practices": list[BestPractice],
+    "test_cases": list[TestCase],
+    "estimated_reading_time": int,
+    "changes_made": list[str] = None,  # If feedback was incorporated
+    "improvement_score": float = None,
+}
+```
+
+---
+
+## Phase 3 Modules
+
+**File**: `src/skill_fleet/core/modules/phase3_validation.py`
+
+Phase 3 validates and refines the generated skill.
+
+### SkillValidatorModule
+
+Validate a draft skill against quality and compliance rules.
+
+```python

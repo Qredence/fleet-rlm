@@ -1,0 +1,58 @@
+<!-- Chunk 1679: bytes 6701675-6703543, type=function -->
+def serialize_pydantic_objects(
+    items: list[Any], output_format: str = "dict"
+) -> dict[str, Any] | list[Any] | str:
+    """
+    Serialize a list of Pydantic objects or dicts.
+
+    Args:
+        items: List of objects to serialize
+        output_format: "dict" for dict output, "json" for JSON string,
+                     "by_key" for dict with item keys as dict keys
+
+    Returns:
+        Serialized list or dict
+
+    Examples:
+        >>> class Item(BaseModel):
+        ...     id: int
+        ...     name: str
+        >>> items = [Item(id=1, name="a"), Item(id=2, name="b")]
+        >>> serialize_pydantic_objects(items)
+        [{'id': 1, 'name': 'a'}, {'id': 2, 'name': 'b'}]
+        >>> serialize_pydantic_objects(items, output_format="by_key", key_attr="id")
+        {1: {'id': 1, 'name': 'a'}, 2: {'id': 2, 'name': 'b'}}
+
+    """
+    if not items:
+        return {} if output_format == "by_key" else []
+
+    # Serialize each item
+    serialized_items = []
+    for item in items:
+        item_dict = serialize_pydantic_object(item, output_format="dict")
+        serialized_items.append(item_dict)
+
+    # Return as list
+    if output_format == "json":
+        return json.dumps(serialized_items, ensure_ascii=False, indent=2, default=str)
+    elif output_format == "by_key":
+        # Convert to dict by extracting key from each item
+        result = {}
+        for item_dict in serialized_items:
+            # Try to find a key field
+            if "id" in item_dict:
+                key = item_dict["id"]
+            elif "name" in item_dict:
+                key = item_dict["name"]
+            elif "filename" in item_dict:
+                key = item_dict["filename"]
+            else:
+                # Use index if no key found
+                key = len(result)
+            result[key] = item_dict
+        return result
+
+    return serialized_items
+
+

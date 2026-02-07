@@ -1,0 +1,35 @@
+<!-- Chunk 1947: bytes 7801761-7802876, type=function -->
+def load_skill_file(skill_file: Path) -> SkillMetadata:
+    """
+    Load a skill definition stored as a single JSON file.
+
+    Args:
+        skill_file: Path to the JSON skill file
+
+    Returns:
+        SkillMetadata object containing the skill's metadata
+
+    """
+    skill_data = json.loads(skill_file.read_text(encoding="utf-8"))
+    skill_id = skill_data["skill_id"]
+
+    # Generate name from skill_id if not present
+    name = skill_data.get("name") or skill_id_to_name(skill_id)
+    description = skill_data.get("description", "")
+
+    metadata = SkillMetadata(
+        skill_id=skill_id,
+        version=skill_data.get("version", "1.0.0"),
+        type=skill_data.get("type", "technical"),
+        weight=skill_data.get("weight", "medium"),
+        load_priority=skill_data.get("load_priority", "on_demand"),
+        dependencies=list(skill_data.get("dependencies", [])),
+        capabilities=list(skill_data.get("capabilities", [])),
+        path=skill_file,
+        always_loaded=bool(skill_data.get("always_loaded", False)),
+        name=name,
+        description=description,
+    )
+    return metadata
+
+

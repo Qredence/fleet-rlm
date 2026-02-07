@@ -1,0 +1,44 @@
+<!-- Chunk 1913: bytes 7731567-7732755, type=function -->
+def setup_mlflow_experiment(
+    experiment_name: str = DEFAULT_EXPERIMENT_NAME,
+    tracking_uri: str = DEFAULT_TRACKING_URI,
+) -> None:
+    """
+    Set up MLflow experiment for skill creation tracking.
+
+    Args:
+        experiment_name: Name of the MLflow experiment
+        tracking_uri: MLflow tracking URI (default: "mlruns")
+
+    Raises:
+        ImportError: If MLflow is not installed
+
+    Examples:
+        >>> setup_mlflow_experiment()
+        >>> setup_mlflow_experiment("custom-experiment", "custom-tracking-uri")
+
+    """
+    try:
+        import mlflow
+    except ImportError as err:
+        raise ImportError("MLflow is not installed. Install it with: uv add mlflow") from err
+
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(experiment_name)
+
+    # Log system info
+    try:
+        import dspy
+
+        mlflow.log_params(  # type: ignore[attr-defined]
+            {
+                "dspy_version": dspy.__version__,
+                "workflow_version": "2.0",
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to log system info: {e}")
+
+    logger.info(f"MLflow experiment '{experiment_name}' ready at {tracking_uri}")
+
+

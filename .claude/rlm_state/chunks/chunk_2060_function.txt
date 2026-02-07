@@ -1,0 +1,59 @@
+<!-- Chunk 2060: bytes 7965272-7967013, type=function -->
+def test_recommendation_engine(temp_analytics_dir):
+    class MockTaxonomy:
+        def get_skill_metadata(self, skill_id):
+            if skill_id == "skill_1":
+
+                class Meta:
+                    dependencies = ["dep_1"]
+
+                return Meta()
+            return None
+
+    tracker = UsageTracker(temp_analytics_dir)
+    tracker.track_usage("skill_1", "user_1")
+
+    engine = AnalyticsEngine(temp_analytics_dir / "usage_log.jsonl")
+    recommender = RecommendationEngine(engine, MockTaxonomy())
+
+    recs = recommender.recommend_skills("user_1")
+    assert len(recs) == 1
+    assert recs[0]["skill_id"] == "dep_1"
+    assert "Required by" in recs[0]["reason"]
+
+
+============================================================
+END FILE: tests/test_analytics.py
+============================================================
+
+============================================================
+FILE: tests/test_api.py
+============================================================
+
+"""Unit tests for FastAPI skill creation API.
+
+Tests FastAPI endpoints in src/skill_fleet/api/
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from skill_fleet.api.factory import get_app
+from skill_fleet.core.models import ValidationReport
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+TEST_SKILL_PATH = "general/testing"
+TEST_SKILL_DESCRIPTION = "Use when testing."
+API_VERSION = "2.0.0"
+
+# ============================================================================
+# Fixtures
+# ============================================================================
+
+
+@pytest.fixture

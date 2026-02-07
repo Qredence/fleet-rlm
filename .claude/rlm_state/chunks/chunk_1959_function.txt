@@ -1,0 +1,14 @@
+<!-- Chunk 1959: bytes 7869035-7869436, type=function -->
+def authenticated_client(api_client):
+    """Create authenticated API client."""
+    # Add auth header if needed
+    api_client.headers["Authorization"] = "Bearer test-token"
+    return api_client
+
+
+# =============================================================================
+# Service Mock Fixtures
+# =============================================================================
+
+
+@pytest.fixture

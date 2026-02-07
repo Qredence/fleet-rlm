@@ -1,0 +1,106 @@
+<!-- Chunk 1769: bytes 7410250-7413972, type=class -->
+class WorkflowOptimizer:
+    """Caches workflow step outputs to speed up repeated runs."""
+
+    def __init__(self, cache_dir: Path) -> None:
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.hit_rate = {"hits": 0, "misses": 0}
+
+    def cache_key(self, step: str, inputs: dict[str, Any]) -> str:
+        """
+        Generate a cache key from step name and inputs.
+
+        Note: MD5 is used for cache key generation only (non-cryptographic).
+        """
+        payload = json.dumps(inputs, sort_keys=True, default=str)
+        # MD5 is sufficient for cache keys (not used for security)
+        digest = hashlib.md5(f"{step}::{payload}".encode(), usedforsecurity=False).hexdigest()  # nosec B324
+        return digest
+
+    def get_cached(self, step: str, inputs: dict[str, Any]) -> Any | None:
+        """
+        Retrieve cached result if available, otherwise return None.
+
+        Note: Only loads pickle files created by this application.
+        """
+        key = self.cache_key(step, inputs)
+        cache_file = self.cache_dir / f"{key}.pkl"
+        if not cache_file.exists():
+            self.hit_rate["misses"] += 1
+            return None
+        try:
+            with cache_file.open("rb") as handle:
+                self.hit_rate["hits"] += 1
+                # Only loading our own cached data, not untrusted input
+                return pickle.load(handle)  # nosec B301
+        except Exception:
+            self.hit_rate["misses"] += 1
+            return None
+
+    def cache_result(self, step: str, inputs: dict[str, Any], result: Any) -> None:
+        """Cache a result for a given step and inputs."""
+        key = self.cache_key(step, inputs)
+        cache_file = self.cache_dir / f"{key}.pkl"
+        try:
+            with cache_file.open("wb") as handle:
+                pickle.dump(result, handle)
+        except Exception:
+            # Ignore cache failures; they should not break the workflow.
+            return
+
+    def clear_cache(self) -> None:
+        """Remove all cached files from the cache directory."""
+        for cache_file in self.cache_dir.glob("*.pkl"):
+            cache_file.unlink()
+
+    def get_cache_stats(self) -> dict[str, Any]:
+        """Return basic cache hit/miss stats and current cache file count."""
+        total = self.hit_rate["hits"] + self.hit_rate["misses"]
+        hit_rate = self.hit_rate["hits"] / total if total else 0
+        return {
+            "hits": self.hit_rate["hits"],
+            "misses": self.hit_rate["misses"],
+            "hit_rate": hit_rate,
+            "cache_size": len(list(self.cache_dir.glob("*.pkl"))),
+        }
+
+
+============================================================
+END FILE: src/skill_fleet/core/optimization/cache.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/optimization/evaluation.py
+============================================================
+
+"""
+Evaluation metrics and data loading for DSPy optimization.
+
+This module provides:
+- Metrics for evaluating skill creation quality
+- Functions to load training/validation datasets
+- Utilities for running evaluations
+
+Metrics are compatible with DSPy optimizers (MIPROv2, GEPA, etc.)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import dspy
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Data Loading
+# =============================================================================
+
+

@@ -1,0 +1,28 @@
+<!-- Chunk 970: bytes 3423879-3424643, type=function -->
+def display_error(
+    message: str,
+    suggestion: str = "",
+    title: str = "❌ Error",
+    exit_code: int = 1
+) -> None:
+    """Display an error message with consistent formatting.
+
+    Args:
+        message: The error message to display.
+        suggestion: Optional actionable suggestion.
+        title: Panel title for the error.
+        exit_code: Exit code associated with this error.
+    """
+    from rich.panel import Panel
+
+    console = get_console()
+    content = f"[bold red]Error:[/bold red] {message}"
+    if suggestion:
+        content += f"\n\n[yellow]💡 Suggestion:[/yellow] {suggestion}"
+
+    console.print(Panel(content, title=title, border_style="red"))
+
+    if exit_code != 0:
+        console.print(f"\n[dim]Exit code: {exit_code}[/dim]")
+
+

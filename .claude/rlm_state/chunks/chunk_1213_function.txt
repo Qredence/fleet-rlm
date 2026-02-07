@@ -1,0 +1,26 @@
+<!-- Chunk 1213: bytes 4573489-4574186, type=function -->
+def run_shell_script(script_name: str, args: list[str] = None):
+    """Run a shell script from scripts/internal/dev/."""
+    script_path = Path(__file__).parent / "internal" / "dev" / script_name
+    cmd = [str(script_path)]
+    if args:
+        cmd.extend(args)
+
+    print(f"🚀 Running {script_name}...")
+    try:
+        # Check if executable
+        if not os.access(script_path, os.X_OK):
+            os.chmod(script_path, 0o700)
+
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error running {script_name}: {e}")
+        sys.exit(e.returncode)
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        sys.exit(1)
+
+
+import os
+
+

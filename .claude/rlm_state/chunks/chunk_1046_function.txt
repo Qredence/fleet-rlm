@@ -1,0 +1,17 @@
+<!-- Chunk 1046: bytes 3765713-3766252, type=function -->
+def __init__(self, base_url: str = "http://localhost:8000"):
+    """Initialize client."""
+    self.base_url = base_url.rstrip("/")
+    self.client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
+```
+
+**Vulnerability:**
+No validation that URL uses secure protocol:
+- User can accidentally use `http://` instead of `https://` in production
+- Could lead to credentials being transmitted in plaintext
+- MITM attack vector if production API is accessed over HTTP
+
+**Mitigation Required:**
+```python
+from urllib.parse import urlparse
+

@@ -1,0 +1,23 @@
+<!-- Chunk 1649: bytes 6675066-6675770, type=class -->
+class ConfigurationError(SkillsFleetError):
+    """
+    Raised when configuration is invalid or missing.
+
+    This can occur when:
+    - config.yaml is malformed
+    - Required environment variables are missing
+    - Invalid model configuration
+    - LLM provider unreachable
+    """
+
+    def __init__(self, message: str, *, config_key: str | None = None) -> None:
+        details = {"config_key": config_key} if config_key else None
+        super().__init__(message, details=details)
+        self.config_key = config_key
+
+
+# =============================================================================
+# Research Errors
+# =============================================================================
+
+

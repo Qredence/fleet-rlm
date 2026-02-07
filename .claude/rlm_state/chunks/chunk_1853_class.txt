@@ -1,0 +1,10 @@
+<!-- Chunk 1853: bytes 7637237-7637417, type=class -->
+class LoadPriorityEnum:
+    """Skill loading priority strategy."""
+
+    ALWAYS = "always"
+    TASK_SPECIFIC = "task_specific"
+    ON_DEMAND = "on_demand"
+    DORMANT = "dormant"
+
+

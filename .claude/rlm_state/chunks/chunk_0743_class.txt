@@ -1,0 +1,18 @@
+<!-- Chunk 743: bytes 2579614-2579908, type=class -->
+class SkillType(str, Enum):
+    """Type of skill per agentskills.io specification."""
+
+    GUIDE = "guide"
+    TOOL_INTEGRATION = "tool_integration"
+    WORKFLOW = "workflow"
+    REFERENCE = "reference"
+    MEMORY_BLOCK = "memory_block"
+```
+
+---
+
+### SkillWeight
+
+Skill weight enum.
+
+```python

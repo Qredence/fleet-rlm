@@ -1,0 +1,56 @@
+<!-- Chunk 1310: bytes 4776737-4778173, type=function -->
+def main():
+    parser = argparse.ArgumentParser(description="Skill Fleet Database Manager")
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+    subparsers.add_parser("init", help="Run migration and seed")
+    subparsers.add_parser("migrate", help="Run only migration")
+    subparsers.add_parser("seed", help="Run only seeding")
+    subparsers.add_parser("verify", help="Verify database state")
+
+    args = parser.parse_args()
+
+    if args.command == "init":
+        run_migration()
+        run_seed()
+    elif args.command == "migrate":
+        run_migration()
+    elif args.command == "seed":
+        run_seed()
+    elif args.command == "verify":
+        verify_db()
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/manage_db.py
+============================================================
+
+============================================================
+FILE: scripts/manage_opt.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Unified Optimization Manager for Skill Fleet.
+
+Orchestrates DSPy optimization workflows, including:
+- MIPROv2 optimization
+- GEPA optimization
+- Benchmarking
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+

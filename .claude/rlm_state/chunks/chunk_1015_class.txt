@@ -1,0 +1,32 @@
+<!-- Chunk 1015: bytes 3563785-3564934, type=class -->
+class GoldenStandardMonitor:
+    def __init__(self, golden_examples: list, drift_threshold: float = 0.05):
+        self.golden = golden_examples
+        self.threshold = drift_threshold
+        self.history = []  # [(timestamp, program_id, accuracy), ...]
+        
+    async def check_drift(self, program) -> DriftReport:
+        # Evaluate program on golden examples
+        accuracy = evaluate(program, self.golden)
+        
+        # Compare to baseline (first optimization)
+        baseline = self.history[0][2] if self.history else 1.0
+        drop = baseline - accuracy
+        
+        # Detect drift
+        if drop > self.threshold:
+            return DriftReport(
+                detected=True,
+                accuracy_drop=drop,
+                recommendation="Re-optimize with new golden examples",
+                suggested_action="Run: uv run skill-fleet optimize --refresh-golden"
+            )
+        
+        return DriftReport(detected=False, accuracy=accuracy)
+        
+    def record(self, program_id: str, accuracy: float):
+        self.history.append((datetime.utcnow(), program_id, accuracy))
+```
+
+**New Metric**:
+```python

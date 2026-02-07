@@ -1,0 +1,25 @@
+<!-- Chunk 1819: bytes 7563139-7564104, type=class -->
+class IncorporateFeedback(dspy.Signature):
+    """
+    Revise skill content based on user feedback.
+
+    Apply specific changes requested by user while maintaining
+    overall structure and quality of the skill.
+    """
+
+    # Inputs
+    current_content: str = dspy.InputField(desc="Current SKILL.md content")
+    feedback: str = dspy.InputField(desc="User feedback with requested changes")
+    change_requests: list[str] = dspy.InputField(desc="Specific change requests as bullet points")
+
+    # Outputs
+    revised_content: str = dspy.OutputField(desc="Updated SKILL.md with feedback incorporated")
+    changes_made: list[str] = dspy.OutputField(desc="List of specific changes that were applied")
+    changes_rejected: list[str] = dspy.OutputField(
+        desc="Feedback items that couldn't be applied (with reasons)"
+    )
+    quality_impact: str = dspy.OutputField(
+        desc="Assessment of how changes affect quality (improved/unchanged/degraded)"
+    )
+
+

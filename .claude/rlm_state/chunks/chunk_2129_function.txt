@@ -1,0 +1,14 @@
+<!-- Chunk 2129: bytes 8050220-8050684, type=function -->
+def test_safe_json_loads_empty_and_unknown_types_fall_back(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+
+    assert safe_json_loads("", default={"d": 1}) == {"d": 1}
+    assert safe_json_loads(None, default=[]) == []
+    assert safe_json_loads(123, default={"d": 2}, field_name="weird") == {"d": 2}
+
+    messages = "\n".join(r.message for r in caplog.records)
+    assert "Unexpected type for field 'weird'" in messages
+
+

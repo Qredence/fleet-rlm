@@ -1,0 +1,19 @@
+<!-- Chunk 310: bytes 517940-518330, type=function -->
+def search_web(query: str) -> str:
+    return f"Search results for '{query}'"
+
+# Create ReAct agent
+react = dspy.ReAct(
+    signature="question -> answer",
+    tools=[get_weather, search_web],
+    max_iters=5
+)
+
+# Use agent
+result = react(question="What's the weather in Tokyo?")
+print(result.answer)
+print("Tool calls:", result.trajectory)
+```
+
+### BestOfN for Multiple Attempts
+```python

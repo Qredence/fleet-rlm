@@ -1,0 +1,15 @@
+<!-- Chunk 1750: bytes 7348735-7349253, type=class -->
+class PackageResult(BaseModel):
+    """Result from the Package step (Step 5)."""
+
+    validation_report: ValidationReport
+    integration_tests: list[TestCase] = Field(default_factory=list)
+    packaging_manifest: PackagingManifest
+    quality_score: float = Field(ge=0.0, le=1.0, description="Overall quality score")
+
+
+# =============================================================================
+# Step 6: Iterate - Feedback Models
+# =============================================================================
+
+

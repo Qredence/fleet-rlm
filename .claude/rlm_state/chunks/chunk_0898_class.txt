@@ -1,0 +1,28 @@
+<!-- Chunk 898: bytes 3179995-3180956, type=class -->
+class AnalyzeIntent(dspy.Signature):
+    """Deeply analyze user intent to understand what skill is needed."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_description` | `str` | User's task description with any clarifications |
+| `user_context` | `str` | JSON user context (user_id, existing skills, preferences) |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_intent` | `TaskIntent` | Structured intent with purpose, problem_statement, target_audience, value_proposition |
+| `skill_type` | `str` | Type: 'how_to', 'reference', 'concept', 'workflow', 'checklist' |
+| `scope` | `str` | Scope description: what's included and excluded |
+| `success_criteria` | `list[str]` | How to know this skill is successful (3-5 criteria) |
+
+**Used by**: `IntentAnalyzerModule` with `dspy.ChainOfThought`
+
+---
+
+### FindTaxonomyPath
+
+Determine optimal taxonomy placement for the skill.
+
+```python

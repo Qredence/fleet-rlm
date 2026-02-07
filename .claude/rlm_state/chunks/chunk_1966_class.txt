@@ -1,0 +1,43 @@
+<!-- Chunk 1966: bytes 7875105-7876823, type=class -->
+class TestUpdateSkill:
+    """Tests for PUT /api/v1/skills/{skill_id} endpoint."""
+
+    def test_update_skill_success(self, client, sample_skill):
+        """Test successful skill update."""
+        update_data = {"name": "Updated Skill Name", "description": "Updated description"}
+
+        with patch("skill_fleet.api.v1.skills.update_skill") as mock_update:
+            mock_update.return_value = {**sample_skill, **update_data}
+
+            response = client.put(f"/api/v1/skills/{sample_skill['skill_id']}", json=update_data)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["name"] == update_data["name"]
+
+    def test_update_skill_not_found(self, client):
+        """Test 404 when updating non-existent skill."""
+        with patch("skill_fleet.api.v1.skills.update_skill") as mock_update:
+            mock_update.return_value = None
+
+            response = client.put("/api/v1/skills/non-existent-id", json={"name": "New Name"})
+
+            assert response.status_code == 404
+
+    def test_update_skill_partial(self, client, sample_skill):
+        """Test partial update (only some fields)."""
+        update_data = {"description": "Only updating description"}
+
+        with patch("skill_fleet.api.v1.skills.update_skill") as mock_update:
+            mock_update.return_value = {**sample_skill, **update_data}
+
+            response = client.put(f"/api/v1/skills/{sample_skill['skill_id']}", json=update_data)
+
+            assert response.status_code == 200
+
+
+# =============================================================================
+# Test Validate Skill Endpoint
+# =============================================================================
+
+

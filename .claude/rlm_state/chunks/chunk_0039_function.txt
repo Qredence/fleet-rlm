@@ -1,0 +1,14 @@
+<!-- Chunk 39: bytes 117164-117487, type=function -->
+def factuality_reward(args, pred: dspy.Prediction) -> float:
+    """Reward based on factual correctness."""
+    judge = dspy.Predict(FactualityJudge)
+    result = judge(
+        statement=pred.answer,
+        context=args.context
+    )
+    return 1.0 if result.is_factual else 0.0
+```
+
+### Multi-Criteria Reward
+
+```python

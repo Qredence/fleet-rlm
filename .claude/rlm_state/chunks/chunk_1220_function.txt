@@ -1,0 +1,14 @@
+<!-- Chunk 1220: bytes 4582580-4582972, type=function -->
+def load_existing_trainset(trainset_path: Path) -> list[dict[str, Any]]:
+    """Load existing training set."""
+    if not trainset_path.exists():
+        return []
+
+    try:
+        with trainset_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        print(f"  ⚠️  Could not parse {trainset_path}, starting fresh")
+        return []
+
+

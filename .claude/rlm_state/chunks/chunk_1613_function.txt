@@ -1,0 +1,76 @@
+<!-- Chunk 1613: bytes 6629548-6631755, type=function -->
+def validate_skill(args: Any) -> int:
+    """
+    Programmatic entrypoint for validating a skill directory.
+
+    Args must provide:
+    - skill_path: str
+    - skills_root: str
+    """
+    skills_root = Path(args.skills_root) if hasattr(args, "skills_root") else Path("./skills")
+    validator = SkillValidator(skills_root)
+
+    skill_path = args.skill_path if hasattr(args, "skill_path") else ""
+    raw = Path(skill_path)
+
+    # Maintain compatibility with existing tests and scripts: call validate_complete,
+    # but ensure the final path cannot escape skills_root.
+    if raw.is_absolute():
+        try:
+            rel = raw.resolve().relative_to(skills_root.resolve())
+        except ValueError:
+            result = {"passed": False}
+        else:
+            try:
+                candidate = validator.resolve_skill_ref(rel.as_posix())
+            except ValueError:
+                result = {"passed": False}
+            else:
+                result = validator.validate_complete(candidate)
+        passed = bool(result.get("passed"))
+        return 0 if passed else 2
+
+    candidate = raw
+    try:
+        candidate_path = validator.resolve_skill_ref(candidate.as_posix())
+    except ValueError:
+        result = {"passed": False}
+    else:
+        result = validator.validate_complete(candidate_path)
+    passed = bool(result.get("passed"))
+    return 0 if passed else 2
+
+
+__all__ = ["create_skill", "validate_skill"]
+
+
+============================================================
+END FILE: src/skill_fleet/cli/main.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/tui_spawner.py
+============================================================
+
+"""
+Spawn and manage the Node.js TUI process from Python CLI.
+
+This module handles:
+1. Checking if Node.js and TUI dependencies are available
+2. Building the TUI if needed
+3. Spawning the TUI process with proper environment variables
+4. Handling process lifecycle and signals
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+

@@ -1,0 +1,55 @@
+<!-- Chunk 1284: bytes 4740828-4742355, type=function -->
+def create_tracking_config() -> dict:
+    """
+    Create DSPy tracking configuration file.
+
+    Returns tracking configuration dictionary.
+    """
+    logger.info("Creating DSPy tracking configuration...")
+
+    config = {
+        "version": "3.1.0",
+        "tracking_enabled": True,
+        "lm_calls": {
+            "track_requests": True,
+            "track_responses": True,
+            "track_errors": True,
+            "log_tokens": True,
+            "log_cost": True,
+        },
+        "cache": {
+            "enabled": True,
+            "location": ".dspy_cache",
+            "max_size_mb": 1000,
+        },
+        "optimization": {
+            "track_parameters": True,
+            "track_demos": True,
+            "track_instructions": True,
+            "save_artifacts": True,
+        },
+        "mlflow": {
+            "enabled": False,  # Will be set based on installation
+            "experiment_name": "skill-fleet-dspy-optimization",
+            "artifact_location": "./mlruns",
+        },
+        "monitoring": {
+            "log_level": "INFO",
+            "enable_tracing": True,
+            "enable_profiling": False,  # Performance profiling (expensive)
+        },
+    }
+
+    # Save configuration
+    config_dir = Path(".dspy")
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / "tracking_config.json"
+
+    with open(config_file, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+    logger.info(f"✅ Tracking configuration saved to {config_file}")
+
+    return config
+
+

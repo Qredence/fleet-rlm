@@ -1,0 +1,45 @@
+<!-- Chunk 429: bytes 617405-618492, type=function -->
+def load_with_version_check(filepath):
+    """Load program with version check."""
+    # Load saved program
+    with open(filepath, "r") as f:
+        metadata = json.load(f)
+
+    # Check versions
+    saved_version = metadata.get("_metadata", {}).get("dspy_version")
+    current_version = dspy.__version__
+
+    if saved_version != current_version:
+        print(f"WARNING: DSPy version mismatch!")
+        print(f"Saved: {saved_version}")
+        print(f"Current: {current_version}")
+
+        # Ask user what to do
+        choice = input("Continue anyway? (y/n): ")
+        if choice.lower() != 'y':
+            return None
+
+    # Load program
+    return dspy.load(filepath)
+
+# Use with version check
+program = load_with_version_check("my_program.json")
+```
+
+## Version Best Practices
+
+### 1. Always Save Programs
+
+```python
+# Good: Save programs to capture versions
+program = MyDSPyProgram()
+program.save("my_program.json")
+
+# Bad: Don't save programs (no version info)
+program = MyDSPyProgram()
+```
+
+### 2. Check Versions Before Loading
+
+```python
+# Good: Check versions before loading

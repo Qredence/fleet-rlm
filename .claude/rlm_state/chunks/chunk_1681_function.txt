@@ -1,0 +1,86 @@
+<!-- Chunk 1681: bytes 6705053-6707569, type=function -->
+def merge_subdirectory_files(
+    *file_dicts: dict[str, Any],
+    override: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """
+    Merge multiple subdirectory file dictionaries.
+
+    Args:
+        *file_dicts: Dicts to merge (e.g., references_files, guides_files, etc.)
+        override: If True, later dicts override earlier dicts for same filenames
+
+    Returns:
+        Merged dict with subdirectory names as keys and file contents as values
+
+    Examples:
+        >>> refs = {"api.md": "API content", "patterns.md": "Patterns"}
+        >>> guides = {"setup.md": "Setup content"}
+        >>> merge_subdirectory_files({"references": refs, "guides": guides})
+        {'references': {'api.md': 'API content', 'patterns.md': 'Patterns'},
+         'guides': {'setup.md': 'Setup content'}}
+
+    """
+    merged: dict[str, dict[str, Any]] = {}
+
+    for file_dict in file_dicts:
+        for subdir_name, files in file_dict.items():
+            if not isinstance(files, dict):
+                continue
+
+            if subdir_name not in merged:
+                merged[subdir_name] = {}
+
+            # Merge files for this subdirectory
+            for filename, content in files.items():
+                if override or filename not in merged[subdir_name]:
+                    merged[subdir_name][filename] = content
+
+    return merged
+
+
+__all__ = [
+    "serialize_pydantic_object",
+    "serialize_pydantic_objects",
+    "normalize_dict_output",
+    "merge_subdirectory_files",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/common/serialization.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/common/streaming.py
+============================================================
+
+"""
+DSPy streaming integration for CLI and FastAPI deployment.
+
+This module provides utilities for streaming DSPy module outputs:
+- Real-time thinking/reasoning display for CLI
+- Server-Sent Events (SSE) for FastAPI deployment
+- Status messages for workflow progress
+
+Based on: https://dspy.ai/tutorials/streaming/
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any
+
+import dspy
+from dspy.streaming import StatusMessageProvider, StreamListener
+
+from .dspy_compat import Reasoning, coerce_reasoning_text
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+logger = logging.getLogger(__name__)
+
+

@@ -1,0 +1,87 @@
+<!-- Chunk 1204: bytes 4549981-4552470, type=function -->
+def main() -> int:
+    """Main entry point."""
+    print("=" * 60)
+    print("Skills-Fleet Database Migration")
+    print("=" * 60)
+
+    # Check database connection
+    print("\n🔍 Checking database connection...")
+    if not check_database_exists():
+        print("❌ Cannot connect to database!")
+        print("\n💡 Tips:")
+        print("   1. Make sure DATABASE_URL is set in your environment")
+        print("   2. Format: postgresql://user:password@host/database?sslmode=require")
+        print("   3. Get connection string from: https://console.neon.tech")
+        return 1
+
+    print("✅ Database connection verified")
+
+    # Confirm before proceeding
+    print("\n⚠️  This will create/modify database tables.")
+    response = input("Proceed? (yes/no): ").strip().lower()
+    if response not in ("yes", "y"):
+        print("Migration cancelled.")
+        return 0
+
+    # Apply migration
+    try:
+        apply_migration()
+        print("\n" + "=" * 60)
+        print("Migration complete! 🎉")
+        print("=" * 60)
+        return 0
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+============================================================
+END FILE: scripts/archive/apply_migration.py
+============================================================
+
+============================================================
+FILE: scripts/archive/apply_migration_sqlalchemy.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Skills-Fleet Migration Script (SQLAlchemy version)
+
+This script applies the database migration using SQLAlchemy,
+which should already be installed in your venv.
+"""
+
+import os
+import sys
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+
+# Load environment variables
+load_dotenv()
+
+# Get database URL from environment
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    print("❌ DATABASE_URL environment variable not set!")
+    print("\n💡 Set it like this:")
+    print('   export DATABASE_URL="postgresql://user:pass@host/db?sslmode=require"')
+    sys.exit(1)
+
+# Ensure psycopg driver is specified for SQLAlchemy
+if not DATABASE_URL.startswith("postgresql+"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
+
+

@@ -1,0 +1,106 @@
+<!-- Chunk 1780: bytes 7430492-7434564, type=function -->
+def optimize_with_miprov2(
+    program: LegacySkillCreationProgram,
+    trainset_path: str | Path = "config/training/trainset.json",
+    output_path: str | Path = "config/optimized/miprov2/",
+    model: str = DEFAULT_MODEL,
+    auto: Literal["light", "medium", "heavy"] = "medium",
+    max_bootstrapped_demos: int = 4,
+    max_labeled_demos: int = 4,
+    num_threads: int = 8,
+) -> LegacySkillCreationProgram:
+    """
+    Optimize skill creation workflow with MIPROv2.
+
+    MIPROv2 (Multi-stage Instruction Proposal Optimizer v2) tunes:
+    - Instructions for each signature
+    - Few-shot example selection
+    - Prompt structure
+
+    Args:
+        program: LegacySkillCreationProgram to optimize
+        trainset_path: Path to training data JSON
+        output_path: Directory to save optimized program
+        model: Approved model name for optimization
+        auto: Optimization intensity ("light", "medium", "heavy")
+        max_bootstrapped_demos: Max examples from successful rollouts
+        max_labeled_demos: Max examples from training set
+        num_threads: Number of parallel threads
+        **optimizer_kwargs: Additional keyword arguments forwarded to
+            :class:`dspy.teleprompt.MIPROv2`. See the DSPy MIPROv2
+            documentation for the full list of supported parameters
+            (for example, search budget and sampling options).
+
+    Returns:
+        Optimized LegacySkillCreationProgram
+
+    """
+    from dspy.teleprompt import MIPROv2
+
+    from .evaluation import load_trainset, skill_creation_metric, split_dataset
+
+    # Configure with approved model and LM usage tracking
+    lm = get_lm(model)
+    dspy.configure(lm=lm, track_usage=True)
+    logger.info(f"Configured DSPy with model: {model} (track_usage enabled)")
+
+    # Use TrainingDataManager if available
+    trainset_manager = TrainingDataManager(Path(trainset_path).parent)
+    filtered_examples = trainset_manager.get_trainset()
+
+    if filtered_examples:
+        logger.info(f"Using {len(filtered_examples)} filtered examples from TrainingDataManager")
+        # Convert to DSPy Example objects if needed, but load_trainset handles raw dicts usually
+        # Assuming filtered_examples are compatible with what split_dataset expects
+        examples = [dspy.Example(**ex).with_inputs("task_description") for ex in filtered_examples]
+    else:
+        # Fallback to direct file loading
+        logger.info(f"Loading full trainset from {trainset_path}")
+        examples = load_trainset(trainset_path)
+
+    train, val = split_dataset(examples, train_ratio=0.8)
+    logger.info(f"Loaded {len(examples)} examples: {len(train)} train, {len(val)} val")
+
+    # Configure optimizer
+    optimizer = MIPROv2(
+        metric=skill_creation_metric,
+        auto=auto,
+        max_bootstrapped_demos=max_bootstrapped_demos,
+        max_labeled_demos=max_labeled_demos,
+        num_threads=num_threads,
+    )
+
+    logger.info(f"Starting MIPROv2 optimization (auto={auto})...")
+
+    # Wrap program for optimization to handle missing context
+    wrapped_program = OptimizationWrapper(program)
+
+    # Run optimization
+    optimized_wrapper = optimizer.compile(
+        wrapped_program,
+        trainset=train,
+        valset=val,
+    )
+
+    # Extract optimized program
+    optimized = optimized_wrapper.program
+
+    # Save optimized program as JSON state (no cloudpickle) for safer loading
+    output_path = Path(output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
+    state_path = output_path / STATE_FILENAME
+    optimized.save(str(state_path), save_program=False)
+
+    # Update training data manager with results (placeholder for now as we don't have per-example scores easily from MIPROv2 yet)
+    # Ideally we'd run an evaluation pass here to get scores
+    # trainset_manager.update_scores(...)
+
+    logger.info(f"Optimized program state saved to {state_path}")
+    return optimized
+
+
+# =============================================================================
+# GEPA Optimization
+# =============================================================================
+
+

@@ -1,0 +1,10 @@
+<!-- Chunk 235: bytes 308504-308686, type=function -->
+def update_email(data):
+    if not data.get("email") or "@" not in data["email"]:
+        raise ValueError("Invalid email")
+    # ...
+```
+
+**After:**
+```python
+# utils/validation.py

@@ -1,0 +1,2 @@
+[console_scripts]
+rlm-modal = rlm_dspy_modal.cli:app

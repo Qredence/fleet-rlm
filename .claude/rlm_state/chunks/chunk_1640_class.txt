@@ -1,0 +1,20 @@
+<!-- Chunk 1640: bytes 6672539-6673110, type=class -->
+class DSPyOptimizationError(DSPyWorkflowError):
+    """
+    Raised when DSPy optimization (MIPROv2, GEPA) fails.
+
+    Attributes:
+        optimizer: The optimizer that failed (e.g., "miprov2", "gepa")
+
+    """
+
+    def __init__(self, message: str, *, optimizer: str) -> None:
+        super().__init__(message, details={"optimizer": optimizer})
+        self.optimizer = optimizer
+
+
+# =============================================================================
+# Conversation Agent Errors
+# =============================================================================
+
+

@@ -1,0 +1,30 @@
+<!-- Chunk 1839: bytes 7619314-7620095, type=function -->
+def load_fleet_config(config_path: Path | None = None) -> dict[str, Any]:
+    """
+    Load fleet configuration from YAML file.
+
+    Args:
+        config_path: Path to config file (default: config/config.yaml)
+
+    Returns:
+        Configuration dictionary
+
+    """
+    if config_path is None:
+        # Try to find config in standard locations
+        candidates = [
+            Path.cwd() / "config" / "config.yaml",
+            Path(__file__).parent.parent.parent / "config" / "config.yaml",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                config_path = candidate
+                break
+
+    if config_path and config_path.exists():
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+
+    return {}
+
+

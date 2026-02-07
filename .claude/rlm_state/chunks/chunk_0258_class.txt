@@ -1,0 +1,69 @@
+<!-- Chunk 258: bytes 317835-320381, type=class -->
+class ImportAnalyzer(ast.NodeVisitor):
+    """Analyze imports and function definitions in Python files."""
+
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self.imports: list[dict[str, Any]] = []
+        self.functions: list[dict[str, Any]] = []
+        self.issues: list[dict[str, Any]] = []
+
+    def visit_Import(self, node: ast.Import) -> None:
+        """Visit import statements."""
+        for alias in node.names:
+            self.imports.append({
+                "type": "import",
+                "module": alias.name,
+                "alias": alias.asname,
+                "lineno": node.lineno,
+            })
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """Visit from...import statements."""
+        for alias in node.names:
+            self.imports.append({
+                "type": "from_import",
+                "module": node.module or "",
+                "name": alias.name,
+                "alias": alias.asname,
+                "lineno": node.lineno,
+            })
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Visit function definitions."""
+        self.functions.append({
+            "name": node.name,
+            "lineno": node.lineno,
+            "args": [arg.arg for arg in node.args.args],
+            "is_async": False,
+        })
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Visit async function definitions."""
+        self.functions.append({
+            "name": node.name,
+            "lineno": node.lineno,
+            "args": [arg.arg for arg in node.args.args],
+            "is_async": True,
+        })
+        self.generic_visit(node)
+
+
+# Common utility function patterns that should be imported
+COMMON_UTILS = {
+    "json_serialize": ["json.dumps", "json.loads", "orjson", "msgpack"],
+    "date_format": ["datetime.strftime", "datetime.strptime", "dateutil"],
+    "retry_logic": ["tenacity", "backoff", "retry decorator"],
+    "validation": ["pydantic", "marshmallow", "cerberus", "voluptuous"],
+    "logging_setup": ["logging.getLogger", "structlog", "loguru"],
+    "http_client": ["requests", "httpx", "aiohttp"],
+    "env_config": ["os.environ", "python-dotenv", "pydantic-settings"],
+    "file_io": ["pathlib.Path", "open with context manager"],
+    "async_utils": ["asyncio gather", "asyncio create_task"],
+    "string_utils": ["strip/split/join", "str.format", "f-strings"],
+}
+
+

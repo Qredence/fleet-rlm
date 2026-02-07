@@ -1,0 +1,14 @@
+<!-- Chunk 21: bytes 6939-7478, type=h4 -->
+#### Category 2: Workflow Automation
+
+**Used for:** Multi-step processes that benefit from consistent methodology, including coordination across multiple MCP servers.
+
+**Real example:** `skill-creator` skill
+"Interactive guide for creating new skills. Walks the user through use case definition, frontmatter generation, instruction writing, and validation."
+
+**Key techniques:**
+•  Step-by-step workflow with validation gates
+•  Templates for common structures
+•  Built-in review and improvement suggestions
+•  Iterative refinement loops
+

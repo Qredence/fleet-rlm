@@ -1,0 +1,16 @@
+<!-- Chunk 1708: bytes 7279679-7280185, type=class -->
+class TaskConfig(BaseModel):
+    """Configuration for a single task."""
+
+    model: str | None = None
+    role: str | None = None
+    parameters: ModelParameters = Field(default_factory=ModelParameters)
+
+    @model_validator(mode="after")
+    def validate_model_or_role(self) -> TaskConfig:
+        """Validate that at least model or role is specified."""
+        if self.model is None and self.role is None:
+            raise ValueError("Task must specify either 'model' or 'role'")
+        return self
+
+

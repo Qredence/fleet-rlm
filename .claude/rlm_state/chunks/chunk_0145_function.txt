@@ -1,0 +1,9 @@
+<!-- Chunk 145: bytes 213614-213804, type=function -->
+def case_insensitive_match(example, pred, trace=None):
+    """Case-insensitive string matching."""
+    return example.output.lower() == pred.output.lower()
+```
+
+### Keyword Match
+
+```python

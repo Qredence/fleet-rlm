@@ -1,0 +1,37 @@
+<!-- Chunk 2002: bytes 7891336-7892270, type=function -->
+def test_cli_exit_with_zero_exit_code():
+    """Test CLIExit with zero exit code."""
+    error = CLIExit(exit_code=0)
+    assert error.exit_code == 0
+
+
+============================================================
+END FILE: tests/cli/test_exceptions.py
+============================================================
+
+============================================================
+FILE: tests/cli/test_security_utils.py
+============================================================
+
+"""Tests for CLI security utilities.
+
+This module tests input validation and sanitization functions used throughout
+the CLI to prevent security vulnerabilities including:
+- Path traversal attacks
+- Injection attacks
+- Invalid protocol usage
+- Invalid timeout values
+"""
+
+from pathlib import Path
+
+import pytest
+
+from skill_fleet.cli.utils.security import (
+    sanitize_user_id,
+    validate_api_url,
+    validate_path_within_root,
+    validate_timeout,
+)
+
+

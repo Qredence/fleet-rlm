@@ -1,0 +1,9 @@
+<!-- Chunk 1654: bytes 6676548-6676724, type=class -->
+class LLMAuthenticationError(LLMProviderError):
+    """
+    Raised when LLM provider authentication fails.
+
+    This typically indicates missing or invalid API keys.
+    """
+
+

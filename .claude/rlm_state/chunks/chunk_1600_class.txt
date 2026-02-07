@@ -1,0 +1,32 @@
+<!-- Chunk 1600: bytes 6597530-6598343, type=class -->
+class ValidationError(CLIError):
+    """
+    Exception raised for input validation errors.
+
+    Used when user input fails validation checks (e.g., invalid
+    arguments, malformed data, constraint violations).
+
+    Example:
+        raise ValidationError("Invalid email address")
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        suggestion: str | None = "Run with --help for usage information",
+    ) -> None:
+        """
+        Initialize a validation error.
+
+        Args:
+            message: Human-readable error message
+            suggestion: Optional helpful suggestion (default: "Run with --help for usage information")
+        """
+        super().__init__(
+            message,
+            exit_code=EXIT_VALIDATION_ERROR,
+            suggestion=suggestion,
+        )
+
+

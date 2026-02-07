@@ -1,0 +1,6 @@
+<!-- Chunk 1120: bytes 4180928-4181102, type=function -->
+def test_skill_validate_model():
+    """Test that skill_validate uses zero temperature."""
+    lm = get_task_lm("skill_validate")
+    assert lm.kwargs["temperature"] == 0.0
+

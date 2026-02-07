@@ -1,0 +1,7 @@
+<!-- Chunk 1977: bytes 7885914-7886044, type=function -->
+def test_exit_codes():
+    """Test exit codes match standard values."""
+    assert EXIT_SUCCESS == 0
+    assert EXIT_ERROR == 1
+
+

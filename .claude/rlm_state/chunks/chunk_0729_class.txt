@@ -1,0 +1,33 @@
+<!-- Chunk 729: bytes 2573000-2573593, type=class -->
+class HitlResponseRequest(BaseModel):
+    """Request for submitting HITL response."""
+
+    action: str = Field(..., description="Action to take")
+    response: str = Field(default="", description="User response")
+```
+
+**Actions**:
+- `proceed` - Continue to next phase
+- `revise` - Restart current phase with feedback
+- `refine` - Run refinement with feedback
+- `cancel` - Cancel skill creation
+
+**Example**:
+```json
+{
+    "action": "proceed",
+    "response": "intermediate"
+}
+```
+
+---
+
+## Taxonomy Schemas
+
+### TaxonomyResponse
+
+Taxonomy structure response.
+
+```python
+from typing import Any
+

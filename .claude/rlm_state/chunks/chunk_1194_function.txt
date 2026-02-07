@@ -1,0 +1,8 @@
+<!-- Chunk 1194: bytes 4510717-4510907, type=function -->
+def select_template(skill_type: str, taxonomy_path: str) -> str:
+    """Choose appropriate template based on skill characteristics."""
+    pass
+```
+
+### 3. **Add Quality Metrics**
+```python

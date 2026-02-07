@@ -1,0 +1,93 @@
+<!-- Chunk 1834: bytes 7593364-7596753, type=function -->
+def _simple_file_search(query: str, workspace_path: Path, max_results: int) -> dict[str, Any]:
+    """
+    Simple file search fallback implementation.
+
+    Searches for files containing query terms in their names or paths.
+    This is a basic implementation - can be enhanced with semantic search later.
+
+    Args:
+        query: Search query
+        workspace_path: Root path to search
+        max_results: Maximum results
+
+    Returns:
+        Dict with files and snippets
+
+    """
+    files_found = []
+    snippets = []
+
+    try:
+        # Search for Python, Markdown, and JSON files
+        query_terms = query.lower().split()
+
+        # Search in common directories
+        search_dirs = [
+            workspace_path / "skills",
+            workspace_path / "src",
+            workspace_path / "docs",
+        ]
+
+        for search_dir in search_dirs:
+            if not search_dir.exists():
+                continue
+
+            # Search for files matching query terms
+            for file_path in search_dir.rglob("*.py"):
+                if len(files_found) >= max_results:
+                    break
+
+                file_name = file_path.name.lower()
+                file_str = str(file_path).lower()
+
+                # Check if any query term matches
+                if any(term in file_name or term in file_str for term in query_terms):
+                    files_found.append(str(file_path.relative_to(workspace_path)))
+
+                    # Try to extract a snippet
+                    try:
+                        content = file_path.read_text(encoding="utf-8", errors="ignore")
+                        # Find first occurrence of query term
+                        for term in query_terms:
+                            idx = content.lower().find(term.lower())
+                            if idx != -1:
+                                start = max(0, idx - 100)
+                                end = min(len(content), idx + 300)
+                                snippet = content[start:end].strip()
+                                snippets.append(
+                                    {
+                                        "file": str(file_path.relative_to(workspace_path)),
+                                        "content_snippet": snippet,
+                                        "relevance": 0.7,  # Simple relevance score
+                                    }
+                                )
+                                break
+                    except Exception:
+                        # Skip files that cannot be read or parsed
+                        pass
+
+        # Also search for Markdown files
+        for search_dir in search_dirs:
+            if not search_dir.exists() or len(files_found) >= max_results:
+                break
+
+            for file_path in search_dir.rglob("*.md"):
+                if len(files_found) >= max_results:
+                    break
+
+                file_name = file_path.name.lower()
+                if any(term in file_name for term in query_terms):
+                    rel_path = str(file_path.relative_to(workspace_path))
+                    if rel_path not in files_found:
+                        files_found.append(rel_path)
+
+    except Exception as e:
+        logger.warning(f"Simple file search error: {e}")
+
+    return {
+        "files": files_found[:max_results],
+        "snippets": snippets[:max_results],
+    }
+
+

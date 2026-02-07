@@ -1,0 +1,45 @@
+<!-- Chunk 824: bytes 2877094-2878547, type=class -->
+class JobMemoryStore:
+    """Hot cache for in-flight jobs (created < 1 hour ago)."""
+    
+    def __init__(self, ttl_minutes: int = 60):
+        self.ttl_minutes = ttl_minutes
+        self.store: dict[str, tuple[JobState, datetime]] = {}
+    
+    def set(self, job_id: str, job: JobState) -> None:
+        """Store job in memory with timestamp."""
+        self.store[job_id] = (job, datetime.now(UTC))
+    
+    def get(self, job_id: str) -> Optional[JobState]:
+        """Get job from memory if not expired."""
+        if job_id not in self.store:
+            return None
+        
+        job, created_at = self.store[job_id]
+        age = datetime.now(UTC) - created_at
+        
+        if age > timedelta(minutes=self.ttl_minutes):
+            # Expired: remove from memory
+            del self.store[job_id]
+            return None
+        
+        return job
+    
+    def delete(self, job_id: str) -> bool:
+        """Remove job from memory."""
+        if job_id in self.store:
+            del self.store[job_id]
+            return True
+        return False
+    
+    def cleanup_expired(self) -> int:
+        """Remove expired entries. Call periodically."""
+        expired_ids = [
+            job_id for job_id, (_, created_at) in self.store.items()
+            if datetime.now(UTC) - created_at > timedelta(minutes=self.ttl_minutes)
+        ]
+        for job_id in expired_ids:
+            del self.store[job_id]
+        return len(expired_ids)
+
+

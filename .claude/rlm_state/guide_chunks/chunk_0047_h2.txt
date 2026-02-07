@@ -1,0 +1,8 @@
+<!-- Chunk 47: bytes 13948-14082, type=h2 -->
+## Troubleshooting
+Error: [Common error message]
+Cause: [Why it happens]
+Solution: [How to fix]
+(Add more error cases as needed)
+```
+

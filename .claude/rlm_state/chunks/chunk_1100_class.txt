@@ -1,0 +1,247 @@
+<!-- Chunk 1100: bytes 3932222-3941052, type=class -->
+class SkillCreator:
+    """High-level orchestrator for skill creation.
+    
+    Coordinates DSPy programs, taxonomy management, validation,
+    and human feedback to create skills end-to-end.
+    """
+    
+    def __init__(
+        self,
+        taxonomy_manager: TaxonomyManager,
+        feedback_handler: Optional[FeedbackHandler] = None,
+        validator: Optional[SkillValidator] = None,
+        lm: Optional[dspy.LM] = None,
+        verbose: bool = True
+    ):
+        """Initialize skill creator.
+        
+        Args:
+            taxonomy_manager: Taxonomy management instance
+            feedback_handler: Handler for human feedback (default: auto-approval)
+            validator: Skill validator (creates default if None)
+            lm: Language model (uses dspy.settings if None)
+            verbose: Whether to print progress
+        """
+        self.taxonomy = taxonomy_manager
+        self.verbose = verbose
+        
+        # Initialize feedback handler
+        self.feedback_handler = feedback_handler or create_feedback_handler("auto")
+        
+        # Initialize validator
+        self.validator = validator or SkillValidator(
+            schema_path=taxonomy_manager.skills_root / "taxonomy_meta.json"
+        )
+        
+        # Configure LM
+        if lm:
+            dspy.settings.configure(lm=lm)
+        
+        # Initialize DSPy programs
+        self.creation_program = SkillCreationProgram()
+        self.revision_program = SkillRevisionProgram()
+        self.iterate_module = IterateModule()
+        
+        # Statistics
+        self.stats = {
+            "total": 0,
+            "successful": 0,
+            "failed": 0,
+            "avg_iterations": 0.0
+        }
+    
+    def create_skill(
+        self,
+        task_description: str,
+        user_context: Dict,
+        max_iterations: int = 3
+    ) -> Dict:
+        """Create a new skill from task description.
+        
+        Args:
+            task_description: User's task or capability requirement
+            user_context: Dict with user_id and other context
+            max_iterations: Maximum HITL iterations
+        
+        Returns:
+            Result dictionary with status and metadata
+        """
+        self.stats["total"] += 1
+        
+        if self.verbose:
+            self._print_header("Skill Creation")
+            print(f"📝 Task: {task_description}")
+            print(f"👤 User: {user_context.get('user_id', 'unknown')}\n")
+        
+        try:
+            # Execute main creation program
+            result = self.creation_program(
+                task_description=task_description,
+                existing_skills=self.taxonomy.get_mounted_skills(
+                    user_context.get('user_id', 'default')
+                ),
+                taxonomy_structure=self.taxonomy.get_relevant_branches(
+                    task_description
+                ),
+                parent_skills_getter=self.taxonomy.get_parent_skills
+            )
+            
+            understanding = result['understanding']
+            plan = result['plan']
+            package = result['package']
+            
+            # Check if skill exists
+            if self.taxonomy.skill_exists(understanding['taxonomy_path']):
+                return {"status": "exists", "path": understanding['taxonomy_path']}
+            
+            # Validate dependencies
+            if not self._validate_plan(plan):
+                return {"status": "error", "message": "Invalid dependencies"}
+            
+            # Check initial validation
+            if not package['validation_report']['passed']:
+                return {
+                    "status": "validation_failed",
+                    "errors": package['validation_report'].get('errors', [])
+                }
+            
+            # HITL iteration
+            approval = self._iterate_for_approval(
+                result=result,
+                max_iterations=max_iterations
+            )
+            
+            if approval['status'] == 'approved':
+                self.stats["successful"] += 1
+            else:
+                self.stats["failed"] += 1
+            
+            return approval
+            
+        except Exception as e:
+            logger.exception("Error creating skill")
+            self.stats["failed"] += 1
+            return {"status": "error", "message": str(e)}
+    
+    def _validate_plan(self, plan: Dict) -> bool:
+        """Validate skill plan (dependencies, circular refs)."""
+        
+        dep_ids = [d if isinstance(d, str) else d.get('skill_id') 
+                   for d in plan['dependencies']]
+        
+        # Check dependencies exist
+        valid, missing = self.taxonomy.validate_dependencies(dep_ids)
+        if not valid:
+            if self.verbose:
+                print(f"❌ Missing dependencies: {missing}")
+            return False
+        
+        # Check for cycles
+        has_cycle, path = self.taxonomy.detect_circular_dependencies(
+            plan['skill_metadata']['skill_id'],
+            dep_ids
+        )
+        if has_cycle:
+            if self.verbose:
+                print(f"❌ Circular dependency: {' → '.join(path)}")
+            return False
+        
+        return True
+    
+    def _iterate_for_approval(
+        self,
+        result: Dict,
+        max_iterations: int
+    ) -> Dict:
+        """Iterate with human feedback until approved or max iterations."""
+        
+        understanding = result['understanding']
+        plan = result['plan']
+        skeleton = result['skeleton']
+        content = result['content']
+        package = result['package']
+        
+        for iteration in range(1, max_iterations + 1):
+            if self.verbose:
+                print(f"\n📋 Iteration {iteration}/{max_iterations}")
+            
+            # Get human feedback
+            feedback = self.feedback_handler.get_feedback(
+                package['packaging_manifest'],
+                package['validation_report']
+            )
+            
+            # Process feedback
+            decision = self.iterate_module(
+                packaged_skill=package['packaging_manifest'],
+                validation_report=package['validation_report'],
+                human_feedback=feedback
+            )
+            
+            if decision['approval_status'] == 'approved':
+                # Register skill
+                success = self.taxonomy.register_skill(
+                    path=understanding['taxonomy_path'],
+                    metadata=plan['skill_metadata'],
+                    content=content['skill_content'],
+                    evolution=decision['evolution_metadata']
+                )
+                
+                if success:
+                    if self.verbose:
+                        print(f"✅ Skill approved and registered!")
+                    
+                    return {
+                        "status": "approved",
+                        "skill_id": plan['skill_metadata']['skill_id'],
+                        "path": understanding['taxonomy_path'],
+                        "version": plan['skill_metadata']['version'],
+                        "quality_score": package['quality_score'],
+                        "iterations": iteration
+                    }
+                else:
+                    return {"status": "error", "message": "Registration failed"}
+            
+            elif decision['approval_status'] == 'needs_revision':
+                if iteration < max_iterations:
+                    # Revise and repackage
+                    if self.verbose:
+                        print("🔄 Revising skill...")
+                    
+                    revised = self.revision_program(
+                        skeleton=skeleton,
+                        parent_skills=understanding['parent_skills'],
+                        composition_strategy=plan['composition_strategy'],
+                        plan=plan,
+                        taxonomy_path=understanding['taxonomy_path'],
+                        revision_feedback=decision['revision_plan']
+                    )
+                    
+                    content = revised['content']
+                    package = revised['package']
+            
+            else:  # rejected
+                return {
+                    "status": "rejected",
+                    "reason": decision['revision_plan'],
+                    "iterations": iteration
+                }
+        
+        return {
+            "status": "max_iterations",
+            "message": f"Not approved after {max_iterations} iterations"
+        }
+    
+    def _print_header(self, title: str):
+        """Print formatted header."""
+        print("\n" + "=" * 70)
+        print(f"  {title}")
+        print("=" * 70)
+    
+    def get_stats(self) -> Dict:
+        """Get creation statistics."""
+        return self.stats.copy()
+
+
+# Convenience function

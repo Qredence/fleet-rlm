@@ -1,0 +1,5 @@
+<!-- Chunk 1647: bytes 6674415-6674505, type=class -->
+class APIAuthenticationError(APIError):
+    """Raised when API authentication fails."""
+
+

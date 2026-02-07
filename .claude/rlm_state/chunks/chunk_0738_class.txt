@@ -1,0 +1,25 @@
+<!-- Chunk 738: bytes 2577049-2577805, type=class -->
+class OptimizationStartRequest(BaseModel):
+    """Request to start optimization."""
+
+    optimizer: str = Field(default="miprov2", description="Optimizer type")
+    training_paths: list[str] = Field(
+        default_factory=list,
+        description="Paths to training skills"
+    )
+    auto: str = Field(default="medium", description="MIPROv2 auto setting")
+    max_bootstrapped_demos: int = Field(default=4, description="Max bootstrapped demos")
+    max_labeled_demos: int = Field(default=4, description="Max labeled demos")
+    save_path: str = Field(
+        default="skill_creator_optimized.json",
+        description="Path to save optimized program"
+    )
+```
+
+---
+
+### OptimizationStatusResponse
+
+Optimization job status response schema.
+
+```python

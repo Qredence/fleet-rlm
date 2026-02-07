@@ -1,0 +1,143 @@
+<!-- Chunk 1765: bytes 7396382-7401248, type=class -->
+class FindTaxonomyPathModule(BaseModule):
+    """
+    Find optimal taxonomy path for a skill.
+
+    Uses FindTaxonomyPath signature to determine:
+    - Recommended taxonomy path
+    - Alternative paths
+    - Path rationale
+    - New directories needed
+    - Confidence score
+
+    Example:
+        module = FindTaxonomyPathModule()
+        result = module.forward(
+            task_description="Build a React component library",
+            requirements={"domain": "technical", "category": "frontend"},
+            taxonomy_structure={"technical": {"frontend": ["react", "vue"]}},
+            existing_skills=["technical/frontend/react-basics"]
+        )
+        # Returns: {
+        #   "recommended_path": "technical/frontend/react-components",
+        #   "alternative_paths": ["web/react-components"],
+        #   "path_rationale": "React-specific skill...",
+        #   "new_directories": [],
+        #   "confidence": 0.85
+        # }
+
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.find_path = dspy.ChainOfThought(FindTaxonomyPath)
+
+    def forward(  # type: ignore[override]
+        self,
+        task_description: str,
+        requirements: dict | None = None,
+        taxonomy_structure: dict | None = None,
+        existing_skills: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Find taxonomy path for skill.
+
+        Args:
+            task_description: User's task description
+            requirements: Requirements from GatherRequirementsModule
+            taxonomy_structure: Current taxonomy structure
+            existing_skills: List of existing skill paths
+
+        Returns:
+            Dictionary with taxonomy analysis:
+            - recommended_path: Suggested taxonomy path
+            - alternative_paths: Alternative valid paths
+            - path_rationale: Explanation for path choice
+            - new_directories: New directories to create
+            - confidence: Confidence score (0.0-1.0)
+
+        """
+        start_time = time.time()
+
+        # Sanitize inputs
+        clean_task = self._sanitize_input(task_description)
+        clean_requirements = self._sanitize_input(str(requirements or {}))
+        clean_structure = self._sanitize_input(str(taxonomy_structure or {}))
+        clean_existing = existing_skills if existing_skills else []
+
+        # Execute signature
+        result = self.find_path(
+            task_description=clean_task,
+            requirements=clean_requirements,
+            taxonomy_structure=clean_structure,
+            existing_skills=clean_existing,
+        )
+
+        # Transform to structured output
+        output = {
+            "recommended_path": result.recommended_path,
+            "alternative_paths": result.alternative_paths
+            if isinstance(result.alternative_paths, list)
+            else [],
+            "path_rationale": result.path_rationale,
+            "new_directories": result.new_directories
+            if isinstance(result.new_directories, list)
+            else [],
+            "confidence": float(result.confidence) if hasattr(result, "confidence") else 0.5,
+        }
+
+        # Validate
+        required = ["recommended_path", "path_rationale", "confidence"]
+        if not self._validate_result(output, required):
+            self.logger.warning("Result missing required fields, using defaults")
+            output.setdefault("recommended_path", "general/uncategorized")
+            output.setdefault("path_rationale", "Default path due to analysis failure")
+            output.setdefault("confidence", 0.0)
+
+        # Ensure confidence is in valid range
+        output["confidence"] = max(0.0, min(1.0, output["confidence"]))
+
+        # Log execution
+        duration_ms = (time.time() - start_time) * 1000
+        self._log_execution(
+            inputs={
+                "task_description": clean_task[:100],
+                "taxonomy": clean_structure[:100],
+            },
+            outputs={
+                "path": output["recommended_path"],
+                "confidence": output["confidence"],
+            },
+            duration_ms=duration_ms,
+        )
+
+        return output
+
+
+============================================================
+END FILE: src/skill_fleet/core/modules/understanding/taxonomy.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/modules/validation/compliance.py
+============================================================
+
+"""
+Validation modules for skill quality assurance.
+
+Uses validation signatures to check compliance and assess quality.
+"""
+
+import time
+from typing import Any
+
+import dspy
+
+from skill_fleet.core.modules.base import BaseModule
+from skill_fleet.core.signatures.validation.compliance import (
+    AssessQuality,
+    RefineSkill,
+    ValidateCompliance,
+)
+
+

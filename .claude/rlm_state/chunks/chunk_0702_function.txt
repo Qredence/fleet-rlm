@@ -1,0 +1,23 @@
+<!-- Chunk 702: bytes 1370510-1371108, type=function -->
+def cmd_init(args: argparse.Namespace) -> int:
+    state_path = Path(args.state)
+    ctx_path = Path(args.context)
+
+    content = _read_text_file(ctx_path, max_bytes=args.max_bytes)
+    state: Dict[str, Any] = {
+        "version": 1,
+        "context": {
+            "path": str(ctx_path),
+            "loaded_at": time.time(),
+            "content": content,
+        },
+        "buffers": [],
+        "globals": {},
+    }
+    _save_state(state, state_path)
+
+    print(f"Initialised RLM REPL state at: {state_path}")
+    print(f"Loaded context: {ctx_path} ({len(content):,} chars)")
+    return 0
+
+

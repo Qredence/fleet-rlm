@@ -1,0 +1,53 @@
+<!-- Chunk 1263: bytes 4698267-4700273, type=function -->
+def cmd_evaluate_file(args: argparse.Namespace) -> int:
+    """Evaluate a single skill file."""
+    try:
+        skill_path = Path(args.file)
+        if not skill_path.exists():
+            logger.error(f"File not found: {skill_path}")
+            return 1
+
+        content = skill_path.read_text(encoding="utf-8")
+        scores = assess_skill_quality(content)
+
+        print(f"\n{'=' * 60}")
+        print(f"SKILL QUALITY ASSESSMENT: {skill_path.name}")
+        print(f"{'=' * 60}")
+        print(f"\nOverall Score: {scores.overall_score:.3f}")
+        print("\n--- Detailed Scores ---")
+        print(f"Frontmatter Completeness: {scores.frontmatter_completeness:.2f}")
+        print(f"Pattern Count: {scores.pattern_count}")
+        print(f"Has Anti-patterns: {scores.has_anti_patterns}")
+        print(f"Has Key Insights: {scores.has_key_insights}")
+        print(f"Has Quick Reference: {scores.has_quick_reference}")
+        print(f"Has Common Mistakes: {scores.has_common_mistakes}")
+        print(f"Has Red Flags: {scores.has_red_flags}")
+        print(f"Has Real-World Impact: {scores.has_real_world_impact}")
+        print(f"Code Examples Count: {scores.code_examples_count}")
+        print(f"Code Examples Quality: {scores.code_examples_quality:.2f}")
+
+        if scores.strengths:
+            print(f"\n--- Strengths ({len(scores.strengths)}) ---")
+            for strength in scores.strengths:
+                print(f"  ✓ {strength}")
+
+        if scores.issues:
+            print(f"\n--- Issues ({len(scores.issues)}) ---")
+            for issue in scores.issues:
+                print(f"  ✗ {issue}")
+
+        print(f"\n{'=' * 60}")
+
+        if args.json:
+            print("\nJSON Output:")
+            print(json.dumps(scores.to_dict(), indent=2))
+
+        # Return based on quality threshold
+        threshold = args.threshold or 0.6
+        return 0 if scores.overall_score >= threshold else 1
+
+    except Exception as e:
+        logger.error(f"Evaluation failed: {e}")
+        return 1
+
+

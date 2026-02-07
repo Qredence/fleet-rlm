@@ -1,0 +1,18 @@
+<!-- Chunk 1079: bytes 3841512-3842003, type=function -->
+def test_valid_metadata(validator):
+    """Test validation of correct metadata."""
+    metadata = {
+        "skill_id": "technical.programming.python",
+        "version": "1.0.0",
+        "type": "technical",
+        "weight": "medium",
+        "load_priority": "task_specific",
+        "dependencies": [],
+        "capabilities": ["async_programming", "context_managers"]
+    }
+    
+    passed, errors = validator.validate_metadata(metadata)
+    assert passed
+    assert len(errors) == 0
+
+

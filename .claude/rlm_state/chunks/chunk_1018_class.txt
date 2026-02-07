@@ -1,0 +1,824 @@
+<!-- Chunk 1018: bytes 3570948-3602169, type=class -->
+class SkillSimilarityIndex:
+    def __init__(self):
+        self.embeddings = load_embeddings()  # Pre-computed
+        
+    def find_similar(self, query_embedding, top_k=3) -> list[SimilarSkill]:
+        """Find most similar skills using cosine similarity."""
+        similarities = cosine_similarity(
+            query_embedding.reshape(1, -1),
+            self.embeddings
+        )
+        return sorted(
+            similarities,
+            key=lambda x: x[1],
+            reverse=True
+        )[:top_k]
+```
+
+**API Endpoint**:
+```
+POST /api/v1/skills/similar
+Request: {
+  "skill_description": "Async programming in Python",
+  "skill_intent": "Teach coroutines and event loops"
+}
+Response: {
+  "similar_skills": [
+    {
+      "path": "skills/python/async",
+      "title": "Python Async Programming",
+      "similarity": 0.95,
+      "reason": "Covers same topics"
+    },
+    {
+      "path": "skills/python/threading",
+      "title": "Python Threading",
+      "similarity": 0.72,
+      "reason": "Related concurrency concept"
+    }
+  ],
+  "recommendation": "Consider extending 'async' instead of creating new"
+}
+```
+
+**CLI Integration** (during `create` flow):
+```
+$ uv run skill-fleet create "python async programming"
+
+Phase 1: Understanding...
+✓ Skill intent extracted: "Teach async/await, coroutines"
+
+🔍 Checking for similar skills...
+⚠️  Found: "Python Async Programming" (95% match)
+   Would you like to:
+   (a) Extend existing skill
+   (b) Create new skill anyway
+   (c) Skip creation
+   
+Choose: (a)
+✓ Creating extended version of existing skill...
+```
+
+**Index Maintenance** (Nightly Job):
+```python
+async def nightly_reindex():
+    """Recompute similarity index for all skills."""
+    all_skills = glob("skills/**/*.md")
+    for skill_path in all_skills:
+        skill = load_skill(skill_path)
+        embedding = embed(skill.description + skill.content)
+        index.update(skill_path, embedding)
+    index.save()
+```
+
+**Files to Create**:
+1. `src/skill_fleet/core/dspy/tools/similarity.py` (~250 lines)
+2. `config/indices/skill_similarity_index.pkl` (embeddings cache)
+3. Update `src/skill_fleet/core/dspy/skill_creator.py` phase1 with similarity check
+4. Update `src/skill_fleet/api/routes/skills.py` with /similar endpoint
+5. Add CLI command for on-demand reindex (no scheduler, local-only)
+
+**Timeline**: 1-1.5 days (local-only, no scheduled jobs) | **Impact**: Better skill reuse, reduced duplication
+
+---
+
+### TIER 5: Developer Experience (Optional, Nice-to-Have)
+
+#### **5A: Optimization Result Dashboard** 📊
+
+**Problem**: Results stored in JSON files; hard to explore/compare.
+
+**Solution**: Simple HTML dashboard for visual result exploration.
+
+**Implementation**:
+- Single-file HTML dashboard: `scripts/dashboard.html`
+- Backend: Simple Flask server in `scripts/dashboard_server.py`
+- Reads from: `config/optimized/*.json`
+- No database needed; filesystem-based
+
+**Dashboard Features**:
+- **Run History**: Table with all optimization runs
+- **Metrics Comparison**: Optimizer vs quality vs cost scatter plot
+- **Convergence Curves**: Metric improvement over iterations
+- **Cost Analysis**: Budget vs actual spend
+- **Filters**: By optimizer, date, skill, domain
+
+**Dashboard UI**:
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Optimization Results Dashboard                                │
+├─────────────────────────┬───────────────────┬──────────────────┤
+│ Filter: [Optimizer]     │ [Date Range]      │ [Domain]         │
+├────────────────────────────────────────────────────────────────┤
+│ 📊 Run History                                                 │
+│ Date       │ Optimizer │ Quality │ Cost    │ Time    │ Status │
+│ 2026-01-20 │ MIPROv2   │ 0.84    │ $2.30  │ 10 min  │ ✓ Done │
+│ 2026-01-20 │ GEPA      │ 0.81    │ $0.80  │ 5 min   │ ✓ Done │
+│ 2026-01-19 │ Bootstrap │ 0.78    │ $0.50  │ 3 min   │ ✓ Done │
+├────────────────────────────────────────────────────────────────┤
+│ 📈 Metrics vs Cost (scatter plot)                              │
+│    Y: Quality | X: Cost | Size: Time                           │
+│    [plot showing efficiency frontier]                           │
+├────────────────────────────────────────────────────────────────┤
+│ 🎯 Best Runs (by metric)                                       │
+│ 1. MIPROv2 on 2026-01-20: 0.84 quality, $2.30 cost             │
+│ 2. GEPA on 2026-01-20: 0.81 quality, $0.80 cost                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**CLI Command**:
+```bash
+uv run skill-fleet dashboard
+# Launches: http://localhost:8888
+# Auto-refreshes every 5 seconds
+```
+
+**Files to Create**:
+1. `scripts/dashboard.html` (~500 lines HTML/CSS/JS)
+2. `scripts/dashboard_server.py` (~150 lines Flask)
+3. CLI: Add `dashboard` command to `cli/commands/`
+
+**Timeline**: 1-2 days | **Impact**: Better visibility into optimization results
+
+---
+
+#### **5B: Skill Template Gallery** 🎨
+
+**Problem**: Users create from scratch; patterns not documented or reusable.
+
+**Solution**: Template library + creation flow.
+
+**Implementation**:
+- Templates directory: `skills/_templates/`
+- Examples:
+  - `template_guide_basic.md`: How-to guide format
+  - `template_tool_integration.md`: Tool usage patterns
+  - `template_workflow.md`: Multi-step process format
+  - `template_reference.md`: API reference format
+
+**Template Structure**:
+```
+skills/_templates/
+├── template_guide_basic.md
+│   ├── [Pre-filled sections]
+│   │   ├── When to Use
+│   │   ├── Quick Start
+│   │   ├── Examples
+│   │   └── Common Mistakes
+│   └── [Comments explaining]
+│
+├── template_tool_integration.md
+│   ├── Tool definition
+│   ├── Workflow diagram
+│   ├── Integration examples
+│   └── Troubleshooting
+```
+
+**CLI Commands**:
+```bash
+uv run skill-fleet template list
+# Shows available templates
+
+uv run skill-fleet create-from-template guide_basic --name "my-guide"
+# Creates new skill from template
+
+uv run skill-fleet template preview guide_basic
+# Shows template structure
+```
+
+**Template Metadata**:
+```json
+{
+  "name": "guide_basic",
+  "title": "Basic Guide Template",
+  "description": "Simple how-to guide format",
+  "categories": ["general"],
+  "sections": ["When to Use", "Quick Start", "Examples"],
+  "estimated_time": "15 min",
+  "difficulty": "easy"
+}
+```
+
+**Files to Create**:
+1. `skills/_templates/` directory with .md templates
+2. `src/skill_fleet/cli/commands/template.py` (new command)
+3. `config/templates/metadata.json` (template index)
+4. Add template selection to `create` flow
+
+**Timeline**: 1 day | **Impact**: Faster onboarding, clearer patterns
+
+---
+
+## Part 3: Phased Execution Plan
+
+### **Phase 0: Foundation (Weeks 1-2) - Enable Tier 1**
+
+**Goal**: Build infrastructure for everything that follows.
+
+```markdown
+[ ] 0.1: Implement Persistent Job Storage (Tier 2A) ⭐ CRITICAL
+    └─ Enables all optimization improvements
+    └─ Deliverables:
+        - src/skill_fleet/db/jobs.py (SQLAlchemy models)
+        - Migration logic (alembic)
+        - Job resume on API startup
+    └─ Testing: Job persistence, resume after crash
+    └─ Estimated: 2-3 days
+    
+[ ] 0.2: Implement OptimizerSelector (Tier 1A) ⭐ HIGH ROI
+    └─ Intelligent optimizer selection
+    └─ Deliverables:
+        - src/skill_fleet/core/dspy/optimization/selector.py
+        - API endpoint: POST /api/v1/optimization/recommend
+        - CLI flag: --auto-select
+    └─ Testing: Decision tree, cost estimates, selection accuracy
+    └─ Estimated: 1-2 days
+    
+[ ] 0.3: Implement TrainingDataManager (Tier 1C)
+    └─ Smart training data selection
+    └─ Deliverables:
+        - src/skill_fleet/config/training/manager.py
+        - example_metadata.json schema
+        - Integration with optimizer
+    └─ Testing: Quality scoring, filtering, gap detection
+    └─ Estimated: 1-2 days
+```
+
+**Outcome**: API restart-safe, optimizer selection intelligent, training data optimized  
+**Estimated Effort**: 2-4 days (local-only, -50% vs distributed)  
+**Testing**: Unit tests + integration tests + manual verification
+
+---
+
+### **Phase 1: DSPy Value Prop (Weeks 3-5) - Complete Tier 1**
+
+**Goal**: Unlock DSPy's full potential: feedback loops, adaptive metrics, signature improvement.
+
+```markdown
+[ ] 1.1: Implement Adaptive Metric Weighting (Tier 1B)
+    └─ Per-style optimization
+    └─ Deliverables:
+        - src/skill_fleet/core/dspy/metrics/adaptive_weighting.py
+        - New signature: AdjustMetricWeights
+        - API endpoint: POST /api/v1/evaluation/adaptive-weights
+    └─ Testing: Weights by style, integration with optimization
+    └─ Estimated: 1-2 days
+    
+[ ] 1.2: Implement Metric-Driven Signature Tuning (Tier 1D) ⭐ CLOSES LOOP
+    └─ Signatures self-improve
+    └─ Deliverables:
+        - src/skill_fleet/core/dspy/modules/signature_tuner.py
+        - New signature: TuneSignature
+        - API endpoint: POST /api/v1/signatures/tune
+        - Version history tracking
+    └─ Testing: Signature improvement, version control
+    └─ Estimated: 2-3 days
+    
+[ ] 1.3: Implement Module Composition Registry (Tier 3A)
+    └─ Infrastructure for module versioning
+    └─ Deliverables:
+        - src/skill_fleet/core/dspy/modules/registry.py
+        - Update skill_creator.py to use registry
+        - API endpoint: GET /api/v1/modules/available
+    └─ Testing: Module creation, versioning, swapping
+    └─ Estimated: 1-2 days
+    
+[ ] 1.4: End-to-End Optimization Cycle
+    └─ Verify all pieces work together
+    └─ Execute: Create skill → Optimize with auto-select →
+                Tune signature → Adaptive weights
+    └─ Testing: Full workflow, metric improvement
+    └─ Estimated: 1-2 days
+```
+
+**Outcome**: Signatures self-improve, metrics adapt per style, modules versioned  
+**Estimated Effort**: 5-9 days  
+**Checkpoint**: Full workflow test before Phase 2
+
+---
+
+### **Phase 2: Reliability & Scale (Weeks 6-8) - Tier 2 + 3B+3C**
+
+**Goal**: Production-ready: streaming, caching, versioning, fast paths.
+
+```markdown
+[ ] 2.1: Implement Streaming Result Aggregation (Tier 2B)
+    └─ Real-time feedback
+    └─ Deliverables:
+        - src/skill_fleet/common/streaming/aggregator.py
+        - SSE endpoint: GET /api/v1/optimization/{job_id}/stream
+        - CLI: --watch flag
+    └─ Testing: Backpressure, slow client, disconnect/reconnect
+    └─ Estimated: 1-2 days
+    
+[ ] 2.2: Implement CLI ↔ API Caching (Tier 2C)
+    └─ Faster result retrieval
+    └─ Deliverables:
+        - src/skill_fleet/cli/cache.py
+        - ETag-based sync
+        - Local cache in ~/.skill_fleet/cache/
+    └─ Testing: Cache hit/miss, invalidation
+    └─ Estimated: 1 day
+    
+[ ] 2.3: Implement Signature Version Control (Tier 3B)
+    └─ Safe schema evolution
+    └─ Deliverables:
+        - src/skill_fleet/core/dspy/signatures/versioning.py
+        - @signature_version decorator
+        - Auto-migration on load
+        - CLI: signatures check --migration
+    └─ Testing: Version tracking, migration, backward compat
+    └─ Estimated: 2-3 days
+    
+[ ] 2.4: Implement Phase Conditional Branching (Tier 3C)
+    └─ Fast path for simple skills
+    └─ Deliverables:
+        - EvaluateComplexity signature
+        - Branching logic in skill_creator.py
+        - config/phase_rules.yaml
+        - Metrics: time saved, quality comparison
+    └─ Testing: Complexity detection, fast/normal/expert paths
+    └─ Estimated: 1-2 days
+```
+
+**Outcome**: Production-ready streaming, versioned schemas, 30-50% faster for simple skills  
+**Estimated Effort**: 3-5 days (local-only, -40% vs distributed)  
+**Checkpoint**: Streaming test, version migration test
+
+---
+
+### **Phase 3: Quality Assurance (Weeks 9-11) - Tier 4**
+
+**Goal**: Prevent degradation, robust decision-making.
+
+```markdown
+[ ] 3.1: Golden Standard Drift Detection (Tier 4A)
+    └─ Auto-detect optimization degradation
+    └─ Deliverables:
+        - src/skill_fleet/core/dspy/metrics/drift.py
+        - GoldenStandardMonitor
+        - Integration in evaluation pipeline
+        - CLI: --check-drift flag
+    └─ Testing: Drift detection, alerts, re-optimization trigger
+    └─ Estimated: 1-2 days
+    
+[ ] 3.2: Multi-Optimizer Ensemble Voting (Tier 4B)
+    └─ Hedge against optimizer failure
+    └─ Deliverables:
+        - OptimizerEnsemble in ensemble.py
+        - API endpoint: POST /api/v1/optimization/ensemble
+        - CLI: --ensemble flag
+        - Optimizer weight learning
+    └─ Testing: Parallel execution, voting, confidence scoring
+    └─ Estimated: 2-3 days
+    
+[ ] 3.3: Skill Similarity Index (Tier 4C)
+    └─ Reduce duplication, improve discovery
+    └─ Deliverables:
+        - src/skill_fleet/core/dspy/tools/similarity.py
+        - SkillSimilarityIndex
+        - Nightly reindex job
+        - API endpoint: POST /api/v1/skills/similar
+        - Integration in create flow
+    └─ Testing: Similarity search, index updates, UX integration
+    └─ Estimated: 2-3 days
+    
+[ ] 3.4: Comprehensive Testing Suite
+    └─ All improvements tested
+    └─ Integration tests: End-to-end workflows
+    └─ Regression tests: Existing functionality
+    └─ Performance tests: Speed improvements verified
+    └─ Estimated: 2-3 days
+```
+
+**Outcome**: Robust quality assurance, no optimizer failure modes, good skill discovery  
+**Estimated Effort**: 4-7 days (local-only, -40% vs distributed)  
+**Checkpoint**: Full integration test suite passes
+
+---
+
+### **Phase 4: DX Polish (Weeks 12+) - Tier 5 (Optional)**
+
+**Goal**: Better developer experience, self-service.
+
+```markdown
+[ ] 4.1: Optimization Result Dashboard (Tier 5A)
+    └─ Visual exploration
+    └─ Deliverables:
+        - scripts/dashboard.html
+        - scripts/dashboard_server.py
+        - CLI command: dashboard
+    └─ Testing: UI functionality, data updates
+    └─ Estimated: 1-2 days
+    
+[ ] 4.2: Skill Template Gallery (Tier 5B)
+    └─ Faster onboarding
+    └─ Deliverables:
+        - skills/_templates/ directory
+        - Template metadata schema
+        - CLI commands: template list/preview/create-from-template
+    └─ Testing: Template loading, skill creation from template
+    └─ Estimated: 1 day
+    
+[ ] 4.3: Documentation Updates
+    └─ Capture all new capabilities
+    └─ Deliverables:
+        - Updated README with new commands
+        - Optimization guide
+        - Troubleshooting guide
+        - Architecture diagrams
+    └─ Estimated: 1-2 days
+```
+
+**Outcome**: Better developer experience, self-service templates  
+**Estimated Effort**: 1-2 days (local-only, -50%, optional)
+
+---
+
+## Part 4: Success Metrics
+
+### Primary Metrics (Track Throughout)
+
+| Metric | Target | Baseline | Tier | Success Criteria |
+|--------|--------|----------|------|-----------------|
+| **Skill Quality Score** | 0.85-0.90 | 0.70-0.75 | 1 | Quality improvement: +15-20% |
+| **Optimization Speed** | 2-3x faster | baseline | 2C, 3C | Run more optimizations per day |
+| **Optimizer Selection Accuracy** | >85% | <50% | 1A | Right optimizer picked automatically |
+| **Job Reliability** | 99.9% uptime | ~50% (restart loss) | 2A | No data loss on API restart |
+| **Training Data Efficiency** | 40 examples ≥ 50 | baseline | 1C | Faster convergence with filtered data |
+| **Drift Detection Rate** | 100% | N/A | 4A | All drifts detected on time |
+
+### Secondary Metrics
+
+| Metric | Target | Owner | Tracking Method |
+|--------|--------|-------|-----------------|
+| API response time (p95) | <500ms | Tier 2B, 2C | HTTP logging + monitoring |
+| CLI UX satisfaction | 4.5/5 | Tier 5B | User feedback + metrics |
+| Module composition complexity | <5 steps | Tier 3A | Code review |
+| Schema migration success | 100% | Tier 3B | Test coverage |
+| Simple skill creation time | <10 min | Tier 3C | End-to-end test |
+| Similarity index accuracy | >90% | Tier 4C | Ground truth comparison |
+| Dashboard UI load time | <2s | Tier 5A | Performance test |
+
+### Implementation Success Checklist
+
+- [ ] Phase 0 complete: Jobs persist, OptimizerSelector works, TrainingDataManager filters
+- [ ] Phase 1 complete: Signatures improve automatically, metrics adapt per style
+- [ ] Phase 2 complete: Streaming real-time, API/CLI caching works, versioning safe
+- [ ] Phase 3 complete: Drift detected, ensemble voting robust, similarity working
+- [ ] Phase 4 complete (optional): Dashboard useful, templates accelerate onboarding
+- [ ] All tests passing: Unit + integration + performance
+- [ ] Documentation complete: New commands, workflows, troubleshooting
+- [ ] User acceptance: Can create skill faster, higher quality, more confident
+
+---
+
+## Part 5: Risk Mitigation
+
+### Technical Risks
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| **Job persistence race conditions** | Data corruption | Implement with transactions, test with concurrent writes |
+| **Signature migration breaks old programs** | Backward compat issue | Comprehensive migration tests, reversible migrations |
+| **Optimizer ensemble 3x cost** | Budget overrun | Make --ensemble opt-in, show cost estimate first |
+| **Similarity index stale** | Poor recommendations | Nightly reindex, cache invalidation on new skill |
+| **Streaming backpressure issues** | Buffering, OOM | Implement drop strategy, test with slow clients |
+
+### Adoption Risks
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| **Users don't trust OptimizerSelector** | Manual selection continues | Show reasoning, confidence score, allow override |
+| **Phase branching skips important validation** | Lower quality skills | Keep expert path option, provide quality metrics |
+| **Similarity recommendations too aggressive** | Users extend when should create new | Show similarity confidence, allow "create new anyway" |
+| **Dashboard not used** | Visibility lost | Simple one-file design, auto-launch on completion |
+
+### Operational Risks
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| **SQLite scaling issue** | Performance at 10k+ jobs | Migration path to PostgreSQL documented |
+| **Embedding model license issue** | Cannot use similarity | Use open-source model (sentence-transformers) |
+| **Golden standard outdated** | Drift detection unreliable | Quarterly review of golden examples |
+
+---
+
+## Part 6: Dependencies & Prerequisites
+
+### External Dependencies
+
+- **Python Libraries**: Already installed
+  - dspy-ai (v3.1.0)
+  - fastapi, sqlalchemy, pydantic
+  - sentence-transformers (for similarity)
+
+- **Infrastructure**:
+  - SQLite (included, no setup needed)
+  - Optional Redis (caching improvement)
+  - Optional MLflow (monitoring)
+
+### Internal Dependencies (Ordering)
+
+```
+Phase 0 (Foundation):
+  ├─ 0.1 (Job Persistence) must complete first
+  ├─ 0.2 (OptimizerSelector) depends on 0.1
+  └─ 0.3 (TrainingDataManager) independent
+
+Phase 1 (DSPy):
+  ├─ 1.1 (Adaptive Weighting) independent
+  ├─ 1.2 (Signature Tuning) depends on 1.1
+  ├─ 1.3 (Module Registry) independent
+  └─ 1.4 (E2E Test) depends on all above
+
+Phase 2 (Reliability):
+  ├─ 2.1 (Streaming) independent
+  ├─ 2.2 (Caching) independent
+  ├─ 2.3 (Signature Versioning) independent
+  └─ 2.4 (Phase Branching) depends on Phase 1
+
+Phase 3 (Quality):
+  ├─ 3.1 (Drift Detection) depends on Phase 1 (evaluation)
+  ├─ 3.2 (Ensemble) depends on Phase 0 (jobs)
+  ├─ 3.3 (Similarity) independent
+  └─ 3.4 (Testing) depends on all
+
+Phase 4 (DX):
+  ├─ 4.1 (Dashboard) depends on Phase 0 (jobs, results)
+  ├─ 4.2 (Templates) independent
+  └─ 4.3 (Docs) depends on all
+```
+
+---
+
+## Part 7: Quick Wins (Start Here)
+
+**If you have 1 week**: Do these 3 items (4-7 days total)
+
+```markdown
+1. Tier 1A: OptimizerSelector (1-2 days)
+   └─ Minimal code (~250 lines)
+   └─ High impact: 20-30% faster optimization
+   └─ No dependencies: Add standalone module
+   └─ Proves intelligent selection concept
+   
+2. Tier 2A: Persistent Job Storage (2-3 days)
+   └─ Essential for production
+   └─ SQLite simple, adds resilience
+   └─ Foundation for all job tracking
+   └─ Unblocks Phase 1+2+3
+   
+3. Tier 1C: TrainingDataManager (1-2 days)
+   └─ Minimal code (~150 lines)
+   └─ Enables smarter data sampling
+   └─ No breaking changes: Add alongside existing
+   └─ Immediate quality improvement
+```
+
+**ROI**: 4-7 days → Production-ready + 20% quality gain + smarter optimization + fewer restarts
+
+---
+
+## Summary
+
+This comprehensive plan transforms skill-fleet from a working prototype into a **production-grade meta-learning platform**.
+
+**Core Philosophy**:
+1. **API-first, CLI-second**: All logic in FastAPI; CLI is SDK client
+2. **DSPy value prop**: Every improvement targets signatures, metrics, or programs
+3. **Continuous feedback**: Metrics → signature improvement → data refinement → optimizer selection
+4. **Observable everything**: Track decisions, costs, quality, performance
+
+**Phased Execution** (Local-only focus, -20% overall):
+- **Phase 0** (5-7 days): Foundation (jobs, selector, training data)
+- **Phase 1** (1.5-2.5 weeks): DSPy core (weighting, tuning, registry)
+- **Phase 2** (1.5-2 weeks): Reliability (streaming, caching, versioning)
+- **Phase 3** (1.5-2.5 weeks): Quality (drift, ensemble, similarity)
+- **Phase 4** (0.5-1 weeks, optional): DX (dashboard, templates)
+- **Total**: 8-10 weeks (vs 12 weeks distributed)
+
+**Expected Impact**:
+- Quality: 0.70-0.75 → 0.85-0.90 (+15-20%)
+- Speed: 2-3x faster optimization (fewer wrong choices, smarter data)
+- Reliability: 99.9% uptime (job persistence, graceful degradation)
+- DX: Self-service templates, visual dashboards, faster onboarding
+
+**Start with quick wins** (local-only, -50%): OptimizerSelector + Job Persistence + TrainingDataManager = **2-4 days**, 20% quality gain.
+
+---
+
+**Document Last Updated**: January 20, 2026  
+**Status**: Ready for Implementation  
+**Next Step**: Prioritize and schedule Phase 0 tasks
+
+
+============================================================
+END FILE: docs/internal/plans/archive/2026-01-20-dspy-optimization-comprehensive.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/2026-01-22-dspy-3.1x-signature-module-improvements.md
+============================================================
+
+# 2026-01-22 — DSPy 3.1.x Signature/Module Improvements
+
+## Purpose
+
+Leverage DSPy 3.1.x changes (3.1.0–3.1.2) to improve robustness and observability of our DSPy signatures/modules.
+
+This is **not** about mandatory compatibility fixes; it is about making our usage more resilient to:
+- `dspy.Reasoning` object outputs (and any upstream evolution of that type)
+- DSPy output parsing behavior changes (esp. structured outputs)
+- Predict/InputField default handling improvements
+
+## DSPy 3.1.1 / 3.1.2 Release-Note Deltas We Care About
+
+- **3.1.1**: `Predict` now uses `InputField` defaults; streaming yields the last chunk correctly; multiple structured-output reliability improvements.
+- **3.1.2**: JSON parsing behavior changed (removal of an initial regex-based JSON extraction); settings save/load behavior updated; additional knobs exposed for parallel execution.
+
+## Current State (as implemented)
+
+- Core conversational signatures live in `src/skill_fleet/core/dspy/signatures/chat.py`.
+- Conversational modules already coerce reasoning text in key places (e.g. `GenerateQuestionModule`, `DetectMultiSkillModule`, `DeepUnderstandingModule`).
+- Utility `safe_json_loads()` already handles: JSON strings, dict/list, and Pydantic models.
+- There is a second signature set under `src/skill_fleet/agent/signatures.py` that appears unused by current imports; it differs in typing conventions (e.g. string reasoning).
+
+## Observed Gaps / Opportunities
+
+1. **Reasoning field consistency**
+   - Some signatures use `reasoning: dspy.Reasoning`, but others use `str` or omit reasoning entirely.
+   - Some modules still read `result.rationale` even when the signature doesn’t declare a rationale output.
+
+2. **Structured output hardening**
+   - Many outputs are `list[str]` or nested dict/list. We often parse defensively, but not everywhere.
+   - As DSPy evolves parsing behavior, we want consistent, predictable “JSON-only” output contracts for list/dict fields.
+
+3. **InputField defaults**
+   - Optional inputs are often implemented as Python defaults in module `forward()` signatures (e.g. `conversation_history=""`), but not as `InputField` defaults.
+   - With DSPy 3.1.1+ Predict now respecting InputField defaults, we can encode defaults at the signature layer for stability.
+
+## Proposal
+
+### A) Standardize reasoning outputs
+
+- For all ChainOfThought-based signatures that we stream or log, add:
+  - `reasoning: dspy.Reasoning = dspy.OutputField(...)`
+- Update modules to extract reasoning via:
+  - `coerce_reasoning_text(getattr(result, "reasoning", getattr(result, "rationale", "")))`
+- Keep public API payloads using strings (serialize reasoning to text at boundaries) to avoid leaking DSPy internal types.
+
+### B) Standardize structured outputs
+
+- For signatures that return list/dict-ish outputs used by CLI/API, make output formatting requirements explicit:
+  - “Return a JSON array only” / “Return JSON object only” where appropriate.
+- Ensure every module that consumes list/dict fields uses `safe_json_loads()` (or equivalent coercion) instead of assuming the type.
+
+### C) Consider adopting interpreter/RLM features (optional)
+
+- Evaluate DSPy’s interpreter/RLM upgrades for two specific use cases:
+  - Phase 0 research / example gathering: sandboxed code execution for validating examples.
+  - Phase 3 validation: optional “explain failures” / “suggest minimal fix” steps.
+
+This should be gated behind explicit config flags and not enabled by default.
+
+### D) Remove or align unused signature sets
+
+- Either:
+  1) Align `src/skill_fleet/agent/signatures.py` with `core/dspy/signatures/*` (types + naming), OR
+  2) Mark it deprecated and ensure nothing imports it.
+
+## Execution Checklist
+
+- [x] Inventory all DSPy signatures and the modules that consume them; record for each:
+  - reasoning field type (Reasoning/str/missing)
+  - structured outputs (list/dict) and how they’re parsed
+  - which signatures are streamed (need `reasoning` for streamify)
+- [x] Implement A) reasoning standardization in the core modules (conversation + phase modules).
+- [x] Implement B) structured output hardening for list/dict-ish fields (module-level parsing + improved `safe_json_loads()`).
+- [x] Decide on D) for `src/skill_fleet/agent/signatures.py` (remove unused legacy).
+- [ ] (Optional) Prototype C) behind a feature flag.
+- [ ] Add/extend unit tests for:
+  - reasoning coercion (simulate `dspy.Reasoning` objects)
+  - structured output parsing (string JSON, list, pydantic model)
+
+## Validation
+
+```bash
+# from repo root
+UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/unit -q
+```
+
+
+============================================================
+END FILE: docs/internal/plans/archive/2026-01-22-dspy-3.1x-signature-module-improvements.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/2026-01-22-fix-scoping-loop.md
+============================================================
+
+# 2026-01-22 — Fix Scoping Loop (Chat Scoping)
+
+## Goal
+
+- Stop the `skill-fleet chat` scoping loop that re-prompts for plan selection after a plan is already chosen.
+- Preserve correct multi-skill behavior without regressing readiness/confirming transitions.
+- Provide clearer user-facing progress indication, including the readiness score, during the chat flow.
+- Keep DSPy compatibility explicit for **3.1.1** and **3.1.2** (confirm behavior in both).
+
+## Background
+
+The current flow re-enters `handle_exploring` after `DEEP_UNDERSTANDING` and re-runs `detect_multi_skill`, which can return `alternative_approaches` again even though a plan was already selected. This traps the user in a repeated “Which plan?” prompt.
+
+Reference plan: `.opencode/plans/fix-scoping-loop.md`.
+
+## Plan
+
+### TODO
+
+- [x] Review current conversation state flow in `src/skill_fleet/core/services/conversation/handlers/exploration.py` and confirm the loop reproduction steps.
+- [x] Inspect `DetectMultiSkillModule` behavior to understand when it returns `alternative_approaches` vs `requires_multiple_skills`.
+- [x] Implement a **scoping-complete guard** to skip `detect_multi_skill` once a plan is selected:
+  - Set `session.deep_understanding["scoping_complete"] = True` when `handle_multi_skill` accepts a plan selection.
+  - In `handle_exploring`, if `scoping_complete` is true, bypass multi-skill detection and go straight to readiness assessment.
+- [x] Add clearer progress indication during `chat` (e.g., “Phase: Exploring → Readiness”) and include the **readiness score** in the prompt/response flow.
+- [x] Add/adjust tests or a reproduction script for the plan-selection path (ensure no repeated plan prompt).
+- [ ] Validate behavior on **DSPy 3.1.1** and **3.1.2** (verify local dependency pin or note required bump if missing).
+
+## Validation
+
+```bash
+# from repo root
+uv run pytest tests/unit -q
+```
+
+## Validation Notes
+
+- `UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import dspy; print(dspy.__version__)"` → `3.1.2`
+- `UV_CACHE_DIR=/tmp/uv-cache uv run --with "dspy==3.1.1" python -c "import dspy; print(dspy.__version__)"` → resolver error: no `dspy==3.1.1` available
+
+## Notes
+
+- If multi-skill breakdown still needs follow-on decomposition, consider a follow-up prompt or a targeted enhancement to `DetectMultiSkillModule` to treat “selected plan” as a directive rather than a new alternative.
+
+
+============================================================
+END FILE: docs/internal/plans/archive/2026-01-22-fix-scoping-loop.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/EXEC-0.2-optimizer-auto-selection.md
+============================================================
+
+# EXEC Script: 0.2 Optimizer Auto-Selection Engine
+
+**Reference**: [TRACKLIST.md](./TRACKLIST.md) Task 0.2  
+**Plan**: [2026-01-20-dspy-optimization-comprehensive.md](../2026-01-20-dspy-optimization-comprehensive.md) Tier 1A  
+**Status**: 🚀 READY TO EXECUTE  
+**Estimated Effort**: 1-2 days  
+**Priority**: HIGH ROI (20-30% faster optimization from fewer wrong optimizer choices)
+
+---
+
+## 🎯 Objective
+
+Build an intelligent optimizer selector that automatically recommends the best DSPy optimizer (MIPROv2, GEPA, BootstrapFewShot) based on task characteristics, eliminating manual guessing.
+
+**Problem Solved**: Users currently manually choose optimizer → wrong choice = wasted budget/time.
+
+---
+
+## 📋 Prerequisites
+
+- [x] Phase 0.1 complete (Job Storage)
+- [x] Existing optimizers functional (`core/optimization/optimizer.py`)
+- [x] API routes exist (`api/routes/optimization.py`)
+- [x] CLI command exists (`cli/commands/optimize.py`)
+
+---
+
+## 🔧 Implementation Tasks
+
+### Task 0.2.1: Create Selector Module (~1 day)
+
+**File**: `src/skill_fleet/core/dspy/optimization/selector.py`
+
+```python
+"""Optimizer Auto-Selection Engine.
+
+Intelligently recommends the best DSPy optimizer based on task characteristics,
+budget constraints, and historical performance data.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
+
+

@@ -1,0 +1,42 @@
+<!-- Chunk 727: bytes 2570889-2571658, type=class -->
+class SkillDetailResponse(BaseModel):
+    """Detailed information about a skill."""
+
+    skill_id: str
+    name: str
+    description: str
+    version: str
+    type: str
+    metadata: dict[str, Any]
+    content: Optional[str] = None
+```
+
+**Example**:
+```json
+{
+    "skill_id": "python-async-await",
+    "name": "python-async-await",
+    "description": "Proficiency with Python's async/await syntax",
+    "version": "1.0.0",
+    "type": "guide",
+    "metadata": {
+        "weight": "medium",
+        "load_priority": "on_demand",
+        "dependencies": [],
+        "capabilities": ["code-generation"]
+    },
+    "content": "# Python Async/Await\n\n..."
+}
+```
+
+---
+
+## HITL Schemas
+
+### HitlPromptResponse
+
+HITL prompt response schema.
+
+```python
+from typing import Any
+

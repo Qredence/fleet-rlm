@@ -1,0 +1,22 @@
+<!-- Chunk 1733: bytes 7334232-7335144, type=class -->
+class UnderstandingResult(BaseModel):
+    """Result from the Understand step (Step 1)."""
+
+    task_intent: str = Field(description="Core intent and requirements extracted from task")
+    taxonomy_path: str = Field(
+        description="Proposed taxonomy path (e.g., 'technical_skills/programming/languages/python')"
+    )
+    parent_skills: list[ParentSkillInfo] = Field(
+        default_factory=list, description="Parent/sibling skills for context"
+    )
+    dependency_analysis: DependencyAnalysis = Field(
+        default_factory=DependencyAnalysis, description="Analysis of required dependencies"
+    )
+    confidence_score: float = Field(ge=0.0, le=1.0, description="Confidence in taxonomy placement")
+
+
+# =============================================================================
+# Step 2: Plan - Skill Structure Models
+# =============================================================================
+
+

@@ -1,0 +1,8 @@
+<!-- Chunk 211: bytes 299820-299983, type=class -->
+class EmailConfig:
+    host: str = "localhost"
+    port: int = 587
+    use_tls: bool = True
+    timeout: int = 30
+    # Only expose what users actually configure
+

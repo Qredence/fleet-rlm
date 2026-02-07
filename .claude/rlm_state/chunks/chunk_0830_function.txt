@@ -1,0 +1,8 @@
+<!-- Chunk 830: bytes 2884559-2884729, type=function -->
+def get_job(job_id: str) -> JobState | None:
+    job = JOBS.get(job_id)
+    if job:
+        return job
+    return load_job_session(job_id)  # Fragile JSON loading
+
+# NEW

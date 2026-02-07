@@ -1,0 +1,44 @@
+<!-- Chunk 1775: bytes 7421995-7423150, type=function -->
+def skill_creation_metric(
+    gold: dspy.Example,
+    pred: dspy.Prediction,
+    trace: Any = None,
+) -> float:
+    """
+    Composite metric for full skill creation workflow.
+
+    Combines:
+    - Taxonomy path accuracy: 30%
+    - Metadata quality: 35%
+    - Content quality: 35%
+
+    Args:
+        gold: Example with expected values
+        pred: Prediction with workflow outputs
+        trace: Optional trace information
+
+    Returns:
+        Score between 0.0 and 1.0
+
+    """
+    path_score = taxonomy_path_metric(gold, pred, trace)
+    metadata_score = metadata_metric(gold, pred, trace)
+    content_score = content_quality_metric(gold, pred, trace)
+
+    # Weighted combination
+    total = (path_score * 0.30) + (metadata_score * 0.35) + (content_score * 0.35)
+
+    logger.debug(
+        f"Skill creation metric: path={path_score:.2f}, "
+        f"metadata={metadata_score:.2f}, content={content_score:.2f}, "
+        f"total={total:.2f}"
+    )
+
+    return total
+
+
+# =============================================================================
+# Evaluation Utilities
+# =============================================================================
+
+

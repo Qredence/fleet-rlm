@@ -1,0 +1,54 @@
+<!-- Chunk 264: bytes 325824-327299, type=function -->
+def main() -> None:
+    """Main entry point."""
+    if len(sys.argv) < 2:
+        print("Usage: python analyze_imports.py <file_or_directory>")
+        sys.exit(1)
+
+    target_path = sys.argv[-1]
+    path = Path(target_path)
+
+    if not path.exists():
+        print(f"❌ Error: Path '{path}' does not exist")
+        sys.exit(1)
+
+    # Collect Python files
+    python_files = collect_python_files(path)
+    if not python_files:
+        print(f"❌ No Python files found in '{path}'")
+        sys.exit(1)
+
+    print(f"🔍 Analyzing {len(python_files)} Python files...\n")
+
+    # Analyze files
+    results = [analyze_file(f) for f in python_files]
+    print_analysis_results(results)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: .fleet/factory/skills/python-backend-reviewer/scripts/analyze_imports.py
+============================================================
+
+============================================================
+FILE: .fleet/factory/skills/python-backend-reviewer/scripts/complexity_analyzer.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Analyze code complexity metrics: cyclomatic complexity, nesting depth, function length.
+
+Usage:
+    python complexity_analyzer.py <file_or_directory>
+    python complexity_analyzer.py --max-complexity 10 --max-length 50 <file_or_directory>
+"""
+
+import ast
+import sys
+from pathlib import Path
+from typing import Any
+
+

@@ -1,0 +1,7 @@
+<!-- Chunk 1986: bytes 7888017-7888193, type=function -->
+def test_cli_error_with_custom_exit_code():
+    """Test CLIError accepts custom exit code."""
+    error = CLIError("Test error", exit_code=2)
+    assert error.exit_code == 2
+
+

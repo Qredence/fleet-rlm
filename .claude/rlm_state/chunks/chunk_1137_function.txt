@@ -1,0 +1,42 @@
+<!-- Chunk 1137: bytes 4250276-4251555, type=function -->
+def test_create_streaming_module_accepts_reasoning_field():
+    module = dspy.ChainOfThought("question -> answer")
+    stream_module = create_streaming_module(module, reasoning_field="reasoning", async_mode=False)
+    assert stream_module is not None
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/unit/test_streaming_reasoning_type.py -v`
+Expected: FAIL only if our wrapper breaks due to adapter/type assumptions.
+
+**Step 3: Minimal implementation**
+
+If failures occur:
+- Avoid hardcoding assumptions about adapter markers.
+- Ensure `StreamListener` remains configured by field name ("reasoning") and let DSPy handle type streaming.
+
+**Step 4: Run test to verify it passes**
+
+Run: `uv run pytest tests/unit/test_streaming_reasoning_type.py -v`
+Expected: PASS
+
+---
+
+### Task 7: Validate GEPA integration against DSPy 3.1.x APIs
+
+**Files:**
+- Modify (if needed): `src/skill_fleet/core/optimization/optimizer.py`
+- Test: `tests/unit/test_gepa_smoke.py`
+
+**Goal:** Confirm our usage of `dspy.GEPA(...)` remains aligned with the official constructor signature
+and that we pass a strong reflection LM (and adapter choices do not break compilation).
+
+**Step 1: Write failing test**
+
+Smoke-test object creation only (no network calls):
+
+```python
+import dspy
+
+

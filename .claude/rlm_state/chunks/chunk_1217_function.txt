@@ -1,0 +1,17 @@
+<!-- Chunk 1217: bytes 4578744-4579253, type=function -->
+def get_subdirectories(skill_path: Path) -> list[str]:
+    """Get list of subdirectories for a skill."""
+    subdirs = []
+    skill_dir = skill_path.parent
+
+    for potential_subdir in ["references", "guides", "templates", "scripts", "examples"]:
+        if (
+            (skill_dir / potential_subdir).exists()
+            and (skill_dir / potential_subdir).is_dir()
+            and list((skill_dir / potential_subdir).glob("*"))
+        ):
+            subdirs.append(potential_subdir)
+
+    return subdirs
+
+

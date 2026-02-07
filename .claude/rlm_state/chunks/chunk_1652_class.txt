@@ -1,0 +1,17 @@
+<!-- Chunk 1652: bytes 6676069-6676454, type=class -->
+class WebSearchError(ResearchError):
+    """
+    Raised when web search research fails.
+
+    This can occur when:
+    - Search API unavailable
+    - Network errors
+    - Invalid search query
+    """
+
+
+# =============================================================================
+# LLM Provider Errors
+# =============================================================================
+
+

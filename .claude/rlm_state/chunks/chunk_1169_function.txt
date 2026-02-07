@@ -1,0 +1,1059 @@
+<!-- Chunk 1169: bytes 4438734-4466498, type=function -->
+def collect_onboarding_responses() -> dict:
+    """Collect user responses through interactive prompts."""
+    responses = {}
+    
+    # Question 1: Role
+    console.print("[bold]1. What's your primary role?[/bold]")
+    roles = [
+        "Frontend Developer",
+        "Backend Developer",
+        "Full Stack Developer",
+        "Data Scientist",
+        "ML Engineer",
+        "DevOps/SRE",
+        "Product Manager",
+        "Other"
+    ]
+    
+    for i, role in enumerate(roles, 1):
+        console.print(f"  {i}. {role}")
+    
+    role_choice = Prompt.ask(
+        "Choose",
+        choices=[str(i) for i in range(1, len(roles) + 1)]
+    )
+    responses['role'] = roles[int(role_choice) - 1].lower().replace(' ', '_').replace('/', '_')
+    
+    # Question 2: Tech Stack
+    console.print("\n[bold]2. Which technologies do you work with?[/bold]")
+    console.print("(Enter numbers separated by commas, e.g., 1,3,5)")
+    
+    techs = [
+        "JavaScript/TypeScript",
+        "Python",
+        "Java",
+        "Go",
+        "Rust",
+        "React",
+        "Vue",
+        "Node.js",
+        "Django/Flask",
+        "PostgreSQL",
+        "MongoDB",
+        "Docker",
+        "Kubernetes",
+        "AWS",
+        "Azure"
+    ]
+    
+    for i, tech in enumerate(techs, 1):
+        console.print(f"  {i}. {tech}")
+    
+    tech_choices = Prompt.ask("Choose (comma-separated)")
+    selected_techs = [
+        techs[int(choice.strip()) - 1]
+        for choice in tech_choices.split(',')
+        if choice.strip().isdigit()
+    ]
+    responses['tech_stack'] = selected_techs
+    
+    # Question 3: Common Tasks
+    console.print("\n[bold]3. What tasks do you perform most often?[/bold]")
+    console.print("(Enter numbers separated by commas)")
+    
+    tasks = [
+        "Building new features",
+        "Debugging issues",
+        "Code review",
+        "Performance optimization",
+        "Writing tests",
+        "Documentation",
+        "Data analysis",
+        "API design",
+        "Infrastructure setup"
+    ]
+    
+    for i, task in enumerate(tasks, 1):
+        console.print(f"  {i}. {task}")
+    
+    task_choices = Prompt.ask("Choose (comma-separated)")
+    selected_tasks = [
+        tasks[int(choice.strip()) - 1]
+        for choice in task_choices.split(',')
+        if choice.strip().isdigit()
+    ]
+    responses['common_tasks'] = selected_tasks
+    
+    # Question 4: Experience Level
+    console.print("\n[bold]4. What's your experience level?[/bold]")
+    levels = ["Junior", "Mid-level", "Senior", "Lead/Principal"]
+    
+    for i, level in enumerate(levels, 1):
+        console.print(f"  {i}. {level}")
+    
+    level_choice = Prompt.ask(
+        "Choose",
+        choices=[str(i) for i in range(1, len(levels) + 1)]
+    )
+    responses['experience_level'] = levels[int(level_choice) - 1].lower()
+    
+    return responses
+
+
+if __name__ == '__main__':
+    onboard()
+```
+
+---
+
+**This is a comprehensive, production-ready implementation strategy spanning 14 weeks. Would you like me to continue with Phases 4-6 (Dynamic Generation, Intelligence Layer, and Production Hardening)?**
+
+The strategy provides:
+- ✅ Complete file structure with actual code
+- ✅ Phased rollout (2 weeks per phase)
+- ✅ Testing at each stage
+- ✅ Documentation throughout
+- ✅ CLI tools for easy interaction
+- ✅ Real DSPy implementation
+- ✅ Taxonomy-first design
+
+============================================================
+END FILE: plans/archive/implementation-phase-final.md
+============================================================
+
+============================================================
+FILE: plans/archive/overview.md
+============================================================
+
+# Agentic Skills System: Comprehensive Overview
+
+## Table of Contents
+1. [Introduction](#introduction)
+2. [The Problem We're Solving](#the-problem-were-solving)
+3. [What is the Agentic Skills System?](#what-is-the-agentic-skills-system)
+4. [Core Concepts](#core-concepts)
+5. [Use Cases](#use-cases)
+6. [Benefits](#benefits)
+7. [Why This Approach?](#why-this-approach)
+8. [Technical Architecture](#technical-architecture)
+9. [Comparison with Traditional Approaches](#comparison-with-traditional-approaches)
+10. [Getting Started](#getting-started)
+
+---
+
+## Introduction
+
+As AI agents become more sophisticated, they face a fundamental challenge: **how to maintain optimal performance while adapting to diverse, evolving tasks without becoming bloated with unnecessary capabilities.**
+
+The Agentic Skills System (ASS) addresses this challenge through a hierarchical, dynamic skill taxonomy that enables agents to mount only the capabilities they need, when they need them, while maintaining stateful context across interactions.
+
+Think of it as a **"just-in-time capability framework"** for AI agents—similar to how modern operating systems load drivers on-demand, or how IDEs load plugins based on the file type you're editing.
+
+---
+
+## The Problem We're Solving
+
+### Current Limitations in Agentic Systems
+
+**1. The Capability Bloat Problem**
+- Agents are either given too many capabilities (slow, expensive) or too few (limited utility)
+- No middle ground between "do everything poorly" and "do one thing well"
+- Static capability sets can't adapt to changing requirements
+
+**2. The Context Overload Problem**
+- Massive system prompts consume valuable context window
+- Irrelevant instructions reduce effectiveness
+- No prioritization of what's actually needed
+
+**3. The One-Size-Fits-All Problem**
+- Generic agents serve no one optimally
+- Personalization requires manual configuration
+- Domain expertise is hard to encode and maintain
+
+**4. The State Management Problem**
+- Agents lose context between sessions
+- No memory of past interactions or learned patterns
+- Repetitive work that should be remembered
+
+**5. The Evolution Problem**
+- Capabilities are static and hard to update
+- No mechanism for continuous learning
+- Difficult to track what works and what doesn't
+
+### Real-World Scenario
+
+Imagine a software development assistant:
+
+**Without ASS:**
+```
+System prompt: 50,000 tokens covering:
+- Every programming language
+- Every framework and library
+- All design patterns
+- Complete DevOps knowledge
+- Security best practices
+- Database expertise
+- ... (you get the idea)
+
+Result: 
+- Slow responses
+- Generic advice
+- High cost per interaction
+- Mediocre at everything
+```
+
+**With ASS:**
+```
+Initial state: 3 core cognitive skills (500 tokens)
+
+User: "Help me debug this React component"
+
+Agent mounts:
+- React ecosystem (2,000 tokens)
+- JavaScript debugging (1,500 tokens)
+- Frontend development patterns (1,000 tokens)
+
+Total: 5,000 tokens of highly relevant context
+
+Result:
+- Fast, focused responses
+- Expert-level React knowledge
+- Low cost
+- Excellent at the specific task
+```
+
+---
+
+## What is the Agentic Skills System?
+
+The Agentic Skills System is a **hierarchical, dynamic capability framework** that enables AI agents to:
+
+1. **Organize knowledge** into a taxonomic tree structure
+2. **Load capabilities on-demand** based on task requirements
+3. **Generate new skills** automatically when needed
+4. **Maintain state** across sessions and interactions
+5. **Evolve over time** through usage patterns and feedback
+
+### Key Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    AGENTIC SKILLS SYSTEM                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌─────────────────┐  ┌──────────────────┐                 │
+│  │   TAXONOMY      │  │  SKILL CREATOR   │                 │
+│  │   MANAGER       │  │   (DSPy-based)   │                 │
+│  │                 │  │                  │                 │
+│  │  • Structure    │  │  • Understand    │                 │
+│  │  • Navigation   │  │  • Plan          │                 │
+│  │  • Validation   │  │  • Initialize    │                 │
+│  │  • Mounting     │  │  • Edit          │                 │
+│  └────────┬────────┘  │  • Package       │                 │
+│           │           │  • Iterate       │                 │
+│           │           └────────┬─────────┘                 │
+│           │                    │                            │
+│  ┌────────┴────────────────────┴─────────┐                 │
+│  │         PLANNER AGENT                 │                 │
+│  │                                        │                 │
+│  │  • Task Analysis                       │                 │
+│  │  • Skill Selection                     │                 │
+│  │  • Dependency Resolution               │                 │
+│  │  • Optimal Mounting                    │                 │
+│  └────────┬───────────────────────────────┘                 │
+│           │                                                  │
+│  ┌────────┴───────────────────────────────┐                 │
+│  │       WORKER AGENT(S)                  │                 │
+│  │                                         │                 │
+│  │  With dynamically mounted skills:       │                 │
+│  │  • Python Programming                   │                 │
+│  │  • Code Analysis                        │                 │
+│  │  • Debug Strategies                     │                 │
+│  │  • Project Context Memory               │                 │
+│  └─────────────────────────────────────────┘                 │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+```
+
+### The 8-Level Taxonomy Hierarchy
+
+```
+1. COGNITIVE_SKILLS
+   └─ Analysis, Synthesis, Planning, Reasoning, Learning
+
+2. TECHNICAL_SKILLS
+   └─ Programming, Data Engineering, Infrastructure, Security, APIs
+
+3. DOMAIN_KNOWLEDGE
+   └─ Machine Learning, NLP, Computer Vision, Business Intelligence
+
+4. TOOL_PROFICIENCY
+   └─ Development Tools, Data Tools, Monitoring, Collaboration
+
+5. MCP_CAPABILITIES
+   └─ Context Management, Tool Integration, Resource Access, State
+
+6. SPECIALIZATIONS
+   └─ Frontend, Backend, DevOps, Data Science, AI/ML Engineering
+
+7. TASK_FOCUS_AREAS
+   └─ Build/Create, Debug/Fix, Optimize, Research, Maintain
+
+8. MEMORY_BLOCKS
+   └─ Project Context, Interaction History, Knowledge Base, Evolution
+```
+
+---
+
+## Core Concepts
+
+### 1. Progressive Disclosure
+Skills are organized in layers of increasing detail:
+- **Metadata**: Lightweight (skill ID, version, dependencies) - always loaded
+- **Documentation**: Medium weight (capabilities, examples) - loaded on-demand
+- **Resources**: Heavy (full implementations, data) - lazy loaded
+
+### 2. Dynamic Mounting
+Like dynamic linking in software:
+```python
+# Instead of loading everything
+agent = Agent(all_skills)  # ❌ Bloated
+
+# Load only what's needed
+agent = Agent(core_skills)
+agent.mount("python.async")      # ✓ Focused
+agent.mount("debugging.traces")  # ✓ Relevant
+```
+
+### 3. Skill Composition
+Skills understand their relationships:
+- **Extends**: Child inherits from parent (Python → Async Python)
+- **Complements**: Works alongside siblings (React → React Hooks)
+- **Requires**: Hard dependency (React Testing → React)
+- **Conflicts**: Cannot coexist (Python 2 ↔ Python 3)
+
+### 4. Just-In-Time Generation
+When a needed skill doesn't exist:
+```
+User Task → Planner Analyzes → Skill Missing → Creator Generates → Mounts → Executes
+```
+
+### 5. Stateful Evolution
+The system learns and improves:
+- Usage patterns tracked
+- Successful compositions remembered
+- Quality metrics collected
+- Skills refined based on feedback
+
+---
+
+## Use Cases
+
+### 1. Software Development Assistant
+
+**Scenario**: Multi-project development team
+
+**Without ASS**:
+- Generic coding assistant
+- Same knowledge for all languages
+- No project-specific context
+- Forgets between sessions
+
+**With ASS**:
+```
+Project A (React E-commerce):
+  Mounted Skills:
+  - React ecosystem
+  - E-commerce patterns
+  - Payment integration
+  - Frontend optimization
+  Memory: Previous decisions, component patterns
+
+Project B (Python ML Pipeline):
+  Mounted Skills:
+  - Python data processing
+  - ML model deployment
+  - Pipeline orchestration
+  - AWS services
+  Memory: Model architecture, data schemas
+```
+
+**Result**: Specialized expert for each project with perfect context recall.
+
+### 2. Customer Support Agent
+
+**Scenario**: Multi-product tech company
+
+**Problem**: Different products need different knowledge, but agents need to handle any inquiry.
+
+**Solution with ASS**:
+```
+Incoming Ticket: "Can't connect to database"
+
+Planner Analysis:
+- Product: CloudDB
+- Issue Type: Connection
+- Priority: High
+
+Mounts:
+- CloudDB product knowledge
+- Database troubleshooting
+- Network diagnostics
+- Customer's history (memory block)
+
+Response: Expert-level, contextual support
+```
+
+**Benefit**: Each agent becomes a specialist for the specific inquiry in real-time.
+
+### 3. Research Assistant
+
+**Scenario**: Academic researcher exploring multiple domains
+
+**Challenge**: Need deep expertise in varied fields that change by project.
+
+**ASS Implementation**:
+```
+Research Phase 1: Literature Review
+  Mounts:
+  - Academic search strategies
+  - Citation analysis
+  - Research domain knowledge
+  - Paper summarization
+  Memory: Papers reviewed, themes identified
+
+Research Phase 2: Methodology Design
+  Mounts:
+  - Experimental design
+  - Statistical analysis
+  - Research domain methods
+  - Ethics compliance
+  Memory: Previous phase findings
+
+Research Phase 3: Data Analysis
+  Mounts:
+  - Statistical modeling
+  - Data visualization
+  - Research domain metrics
+  - Results interpretation
+  Memory: Experimental design, hypotheses
+```
+
+**Result**: Agent evolves expertise as research progresses, maintaining continuity.
+
+### 4. DevOps Automation
+
+**Scenario**: Managing heterogeneous infrastructure
+
+**With ASS**:
+```
+Incident: API latency spike
+
+Planner mounts:
+- AWS CloudWatch analysis
+- Kubernetes diagnostics
+- Database performance tuning
+- API optimization patterns
+- Previous incident memory
+
+Auto-remediation with context-aware decisions
+```
+
+### 5. Personal Productivity Assistant
+
+**Scenario**: Individual knowledge worker
+
+**ASS Advantage**:
+```
+Morning:
+  - Email triage skills
+  - Calendar management
+  - Priority analysis
+  - Communication patterns (memory)
+
+Afternoon:
+  - Code review skills
+  - Technical writing
+  - Design feedback
+  - Project context (memory)
+
+Evening:
+  - Personal finance skills
+  - Health tracking
+  - Learning resources
+  - Personal preferences (memory)
+```
+
+**Result**: One agent, multiple expert personas, perfect context switching.
+
+### 6. Educational Tutor
+
+**Scenario**: Adaptive learning platform
+
+**Traditional**: Same teaching approach for all students
+
+**With ASS**:
+```
+Student A (Visual Learner, Beginner):
+  Mounts:
+  - Visual explanation generation
+  - Beginner-friendly examples
+  - Gamification strategies
+  - Student's learning history (memory)
+
+Student B (Advanced, Text Learner):
+  Mounts:
+  - Advanced concept connections
+  - Mathematical formalization
+  - Research paper references
+  - Student's knowledge gaps (memory)
+```
+
+**Result**: Personalized teaching adapted to individual learning styles and progress.
+
+---
+
+## Benefits
+
+### 1. **Performance & Efficiency**
+
+#### Context Window Optimization
+- **Traditional**: 50,000+ token system prompts
+- **ASS**: 3,000-8,000 tokens of relevant skills
+- **Result**: 6-15x reduction in context usage
+
+#### Faster Response Times
+- Less context to process
+- More focused reasoning
+- Reduced hallucination (less irrelevant information)
+
+#### Cost Reduction
+```
+Traditional Agent:
+  50,000 tokens/request × $0.003/1K tokens = $0.15/request
+  
+ASS Agent:
+  5,000 tokens/request × $0.003/1K tokens = $0.015/request
+  
+Savings: 90% per request
+```
+
+### 2. **Quality & Accuracy**
+
+#### Specialized Expertise
+- Deep knowledge in relevant domain
+- Appropriate level of detail
+- Fewer hallucinations (focused context)
+
+#### Contextual Awareness
+- Remembers project-specific decisions
+- Learns from past interactions
+- Maintains consistency across sessions
+
+#### Adaptive Learning
+- Improves based on usage
+- Identifies and fills knowledge gaps
+- Evolves with user needs
+
+### 3. **Scalability**
+
+#### Horizontal Scaling
+```
+Multi-Worker Architecture:
+  Worker 1: Frontend tasks
+  Worker 2: Backend tasks
+  Worker 3: DevOps tasks
+  
+Each with optimal skill sets
+No redundant capabilities
+```
+
+#### Growing Capability
+- Start small (core skills)
+- Grow on-demand (new skills generated)
+- No upfront investment in unused features
+
+#### Multi-User Support
+```
+User 1 Profile: Web Developer
+  → Mounted: React, Node.js, REST APIs
+
+User 2 Profile: Data Scientist
+  → Mounted: Python, ML, Data Viz
+
+Each gets personalized agent, shared infrastructure
+```
+
+### 4. **Maintainability**
+
+#### Modular Updates
+- Update one skill without touching others
+- Version management per skill
+- Test skills in isolation
+
+#### Clear Organization
+- Hierarchical structure
+- Easy to navigate
+- Discoverability through taxonomy
+
+#### Quality Assurance
+- Automated validation
+- Comprehensive testing per skill
+- Quality metrics tracked
+
+### 5. **Flexibility**
+
+#### Multi-Domain Support
+- Same framework for any domain
+- Easy to add new skill categories
+- Cross-domain skill composition
+
+#### Customization
+- User-specific skill sets
+- Company-specific knowledge
+- Project-specific context
+
+#### Integration
+- Works with existing tools (MCP)
+- Pluggable components
+- Standard interfaces
+
+---
+
+## Why This Approach?
+
+### The Case for Hierarchical Taxonomy
+
+**1. Cognitive Alignment**
+Human expertise is hierarchical:
+```
+Expert Developer:
+  └─ Programming
+     └─ Python
+        └─ Async Programming
+           └─ asyncio patterns
+```
+
+ASS mirrors this natural knowledge organization.
+
+**2. Efficient Navigation**
+```
+Flat Structure (Traditional):
+  Search through 10,000 capabilities ❌
+
+Hierarchical (ASS):
+  Navigate: Programming → Python → Async
+  Search space: ~10 relevant skills ✓
+```
+
+**3. Dependency Management**
+Natural parent-child relationships:
+- Can't have React Hooks without React
+- Can't do ML deployment without ML basics
+- Tree structure enforces valid dependencies
+
+### The Case for Dynamic Generation
+
+**Why not pre-define all skills?**
+
+**1. Impossibility of Completeness**
+- Infinite possible skill combinations
+- New technologies constantly emerging
+- User-specific needs highly varied
+
+**2. Maintenance Burden**
+```
+Pre-defined Approach:
+  5,000 skills × 1 hour maintenance each = 5,000 hours/year
+
+Dynamic Generation:
+  Generate on-demand
+  Maintain only used skills (typically <200)
+  ~200 hours/year
+```
+
+**3. Quality Through Relevance**
+- Generated skills are contextually relevant
+- Include user-specific examples
+- Address actual use cases, not theoretical ones
+
+**4. Rapid Evolution**
+```
+New Framework Released:
+
+Traditional: Wait months for manual skill creation
+
+ASS: User requests → Generated in seconds → Validated → Deployed
+```
+
+### The Case for Stateful Memory
+
+**Why memory blocks matter:**
+
+**1. Context Continuity**
+```
+Session 1: "Build me a user authentication system"
+  → Decisions made: JWT tokens, PostgreSQL, bcrypt
+
+Session 2: "Add password reset functionality"
+  Without Memory: Might suggest different approach
+  With Memory: Extends existing JWT system ✓
+```
+
+**2. Learning from Experience**
+```
+Pattern Detected:
+  User always prefers async/await over callbacks
+  
+Memory Stored:
+  Code style preference: async/await
+  
+Future Generations:
+  Automatically use async/await ✓
+```
+
+**3. Project Intelligence**
+```
+Memory Blocks Store:
+  - Architecture decisions & rationale
+  - Naming conventions used
+  - Successful patterns
+  - Avoided anti-patterns
+  - Team preferences
+  
+Result: Agent becomes a project expert over time
+```
+
+### The Case for DSPy-Based Generation
+
+**Why DSPy over simple prompting?**
+
+**1. Optimization**
+```
+Simple Prompting:
+  Fixed templates
+  No improvement over time
+
+DSPy:
+  Automatically tunes prompts
+  Learns from examples
+  Improves with feedback
+```
+
+**2. Composability**
+```
+DSPy Signatures:
+  Step1(input) → Step2(step1.output) → Step3(step2.output)
+  
+Clear data flow
+Testable components
+Reusable modules
+```
+
+**3. Quality Control**
+```
+DSPy Assertions:
+  assert output_is_valid_json()
+  assert has_required_fields()
+  assert examples_are_executable()
+  
+Automatic retries if validation fails
+```
+
+### The Case for Progressive Bootstrap
+
+**Why onboarding-driven initialization?**
+
+**1. Zero to Productive Fast**
+```
+Traditional: Here's everything (overwhelming)
+ASS: What do you do? → Specialized set → Start working
+```
+
+**2. Right-Sized from Start**
+```
+Web Developer gets:
+  - JavaScript/TypeScript
+  - React
+  - REST APIs
+  
+Not:
+  - Kubernetes deep dive
+  - ML pipelines
+  - Database internals
+```
+
+**3. Growth Path**
+```
+Start: Essential skills for role
+Week 1: Add commonly used skills
+Month 1: Personalized skill set emerges
+Year 1: Highly customized expert agent
+```
+
+### The Case Against Alternatives
+
+**Alternative 1: Monolithic Super-Agent**
+```
+Problems:
+  - Bloated context (50K+ tokens)
+  - Expensive ($$$)
+  - Slower responses
+  - Generic, not specialized
+  - Cannot maintain focus
+```
+
+**Alternative 2: Multiple Specialized Agents**
+```
+Problems:
+  - No context sharing
+  - Coordination complexity
+  - Redundant capabilities
+  - User must choose correct agent
+  - State fragmentation
+```
+
+**Alternative 3: RAG-Based Dynamic Context**
+```
+Problems:
+  - Retrieval accuracy issues
+  - No structured organization
+  - Difficult dependency management
+  - No skill composition
+  - Limited to text, not capabilities
+```
+
+**ASS Advantages Over All:**
+- Focused but comprehensive
+- Efficient but powerful
+- Flexible but structured
+- Dynamic but reliable
+- Scales with needs
+
+---
+
+## Technical Architecture
+
+### High-Level Flow
+
+```
+┌──────────────┐
+│  User Task   │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────────────────────┐
+│   Planner Agent              │
+│                              │
+│  1. Analyze task intent      │
+│  2. Identify required skills │
+│  3. Check taxonomy           │
+│  4. Generate if missing      │
+│  5. Resolve dependencies     │
+│  6. Optimize mounting        │
+└──────┬───────────────────────┘
+       │
+       ▼
+┌────────────────────────────────┐
+│  Skill Loading                 │
+│                                │
+│  • Load metadata (lightweight) │
+│  • Mount to worker             │
+│  • Activate memory blocks      │
+└────────┬───────────────────────┘
+         │
+         ▼
+┌────────────────────────────────┐
+│  Worker Agent Execution        │
+│                                │
+│  • Execute with mounted skills │
+│  • Access memory context       │
+│  • Track usage metrics         │
+└────────┬───────────────────────┘
+         │
+         ▼
+┌────────────────────────────────┐
+│  Evolution & Learning          │
+│                                │
+│  • Update memory blocks        │
+│  • Record skill usage          │
+│  • Identify patterns           │
+│  • Suggest improvements        │
+└────────────────────────────────┘
+```
+
+### Skill Lifecycle
+
+```
+CREATE → VALIDATE → MOUNT → USE → TRACK → EVOLVE
+   ↑                                         │
+   └─────────────────────────────────────────┘
+```
+
+---
+
+## Comparison with Traditional Approaches
+
+| Aspect | Traditional Agent | RAG Agent | ASS Agent |
+|--------|------------------|-----------|-----------|
+| **Context Size** | 50K+ tokens | 10K-20K tokens | 3K-8K tokens |
+| **Specialization** | None (generic) | Limited | Deep (domain expert) |
+| **Cost per Request** | $0.15 | $0.05 | $0.015 |
+| **Setup Time** | Instant | Medium | ~5 min (onboarding) |
+| **Adaptation** | None | Retrieval-based | Generative |
+| **State Management** | None | None | Built-in |
+| **Skill Organization** | Flat | Vector-based | Hierarchical |
+| **Maintenance** | Update entire prompt | Update knowledge base | Update individual skills |
+| **Composition** | N/A | N/A | Native support |
+| **Quality over Time** | Static | Improves with data | Learns and evolves |
+
+---
+
+## Getting Started
+
+### Quick Start Example
+
+```python
+from agentic_skills import TaxonomyManager, SkillCreator
+
+# Initialize
+taxonomy = TaxonomyManager("./skills")
+creator = SkillCreator(taxonomy)
+
+# Create a skill
+result = creator.create_skill(
+    task="Help me write Python async code",
+    user_id="developer_123"
+)
+
+# Agent now has async Python expertise
+# without loading all of Python, all of programming,
+# or any unrelated skills
+```
+
+### Onboarding Example
+
+```bash
+# Interactive onboarding
+$ askill onboard --user-id john_doe
+
+Welcome to the Agentic Skills System!
+
+1. What's your primary role?
+   > Backend Developer
+
+2. Which technologies do you work with?
+   > Python, PostgreSQL, Docker, AWS
+
+3. What tasks do you perform most often?
+   > Building APIs, Debugging, Performance optimization
+
+Setting up your skills...
+✓ Onboarding complete!
+
+Profile: backend_developer
+Mounted Skills: 8
+On-Demand Skills: 12
+
+You're ready to start!
+```
+
+---
+
+## Conclusion
+
+The Agentic Skills System represents a paradigm shift in how we build and deploy AI agents:
+
+**From Static to Dynamic**: Capabilities evolve with needs
+**From Generic to Specialized**: Expert-level performance in context
+**From Stateless to Stateful**: Continuity and learning over time
+**From Bloated to Focused**: Efficiency through relevance
+**From Manual to Automatic**: Skills generated on-demand
+
+It's not just a technical improvement—it's a fundamentally better model for how AI agents should organize, access, and evolve their capabilities.
+
+### The Vision
+
+Imagine a world where:
+- Every user has a personal AI agent that truly understands their context
+- Agents become more valuable over time through accumulated knowledge
+- New capabilities emerge automatically as needs arise
+- Specialization and generalization coexist harmoniously
+- The cost of intelligence scales with value, not with possibility
+
+The Agentic Skills System makes this vision achievable today.
+
+---
+
+## Next Steps
+
+1. **Explore the Documentation**: [Architecture Docs](docs/architecture/)
+2. **Try the Demo**: [Getting Started](docs/getting-started/index.md)
+3. **Contribute**: [Contributing Guide](CONTRIBUTING.md)
+4. **Join Community**: [Discord](https://discord.gg/agentic-skills) | [Forum](https://forum.agentic-skills.dev)
+
+**Ready to build the next generation of AI agents?**
+
+```bash
+git clone https://github.com/yourorg/agentic-skills-system
+cd agentic-skills-system
+pip install -e .
+askill onboard
+```
+
+Welcome to the future of agentic AI. 🚀
+
+
+============================================================
+END FILE: plans/archive/overview.md
+============================================================
+
+============================================================
+FILE: plans/archive/skill-creator-plan.md
+============================================================
+
+# Refactored Structure
+
+## Directory Layout
+
+```
+src/workflow/
+├── __init__.py
+├── signatures.py          # DSPy signatures (already exists)
+├── modules.py             # DSPy modules for each step
+├── programs.py            # DSPy programs (complete workflows)
+├── skill_creator.py       # High-level orchestrator
+└── feedback.py            # HITL feedback handlers
+```
+
+---
+
+## File 1: `src/workflow/modules.py`
+
+**DSPy Modules - Each step as a reusable component**
+
+```python
+"""DSPy modules for skill creation workflow steps.
+
+Each module encapsulates one step of the workflow with its own
+logic, validation, and error handling.
+"""
+
+import dspy
+import json
+from typing import Dict, List, Optional, Tuple
+import logging
+
+from .signatures import (
+    UnderstandTaskForSkill,
+    PlanSkillStructure,
+    InitializeSkillSkeleton,
+    EditSkillContent,
+    PackageSkillForApproval,
+    IterateSkillWithFeedback
+)
+
+logger = logging.getLogger(__name__)
+
+

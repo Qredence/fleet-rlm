@@ -1,0 +1,14 @@
+<!-- Chunk 734: bytes 2575368-2575645, type=class -->
+class ValidateFrontmatterRequest(BaseModel):
+    """Request for frontmatter validation."""
+
+    content: str = Field(..., description="Full SKILL.md content including frontmatter")
+```
+
+---
+
+### FrontmatterValidationResponse
+
+Frontmatter validation response schema.
+
+```python

@@ -1,0 +1,7 @@
+<!-- Chunk 177: bytes 287565-287642, type=function -->
+def get_user(user_id: str) -> User | None:
+    ...
+```
+
+**Avoid:**
+```python

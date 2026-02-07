@@ -1,0 +1,22 @@
+<!-- Chunk 1022: bytes 3603612-3604318, type=class -->
+class OptimizerRecommendation:
+    """Result of optimizer selection.
+    
+    Attributes:
+        recommended: The recommended optimizer type
+        config: Suggested configuration for the optimizer
+        estimated_cost: Estimated cost in USD
+        estimated_time_minutes: Estimated time to complete
+        confidence: Confidence in recommendation (0.0-1.0)
+        reasoning: Human-readable explanation
+        alternatives: Other viable options with trade-offs
+    """
+    recommended: OptimizerType
+    config: OptimizerConfig
+    estimated_cost: float
+    estimated_time_minutes: int
+    confidence: float
+    reasoning: str
+    alternatives: list[dict[str, Any]] = field(default_factory=list)
+
+

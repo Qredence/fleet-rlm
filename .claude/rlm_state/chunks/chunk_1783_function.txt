@@ -1,0 +1,32 @@
+<!-- Chunk 1783: bytes 7439358-7440250, type=function -->
+def save_program_state(
+    program: LegacySkillCreationProgram,
+    path: str | Path,
+    save_program: bool = False,
+) -> None:
+    """
+    Save program state to disk.
+
+    Args:
+        program: Program to save
+        path: Output path (file for state-only, dir for full program)
+        save_program: If True, save full program (uses cloudpickle)
+
+    """
+    path = Path(path)
+
+    if save_program:
+        path.mkdir(parents=True, exist_ok=True)
+        program.save(str(path), save_program=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        program.save(str(path), save_program=False)
+
+    logger.info(f"Saved program to {path} (full_program={save_program})")
+
+
+# =============================================================================
+# MLflow Integration (Optional)
+# =============================================================================
+
+

@@ -1,0 +1,101 @@
+<!-- Chunk 1800: bytes 7477529-7480291, type=function -->
+def combined_package_reward(args, pred: dspy.Prediction) -> float:
+    """
+    Combined reward for Package step (validation + quality).
+
+    Returns:
+        float: Weighted average score between 0.0 and 1.0
+
+    """
+    report_score = validation_report_reward(args, pred)
+    quality_valid = quality_score_reward(args, pred)
+
+    return report_score * 0.7 + quality_valid * 0.3
+
+
+============================================================
+END FILE: src/skill_fleet/core/optimization/rewards/step_rewards.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/services/__init__.py
+============================================================
+
+"""
+Services layer for skill-fleet.
+
+This module provides the service classes that implement the core business
+logic for skill creation, conversation management, and workflow orchestration.
+
+Directory Structure:
+- base.py: BaseService class with common dependencies and utilities
+- models.py: Conversation-related Pydantic models
+
+Import Guidelines:
+- For base class: from skill_fleet.core.services import BaseService
+- For models: from skill_fleet.core.services import ConversationSession, AgentResponse
+- For errors: from skill_fleet.core.services import ServiceError, ConfigurationError
+"""
+
+from skill_fleet.core.services.base import (
+    BaseService,
+    ConfigurationError,
+    ServiceError,
+    ValidationError,
+)
+from skill_fleet.core.services.models import (
+    AgentResponse,
+    ConversationMessage,
+    ConversationSession,
+    ConversationState,
+    MessageRole,
+)
+
+__all__ = [
+    # Base
+    "BaseService",
+    "ConfigurationError",
+    "ServiceError",
+    "ValidationError",
+    # Models
+    "AgentResponse",
+    "ConversationMessage",
+    "ConversationSession",
+    "ConversationState",
+    "MessageRole",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/core/services/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/services/base.py
+============================================================
+
+"""
+Base service class for skill-fleet services.
+
+Provides common dependencies, DSPy context management, and error handling
+for all service classes in the skill-fleet architecture.
+"""
+
+from __future__ import annotations
+
+import logging
+from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
+
+import dspy
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from skill_fleet.taxonomy.manager import TaxonomyManager
+
+logger = logging.getLogger(__name__)
+
+

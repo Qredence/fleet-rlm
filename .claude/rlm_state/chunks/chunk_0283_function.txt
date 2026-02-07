@@ -1,0 +1,13 @@
+<!-- Chunk 283: bytes 360042-360443, type=function -->
+def _load_state(state_path: Path) -> Dict[str, Any]:
+    if not state_path.exists():
+        raise RlmReplError(
+            f"No state found at {state_path}. Run: python rlm_repl.py init <context_path>"
+        )
+    with state_path.open("rb") as f:
+        state = pickle.load(f)
+    if not isinstance(state, dict):
+        raise RlmReplError(f"Corrupt state file: {state_path}")
+    return state
+
+

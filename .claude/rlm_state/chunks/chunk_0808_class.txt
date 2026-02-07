@@ -1,0 +1,123 @@
+<!-- Chunk 808: bytes 2727362-2730037, type=class -->
+class CustomService(BaseService):
+    """Custom service with injected dependencies."""
+
+    async def initialize(self):
+        """Initialize service (called by constructor)."""
+        # Access injected dependencies
+        self.skill_repo = self.skill_repository
+        self.job_repo = self.job_repository
+        self.lm_client = self.lm_client
+        self.config = self.config
+```
+
+### Available Dependencies
+
+```python
+# In BaseService
+self.skill_repository  # SkillRepository instance
+self.job_repository    # JobRepository instance
+self.taxonomy_repository  # TaxonomyRepository instance
+self.lm_client        # LLM client (DSPy)
+self.config           # Application configuration
+self.logger           # Logger instance
+```
+
+## Service Types
+
+### 1. SkillService
+
+Orchestrates skill-related operations.
+
+```python
+from skill_fleet.services import SkillService  # Future: from core.services
+
+service = SkillService()
+
+# Create skill with workflow
+job = await service.create_skill(
+    task_description="Create a Redis caching skill",
+    user_id="user-123",
+    taxonomy_path="redis/caching",
+)
+
+# Validate skill
+report = await service.validate_skill(skill_id="redis-caching")
+
+# Refine skill
+result = await service.refine_skill(
+    skill_id="redis-caching",
+    feedback="Add more pipeline examples",
+)
+
+# Search skills
+skills = await service.search_skills(query="caching", limit=10)
+```
+
+### 2. JobService
+
+Manages background job lifecycle.
+
+```python
+from skill_fleet.core.services import JobService
+
+service = JobService()
+
+# Execute job
+job = await service.execute_job(
+    task_description="Create skill",
+    user_id="user-123",
+)
+
+# Poll job status
+status = await service.get_job_status(job_id="job-123")
+
+# Handle HITL
+prompt = await service.get_hitl_prompt(job_id="job-123")
+await service.submit_hitl_response(
+    job_id="job-123",
+    action="proceed",
+    response="intermediate",
+)
+
+# Retry failed job
+job = await service.retry_job(job_id="job-123")
+```
+
+### 3. ConversationService
+
+Manages conversational interactions.
+
+```python
+from skill_fleet.core.services import ConversationService
+
+service = ConversationService()
+
+# Create or get session
+session = await service.get_or_create_session(
+    session_id="sess-123",
+    user_id="user-456",
+)
+
+# Process message
+response = await service.process_message(
+    session=session,
+    message="Create a Python decorators skill",
+    context={},
+)
+
+# Stream response
+async for event in service.stream_response(
+    session=session,
+    message="Help me with caching",
+):
+    yield event
+```
+
+## Dependency Injection
+
+### Constructor Injection
+
+```python
+from skill_fleet.core.services import BaseService
+

@@ -1,0 +1,316 @@
+<!-- Chunk 1063: bytes 3801494-3813294, type=class -->
+class TaxonomySkillCreator(dspy.Module):
+    """Complete skill creation workflow with taxonomy integration."""
+    
+    def __init__(
+        self,
+        taxonomy_manager: TaxonomyManager,
+        lm: Optional[dspy.LM] = None
+    ):
+        super().__init__()
+        self.taxonomy = taxonomy_manager
+        
+        # Configure language model if provided
+        if lm:
+            dspy.settings.configure(lm=lm)
+        
+        # Initialize each step as a DSPy module with Chain of Thought
+        self.understand = dspy.ChainOfThought(UnderstandTaskForSkill)
+        self.plan = dspy.ChainOfThought(PlanSkillStructure)
+        self.initialize = dspy.ChainOfThought(InitializeSkillSkeleton)
+        self.edit = dspy.ChainOfThought(EditSkillContent)
+        self.package = dspy.ChainOfThought(PackageSkillForApproval)
+        self.iterate = dspy.ChainOfThought(IterateSkillWithFeedback)
+    
+    def forward(
+        self, 
+        task_description: str,
+        user_context: Dict,
+        max_iterations: int = 3,
+        auto_approve: bool = False
+    ) -> Dict:
+        """Execute full skill creation workflow.
+        
+        Args:
+            task_description: User's task or capability requirement
+            user_context: Dict with user_id and other context
+            max_iterations: Maximum HITL iterations
+            auto_approve: Skip HITL for testing (not recommended for production)
+        
+        Returns:
+            Dict with status, skill_id, path, and any error messages
+        """
+        
+        print(f"🚀 Starting skill creation workflow...")
+        print(f"📝 Task: {task_description}")
+        
+        # Step 1: UNDERSTAND
+        print("\n" + "="*60)
+        print("STEP 1: UNDERSTAND - Analyzing task and mapping to taxonomy")
+        print("="*60)
+        
+        understanding = self.understand(
+            task_description=task_description,
+            existing_skills=json.dumps(
+                self.taxonomy.get_mounted_skills(user_context.get('user_id', 'default'))
+            ),
+            taxonomy_structure=json.dumps(
+                self.taxonomy.get_relevant_branches(task_description)
+            )
+        )
+        
+        print(f"✓ Task Intent: {understanding.task_intent}")
+        print(f"✓ Taxonomy Path: {understanding.taxonomy_path}")
+        print(f"✓ Confidence: {understanding.confidence_score}")
+        
+        # Check if skill already exists
+        if self.taxonomy.skill_exists(understanding.taxonomy_path):
+            print(f"⚠️  Skill already exists at {understanding.taxonomy_path}")
+            return {
+                "status": "exists",
+                "path": understanding.taxonomy_path,
+                "message": "Skill already exists in taxonomy"
+            }
+        
+        # Step 2: PLAN
+        print("\n" + "="*60)
+        print("STEP 2: PLAN - Designing skill structure")
+        print("="*60)
+        
+        plan = self.plan(
+            task_intent=understanding.task_intent,
+            taxonomy_path=understanding.taxonomy_path,
+            parent_skills=understanding.parent_skills,
+            dependency_analysis=understanding.dependency_analysis
+        )
+        
+        skill_metadata = json.loads(plan.skill_metadata)
+        dependencies = json.loads(plan.dependencies)
+        
+        print(f"✓ Skill ID: {skill_metadata['skill_id']}")
+        print(f"✓ Type: {skill_metadata['type']}")
+        print(f"✓ Weight: {skill_metadata['weight']}")
+        print(f"✓ Dependencies: {len(dependencies)}")
+        
+        # Validate dependencies
+        deps_valid, missing_deps = self.taxonomy.validate_dependencies(
+            [d['skill_id'] for d in dependencies]
+        )
+        if not deps_valid:
+            print(f"❌ Missing dependencies: {missing_deps}")
+            return {
+                "status": "error",
+                "message": f"Cannot resolve dependencies: {missing_deps}"
+            }
+        
+        # Check for circular dependencies
+        has_cycle, cycle_path = self.taxonomy.detect_circular_dependencies(
+            skill_metadata['skill_id'],
+            [d['skill_id'] for d in dependencies]
+        )
+        if has_cycle:
+            print(f"❌ Circular dependency detected: {' -> '.join(cycle_path)}")
+            return {
+                "status": "error",
+                "message": f"Circular dependency: {cycle_path}"
+            }
+        
+        # Step 3: INITIALIZE
+        print("\n" + "="*60)
+        print("STEP 3: INITIALIZE - Creating skill skeleton")
+        print("="*60)
+        
+        skeleton = self.initialize(
+            skill_metadata=plan.skill_metadata,
+            capabilities=plan.capabilities,
+            taxonomy_path=understanding.taxonomy_path
+        )
+        
+        skeleton_data = json.loads(skeleton.skill_skeleton)
+        print(f"✓ Root path: {skeleton_data['root_path']
+
+============================================================
+END FILE: docs/internal/plans/archive/implementation-phase-1.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/implementation-phase-2.md
+============================================================
+
+}")
+        print(f"✓ Files: {len(skeleton_data['files'])}")
+        print(f"✓ Directories: {len(skeleton_data['directories'])}")
+        
+        # Step 4: EDIT
+        print("\n" + "="*60)
+        print("STEP 4: EDIT - Generating skill content")
+        print("="*60)
+        
+        content = self.edit(
+            skill_skeleton=skeleton.skill_skeleton,
+            parent_skills=understanding.parent_skills,
+            composition_strategy=plan.composition_strategy
+        )
+        
+        print(f"✓ Main content generated: {len(content.skill_content)} chars")
+        print(f"✓ Capabilities documented: {len(json.loads(content.capability_implementations))}")
+        print(f"✓ Examples created: {len(json.loads(content.usage_examples))}")
+        
+        # Step 5: PACKAGE
+        print("\n" + "="*60)
+        print("STEP 5: PACKAGE - Validating and packaging")
+        print("="*60)
+        
+        package = self.package(
+            skill_content=content.skill_content,
+            skill_metadata=plan.skill_metadata,
+            taxonomy_path=understanding.taxonomy_path,
+            capability_implementations=content.capability_implementations
+        )
+        
+        validation = json.loads(package.validation_report)
+        print(f"✓ Validation: {'PASSED' if validation['passed'] else 'FAILED'}")
+        print(f"✓ Quality score: {package.quality_score:.2f}")
+        
+        if validation['errors']:
+            print(f"❌ Validation errors:")
+            for error in validation['errors']:
+                print(f"   - {error}")
+            return {
+                "status": "validation_failed",
+                "errors": validation['errors']
+            }
+        
+        # Step 6: ITERATE (HITL)
+        print("\n" + "="*60)
+        print("STEP 6: ITERATE - Human-in-the-loop approval")
+        print("="*60)
+        
+        iteration_count = 0
+        while iteration_count < max_iterations:
+            # Get human feedback
+            if auto_approve:
+                feedback = json.dumps({
+                    "status": "approved",
+                    "comments": "Auto-approved for testing"
+                })
+            else:
+                feedback = self._get_human_feedback(
+                    package.packaging_manifest,
+                    validation
+                )
+            
+            approval = self.iterate(
+                packaged_skill=package.packaging_manifest,
+                validation_report=package.validation_report,
+                human_feedback=feedback,
+                usage_analytics=json.dumps({})  # No analytics for new skill
+            )
+            
+            print(f"\n📋 Iteration {iteration_count + 1}: {approval.approval_status}")
+            
+            if approval.approval_status == "approved":
+                # Persist to taxonomy
+                print(f"\n✅ Skill approved! Registering in taxonomy...")
+                
+                success = self.taxonomy.register_skill(
+                    path=understanding.taxonomy_path,
+                    metadata=skill_metadata,
+                    content=content.skill_content,
+                    evolution=json.loads(approval.evolution_metadata)
+                )
+                
+                if success:
+                    print(f"🎉 Skill successfully created!")
+                    print(f"📍 Location: skills/{understanding.taxonomy_path}")
+                    print(f"🆔 Skill ID: {skill_metadata['skill_id']}")
+                    
+                    return {
+                        "status": "approved",
+                        "skill_id": skill_metadata['skill_id'],
+                        "path": understanding.taxonomy_path,
+                        "version": skill_metadata['version'],
+                        "quality_score": package.quality_score
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "message": "Failed to register skill in taxonomy"
+                    }
+            
+            elif approval.approval_status == "needs_revision":
+                print(f"📝 Revision needed...")
+                revision_plan = json.loads(approval.revision_plan)
+                
+                # Re-run EDIT step with feedback
+                print(f"\n🔄 Regenerating content with feedback...")
+                content = self.edit(
+                    skill_skeleton=skeleton.skill_skeleton,
+                    parent_skills=understanding.parent_skills,
+                    composition_strategy=plan.composition_strategy
+                    # TODO: Pass revision feedback to edit step
+                )
+                
+                # Re-package
+                package = self.package(
+                    skill_content=content.skill_content,
+                    skill_metadata=plan.skill_metadata,
+                    taxonomy_path=understanding.taxonomy_path,
+                    capability_implementations=content.capability_implementations
+                )
+                
+            else:  # rejected
+                print(f"❌ Skill rejected")
+                return {
+                    "status": "rejected",
+                    "reason": approval.revision_plan
+                }
+            
+            iteration_count += 1
+        
+        print(f"⚠️  Maximum iterations ({max_iterations}) reached")
+        return {
+            "status": "max_iterations_reached",
+            "message": f"Skill not approved after {max_iterations} iterations"
+        }
+    
+    def _get_human_feedback(
+        self,
+        packaging_manifest: str,
+        validation_report: Dict
+    ) -> str:
+        """Get human feedback on packaged skill.
+        
+        In production, this would integrate with a review UI.
+        For now, returns auto-approval.
+        """
+        # TODO: Implement actual HITL interface
+        # This could be:
+        # - Web UI for review
+        # - CLI prompts
+        # - Integration with issue tracking
+        # - Slack/email notifications
+        
+        return json.dumps({
+            "status": "approved",
+            "comments": "Automated approval - implement HITL interface",
+            "reviewer": "system"
+        })
+```
+
+### Day 12-14: Testing & Documentation
+
+**File: tests/test_skill_creation.py**
+```python
+"""Integration tests for skill creation workflow."""
+import pytest
+import json
+from pathlib import Path
+import tempfile
+import shutil
+
+from src.taxonomy.manager import TaxonomyManager
+from src.workflow.skill_creator import TaxonomySkillCreator
+
+
+@pytest.fixture

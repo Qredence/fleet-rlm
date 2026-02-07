@@ -1,0 +1,9 @@
+<!-- Chunk 1360: bytes 5052508-5052667, type=function -->
+def get_redis_client():
+    return redis.Redis(host=settings.REDIS_HOST)
+```
+
+**Testing with overrides:**
+```python
+from fastapi.testclient import TestClient
+

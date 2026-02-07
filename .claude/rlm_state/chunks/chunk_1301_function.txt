@@ -1,0 +1,7 @@
+<!-- Chunk 1301: bytes 4770475-4770641, type=function -->
+def run_synthetic() -> list:
+    """Return synthetic examples."""
+    print(f"✅ Loaded {len(SYNTHETIC_EXAMPLES)} synthetic examples")
+    return SYNTHETIC_EXAMPLES
+
+

@@ -1,0 +1,12 @@
+<!-- Chunk 1152: bytes 4394043-4394386, type=function -->
+def test_circular_dependency_detection(temp_taxonomy):
+    """Test circular dependency detection."""
+    manager = TaxonomyManager(temp_taxonomy)
+    
+    # Add skills with circular dependencies for testing
+    # This would require more setup, marking as TODO
+    # TODO: Implement circular dependency test
+    pass
+
+
+@pytest.mark.integration

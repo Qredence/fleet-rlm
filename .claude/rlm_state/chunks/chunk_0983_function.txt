@@ -1,0 +1,168 @@
+<!-- Chunk 983: bytes 3438385-3444984, type=function -->
+def create_command(
+    ctx: typer.Context,
+    task: str = typer.Argument(..., help="Description of the skill to create"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Skip interactive prompts"),
+) -> None:
+    """Create a new skill using the 3-phase workflow.
+
+    This command starts a skill creation job and polls for human-in-the-loop
+    feedback as needed during the creation process.
+
+    \b
+    Workflow phases:
+    1. Clarify - Answer questions to refine requirements
+    2. Preview - Review generated content before finalizing
+    3. Validate - Accept or request changes to the final skill
+
+    Example:
+        skill-fleet create "Create a Python async programming skill"
+        skill-fleet create "Add testing helpers" --auto-approve
+    """
+    config = ctx.obj
+
+    async def _run():
+        try:
+            console.print(f"[bold cyan]{ICON_WORKING} Starting skill creation job...[/bold cyan]")
+            result = await config.client.create_skill(task, config.user_id)
+            job_id = result.get("job_id")
+
+            if not job_id:
+                raise APIError("No job ID returned from API")
+
+            console.print(f"[{ICON_SUCCESS}] [green]Job created: {job_id}[/green]")
+
+            # Polling loop for HITL
+            attempt = 0
+            max_attempts = 100  # Prevent infinite loops
+
+            while attempt < max_attempts:
+                prompt_data = await config.client.get_hitl_prompt(job_id)
+                status = prompt_data.get("status")
+
+                if status == "completed":
+                    console.print(f"\n[bold green]{ICON_SUCCESS} Skill Creation Completed![/bold green]")
+                    content = prompt_data.get("skill_content") or "No content generated."
+                    from rich.panel import Panel
+                    console.print(Panel(content, title="Final Skill Content"))
+                    return
+
+                elif status == "failed":
+                    error_msg = prompt_data.get('error', 'Unknown error')
+                    raise APIError(f"Job failed: {error_msg}")
+
+                elif status == "pending_hitl":
+                    if auto_approve:
+                        console.print(
+                            f"[yellow]⚠️  HITL Needed ({prompt_data.get('type')}), but --auto-approve is ON. Sending default response...[/yellow]"
+                        )
+                        await config.client.post_hitl_response(
+                            job_id, {"action": "proceed", "answers": {}}
+                        )
+                        attempt += 1
+                        await asyncio.sleep(HITL_POLL_INTERVAL)
+                        continue
+
+                    interaction_type = prompt_data.get("type")
+                    console.print(
+                        f"\n[bold yellow]🤔 HITL Needed: {interaction_type}[/bold yellow]"
+                    )
+
+                    if interaction_type == "clarify":
+                        questions = prompt_data.get("questions", [])
+                        answers = {}
+                        if questions:
+                            for q in questions:
+                                # Handle string or dict question objects
+                                q_text = q.get("question") if isinstance(q, dict) else q
+                                ans = typer.prompt(f"❓ {q_text}")
+                                answers[q_text] = ans
+                        await config.client.post_hitl_response(job_id, {"answers": answers})
+
+                    elif interaction_type == "confirm":
+                        summary = prompt_data.get("summary", "")
+                        from rich.panel import Panel
+                        console.print(Panel(summary or "No summary available.", title="Understanding Summary"))
+                        action = typer.prompt("Proceed? (proceed/revise/cancel)", default="proceed")
+                        await config.client.post_hitl_response(job_id, {"action": action})
+
+                    elif interaction_type == "preview":
+                        content = prompt_data.get("content", "")
+                        from rich.panel import Panel
+                        console.print(Panel(content or "No preview available.", title="Content Preview"))
+                        action = typer.prompt("Looks good? (proceed/refine)", default="proceed")
+                        await config.client.post_hitl_response(job_id, {"action": action})
+
+                    elif interaction_type == "validate":
+                        report = prompt_data.get("report", "")
+                        from rich.panel import Panel
+                        console.print(Panel(report or "No report available.", title="Validation Report"))
+                        action = typer.prompt("Accept? (proceed/refine)", default="proceed")
+                        await config.client.post_hitl_response(job_id, {"action": action})
+
+                attempt += 1
+                await asyncio.sleep(HITL_POLL_INTERVAL)
+
+            raise APIError("Job timed out after maximum polling attempts")
+
+        except APIError as e:
+            display_cli_error(e)
+            raise typer.Exit(code=e.exit_code)
+        except CLIError as e:
+            display_cli_error(e)
+            raise typer.Exit(code=e.exit_code)
+        except Exception as e:
+            display_error(f"Unexpected error: {e}", suggestion="Run with --verbose for details")
+            raise typer.Exit(code=1)
+        finally:
+            await config.client.close()
+
+    asyncio.run(_run())
+```
+
+**Step 4: Run tests**
+
+```bash
+uv run pytest tests/cli/test_create_command.py -v
+```
+
+**Step 5: Commit**
+
+```bash
+git add src/skill_fleet/cli/commands/create.py tests/cli/test_create_command.py
+git commit -m "refactor(cli): improve create command error handling
+
+- Replace bare Exception with specific CLIError/APIError
+- Use singleton console from utils
+- Add proper finally block for client cleanup
+- Add timeout to prevent infinite polling
+- Use Rich Panel for consistent formatting
+
+Fixes error handling issues from cli-error-handling-review.md"
+```
+
+---
+
+## Task 7: Update validate.py with Security Validation
+
+**Files:**
+- Modify: `src/skill_fleet/cli/commands/validate.py`
+- Create: `tests/cli/test_validate_command.py`
+
+**Step 1: Write the failing test for validate command security**
+
+Create `tests/cli/test_validate_command.py`:
+
+```python
+"""Tests for validate command."""
+
+import pytest
+import tempfile
+from pathlib import Path
+from typer.testing import CliRunner
+
+from skill_fleet.cli.app import app
+
+runner = CliRunner()
+
+

@@ -1,0 +1,168 @@
+<!-- Chunk 2056: bytes 7957912-7963551, type=function -->
+def mock_default_response():
+    """Default mock response."""
+    return "Default mock response"
+
+
+async def test_clear_task():
+    """Test workflow with a clear, specific task."""
+    print("\n" + "=" * 70)
+    print("TEST 1: Clear Task (Should complete without HITL)")
+    print("=" * 70)
+
+    from skill_fleet.core.workflows.skill_creation.understanding import UnderstandingWorkflow
+
+    setup_mock_lm()
+
+    workflow = UnderstandingWorkflow()
+
+    result = await workflow.execute(
+        task_description="Build a React component library with TypeScript for our design system",
+        user_context={"experience": "intermediate", "team_size": 5},
+    )
+
+    print(f"\nStatus: {result.get('status')}")
+
+    if result.get("status") == "completed":
+        print("\n✅ Workflow completed successfully!")
+        print("\nRequirements:")
+        req = result.get("requirements", {})
+        print(f"  - Domain: {req.get('domain')}")
+        print(f"  - Category: {req.get('category')}")
+        print(f"  - Topics: {req.get('topics', [])}")
+        print(f"  - Ambiguities: {req.get('ambiguities', [])}")
+
+        print("\nPlan:")
+        plan = result.get("plan", {})
+        print(f"  - Skill Name: {plan.get('skill_name')}")
+        print(f"  - Taxonomy Path: {plan.get('taxonomy_path')}")
+        print(f"  - Outline Length: {len(plan.get('content_outline', []))} sections")
+        print(f"  - Tags: {plan.get('tags', [])}")
+
+        print("\nIntent:")
+        intent = result.get("intent", {})
+        print(f"  - Purpose: {intent.get('purpose', 'N/A')[:60]}...")
+        print(f"  - Skill Type: {intent.get('skill_type')}")
+    else:
+        print(f"\n⚠️  Unexpected status: {result.get('status')}")
+
+    return result
+
+
+async def test_ambiguous_task():
+    """Test workflow with an ambiguous task (should trigger HITL)."""
+    print("\n" + "=" * 70)
+    print("TEST 2: Ambiguous Task (Should trigger HITL)")
+    print("=" * 70)
+
+    from skill_fleet.core.workflows.skill_creation.understanding import UnderstandingWorkflow
+
+    # Override mock to return ambiguities
+    def mock_with_ambiguities(prompt, **kwargs):
+        prompt_str = str(prompt).lower()
+        if "requirements" in prompt_str or "domain" in prompt_str:
+            return mock_requirements_with_ambiguities_response()
+        return mock_default_response()
+
+    mock_lm = Mock()
+    mock_lm.side_effect = mock_with_ambiguities
+    dspy.configure(lm=mock_lm)
+
+    workflow = UnderstandingWorkflow()
+
+    result = await workflow.execute(task_description="Help me build something", user_context={})
+
+    print(f"\nStatus: {result.get('status')}")
+    print(f"HITL Type: {result.get('hitl_type')}")
+
+    if result.get("status") == "pending_user_input":
+        print("\n✅ Correctly suspended for HITL clarification!")
+
+        hitl_data = result.get("hitl_data", {})
+        questions = hitl_data.get("questions", [])
+
+        print(f"\nPriority: {hitl_data.get('priority')}")
+        print(f"Questions Generated: {len(questions)}")
+        print(f"\nRationale: {hitl_data.get('rationale', 'N/A')[:100]}...")
+
+        print("\n📝 Generated Questions:")
+        for i, q in enumerate(questions, 1):
+            print(f"\n  Question {i}:")
+            print(f"    Text: {q.get('text', 'N/A')}")
+            print(f"    Type: {q.get('question_type', 'N/A')}")
+            print(f"    Rationale: {q.get('rationale', 'N/A')[:80]}...")
+            if q.get("options"):
+                print(f"    Options: {len(q.get('options'))} choices")
+
+        print("\n📋 Context for Follow-up:")
+        context = result.get("context", {})
+        partial = context.get("partial_understanding", {})
+        print(f"    Domain detected: {partial.get('domain')}")
+        print(f"    Topics identified: {partial.get('topics', [])}")
+
+        follow_up = hitl_data.get("follow_up_context", {})
+        print(f"\n    Expected improvements: {follow_up.get('expected_improvements', [])}")
+        print(f"    Critical gaps: {follow_up.get('critical_gaps', [])}")
+    else:
+        print(f"\n❌ Expected HITL suspension but got: {result.get('status')}")
+
+    return result
+
+
+async def main():
+    """Run all tests."""
+    print("\n" + "=" * 70)
+    print("UNDERSTANDING WORKFLOW TEST SUITE")
+    print("=" * 70)
+    print("\nThis tests the refactored UnderstandingWorkflow with:")
+    print("  - Async operations (aforward)")
+    print("  - ReAct-based plan synthesis")
+    print("  - HITL clarification logic")
+    print("  - Parallel module execution")
+
+    try:
+        # Test 1: Clear task
+        result1 = await test_clear_task()
+
+        # Test 2: Ambiguous task
+        result2 = await test_ambiguous_task()
+
+        # Summary
+        print("\n" + "=" * 70)
+        print("TEST SUMMARY")
+        print("=" * 70)
+        print(f"\n✅ Test 1 (Clear task): {result1.get('status')}")
+        print(f"✅ Test 2 (Ambiguous task): {result2.get('status')}")
+        print("\n🎉 All tests completed successfully!")
+
+    except Exception as e:
+        print(f"\n❌ Test failed with error: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+============================================================
+END FILE: tests/integration/test_understanding_workflow.py
+============================================================
+
+============================================================
+FILE: tests/test_analytics.py
+============================================================
+
+import json
+
+import pytest
+
+from skill_fleet.analytics.engine import (
+    AnalyticsEngine,
+    RecommendationEngine,
+    UsageTracker,
+)
+
+
+@pytest.fixture

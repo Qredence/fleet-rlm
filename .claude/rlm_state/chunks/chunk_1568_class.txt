@@ -1,0 +1,39 @@
+<!-- Chunk 1568: bytes 6459112-6461530, type=class -->
+class HITLPromptResponse(BaseModel):
+    """
+    Response model for HITL prompt endpoint.
+
+    This model contains all possible fields across different interaction types.
+    Fields are optional since different interaction types use different subsets.
+    """
+
+    status: str = Field(..., description="Job status")
+    type: str | None = Field(None, description="HITL interaction type")
+    current_phase: str | None = Field(None, description="Current workflow phase")
+    progress_message: str | None = Field(None, description="Progress message")
+    questions: list[StructuredQuestion] | None = Field(None, description="Clarifying questions")
+    rationale: str | None = Field(None, description="Rationale for questions")
+    summary: str | None = Field(None, description="Understanding summary")
+    path: str | None = Field(None, description="Proposed taxonomy path")
+    key_assumptions: list[str] | None = Field(None, description="Key assumptions")
+    content: str | None = Field(None, description="Preview content")
+    highlights: list[str] | None = Field(None, description="Content highlights")
+    report: str | None = Field(None, description="Validation report")
+    passed: bool | None = Field(None, description="Validation passed")
+    skill_content: str | None = Field(None, description="Generated skill content")
+    intended_taxonomy_path: str | None = Field(None, description="Intended path")
+    draft_path: str | None = Field(None, description="Draft path")
+    final_path: str | None = Field(None, description="Final path")
+    promoted: bool | None = Field(None, description="Whether promoted")
+    saved_path: str | None = Field(None, description="Saved path")
+    validation_passed: bool | None = Field(None, description="Validation passed")
+    validation_status: str | None = Field(None, description="Validation status")
+    validation_score: float | None = Field(None, description="Validation score")
+    error: str | None = Field(None, description="Error message")
+    question: str | None = Field(None, description="Deep understanding question")
+    research_performed: list[Any] | None = Field(None, description="Research performed")
+    current_understanding: str | None = Field(None, description="Current understanding")
+    readiness_score: float | None = Field(None, description="Readiness score")
+    questions_asked: list[Any] | None = Field(None, description="Questions asked")
+
+

@@ -1,0 +1,5 @@
+<!-- Chunk 202: bytes 298017-298092, type=function -->
+def from_json(text):
+    return json.loads(text)
+
+# Recreating retry logic

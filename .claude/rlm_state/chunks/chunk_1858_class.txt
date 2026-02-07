@@ -1,0 +1,9 @@
+<!-- Chunk 1858: bytes 7638345-7638467, type=class -->
+class ChecklistPhaseEnum:
+    """TDD checklist phase."""
+
+    RED = "red"
+    GREEN = "green"
+    REFACTOR = "refactor"
+
+

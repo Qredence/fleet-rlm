@@ -1,0 +1,7 @@
+<!-- Chunk 78: bytes 26249-26384, type=h3 -->
+### Pattern 3: Iterative refinement
+
+**Use when:** Output quality improves with iteration.
+
+**Example: Report generation**
+```markdown

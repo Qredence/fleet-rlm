@@ -1,0 +1,5 @@
+<!-- Chunk 1638: bytes 6672183-6672301, type=class -->
+class DSPyConfigurationError(DSPyWorkflowError):
+    """Raised when DSPy configuration is invalid or incomplete."""
+
+

@@ -1,0 +1,64 @@
+<!-- Chunk 1540: bytes 6385573-6387506, type=function -->
+def get_cached_taxonomy_service(taxonomy_manager: TaxonomyManager) -> CachedTaxonomyService:
+    """
+    Get or create the cached taxonomy service.
+
+    Args:
+        taxonomy_manager: The underlying TaxonomyManager
+
+    Returns:
+        CachedTaxonomyService instance
+
+    """
+    global _cached_service
+    if _cached_service is None or _cached_service.taxonomy_manager is not taxonomy_manager:
+        _cached_service = CachedTaxonomyService(taxonomy_manager)
+    return _cached_service
+
+
+__all__ = [
+    "CachedTaxonomyService",
+    "get_cached_taxonomy_service",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/api/services/cached_taxonomy.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/services/job_manager.py
+============================================================
+
+"""
+Job lifecycle management with dual-layer persistence (memory + database).
+
+This module provides the JobManager facade that coordinates job state
+across both in-memory cache (hot, fast) and database (durable, multi-instance).
+
+Architecture:
+    Memory Layer    -> Fast cache for in-flight jobs (<1 hour old)
+    Database Layer  -> Source of truth for all job history
+    JobManager      -> Coordinates between both layers using transactional sessions
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
+
+from ...infrastructure.db.repositories import JobRepository
+from ...infrastructure.db.session import transactional_session
+from ..schemas.models import DeepUnderstandingState, JobState, TDDWorkflowState
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.orm import Session
+
+

@@ -1,0 +1,45 @@
+<!-- Chunk 754: bytes 2587695-2588700, type=function -->
+def migrate_all_skills(
+    skills_root: Path,
+    dry_run: bool = False,
+    verbose: bool = True,
+) -> dict[str, Any]
+```
+
+**Parameters:**
+- `skills_root` (Path): Root of skills taxonomy
+- `dry_run` (bool): If True, preview changes without writing
+- `verbose` (bool): If True, print progress
+
+**Returns:**
+- `dict`: Summary with `total`, `successful`, `failed`, `skipped`, and `results`
+
+**Example:**
+```python
+summary = migrate_all_skills(
+    Path("skills"),
+    dry_run=False,
+    verbose=True
+)
+
+print(f"Total: {summary['total']}")
+print(f"Successful: {summary['successful']}")
+print(f"Skipped: {summary['skipped']}")
+print(f"Failed: {summary['failed']}")
+
+# Process individual results
+for result in summary['results']:
+    if not result['success']:
+        print(f"Failed: {result['skill_id']}")
+        for error in result['errors']:
+            print(f"  - {error}")
+```
+
+---
+
+#### `validate_migration()`
+
+Validate that all skills have valid agentskills.io frontmatter.
+
+**Signature:**
+```python

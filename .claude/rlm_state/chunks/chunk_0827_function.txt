@@ -1,0 +1,16 @@
+<!-- Chunk 827: bytes 2883721-2884168, type=function -->
+def initialize_job_manager(db_repo: JobRepository) -> JobManager:
+    """Initialize job manager with database repo (call at API startup)."""
+    global _job_manager
+    _job_manager = JobManager()
+    _job_manager.set_db_repo(db_repo)
+    logger.info("JobManager initialized with database persistence")
+    return _job_manager
+```
+
+### Phase 2: Update API Routes (45 mins)
+
+**File**: `src/skill_fleet/api/routes/jobs.py` (MODIFY)
+
+```python
+# OLD

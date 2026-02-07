@@ -1,0 +1,10 @@
+<!-- Chunk 1850: bytes 7636638-7636803, type=class -->
+class SkillStatusEnum:
+    """Skill lifecycle status values."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    ARCHIVED = "archived"
+
+

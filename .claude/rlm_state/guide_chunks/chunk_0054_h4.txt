@@ -1,0 +1,21 @@
+<!-- Chunk 54: bytes 16811-17285, type=h4 -->
+#### 2. Functional tests
+
+**Goal:** Verify the skill produces correct outputs.
+
+**Test cases:**
+•  Valid outputs generated
+•  API calls succeed
+•  Error handling works
+•  Edge cases covered
+
+**Example:**
+**Test:** Create project with 5 tasks
+**Given:** Project name "Q4 Planning", 5 task descriptions
+**When:** Skill executes workflow
+**Then:**
+  - Project created in ProjectHub
+  - 5 tasks created with correct properties
+  - All tasks linked to project
+  - No API errors
+

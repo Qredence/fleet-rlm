@@ -1,0 +1,55 @@
+<!-- Chunk 399: bytes 575148-576525, type=class -->
+class TaskRouting(dspy.Signature):
+    task = dspy.InputField(desc="Task description")
+    agent_id = dspy.OutputField(
+        desc="Agent ID in format: 'agent_name' (e.g., 'researcher', 'coder')"
+    )
+    reasoning = dspy.OutputField(
+        desc="Brief explanation of why this agent is suitable (1-2 sentences)"
+    )
+```
+
+### 5. Use Consistent Naming Conventions
+
+- Input fields: `task_description`, `user_query`, `document_text`
+- Output fields: `summary`, `analysis`, `recommendation`
+- Lists: `subtasks`, `key_points`, `suggestions`
+- Scores: `confidence_score`, `quality_score`, `relevance_score`
+
+## Common Issues and Solutions
+
+### Issue: Ambiguous field descriptions
+
+**Problem**: LLM doesn't understand what the field represents
+
+**Solution**: Add specific examples and constraints
+```python
+# Before
+summary = dspy.OutputField(desc="Summary")
+
+# After
+summary = dspy.OutputField(
+    desc="Concise summary in 2-3 sentences, capturing main points"
+)
+```
+
+### Issue: Missing type hints
+
+**Problem**: DSPy can't validate data types
+
+**Solution**: Add type hints to all fields
+```python
+# Before
+suggestions = dspy.OutputField(desc="Suggestions")
+
+# After
+suggestions: List[str] = dspy.OutputField(desc="List of suggestions")
+```
+
+### Issue: Too many outputs
+
+**Problem**: Signature is doing too much
+
+**Solution**: Split into multiple signatures
+```python
+# Before

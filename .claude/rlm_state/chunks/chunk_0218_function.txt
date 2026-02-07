@@ -1,0 +1,16 @@
+<!-- Chunk 218: bytes 301198-301602, type=function -->
+def process_order(order_data):
+    # Validate input (50 lines)
+    # Query database (30 lines)
+    # Calculate prices (40 lines)
+    # Apply discounts (35 lines)
+    # Process payment (45 lines)
+    # Send notifications (25 lines)
+    # Update inventory (30 lines)
+    # Log everything (20 lines)
+    # Return response (10 lines)
+    # Total: 285 lines
+```
+
+**Solution:** Extract logical steps
+```python

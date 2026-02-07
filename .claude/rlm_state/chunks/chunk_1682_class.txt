@@ -1,0 +1,38 @@
+<!-- Chunk 1682: bytes 6707569-6709048, type=class -->
+class SkillFleetStatusProvider(StatusMessageProvider):
+    """
+    Status messages for skill creation workflow.
+
+    Provides human-readable status updates during:
+    - LLM calls
+    - Module execution
+    - Tool calls (research, file operations, etc.)
+    """
+
+    def lm_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str:
+        """Status message at the start of calling dspy.LM."""
+        return "🤖 Calling LLM..."
+
+    def lm_end_status_message(self, outputs: dspy.Prediction) -> str:
+        """Status message at the end of calling dspy.LM."""
+        return "✅ LLM call complete"
+
+    def module_start_status_message(self, instance: dspy.Module, inputs: dict[str, Any]) -> str:
+        """Status message at the start of calling a dspy.Module."""
+        module_name = instance.__class__.__name__
+        return f"🔄 Running {module_name}..."
+
+    def module_end_status_message(self, outputs: dspy.Prediction) -> str:
+        """Status message at the end of calling a dspy.Module."""
+        return "✅ Module complete"
+
+    def tool_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str:
+        """Status message at the start of calling a dspy.Tool."""
+        tool_name = getattr(instance, "name", "unknown_tool")
+        return f"🔧 Calling tool: {tool_name}..."
+
+    def tool_end_status_message(self, outputs: Any) -> str:
+        """Status message at the end of calling a dspy.Tool."""
+        return "✅ Tool call complete"
+
+

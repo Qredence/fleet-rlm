@@ -1,0 +1,93 @@
+<!-- Chunk 1548: bytes 6406520-6409341, type=class -->
+class JobStore:
+    """
+    Job store with automatic TTL eviction.
+
+    Prevents memory leaks by evicting old jobs after MAX_AGE_HOURS.
+    Designed for asyncio context (single-threaded event loop).
+    """
+
+    MAX_JOBS = 1000  # Maximum number of jobs to keep in memory
+    MAX_AGE_HOURS = 24  # Evict jobs older than this
+
+    def __init__(self):
+        self._jobs: dict[str, JobState] = {}
+        self._access_times: dict[str, float] = {}
+
+    def _evict_if_needed(self):
+        """Evict old jobs if we're over capacity or jobs are too old."""
+        now = time.time()
+        max_age_seconds = self.MAX_AGE_HOURS * 3600
+
+        # Evict by age
+        expired = [
+            job_id
+            for job_id, last_access in self._access_times.items()
+            if now - last_access > max_age_seconds
+        ]
+        for job_id in expired:
+            self._evict_job(job_id)
+
+        # Evict by count (LRU - evict least recently accessed)
+        while len(self._jobs) > self.MAX_JOBS and self._access_times:
+            # Find oldest access
+            oldest_job = min(self._access_times, key=lambda job_id: self._access_times[job_id])
+            self._evict_job(oldest_job)
+
+    def _evict_job(self, job_id: str):
+        """Remove a job from memory."""
+        self._jobs.pop(job_id, None)
+        self._access_times.pop(job_id, None)
+        logger.debug(f"Evicted job {job_id} from memory")
+
+    def __getitem__(self, job_id: str) -> JobState:
+        """Get job and update access time."""
+        self._access_times[job_id] = time.time()
+        return self._jobs[job_id]
+
+    def __setitem__(self, job_id: str, job: JobState):
+        """Set job and update access time."""
+        self._evict_if_needed()
+        self._jobs[job_id] = job
+        self._access_times[job_id] = time.time()
+
+    def __contains__(self, job_id: str) -> bool:
+        """Check if job exists."""
+        return job_id in self._jobs
+
+    def get(self, job_id: str, default=None):
+        """Get job with default."""
+        if job_id in self._jobs:
+            self._access_times[job_id] = time.time()
+            return self._jobs[job_id]
+        return default
+
+    def pop(self, job_id: str, default=None):
+        """Remove and return job."""
+        self._access_times.pop(job_id, None)
+        return self._jobs.pop(job_id, default)
+
+    def keys(self):
+        """Return job IDs."""
+        return self._jobs.keys()
+
+    def items(self):
+        """Return job items."""
+        return self._jobs.items()
+
+    def values(self):
+        """Return job values."""
+        return self._jobs.values()
+
+    def __iter__(self):
+        """Iterate over job IDs."""
+        return iter(self._jobs)
+
+    def __len__(self) -> int:
+        """Return number of jobs."""
+        return len(self._jobs)
+
+
+JOBS: JobStore = JobStore()
+
+

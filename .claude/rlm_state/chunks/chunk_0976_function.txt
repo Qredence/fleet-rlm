@@ -1,0 +1,8 @@
+<!-- Chunk 976: bytes 3428000-3428180, type=function -->
+def test_app_has_help():
+    """Test app has help text."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "skill-fleet" in result.stdout
+
+

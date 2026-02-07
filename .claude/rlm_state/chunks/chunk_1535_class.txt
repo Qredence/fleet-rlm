@@ -1,0 +1,10 @@
+<!-- Chunk 1535: bytes 6374581-6374799, type=class -->
+class UserTaxonomyResponse(BaseModel):
+    """Response model for retrieving user-specific taxonomy."""
+
+    user_id: str
+    taxonomy: dict[str, Any]
+    adapted_categories: list[str]
+    usage_stats: dict[str, Any]
+
+

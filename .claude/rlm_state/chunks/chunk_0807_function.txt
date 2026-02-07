@@ -1,0 +1,657 @@
+<!-- Chunk 807: bytes 2711135-2727362, type=function -->
+def test_skill_is_ready_for_publication():
+    skill = Skill(
+        metadata=SkillMetadata(
+            skill_id="test-skill",
+            name="test-skill",
+            description="A test skill",
+        ),
+        content="# Test\n\nContent here",
+    )
+
+    spec = SkillIsReadyForPublication(require_content=True)
+    assert spec.is_satisfied_by(skill) is True
+```
+
+## See Also
+
+- **[Import Path Guide](../development/IMPORT_PATH_GUIDE.md)** - Import patterns for domain layer
+- **[Service Layer](SERVICE_LAYER.md)** - Application service architecture
+- **[Restructuring Status](restructuring-status.md)** - Architecture evolution
+
+
+============================================================
+END FILE: docs/architecture/DOMAIN_LAYER.md
+============================================================
+
+============================================================
+FILE: docs/architecture/JOB_PERSISTENCE.md
+============================================================
+
+# Job Persistence (Phase 0.1)
+
+## Overview
+
+Skills-fleet uses **dual-layer persistent job storage** to ensure jobs survive API restarts and can be resumed from where they left off.
+
+```
+┌──────────────────────────────────────┐
+│  Memory Cache (Hot)                  │
+│  - Fast access (<1ms)                │
+│  - 60-minute TTL                     │
+│  - Auto-cleanup background task      │
+└────────────┬─────────────────────────┘
+             │ (fallback on miss)
+             ↓
+┌──────────────────────────────────────┐
+│  SQLite Database (Durable)           │
+│  - Permanent storage                 │
+│  - Multi-instance access             │
+│  - Job resume on startup             │
+└──────────────────────────────────────┘
+```
+
+## Architecture
+
+### Memory Layer (`JobMemoryStore`)
+- **Purpose**: Fast access to recently created/active jobs
+- **TTL**: 60 minutes (configurable)
+- **Auto-cleanup**: Background task runs every 5 minutes
+- **Failure mode**: Graceful - falls back to database
+
+### Database Layer (`Job` model)
+- **Table**: `jobs` in PostgreSQL/SQLite
+- **Primary key**: `job_id` (UUID)
+- **Status tracking**: pending, running, pending_hitl, completed, failed, cancelled
+- **Durability**: Persistent across server restarts
+
+### JobManager Facade
+```python
+from skill_fleet.app.services.job_manager import JobManager
+
+# Initialize
+manager = JobManager()
+manager.set_db_repo(job_repository)
+
+# Create job (stores in memory + DB)
+job = JobState(job_id="job-1", status="pending")
+manager.create_job(job)
+
+# Retrieve (memory first, fallback to DB)
+retrieved = manager.get_job("job-1")
+
+# Update (both layers)
+manager.update_job("job-1", {"status": "running"})
+
+# Cleanup expired entries
+manager.cleanup_expired()
+```
+
+## Job Lifecycle
+
+### Complete Flow
+
+```
+1. CREATE
+   └─> JobState created in memory
+   └─> Persisted to database
+   └─> Status: pending
+
+2. START
+   ├─> Update status → running
+   ├─> Update in memory cache
+   └─> Update in database
+
+3. PROGRESS
+   ├─> Update progress_message
+   ├─> Update progress_percent
+   ├─> Update memory cache (fast)
+   └─> Update database (durable)
+
+4. COMPLETE
+   ├─> Set status → completed
+   ├─> Store result data
+   ├─> Update progress_percent → 100
+   ├─> Update memory cache
+   └─> Update database (persists)
+
+5. RESUME (on server restart)
+   ├─> Query DB for pending jobs
+   ├─> Query DB for running jobs
+   ├─> Query DB for pending_hitl jobs
+   ├─> Reload each into memory cache
+   └─> Resume processing
+```
+
+### Status Values
+
+```python
+Status.PENDING      # Waiting to start
+Status.RUNNING      # Currently executing
+Status.PENDING_HITL # Waiting for human input
+Status.COMPLETED    # Finished successfully
+Status.FAILED       # Failed with error
+Status.CANCELLED    # Cancelled by user
+```
+
+## Setup & Configuration
+
+### 1. Database Initialization
+
+Initialize the database schema on startup:
+
+```bash
+# Automatic (via API startup)
+uv run skill-fleet serve
+
+# Manual
+uv run skill-fleet db init
+
+# Verify
+uv run skill-fleet db status
+```
+
+### 2. Configure Database URL
+
+Set environment variable:
+
+```bash
+# PostgreSQL (production)
+export DATABASE_URL="postgresql://user:pass@localhost/skills_fleet"
+
+# SQLite (development)
+export DATABASE_URL="sqlite:///./skills_fleet.db"
+```
+
+### 3. Configure JobManager
+
+The API automatically initializes `JobManager` at startup:
+
+```python
+# In src/skill_fleet/api/lifespan.py
+
+# Startup:
+init_db()
+job_repo = JobRepository(SessionLocal())
+job_manager = initialize_job_manager(job_repo)
+
+# Resume pending jobs
+pending = job_repo.get_by_status('pending')
+running = job_repo.get_by_status('running')
+hitl = job_repo.get_by_status('pending_hitl')
+```
+
+## CLI Commands
+
+### Initialize Database
+
+```bash
+uv run skill-fleet db init
+# Creates all tables
+```
+
+### Check Status
+
+```bash
+uv run skill-fleet db status
+# Shows table counts and health
+```
+
+### Reset Database (Dev Only)
+
+```bash
+uv run skill-fleet db reset --force
+# WARNING: Deletes all data
+```
+
+### Start API (Auto-Init)
+
+```bash
+uv run skill-fleet serve
+# Automatically initializes DB
+# Resumes pending/running jobs
+# Starts cleanup background task
+```
+
+### Skip DB Init
+
+```bash
+uv run skill-fleet serve --skip-db-init
+# Assumes database already initialized
+```
+
+## Query Job by Status
+
+### Using JobRepository
+
+```python
+from skill_fleet.db.repositories import JobRepository
+
+repo = JobRepository(db_session)
+
+# Get pending jobs (e.g., after server restart)
+pending = repo.get_by_status('pending')
+
+# Get running jobs
+running = repo.get_by_status('running')
+
+# Get jobs waiting for human input
+hitl = repo.get_by_status('pending_hitl')
+
+# Process and resume
+for job in pending + running + hitl:
+    print(f"Resuming {job.job_id}: {job.task_description}")
+```
+
+## Crash Recovery
+
+### Scenario 1: Mid-Job Crash
+
+```
+Before crash:
+  Memory:   job#1 → status=running, progress=65%
+  Database: job#1 → status=running, progress=65%
+
+Server crashes (memory lost)
+
+On restart:
+  1. Init database
+  2. Query DB for running jobs
+  3. Find job#1 with progress=65%
+  4. Reload into memory cache
+  5. Resume from step 66%
+```
+
+### Scenario 2: Partial Update
+
+```
+Before crash:
+  Memory:   job#1 → status=running
+  Database: job#1 → status=pending (update in flight)
+
+Server crashes
+
+On restart:
+  1. Query DB → finds status=pending
+  2. Resumes from pending (safe fallback)
+  3. May re-run some steps (OK, idempotent)
+```
+
+### Scenario 3: Server Graceful Shutdown
+
+```
+On shutdown:
+  1. API receives SIGTERM
+  2. Background cleanup task cancels
+  3. Active jobs stay in "running" state
+  4. All changes already persisted
+
+On restart:
+  1. Query DB for running jobs
+  2. Reload and resume
+  3. No data loss
+```
+
+## Memory Cache Behavior
+
+### TTL (Time-To-Live)
+
+Default: 60 minutes
+Configurable:
+
+```python
+manager.memory = JobMemoryStore(ttl_minutes=120)  # 2 hours
+```
+
+### Auto-Cleanup
+
+Background task runs every 5 minutes:
+
+```python
+# In lifespan.py
+cleanup_task = asyncio.create_task(_cleanup_expired_jobs())
+
+async def _cleanup_expired_jobs():
+    while True:
+        await asyncio.sleep(300)  # 5 minutes
+        cleaned = manager.cleanup_expired()
+        if cleaned > 0:
+            logger.info(f"Cleaned {cleaned} expired jobs")
+```
+
+### Manual Cleanup
+
+```python
+manager.cleanup_expired()  # Removes expired entries
+manager.memory.clear()     # Clears all entries
+```
+
+## Troubleshooting
+
+### Database Connection Error
+
+```
+ERROR: Cannot connect to database
+```
+
+**Solution:**
+1. Check `DATABASE_URL` environment variable
+2. Verify database server is running
+3. Verify credentials are correct
+
+```bash
+# Set correct URL
+export DATABASE_URL="postgresql://user:pass@localhost/dbname"
+
+# Test connection
+uv run skill-fleet db status
+```
+
+### Job Not Found After Restart
+
+```
+ERROR: Job xxx not found in memory or database
+```
+
+**Possible causes:**
+1. Job table not created: Run `uv run skill-fleet db init`
+2. Database corruption: Run `uv run skill-fleet db reset --force` (development only)
+3. Job TTL expired: Increase `ttl_minutes` in `JobMemoryStore`
+
+### Too Many DB Connections
+
+```
+ERROR: too many connections
+```
+
+**Solution:**
+```python
+# In database.py
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,       # Default: 10
+    max_overflow=20,    # Default: 20
+    # Reduce if getting too many connections error
+)
+```
+
+### Memory Leaks
+
+**Symptoms:**
+- Memory usage grows over time
+- Old jobs not cleaned up
+
+**Solution:**
+```python
+# Ensure cleanup task is running
+# Check logs for: "Cleaned X expired jobs"
+
+# Manual cleanup if needed
+manager.cleanup_expired()
+
+# Verify TTL setting
+print(f"Memory TTL: {manager.memory.ttl_minutes} minutes")
+```
+
+## Performance Characteristics
+
+### Job Creation
+- **Memory**: ~1ms (always fast)
+- **Database**: ~10-50ms (depends on DB)
+- **Total**: ~10-50ms
+
+### Job Retrieval (Memory Hit)
+- **Latency**: <1ms
+- **Hit rate**: ~90% for active jobs
+
+### Job Retrieval (DB Fallback)
+- **Latency**: ~10-50ms
+- **Occurs**: ~10% of requests
+
+### Job Update
+- **Memory**: ~1ms
+- **Database**: ~10-50ms
+- **Total**: ~10-50ms
+
+## Best Practices
+
+### 1. Always Initialize Database
+
+```bash
+# Required before first use
+uv run skill-fleet serve
+# or manually
+uv run skill-fleet db init
+```
+
+### 2. Periodically Clean Old Jobs
+
+Old completed jobs accumulate in database. Consider archiving:
+
+```python
+# Query completed jobs older than 30 days
+from datetime import datetime, timedelta, UTC
+
+old_date = datetime.now(UTC) - timedelta(days=30)
+old_jobs = db.query(Job).filter(
+    Job.status == 'completed',
+    Job.completed_at < old_date
+).all()
+
+# Archive to separate table (optional)
+# Then delete: db.delete(old_jobs)
+```
+
+### 3. Monitor Memory Usage
+
+```python
+# Check memory store size
+print(f"Jobs in memory: {len(manager.memory.store)}")
+
+# Monitor cleanup effectiveness
+manager.cleanup_expired()
+```
+
+### 4. Handle Long-Running Jobs
+
+For jobs taking >1 hour:
+1. Increase `ttl_minutes` in `JobMemoryStore`
+2. Or update the job occasionally to refresh timestamp
+3. Or monitor from database instead of memory
+
+```python
+# Option: Update job every 30 minutes to keep in memory
+if job_age > 30 * 60:  # 30 minutes
+    manager.update_job(job_id, {"progress_message": "Still running..."})
+```
+
+### 5. Graceful Shutdown
+
+API already handles graceful shutdown. Just send SIGTERM:
+
+```bash
+kill -TERM <pid>  # Graceful shutdown
+# API will:
+# - Stop accepting new requests
+# - Wait for in-flight jobs to complete
+# - Close DB connections
+# - Exit cleanly
+```
+
+## Migration Guide
+
+### From In-Memory Only (Phase <0.1)
+
+If you have in-memory jobs before database was added:
+
+```python
+# Old way (lost on restart)
+manager = JobManager()
+manager.create_job(job)
+
+# New way (persists)
+manager = JobManager()
+manager.set_db_repo(job_repository)
+manager.create_job(job)  # Now persists!
+```
+
+No data migration needed - new jobs use database automatically.
+
+### From Single Database (No Cache)
+
+If you want to add memory cache to existing setup:
+
+```python
+# Backward compatible - just set the repo
+manager = JobManager(ttl_minutes=60)
+manager.set_db_repo(repository)
+
+# Existing DB jobs work automatically
+# New jobs use dual-layer
+```
+
+## Monitoring & Observability
+
+### Check Job Storage
+
+```bash
+# View database job count
+sqlite3 skills_fleet.db "SELECT COUNT(*) FROM jobs;"
+
+# View job statuses
+sqlite3 skills_fleet.db \
+  "SELECT status, COUNT(*) FROM jobs GROUP BY status;"
+
+# View memory store
+python -c "from skill_fleet.app.services.job_manager import get_job_manager; \
+  m = get_job_manager(); print(f'Memory jobs: {len(m.memory.store)}')"
+```
+
+### Enable Debug Logging
+
+```python
+import logging
+logging.getLogger('skill_fleet.app.services.job_manager').setLevel(logging.DEBUG)
+
+# Shows:
+# - Memory hits/misses
+# - DB lookups
+# - Cleanup activity
+# - Cache warming
+```
+
+### Monitor Background Cleanup
+
+Check logs for cleanup task activity:
+
+```bash
+# Grep for cleanup messages
+grep "Cleaned.*expired" server.log
+
+# Shows frequency and effectiveness of cleanup
+```
+
+## FAQ
+
+**Q: What happens if database is unavailable?**
+A: Jobs still work in memory (up to TTL). On DB failure, logging continues but persistence is deferred. No data loss - update succeeds in memory, DB sync retried.
+
+**Q: Can I disable the memory cache?**
+A: Yes, but not recommended:
+```python
+manager = JobManager(memory_store=EmptyMemoryStore())  # All DB lookups
+```
+
+**Q: How do I migrate jobs to a different database?**
+A: Export from old DB, import to new:
+```bash
+# Export
+pg_dump old_db > export.sql
+
+# Import
+psql new_db < export.sql
+```
+
+**Q: What's the maximum number of jobs?**
+A: Depends on database size. SQLite: ~1-10M jobs. PostgreSQL: Millions+. Memory cache stores ~1000s due to TTL.
+
+**Q: Can I query jobs by user?**
+A: Yes, via `JobRepository`:
+```python
+user_jobs = repo.get_multi(user_id="user@example.com")
+```
+
+---
+
+**Documentation**: See [docs/](../docs/) for more information.
+**Code**: See [src/skill_fleet/api/job_manager.py](../../src/skill_fleet/api/job_manager.py)
+**Tests**: See [tests/integration/test_job_persistence_phase_0_1.py](../../tests/integration/test_job_persistence_phase_0_1.py)
+
+
+============================================================
+END FILE: docs/architecture/JOB_PERSISTENCE.md
+============================================================
+
+============================================================
+FILE: docs/architecture/SERVICE_LAYER.md
+============================================================
+
+# Service Layer Architecture
+
+**Last Updated**: 2026-01-25
+
+## Overview
+
+The Service Layer sits between the API routes and the domain layer, orchestrating business logic and coordinating domain objects to accomplish use cases. It provides application-level services that encapsulate workflows and coordinate interactions between multiple domain objects.
+
+`★ Insight ─────────────────────────────────────`
+Services are stateful coordinators, not just function containers. They inherit from BaseService which provides dependency injection for repositories, LLM clients, and configuration. This makes services testable with mocks and allows easy swapping of implementations.
+`─────────────────────────────────────────────────`
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      API Routes                              │
+│                   (FastAPI Endpoints)                        │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Service Layer                             │
+│  ┌────────────────┐  ┌──────────────┐  ┌────────────────┐ │
+│  │ SkillService   │  │JobService    │  │ TaxonomyService │ │
+│  │                │  │              │  │                │ │
+│  │ • Create       │  │ • Execute    │  │ • Navigate     │ │
+│  │ • Validate     │  │ • Poll       │  │ • Search       │ │
+│  │ • Refine       │  │ • HITL       │  │ • Update       │ │
+│  └────────────────┘  └──────────────┘  └────────────────┘ │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Domain Layer                             │
+│  • Entities (Skill, Job)                                    │
+│  • Value Objects (TaxonomyPath, SkillMetadata)              │
+│  • Specifications (business rules)                          │
+│  • Domain Services (business logic)                         │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Infrastructure Layer                        │
+│  • Repositories (data access)                               │
+│  • External APIs (LLM providers)                            │
+│  • File System (skills storage)                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## BaseService
+
+All application services inherit from `BaseService`, which provides:
+
+### Dependency Injection
+
+```python
+from skill_fleet.core.services import BaseService
+

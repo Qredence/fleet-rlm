@@ -1,0 +1,6 @@
+<!-- Chunk 178: bytes 287642-287753, type=function -->
+def process_order(order_id, items):  # No type hints
+    ...
+
+# Old-style Optional
+from typing import Optional

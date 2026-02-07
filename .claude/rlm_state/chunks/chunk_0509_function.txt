@@ -1,0 +1,11 @@
+<!-- Chunk 509: bytes 855229-855494, type=function -->
+def single_word_reward(args, pred: dspy.Prediction) -> float:
+    """
+    Reward single-word answers.
+
+    Returns:
+        float: 1.0 for single word, 0.0 otherwise
+    """
+    return 1.0 if len(pred.answer.split()) == 1 else 0.0
+
+# Bad: Ambiguous reward function

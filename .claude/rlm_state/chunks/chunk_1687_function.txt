@@ -1,0 +1,56 @@
+<!-- Chunk 1687: bytes 6715135-6717012, type=function -->
+def process_stream_sync(
+    streaming_program: Any,
+    **kwargs: Any,
+) -> Generator[dict[str, Any], None, None]:
+    """
+    Process a sync DSPy stream and yield normalized events.
+
+    This is useful for CLI usage where you want to handle all stream types
+    uniformly.
+
+    Args:
+        streaming_program: Streamified DSPy program (sync mode)
+        **kwargs: Arguments to pass to the streaming program
+
+    Yields:
+        Normalized event dictionaries with keys:
+            - "type": "reasoning" | "status" | "prediction"
+            - "content": The actual content (token, message, or prediction)
+
+    Example:
+        >>> stream = create_streaming_module(module, async_mode=False)
+        >>> for event in process_stream_sync(stream, question="What is 2+2?"):
+        ...     if event["type"] == "reasoning":
+        ...         print(event["content"], end="", flush=True)
+        ...     elif event["type"] == "status":
+        ...         print(f"\\n{event['content']}")
+
+    """
+    for chunk in streaming_program(**kwargs):
+        if isinstance(chunk, dspy.Prediction):
+            yield {"type": "prediction", "content": chunk}
+        elif isinstance(chunk, dspy.streaming.StreamResponse):
+            yield {"type": "reasoning", "content": chunk.chunk}
+        elif isinstance(chunk, dspy.streaming.StatusMessage):
+            yield {"type": "status", "content": chunk.message}
+
+
+__all__ = [
+    "SkillFleetStatusProvider",
+    "create_streaming_module",
+    "create_async_module",
+    "stream_dspy_response",
+    "process_stream_sync",
+    # Test stub classes (for unit testing)
+    "StubPrediction",
+    "StubStreamResponse",
+    "StubStatusMessage",
+]
+
+
+# ============================================================================
+# Test Stub Classes (for unit testing)
+# ============================================================================
+
+

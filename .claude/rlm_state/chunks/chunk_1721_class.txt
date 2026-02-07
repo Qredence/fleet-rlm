@@ -1,0 +1,18 @@
+<!-- Chunk 1721: bytes 7325765-7326492, type=class -->
+class ClarifyingQuestion(BaseModel):
+    """A clarifying question to ask the user during skill creation."""
+
+    id: str = Field(description="Unique question identifier")
+    question: str = Field(description="The question text to display to the user")
+    context: str = Field(default="", description="Why this question is being asked")
+    options: list[QuestionOption] = Field(
+        default_factory=list,
+        description="Multi-select options (2-5 required, empty if free-form)",
+    )
+    allows_multiple: bool = Field(
+        default=True,
+        description="Whether multiple options can be selected (default: true)",
+    )
+    required: bool = Field(default=True, description="Whether an answer is required")
+
+

@@ -1,0 +1,281 @@
+<!-- Chunk 794: bytes 2663302-2671318, type=function -->
+def process_skill_job(job_id: str):
+    """Process a skill creation job."""
+    with get_db() as db:
+        repo = JobRepository(db)
+        job = repo.get(job_id)
+        worker = SkillJobWorker(DATABASE_URL)
+        worker.process_job(job, db)
+```
+
+### Option 2: FastAPI BackgroundTasks (Simple)
+
+```python
+from fastapi import BackgroundTasks
+
+@router.post("/skills/create")
+async def create_skill(
+    task_description: str,
+    background_tasks: BackgroundTasks
+):
+    """Create a new skill via background job."""
+    job_id = create_skill_job(user_id="default", task_description=task_description)
+    background_tasks.add_task(process_skill_job, job_id)
+    return {"job_id": job_id}
+```
+
+### Option 3: Dedicated Worker Process
+
+```python
+# worker.py (run as separate process)
+if __name__ == "__main__":
+    worker = SkillJobWorker(DATABASE_URL)
+    print("Starting job worker...")
+    worker.poll_for_jobs()
+```
+
+## Monitoring
+
+```sql
+-- View job statistics
+SELECT
+    status,
+    COUNT(*) as count,
+    AVG(EXTRACT(EPOCH FROM (completed_at - created_at))) as avg_duration_seconds
+FROM jobs
+GROUP BY status
+ORDER BY count DESC;
+
+-- Find stuck jobs (running > 1 hour)
+SELECT job_id, current_phase, created_at
+FROM jobs
+WHERE status = 'running'
+AND created_at < NOW() - INTERVAL '1 hour';
+```
+
+
+============================================================
+END FILE: docs/architecture/BACKGROUND_JOBS.md
+============================================================
+
+============================================================
+FILE: docs/architecture/CACHING_LAYER.md
+============================================================
+
+# Caching Layer Architecture
+
+**Last Updated**: 2026-01-25
+
+## Overview
+
+The caching layer provides in-memory caching for frequently accessed data, reducing database queries and API response times. It uses a decorator-based pattern for declarative cache configuration with intelligent invalidation.
+
+`★ Insight ─────────────────────────────────────`
+The cache uses TTL-based expiration with different strategies for different data types. Global data (taxonomy) has longer TTL (5min), user-specific data has medium TTL (2min), and branch-specific data has the longest TTL (10min) since taxonomy branches change infrequently.
+`─────────────────────────────────────────────────`
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     API Routes                           │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  @cache_endpoint(ttl=300, pattern="/skills/*")   │  │
+│  │  async def get_skill(...)                        │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Cache Manager                           │
+│  ┌──────────────────┐  ┌──────────────────────────┐    │
+│  │   In-Memory      │  │    Pattern-Based         │    │
+│  │   Cache Store    │◄─┤    Invalidation         │    │
+│  │   (dict)         │  │    (regex matching)     │    │
+│  └──────────────────┘  └──────────────────────────┘    │
+└────────────────────────┬────────────────────────────────┘
+                         │ Cache Miss
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│              Data Sources                                │
+│  • Taxonomy Manager  • Job Store  • Repository          │
+└─────────────────────────────────────────────────────────┘
+```
+
+## TTL Configuration
+
+| Cache Type | TTL | Use Case |
+|------------|-----|----------|
+| **Global** | 5 minutes (300s) | Taxonomy structure, global settings |
+| **User** | 2 minutes (120s) | User-specific data, profiles |
+| **Branch** | 10 minutes (600s) | Taxonomy branch data |
+| **Custom** | Configurable | Per-endpoint configuration |
+
+### Default TTL Values
+
+```python
+# In cache manager
+DEFAULT_TTL = 300  # 5 minutes
+GLOBAL_TTL = 300   # 5 minutes
+USER_TTL = 120     # 2 minutes
+BRANCH_TTL = 600   # 10 minutes
+```
+
+## Usage Patterns
+
+### 1. Decorator-Based Caching
+
+```python
+from skill_fleet.app.cache import cache_endpoint, cache_user_data, cache_branch_data
+
+# Cache with default TTL (5 minutes)
+@cache_endpoint
+async def get_taxonomy():
+    """Cached taxonomy response."""
+    return TaxonomyManager().get_taxonomy()
+
+# Cache with custom TTL
+@cache_endpoint(ttl=600)
+async def get_skill_details(skill_id: str):
+    """Cached skill details (10 minutes)."""
+    return TaxonomyManager().get_skill_metadata(skill_id)
+
+# User-specific caching
+@cache_user_data
+async def get_user_profile(user_id: str):
+    """Cached per-user data (2 minutes)."""
+    return UserProfile.get(user_id)
+
+# Branch-specific caching
+@cache_branch_data
+async def get_taxonomy_branch(branch_path: str):
+    """Cached taxonomy branch (10 minutes)."""
+    return TaxonomyManager().get_branch(branch_path)
+```
+
+### 2. Manual Cache Operations
+
+```python
+from skill_fleet.app.cache_manager import cache_manager
+
+# Get from cache
+cached_value = cache_manager.get("taxonomy:global")
+
+# Set in cache
+cache_manager.set("taxonomy:global", taxonomy_data, ttl=300)
+
+# Invalidate by pattern
+cache_manager.invalidate_pattern("/skills/*")
+cache_manager.invalidate_pattern("/taxonomy/user/*")
+
+# Clear all cache
+cache_manager.clear()
+```
+
+### 3. Cache Invalidation on Write
+
+```python
+from skill_fleet.app.cache_manager import cache_manager
+
+async def create_skill(skill_data):
+    """Create a skill and invalidate related cache."""
+    skill = await repository.create(skill_data)
+
+    # Invalidate all skill-related cache entries
+    cache_manager.invalidate_pattern("/skills/*")
+    cache_manager.invalidate_pattern("/taxonomy/*")
+
+    return skill
+```
+
+## Cache Key Generation
+
+Cache keys are generated based on:
+
+1. **Endpoint path**: The API route path
+2. **Query parameters**: URL parameters
+3. **User context**: For user-specific caches
+4. **Custom key function**: Override default behavior
+
+### Default Key Format
+
+```
+{cache_type}:{path}:{query_params_hash}:{user_id}
+```
+
+**Examples**:
+- `global:/taxonomy:{}` - Global taxonomy
+- `user:/taxonomy/user/abc123:{user_id}` - User taxonomy
+- `endpoint:/skills/python-async:{}` - Skill details
+
+### Custom Key Functions
+
+```python
+from skill_fleet.app.cache import cache_endpoint
+
+@cache_endpoint(key_function=lambda kwargs: f"custom:{kwargs['skill_id']}")
+async def get_skill(skill_id: str):
+    """Use custom cache key."""
+    return get_skill_by_id(skill_id)
+```
+
+## Pattern-Based Invalidation
+
+The cache supports regex-based pattern invalidation for bulk cache clearing.
+
+```python
+from skill_fleet.app.cache_manager import cache_manager
+
+# Invalidate all skill caches
+cache_manager.invalidate_pattern("/skills/*")
+
+# Invalidate all user taxonomy caches
+cache_manager.invalidate_pattern("/taxonomy/user/*")
+
+# Invalidate specific skill and its dependencies
+cache_manager.invalidate_pattern(f"/skills/{skill_id}/*")
+cache_manager.invalidate_pattern("/taxonomy/*")
+```
+
+### Common Invalidations
+
+| Event | Invalidation Pattern |
+|-------|---------------------|
+| Skill created | `/skills/*`, `/taxonomy/*` |
+| Skill updated | `/skills/{id}/*`, `/taxonomy/*` |
+| Skill deleted | `/skills/{id}/*`, `/taxonomy/*` |
+| Taxonomy updated | `/taxonomy/*` |
+| User profile updated | `/user/{id}/*` |
+
+## Cache Statistics
+
+The cache manager provides statistics for monitoring and debugging.
+
+```python
+from skill_fleet.app.cache_manager import cache_manager
+
+# Get cache statistics
+stats = cache_manager.get_stats()
+print(f"Hits: {stats['hits']}")
+print(f"Misses: {stats['misses']}")
+print(f"Hit rate: {stats['hit_rate']:.2%}")
+print(f"Size: {stats['size']}")
+```
+
+**Statistics Output**:
+```json
+{
+  "hits": 1523,
+  "misses": 87,
+  "hit_rate": 0.946,
+  "size": 423,
+  "evictions": 12,
+  "invalidations": 45
+}
+```
+
+## In-Memory Cache Implementation
+
+The current implementation uses an in-memory dictionary:
+
+```python

@@ -1,0 +1,51 @@
+<!-- Chunk 932: bytes 3370457-3371941, type=class -->
+class TestValidateSkillCommand:
+    """Test validate-skill command."""
+
+    @patch('skill_fleet.cli.main.SkillValidator')
+    def test_validate_valid_skill(self, mock_validator_class):
+        """Test validate-skill with valid skill."""
+        # Arrange
+        mock_validator = MagicMock()
+        mock_validator_class.return_value = mock_validator
+        mock_validator.validate_complete.return_value = {
+            "passed": True,
+            "errors": [],
+            "warnings": []
+        }
+
+        args = MagicMock()
+        args.skill_path = "skills/general/testing"
+        args.skills_root = "/tmp/skills"
+        args.json = False
+
+        # Act
+        result = validate_skill(args)
+
+        # Assert
+        assert result == 0
+
+    @patch('skill_fleet.cli.main.SkillValidator')
+    def test_validate_invalid_skill(self, mock_validator_class):
+        """Test validate-skill with invalid skill."""
+        # Arrange
+        mock_validator = MagicMock()
+        mock_validator_class.return_value = mock_validator
+        mock_validator.validate_complete.return_value = {
+            "passed": False,
+            "errors": ["Missing YAML frontmatter"],
+            "warnings": []
+        }
+
+        args = MagicMock()
+        args.skill_path = "skills/invalid/skill"
+        args.skills_root = "/tmp/skills"
+        args.json = False
+
+        # Act
+        result = validate_skill(args)
+
+        # Assert
+        assert result == 2  # Exit code for validation failure
+
+

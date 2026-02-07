@@ -1,0 +1,38 @@
+<!-- Chunk 1191: bytes 4505004-4506063, type=class -->
+class IterateSkillWithFeedback(dspy.Signature):
+    """Step 6: HITL approval and skill evolution tracking."""
+    
+    packaged_skill = dspy.InputField()
+    human_feedback = dspy.InputField()
+    usage_analytics = dspy.InputField(
+        desc="Optional: usage data from deployed version"
+    )
+    
+    approval_status = dspy.OutputField(
+        desc="approved | needs_revision | rejected"
+    )
+    
+    revision_plan = dspy.OutputField(
+        desc="If needs_revision: specific changes required"
+    )
+    
+    evolution_metadata = dspy.OutputField(
+        desc="""Track skill evolution:
+        - version_history: [list of versions]
+        - generation_reason: "user_request | pattern_detected | optimization"
+        - success_metrics: usage stats, error rates
+        - improvement_suggestions: for next version
+        """
+    )
+```
+
+**Why:** Enables continuous learning and taxonomy improvement over time.
+
+---
+
+## 🏗️ Recommended Workflow Implementation
+
+```python
+from dspy import Module, ChainOfThought
+from typing import Dict, List, Optional
+

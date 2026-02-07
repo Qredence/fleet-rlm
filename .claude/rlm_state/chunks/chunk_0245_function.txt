@@ -1,0 +1,18 @@
+<!-- Chunk 245: bytes 310888-311374, type=function -->
+def calculate_price(item_type, quantity, base_price):
+    if item_type == "book":
+        if quantity > 10:
+            return base_price * quantity * 0.9
+        return base_price * quantity
+    elif item_type == "electronics":
+        if quantity > 5:
+            return base_price * quantity * 0.85
+        return base_price * quantity * 0.95
+    elif item_type == "clothing":
+        return base_price * quantity * 0.8
+```
+
+**After:**
+```python
+from abc import ABC, abstractmethod
+

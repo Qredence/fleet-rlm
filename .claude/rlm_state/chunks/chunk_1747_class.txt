@@ -1,0 +1,50 @@
+<!-- Chunk 1747: bytes 7346479-7348105, type=class -->
+class ValidationReport(BaseModel):
+    """
+    Validation results for a skill package.
+
+    Merged from workflow (status-based) and core (score-based).
+    """
+
+    passed: bool = Field(description="Whether all required checks passed")
+    status: Literal["passed", "failed", "warnings"] = Field(
+        default="passed", description="Overall validation status"
+    )
+    score: float = Field(default=1.0, ge=0.0, le=1.0, description="Overall quality score")
+    errors: list[str] = Field(default_factory=list, description="Critical errors")
+    warnings: list[str] = Field(default_factory=list, description="Non-critical issues")
+    checks_performed: list[str] = Field(
+        default_factory=list, description="List of checks that were run"
+    )
+    checks: list[ValidationCheckItem] = Field(default_factory=list, description="Detailed checks")
+    feedback: str = Field(default="", description="Consolidated feedback for refinement")
+
+    # Allow dict-like access for deprecated code using .get()
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Get attribute by key with optional default.
+
+        Args:
+            key: Attribute name to retrieve.
+            default: Default value if attribute not found.
+
+        Returns:
+            The attribute value or default.
+
+        """
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        """
+        Enable dict-like access to attributes.
+
+        Args:
+            key: Attribute name to retrieve.
+
+        Returns:
+            The attribute value.
+
+        """
+        return getattr(self, key)
+
+

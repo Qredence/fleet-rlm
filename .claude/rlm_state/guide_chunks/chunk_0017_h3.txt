@@ -1,0 +1,5 @@
+<!-- Chunk 17: bytes 5494-5604, type=h3 -->
+### Start with use cases
+
+Before writing any code, identify 2-3 concrete use cases your skill should enable.
+

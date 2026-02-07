@@ -1,0 +1,15 @@
+<!-- Chunk 1522: bytes 6370264-6370720, type=class -->
+class AssessQualityRequest(BaseModel):
+    """Request body for assessing content quality."""
+
+    skill_id: str | None = Field(
+        default=None, description="Skill ID (optional if content provided)"
+    )
+    content: str | None = Field(
+        default=None, description="Content to assess (optional if skill_id provided)"
+    )
+    criteria: list[str] = Field(
+        default_factory=list, description="Specific quality criteria to assess"
+    )
+
+

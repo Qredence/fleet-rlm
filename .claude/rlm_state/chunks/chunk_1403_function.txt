@@ -1,0 +1,122 @@
+<!-- Chunk 1403: bytes 5132701-5136199, type=function -->
+def main():
+    print("\n" + "="*70)
+    print("INTERACTIVE PATCH ENDPOINT DEMONSTRATION")
+    print("="*70)
+    print("\nThis demonstrates exactly how PATCH partial updates work")
+    print("using Pydantic models and the exclude_unset pattern")
+
+    # Start with initial user
+    user = User(id=1, name="John Doe", email="john@example.com", age=30)
+
+    print("\n" + "="*70)
+    print("INITIAL STATE")
+    print("="*70)
+    print("\nStarting user:")
+    print(f"  {user.model_dump()}")
+
+    # Scenario 1: Update only name
+    user = demonstrate_update_scenario(
+        "Update Only Name",
+        {"name": "John Updated"},
+        user
+    )
+
+    # Scenario 2: Update only age
+    user = demonstrate_update_scenario(
+        "Update Only Age",
+        {"age": 35},
+        user
+    )
+
+    # Scenario 3: Update multiple fields
+    user = demonstrate_update_scenario(
+        "Update Multiple Fields",
+        {"name": "John Smith", "email": "john.smith@example.com"},
+        user
+    )
+
+    # Scenario 4: Empty update
+    user = demonstrate_update_scenario(
+        "Empty Update (No Fields)",
+        {},
+        user
+    )
+
+    # Scenario 5: Update all fields
+    user = demonstrate_update_scenario(
+        "Update All Fields",
+        {"name": "John Final", "email": "john.final@example.com", "age": 32},
+        user
+    )
+
+    print("\n" + "="*70)
+    print("FINAL STATE")
+    print("="*70)
+    print("\nFinal user:")
+    print(f"  {user.model_dump()}")
+
+    print("\n" + "="*70)
+    print("KEY TAKEAWAYS")
+    print("="*70)
+
+    print("""
+1. Optional Fields in Model
+   - Allows clients to provide any subset of fields
+   - Unprovided fields default to None
+
+2. exclude_unset=True
+   - Returns ONLY fields that were explicitly set
+   - Crucial for partial updates!
+   - Without it, all fields (including None) would be included
+
+3. model_copy(update=...)
+   - Creates new instance with only specified fields updated
+   - Preserves all other field values
+   - Immutable (doesn't modify original)
+
+4. Empty Check
+   - Returns early if no fields provided
+   - Avoids unnecessary operations
+   - Returns user unchanged
+
+This pattern is the idiomatic way to implement PATCH endpoints
+in FastAPI with Pydantic models.
+    """)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: skills/python/fastapi-production/examples/02-partial-updates/interactive_demo.py
+============================================================
+
+============================================================
+FILE: skills/python/fastapi-production/examples/02-partial-updates/patch_endpoint_example.py
+============================================================
+
+"""
+FastAPI PATCH Endpoint Example - Partial User Updates
+
+This example demonstrates how to create a PATCH endpoint that updates only the
+fields provided in the request, leaving other fields unchanged.
+
+WARNING: This is example code that uses global state (fake_db, next_id)
+for simplicity. In production applications:
+- Use a proper database (PostgreSQL, MongoDB, etc.)
+- Replace global variables with proper dependency injection
+- Consider using SQLAlchemy ORM with async support
+- Add proper validation, error handling, and transaction support
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, EmailStr, Field
+
+# ========================================
+# 1. THE USER MODELS
+# ========================================
+

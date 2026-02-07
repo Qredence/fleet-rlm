@@ -1,0 +1,10 @@
+<!-- Chunk 1706: bytes 7278641-7278923, type=class -->
+class RoleConfig(BaseModel):
+    """Configuration for a role (router, planner, worker, judge)."""
+
+    model: str
+    description: str = ""
+    capabilities: list[str] = Field(default_factory=list)
+    parameter_overrides: ModelParameters = Field(default_factory=ModelParameters)
+
+

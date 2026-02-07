@@ -1,0 +1,30 @@
+<!-- Chunk 730: bytes 2573593-2574110, type=class -->
+class TaxonomyResponse(BaseModel):
+    """Taxonomy structure response."""
+
+    taxonomy: dict[str, Any] = Field(..., description="Hierarchical taxonomy structure")
+    total_skills: int = Field(..., description="Total number of skills")
+```
+
+**Example**:
+```json
+{
+    "taxonomy": {
+        "python": {
+            "async-await": { ... },
+            "decorators": { ... }
+        }
+    },
+    "total_skills": 2
+}
+```
+
+---
+
+## Validation Schemas
+
+### ValidateSkillRequest
+
+Skill validation request schema.
+
+```python

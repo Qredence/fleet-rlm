@@ -1,0 +1,142 @@
+<!-- Chunk 2094: bytes 8015603-8020505, type=function -->
+def test_coerce_reasoning_text_handles_dspy_reasoning() -> None:
+    reasoning = dspy.Reasoning(content=" hello ")
+    assert coerce_reasoning_text(reasoning) == "hello"
+
+
+============================================================
+END FILE: tests/unit/test_dspy_reasoning_compat.py
+============================================================
+
+============================================================
+FILE: tests/unit/test_hitl_questions.py
+============================================================
+
+#!/usr/bin/env python3
+"""Test script to verify HITL clarifying questions appear."""
+
+import asyncio
+import json
+import sys
+
+import httpx
+
+
+async def test_hitl_clarifying_questions():
+    """Test that clarifying questions appear in HITL workflow."""
+    base_url = "http://127.0.0.1:8000"
+
+    print("🧪 Testing HITL clarifying questions...")
+    print(f"   API URL: {base_url}")
+
+    async with httpx.AsyncClient() as client:
+        # Step 1: Create a skill job
+        print("\n1️⃣ Creating skill job...")
+        try:
+            response = await client.post(
+                f"{base_url}/api/v1/skills/",
+                json={"task_description": "a figma design system skill", "user_id": "test_user"},
+                timeout=120.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            job_id = data.get("job_id")
+            print(f"   ✅ Job created: {job_id}")
+            print(f"   Status: {data.get('status')}")
+
+            if data.get("hitl_context"):
+                print(f"   HITL Context: {json.dumps(data.get('hitl_context'), indent=2)}")
+        except Exception as e:
+            print(f"   ❌ Failed to create job: {e}")
+            return False
+
+        # Step 2: Poll for HITL prompt
+        print("\n2️⃣ Polling for HITL prompt...")
+        max_attempts = 30
+        for attempt in range(max_attempts):
+            try:
+                response = await client.get(f"{base_url}/api/v1/hitl/{job_id}/prompt", timeout=10.0)
+                response.raise_for_status()
+                prompt_data = response.json()
+
+                status = prompt_data.get("status")
+                hitl_type = prompt_data.get("type")
+                questions = prompt_data.get("questions")
+
+                print(f"   Attempt {attempt + 1}/{max_attempts}: status={status}, type={hitl_type}")
+
+                # Check if we have clarifying questions
+                if status in ["pending_hitl", "pending_user_input"]:
+                    print("\n   ✅ Job reached HITL state!")
+                    print(f"   Status: {status}")
+                    print(f"   Type: {hitl_type}")
+
+                    if questions:
+                        print(f"\n   📝 Questions found ({len(questions)}):")
+                        for i, q in enumerate(questions, 1):
+                            print(f"      {i}. {q.get('text', q)[:100]}...")
+                        return True
+                    else:
+                        print("   ⚠️  No questions in prompt data")
+                        print(f"   Full prompt data: {json.dumps(prompt_data, indent=2)}")
+                        return False
+
+                # Check if job completed without HITL
+                if status in ["completed", "failed", "cancelled"]:
+                    print(f"\n   ⚠️  Job finished without HITL (status: {status})")
+                    return False
+
+                # Wait before next poll
+                await asyncio.sleep(2)
+
+            except Exception as e:
+                print(f"   ❌ Error polling: {e}")
+                await asyncio.sleep(2)
+
+        print(f"\n   ❌ Timeout waiting for HITL prompt after {max_attempts} attempts")
+        return False
+
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("HITL Clarifying Questions Test")
+    print("=" * 60)
+
+    # Check if server is running
+    import subprocess
+
+    result = subprocess.run(["lsof", "-i", ":8000"], capture_output=True, text=True)
+    if "uvicorn" not in result.stdout:
+        print("\n❌ Server is not running on port 8000!")
+        print("   Please start it first with: uv run skill-fleet serve")
+        sys.exit(1)
+
+    success = asyncio.run(test_hitl_clarifying_questions())
+
+    print("\n" + "=" * 60)
+    if success:
+        print("✅ TEST PASSED: Clarifying questions are working!")
+    else:
+        print("❌ TEST FAILED: Clarifying questions not appearing")
+    print("=" * 60)
+
+    sys.exit(0 if success else 1)
+
+
+============================================================
+END FILE: tests/unit/test_hitl_questions.py
+============================================================
+
+============================================================
+FILE: tests/unit/test_skill_validator.py
+============================================================
+
+import json
+from pathlib import Path
+
+import pytest
+
+from skill_fleet.validators import SkillValidator
+
+
+@pytest.fixture

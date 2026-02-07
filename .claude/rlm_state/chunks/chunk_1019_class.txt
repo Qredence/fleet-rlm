@@ -1,0 +1,11 @@
+<!-- Chunk 1019: bytes 3602169-3602429, type=class -->
+class OptimizerType(str, Enum):
+    """Available optimizer types."""
+    BOOTSTRAP_FEWSHOT = "bootstrap_fewshot"
+    MIPROV2 = "miprov2"
+    GEPA = "gepa"
+    REFLECTION_METRICS = "reflection_metrics"
+    BOOTSTRAP_FINETUNE = "bootstrap_finetune"
+
+
+@dataclass

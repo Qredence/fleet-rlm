@@ -1,0 +1,332 @@
+<!-- Chunk 452: bytes 641061-650421, type=function -->
+def combined_metric(example, pred, trace=None):
+    """Use consistent thresholds."""
+    accuracy = example.output == pred.output
+    confidence = getattr(pred, 'confidence', 0)
+    length = LENGTH_MIN <= len(pred.output) <= LENGTH_MAX
+
+    return accuracy and confidence > CONFIDENCE_THRESHOLD and length
+```
+
+## Common Issues and Solutions
+
+### Issue: Metric Too Strict
+
+**Problem**: No examples pass the metric
+
+**Solution**:
+1. Lower thresholds
+2. Use lenient criteria (at least one must pass)
+3. Debug which criteria are failing
+4. Check example data quality
+
+### Issue: Metric Too Lenient
+
+**Problem**: All examples pass the metric
+
+**Solution**:
+1. Raise thresholds
+2. Add more criteria
+3. Use strict mode (all must pass)
+4. Add negative test cases
+
+### Issue: Slow Metric Evaluation
+
+**Problem**: Metrics take too long to evaluate
+
+**Solution**:
+1. Cache expensive computations
+2. Use approximate metrics
+3. Parallelize metric evaluation
+4. Reduce dataset size for tuning
+
+### Issue: Metric Not Aligned with Task
+
+**Problem**: Good metric score but poor task performance
+
+**Solution**:
+1. Review metric definition with domain experts
+2. Add human evaluation samples
+3. Correlate metric with human judgments
+4. Use multiple metrics for different aspects
+
+
+============================================================
+END FILE: .fleet/letta/skills/dspy-optimization/references/metrics.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/dspy-optimization/references/optimizers.md
+============================================================
+
+# DSPy Optimizers
+
+Teleprompters automatically optimize DSPy programs by finding the best prompts and demonstrations. This guide covers available optimizers and when to use them.
+
+## Table of Contents
+
+- [Optimization Overview](#optimization-overview)
+- [BootstrapFewShot](#bootstrapfewshot)
+- [KNNFewShot](#knnfewshot)
+- [MIPROv2](#miprov2)
+- [GEPA](#gepa)
+- [Optimizer Comparison](#optimizer-comparison)
+- [Best Practices](#best-practices)
+
+## Optimization Overview
+
+### What is Optimization?
+
+DSPy optimization is the process of automatically finding the best prompts and examples (demonstrations) to improve your program's performance.
+
+### Why Optimize?
+
+- **Better performance**: Higher quality outputs
+- **Consistency**: More reliable results
+- **Efficiency**: Fewer tokens, faster execution
+- **Robustness**: Better handling of edge cases
+
+### The Optimization Process
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   Program   │───►│ Teleprompter │───►│  Optimized  │
+│  (Module)   │    │  (Strategy) │    │   Program   │
+└─────────────┘    └─────────────┘    └─────────────┘
+       │                  │                  │
+       │                  │                  │
+       ▼                  ▼                  ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  Training   │    │   Metrics   │    │  Compiled   │
+│  Examples   │    │  (Scoring)  │    │  Artifacts  │
+└─────────────┘    └─────────────┘    └─────────────┘
+```
+
+## BootstrapFewShot
+
+The most common teleprompter. Uses few-shot learning with demonstrations.
+
+```python
+teleprompter = dspy.BootstrapFewShot(
+    max_labeled_demos=5,      # Number of demonstrations
+    max_bootstrapped_demos=10, # Maximum demonstrations to generate
+    max_rounds=1,             # Number of optimization rounds
+    metric=your_metric,          # Evaluation metric
+)
+
+compiled = teleprompter.compile(
+    program,
+    trainset=trainset
+)
+```
+
+**When to use:**
+- You have labeled training examples
+- You want automatic demonstration generation
+- Good balance of performance and cost
+- Starting point for most use cases
+
+**Parameters:**
+- `max_labeled_demos`: Number of examples from your training set
+- `max_bootstrapped_demos`: Total demonstrations (labeled + generated)
+- `max_rounds`: Number of optimization rounds
+- `metric`: Evaluation metric function
+- `max_errors`: Maximum number of errors to tolerate
+
+## KNNFewShot
+
+Uses k-nearest neighbors to select relevant examples.
+
+```python
+teleprompter = dspy.KNNFewShot(
+    k=4,                    # Number of neighbors
+    trainset=trainset
+)
+
+compiled = teleprompter.compile(program)
+```
+
+**When to use:**
+- Large training sets (100+ examples)
+- Need efficient example selection
+- Want context-aware demonstrations
+- Training data is diverse
+
+**Parameters:**
+- `k`: Number of neighbors to select
+- `trainset`: Training examples
+- `metric`: Distance metric (optional)
+
+## LabeledFewShot
+
+Uses only provided demonstrations without generation.
+
+```python
+teleprompter = dspy.LabeledFewShot(
+    k=5,                    # Number of demonstrations
+    trainset=trainset
+)
+
+compiled = teleprompter.compile(program)
+```
+
+**When to use:**
+- You have high-quality demonstrations
+- Don't want automatic generation
+- Need full control over examples
+- Simple optimization baseline
+
+**Parameters:**
+- `k`: Number of demonstrations
+- `trainset`: Training examples
+
+## MIPROv2
+
+Advanced prompt tuning with multi-stage optimization.
+
+```python
+from dspy.teleprompt import MIPROv2
+
+teleprompter = MIPROv2(
+    metric=gsm8k_metric,
+    auto="medium",  # light, medium, or heavy
+)
+
+compiled = teleprompter.compile(
+    program,
+    trainset=trainset,
+    max_bootstrapped_demos=4,
+    max_labeled_demos=4
+)
+```
+
+**When to use:**
+- Need high-quality prompt tuning
+- Have moderate training data (50-200 examples)
+- Want better performance than BootstrapFewShot
+- Can afford longer optimization time
+
+**Optimization Levels:**
+- **light**: Fast optimization, fewer candidates
+- **medium**: Balanced optimization (recommended)
+- **heavy**: Thorough optimization, more candidates
+
+**Advanced Configuration:**
+```python
+teleprompter = MIPROv2(
+    metric=your_metric,
+    auto="medium",
+    num_threads=4,  # Parallel optimization
+    teacher_settings=dict(lm=dspy.LM("openai/gpt-4")),
+    prompt_model=dspy.LM("openai/gpt-4o-mini"),
+)
+```
+
+**Parameters:**
+- `metric`: Evaluation metric function
+- `auto`: Optimization budget (light/medium/heavy)
+- `num_threads`: Parallel optimization threads
+- `teacher_settings`: LM for teacher (strong model)
+- `prompt_model`: LM for prompt generation (fast model)
+- `max_bootstrapped_demos`: Maximum bootstrapped demonstrations
+- `max_labeled_demos`: Maximum labeled demonstrations
+
+## GEPA
+
+Reflective prompt optimizer that evolves prompts using LM-driven feedback.
+
+```python
+from dspy.teleprompt import GEPA
+
+gepa_optimizer = GEPA(
+    metric=your_metric,
+    auto="medium",
+    reflection_minibatch_size=3,
+    candidate_selection_strategy="pareto",
+    reflection_lm=dspy.LM("openai/gpt-4", temperature=1.0),
+    log_dir="gepa_logs/"
+)
+
+compiled = gepa_optimizer.compile(
+    program,
+    trainset=trainset
+)
+```
+
+**When to use:**
+- Complex tasks requiring deep reasoning
+- Want prompts that evolve based on reflection
+- Have strong reflection LM available
+- Can afford longer optimization time
+- Tasks where textual feedback is valuable
+
+**Key Features:**
+- **Reflective evolution**: Analyzes failures and adjusts prompts
+- **Textual feedback**: Can use domain-specific feedback beyond scalar metrics
+- **Component selection**: Rounds through different program components
+- **Pareto optimization**: Selects candidates based on multiple criteria
+
+**Parameters:**
+- `metric`: Evaluation metric (must accept 5 arguments)
+- `auto`: Optimization budget
+- `reflection_lm`: Strong LM for reflection (e.g., GPT-4)
+- `reflection_minibatch_size`: Number of examples per reflection batch
+- `candidate_selection_strategy`: "pareto" or "current_best"
+- `component_selector`: How to select components ("round_robin" or custom)
+- `log_dir`: Directory for optimization logs
+- `use_wandb`: Enable Weights & Biases logging
+- `use_mlflow`: Enable MLflow tracking
+
+**Reflection LM Requirements:**
+```python
+# Good reflection LM
+reflection_lm = dspy.LM(
+    model='openai/gpt-4',
+    temperature=1.0,
+    max_tokens=32000
+)
+```
+
+## Optimizer Comparison
+
+| Optimizer | Use Case | Training Data | Cost | Performance | Time |
+|------------|-----------|---------------|------|-------------|-------|
+| BootstrapFewShot | General purpose | 10-50 examples | Medium | High | Fast |
+| KNNFewShot | Large datasets | 100+ examples | Low | Medium-High | Fast |
+| LabeledFewShot | Controlled prompts | 10-30 examples | Low | Medium | Very Fast |
+| MIPROv2 | Quality tuning | 50-200 examples | High | Very High | Medium |
+| GEPA | Complex tasks | 50-200 examples | Very High | Very High | Slow |
+
+**Quick Selection Guide:**
+- **Starting out?** Use BootstrapFewShot
+- **Large training set?** Use KNNFewShot
+- **Need best quality?** Use MIPROv2
+- **Complex reasoning tasks?** Use GEPA
+- **Full control over examples?** Use LabeledFewShot
+
+## Best Practices
+
+### 1. Start Simple
+
+Begin with basic optimization, then iterate:
+
+```python
+# Step 1: Simple few-shot
+teleprompter = dspy.LabeledFewShot(k=3)
+compiled = teleprompter.compile(program, trainset=trainset)
+
+# Evaluate
+score = evaluate(compiled, devset)
+
+# Step 2: Add bootstrap if needed
+if score < 0.7:
+    teleprompter = dspy.BootstrapFewShot(max_labeled_demos=3)
+    compiled = teleprompter.compile(program, trainset=trainset)
+```
+
+### 2. Use Appropriate Metrics
+
+Choose metrics that align with your goals:
+
+```python
+# For classification

@@ -1,0 +1,202 @@
+<!-- Chunk 428: bytes 612105-617405, type=function -->
+def test_lm():
+    """Test if LM is configured correctly."""
+    try:
+        result = qa(question="Test question")
+        return hasattr(result, 'answer')
+    except Exception as e:
+        print(f"LM configuration failed: {e}")
+        return False
+
+# Test before using in production
+assert test_lm(), "LM configuration is invalid"
+```
+
+## Common Issues and Solutions
+
+### Issue: LM Not Recognized
+
+**Problem**: DSPy doesn't recognize the model name
+
+**Solution**:
+1. Check model name format: "provider/model"
+2. Verify provider is supported by LiteLLM
+3. Check model name is correct for provider
+4. Try simpler model name (e.g., "openai/gpt-4")
+
+### Issue: API Key Not Found
+
+**Problem**: DSPy can't find API key
+
+**Solution**:
+1. Set environment variable: `OPENAI_API_KEY=your_key`
+2. Pass API key directly: `dspy.LM('openai/gpt-4', api_key='your_key')`
+3. Check API key is valid and not expired
+4. Verify environment variable is set correctly
+
+### Issue: Local Override Not Working
+
+**Problem**: `dspy.context()` not changing LM
+
+**Solution**:
+1. Verify LM object is valid
+2. Check indentation of context block
+3. Ensure `with dspy.context(lm=...)` syntax is correct
+4. Use thread-safe configuration if needed
+
+### Issue: Responses API Not Available
+
+**Problem**: Can't enable Responses API for model
+
+**Solution**:
+1. Check if model supports Responses API
+2. Verify provider supports Responses API
+3. Check LiteLLM documentation for compatibility
+4. Use standard configuration if Responses API not available
+
+
+============================================================
+END FILE: .fleet/letta/skills/dspy-configuration/references/lm-config.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/dspy-configuration/references/versioning.md
+============================================================
+
+# DSPy Version Management
+
+Track and manage dependency versions to ensure compatibility. This guide covers dependency versioning, version mismatch detection, and compatibility best practices.
+
+## Table of Contents
+
+- [Versioning Overview](#versioning-overview)
+- [Dependency Versioning](#dependency-versioning)
+- [Version Mismatch Detection](#version-mismatch-detection)
+- [Version Best Practices](#version-best-practices)
+- [Compatibility](#compatibility)
+
+## Versioning Overview
+
+### What is Version Management?
+
+DSPy automatically captures and stores dependency versions when saving modules, ensuring compatibility when loading modules later.
+
+### Why Manage Versions?
+
+- **Compatibility**: Prevents issues from version changes
+- **Reproducibility**: Ensures consistent results across runs
+- **Debugging**: Identifies version-related problems
+- **Migration**: Facilitates upgrades with minimal disruption
+
+## Dependency Versioning
+
+### Automatic Version Capture
+
+DSPy's `save()` method automatically captures dependency versions:
+
+```python
+import dspy
+
+# Create and configure program
+program = MyDSPyProgram()
+dspy.configure(lm=dspy.LM('openai/gpt-4o-mini'))
+
+# Save program
+program.save("my_program.json")
+
+# Dependency versions are automatically captured
+```
+
+### What is Captured?
+
+DSPy captures versions of:
+- **DSPy itself**: The DSPy version used
+- **Critical dependencies**: Key dependencies that affect behavior
+- **Provider libraries**: LLM provider libraries (OpenAI, Anthropic, etc.)
+
+### Loading with Version Check
+
+When loading a saved module, DSPy can check for version mismatches:
+
+```python
+import dspy
+
+# Load program (with automatic version check)
+loaded_program = dspy.load("my_program.json")
+
+# DSPy will warn if versions don't match
+```
+
+## Version Mismatch Detection
+
+### Automatic Warnings
+
+DSPy automatically warns about version mismatches:
+
+```python
+import dspy
+
+# Load program with version mismatch
+loaded_program = dspy.load("my_program.json")
+
+# Output:
+# WARNING: DSPy version mismatch
+# Saved version: 2.5.0
+# Current version: 2.6.0
+# This may cause unexpected behavior.
+```
+
+### Explicit Version Check
+
+Manually check versions before loading:
+
+```python
+import dspy
+import json
+
+# Load saved program metadata
+with open("my_program.json", "r") as f:
+    metadata = json.load(f)
+
+# Check DSPy version
+saved_dspy_version = metadata.get("_metadata", {}).get("dspy_version")
+current_dspy_version = dspy.__version__
+
+if saved_dspy_version != current_dspy_version:
+    print(f"WARNING: DSPy version mismatch!")
+    print(f"Saved: {saved_dspy_version}")
+    print(f"Current: {current_dspy_version}")
+```
+
+### Dependency Version Check
+
+```python
+import dspy
+import json
+
+# Load saved program metadata
+with open("my_program.json", "r") as f:
+    metadata = json.load(f)
+
+# Check dependency versions
+saved_deps = metadata.get("_metadata", {}).get("dependencies", {})
+
+for package, saved_version in saved_deps.items():
+    try:
+        current_version = __import__(package).__version__
+        if saved_version != current_version:
+            print(f"WARNING: {package} version mismatch!")
+            print(f"Saved: {saved_version}")
+            print(f"Current: {current_version}")
+    except ImportError:
+        print(f"WARNING: {package} not installed!")
+```
+
+### Version Mismatch Handling
+
+Handle version mismatches gracefully:
+
+```python
+import dspy
+import json
+

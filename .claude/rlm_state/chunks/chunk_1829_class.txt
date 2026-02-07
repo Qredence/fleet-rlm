@@ -1,0 +1,23 @@
+<!-- Chunk 1829: bytes 7584144-7585006, type=class -->
+class RefineSkill(dspy.Signature):
+    """
+    Refine skill content based on quality assessment.
+
+    Apply targeted improvements to address weaknesses while
+    preserving strengths.
+    """
+
+    # Inputs
+    current_content: str = dspy.InputField(desc="Current SKILL.md content")
+    weaknesses: list[str] = dspy.InputField(desc="Quality weaknesses to address")
+    target_score: float = dspy.InputField(desc="Target quality score to achieve", default=0.8)
+
+    # Outputs
+    refined_content: str = dspy.OutputField(desc="Improved SKILL.md content")
+    improvements_made: list[str] = dspy.OutputField(desc="Specific improvements applied")
+    new_score_estimate: float = dspy.OutputField(
+        desc="Estimated new quality score after refinements"
+    )
+    requires_another_pass: bool = dspy.OutputField(desc="Whether another refinement pass is needed")
+
+

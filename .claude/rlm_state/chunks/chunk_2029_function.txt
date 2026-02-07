@@ -1,0 +1,13 @@
+<!-- Chunk 2029: bytes 7918148-7918480, type=function -->
+def dependency_override_cleanup(app):
+    """Cleanup dependency overrides after test."""
+    yield
+    app.dependency_overrides.clear()
+
+
+# =============================================================================
+# Mock Fixtures
+# =============================================================================
+
+
+@pytest.fixture

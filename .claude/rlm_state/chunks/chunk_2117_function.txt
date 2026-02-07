@@ -1,0 +1,17 @@
+<!-- Chunk 2117: bytes 8044556-8045070, type=function -->
+def temp_training_dir(tmp_path):
+    """Create temporary training directory with dummy data."""
+    training_dir = tmp_path / "config" / "training"
+    training_dir.mkdir(parents=True)
+
+    # Create trainset
+    trainset = [
+        {"task_description": "Task 1", "output": "Output 1"},
+        {"task_description": "Task 2", "output": "Output 2"},
+        {"task_description": "Task 3", "output": "Output 3"},
+    ]
+    (training_dir / "trainset.json").write_text(json.dumps(trainset))
+
+    return training_dir
+
+

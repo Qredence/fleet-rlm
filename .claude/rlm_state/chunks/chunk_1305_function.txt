@@ -1,0 +1,7 @@
+<!-- Chunk 1305: bytes 4773146-4773344, type=function -->
+def get_migration_script_path() -> str:
+    """Get path to migration SQL file."""
+    root = Path(__file__).resolve().parents[1]
+    return str(root / "migrations" / "001_init_skills_schema.sql")
+
+

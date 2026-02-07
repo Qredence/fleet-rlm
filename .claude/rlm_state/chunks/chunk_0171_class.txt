@@ -1,0 +1,16 @@
+<!-- Chunk 171: bytes 285423-285756, type=class -->
+class UserManager:
+    def save(self, user: User): ...
+    def find_by_id(self, user_id: str): ...
+    def send_welcome_email(self, user: User): ...
+    def hash_password(self, password: str): ...
+```
+
+#### Open/Closed Principle
+
+Open for extension, closed for modification.
+
+**Good:**
+```python
+from abc import ABC, abstractmethod
+

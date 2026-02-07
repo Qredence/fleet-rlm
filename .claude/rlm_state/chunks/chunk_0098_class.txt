@@ -1,0 +1,5 @@
+<!-- Chunk 98: bytes 151137-151308, type=class -->
+class TaskDecomposition(dspy.Signature):
+    task = dspy.InputField(desc="Complex task to decompose")
+    subtasks: List[str] = dspy.OutputField(desc="List of subtasks")
+

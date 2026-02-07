@@ -1,0 +1,87 @@
+<!-- Chunk 130: bytes 179053-180784, type=class -->
+class CacheMonitor:
+    def __init__(self):
+        self.hits = 0
+        self.misses = 0
+
+    def check_cache(self, request):
+        """Check if request is in cache."""
+        key = dspy.cache.cache_key(request)
+        cached = dspy.cache.get(key)
+
+        if cached:
+            self.hits += 1
+            print(f"Cache HIT: {key[:50]}...")
+        else:
+            self.misses += 1
+            print(f"Cache MISS: {key[:50]}...")
+
+        return cached
+
+    def stats(self):
+        """Get cache statistics."""
+        total = self.hits + self.misses
+        if total == 0:
+            return "No cache operations"
+        return f"Hits: {self.hits}, Misses: {self.misses}, Hit Rate: {self.hits/total:.2%}"
+
+# Use cache monitor
+monitor = CacheMonitor()
+cached = monitor.check_cache(request)
+print(monitor.stats())
+```
+
+### Clear Cache
+
+```python
+import dspy
+
+# Clear all cache (memory and disk)
+dspy.cache.clear()
+
+# Clear memory cache only
+dspy.cache.clear_memory()
+
+# Clear disk cache only
+dspy.cache.clear_disk()
+```
+
+### Inspect Cache Contents
+
+```python
+import dspy
+
+# List all cache keys
+all_keys = list(dspy.cache.keys())
+
+# Get specific cached value
+key = dspy.cache.cache_key(request)
+cached_value = dspy.cache.get(key)
+
+# Check cache size
+cache_size = len(all_keys)
+print(f"Cache contains {cache_size} entries")
+```
+
+## Best Practices
+
+### 1. Enable Caching by Default
+
+```python
+# Good: Caching is enabled by default
+import dspy
+
+# No action required
+response = qa(question="Test")
+
+# Bad: Explicitly disable caching
+dspy.configure_cache(
+    enable_disk_cache=False,
+    enable_memory_cache=False,
+)
+```
+
+### 2. Use Custom Cache Keys for Complex Requests
+
+```python
+# Good: Custom cache key for complex requests

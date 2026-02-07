@@ -1,0 +1,152 @@
+<!-- Chunk 1197: bytes 4515413-4519421, type=class -->
+class SkillBootstrapper {
+  async onboardUser(userId, responses) {
+    const profile = this.analyzeResponses(responses);
+    const skillPlan = this.generateSkillPlan(profile);
+    
+    // Generate only needed skills
+    for (const skillPath of skillPlan.required) {
+      await this.generateSkill(skillPath);
+    }
+    
+    // Mark others as "on-demand"
+    this.registerOnDemandSkills(skillPlan.onDemand);
+    
+    return {
+      userId,
+      profile,
+      mountedSkills: skillPlan.required,
+      readyForTasks: true
+    };
+  }
+  
+  analyzeResponses(responses) {
+    // Map user responses to skill requirements
+    return {
+      primaryRole: responses.role,
+      techStack: responses.technologies,
+      commonTasks: responses.typical_tasks,
+      experience_level: responses.experience
+    };
+  }
+  
+  generateSkillPlan(profile) {
+    const plans = {
+      web_developer: {
+        required: [
+          'technical_skills/programming/javascript_typescript',
+          'technical_skills/programming/paradigms/object_oriented',
+          'tool_proficiency/development_tools/version_control',
+          'specializations/frontend_development',
+          'task_focus_areas/build_create'
+        ],
+        onDemand: [
+          'technical_skills/infrastructure/containerization',
+          'specializations/backend_development'
+        ]
+      },
+      // ... other profiles
+    };
+    
+    return plans[profile.primaryRole] || plans.general_purpose;
+  }
+}
+```
+
+### Onboarding Questions
+```json
+{
+  "onboarding_flow": {
+    "questions": [
+      {
+        "id": "role",
+        "text": "What's your primary role?",
+        "type": "single_select",
+        "options": [
+          "Frontend Developer",
+          "Backend Developer",
+          "Full Stack Developer",
+          "Data Scientist",
+          "ML Engineer",
+          "DevOps/SRE",
+          "Product Manager",
+          "Other"
+        ],
+        "skill_mapping": {
+          "Frontend Developer": ["specializations/frontend_development"],
+          "Backend Developer": ["specializations/backend_development"]
+        }
+      },
+      {
+        "id": "tech_stack",
+        "text": "Which technologies do you work with?",
+        "type": "multi_select",
+        "options": [
+          "JavaScript/TypeScript",
+          "Python",
+          "Java",
+          "Go",
+          "Rust",
+          "C++",
+          "React",
+          "Vue",
+          "Node.js",
+          "Django/Flask",
+          "PostgreSQL",
+          "MongoDB",
+          "Docker",
+          "Kubernetes",
+          "AWS",
+          "Azure"
+        ],
+        "skill_mapping": {
+          "JavaScript/TypeScript": [
+            "technical_skills/programming/languages/javascript_typescript"
+          ],
+          "Python": [
+            "technical_skills/programming/languages/python"
+          ],
+          "Docker": [
+            "technical_skills/infrastructure/containerization/docker"
+          ]
+        }
+      },
+      {
+        "id": "common_tasks",
+        "text": "What tasks do you perform most often?",
+        "type": "multi_select",
+        "options": [
+          "Building new features",
+          "Debugging issues",
+          "Code review",
+          "Performance optimization",
+          "Writing tests",
+          "Documentation",
+          "Data analysis",
+          "API design",
+          "Infrastructure setup"
+        ],
+        "skill_mapping": {
+          "Building new features": ["task_focus_areas/build_create"],
+          "Debugging issues": ["task_focus_areas/debug_fix"],
+          "Performance optimization": ["task_focus_areas/optimize_improve"]
+        }
+      },
+      {
+        "id": "experience_level",
+        "text": "What's your experience level?",
+        "type": "single_select",
+        "options": ["Junior", "Mid-level", "Senior", "Lead/Principal"],
+        "affects_skill_depth": true
+      }
+    ]
+  }
+}
+```
+
+## Phase 3: Just-In-Time Skill Generation (Ongoing)
+
+### Dynamic Generation Strategy
+
+```javascript
+// skill_generator.js

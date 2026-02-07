@@ -1,0 +1,59 @@
+<!-- Chunk 2075: bytes 7984417-7986679, type=class -->
+class TestGatherRequirementsModule:
+    """Test GatherRequirementsModule."""
+
+    def test_module_can_be_instantiated(self):
+        """Should create instance with ChainOfThought."""
+        module = GatherRequirementsModule()
+        assert module is not None
+        assert hasattr(module, "gather")
+
+    @patch("skill_fleet.core.modules.understanding.requirements.dspy.ChainOfThought")
+    def test_forward_returns_structured_output(self, mock_cot):
+        """Should return dict with required fields."""
+        # Mock the ChainOfThought result
+        mock_result = Mock()
+        mock_result.domain = "technical"
+        mock_result.category = "web"
+        mock_result.target_level = "intermediate"
+        mock_result.topics = ["react", "components"]
+        mock_result.constraints = ["typescript"]
+        mock_result.ambiguities = []
+
+        mock_cot.return_value.return_value = mock_result
+
+        module = GatherRequirementsModule()
+        result = module.forward(task_description="Build a React app", user_context={})
+
+        assert isinstance(result, dict)
+        assert result["domain"] == "technical"
+        assert result["category"] == "web"
+        assert "topics" in result
+
+    @pytest.mark.skip(reason="Integration test - requires actual LM configuration")
+    def test_forward_handles_empty_ambiguities(self):
+        """Should handle tasks with no ambiguities."""
+        # Integration test - requires actual LM
+        module = GatherRequirementsModule()
+
+        result = module.forward(
+            task_description="Create a Python function to format dates",
+            user_context={"experience": "beginner"},
+        )
+
+        # Should return structured result
+        assert "domain" in result
+        assert "topics" in result
+        assert isinstance(result.get("ambiguities"), list)
+
+    @pytest.mark.skip(reason="Integration test - requires actual LM configuration")
+    def test_forward_detects_ambiguities(self):
+        """Should detect ambiguities in vague descriptions."""
+        module = GatherRequirementsModule()
+
+        result = module.forward(task_description="Help me build something", user_context={})
+
+        # Vague task should have ambiguities
+        assert len(result.get("ambiguities", [])) > 0
+
+

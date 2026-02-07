@@ -1,0 +1,8 @@
+<!-- Chunk 894: bytes 3172736-3172885, type=class -->
+class GuidedCreatorProgram(dspy.Module):
+    """DSPy program to guide users through skill creation via chat."""
+```
+
+### ChatSessionState
+
+```python

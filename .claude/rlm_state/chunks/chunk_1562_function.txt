@@ -1,0 +1,33 @@
+<!-- Chunk 1562: bytes 6438825-6439721, type=function -->
+def _ensure_draft_root(drafts_root: Path, job_id: str) -> Path:
+    """
+    Ensure the per-job draft root exists (with its own taxonomy_meta.json).
+
+    Args:
+        drafts_root: Base directory for drafts
+        job_id: Unique job identifier
+
+    Returns:
+        Path to the job-specific draft root
+
+    """
+    job_root = drafts_root / job_id
+    job_root.mkdir(parents=True, exist_ok=True)
+    meta_path = job_root / "taxonomy_meta.json"
+    if not meta_path.exists():
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "total_skills": 0,
+                    "generation_count": 0,
+                    "statistics": {"by_type": {}, "by_weight": {}, "by_priority": {}},
+                    "last_updated": "",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    return job_root
+
+

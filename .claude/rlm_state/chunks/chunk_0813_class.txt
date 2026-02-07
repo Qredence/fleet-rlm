@@ -1,0 +1,14 @@
+<!-- Chunk 813: bytes 2736631-2736956, type=class -->
+class MyService(BaseService):
+    async def initialize(self):
+        # Access service-specific config
+        cache_ttl = self.config.get("services.skill_service.cache_ttl", 300)
+        self.cache_ttl = cache_ttl
+```
+
+## Best Practices
+
+### 1. Keep Services Thin
+
+```python
+# ✅ Good: Service orchestrates, domain has logic

@@ -1,0 +1,20 @@
+<!-- Chunk 1648: bytes 6674505-6675066, type=class -->
+class APIRateLimitError(APIError):
+    """
+    Raised when API rate limit is exceeded.
+
+    Attributes:
+        retry_after: Seconds to wait before retrying (if available)
+
+    """
+
+    def __init__(self, message: str, *, retry_after: int | None = None) -> None:
+        super().__init__(message, details={"retry_after": retry_after})
+        self.retry_after = retry_after
+
+
+# =============================================================================
+# Configuration Errors
+# =============================================================================
+
+

@@ -1,0 +1,27 @@
+<!-- Chunk 72: bytes 137468-138147, type=class -->
+class SmartSummarizer(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.summarize = dspy.Predict(SummarizeText)
+
+    def forward(self, document: str, max_length: int = 300):
+        # Pre-processing: Truncate if too long
+        if len(document) > max_length * 2:
+            document = document[:max_length * 2]
+
+        # Core processing
+        result = self.summarize(document=document, max_length=max_length)
+
+        # Post-processing: Ensure max length
+        summary = result.summary[:max_length]
+
+        return dspy.Prediction(summary=summary)
+```
+
+## Module Composition
+
+### Sequential Composition
+
+Modules execute in sequence:
+
+```python

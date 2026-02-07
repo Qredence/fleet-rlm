@@ -1,0 +1,373 @@
+<!-- Chunk 853: bytes 3033721-3042966, type=function -->
+def test_safe_json_loads_with_invalid_json():
+    """Test safe_json_loads with invalid JSON returns default."""
+    result = safe_json_loads('invalid json', default={})
+    assert result == {}
+```
+
+## Pull Request Process
+
+### Before Submitting
+
+1. **Run tests locally**: Ensure all tests pass
+2. **Run linting**: Fix any ruff issues
+3. **Update documentation**: Document new features or API changes
+4. **Update CHANGELOG.md**: Add your changes to the Unreleased section
+
+### Submitting a PR
+
+1. Fork the repository
+2. Create a feature branch:
+
+```bash
+git checkout -b feature/your-feature-name
+```
+
+3. Make your changes and commit:
+
+```bash
+git add .
+git commit -m "feat: add new feature description"
+```
+
+4. Push to your fork:
+
+```bash
+git push origin feature/your-feature-name
+```
+
+5. Open a pull request against the main branch
+
+### Commit Message Conventions
+
+We follow semantic commit messages:
+
+- `feat:` New feature
+- `fix:` Bug fix
+- `docs:` Documentation changes
+- `style:` Code style changes (formatting, etc.)
+- `refactor:` Code refactoring
+- `test:` Adding or updating tests
+- `chore:` Maintenance tasks
+
+Examples:
+
+```
+feat: add revision feedback support to skill editing
+fix: handle None values in safe_json_loads
+docs: update API reference for new modules
+test: add tests for common utility functions
+```
+
+### PR Checklist
+
+Before submitting your PR, ensure:
+
+- [ ] All tests pass locally
+- [ ] Code passes `uv run ruff check .`
+- [ ] Code passes `uv run ty check src/ tests/`
+- [ ] Documentation updated for new features
+- [ ] CHANGELOG.md updated (if applicable)
+- [ ] Commit messages follow conventions
+- [ ] PR description clearly explains the changes
+
+### Branch Protection & Required Checks
+
+The `main` branch is protected with the following requirements:
+
+- At least 1 approving review required
+- All CI status checks must pass:
+  - Linting (ruff check and format)
+  - Type checking (ty)
+  - Tests (Python 3.12 and 3.13)
+  - Build verification
+  - Security checks
+- All conversations must be resolved
+- Linear history enforced (no merge commits)
+
+See the [Branch Protection Guide](../../.github/BRANCH_PROTECTION.md) for complete details on repository protection rules.
+
+## Project Structure
+
+```
+skill-fleet/
+├── src/skill_fleet/
+│   ├── agent/          # Conversational agent for skill creation
+│   ├── analytics/      # Usage analytics and recommendations
+│   ├── cli/            # Command-line interface
+│   ├── common/         # Shared utilities
+│   ├── llm/            # LLM configuration and DSPy setup
+│   ├── onboarding/     # User onboarding and bootstrap
+│   ├── taxonomy/       # Skill taxonomy management
+│   ├── validators/     # Skill validation
+│   └── workflow/       # DSPy-powered skill creation workflow
+├── docs/               # Documentation
+├── tests/              # Test suite
+└── config/             # Configuration files
+```
+
+## Getting Help
+
+- **Documentation**: Start with [docs/overview.md](../overview.md)
+- **Issues**: Check [GitHub Issues](https://github.com/Qredence/skill-fleet/issues)
+- **Discussions**: Use [GitHub Discussions](https://github.com/Qredence/skill-fleet/discussions) for questions
+
+## License
+
+By contributing to Skills Fleet, you agree that your contributions will be licensed under the same license as the project.
+
+
+============================================================
+END FILE: docs/development/CONTRIBUTING.md
+============================================================
+
+============================================================
+FILE: docs/development/IMPORT_PATH_GUIDE.md
+============================================================
+
+# Import Path Guide
+
+**Last Updated**: 2026-01-29
+**Status**: Post-DSPy Architecture Migration
+
+## Overview
+
+After the DSPy workflow architecture migration, Skills Fleet uses a clean three-layer pattern: **Signatures → Modules → Workflows**. This guide provides canonical import paths for all modules.
+
+## Current Architecture
+
+```
+src/skill_fleet/
+├── dspy/                  # Centralized DSPy configuration ⭐
+├── core/
+│   ├── modules/          # DSPy modules
+│   ├── signatures/       # DSPy signatures
+│   ├── workflows/        # Workflow orchestration
+│   └── models.py         # Domain models
+├── api/                  # FastAPI application
+├── cli/                  # CLI commands
+├── common/               # Shared utilities
+├── infrastructure/       # Technical infrastructure
+├── taxonomy/             # Taxonomy management
+└── validators/           # Skill validation
+```
+
+## Recommended Import Patterns
+
+### 1. DSPy Configuration ⭐
+
+**Primary Location**: `skill_fleet.dspy`
+
+```python
+# DSPy setup (NEW location - preferred)
+from skill_fleet.dspy import configure_dspy, get_task_lm
+
+# Configure DSPy globally
+configure_dspy()
+
+# Get language model for specific task
+lm = get_task_lm("skill_understand")
+edit_lm = get_task_lm("skill_edit")
+```
+
+**Note**: Old imports from `infrastructure/llm/` and `core/dspy/` no longer work.
+
+### 2. Workflow Layer
+
+**Primary Location**: `skill_fleet.core.workflows`
+
+```python
+# Skill creation workflows
+from skill_fleet.core.workflows.skill_creation import (
+    UnderstandingWorkflow,
+    GenerationWorkflow,
+    ValidationWorkflow,
+)
+
+# Use workflows
+understanding = UnderstandingWorkflow()
+result = await understanding.execute(
+    task_description="Build a REST API",
+    user_context={},
+    taxonomy_structure={},
+    existing_skills=[],
+)
+```
+
+### 3. Module Layer (Direct Use)
+
+**Primary Location**: `skill_fleet.core.modules`
+
+```python
+# Understanding modules
+from skill_fleet.core.modules.understanding import (
+    GatherRequirementsModule,
+    AnalyzeIntentModule,
+    FindTaxonomyPathModule,
+    AnalyzeDependenciesModule,
+)
+
+# Generation modules
+from skill_fleet.core.modules.generation import SkillContentGeneratorModule
+
+# Validation modules
+from skill_fleet.core.modules.validation import (
+    ComplianceCheckerModule,
+    QualityAssessorModule,
+    SkillRefinerModule,
+)
+
+# HITL modules
+from skill_fleet.core.modules.hitl import GenerateClarifyingQuestionsModule
+```
+
+### 4. Signature Layer (Type Definitions)
+
+**Primary Location**: `skill_fleet.core.signatures`
+
+```python
+# Understanding signatures
+from skill_fleet.core.signatures.understanding import (
+    GatherRequirements,
+    AnalyzeIntent,
+    FindTaxonomyPath,
+    AnalyzeDependencies,
+    SynthesizePlan,
+)
+
+# Generation signatures
+from skill_fleet.core.signatures.generation import (
+    GenerateSkillContent,
+    GenerateSkillSection,
+)
+
+# Validation signatures
+from skill_fleet.core.signatures.validation import (
+    ValidateCompliance,
+    AssessQuality,
+    RefineSkill,
+)
+
+# HITL signatures
+from skill_fleet.core.signatures.hitl import GenerateClarifyingQuestions
+```
+
+### 5. API Layer
+
+**Primary Location**: `skill_fleet.api`
+
+```python
+# FastAPI application
+from skill_fleet.api.factory import create_app
+
+# Services
+from skill_fleet.api.services.skill_service import SkillService
+from skill_fleet.api.services.job_manager import get_job_manager
+
+# Schemas
+from skill_fleet.api.schemas.skills import (
+    CreateSkillRequest,
+    CreateSkillResponse,
+)
+
+# Dependencies
+from skill_fleet.api.dependencies import get_skill_service
+```
+
+### 6. Domain Models
+
+**Primary Location**: `skill_fleet.core.models`
+
+```python
+from skill_fleet.core.models import (
+    # Skill creation
+    SkillCreationResult,
+    SkillMetadata,
+    PlanResult,
+    
+    # HITL
+    HITLSession,
+    ClarifyingQuestion,
+    
+    # Validation
+    ValidationReport,
+    QualityAssessment,
+)
+```
+
+### 7. Common Utilities
+
+**Primary Location**: `skill_fleet.common`
+
+```python
+# Security
+from skill_fleet.common.security import (
+    sanitize_taxonomy_path,
+    resolve_path_within_root,
+    is_safe_path,
+)
+
+# Utilities
+from skill_fleet.common.utils import (
+    safe_json_loads,
+    safe_float,
+)
+
+# Paths
+from skill_fleet.common.paths import (
+    get_skills_root,
+    get_drafts_root,
+)
+```
+
+### 8. Taxonomy
+
+**Primary Location**: `skill_fleet.taxonomy`
+
+```python
+from skill_fleet.taxonomy.manager import TaxonomyManager
+```
+
+### 9. Validation
+
+**Primary Location**: `skill_fleet.validators`
+
+```python
+from skill_fleet.validators.skill_validator import SkillValidator
+```
+
+### 10. CLI
+
+**Primary Location**: `skill_fleet.cli`
+
+```python
+from skill_fleet.cli.app import app as cli_app
+```
+
+## Deprecated Import Patterns ❌
+
+These import paths **no longer work** after the migration:
+
+```python
+# ❌ Deleted directories
+from skill_fleet.core.dspy import ...              # Directory deleted
+from skill_fleet.infrastructure.llm import ...     # Directory deleted
+from skill_fleet.onboarding import ...             # Directory deleted
+
+# ❌ Deleted orchestrators
+from skill_fleet.core.dspy.modules.workflows import TaskAnalysisOrchestrator  # Deleted
+from skill_fleet.core.dspy.modules.workflows import ContentGenerationOrchestrator  # Deleted
+from skill_fleet.core.dspy.modules.workflows import QualityAssuranceOrchestrator  # Deleted
+
+# ❌ Old creator
+from skill_fleet.core.creator import TaxonomySkillCreator  # Deleted
+```
+
+## Architecture Pattern: Signatures → Modules → Workflows
+
+### Layer 1: Signatures (Type Definitions)
+
+```python
+# src/skill_fleet/core/signatures/understanding/requirements.py
+import dspy
+

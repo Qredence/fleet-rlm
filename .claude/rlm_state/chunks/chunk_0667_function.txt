@@ -1,0 +1,12 @@
+<!-- Chunk 667: bytes 1270720-1271009, type=function -->
+def _filter_pickleable(d: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    kept: Dict[str, Any] = {}
+    dropped: List[str] = []
+    for k, v in d.items():
+        if _is_pickleable(v):
+            kept[k] = v
+        else:
+            dropped.append(k)
+    return kept, dropped
+
+

@@ -1,0 +1,19 @@
+<!-- Chunk 2058: bytes 7963621-7964272, type=function -->
+def test_usage_tracking(temp_analytics_dir):
+    tracker = UsageTracker(temp_analytics_dir)
+    tracker.track_usage("skill_1", "user_1", success=True, task_id="task_1")
+    tracker.track_usage("skill_2", "user_1", success=False, task_id="task_1")
+
+    usage_file = temp_analytics_dir / "usage_log.jsonl"
+    assert usage_file.exists()
+
+    with usage_file.open("r") as f:
+        lines = f.readlines()
+        assert len(lines) == 2
+        event1 = json.loads(lines[0])
+        assert event1["skill_id"] == "skill_1"
+        assert event1["user_id"] == "user_1"
+        assert event1["success"] is True
+        assert event1["task_id"] == "task_1"
+
+

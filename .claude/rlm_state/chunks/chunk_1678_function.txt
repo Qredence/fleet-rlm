@@ -1,0 +1,50 @@
+<!-- Chunk 1678: bytes 6700082-6701675, type=function -->
+def serialize_pydantic_object(
+    obj: Any, output_format: str = "dict"
+) -> dict[str, Any] | list[Any] | str:
+    """
+    Serialize a Pydantic object or dict to JSON-compatible format.
+
+    Args:
+        obj: Object to serialize (Pydantic model, dict, or primitive)
+        output_format: "dict" for dict output, "json" for JSON string
+
+    Returns:
+        Serialized object as dict, list, or JSON string
+
+    Examples:
+        >>> class Example(BaseModel):
+        ...     name: str
+        >>> obj = Example(name="test")
+        >>> serialize_pydantic_object(obj, output_format="dict")
+        {'name': 'test'}
+        >>> serialize_pydantic_object(obj, output_format="json")
+        '{"name":"test"}'
+
+    """
+    if obj is None:
+        return {} if output_format == "dict" else "{}"
+
+    # Check if object has model_dump method (Pydantic v2)
+    if hasattr(obj, "model_dump"):
+        serialized = obj.model_dump(mode="json", exclude_none=True)
+    elif isinstance(obj, BaseModel):
+        # Fallback for Pydantic v1 or older code
+        serialized = obj.dict(exclude_none=True, by_alias=True)
+    elif isinstance(obj, (dict, list, str, int, float, bool)):
+        # Primitives are already JSON-serializable
+        serialized = obj
+    else:
+        # Try to serialize as dict
+        try:
+            serialized = dict(obj)
+        except (TypeError, ValueError):
+            # Last resort: convert to string
+            serialized = str(obj)
+
+    if output_format == "json":
+        return json.dumps(serialized, ensure_ascii=False, indent=2, default=str)
+
+    return serialized
+
+

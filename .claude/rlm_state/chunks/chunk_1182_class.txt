@@ -1,0 +1,64 @@
+<!-- Chunk 1182: bytes 4483882-4485975, type=class -->
+class WebhookFeedbackHandler(FeedbackHandler):
+    """Send skill for review via webhook and wait for response."""
+    
+    def __init__(self, webhook_url: str, timeout: int = 3600):
+        self.webhook_url = webhook_url
+        self.timeout = timeout
+    
+    def get_feedback(
+        self,
+        packaging_manifest: str,
+        validation_report: Dict
+    ) -> str:
+        """Post to webhook and wait for approval response."""
+        
+        import requests
+        import time
+        
+        # Post review request
+        review_data = {
+            "manifest": packaging_manifest,
+            "validation": validation_report,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        try:
+            response = requests.post(
+                self.webhook_url,
+                json=review_data,
+                timeout=10
+            )
+            review_id = response.json().get('review_id')
+            
+            # Poll for decision
+            start_time = time.time()
+            while time.time() - start_time < self.timeout:
+                status_response = requests.get(
+                    f"{self.webhook_url}/{review_id}",
+                    timeout=5
+                )
+                
+                if status_response.json().get('status') != 'pending':
+                    return json.dumps(status_response.json())
+                
+                time.sleep(30)  # Poll every 30 seconds
+            
+            # Timeout
+            return json.dumps({
+                "status": "needs_revision",
+                "comments": "Review timeout - please review manually",
+                "reviewer": "system",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
+        except Exception as e:
+            logger.error(f"Webhook feedback error: {e}")
+            return json.dumps({
+                "status": "needs_revision",
+                "comments": f"Feedback system error: {str(e)}",
+                "reviewer": "system",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+

@@ -1,0 +1,55 @@
+<!-- Chunk 1925: bytes 7743533-7745565, type=function -->
+def log_lm_usage(prediction: Any, prefix: str = "lm") -> None:
+    """
+    Extract and log LM usage metrics from a DSPy prediction.
+
+    DSPy 3.1.2+ with `track_usage=True` provides token usage information
+    via the `get_lm_usage()` method on predictions.
+
+    Args:
+        prediction: DSPy prediction object with get_lm_usage() method
+        prefix: Prefix for metric names (default: "lm")
+
+    Examples:
+        >>> # From within an orchestrator
+        >>> result = await module.aforward(...)
+        >>> log_lm_usage(result, prefix="phase1_lm")
+        # Logs: phase1_lm_tokens_in, phase1_lm_tokens_out, phase1_lm_total_tokens
+
+    """
+    try:
+        if not hasattr(prediction, "get_lm_usage"):
+            logger.debug("Prediction does not have get_lm_usage method")
+            return
+
+        usage = prediction.get_lm_usage()
+        if not usage:
+            logger.debug("No LM usage data available")
+            return
+
+        # Extract token counts from usage data
+        metrics: dict[str, float] = {}
+
+        # Handle different usage formats
+        if isinstance(usage, dict):
+            for lm_name, lm_usage in usage.items():
+                if isinstance(lm_usage, dict):
+                    tokens_in = lm_usage.get("tokens_in", 0)
+                    tokens_out = lm_usage.get("tokens_out", 0)
+                    total_tokens = lm_usage.get("total_tokens", tokens_in + tokens_out)
+
+                    base_key = f"{prefix}_{lm_name}" if lm_name else prefix
+                    metrics[f"{base_key}_tokens_in"] = float(tokens_in)
+                    metrics[f"{base_key}_tokens_out"] = float(tokens_out)
+                    metrics[f"{base_key}_total_tokens"] = float(total_tokens)
+                else:
+                    # Simple numeric usage
+                    metrics[f"{prefix}_{lm_name}"] = float(lm_usage)
+
+        log_phase_metrics("", prefix, metrics)
+        logger.debug(f"Logged LM usage: {metrics}")
+
+    except Exception as e:
+        logger.warning(f"Failed to log LM usage: {e}")
+
+

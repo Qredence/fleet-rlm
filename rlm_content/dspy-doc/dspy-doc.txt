@@ -1,0 +1,3126 @@
+Directory structure:
+└── stanfordnlp-dspy/
+    ├── .pre-commit-config.yaml
+    ├── docs/
+    │   ├── Pipfile
+    │   ├── requirements.txt
+    │   ├── vercel.json
+    │   ├── docs/
+    │   │   ├── api/
+    │   │   │   ├── index.md
+    │   │   │   ├── adapters/
+    │   │   │   │   ├── Adapter.md
+    │   │   │   │   ├── ChatAdapter.md
+    │   │   │   │   ├── JSONAdapter.md
+    │   │   │   │   └── TwoStepAdapter.md
+    │   │   │   ├── evaluation/
+    │   │   │   │   ├── answer_exact_match.md
+    │   │   │   │   ├── answer_passage_match.md
+    │   │   │   │   ├── CompleteAndGrounded.md
+    │   │   │   │   ├── Evaluate.md
+    │   │   │   │   ├── EvaluationResult.md
+    │   │   │   │   └── SemanticF1.md
+    │   │   │   ├── experimental/
+    │   │   │   │   ├── Citations.md
+    │   │   │   │   └── Document.md
+    │   │   │   ├── models/
+    │   │   │   │   ├── Embedder.md
+    │   │   │   │   └── LM.md
+    │   │   │   ├── modules/
+    │   │   │   │   ├── BestOfN.md
+    │   │   │   │   ├── ChainOfThought.md
+    │   │   │   │   ├── Module.md
+    │   │   │   │   ├── MultiChainComparison.md
+    │   │   │   │   ├── Parallel.md
+    │   │   │   │   ├── Predict.md
+    │   │   │   │   ├── ProgramOfThought.md
+    │   │   │   │   ├── ReAct.md
+    │   │   │   │   └── Refine.md
+    │   │   │   ├── optimizers/
+    │   │   │   │   ├── BetterTogether.md
+    │   │   │   │   ├── BootstrapFewShot.md
+    │   │   │   │   ├── BootstrapFewShotWithRandomSearch.md
+    │   │   │   │   ├── BootstrapFinetune.md
+    │   │   │   │   ├── BootstrapRS.md
+    │   │   │   │   ├── COPRO.md
+    │   │   │   │   ├── Ensemble.md
+    │   │   │   │   ├── InferRules.md
+    │   │   │   │   ├── KNN.md
+    │   │   │   │   ├── KNNFewShot.md
+    │   │   │   │   └── LabeledFewShot.md
+    │   │   │   ├── primitives/
+    │   │   │   │   ├── Audio.md
+    │   │   │   │   ├── Code.md
+    │   │   │   │   ├── Example.md
+    │   │   │   │   ├── History.md
+    │   │   │   │   ├── Image.md
+    │   │   │   │   ├── Prediction.md
+    │   │   │   │   ├── Tool.md
+    │   │   │   │   └── ToolCalls.md
+    │   │   │   ├── signatures/
+    │   │   │   │   ├── InputField.md
+    │   │   │   │   ├── OutputField.md
+    │   │   │   │   └── Signature.md
+    │   │   │   ├── tools/
+    │   │   │   │   ├── ColBERTv2.md
+    │   │   │   │   ├── Embeddings.md
+    │   │   │   │   └── PythonInterpreter.md
+    │   │   │   └── utils/
+    │   │   │       ├── asyncify.md
+    │   │   │       ├── configure_cache.md
+    │   │   │       ├── disable_litellm_logging.md
+    │   │   │       ├── disable_logging.md
+    │   │   │       ├── enable_litellm_logging.md
+    │   │   │       ├── enable_logging.md
+    │   │   │       ├── inspect_history.md
+    │   │   │       ├── load.md
+    │   │   │       ├── StatusMessage.md
+    │   │   │       ├── StatusMessageProvider.md
+    │   │   │       ├── streamify.md
+    │   │   │       └── StreamListener.md
+    │   │   ├── community/
+    │   │   │   └── how-to-contribute.md
+    │   │   ├── js/
+    │   │   │   └── runllm-widget.js
+    │   │   ├── static/
+    │   │   │   └── .nojekyll
+    │   │   └── tutorials/
+    │   │       ├── classification/
+    │   │       │   └── index.md
+    │   │       └── papillon/
+    │   │           └── index.md
+    │   └── overrides/
+    │       └── main.html
+    ├── dspy/
+    │   ├── __metadata__.py
+    │   ├── adapters/
+    │   │   ├── __init__.py
+    │   │   └── types/
+    │   │       └── __init__.py
+    │   ├── datasets/
+    │   │   ├── __init__.py
+    │   │   └── alfworld/
+    │   │       └── __init__.py
+    │   ├── dsp/
+    │   │   ├── __init__.py
+    │   │   └── utils/
+    │   │       └── __init__.py
+    │   ├── evaluate/
+    │   │   └── __init__.py
+    │   ├── experimental/
+    │   │   └── __init__.py
+    │   ├── predict/
+    │   │   ├── __init__.py
+    │   │   ├── parameter.py
+    │   │   └── avatar/
+    │   │       ├── __init__.py
+    │   │       ├── models.py
+    │   │       └── signatures.py
+    │   ├── primitives/
+    │   │   └── __init__.py
+    │   ├── propose/
+    │   │   ├── __init__.py
+    │   │   └── propose_base.py
+    │   ├── retrievers/
+    │   │   └── __init__.py
+    │   ├── signatures/
+    │   │   ├── __init__.py
+    │   │   └── utils.py
+    │   ├── streaming/
+    │   │   └── __init__.py
+    │   ├── teleprompt/
+    │   │   ├── teleprompt.py
+    │   │   ├── vanilla.py
+    │   │   └── gepa/
+    │   │       └── __init__.py
+    │   └── utils/
+    │       └── caching.py
+    ├── tests/
+    │   ├── README.md
+    │   ├── __init__.py
+    │   ├── adapters/
+    │   │   └── test_audio.py
+    │   ├── evaluate/
+    │   │   └── test_metrics.py
+    │   ├── metadata/
+    │   │   └── test_metadata.py
+    │   ├── reliability/
+    │   │   ├── __init__.py
+    │   │   ├── test_generated.py
+    │   │   ├── complex_types/
+    │   │   │   └── generated/
+    │   │   │       └── test_nesting_1/
+    │   │   │           └── inputs/
+    │   │   │               ├── input1.json
+    │   │   │               └── input2.json
+    │   │   └── input_formats/
+    │   │       └── generated/
+    │   │           └── test_markdown_1/
+    │   │               └── inputs/
+    │   │                   └── input2.json
+    │   ├── teleprompt/
+    │   │   ├── test_finetune.py
+    │   │   └── test_teleprompt.py
+    │   ├── test_utils/
+    │   │   ├── __init__.py
+    │   │   └── server/
+    │   │       └── litellm_server_config.yaml
+    │   └── utils/
+    │       ├── __init__.py
+    │       └── resources/
+    │           └── mcp_server.py
+    └── .github/
+        ├── ISSUE_TEMPLATE/
+        │   ├── bug_report.yml
+        │   └── feature_request.yml
+        ├── PULL_REQUEST_TEMPLATE/
+        │   └── pull_request_template.md
+        ├── workflow_scripts/
+        │   └── install_testpypi_pkg.sh
+        └── .internal_dspyai/
+            └── pyproject.toml
+
+================================================
+FILE: .pre-commit-config.yaml
+================================================
+default_language_version:
+  python: python3.10
+
+default_stages: [pre-commit]
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff (lint)
+        entry: ruff
+        language: system
+        types_or: [python, pyi]
+        files: ^(dspy|tests)/.*\.py$
+        exclude: ^(dspy/__metadata__\.py|tests/reliability/.*\.py)$
+        args: [check, --fix-only]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        args: ["--allow-multiple-documents", "--unsafe"]
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: debug-statements
+
+
+
+================================================
+FILE: docs/Pipfile
+================================================
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+dspy = {git = "https://github.com/stanfordnlp/dspy.git"}
+mkdocs-material = "*"
+mkdocs-jupyter = "*"
+"mkdocs-material[imaging]" = "*"
+mkdocs-redirects = "*"
+mkdocstrings = "*"
+mkdocstrings-python = "*"
+urllib3 = "==1.26.6"
+mistune = "==3.0.2"
+
+[requires]
+python_version = "3.12"
+
+
+
+================================================
+FILE: docs/requirements.txt
+================================================
+git+https://github.com/stanfordnlp/dspy.git
+mkdocs-material
+mkdocs-jupyter
+mkdocs-material[imaging]
+mkdocs-redirects
+mkdocstrings
+mkdocstrings-python
+mkdocs-llmstxt>=0.3.0
+urllib3==1.26.6
+mistune==3.0.2
+
+
+
+================================================
+FILE: docs/vercel.json
+================================================
+{
+  "trailingSlash": true,
+  "headers": [
+    {
+      "source": "/(.*).md",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/markdown; charset=utf-8"
+        }
+      ]
+    }
+  ]
+}
+
+
+
+================================================
+FILE: docs/docs/api/index.md
+================================================
+# API Reference
+
+Welcome to the DSPy API reference documentation. This section provides detailed information about DSPy's classes, modules, and functions.
+
+
+================================================
+FILE: docs/docs/api/adapters/Adapter.md
+================================================
+# dspy.Adapter
+
+<!-- START_API_REF -->
+::: dspy.Adapter
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - format
+            - format_assistant_message_content
+            - format_conversation_history
+            - format_demos
+            - format_field_description
+            - format_field_structure
+            - format_system_message
+            - format_task_description
+            - format_user_message_content
+            - parse
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/adapters/ChatAdapter.md
+================================================
+# dspy.ChatAdapter
+
+<!-- START_API_REF -->
+::: dspy.ChatAdapter
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - format
+            - format_assistant_message_content
+            - format_conversation_history
+            - format_demos
+            - format_field_description
+            - format_field_structure
+            - format_field_with_value
+            - format_finetune_data
+            - format_system_message
+            - format_task_description
+            - format_user_message_content
+            - parse
+            - user_message_output_requirements
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/adapters/JSONAdapter.md
+================================================
+# dspy.JSONAdapter
+
+<!-- START_API_REF -->
+::: dspy.JSONAdapter
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - format
+            - format_assistant_message_content
+            - format_conversation_history
+            - format_demos
+            - format_field_description
+            - format_field_structure
+            - format_field_with_value
+            - format_finetune_data
+            - format_system_message
+            - format_task_description
+            - format_user_message_content
+            - parse
+            - user_message_output_requirements
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/adapters/TwoStepAdapter.md
+================================================
+# dspy.TwoStepAdapter
+
+<!-- START_API_REF -->
+::: dspy.TwoStepAdapter
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - format
+            - format_assistant_message_content
+            - format_conversation_history
+            - format_demos
+            - format_field_description
+            - format_field_structure
+            - format_system_message
+            - format_task_description
+            - format_user_message_content
+            - parse
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/evaluation/answer_exact_match.md
+================================================
+# dspy.evaluate.answer_exact_match
+
+<!-- START_API_REF -->
+::: dspy.evaluate.answer_exact_match
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/evaluation/answer_passage_match.md
+================================================
+# dspy.evaluate.answer_passage_match
+
+<!-- START_API_REF -->
+::: dspy.evaluate.answer_passage_match
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/evaluation/CompleteAndGrounded.md
+================================================
+# dspy.evaluate.CompleteAndGrounded
+
+<!-- START_API_REF -->
+::: dspy.evaluate.CompleteAndGrounded
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/evaluation/Evaluate.md
+================================================
+# dspy.Evaluate
+
+<!-- START_API_REF -->
+::: dspy.Evaluate
+    handler: python
+    options:
+        members:
+            - __call__
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/evaluation/EvaluationResult.md
+================================================
+# dspy.evaluate.EvaluationResult
+
+<!-- START_API_REF -->
+::: dspy.evaluate.EvaluationResult
+    handler: python
+    options:
+        members:
+            - copy
+            - from_completions
+            - get
+            - get_lm_usage
+            - inputs
+            - items
+            - keys
+            - labels
+            - set_lm_usage
+            - toDict
+            - values
+            - with_inputs
+            - without
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/evaluation/SemanticF1.md
+================================================
+# dspy.evaluate.SemanticF1
+
+<!-- START_API_REF -->
+::: dspy.evaluate.SemanticF1
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/experimental/Citations.md
+================================================
+# dspy.experimental.Citations
+
+<!-- START_API_REF -->
+::: dspy.experimental.Citations
+    handler: python
+    options:
+        members:
+            - adapt_to_native_lm_feature
+            - description
+            - extract_custom_type_from_annotation
+            - format
+            - from_dict_list
+            - is_streamable
+            - parse_lm_response
+            - parse_stream_chunk
+            - serialize_model
+            - validate_input
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/experimental/Document.md
+================================================
+# dspy.experimental.Document
+
+<!-- START_API_REF -->
+::: dspy.experimental.Document
+    handler: python
+    options:
+        members:
+            - adapt_to_native_lm_feature
+            - description
+            - extract_custom_type_from_annotation
+            - format
+            - is_streamable
+            - parse_lm_response
+            - parse_stream_chunk
+            - serialize_model
+            - validate_input
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/models/Embedder.md
+================================================
+# dspy.Embedder
+
+<!-- START_API_REF -->
+::: dspy.Embedder
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/models/LM.md
+================================================
+# dspy.LM
+
+<!-- START_API_REF -->
+::: dspy.LM
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - aforward
+            - copy
+            - dump_state
+            - finetune
+            - forward
+            - infer_provider
+            - inspect_history
+            - kill
+            - launch
+            - reinforce
+            - update_history
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/BestOfN.md
+================================================
+# dspy.BestOfN
+
+<!-- START_API_REF -->
+::: dspy.BestOfN
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/ChainOfThought.md
+================================================
+# dspy.ChainOfThought
+
+<!-- START_API_REF -->
+::: dspy.ChainOfThought
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - aforward
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/Module.md
+================================================
+# dspy.Module
+
+<!-- START_API_REF -->
+::: dspy.Module
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - batch
+            - deepcopy
+            - dump_state
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/MultiChainComparison.md
+================================================
+# dspy.MultiChainComparison
+
+<!-- START_API_REF -->
+::: dspy.MultiChainComparison
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/Parallel.md
+================================================
+# dspy.Parallel
+
+<!-- START_API_REF -->
+::: dspy.Parallel
+    handler: python
+    options:
+        members:
+            - __call__
+            - forward
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/Predict.md
+================================================
+# dspy.Predict
+
+<!-- START_API_REF -->
+::: dspy.Predict
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - aforward
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_config
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset
+            - reset_copy
+            - save
+            - set_lm
+            - update_config
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/ProgramOfThought.md
+================================================
+# dspy.ProgramOfThought
+
+<!-- START_API_REF -->
+::: dspy.ProgramOfThought
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/ReAct.md
+================================================
+# dspy.ReAct
+
+<!-- START_API_REF -->
+::: dspy.ReAct
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - aforward
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+            - truncate_trajectory
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/modules/Refine.md
+================================================
+# dspy.Refine
+
+<!-- START_API_REF -->
+::: dspy.Refine
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - batch
+            - deepcopy
+            - dump_state
+            - forward
+            - get_lm
+            - inspect_history
+            - load
+            - load_state
+            - map_named_predictors
+            - named_parameters
+            - named_predictors
+            - named_sub_modules
+            - parameters
+            - predictors
+            - reset_copy
+            - save
+            - set_lm
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/BetterTogether.md
+================================================
+# dspy.BetterTogether
+
+<!-- START_API_REF -->
+::: dspy.BetterTogether
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/BootstrapFewShot.md
+================================================
+# dspy.BootstrapFewShot
+
+<!-- START_API_REF -->
+::: dspy.BootstrapFewShot
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/BootstrapFewShotWithRandomSearch.md
+================================================
+# dspy.BootstrapFewShotWithRandomSearch
+
+<!-- START_API_REF -->
+::: dspy.BootstrapFewShotWithRandomSearch
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/BootstrapFinetune.md
+================================================
+# dspy.BootstrapFinetune
+
+<!-- START_API_REF -->
+::: dspy.BootstrapFinetune
+    handler: python
+    options:
+        members:
+            - compile
+            - convert_to_lm_dict
+            - finetune_lms
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/BootstrapRS.md
+================================================
+# dspy.BootstrapRS
+
+<!-- START_API_REF -->
+::: dspy.BootstrapRS
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/COPRO.md
+================================================
+# dspy.COPRO
+
+<!-- START_API_REF -->
+::: dspy.COPRO
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/Ensemble.md
+================================================
+# dspy.Ensemble
+
+<!-- START_API_REF -->
+::: dspy.Ensemble
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/InferRules.md
+================================================
+# dspy.InferRules
+
+<!-- START_API_REF -->
+::: dspy.InferRules
+    handler: python
+    options:
+        members:
+            - compile
+            - evaluate_program
+            - format_examples
+            - get_params
+            - get_predictor_demos
+            - induce_natural_language_rules
+            - update_program_instructions
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/KNN.md
+================================================
+# dspy.KNN
+
+<!-- START_API_REF -->
+::: dspy.KNN
+    handler: python
+    options:
+        members:
+            - __call__
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/KNNFewShot.md
+================================================
+# dspy.KNNFewShot
+
+<!-- START_API_REF -->
+::: dspy.KNNFewShot
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/optimizers/LabeledFewShot.md
+================================================
+# dspy.LabeledFewShot
+
+<!-- START_API_REF -->
+::: dspy.LabeledFewShot
+    handler: python
+    options:
+        members:
+            - compile
+            - get_params
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/Audio.md
+================================================
+# dspy.Audio
+
+<!-- START_API_REF -->
+::: dspy.Audio
+    handler: python
+    options:
+        members:
+            - adapt_to_native_lm_feature
+            - description
+            - extract_custom_type_from_annotation
+            - format
+            - from_array
+            - from_file
+            - from_url
+            - is_streamable
+            - parse_lm_response
+            - parse_stream_chunk
+            - serialize_model
+            - validate_input
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/Code.md
+================================================
+# dspy.Code
+
+<!-- START_API_REF -->
+::: dspy.Code
+    handler: python
+    options:
+        members:
+            - adapt_to_native_lm_feature
+            - description
+            - extract_custom_type_from_annotation
+            - format
+            - is_streamable
+            - parse_lm_response
+            - parse_stream_chunk
+            - serialize_model
+            - validate_input
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/Example.md
+================================================
+# dspy.Example
+
+<!-- START_API_REF -->
+::: dspy.Example
+    handler: python
+    options:
+        members:
+            - copy
+            - get
+            - inputs
+            - items
+            - keys
+            - labels
+            - toDict
+            - values
+            - with_inputs
+            - without
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/History.md
+================================================
+# dspy.History
+
+<!-- START_API_REF -->
+::: dspy.History
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/Image.md
+================================================
+# dspy.Image
+
+<!-- START_API_REF -->
+::: dspy.Image
+    handler: python
+    options:
+        members:
+            - adapt_to_native_lm_feature
+            - description
+            - extract_custom_type_from_annotation
+            - format
+            - from_PIL
+            - from_file
+            - from_url
+            - is_streamable
+            - parse_lm_response
+            - parse_stream_chunk
+            - serialize_model
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/Prediction.md
+================================================
+# dspy.Prediction
+
+<!-- START_API_REF -->
+::: dspy.Prediction
+    handler: python
+    options:
+        members:
+            - copy
+            - from_completions
+            - get
+            - get_lm_usage
+            - inputs
+            - items
+            - keys
+            - labels
+            - set_lm_usage
+            - toDict
+            - values
+            - with_inputs
+            - without
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/Tool.md
+================================================
+# dspy.Tool
+
+<!-- START_API_REF -->
+::: dspy.Tool
+    handler: python
+    options:
+        members:
+            - __call__
+            - acall
+            - adapt_to_native_lm_feature
+            - description
+            - extract_custom_type_from_annotation
+            - format
+            - format_as_litellm_function_call
+            - from_langchain
+            - from_mcp_tool
+            - is_streamable
+            - parse_lm_response
+            - parse_stream_chunk
+            - serialize_model
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/primitives/ToolCalls.md
+================================================
+# dspy.ToolCalls
+
+<!-- START_API_REF -->
+::: dspy.ToolCalls
+    handler: python
+    options:
+        members:
+            - adapt_to_native_lm_feature
+            - description
+            - extract_custom_type_from_annotation
+            - format
+            - from_dict_list
+            - is_streamable
+            - parse_lm_response
+            - parse_stream_chunk
+            - serialize_model
+            - validate_input
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/signatures/InputField.md
+================================================
+# dspy.InputField
+
+<!-- START_API_REF -->
+::: dspy.InputField
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/signatures/OutputField.md
+================================================
+# dspy.OutputField
+
+<!-- START_API_REF -->
+::: dspy.OutputField
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/signatures/Signature.md
+================================================
+# dspy.Signature
+
+<!-- START_API_REF -->
+::: dspy.Signature
+    handler: python
+    options:
+        members:
+            - append
+            - delete
+            - dump_state
+            - equals
+            - insert
+            - load_state
+            - prepend
+            - with_instructions
+            - with_updated_fields
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/tools/ColBERTv2.md
+================================================
+# dspy.ColBERTv2
+
+<!-- START_API_REF -->
+::: dspy.ColBERTv2
+    handler: python
+    options:
+        members:
+            - __call__
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/tools/Embeddings.md
+================================================
+# dspy.retrievers.Embeddings
+
+<!-- START_API_REF -->
+::: dspy.Embeddings
+    handler: python
+    options:
+        members:
+            - __call__
+            - forward
+            - from_saved
+            - load
+            - save
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/tools/PythonInterpreter.md
+================================================
+# dspy.PythonInterpreter
+
+<!-- START_API_REF -->
+::: dspy.PythonInterpreter
+    handler: python
+    options:
+        members:
+            - __call__
+            - execute
+            - shutdown
+            - start
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/asyncify.md
+================================================
+# dspy.asyncify
+
+<!-- START_API_REF -->
+::: dspy.asyncify
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/configure_cache.md
+================================================
+# dspy.configure_cache
+
+<!-- START_API_REF -->
+::: dspy.configure_cache
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/disable_litellm_logging.md
+================================================
+# dspy.disable_litellm_logging
+
+<!-- START_API_REF -->
+::: dspy.disable_litellm_logging
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/disable_logging.md
+================================================
+# dspy.disable_logging
+
+<!-- START_API_REF -->
+::: dspy.disable_logging
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/enable_litellm_logging.md
+================================================
+# dspy.enable_litellm_logging
+
+<!-- START_API_REF -->
+::: dspy.enable_litellm_logging
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/enable_logging.md
+================================================
+# dspy.enable_logging
+
+<!-- START_API_REF -->
+::: dspy.enable_logging
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/inspect_history.md
+================================================
+# dspy.inspect_history
+
+<!-- START_API_REF -->
+::: dspy.inspect_history
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/load.md
+================================================
+# dspy.load
+
+<!-- START_API_REF -->
+::: dspy.load
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/StatusMessage.md
+================================================
+# dspy.streaming.StatusMessage
+
+<!-- START_API_REF -->
+::: dspy.streaming.StatusMessage
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/StatusMessageProvider.md
+================================================
+# dspy.streaming.StatusMessageProvider
+
+<!-- START_API_REF -->
+::: dspy.streaming.StatusMessageProvider
+    handler: python
+    options:
+        members:
+            - lm_end_status_message
+            - lm_start_status_message
+            - module_end_status_message
+            - module_start_status_message
+            - tool_end_status_message
+            - tool_start_status_message
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/streamify.md
+================================================
+# dspy.streamify
+
+<!-- START_API_REF -->
+::: dspy.streamify
+    handler: python
+    options:
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/api/utils/StreamListener.md
+================================================
+# dspy.streaming.StreamListener
+
+<!-- START_API_REF -->
+::: dspy.streaming.StreamListener
+    handler: python
+    options:
+        members:
+            - finalize
+            - flush
+            - receive
+        show_source: true
+        show_root_heading: true
+        heading_level: 2
+        docstring_style: google
+        show_root_full_path: true
+        show_object_full_path: false
+        separate_signature: false
+        inherited_members: true
+:::
+<!-- END_API_REF -->
+
+
+
+================================================
+FILE: docs/docs/community/how-to-contribute.md
+================================================
+# Contributing
+
+DSPy is an actively growing project and community, and we welcome your contributions and involvement! Please read the
+[contributing guide](https://github.com/stanfordnlp/dspy/blob/main/CONTRIBUTING.md) for how to contribute to DSPy.
+
+
+
+
+
+================================================
+FILE: docs/docs/js/runllm-widget.js
+================================================
+document.addEventListener("DOMContentLoaded", function () {
+    var script = document.createElement("script");
+    script.defer = true;
+    script.type = "module";
+    script.id = "runllm-widget-script";
+    script.src =
+      "https://widget.runllm.com";
+    script.setAttribute("runllm-name", "DSPy");
+    script.setAttribute("runllm-preset", "mkdocs");
+    script.setAttribute("runllm-server-address", "https://api.runllm.com");
+    script.setAttribute("runllm-assistant-id", "132");
+    script.setAttribute("runllm-position", "BOTTOM_RIGHT");
+    script.setAttribute("runllm-keyboard-shortcut", "Mod+j");
+    script.setAttribute(
+      "runllm-slack-community-url",
+      ""
+    );
+  
+    document.head.appendChild(script);
+  });
+
+
+================================================
+FILE: docs/docs/static/.nojekyll
+================================================
+[Empty file]
+
+
+================================================
+FILE: docs/docs/tutorials/classification/index.md
+================================================
+Please refer to [this tutorial from Drew Breunig](https://www.dbreunig.com/2024/12/12/pipelines-prompt-optimization-with-dspy.html) using DSPy.
+
+This tutorial demonstrates a few aspects of using DSPy in a highly-accessible, concrete context for categorizing historic events with a tiny LM.
+
+
+================================================
+FILE: docs/docs/tutorials/papillon/index.md
+================================================
+Please refer to [this tutorial from the PAPILLON authors](https://colab.research.google.com/github/Columbia-NLP-Lab/PAPILLON/blob/main/papillon_tutorial.ipynb) using DSPy.
+
+This tutorial demonstrates a few aspects of using DSPy in a more advanced context:
+
+1. It builds a multi-stage `dspy.Module` that involves a small local LM using an external tool.
+2. It builds a multi-stage _judge_ in DSPy, and uses it as a metric for evaluation.
+3. It uses this judge for optimizing the `dspy.Module`, using a large model as a teacher for a small local LM.
+
+
+
+================================================
+FILE: docs/overrides/main.html
+================================================
+{% extends "base.html" %}
+
+{% block extrahead %}
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-G728W2L8KQ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-G728W2L8KQ');
+</script>
+{% endblock %}
+
+
+================================================
+FILE: dspy/__metadata__.py
+================================================
+#replace_package_name_marker
+__name__="dspy"
+#replace_package_version_marker
+__version__="3.1.3"
+__description__="DSPy"
+__url__="https://github.com/stanfordnlp/dspy"
+__author__="Omar Khattab"
+__author_email__="okhattab@stanford.edu"
+
+
+================================================
+FILE: dspy/adapters/__init__.py
+================================================
+from dspy.adapters.base import Adapter
+from dspy.adapters.chat_adapter import ChatAdapter
+from dspy.adapters.json_adapter import JSONAdapter
+from dspy.adapters.two_step_adapter import TwoStepAdapter
+from dspy.adapters.types import Audio, Code, File, History, Image, Reasoning, Tool, ToolCalls, Type
+from dspy.adapters.xml_adapter import XMLAdapter
+
+__all__ = [
+    "Adapter",
+    "ChatAdapter",
+    "Type",
+    "History",
+    "Image",
+    "Audio",
+    "File",
+    "Code",
+    "JSONAdapter",
+    "XMLAdapter",
+    "TwoStepAdapter",
+    "Tool",
+    "ToolCalls",
+    "Reasoning",
+]
+
+
+
+================================================
+FILE: dspy/adapters/types/__init__.py
+================================================
+from dspy.adapters.types.audio import Audio
+from dspy.adapters.types.base_type import Type
+from dspy.adapters.types.code import Code
+from dspy.adapters.types.file import File
+from dspy.adapters.types.history import History
+from dspy.adapters.types.image import Image
+from dspy.adapters.types.reasoning import Reasoning
+from dspy.adapters.types.tool import Tool, ToolCalls
+
+__all__ = ["History", "Image", "Audio", "File", "Type", "Tool", "ToolCalls", "Code", "Reasoning"]
+
+
+
+================================================
+FILE: dspy/datasets/__init__.py
+================================================
+from dspy.datasets.alfworld import AlfWorld
+from dspy.datasets.colors import Colors
+from dspy.datasets.dataloader import DataLoader
+from dspy.datasets.dataset import Dataset
+from dspy.datasets.hotpotqa import HotPotQA
+from dspy.datasets.math import MATH
+
+__all__ = [
+    "Colors",
+    "DataLoader",
+    "Dataset",
+    "HotPotQA",
+    "MATH",
+]
+
+
+
+================================================
+FILE: dspy/datasets/alfworld/__init__.py
+================================================
+from dspy.datasets.alfworld.alfworld import AlfWorld
+
+
+
+================================================
+FILE: dspy/dsp/__init__.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: dspy/dsp/utils/__init__.py
+================================================
+from dspy.dsp.utils.dpr import *
+from dspy.dsp.utils.settings import *
+from dspy.dsp.utils.utils import *
+
+
+
+================================================
+FILE: dspy/evaluate/__init__.py
+================================================
+from dspy.evaluate.auto_evaluation import CompleteAndGrounded, SemanticF1
+from dspy.evaluate.evaluate import Evaluate, EvaluationResult
+from dspy.evaluate.metrics import EM, answer_exact_match, answer_passage_match, normalize_text
+
+__all__ = [
+    "EM",
+    "normalize_text",
+    "answer_exact_match",
+    "answer_passage_match",
+    "Evaluate",
+    "SemanticF1",
+    "CompleteAndGrounded",
+    "EvaluationResult",
+]
+
+
+
+================================================
+FILE: dspy/experimental/__init__.py
+================================================
+from dspy.adapters.types.citation import Citations
+from dspy.adapters.types.document import Document
+
+__all__ = [
+    "Citations",
+    "Document",
+]
+
+
+
+================================================
+FILE: dspy/predict/__init__.py
+================================================
+from dspy.predict.aggregation import majority
+from dspy.predict.best_of_n import BestOfN
+from dspy.predict.chain_of_thought import ChainOfThought
+from dspy.predict.code_act import CodeAct
+from dspy.predict.knn import KNN
+from dspy.predict.multi_chain_comparison import MultiChainComparison
+from dspy.predict.parallel import Parallel
+from dspy.predict.predict import Predict
+from dspy.predict.program_of_thought import ProgramOfThought
+from dspy.predict.react import ReAct, Tool
+from dspy.predict.refine import Refine
+from dspy.predict.rlm import RLM
+
+__all__ = [
+    "majority",
+    "BestOfN",
+    "ChainOfThought",
+    "CodeAct",
+    "KNN",
+    "MultiChainComparison",
+    "Predict",
+    "ProgramOfThought",
+    "ReAct",
+    "Refine",
+    "RLM",
+    "Tool",
+    "Parallel",
+]
+
+
+
+================================================
+FILE: dspy/predict/parameter.py
+================================================
+class Parameter:
+    pass
+
+
+
+================================================
+FILE: dspy/predict/avatar/__init__.py
+================================================
+from dspy.predict.avatar.avatar import *
+from dspy.predict.avatar.models import *
+from dspy.predict.avatar.signatures import *
+
+
+
+================================================
+FILE: dspy/predict/avatar/models.py
+================================================
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class Tool(BaseModel):
+    tool: Any
+    name: str
+    desc: str | None
+    input_type: str | None = None
+
+    def __str__(self) -> str:
+        return f"{self.name}{f'(valid_input: {self.input_type})' if self.input_type else ''}: {self.desc}"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
+class Action(BaseModel):
+    tool_name: Any = Field(..., description="Name of the tool to use.")
+    tool_input_query: Any = Field(..., description="Query to pass as input to the tool.")
+
+
+class ActionOutput(BaseModel):
+    tool_name: str
+    tool_input_query: str
+    tool_output: str
+
+
+
+================================================
+FILE: dspy/predict/avatar/signatures.py
+================================================
+import dspy
+from dspy.predict.avatar.models import Action
+
+
+class Actor(dspy.Signature):
+    """You will be given `Tools` which will be a list of tools to use to accomplish the `Goal`. Given the user query, your task is to decide which tool to use and what input values to provide.
+
+    You will output action needed to accomplish the `Goal`. `Action` should have a tool to use and the input query to pass to the tool.
+
+    Note: You can opt to use no tools and provide the final answer directly. You can also one tool multiple times with different input queries if applicable."""
+
+    goal: str = dspy.InputField(
+        prefix="Goal:",
+        desc="Task to be accomplished.",
+    )
+    tools: list[str] = dspy.InputField(
+        prefix="Tools:",
+        desc="list of tools to use",
+    )
+    action_1: Action = dspy.OutputField(
+        prefix="Action 1:",
+        desc="1st action to take.",
+    )
+
+
+
+================================================
+FILE: dspy/primitives/__init__.py
+================================================
+from dspy.primitives.base_module import BaseModule
+from dspy.primitives.code_interpreter import CodeInterpreter, CodeInterpreterError, FinalOutput
+from dspy.primitives.example import Example
+from dspy.primitives.module import Module
+from dspy.primitives.prediction import Completions, Prediction
+from dspy.primitives.python_interpreter import PythonInterpreter
+
+__all__ = [
+    "BaseModule",
+    "CodeInterpreter",
+    "Completions",
+    "Example",
+    "FinalOutput",
+    "CodeInterpreterError",
+    "Module",
+    "Prediction",
+    "PythonInterpreter",
+]
+
+
+
+================================================
+FILE: dspy/propose/__init__.py
+================================================
+from dspy.propose.grounded_proposer import GroundedProposer
+
+__all__ = [
+    "GroundedProposer",
+]
+
+
+
+================================================
+FILE: dspy/propose/propose_base.py
+================================================
+from abc import ABC, abstractmethod
+
+
+class Proposer(ABC):
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def propose_instructions_for_program(self):
+        pass
+
+    def propose_instruction_for_predictor(self):
+        pass
+
+
+
+================================================
+FILE: dspy/retrievers/__init__.py
+================================================
+from dspy.retrievers.embeddings import Embeddings
+from dspy.retrievers.retrieve import Retrieve
+
+__all__ = ["Embeddings", "Retrieve"]
+
+
+
+================================================
+FILE: dspy/signatures/__init__.py
+================================================
+from dspy.signatures.field import InputField, OldField, OldInputField, OldOutputField, OutputField
+from dspy.signatures.signature import (
+    Signature,
+    SignatureMeta,
+    ensure_signature,
+    infer_prefix,
+    make_signature,
+)
+
+__all__ = [
+    "InputField",
+    "OutputField",
+    "OldField",
+    "OldInputField",
+    "OldOutputField",
+    "SignatureMeta",
+    "Signature",
+    "infer_prefix",
+    "ensure_signature",
+    "make_signature",
+]
+
+
+
+================================================
+FILE: dspy/signatures/utils.py
+================================================
+from typing import Literal
+
+from pydantic.fields import FieldInfo
+
+
+def get_dspy_field_type(field: FieldInfo) -> Literal["input", "output"]:
+    field_type = field.json_schema_extra.get("__dspy_field_type")
+    if field_type is None:
+        raise ValueError(f"Field {field} does not have a __dspy_field_type")
+    return field_type
+
+
+
+================================================
+FILE: dspy/streaming/__init__.py
+================================================
+from dspy.streaming.messages import StatusMessage, StatusMessageProvider, StreamResponse
+from dspy.streaming.streamify import apply_sync_streaming, streamify, streaming_response
+from dspy.streaming.streaming_listener import StreamListener
+
+__all__ = [
+    "StatusMessage",
+    "StatusMessageProvider",
+    "streamify",
+    "StreamListener",
+    "StreamResponse",
+    "streaming_response",
+    "apply_sync_streaming",
+]
+
+
+
+================================================
+FILE: dspy/teleprompt/teleprompt.py
+================================================
+from typing import Any
+
+from dspy.primitives import Example, Module
+
+
+class Teleprompter:
+    def __init__(self):
+        pass
+
+    def compile(self, student: Module, *, trainset: list[Example], teacher: Module | None = None, valset: list[Example] | None = None, **kwargs) -> Module:
+        """
+        Optimize the student program.
+
+        Args:
+            student: The student program to optimize.
+            trainset: The training set to use for optimization.
+            teacher: The teacher program to use for optimization.
+            valset: The validation set to use for optimization.
+
+        Returns:
+            The optimized student program.
+        """
+        raise NotImplementedError
+
+    def get_params(self) -> dict[str, Any]:
+        """
+        Get the parameters of the teleprompter.
+
+        Returns:
+            The parameters of the teleprompter.
+        """
+        return self.__dict__
+
+
+
+================================================
+FILE: dspy/teleprompt/vanilla.py
+================================================
+import random
+
+from dspy.teleprompt.teleprompt import Teleprompter
+
+
+class LabeledFewShot(Teleprompter):
+    def __init__(self, k=16):
+        self.k = k
+
+    def compile(self, student, *, trainset, sample=True):
+        self.student = student.reset_copy()
+        self.trainset = trainset
+
+        if len(self.trainset) == 0:
+            return self.student
+
+        rng = random.Random(0)
+
+        for predictor in self.student.predictors():
+            if sample:
+                predictor.demos = rng.sample(self.trainset, min(self.k, len(self.trainset)))
+            else:
+                predictor.demos = self.trainset[: min(self.k, len(self.trainset))]
+
+        return self.student
+
+
+# NOTE: I believe templatev2 keeps rdemos as long as they have the last field.
+# This may change later, especially with the introduction of required vs optional fields.
+# NOTE: Since we're relying on downstream code to handle the demos, this sampling may be sub-sampled.
+
+
+
+================================================
+FILE: dspy/teleprompt/gepa/__init__.py
+================================================
+from dspy.teleprompt.gepa.gepa import GEPA
+
+__all__ = ["GEPA"]
+
+
+
+================================================
+FILE: dspy/utils/caching.py
+================================================
+import os
+from pathlib import Path
+
+_DEFAULT_CACHE_DIR = os.path.join(Path.home(), ".dspy_cache")
+DSPY_CACHEDIR = os.environ.get("DSPY_CACHEDIR") or _DEFAULT_CACHE_DIR
+
+
+def create_subdir_in_cachedir(subdir: str) -> str:
+    """Create a subdirectory in the DSPy cache directory."""
+    subdir = os.path.join(DSPY_CACHEDIR, subdir)
+    subdir = os.path.abspath(subdir)
+    os.makedirs(subdir, exist_ok=True)
+    return subdir
+
+
+
+================================================
+FILE: tests/README.md
+================================================
+The tests in this directory are primarily concerned with code correctness and Adapter reliability.
+
+If you're looking for testing the end-to-end quality of DSPy modules and optimizer, refer to [LangProBe](https://github.com/Shangyint/langProBe).
+
+
+================================================
+FILE: tests/__init__.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: tests/adapters/test_audio.py
+================================================
+import pytest
+
+from dspy.adapters.types.audio import _normalize_audio_format
+
+
+@pytest.mark.parametrize(
+    "input_format, expected_format",
+    [
+        # Case 1: Standard format (no change)
+        ("wav", "wav"),
+        ("mp3", "mp3"),
+
+        # Case 2: The 'x-' prefix
+        ("x-wav", "wav"),
+        ("x-mp3", "mp3"),
+        ("x-flac", "flac"),
+
+        # Case 3: The edge case
+        ("my-x-format", "my-x-format"),
+        ("x-my-format", "my-format"),
+
+        # Case 4: Empty string and edge cases
+        ("", ""),
+        ("x-", ""),
+    ],
+)
+def test_normalize_audio_format(input_format, expected_format):
+    """
+    Tests that the _normalize_audio_format helper correctly removes 'x-' prefixes.
+    This single test covers the logic for from_url, from_file, and encode_audio.
+    """
+    assert _normalize_audio_format(input_format) == expected_format
+
+
+
+================================================
+FILE: tests/evaluate/test_metrics.py
+================================================
+# FILEPATH: /Users/ahle/repos/dspy/tests/evaluate/test_metrics.py
+
+import dspy
+from dspy.evaluate.metrics import answer_exact_match
+from dspy.predict import Predict
+
+
+def test_answer_exact_match_string():
+    example = dspy.Example(
+        question="What is 1+1?",
+        answer="2",
+    ).with_inputs("question")
+    pred = Predict("question -> answer")
+    pred.answer = "2"
+    assert answer_exact_match(example, pred)
+
+
+def test_answer_exact_match_list():
+    example = dspy.Example(
+        question="What is 1+1?",
+        answer=["2", "two"],
+    ).with_inputs("question")
+    pred = Predict("question -> answer")
+    pred.answer = "2"
+    assert answer_exact_match(example, pred)
+
+
+def test_answer_exact_match_no_match():
+    example = dspy.Example(
+        question="What is 1+1?",
+        answer="2",
+    ).with_inputs("question")
+    pred = Predict("question -> answer")
+    pred.answer = "3"
+    assert not answer_exact_match(example, pred)
+
+
+
+================================================
+FILE: tests/metadata/test_metadata.py
+================================================
+import re
+
+import dspy
+
+
+def test_metadata():
+    assert dspy.__name__ == "dspy"
+    assert re.match(r"\d+\.\d+\.\d+", dspy.__version__)
+    assert dspy.__author__ == "Omar Khattab"
+    assert dspy.__author_email__ == "okhattab@stanford.edu"
+    assert dspy.__url__ == "https://github.com/stanfordnlp/dspy"
+    assert dspy.__description__ == "DSPy"
+
+
+
+================================================
+FILE: tests/reliability/__init__.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: tests/reliability/test_generated.py
+================================================
+import os
+
+import pytest
+
+from tests.reliability.generate.utils import load_generated_cases, run_generated_case
+
+_DIR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+
+
+@pytest.mark.reliability
+@pytest.mark.parametrize(
+    "generated_case",
+    load_generated_cases(_DIR_PATH),
+    ids=lambda case: case.name,
+)
+def test_generated_cases(generated_case):
+    run_generated_case(generated_case)
+
+
+
+================================================
+FILE: tests/reliability/complex_types/generated/test_nesting_1/inputs/input1.json
+================================================
+{
+  "assertions": [
+    "The top-level output should contain the key 'resultLevel1'.",
+    "'resultLevel1' should contain the key 'resultLevel2'.",
+    "'resultLevel2' should contain the key 'resultLevel3'.",
+    "'resultLevel3' should contain the key 'resultLevel4'.",
+    "'resultLevel4' should contain the key 'resultLevel5'.",
+    "'resultLevel5' should contain the key 'outputField1' which should be of type boolean.",
+    "'resultLevel5' should contain the key 'outputField2' which should be an array of strings.",
+    "'outputField1' should indicate success or failure with a boolean value.",
+    "'outputField2' should contain messages represented as strings."
+  ],
+  "input": {
+    "level1": {
+      "level2": {
+        "level3": {
+          "level4": {
+            "level5": {
+              "field1": "test_string",
+              "field2": 42
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+
+
+================================================
+FILE: tests/reliability/complex_types/generated/test_nesting_1/inputs/input2.json
+================================================
+{
+  "assertions": [
+    "The output should have a top-level field named 'resultLevel1'.",
+    "Within 'resultLevel1', there should be a nested field named 'resultLevel2'.",
+    "Within 'resultLevel2', there should be a nested field named 'resultLevel3'.",
+    "Within 'resultLevel3', there should be a nested field named 'resultLevel4'.",
+    "Within 'resultLevel4', there should be a nested field named 'resultLevel5'.",
+    "Within 'resultLevel5', there should be a field named 'outputField1' which must be of type boolean.",
+    "Within 'resultLevel5', there should be a field named 'outputField2' which must be an array of strings."
+  ],
+  "input": {
+    "level1": {
+      "level2": {
+        "level3": {
+          "level4": {
+            "level5": {
+              "field1": "test string",
+              "field2": 123.45
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+
+
+================================================
+FILE: tests/reliability/input_formats/generated/test_markdown_1/inputs/input2.json
+================================================
+{
+  "assertions": [
+    "Each entry in the TOC should be a markdown link pointing to the corresponding section in the document.",
+    "The hierarchy of the TOC should match the levels of headings in the input markdown content (e.g., H1 headings as top-level, H2 headings nested under H1, etc.).",
+    "The TOC should include all headings from the input markdown content, in the order they appear.",
+    "The TOC should not include any non-heading content from the input markdown document."
+  ],
+  "input": {
+    "markdown_content": "# Introduction\n\nThis is the introduction section.\n\n## Overview\n\nAn overview of the document.\n\n### Details\n\nMore detailed information.\n\n#### Subdetails\n\nEven more detailed information.\n\n## Another Section\n\nContent of another section.\n\n### Subsection\n\nDetails of the subsection.\n\n```python\ndef example_function():\n    print(\"Hello, World!\")\n```\n\n# Conclusion\n\nFinal thoughts."
+  }
+}
+
+
+
+================================================
+FILE: tests/teleprompt/test_finetune.py
+================================================
+# TODO
+
+
+
+================================================
+FILE: tests/teleprompt/test_teleprompt.py
+================================================
+from dspy.teleprompt.teleprompt import Teleprompter
+
+
+class DummyTeleprompter(Teleprompter):
+    def __init__(self, param1: int, param2: str):
+        super().__init__()
+        self.param1 = param1
+        self.param2 = param2
+
+    def compile(self, student, *, trainset, teacher=None, valset=None, **kwargs):
+        return student
+
+
+def test_get_params():
+    teleprompter = DummyTeleprompter(param1=1, param2="test")
+    params = teleprompter.get_params()
+    assert params == {"param1": 1, "param2": "test"}
+
+
+
+================================================
+FILE: tests/test_utils/__init__.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: tests/test_utils/server/litellm_server_config.yaml
+================================================
+model_list:
+  - model_name: "dspy-test-model"
+    litellm_params:
+      model: "dspy-test-provider/dspy-test-model"
+  - model_name: "dspy-test-model-2"
+    litellm_params:
+      model: "dspy-test-provider/dspy-test-model"
+
+litellm_settings:
+  num_retries: 0
+  custom_provider_map:
+    - {
+        "provider": "dspy-test-provider",
+        "custom_handler": litellm_server.dspy_test_model,
+      }
+
+
+
+================================================
+FILE: tests/utils/__init__.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: tests/utils/resources/mcp_server.py
+================================================
+from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
+
+mcp = FastMCP("test")
+
+
+class Profile(BaseModel):
+    name: str
+    age: int
+
+
+class Account(BaseModel):
+    profile: Profile
+    account_id: str
+
+
+@mcp.tool()
+def add(a: int, b: int) -> int:
+    """Add two numbers"""
+    return a + b
+
+
+@mcp.tool()
+def hello(names: list[str]) -> str:
+    """Greet people"""
+    return [f"Hello, {name}!" for name in names]
+
+
+@mcp.tool()
+def wrong_tool():
+    """This tool raises an error"""
+    raise ValueError("error!")
+
+
+@mcp.tool()
+def get_account_name(account: Account):
+    """This extracts the name from account"""
+    return account.profile.name
+
+
+@mcp.tool()
+def current_datetime() -> str:
+    """Get the current datetime"""
+    return "2025-07-23T09:10:10.0+00:00"
+
+
+if __name__ == "__main__":
+    mcp.run()
+
+
+
+================================================
+FILE: .github/ISSUE_TEMPLATE/bug_report.yml
+================================================
+
+name: Bug Report
+description: Report a bug in the project
+title: "[Bug] "
+labels: bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🐛 Bug Report
+        Please fill out all required fields to help us diagnose and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "What happened?"
+      description: "Clearly describe the unexpected behavior."
+      placeholder: "Example: When I try to save a file, I get an error message..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: "Steps to reproduce"
+      description: "Tell us how to reproduce the issue."
+      placeholder: "Please provide a code snippet or a github gist for reproducing purpose."
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: "DSPy version"
+      description: "Tell us your DSPy version."
+    validations:
+      required: true
+
+
+
+
+================================================
+FILE: .github/ISSUE_TEMPLATE/feature_request.yml
+================================================
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature] "
+labels: enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🚀 Feature Request
+        Please fill out the following details.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "What feature would you like to see?"
+      description: "Describe the feature clearly."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: "Would you like to contribute?"
+      options:
+        - label: Yes, I'd like to help implement this.
+        - label: No, I just want to request it.
+
+  - type: textarea
+    id: additional-info
+    attributes:
+      label: "Additional Context"
+      description: "Any links, references, or extra details?"
+      placeholder: "Example: This feature exists in XYZ tool."
+
+
+
+================================================
+FILE: .github/PULL_REQUEST_TEMPLATE/pull_request_template.md
+================================================
+## 📝 Changes Description
+
+This MR/PR contains the following changes:
+...
+
+## ✅ Contributor Checklist
+
+- [] Pre-Commit checks are passing (locally and remotely)
+- [] Title of your PR / MR corresponds to the required format
+- [] Commit message follows required format {label}(dspy): {message}
+
+## ⚠️ Warnings
+
+Anything we should be aware of ?
+
+
+
+================================================
+FILE: .github/workflow_scripts/install_testpypi_pkg.sh
+================================================
+#!/bin/bash  
+
+# The $1 argument is the version number passed from the workflow  
+VERSION=$1
+
+echo "version: $VERSION"
+
+for i in {1..5}; do  
+  if python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple dspy-ai-test=="$VERSION"; then  
+    break  
+  else  
+    echo "Attempt $i failed. Waiting before retrying..."  
+    sleep 10  
+  fi  
+done
+
+
+================================================
+FILE: .github/.internal_dspyai/pyproject.toml
+================================================
+[project]  
+#replace_package_name_marker
+name="dspy-ai"  
+#replace_package_version_marker
+version="3.1.3"  
+description = "DSPy"  
+readme = "README.md"  
+authors = [  
+    { name = "Omar Khattab", email = "okhattab@stanford.edu" }  
+]  
+license = { text = "MIT License" }  
+requires-python = ">=3.9" 
+#replace_dspy_version_marker 
+dependencies = ["dspy>=3.1.3"]  
+urls = { "Homepage" = "https://github.com/stanfordnlp/dsp" }  
+  
+[build-system]  
+requires = ["setuptools>=40.8.0", "wheel"]  
+build-backend = "setuptools.build_meta"  
+  
+[tool.setuptools.packages.find]  
+include = ["dsp.*", "dspy.*", "dsp", "dspy"] 
+
+

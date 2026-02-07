@@ -1,0 +1,550 @@
+<!-- Chunk 1807: bytes 7500771-7525167, type=class -->
+class ExplorationHandlers:
+    """
+    Handlers for Exploration and Understanding phases.
+
+    This class is designed as a mixin - the following attributes/methods
+    are expected to be provided by the consuming class:
+    - taxonomy: TaxonomyManager instance
+    - interpret_intent: Intent interpretation module
+    - detect_multi_skill: Multi-skill detection module
+    - assess_readiness: Readiness assessment module
+    - generate_question: Question generation module
+    - generate_confirmation: Confirmation generation module
+    - handle_deep_understanding: Deep understanding handler
+    - create_skill: Skill creation module
+    - deep_understanding_module: Deep understanding module
+    - phase1: Phase1 module
+    - understanding_summary: Understanding summary module
+    - confirm_understanding: Confirmation understanding module
+    - _execute_with_streaming: Helper method for streaming execution
+    - _summarize_conversation: Helper method for conversation summarization
+    """
+
+    # Type stubs for attributes provided by consuming class
+    taxonomy: Any
+    interpret_intent: Any
+    detect_multi_skill: Any
+    assess_readiness: Any
+    generate_question: Any
+    generate_confirmation: Any
+    handle_deep_understanding: Callable
+    create_skill: Any
+    deep_understanding_module: Any
+    phase1: Any
+    understanding_summary: Any
+    confirm_understanding: Any
+    _execute_with_streaming: Callable
+    _summarize_conversation: Callable
+
+    async def handle_exploring(
+        self, user_message: str, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """Handle EXPLORING state."""
+        # Handle explicit continuation if we already have a task
+        user_message_lower = user_message.strip().lower()
+        is_continue = user_message_lower in ("continue", "proceed", "next", "")
+
+        if is_continue and session.task_description:
+            # Bypass intent interpretation and proceed with current task
+            intent_result = {
+                "intent_type": "create_skill",
+                "extracted_task": session.task_description,
+                "confidence": 1.0,
+            }
+            thinking_content = ""
+        else:
+            intent_result, thinking_content = await self._execute_with_streaming(
+                self.interpret_intent,
+                thinking_callback,
+                user_message=user_message,
+                conversation_history=session.messages[-10:],
+                current_state=session.state.value,
+            )
+
+        if intent_result["intent_type"] == "create_skill":
+            previous_task = session.task_description
+            extracted_task = intent_result["extracted_task"]
+            if isinstance(extracted_task, str):
+                session.task_description = extracted_task
+            else:
+                session.task_description = str(extracted_task)
+            if (
+                previous_task
+                and previous_task != session.task_description
+                and session.deep_understanding
+            ):
+                session.deep_understanding.pop("scoping_complete", None)
+
+            # Deep Understanding
+            if not session.deep_understanding or not session.deep_understanding.get("complete"):
+                session.state = ConversationState.DEEP_UNDERSTANDING
+                return await self.handle_deep_understanding(
+                    user_message, session, thinking_callback
+                )
+
+            # Multi-skill check
+            scoping_complete = bool(
+                session.deep_understanding and session.deep_understanding.get("scoping_complete")
+            )
+            if not scoping_complete:
+                existing_skills = self.taxonomy.get_mounted_skills("default")
+                multi_result, multi_thinking = await self._execute_with_streaming(
+                    self.detect_multi_skill,
+                    thinking_callback,
+                    task_description=session.task_description,
+                    collected_examples=session.collected_examples,
+                    existing_skills=existing_skills,
+                )
+                thinking_content += multi_thinking
+
+                if multi_result.get("alternative_approaches"):
+                    session.multi_skill_queue = multi_result.get("alternative_approaches", [])
+                    session.state = ConversationState.MULTI_SKILL_DETECTED
+
+                    return AgentResponse(
+                        message=f"I see different ways to approach this. Which plan do you prefer?\n\n**Reasoning:** {multi_result['reasoning']}",
+                        thinking_content=thinking_content,
+                        state=ConversationState.MULTI_SKILL_DETECTED,
+                        action="choose_plan",
+                        data={"question_options": multi_result["alternative_approaches"]},
+                        requires_user_input=True,
+                    )
+
+                if multi_result["requires_multiple_skills"]:
+                    session.multi_skill_queue = multi_result["suggested_order"]
+                    session.current_skill_index = 0
+                    session.state = ConversationState.MULTI_SKILL_DETECTED
+
+                    message = (
+                        f"I notice your task requires multiple skills: {', '.join(multi_result['skill_breakdown'])}.\n\n"
+                        f"**Reasoning:** {multi_result['reasoning']}\n\n"
+                        f"**Suggested order:** {', '.join(multi_result['suggested_order'])}\n\n"
+                        "I'll create them one at a time, completing the full TDD checklist for each.\n"
+                        f"Ready to start with **{multi_result['suggested_order'][0]}**? (yes/no)"
+                    )
+
+                    return AgentResponse(
+                        message=message,
+                        thinking_content=thinking_content,
+                        state=ConversationState.MULTI_SKILL_DETECTED,
+                        action="multi_skill_detected",
+                        data={"skill_breakdown": multi_result["skill_breakdown"]},
+                        requires_user_input=True,
+                    )
+
+            # Assess readiness
+            readiness, ready_thinking = await self._execute_with_streaming(
+                self.assess_readiness,
+                thinking_callback,
+                task_description=session.task_description,
+                examples=session.collected_examples,
+                questions_asked=len([m for m in session.messages if m.get("role") == "assistant"]),
+            )
+            thinking_content += ready_thinking
+            readiness_score = readiness.get("readiness_score")
+            if readiness_score is not None:
+                session.deep_understanding = session.deep_understanding or {}
+                session.deep_understanding["readiness_score"] = readiness_score
+
+            if readiness["should_proceed"]:
+                session.state = ConversationState.CONFIRMING
+                return await self.generate_confirmation(
+                    session, thinking_content, thinking_callback
+                )
+            else:
+                question_result, q_thinking = await self._execute_with_streaming(
+                    self.generate_question,
+                    thinking_callback,
+                    task_description=session.task_description,
+                    collected_examples=session.collected_examples,
+                    conversation_context=self._summarize_conversation(session.messages),
+                )
+                thinking_content += q_thinking
+
+                message = question_result["question"]
+                if question_result["question_options"]:
+                    message += "\n\nOptions:\n"
+                    for i, option in enumerate(question_result["question_options"], 1):
+                        opt_text = option if isinstance(option, str) else str(option)
+                        message += f"{i}. {opt_text}\n"
+
+                return AgentResponse(
+                    message=message,
+                    thinking_content=thinking_content,
+                    state=ConversationState.EXPLORING,
+                    action="ask_question",
+                    data={**question_result, "readiness_score": readiness_score},
+                    requires_user_input=True,
+                )
+
+        elif intent_result["intent_type"] == "clarify":
+            confidence = intent_result["confidence"]
+            if isinstance(confidence, (int, float)) and confidence > 0.7:
+                session.collected_examples.append(
+                    {"input_description": user_message, "expected_output": ""}
+                )
+
+            readiness, ready_thinking = await self._execute_with_streaming(
+                self.assess_readiness,
+                thinking_callback,
+                task_description=session.task_description,
+                examples=session.collected_examples,
+                questions_asked=len([m for m in session.messages if m.get("role") == "assistant"]),
+            )
+            thinking_content += ready_thinking
+            readiness_score = readiness.get("readiness_score")
+            if readiness_score is not None:
+                session.deep_understanding = session.deep_understanding or {}
+                session.deep_understanding["readiness_score"] = readiness_score
+
+            if readiness["should_proceed"]:
+                session.state = ConversationState.CONFIRMING
+                return await self.generate_confirmation(
+                    session, thinking_content, thinking_callback
+                )
+            else:
+                question_result, q_thinking = await self._execute_with_streaming(
+                    self.generate_question,
+                    thinking_callback,
+                    task_description=session.task_description,
+                    collected_examples=session.collected_examples,
+                    conversation_context=self._summarize_conversation(session.messages),
+                )
+                thinking_content += q_thinking
+
+                message = question_result["question"]
+                if question_result["question_options"]:
+                    message += "\n\nOptions:\n"
+                    for i, option in enumerate(question_result["question_options"], 1):
+                        opt_text = option if isinstance(option, str) else str(option)
+                        message += f"{i}. {opt_text}\n"
+
+                return AgentResponse(
+                    message=message,
+                    thinking_content=thinking_content,
+                    state=ConversationState.EXPLORING,
+                    action="ask_question",
+                    data={**question_result, "readiness_score": readiness_score},
+                    requires_user_input=True,
+                )
+
+        return AgentResponse(
+            message="I'm not sure I understand. Could you tell me more about what skill you'd like to create?",
+            thinking_content=thinking_content,
+            state=ConversationState.EXPLORING,
+            action="clarify_intent",
+            requires_user_input=True,
+        )
+
+    def handle_multi_skill(self, user_message: str, session: ConversationSession) -> AgentResponse:
+        """
+        Handle multi-skill detection state.
+
+        Args:
+            user_message: The user's response message.
+            session: The current conversation session.
+
+        Returns:
+            AgentResponse with appropriate state transition.
+
+        """
+        # Plan Selection Logic: Check if user selected one of the alternative plans
+        if session.multi_skill_queue and user_message in session.multi_skill_queue:
+            session.task_description = user_message
+            session.multi_skill_queue = []  # Clear the plans queue (alternatives)
+            session.deep_understanding = session.deep_understanding or {}
+            session.deep_understanding["scoping_complete"] = True
+            session.state = ConversationState.DEEP_UNDERSTANDING
+            return AgentResponse(
+                message=f"Proceeding with plan: **{user_message}**.\nLet's understand the requirements.",
+                state=ConversationState.DEEP_UNDERSTANDING,
+                action="plan_selected",
+                requires_user_input=False,
+            )
+
+        user_message_lower = user_message.strip().lower()
+        if (
+            user_message_lower in ("yes", "y", "ok", "proceed", "continue")
+            and session.multi_skill_queue
+        ):
+            current_skill_name = session.multi_skill_queue[session.current_skill_index]
+            session.task_description = f"Create a skill for: {current_skill_name}"
+            # Must signal transition to Exploring/Deep Understanding for the new single task
+            session.state = ConversationState.DEEP_UNDERSTANDING
+            # Return instructions to caller to re-route immediately or prompt user
+            return AgentResponse(
+                message=f"Starting creation for: **{current_skill_name}**.\nLet's understand the requirements.",
+                state=ConversationState.DEEP_UNDERSTANDING,
+                action="start_single_skill",
+                requires_user_input=False,
+            )
+
+        return AgentResponse(
+            message="Please respond with 'yes' to proceed or 'no' to revise.",
+            state=ConversationState.MULTI_SKILL_DETECTED,
+            action="wait_for_confirmation",
+            requires_user_input=True,
+        )
+
+    async def handle_confirmation(
+        self, user_message: str, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """
+        Handle user confirmation response.
+
+        Args:
+            user_message: The user's response message.
+            session: The current conversation session.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse with state transition based on user confirmation.
+
+        """
+        user_message_lower = user_message.strip().lower()
+        if user_message_lower in ("yes", "y", "ok", "correct", "proceed", "create"):
+            session.state = ConversationState.CREATING
+            return await self.create_skill(session, thinking_callback)
+        elif user_message_lower in ("no", "n", "cancel", "revise"):
+            session.pending_confirmation = None
+            if session.deep_understanding:
+                session.deep_understanding.pop("scoping_complete", None)
+            session.state = ConversationState.EXPLORING
+            return AgentResponse(
+                message="What would you like to change? Please describe what should be different.",
+                state=ConversationState.EXPLORING,
+                action="revise_understanding",
+                requires_user_input=True,
+            )
+        return AgentResponse(
+            message="Please respond with 'yes' to confirm or 'no' to revise.",
+            state=ConversationState.CONFIRMING,
+            action="wait_for_confirmation",
+            requires_user_input=True,
+        )
+
+    async def handle_deep_understanding(
+        self, user_message: str, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """
+        Handle deep understanding phase.
+
+        Args:
+            user_message: The user's response message.
+            session: The current conversation session.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse with next question or completion status.
+
+        """
+        if not session.deep_understanding:
+            session.deep_understanding = {"questions_asked": [], "answers": []}
+
+        last_question = session.deep_understanding.get("current_question")
+        if last_question:
+            q_id = (
+                last_question.get("id", "unknown")
+                if isinstance(last_question, dict)
+                else getattr(last_question, "id", "unknown")
+            )
+            session.deep_understanding.setdefault("answers", []).append(
+                {"question_id": q_id, "answer": user_message}
+            )
+            asked = session.deep_understanding.get("questions_asked", [])
+            if last_question not in asked:
+                session.deep_understanding.setdefault("questions_asked", []).append(last_question)
+
+        return await self.execute_deep_understanding(session, thinking_callback)
+
+    async def execute_deep_understanding(
+        self, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """
+        Execute deep understanding logic.
+
+        Args:
+            session: The current conversation session.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse with understanding summary or next question.
+
+        """
+        if not session.deep_understanding:
+            session.deep_understanding = {
+                "questions_asked": [],
+                "answers": [],
+                "research_findings": {},
+            }
+
+        history = []
+        asked = session.deep_understanding.get("questions_asked", [])
+        answers = session.deep_understanding.get("answers", [])
+        for i, q in enumerate(asked):
+            if i < len(answers):
+                q_text = (
+                    q.get("question") if isinstance(q, dict) else getattr(q, "question", str(q))
+                )
+                history.append({"question": q_text, "answer": answers[i].get("answer", "")})
+
+        result, thinking = await self._execute_with_streaming(
+            self.deep_understanding_module,
+            thinking_callback,
+            initial_task=session.task_description,
+            conversation_history=history,
+            research_findings=session.deep_understanding.get("research_findings", {}),
+            current_understanding=session.deep_understanding.get("understanding_summary", ""),
+            questions_asked_count=len(asked),
+        )
+
+        if result.get("readiness_score", 0.0) >= 0.8 or len(asked) >= 3:
+            session.deep_understanding["complete"] = True
+            session.deep_understanding["understanding_summary"] = result.get(
+                "understanding_summary", ""
+            )
+            readiness_score = result.get("readiness_score")
+            if readiness_score is not None:
+                session.deep_understanding["readiness_score"] = readiness_score
+            session.user_problem = result.get("user_problem")
+            session.user_goals = result.get("user_goals")
+            if result.get("refined_task_description"):
+                session.task_description = result["refined_task_description"]
+
+            message = f"✅ I understand your needs.\n\n**Summary:**\n{result.get('understanding_summary', '')}\n\nProceeding..."
+            return AgentResponse(
+                message=message,
+                thinking_content=thinking,
+                state=ConversationState.EXPLORING,
+                action="deep_understanding_complete",
+                data={"readiness_score": readiness_score} if readiness_score is not None else {},
+                requires_user_input=False,
+            )
+        else:
+            next_q = result.get("next_question")
+            if next_q:
+                readiness_score = result.get("readiness_score")
+                if readiness_score is not None:
+                    session.deep_understanding["readiness_score"] = readiness_score
+                session.deep_understanding["current_question"] = next_q
+                return AgentResponse(
+                    message="",  # Question in data
+                    thinking_content=thinking,
+                    state=ConversationState.DEEP_UNDERSTANDING,
+                    action="ask_understanding_question",
+                    data={
+                        "question": next_q,
+                        "reasoning": thinking,
+                        "readiness_score": readiness_score,
+                    },
+                    requires_user_input=True,
+                )
+            else:
+                session.deep_understanding["complete"] = True
+                return AgentResponse(
+                    message="Proceeding with current understanding.",
+                    state=ConversationState.EXPLORING,
+                    action="deep_understanding_complete",
+                    requires_user_input=False,
+                )
+
+    async def generate_confirmation(
+        self, session: ConversationSession, thinking_content: str, thinking_callback
+    ) -> AgentResponse:
+        """
+        Generate confirmation summary for the user.
+
+        Args:
+            session: The current conversation session.
+            thinking_content: Accumulated thinking content.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse with confirmation question and summary.
+
+        """
+        existing_skills = self.taxonomy.get_mounted_skills("default")
+        p1_result = await self.phase1.acall(
+            task_description=session.task_description,
+            user_context="Interactive session",
+            taxonomy_structure=json.dumps(
+                self.taxonomy.get_relevant_branches(session.task_description)
+            ),
+            existing_skills=json.dumps(existing_skills),
+        )
+
+        session.taxonomy_path = p1_result["taxonomy"]["recommended_path"]
+        session.skill_metadata_draft = p1_result["plan"]["skill_metadata"]
+
+        summary, s_thinking = await self._execute_with_streaming(
+            self.understanding_summary,
+            thinking_callback,
+            task_description=session.task_description,
+            taxonomy_path=session.taxonomy_path,
+            skill_metadata_draft=session.skill_metadata_draft,
+            user_problem=session.user_problem or "",
+            user_goals=session.user_goals or [],
+            collected_examples=session.collected_examples,
+        )
+
+        confirm, c_thinking = await self._execute_with_streaming(
+            self.confirm_understanding,
+            thinking_callback,
+            task_description=session.task_description,
+            taxonomy_path=session.taxonomy_path,
+            skill_metadata_draft=session.skill_metadata_draft,
+            collected_examples=session.collected_examples,
+        )
+
+        session.pending_confirmation = confirm
+        thinking_content = thinking_content + s_thinking + c_thinking
+        session.state = ConversationState.CONFIRMING
+
+        readiness_score = None
+        if session.deep_understanding:
+            readiness_score = session.deep_understanding.get("readiness_score")
+
+        message = f"**Summary:** {summary.get('alignment_summary', '')}\n\n"
+        message += summary.get("what_was_understood", "") + "\n"
+        message += summary.get("what_will_be_created", "") + "\n"
+        message += summary.get("how_it_addresses_task", "") + "\n\n"
+        message += confirm.get("confirmation_question", "Ready to create?")
+
+        response_data = {**summary, **confirm}
+        if readiness_score is not None:
+            response_data["readiness_score"] = readiness_score
+
+        return AgentResponse(
+            message=message,
+            thinking_content=thinking_content,
+            state=ConversationState.CONFIRMING,
+            action="confirm_understanding",
+            data=response_data,
+            requires_user_input=True,
+        )
+
+    def _summarize_conversation(self, messages: list[dict[str, Any]]) -> str:
+        return "\n".join([f"{m.get('role')}: {m.get('content')}" for m in messages[-10:]])
+
+
+============================================================
+END FILE: src/skill_fleet/core/services/conversation/handlers/exploration.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/services/conversation/handlers/tdd.py
+============================================================
+
+"""TDD workflow handlers."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
+from ..models import AgentResponse, ConversationSession, ConversationState
+
+

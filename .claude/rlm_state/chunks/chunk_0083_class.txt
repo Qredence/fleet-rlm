@@ -1,0 +1,15 @@
+<!-- Chunk 83: bytes 143806-144140, type=class -->
+class TypedModule(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.process = dspy.Predict(MySignature)
+
+    def forward(self, input_data: str) -> dspy.Prediction:
+        return self.process(input=input_data)
+```
+
+### 2. Return dspy.Prediction
+
+Always return `dspy.Prediction` for consistency:
+
+```python

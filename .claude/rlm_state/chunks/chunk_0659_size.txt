@@ -1,0 +1,2250 @@
+<!-- Chunk 659: bytes 1191565-1269022, type=size -->
+
+}
+```
+
+**Or use upsert:**
+```typescript
+await db.insert(users)
+  .values({ email: 'user@example.com', name: 'John' })
+  .onConflictDoUpdate({
+    target: users.email,
+    set: { name: 'John Updated' },
+  });
+```
+
+## Related Resources
+
+- `guides/schema-only.md` - Schema design patterns
+- `references/adapters.md` - Transaction availability by adapter
+- `guides/troubleshooting.md` - Query error solutions
+- `templates/schema-example.ts` - Complete schema with relations
+
+
+============================================================
+END FILE: .fleet/skills/neon-db/neon-drizzle/references/query-patterns.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/neon-db/neon-js/SKILL.md
+============================================================
+
+---
+name: neon-js
+description: Sets up the full Neon JS SDK with unified auth and PostgREST-style database queries. Configures auth client, data client, and type generation. Use when building apps that need both authentication and database access in one SDK.
+allowed-tools: ["bash", "write", "read_file"]
+---
+
+# Neon JS SDK Integration
+
+Set up the unified Neon JS SDK for authentication and database queries in one package.
+
+## When to Use This Skill
+
+- Building apps that need both auth and database queries
+- Migrating from Supabase to Neon
+- Using PostgREST-style API for database access
+- Need type-safe database queries with generated types
+
+**Package**: `@neondatabase/neon-js` (full SDK with auth + data API)
+
+**Need auth only?** Use the `neon-auth` skill instead for `@neondatabase/auth` with a smaller bundle.
+
+## Code Generation Rules
+
+When generating TypeScript/JavaScript code, follow these rules:
+
+**Complete reference:** See [Code Generation Rules](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/code-generation-rules.md) for:
+- Import path handling (path aliases vs relative imports)
+- Neon package imports (subpath exports, adapter patterns)
+- CSS import strategy (Tailwind detection, single import method)
+- File structure patterns
+
+**Key points:**
+- Check `tsconfig.json` for path aliases before generating imports
+- Use relative imports if unsure or no aliases exist
+- `BetterAuthReactAdapter` MUST be imported from `auth/react/adapters` subpath
+- Adapters are factory functions - call them with `()`
+- Choose ONE CSS import method (Tailwind or CSS, not both)
+
+## Available Guides
+
+Each guide is a complete, self-contained walkthrough with numbered phases:
+
+- **`guides/setup.md`** - Complete setup guide for Next.js with auth + data API
+
+I'll automatically detect your context (package manager, framework, existing setup) and select the appropriate guide based on your request.
+
+For troubleshooting, see the [Troubleshooting Guide](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-troubleshooting.md) in references.
+
+## Quick Examples
+
+Tell me what you're building - I'll handle the rest:
+
+- "Set up Neon JS for my Next.js app" -> Loads full stack guide, configures auth + data
+- "Add database queries to my auth setup" -> Configures data API client
+- "Migrate from Supabase" -> Uses SupabaseAuthAdapter for compatibility
+
+## Reference Documentation
+
+**Primary Resource:** See [neon-js.mdc](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/neon-js.mdc) for comprehensive guidelines including:
+- Client setup for all frameworks
+- Database query patterns (PostgREST syntax)
+- Auth adapter options (BetterAuth, Supabase)
+- Type generation
+- Error handling
+
+**Auth Details:** See [neon-auth.mdc](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/neon-auth.mdc) for:
+- All authentication methods
+- UI components
+- Session management
+
+**Framework-Specific Setup (choose your framework):**
+- [Setup - Next.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nextjs.md)
+- [Setup - React SPA](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-react-spa.md)
+- [Setup - Node.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nodejs.md)
+
+**Framework-Specific UI (choose your framework):**
+- [UI - Next.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-nextjs.md)
+- [UI - React SPA](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-react-spa.md)
+
+**Data API & Shared References:**
+- [Data API Reference](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-data-api.md) - PostgREST query patterns and examples
+- [Common Mistakes](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-common-mistakes.md) - Import paths, adapter patterns, CSS
+- [Troubleshooting Guide](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-troubleshooting.md) - Error solutions
+- [Code Generation Rules](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/code-generation-rules.md) - Import and CSS strategies
+- [Auth Adapters Guide](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-adapters.md) - Adapter comparison
+- [Import Reference](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-imports.md) - Complete import paths
+
+## Templates
+
+- `templates/full-client.ts` - Unified auth + data client configuration
+
+## Related Skills
+
+- **neon-auth** - Auth only (smaller bundle, no data queries)
+- **neon-drizzle** - Drizzle ORM setup (alternative to PostgREST)
+- **neon-serverless** - Direct database connections
+- **add-neon-docs** - Add Neon best practices to your project (run after setup)
+
+---
+
+## Workflow
+
+I will:
+1. Detect your project context automatically (Next.js, React SPA, Node.js)
+2. Select and load the appropriate guide
+3. Follow the guide's phases sequentially
+4. Track progress using the guide's workflow checklist
+5. Load reference files only when needed
+6. Offer to add Neon best practices to your project docs
+
+Ready to get started? Just describe what you're building!
+
+
+============================================================
+END FILE: .fleet/skills/neon-db/neon-js/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/neon-db/neon-js/guides/setup.md
+============================================================
+
+# Neon JS SDK Setup Guide
+
+> **Complete Walkthrough**: This is a self-contained, step-by-step guide with numbered phases.
+> Follow each phase in order for a full Neon JS SDK setup with auth and data API.
+
+Complete guide for setting up the Neon JS SDK with authentication and PostgREST-style database queries.
+
+### Important:
+- Remember to run the neon-plugin:add-neon-docs skill with the parameter SKILL_NAME="neon-js" after completing the guide.
+- This guide extends the Neon Auth setup. Follow phases 1-4 from the appropriate framework-specific setup guide ([Next.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nextjs.md), [React SPA](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-react-spa.md), or [Node.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nodejs.md)), then continue with the data API phases below.
+
+## Table of Contents
+
+- [Workflow Checklist](#workflow-checklist)
+- [Phase 1-4: Auth Setup](#phase-1-4-auth-setup)
+- [Phase 5: Database Client Configuration](#phase-5-database-client-configuration)
+- [Phase 6: Type Generation (Optional)](#phase-6-type-generation-optional)
+- [Phase 7: UI Setup (Optional)](#phase-7-ui-setup-optional)
+- [Phase 8: Validation & Testing](#phase-8-validation--testing)
+- [Phase 9: Add Best Practices References](#phase-9-add-best-practices-references)
+
+---
+
+## Workflow Checklist
+
+When following this guide, I will track these high-level tasks:
+
+- [ ] Detect project context (package manager, framework, existing setup)
+- [ ] Install @neondatabase/neon-js package
+- [ ] Configure environment variables (auth URL + data API URL)
+- [ ] Set up auth client (follow Neon Auth guide phases 1-4)
+- [ ] Set up database client for queries
+- [ ] (Optional) Generate TypeScript types from database
+- [ ] (Optional) Set up UI provider
+- [ ] Validate setup and test queries
+- [ ] Add Neon JS best practices to project docs
+
+---
+
+## Phase 1-4: Auth Setup
+
+**Follow the Neon Auth setup guide first:**
+
+See the appropriate framework-specific setup guide for phases 1-4:
+- [Next.js Setup](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nextjs.md)
+- [React SPA Setup](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-react-spa.md)
+- [Node.js Setup](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nodejs.md)
+
+Phases overview:
+- Phase 1: Context Detection
+- Phase 2: Installation (use `@neondatabase/neon-js` instead of `@neondatabase/auth`)
+- Phase 3: Environment Configuration (add `NEON_DATA_API_URL`)
+- Phase 4: Framework-Specific Setup (use `@neondatabase/neon-js` imports)
+
+**Key differences:**
+- Install `@neondatabase/neon-js` instead of `@neondatabase/auth`
+- Import from `@neondatabase/neon-js/auth/next` instead of `@neondatabase/auth/next`
+- Add `NEON_DATA_API_URL` environment variable
+
+---
+
+## Phase 5: Database Client Configuration
+
+**Outcome**: A working database client for PostgREST-style queries.
+
+### Next.js
+
+**Create file:** `lib/db/client.ts`
+
+```typescript
+import { createClient } from "@neondatabase/neon-js";
+import type { Database } from "./database.types"; // Generated types (optional)
+
+/**
+ * Database client for PostgREST-style queries.
+ * Can be used in server components, API routes, and server actions.
+ */
+export const dbClient = createClient<Database>({
+  auth: { url: process.env.NEXT_PUBLIC_NEON_AUTH_URL! },
+  dataApi: { url: process.env.NEON_DATA_API_URL! },
+});
+```
+
+**Environment Variables:**
+
+Add to `.env.local`:
+```bash
+NEON_DATA_API_URL=https://ep-xxx.apirest.c-2.us-east-2.aws.neon.build/dbname/rest/v1
+```
+
+**Usage in Server Components:**
+
+```typescript
+// app/posts/page.tsx
+import { dbClient } from "@/lib/db/client";
+
+export default async function PostsPage() {
+  const { data: posts, error } = await dbClient
+    .from("posts")
+    .select("id, title, created_at")
+    .order("created_at", { ascending: false });
+
+  if (error) return <div>Error loading posts</div>;
+
+  return (
+    <ul>
+      {posts?.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**Usage in API Routes:**
+
+```typescript
+// app/api/posts/route.ts
+import { dbClient } from "@/lib/db/client";
+import { NextResponse } from "next/server";
+
+export async function GET() {
+  const { data, error } = await dbClient.from("posts").select();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json(data);
+}
+
+export async function POST(request: Request) {
+  const body = await request.json();
+
+  const { data, error } = await dbClient
+    .from("posts")
+    .insert(body)
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  return NextResponse.json(data, { status: 201 });
+}
+```
+
+### React SPA
+
+**Update `src/lib/auth-client.ts` to include database:**
+
+```typescript
+import { createClient } from "@neondatabase/neon-js";
+import { BetterAuthReactAdapter } from "@neondatabase/neon-js/auth/react/adapters";
+
+export const client = createClient({
+  auth: {
+    adapter: BetterAuthReactAdapter(),
+    url: import.meta.env.VITE_NEON_AUTH_URL,
+  },
+  dataApi: {
+    url: import.meta.env.VITE_NEON_DATA_API_URL,
+  },
+});
+
+// Export auth and database separately for convenience
+export const authClient = client.auth;
+export const dbClient = client;
+```
+
+**Environment Variables:**
+
+Add to `.env`:
+```bash
+VITE_NEON_DATA_API_URL=https://ep-xxx.apirest.c-2.us-east-2.aws.neon.build/dbname/rest/v1
+```
+
+**Usage:**
+
+```typescript
+import { dbClient } from "./lib/auth-client";
+
+// Use in components
+const { data, error } = await dbClient.from("items").select();
+```
+
+### Node.js Backend
+
+**Update client to include database:**
+
+```typescript
+import { createClient } from "@neondatabase/neon-js";
+
+export const client = createClient({
+  auth: { url: process.env.NEON_AUTH_URL! },
+  dataApi: { url: process.env.NEON_DATA_API_URL! },
+});
+
+// Use in routes
+await client.auth.signIn.email({ email, password });
+const { data } = await client.from("users").select();
+```
+
+**Environment Variables:**
+
+Add to `.env`:
+```bash
+NEON_DATA_API_URL=https://ep-xxx.apirest.c-2.us-east-2.aws.neon.build/dbname/rest/v1
+```
+
+**Complete reference:** See [Data API Reference](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-data-api.md#client-setup)
+
+---
+
+## Phase 6: Type Generation (Optional)
+
+Generate TypeScript types from your database schema:
+
+```bash
+npx neon-js gen-types --db-url "postgresql://user:pass@host/db" --output src/types/database.ts
+```
+
+Or using environment variable:
+
+```bash
+npx neon-js gen-types --db-url "$DATABASE_URL" --output lib/db/database.types.ts
+```
+
+Then update your client to use the types:
+
+```typescript
+import { createClient } from "@neondatabase/neon-js";
+import type { Database } from "./database.types";
+
+export const dbClient = createClient<Database>({
+  auth: { url: process.env.NEXT_PUBLIC_NEON_AUTH_URL! },
+  dataApi: { url: process.env.NEON_DATA_API_URL! },
+});
+```
+
+**Benefits:** Full TypeScript autocomplete for tables, columns, and relationships.
+
+**Complete reference:** See [Data API Reference](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-data-api.md#type-generation)
+
+---
+
+## Phase 7: UI Setup (Optional)
+
+Skip this phase if using custom auth forms or you already set up UI with neon-auth skill.
+
+**Complete UI setup:** See [UI - Next.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-nextjs.md) or [UI - React SPA](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-react-spa.md)
+
+**Quick summary:**
+
+1. **Import CSS** (choose ONE method):
+   - With Tailwind: `@import '@neondatabase/neon-js/ui/tailwind';` in CSS file
+   - Without Tailwind: `import "@neondatabase/neon-js/ui/css";` in layout/app file
+
+2. **Create Auth Provider** with framework-specific navigation adapters
+
+3. **Wrap app** in the provider
+
+**Framework-specific examples:** See [UI - Next.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-nextjs.md) or [UI - React SPA](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-react-spa.md)
+
+---
+
+## Phase 8: Validation & Testing
+
+### Test Database Queries
+
+Create a test page or API route:
+
+```typescript
+// app/api/test-db/route.ts (Next.js)
+import { dbClient } from "@/lib/db/client";
+import { NextResponse } from "next/server";
+
+export async function GET() {
+  try {
+    // Test a simple query
+    const { data, error } = await dbClient
+      .from("pg_catalog.pg_tables")
+      .select("tablename")
+      .eq("schemaname", "public")
+      .limit(5);
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      status: "connected",
+      tables: data,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { status: "error", message: String(error) },
+      { status: 500 }
+    );
+  }
+}
+```
+
+Visit `/api/test-db` to verify the connection.
+
+### Manual Testing Checklist
+
+- [ ] Auth: Sign up a test user
+- [ ] Auth: Sign in with test user
+- [ ] Auth: Verify session persists
+- [ ] Data: Query returns results
+- [ ] Data: Insert creates records
+- [ ] Data: Update modifies records
+- [ ] Data: Delete removes records
+
+**Having Issues?** See:
+- [Troubleshooting Guide](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-troubleshooting.md)
+- [Common Mistakes](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-common-mistakes.md)
+- [Data API Reference](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-data-api.md#error-handling)
+
+---
+
+## Phase 9: Add Best Practices References
+
+Before executing the add-neon-docs skill, provide a summary:
+
+"Neon JS SDK integration is complete! Now adding documentation references..."
+
+Then execute the neon-plugin:add-neon-docs skill with the parameter SKILL_NAME="neon-js"
+
+---
+
+## Setup Complete!
+
+Your Neon JS SDK integration is ready to use.
+
+**What's working:**
+- Authentication API routes at `/api/auth/*`
+- Client-side auth hooks via `authClient.useSession()`
+- PostgREST-style database queries via `dbClient.from()`
+- (If configured) Pre-built UI components
+- (If configured) TypeScript types for database
+
+**Query Examples:**
+
+```typescript
+// Select with filters
+const { data } = await dbClient
+  .from("items")
+  .select("id, name, status")
+  .eq("status", "active")
+  .order("created_at", { ascending: false })
+  .limit(10);
+
+// Select with relationships
+const { data } = await dbClient
+  .from("posts")
+  .select("id, title, author:users(name, email)");
+
+// Insert
+const { data, error } = await dbClient
+  .from("items")
+  .insert({ name: "New Item", status: "pending" })
+  .select()
+  .single();
+
+// Update
+await dbClient
+  .from("items")
+  .update({ status: "completed" })
+  .eq("id", 1);
+
+// Delete
+await dbClient
+  .from("items")
+  .delete()
+  .eq("id", 1);
+```
+
+**Complete query reference:** See [Data API Reference](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-data-api.md)
+
+**Next Steps:**
+- Add protected routes using session checks
+- Implement Row Level Security (RLS) for data access control
+- Generate types from schema for full TypeScript support
+
+**Reference Documentation:**
+
+*Framework-Specific:*
+- [Setup - Next.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nextjs.md) | [UI - Next.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-nextjs.md)
+- [Setup - React SPA](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-react-spa.md) | [UI - React SPA](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-ui-react-spa.md)
+- [Setup - Node.js](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-setup-nodejs.md)
+
+*Shared:*
+- [Data API Reference](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-js-data-api.md) - PostgREST query patterns
+- [Common Mistakes](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/references/neon-auth-common-mistakes.md) - Import paths, adapter patterns
+
+---
+
+**Guide Version**: 1.0.0  
+**Last Updated**: 2025-12-09
+
+
+============================================================
+END FILE: .fleet/skills/neon-db/neon-js/guides/setup.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/neon-db/neon-serverless/SKILL.md
+============================================================
+
+---
+name: neon-serverless
+description: Configures Neon Serverless Driver for Next.js, Vercel Edge Functions, AWS Lambda, and other serverless environments. Installs @neondatabase/serverless, sets up environment variables, and creates working API route examples with TypeScript types. Use when users need to connect their application to Neon, fetch or query data from a Neon database, integrate Neon with Next.js or serverless frameworks, or set up database access in edge/serverless environments where traditional PostgreSQL clients don't work.
+allowed-tools: ["bash"]
+---
+
+# Neon Serverless Skill
+
+Configures the Neon Serverless Driver for optimal performance in serverless and edge computing environments.
+
+## When to Use
+
+- Setting up connections for edge functions (Vercel Edge, Cloudflare Workers)
+- Configuring serverless APIs (AWS Lambda, Google Cloud Functions)
+- Optimizing for low-latency database access
+- Implementing connection pooling for high-throughput apps
+
+**Not recommended for:** Complex multi-statement transactions (use WebSocket Pool), persistent servers (use native PostgreSQL drivers), or offline-first applications.
+
+## Code Generation Rules
+
+When generating TypeScript/JavaScript code:
+- BEFORE generating import statements, check tsconfig.json for path aliases (compilerOptions.paths)
+- If path aliases exist (e.g., "@/*": ["./src/*"]), use them (e.g., import { x } from '@/lib/utils')
+- If NO path aliases exist or unsure, ALWAYS use relative imports (e.g., import { x } from '../../../lib/utils')
+- Verify imports match the project's configuration
+- Default to relative imports - they always work regardless of configuration
+
+## Reference Documentation
+
+**Primary Resource:** See `[neon-serverless.mdc](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/neon-serverless.mdc)` in project root for comprehensive guidelines including:
+- Installation and compatibility requirements
+- HTTP vs WebSocket adapter selection
+- Connection pooling strategies
+- Query optimization patterns
+- Error handling and troubleshooting
+
+## Quick Setup
+
+### Installation
+```bash
+npm install @neondatabase/serverless
+```
+
+### Connection Patterns
+
+**HTTP Client** (recommended for edge/serverless):
+```typescript
+import { neon } from '@neondatabase/serverless';
+const sql = neon(process.env.DATABASE_URL!);
+const rows = await sql`SELECT * FROM users WHERE id = ${userId}`;
+```
+
+**WebSocket Pool** (for Node.js long-lived connections):
+```typescript
+import { Pool } from '@neondatabase/serverless';
+const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+```
+
+See `templates/` for complete examples:
+- `templates/http-connection.ts` - HTTP client setup
+- `templates/websocket-pool.ts` - WebSocket pool configuration
+
+## Validation
+
+Use `scripts/validate-connection.ts` to test your database connection before deployment.
+
+## Related Skills
+
+- **neon-auth** - Add authentication
+- **neon-js** - Full SDK with auth + data API
+- **neon-drizzle** - For ORM with serverless connections
+- **neon-toolkit** - For ephemeral database testing
+
+---
+
+**Want best practices in your project?** Run `neon-plugin:add-neon-docs` with parameter `SKILL_NAME="neon-serverless"` to add reference links.
+
+
+============================================================
+END FILE: .fleet/skills/neon-db/neon-serverless/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/neon-db/neon-toolkit/SKILL.md
+============================================================
+
+---
+name: neon-toolkit
+description: Creates and manages ephemeral Neon databases for testing, CI/CD pipelines, and isolated development environments. Use when building temporary databases for automated tests or rapid prototyping.
+allowed-tools: ["bash"]
+---
+
+# Neon Toolkit Skill
+
+Automates creation, management, and cleanup of temporary Neon databases using the Neon Toolkit.
+
+## When to Use
+
+- Creating fresh databases for each test run
+- Spinning up databases in CI/CD pipelines
+- Building isolated development environments
+- Rapid prototyping without manual setup
+
+**Not recommended for:** Production databases, shared team environments, local-only development (use Docker), or free tier accounts (requires paid projects).
+
+## Code Generation Rules
+
+When generating TypeScript/JavaScript code:
+- BEFORE generating import statements, check tsconfig.json for path aliases (compilerOptions.paths)
+- If path aliases exist (e.g., "@/*": ["./src/*"]), use them (e.g., import { x } from '@/lib/utils')
+- If NO path aliases exist or unsure, ALWAYS use relative imports (e.g., import { x } from '../../../lib/utils')
+- Verify imports match the project's configuration
+- Default to relative imports - they always work regardless of configuration
+
+## Reference Documentation
+
+**Primary Resource:** See [neon-toolkit.mdc](https://raw.githubusercontent.com/neondatabase-labs/ai-rules/main/neon-toolkit.mdc) in project root for comprehensive guidelines including:
+- Core concepts (Organization, Project, Branch, Endpoint)
+- Installation and authentication setup
+- Database lifecycle management patterns
+- API client usage examples
+- Error handling strategies
+
+## Quick Setup
+
+### Installation
+```bash
+npm install @neondatabase/toolkit
+```
+
+### Basic Usage
+```typescript
+import { NeonToolkit } from '@neondatabase/toolkit';
+
+const neon = new NeonToolkit({ apiKey: process.env.NEON_API_KEY! });
+
+// Create ephemeral database
+const db = await neon.createEphemeralDatabase();
+console.log(`Database URL: ${db.url}`);
+
+// Use the database...
+
+// Cleanup
+await db.delete();
+```
+
+## Templates & Scripts
+
+- `templates/toolkit-workflow.ts` - Complete ephemeral database workflow
+- `scripts/create-ephemeral-db.ts` - Create a temporary database
+- `scripts/destroy-ephemeral-db.ts` - Clean up ephemeral database
+
+## Common Use Cases
+
+### Testing
+```typescript
+const db = await neon.createEphemeralDatabase();
+// Run tests with fresh database
+await db.delete();
+```
+
+### CI/CD Integration
+```bash
+export NEON_API_KEY=${{ secrets.NEON_API_KEY }}
+npm test  # Uses ephemeral database
+```
+
+## Related Skills
+
+- **neon-serverless** - For connecting to databases
+- **neon-drizzle** - For schema and migrations
+
+---
+
+**Want best practices in your project?** Run `neon-plugin:add-neon-docs` with parameter `SKILL_NAME="neon-toolkit"` to add reference links.
+
+
+============================================================
+END FILE: .fleet/skills/neon-db/neon-toolkit/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/product-management/SKILL.md
+============================================================
+
+---
+name: product-management
+description: Assist with core product management activities including writing PRDs, analyzing features, synthesizing user research, planning roadmaps, and communicating product decisions. Use when you need help with PM documentation, analysis, or planning workflows that integrate with your codebase.
+---
+# Skill: Product management AI
+
+## Purpose
+
+Assist with core product management activities including writing product requirements documents (PRDs), analyzing feature requests, synthesizing user research, planning roadmaps, and communicating product decisions to stakeholders and engineering teams.
+
+## When to use this skill
+
+- You need to **write or update PRDs** with clear requirements, success metrics, and technical considerations.
+- You're **evaluating feature requests** and need structured analysis of impact, effort, and priority.
+- You need to **synthesize user research** findings into actionable insights.
+- You're **planning roadmaps** and need to organize, prioritize, and communicate plans.
+- You need to **communicate product decisions** clearly to engineering, design, and business stakeholders.
+- You're doing **competitive analysis** or market research synthesis.
+- You need to **track and analyze product metrics** to inform decisions.
+
+## Key capabilities
+
+Unlike point-solution PM tools:
+
+- **Integrated with codebase**: Can reference actual code, APIs, and technical constraints.
+- **Context-aware**: Understands your specific product, architecture, and technical debt.
+- **Flexible templates**: Adapt documentation to your organization's needs.
+- **Version controlled**: All artifacts live in git alongside code.
+- **Collaborative**: Works within existing dev workflows (PRs, issues, docs).
+
+## Inputs
+
+- **Product context**: Current state, key stakeholders, strategic goals.
+- **Feature requests**: User feedback, business needs, or strategic initiatives.
+- **Technical constraints**: Known limitations, dependencies, or technical debt.
+- **User research**: Interview notes, survey results, analytics data.
+- **Business goals**: Metrics, OKRs, or success criteria to optimize for.
+
+## Out of scope
+
+- Making final product decisions (this is the PM's job; the skill assists).
+- Managing stakeholder relationships and politics.
+- Detailed UI/UX design work (use design tools and collaborate with designers).
+- Project management and sprint planning (use project management tools).
+
+## Conventions and best practices
+
+### PRD structure
+A good PRD should include:
+
+1. **Problem statement**: What user pain point or business need are we addressing?
+2. **Goals and success metrics**: What does success look like quantitatively?
+3. **User stories and use cases**: Who will use this and how?
+4. **Requirements**: Functional and non-functional requirements, prioritized.
+5. **Technical considerations**: Architecture implications, dependencies, constraints.
+6. **Design and UX notes**: Key interaction patterns or design requirements.
+7. **Risks and mitigations**: What could go wrong and how to address it.
+8. **Launch plan**: Rollout strategy, feature flags, monitoring.
+9. **Open questions**: What still needs to be decided or researched.
+
+### Feature prioritization
+Use structured frameworks to evaluate features:
+
+- **RICE**: Reach × Impact × Confidence / Effort
+- **ICE**: Impact × Confidence × Ease
+- **Value vs. Effort**: 2×2 matrix plotting value against implementation cost
+- **Kano Model**: Categorize features into basic, performance, and delighters
+
+### User research synthesis
+When synthesizing research:
+
+1. **Identify patterns**: What themes emerge across participants?
+2. **Quote verbatim**: Include actual user quotes to illustrate points.
+3. **Quantify when possible**: "7 out of 10 participants said..."
+4. **Segment findings**: Different user types may have different needs.
+5. **Connect to metrics**: How do qualitative findings explain quantitative data?
+
+### Roadmap planning
+Effective roadmaps should:
+
+- **Theme-based**: Group work into strategic themes, not just feature lists.
+- **Time-horizoned**: Now / Next / Later or Quarterly structure.
+- **Outcome-focused**: Emphasize goals and outcomes, not just outputs.
+- **Flexible**: Leave room for learning and adjustment.
+- **Communicated clearly**: Different views for different audiences.
+
+## Required behavior
+
+1. **Understand context deeply**: Review existing docs, code, and prior discussions before proposing changes.
+2. **Ask clarifying questions**: Don't assume; clarify ambiguous requirements or goals.
+3. **Be specific and actionable**: Avoid vague language; provide concrete, testable requirements.
+4. **Consider tradeoffs**: Explicitly discuss pros/cons of different approaches.
+5. **Connect to strategy**: Tie features and decisions back to higher-level goals.
+6. **Involve stakeholders**: Identify who needs to review or approve.
+7. **Think through edge cases**: Don't just focus on happy paths.
+8. **Make it measurable**: Propose concrete metrics to track success.
+
+## Required artifacts
+
+Depending on the task, generate:
+
+- **PRD document**: Comprehensive product requirements in markdown format.
+- **Feature analysis**: Structured evaluation of a feature request.
+- **Research synthesis**: Summary of user research findings with insights.
+- **Roadmap document**: Organized view of planned work with themes and timelines.
+- **Decision document**: Record of key product decisions and rationale.
+- **Competitive analysis**: Comparison of competitor features and approaches.
+- **Metric definitions**: Clear definitions of success metrics and how to measure them.
+
+## Implementation checklist
+
+### Writing a PRD
+- [ ] Understand the problem space and strategic context
+- [ ] Review related code, APIs, and technical constraints
+- [ ] Interview key stakeholders (engineering, design, business)
+- [ ] Research user needs and competitive landscape
+- [ ] Draft problem statement and goals
+- [ ] Define user stories and use cases
+- [ ] Specify functional and non-functional requirements
+- [ ] Document technical considerations and dependencies
+- [ ] Define success metrics and measurement approach
+- [ ] Identify risks and mitigation strategies
+- [ ] Plan rollout and launch approach
+- [ ] Review with stakeholders and iterate
+
+### Analyzing a feature request
+- [ ] Clarify the user problem or business need
+- [ ] Identify target users and use cases
+- [ ] Estimate impact (users affected, business value)
+- [ ] Assess implementation effort and complexity
+- [ ] Identify dependencies and risks
+- [ ] Check alignment with product strategy
+- [ ] Compare against alternatives
+- [ ] Calculate prioritization score (RICE, ICE, etc.)
+- [ ] Make recommendation with clear reasoning
+
+### Synthesizing user research
+- [ ] Review all research materials (transcripts, notes, data)
+- [ ] Identify key themes and patterns
+- [ ] Extract representative quotes
+- [ ] Segment findings by user type if relevant
+- [ ] Connect qualitative findings to quantitative data
+- [ ] Formulate insights and implications
+- [ ] Generate actionable recommendations
+- [ ] Prioritize recommendations by impact
+
+### Planning a roadmap
+- [ ] Review strategic goals and OKRs
+- [ ] Collect input from stakeholders
+- [ ] Assess current state and technical debt
+- [ ] Group potential work into strategic themes
+- [ ] Prioritize themes and initiatives
+- [ ] Estimate sizing and dependencies
+- [ ] Organize into time horizons (Now/Next/Later)
+- [ ] Define success criteria for each initiative
+- [ ] Create views for different audiences
+- [ ] Review and socialize with stakeholders
+
+## Example workflows
+
+### Example 1: Writing a PRD for a new feature
+
+```markdown
+# PRD: Advanced Search Functionality
+
+## Problem Statement
+Users frequently report difficulty finding specific items in our catalog when they have multiple criteria (price range, location, category, features). Our current search only supports simple text queries, leading to:
+- High bounce rates on search results pages (65% bounce rate vs 32% site average)
+- Increased support tickets asking for search help (150/month)
+- Lost conversion opportunities (estimated $500K annual revenue impact)
+
+## Goals and Success Metrics
+**Primary Goal**: Enable users to find relevant items quickly using multiple filters.
+
+**Success Metrics**:
+- Reduce search result page bounce rate from 65% to <40%
+- Increase search-to-purchase conversion rate by 25%
+- Reduce search-related support tickets by 50%
+- 70% of users engage with at least one filter within 30 days
+
+## User Stories
+
+### Must Have
+1. As a buyer, I want to filter by price range so I can find items within my budget
+2. As a buyer, I want to filter by location so I can find items near me
+3. As a buyer, I want to filter by category so I can narrow down item types
+4. As a buyer, I want to combine multiple filters so I can find exactly what I need
+5. As a buyer, I want to see filter counts so I know how many items match before applying
+
+### Should Have
+6. As a buyer, I want to save my filter preferences so I don't have to reapply them
+7. As a buyer, I want to see suggested filters based on my search query
+8. As a buyer, I want to sort filtered results by relevance, price, or date
+
+### Nice to Have
+9. As a buyer, I want to create saved searches that notify me of new matches
+10. As a buyer, I want to share a filtered search URL with others
+
+## Requirements
+
+### Functional Requirements
+
+**Filter Types** (Priority: Must Have)
+- Price range filter: min/max inputs + common presets ($0-50, $50-100, etc.)
+- Location filter: radius selector + zip code input
+- Category filter: hierarchical category tree with multi-select
+- Custom attribute filters: based on item type (size, color, condition, etc.)
+
+**Filter Behavior** (Priority: Must Have)
+- Filters apply instantly (no "Apply" button) or with <500ms latency
+- URL updates to reflect active filters (shareable links)
+- Clear all filters button visible when any filter is active
+- Filter state persists within session
+- Mobile-friendly filter UI (drawer or modal on mobile)
+
+**Search Integration** (Priority: Must Have)
+- Filters work alongside text search query
+- Filter facet counts update based on text query
+- Auto-suggest filters based on search terms (e.g., "red" → suggest color filter)
+
+### Non-Functional Requirements
+
+**Performance** (Priority: Must Have)
+- Initial page load <2s at p95
+- Filter application response <500ms at p95
+- Support 10,000+ concurrent users without degradation
+- Efficient indexing for 1M+ items
+
+**Scalability** (Priority: Should Have)
+- Filter definitions configurable without code changes
+- Support for 50+ filter types
+- Easily add new filter types for new categories
+
+**Accessibility** (Priority: Must Have)
+- Keyboard navigation for all filters
+- Screen reader support with proper ARIA labels
+- High contrast mode support
+- Touch target sizes ≥44×44px on mobile
+
+## Technical Considerations
+
+### Architecture
+- **Search Backend**: Extend existing Elasticsearch cluster with filter aggregations
+- **API Changes**: New `/search` endpoint query params for filters; return filter facets in response
+- **Frontend**: React components with URL state management (React Router)
+- **Caching**: Cache filter definitions and facet counts (Redis, 5-minute TTL)
+
+### Dependencies
+- Elasticsearch 8.x upgrade (currently on 7.x) to support efficient aggregations
+- Update item schema to include filter-specific fields
+- Backend API versioning to support gradual rollout
+
+### Data Model
+```typescript
+interface SearchFilters {
+  price?: { min: number; max: number };
+  location?: { lat: number; lng: number; radius: number };
+  categories?: string[]; // Category IDs
+  attributes?: Record<string, string[]>; // Dynamic attributes
+}
+
+interface SearchResponse {
+  items: Item[];
+  facets: {
+    [filterName: string]: {
+      values: Array<{ value: string; count: number }>;
+    };
+  };
+  total: number;
+}
+```
+
+### Technical Risks
+1. **Elasticsearch performance**: Complex aggregations may impact search latency
+   - *Mitigation*: Load test with production data; add caching; consider pre-aggregation
+2. **Index size growth**: More fields = larger indices and slower indexing
+   - *Mitigation*: Monitor index size; potentially separate indices for different item types
+3. **Schema evolution**: Adding new filters requires index updates
+   - *Mitigation*: Design flexible schema; plan for gradual rollout
+
+## Design and UX Notes
+
+### Desktop Layout
+- Filters in left sidebar (persistent, not collapsible)
+- Main results area with sort controls at top
+- Filter chips above results showing active filters
+
+### Mobile Layout
+- "Filters" button in header opens bottom sheet
+- Show active filter count badge on button
+- Apply button in bottom sheet (don't auto-apply on mobile to reduce requests)
+
+### Filter UI Patterns
+- Price: Dual slider + text inputs
+- Location: Autocomplete location search + radius selector
+- Category: Expandable tree with checkboxes
+- Attributes: Checkbox groups, collapsible sections
+
+## Risks and Mitigations
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Performance degradation with complex filters | Medium | High | Load testing; caching; gradual rollout with feature flag |
+| Low filter adoption by users | Medium | High | User testing; prominent UI; tutorial on first visit |
+| Elasticsearch upgrade issues | Low | High | Test in staging; plan rollback; off-peak deployment |
+| Filter options become overwhelming | Medium | Medium | User research to prioritize filters; consider "More filters" progressive disclosure |
+
+## Launch Plan
+
+### Phase 1: MVP (Week 1-2)
+- Price, location, and category filters only
+- Desktop web only
+- 5% rollout to test performance
+
+### Phase 2: Expansion (Week 3-4)
+- Add custom attribute filters
+- Mobile responsive design
+- Expand to 25% of users
+
+### Phase 3: Full Launch (Week 5-6)
+- Saved search preferences (logged-in users)
+- 100% rollout
+- Monitor metrics and iterate
+
+### Feature Flags
+- `advanced_search_enabled`: Master flag for entire feature
+- `advanced_search_filters`: Individual filter types can be enabled/disabled
+- `advanced_search_saved_prefs`: Saved preferences feature
+
+### Monitoring
+- Dashboards tracking success metrics (bounce rate, conversion, engagement)
+- Error rates and latency for search API
+- Filter usage analytics (which filters used most, combinations)
+- Alerts for search latency >1s or error rate >1%
+
+## Open Questions
+
+1. **Filter Defaults**: Should any filters be pre-applied based on user history or location? (Owner: PM, Due: Week 1)
+2. **Personalization**: How should we handle conflicting saved preferences vs. shared filter URLs? (Owner: Eng, Due: Week 2)
+3. **Mobile UX**: Should mobile use instant apply or require an "Apply" button? (Owner: Design, Due: Week 1)
+4. **Analytics**: What specific filter interactions should we track? (Owner: Data, Due: Week 2)
+
+## Stakeholders and Reviewers
+
+- **PM Owner**: Jane Doe
+- **Engineering Lead**: John Smith
+- **Design**: Alice Johnson
+- **Data Science**: Bob Lee (metrics and instrumentation)
+- **Approvals Needed**: VP Product, VP Engineering
+
+---
+*Last Updated*: 2025-11-19
+*Status*: Draft → Review → Approved → In Progress
+```
+
+### Example 2: Feature request analysis
+
+```markdown
+# Feature Analysis: Dark Mode Support
+
+## Request Summary
+**Source**: User feedback (150+ requests in past 6 months), competitive pressure
+**Description**: Add dark mode theme option to web and mobile apps
+
+## User Need
+Users working in low-light environments report eye strain with current light-only theme. Power users (25% of DAU) spend 3+ hours/day in app and strongly prefer dark mode. Common feedback: "I use dark mode everywhere else, why not here?"
+
+## Target Users
+- Power users: 300K users, 3+ hrs/day usage
+- Evening/night users: 450K users who primarily use app 6pm-12am
+- Accessibility users: Users with light sensitivity or visual impairments
+
+## Impact Assessment
+
+### User Impact
+- **Reach**: ~750K users (45% of user base) have requested or would use dark mode
+- **Impact Score**: 8/10 - High impact for target users; neutral for others
+- **Confidence**: 85% - Strong signal from user research and competitive data
+
+### Business Impact
+- **Retention**: Likely improves retention for power users (high-value segment)
+- **Acquisition**: Table stakes for competitive positioning
+- **Revenue**: Indirect impact through retention and satisfaction
+- **Estimated Value**: +2% overall retention = ~$800K annual revenue
+
+## Effort Assessment
+
+### Engineering Effort
+- **Frontend**: 3 weeks (2 engineers)
+  - Design system updates (color tokens, theme provider)
+  - Component updates (~150 components)
+  - Testing across browsers and devices
+- **Backend**: 1 week (1 engineer)
+  - User preference storage and API
+  - Default theme logic
+- **Total Effort**: ~7 engineer-weeks
+
+### Design Effort
+- 2 weeks to design and validate dark theme
+- Audit all screens and components
+- Accessibility testing for contrast ratios
+
+### Dependencies
+- Requires design system update first (already planned Q2)
+- Mobile apps need React Native theme provider update
+- Email templates will remain light mode (out of scope for now)
+
+## Alternatives Considered
+
+### Option 1: Full Dark Mode (Recommended)
+- **Pros**: Meets user needs; industry standard; future-proof
+- **Cons**: More implementation work upfront
+- **Effort**: 7 engineer-weeks
+
+### Option 2: Auto Dark Mode Only (follow system preference)
+- **Pros**: Simpler (no user preference storage); still helps users
+- **Cons**: Doesn't give user control; may not match user preference
+- **Effort**: 5 engineer-weeks
+
+### Option 3: Premium Feature (dark mode for paid users)
+- **Pros**: Potential revenue from feature upgrades
+- **Cons**: User backlash (expected table stakes); limits adoption
+- **Effort**: 7 engineer-weeks + paywall logic
+
+## Prioritization Score
+
+Using RICE framework:
+- **Reach**: 750K users = 750
+- **Impact**: 8/10 (high for target segment) = 0.8
+- **Confidence**: 85% = 0.85
+- **Effort**: 7 weeks = 7
+
+**RICE Score**: (750 × 0.8 × 0.85) / 7 = **73.2**
+
+For comparison:
+- Recent feature A: RICE = 45
+- Recent feature B: RICE = 92
+- Average feature RICE: 55
+
+## Risks
+
+1. **Scope Creep**: Easy to bikeshed colors; need clear design authority
+   - *Mitigation*: Lock designs early; time-box feedback cycles
+2. **Accessibility**: Poor contrast choices could harm accessibility
+   - *Mitigation*: WCAG AA testing; accessibility audit before launch
+3. **Maintenance Burden**: Need to test everything in both modes going forward
+   - *Mitigation*: Automated visual regression testing; CI checks
+4. **Incomplete Coverage**: Users notice when parts don't respect theme
+   - *Mitigation*: Comprehensive component audit; phased rollout
+
+## Strategic Alignment
+
+**Product Strategy**: ✅ Aligned - Improves core user experience for power users (strategic segment)
+**Technical Strategy**: ✅ Aligned - Modernizes design system and component architecture
+**Business Goals**: ✅ Aligned - Supports retention goals and competitive positioning
+
+## Recommendation
+
+**✅ Proceed with Option 1 (Full Dark Mode)**
+
+**Reasoning**:
+- High impact for large user segment (45% of base)
+- Strong user demand and competitive pressure
+- Effort is reasonable relative to value
+- RICE score above our threshold (>50)
+- Aligns with product, technical, and business strategy
+
+**Suggested Timeline**:
+- Q2 2025: Design and design system updates
+- Q3 2025: Implementation and testing
+- Q4 2025: Launch with marketing push
+
+**Next Steps**:
+1. Get stakeholder approval
+2. Add to Q2 roadmap
+3. Kick off design work
+4. Plan engineering sprint allocation
+
+---
+*Analysis by*: Jane Doe (PM)
+*Reviewed by*: Design, Engineering, Data
+*Date*: 2025-11-19
+```
+
+## Common PM artifacts
+
+### PRD (Product Requirements Document)
+Comprehensive specification of what to build and why. Include problem statement, goals, user stories, requirements, technical considerations, risks, and launch plan.
+
+### Feature Brief
+Lighter-weight than PRD; quick summary of a feature idea with key details. Use for early-stage exploration before committing to full PRD.
+
+### User Research Synthesis
+Summary of user research findings (interviews, surveys, usability tests) with patterns, insights, and recommendations.
+
+### Roadmap
+Strategic plan of what to build over time. Organize by themes and time horizons; focus on outcomes not just outputs.
+
+### Decision Document
+Record of important product decisions, the options considered, the decision made, and the reasoning. Critical for institutional memory.
+
+### Launch Plan
+Detailed plan for rolling out a feature including phases, feature flags, metrics, monitoring, and rollback procedures.
+
+### Competitive Analysis
+Comparison of competitors' features, approaches, and positioning. Inform product strategy and feature prioritization.
+
+### One-Pager
+Executive summary of a product initiative. Use to communicate to leadership and get alignment.
+
+## Best practices for AI-assisted PM work
+
+### When using AI to write PRDs
+- Provide comprehensive context about the product, users, and technical constraints.
+- Review and edit generated content carefully; AI may miss nuances or make wrong assumptions.
+- Use AI for structure and first drafts; refine with human judgment and stakeholder input.
+- Validate technical details with engineering; don't assume AI knows your architecture.
+
+### When using AI for feature analysis
+- Provide quantitative data when possible (usage numbers, customer feedback counts).
+- Use structured frameworks (RICE, ICE) to make analysis consistent and defensible.
+- Don't let AI make the final decision; use it to organize thinking and surface considerations.
+- Supplement AI analysis with qualitative stakeholder input and strategic context.
+
+### When using AI for research synthesis
+- Provide full transcripts or detailed notes for best results.
+- Ask AI to identify patterns but validate with your own reading of the data.
+- Use AI to extract quotes and organize themes; add your own interpretation and implications.
+- Don't let AI over-summarize; sometimes important details are in the nuances.
+
+## Safety and escalation
+
+- **Strategic decisions**: AI should inform, not make, key product decisions. Involve human PMs and stakeholders.
+- **User data**: Don't feed PII or sensitive user data to AI without proper data handling procedures.
+- **Technical feasibility**: Always validate technical assumptions and effort estimates with engineering.
+- **Competitive intelligence**: Be cautious about including confidential competitive info in prompts.
+- **Tone and voice**: Review and adjust tone for your audience; AI may be too formal or informal.
+
+## Integration with other skills
+
+This skill can be combined with:
+
+- **Data querying**: To analyze product metrics and user behavior data.
+- **AI data analyst**: To perform deeper quantitative analysis for feature decisions.
+- **Frontend UI integration**: To implement features designed in PRDs.
+- **Internal tools**: To build PM tools like feature flag dashboards or metrics viewers.
+
+============================================================
+END FILE: .fleet/skills/product-management/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/prompt-refiner-claude/SKILL.md
+============================================================
+
+---
+name: prompt-refiner-claude
+description: Refine prompts for Claude models (Opus, Sonnet, Haiku) using Anthropic's best practices. Use when preparing complex tasks for Claude.
+---
+
+# Claude Prompt Refiner
+
+## When to Use
+Invoke this skill when you have a task for Claude that:
+- Involves multiple steps or files
+- Requires specific output formatting
+- Needs careful reasoning or analysis
+- Would benefit from structured context
+
+## Refinement Process
+
+### 1. Analyze the Draft Prompt
+Review the user's prompt for:
+- [ ] Clear outcome definition
+- [ ] Sufficient context
+- [ ] Explicit constraints
+- [ ] Success criteria
+
+### 2. Apply Claude-Specific Patterns
+
+**Structure with XML tags:**
+- `<context>` - Background information, codebase state
+- `<task>` - The specific action to take
+- `<requirements>` - Must-have criteria
+- `<constraints>` - Limitations and boundaries
+- `<examples>` - Sample inputs/outputs if helpful
+
+**Ordering matters:**
+1. Context first (what exists)
+2. Task second (what to do)
+3. Requirements third (how to do it)
+4. Examples last (clarifying edge cases)
+
+### 3. Enhance for Reasoning
+For complex tasks, add:
+- "Think through the approach before implementing"
+- "Consider these edge cases: ..."
+- "Explain your reasoning for key decisions"
+
+### 4. Output the Refined Prompt
+Present the improved prompt with:
+- Clear section headers
+- XML tags where beneficial
+- Specific, measurable criteria
+
+## Example Transformation
+
+**Before:**
+"Add caching to the API"
+
+**After:**
+
+============================================================
+END FILE: .fleet/skills/prompt-refiner-claude/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/rlm/SKILL.md
+============================================================
+
+---
+name: rlm
+description: Process very large context files (logs, docs, transcripts, scraped webpages) that exceed context limits by chunking content, delegating analysis to subagents, and synthesizing results. Use when files are >100k characters and require iterative inspection and extraction across the entire document.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - Bash
+  - Task
+---
+
+# RLM (Recursive Language Model Workflow)
+
+A workflow for processing large context files that won't fit in a single conversation by chunking content, delegating chunk analysis to subagents, and synthesizing results.
+
+## When to Use This Skill
+
+Use RLM when:
+- The user provides or references a **very large context file** (>100k chars) - logs, documentation, transcripts, scraped webpages
+- The file is too large to load entirely into the conversation context
+- You need to **iteratively inspect, search, chunk, and extract** information from the entire file
+- The task requires **analyzing multiple sections** independently before synthesis
+- You need to maintain state across multiple operations on the same file
+
+**Trigger phrases:**
+- "Analyze this large log file..."
+- "Extract all mentions of X from this transcript..."
+- "Summarize this 500-page documentation..."
+- "Find patterns across this entire scraped website dump..."
+
+## Mental Model
+
+The RLM workflow has three key components:
+
+1. **Root LM** (you) - Orchestrates the workflow, manages chunking strategy, synthesizes final results
+2. **Persistent REPL** (`rlm_repl.py`) - Maintains state, provides helpers for chunking/searching/extraction
+3. **Sub-LM** (subagent) - Analyzes individual chunks and returns structured results
+
+## Quick Start
+
+### Minimal Example
+
+```bash
+# 1. Initialize with your large file
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py init /path/to/large_file.txt
+
+# 2. Scout the content
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec -c "print(f'Total chars: {len(content):,}')"
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec -c "print(peek(0, 1000))"
+
+# 3. Create chunks
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+paths = write_chunks('.letta/rlm_chunks', size=150000, overlap=5000)
+print(f"Created {len(paths)} chunks")
+for i, p in enumerate(paths[:3]):
+    print(f"  {i}: {p}")
+PY
+
+# 4. Process chunks with subagent (see Subagent Approaches section)
+
+# 5. Synthesize results in main conversation
+```
+
+## Complete Workflow
+
+### 1. Parse Arguments
+
+This skill expects `$ARGUMENTS` in one of these formats:
+- `context=/path/to/file.txt query="What are the main errors?"`
+- `context=/path/to/file.txt query="Extract all usernames" chunk_chars=200000`
+
+Optional parameters:
+- `chunk_chars=<int>` - Chunk size in characters (default: ~200000)
+- `overlap_chars=<int>` - Overlap between chunks (default: 0)
+
+If the user didn't provide arguments, ask for:
+1. The context file path
+2. The query/task
+
+### 2. Initialize REPL State
+
+```bash
+# Initialize with the context file
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py init /path/to/context.txt
+
+# Check status
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py status
+```
+
+The REPL creates a persistent state file at `.letta/rlm_state/state.pkl` containing:
+- The full context content
+- Buffers for accumulating results
+- Any persisted variables from exec commands
+
+### 3. Scout the Context
+
+Get a quick sense of the content structure:
+
+```bash
+# Peek at start
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec -c "print(peek(0, 3000))"
+
+# Peek at end
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec -c "print(peek(len(content)-3000, len(content)))"
+
+# Quick search for structure
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec -c "hits = grep(r'^#+ ', max_matches=10); print([h['match'] for h in hits])"
+```
+
+### 4. Choose Chunking Strategy
+
+**Semantic chunking** (preferred when structure is clear):
+- Markdown files: Split on heading boundaries (`^#+ `)
+- JSON: Split on top-level objects/arrays
+- Logs: Split on timestamp boundaries
+- Code: Split on function/class boundaries
+
+**Character-based chunking** (fallback):
+- Use when no clear semantic boundaries exist
+- Recommended size: 150,000-250,000 chars
+- Add overlap (5,000-10,000 chars) to preserve context at boundaries
+
+### 5. Materialize Chunks
+
+Write chunks to disk so subagents can read them:
+
+```bash
+# Character-based chunking
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+paths = write_chunks('.letta/rlm_chunks', size=200000, overlap=10000)
+print(f"Created {len(paths)} chunks:")
+for i, p in enumerate(paths):
+    print(f"  chunk_{i}: {p}")
+PY
+
+# Semantic chunking example (markdown headings)
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+import re
+# Find all heading positions
+headings = list(re.finditer(r'^#+ .+$', content, re.MULTILINE))
+# Create chunks between headings
+# ... (custom logic based on content structure)
+PY
+```
+
+### 6. Process Chunks with Subagent
+
+You have two approaches for delegating chunk analysis:
+
+#### Approach A: Letta Task Tool (Recommended)
+
+```python
+# For each chunk, spawn a subagent task
+Task({
+    "subagent_type": "general-purpose",
+    "description": f"Analyze chunk {i}",
+    "prompt": f"""Analyze this chunk and extract all error messages.
+
+Read the chunk: {chunk_path}
+
+Return a JSON object with:
+- errors: list of error messages found
+- severity: list of severity levels
+- context: brief context for each error
+
+Be concise and structured."""
+})
+```
+
+#### Approach B: Custom rlm-subcall Subagent
+
+If you've set up a dedicated `rlm-subcall` agent (see `references/subagent-setup.md`):
+
+```bash
+# Use your preferred method to invoke rlm-subcall with:
+# - The user's query
+# - The chunk file path
+# - Specific extraction instructions
+```
+
+**Key principles for subagent calls:**
+- Keep instructions specific and task-focused
+- Request structured output (JSON preferred)
+- Limit subagent output size (they should extract/summarize, not dump)
+- Pass chunk file path, don't paste content into prompt
+
+### 7. Accumulate Results
+
+Collect subagent outputs in REPL buffers or in the main conversation:
+
+```bash
+# Add subagent result to buffers
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+result = """
+{chunk analysis from subagent}
+"""
+add_buffer(result)
+print(f"Buffer count: {len(buffers)}")
+PY
+```
+
+Or manually track results in the conversation as you iterate through chunks.
+
+### 8. Synthesize Final Answer
+
+Once all chunks are processed:
+
+1. Review accumulated results from buffers/conversation
+2. Identify patterns, trends, or comprehensive answers
+3. Synthesize a coherent final response
+4. Optionally: Use a subagent one final time to merge/format the collected evidence
+
+```bash
+# Export buffers for final synthesis
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py export-buffers /tmp/rlm_results.txt
+```
+
+## REPL Helper Functions
+
+The `rlm_repl.py` script provides these helpers in exec mode:
+
+### Variables
+- `context` - Dict with keys: `path`, `loaded_at`, `content`
+- `content` - String alias for `context['content']`
+- `buffers` - List[str] for storing intermediate results
+
+### Functions
+- `peek(start=0, end=1000)` - Extract a substring from content
+- `grep(pattern, max_matches=20, window=120, flags=0)` - Search with regex, returns matches with context
+- `chunk_indices(size=200000, overlap=0)` - Calculate chunk boundaries (returns list of (start, end) tuples)
+- `write_chunks(out_dir, size=200000, overlap=0, prefix='chunk')` - Write chunks to files, returns list of paths
+- `add_buffer(text)` - Append text to buffers list
+
+### Commands
+- `init <context_path>` - Load a context file and create state
+- `status` - Show current state (file size, buffers, vars)
+- `exec -c "<code>"` - Execute Python code (state persists)
+- `exec` - Execute Python code from stdin (use with heredoc)
+- `export-buffers <out_path>` - Write all buffers to a file
+- `reset` - Delete state file
+
+## Guardrails
+
+**DO:**
+- Use REPL to locate and extract specific excerpts
+- Keep subagent prompts focused and structured
+- Request JSON or other structured formats from subagents
+- Quote only necessary snippets in the main conversation
+
+**DON'T:**
+- Paste large raw chunks into the main chat context
+- Spawn subagents from within subagents (orchestration stays in root)
+- Store sensitive data in REPL state files
+- Forget to clean up `.letta/rlm_state/` and `.letta/rlm_chunks/` when done
+
+## File Locations
+
+By default, RLM uses these paths:
+- State: `.letta/rlm_state/state.pkl`
+- Chunks: `.letta/rlm_chunks/chunk_*.txt`
+- Buffers export: User-specified path
+
+You can override the state path with `--state /custom/path.pkl` on any command.
+
+## Advanced Usage
+
+See `references/examples.md` for complete workflow examples including:
+- Analyzing large log files
+- Extracting structured data from transcripts
+- Summarizing documentation
+- Finding patterns in scraped web content
+
+For subagent setup details, see `references/subagent-setup.md`.
+
+## Troubleshooting
+
+**"No state found" error:**
+- Run `init` first with your context file path
+
+**REPL state getting too large:**
+- Use `reset` to clear state
+- Initialize with a fresh context
+- Consider filtering content before init if possible
+
+**Subagent outputs too verbose:**
+- Be more specific in subagent prompts
+- Request structured/summarized output
+- Limit output with explicit constraints
+
+**Memory issues with very large files:**
+- Use `--max-bytes` with init to cap file size
+- Pre-filter or split files before processing
+- Process in multiple RLM sessions if needed
+
+
+============================================================
+END FILE: .fleet/skills/rlm/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/rlm/references/examples.md
+============================================================
+
+# RLM Workflow Examples
+
+Complete examples of using the RLM workflow for different types of large-context tasks.
+
+## Example 1: Analyzing Large Log Files
+
+**Scenario:** User provides a 5MB application log file and wants all critical errors with context.
+
+**Query:** "Extract all CRITICAL errors from app.log with timestamps and surrounding context"
+
+### Workflow
+
+```bash
+# 1. Initialize
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py init /path/to/app.log
+
+# 2. Scout the structure
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec -c "print(peek(0, 1000))"
+# Output shows: [2024-01-23 10:15:32] INFO ...
+# Logs are timestamp-prefixed, line-based
+
+# 3. Search for critical errors
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+critical = grep(r'CRITICAL', max_matches=100, window=200)
+print(f"Found {len(critical)} CRITICAL entries")
+print("First 3:")
+for i, hit in enumerate(critical[:3]):
+    print(f"\n{i}. {hit['snippet'][:200]}...")
+PY
+
+# 4. If too many hits, chunk the file
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+paths = write_chunks('.letta/rlm_chunks', size=150000, overlap=5000)
+print(f"Created {len(paths)} chunks")
+PY
+
+# 5. Process each chunk with subagent
+```
+
+**Subagent prompt template:**
+```
+Read: {chunk_path}
+
+Task: Extract all CRITICAL errors.
+
+For each error, return JSON:
+{
+  "timestamp": "...",
+  "message": "...",
+  "surrounding_lines": "..." (3 lines before and after)
+}
+
+Return: {"errors": [...]}
+```
+
+**Synthesis:**
+- Collect all error objects from subagent responses
+- Sort by timestamp
+- Group by error type/pattern if requested
+- Present summary + full list
+
+---
+
+## Example 2: Extracting Structured Data from Transcripts
+
+**Scenario:** 200-page meeting transcript, user wants all action items and decisions.
+
+**Query:** "Extract all action items and decisions from transcript.txt"
+
+### Workflow
+
+```bash
+# 1. Initialize
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py init transcript.txt
+
+# 2. Check format
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec -c "print(peek(0, 2000))"
+# Transcript has speaker labels: "Alice: ...", "Bob: ..."
+
+# 3. Search for keywords
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+action_words = grep(r'\b(action item|TODO|will do|responsible for)\b', max_matches=50, flags=2)
+decision_words = grep(r'\b(decided|decision|we\'ll go with|agreed)\b', max_matches=50, flags=2)
+print(f"Action keywords: {len(action_words)}")
+print(f"Decision keywords: {len(decision_words)}")
+PY
+
+# 4. Semantic chunking (by speaker turns or time markers)
+# Or character-based if no clear structure
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+paths = write_chunks('.letta/rlm_chunks', size=180000, overlap=8000)
+print(f"{len(paths)} chunks created")
+PY
+
+# 5. Process chunks
+```
+
+**Subagent prompt:**
+```
+Read: {chunk_path}
+
+Extract:
+1. Action items (who, what, when)
+2. Decisions made (what was decided, context)
+
+Return JSON:
+{
+  "action_items": [
+    {"person": "...", "task": "...", "deadline": "..."}
+  ],
+  "decisions": [
+    {"decision": "...", "context": "...", "speaker": "..."}
+  ]
+}
+
+Only include clear, explicit items. Skip vague mentions.
+```
+
+**Synthesis:**
+- Deduplicate similar action items across chunks
+- Organize by person/team
+- Present decisions chronologically
+- Flag any incomplete information
+
+---
+
+## Example 3: Summarizing Documentation
+
+**Scenario:** 1000-page technical specification, user wants high-level summary and specific section.
+
+**Query:** "Summarize the authentication section from spec.md"
+
+### Workflow
+
+```bash
+# 1. Initialize
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py init spec.md
+
+# 2. Find authentication section
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+auth_hits = grep(r'^## Authentication', max_matches=5, window=500)
+if auth_hits:
+    match = auth_hits[0]
+    print(f"Found at position: {match['span']}")
+    print(match['snippet'])
+PY
+
+# 3. Extract just authentication section
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+# Find section boundaries (between ## headers)
+import re
+headers = [(m.start(), m.group(0)) for m in re.finditer(r'^## .+$', content, re.MULTILINE)]
+
+# Find authentication header
+auth_idx = None
+for i, (pos, title) in enumerate(headers):
+    if 'Authentication' in title:
+        auth_idx = i
+        break
+
+if auth_idx is not None:
+    start = headers[auth_idx][0]
+    end = headers[auth_idx + 1][0] if auth_idx + 1 < len(headers) else len(content)
+    auth_section = content[start:end]
+    
+    # Write to separate file
+    from pathlib import Path
+    out = Path('.letta/rlm_chunks/auth_section.txt')
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(auth_section)
+    print(f"Extracted {len(auth_section):,} chars to {out}")
+PY
+
+# 4. If section is still large, chunk it
+# Otherwise, process directly with subagent
+```
+
+**Subagent prompt:**
+```
+Read: .letta/rlm_chunks/auth_section.txt
+
+Create a comprehensive summary of the authentication approach:
+
+1. Overview (2-3 sentences)
+2. Key components (bullet list)
+3. Authentication flow (step-by-step)
+4. Important notes/warnings
+
+Format as markdown. Be thorough but concise.
+```
+
+---
+
+## Example 4: Finding Patterns in Scraped Web Content
+
+**Scenario:** Scraped content from 500 web pages (single concatenated file), find all mentions of pricing.
+
+**Query:** "Find all pricing information from scraped_pages.txt"
+
+### Workflow
+
+```bash
+# 1. Initialize
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py init scraped_pages.txt
+
+# 2. Quick search for price patterns
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+import re
+price_patterns = [
+    r'\$\d+(?:,\d{3})*(?:\.\d{2})?',  # $123.45
+    r'\d+(?:,\d{3})*(?:\.\d{2})?\s*(?:USD|dollars)',  # 123 dollars
+    r'(?:price|cost|pricing):\s*\$?\d+',  # price: $50
+]
+
+all_prices = []
+for pattern in price_patterns:
+    hits = grep(pattern, max_matches=100, window=150, flags=2)
+    all_prices.extend(hits)
+
+print(f"Found {len(all_prices)} price mentions")
+print("\nSample:")
+for hit in all_prices[:5]:
+    print(f"  {hit['match']} -> ...{hit['snippet'][:100]}...")
+PY
+
+# 3. Chunk for detailed extraction
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+paths = write_chunks('.letta/rlm_chunks', size=200000, overlap=5000)
+print(f"Created {len(paths)} chunks")
+PY
+
+# 4. Process with subagent
+```
+
+**Subagent prompt:**
+```
+Read: {chunk_path}
+
+Extract all pricing information.
+
+For each price found, return:
+{
+  "price": "...",
+  "currency": "...",
+  "context": "..." (what is being priced),
+  "page_title": "..." (if identifiable)
+}
+
+Return: {"prices": [...]}
+
+Focus on explicit pricing. Skip vague mentions.
+```
+
+**Synthesis:**
+- Deduplicate identical price mentions
+- Group by product/service
+- Create price range summary
+- Flag any ambiguous/conflicting pricing
+
+---
+
+## Example 5: Multi-Pass Analysis
+
+**Scenario:** Large dataset where you need to first identify patterns, then extract based on those patterns.
+
+**Pass 1: Discover pattern types**
+
+```bash
+# Sample randomly from content
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+import random
+n = len(content)
+samples = [
+    peek(random.randint(0, n-5000), random.randint(0, n-5000)+5000)
+    for _ in range(5)
+]
+for i, s in enumerate(samples):
+    print(f"\n=== Sample {i} ===")
+    print(s[:500])
+PY
+```
+
+Use subagent to analyze samples and identify patterns.
+
+**Pass 2: Extract based on discovered patterns**
+
+```bash
+# Chunk with strategy informed by Pass 1
+python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+# Use pattern-specific chunking
+# Then write chunks
+PY
+```
+
+Process chunks with updated extraction logic.
+
+---
+
+## Tips for All Workflows
+
+1. **Start with reconnaissance**: Use `peek()` and `grep()` to understand structure before chunking
+2. **Choose appropriate chunk size**: 
+   - Smaller (100k) for dense, important content
+   - Larger (250k) for sparse, repetitive content
+3. **Add overlap for safety**: 5-10k chars prevents losing context at boundaries
+4. **Validate early**: Process 1-2 chunks first, check quality before processing all
+5. **Structured output**: Always request JSON or structured format from subagents
+6. **Incremental synthesis**: Don't wait for all chunks - synthesize partial results as you go
+7. **Clean up**: Delete `.letta/rlm_chunks/` and state files when done
+
+## Common Patterns
+
+### Pattern: Frequency Analysis
+1. Quick grep to count occurrences
+2. If high count, chunk and aggregate
+3. Present sorted frequency table
+
+### Pattern: Timeline Extraction
+1. Chunk by time boundaries (if logs/events)
+2. Extract chronological events from each chunk
+3. Merge into master timeline
+4. Sort and filter by date range
+
+### Pattern: Hierarchical Summary
+1. Chunk by document structure (sections/chapters)
+2. Summarize each chunk individually
+3. Create high-level summary from chunk summaries
+4. Present multi-level summary (overview → details)
+
+### Pattern: Entity Extraction
+1. Sample to identify entity types
+2. Chunk content
+3. Extract entities from each chunk
+4. Deduplicate and normalize
+5. Present entity catalog with frequencies
+
+
+============================================================
+END FILE: .fleet/skills/rlm/references/examples.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/rlm/references/subagent-setup.md
+============================================================
+
+# Setting Up the rlm-subcall Subagent
+
+This guide explains how to create a dedicated `rlm-subcall` subagent for use with the RLM workflow.
+
+## Why a Dedicated Subagent?
+
+The `rlm-subcall` agent is optimized for:
+- Analyzing individual chunks of content
+- Extracting structured information
+- Returning concise, focused results
+- Operating with minimal context overhead
+
+## Option 1: Using Letta Task Tool (Recommended)
+
+The simplest approach is to use Letta's built-in Task tool without creating a dedicated agent:
+
+```python
+# Spawn a one-off subagent for each chunk
+Task({
+    "subagent_type": "general-purpose",
+    "description": f"Extract errors from chunk {i}",
+    "prompt": f"""Read and analyze: {chunk_path}
+
+Task: {user_query}
+
+Return structured JSON with your findings.
+Be concise - extract and summarize, don't dump raw content."""
+})
+```
+
+**Advantages:**
+- No setup required
+- Works immediately
+- Flexible - adjust prompt per chunk
+
+**Disadvantages:**
+- Less specialized than a dedicated agent
+- No persistent memory between chunks
+- May need more detailed instructions each time
+
+## Option 2: Creating a Dedicated rlm-subcall Agent
+
+For repeated RLM workflows, create a specialized subagent:
+
+### 1. Create the Agent
+
+```bash
+# Via Letta CLI
+letta create agent \
+  --name rlm-subcall \
+  --description "Specialized agent for RLM chunk analysis" \
+  --preset default
+```
+
+Or programmatically if using Letta as a library.
+
+### 2. Configure the Agent's System Prompt
+
+Edit the agent to include this specialized system guidance:
+
+```markdown
+You are rlm-subcall, a specialized subagent for RLM (Recursive Language Model) workflows.
+
+## Your Role
+
+You analyze individual chunks of a larger document and return focused, structured results.
+
+## Key Principles
+
+1. **Be Concise**: You're analyzing one chunk of a larger file. Return only extracted/summarized information, never dump raw content.
+
+2. **Follow Structure**: The root agent will specify what format to use (usually JSON). Follow it exactly.
+
+3. **No Meta-commentary**: Don't say "I analyzed the chunk and found..." Just return the requested structure.
+
+4. **Read the Chunk**: You'll be given a file path. Read it with the Read tool.
+
+5. **Extract, Don't Dump**: Your job is extraction and light analysis, not wholesale copying.
+
+## Typical Task Format
+
+You'll receive prompts like:
+
+"""
+Read: /path/to/chunk_0042.txt
+
+Task: Extract all error messages with their timestamps.
+
+Return JSON:
+{
+  "errors": [
+    {"timestamp": "...", "message": "...", "severity": "..."}
+  ]
+}
+"""
+
+## Output Format
+
+Prefer structured output:
+- JSON for data extraction
+- Markdown lists for summaries
+- CSV for tabular data
+
+Keep output under 2000 characters unless explicitly requested otherwise.
+```
+
+### 3. Test the Agent
+
+```bash
+# Test with a sample chunk
+letta send --agent rlm-subcall \
+  --message "Read: /tmp/test_chunk.txt\n\nTask: Count occurrences of 'ERROR' and 'WARN'.\n\nReturn JSON with counts."
+```
+
+### 4. Use in RLM Workflow
+
+When processing chunks, invoke your rlm-subcall agent:
+
+```python
+# If using Letta Task tool with your pre-configured agent
+Task({
+    "agent_id": "rlm-subcall",  # Your agent ID
+    "subagent_type": "general-purpose",
+    "description": f"Process chunk {i}",
+    "prompt": f"""Read: {chunk_path}
+
+Task: {user_query}
+
+Return structured JSON."""
+})
+```
+
+Or use your platform's method for invoking a specific agent.
+
+## Agent Memory Considerations
+
+**Per-Chunk Analysis (Default):**
+- Agent forgets between chunks
+- Clean slate for each analysis
+- Prevents context pollution
+
+**Cross-Chunk Memory (Advanced):**
+- If you need the subagent to remember findings across chunks, maintain a conversation thread
+- Use conversation_id to continue the same conversation
+- Be cautious of context accumulation
+
+## Best Practices
+
+1. **Clear Instructions**: Tell the subagent exactly what to extract and in what format
+2. **Validate Output**: Check that subagent responses match expected structure
+3. **Error Handling**: Provide fallback logic if subagent returns unexpected format
+4. **Chunk Size**: Keep chunks small enough that subagent analysis is focused
+5. **Prompt Consistency**: Use similar prompt structure for all chunks in a workflow
+
+## Alternative: Deploy an Existing Agent
+
+If you already have an agent optimized for analysis tasks, you can deploy it for RLM workflows:
+
+```python
+Task({
+    "agent_id": "your-existing-agent-id",
+    "subagent_type": "explore",  # or "general-purpose"
+    "description": "Analyze chunk",
+    "prompt": "..."
+})
+```
+
+See the main SKILL.md for complete workflow integration.
+
+
+============================================================
+END FILE: .fleet/skills/rlm/references/subagent-setup.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/rlm/scripts/rlm_repl.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Persistent mini-REPL for RLM-style workflows in Claude Code.
+
+This script provides a *stateful* Python environment across invocations by
+saving a pickle file to disk. It is intentionally small and dependency-free.
+
+Typical flow:
+  1) Initialise context:
+       python rlm_repl.py init path/to/context.txt
+  2) Execute code repeatedly (state persists):
+       python rlm_repl.py exec -c 'print(len(content))'
+       python rlm_repl.py exec <<'PYCODE'
+       # you can write multi-line code
+       hits = grep('TODO')
+       print(hits[:3])
+       PYCODE
+
+The script injects these variables into the exec environment:
+  - context: dict with keys {path, loaded_at, content}
+  - content: string alias for context['content']
+  - buffers: list[str] for storing intermediate text results
+
+It also injects helpers:
+  - peek(start=0, end=1000) -> str
+  - grep(pattern, max_matches=20, window=120, flags=0) -> list[dict]
+  - chunk_indices(size=200000, overlap=0) -> list[(start,end)]
+  - write_chunks(out_dir, size=200000, overlap=0, prefix='chunk') -> list[str]
+  - add_buffer(text: str) -> None
+
+Security note:
+  This runs arbitrary Python via exec. Treat it like running code you wrote.
+"""
+
+from __future__ import annotations
+
+import argparse
+import io
+import os
+import pickle
+import re
+import sys
+import textwrap
+import time
+import traceback
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+DEFAULT_STATE_PATH = Path(".claude/rlm_state/state.pkl")
+DEFAULT_MAX_OUTPUT_CHARS = 8000
+
+

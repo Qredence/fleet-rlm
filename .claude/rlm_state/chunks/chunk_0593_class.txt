@@ -1,0 +1,10 @@
+<!-- Chunk 593: bytes 905662-906023, type=class -->
+class GenerationSignature(dspy.Signature):
+    """Signature for content generation."""
+
+    topic = dspy.InputField(desc="Topic to generate content about")
+    style = dspy.InputField(desc="Desired style (e.g., formal, casual)")
+    length = dspy.InputField(desc="Target length in words", default=300)
+    content = dspy.OutputField(desc="Generated content")
+
+

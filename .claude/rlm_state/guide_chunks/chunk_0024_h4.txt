@@ -1,0 +1,10 @@
+<!-- Chunk 24: bytes 8288-8831, type=h4 -->
+#### Quantitative metrics:
+
+•  **Skill triggers on 90% of relevant queries**
+    – *How to measure:* Run 10-20 test queries that should trigger your skill. Track how many times it loads automatically vs. requires explicit invocation.
+•  **Completes workflow in X tool calls**
+    – *How to measure:* Compare the same task with and without the skill enabled. Count tool calls and total tokens consumed.
+•  **0 failed API calls per workflow**
+    – *How to measure:* Monitor MCP server logs during test runs. Track retry rates and error codes.
+

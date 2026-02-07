@@ -1,0 +1,1016 @@
+<!-- Chunk 1326: bytes 4888098-4927216, type=function -->
+def function_name(param1: type, param2: type) -> return_type:
+    """Description of the function."""
+```
+
+**Parameters:**
+- `param1`: Description
+- `param2`: Description
+
+**Returns:** Description of return value
+
+**Example:**
+```python
+# Usage example
+```
+
+## Classes
+
+### ClassName
+
+Description of the class.
+
+#### Methods
+
+- `method_name()`: Description
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/references/api-reference.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/references/common-patterns.md
+============================================================
+
+# Common Patterns
+
+Frequently used patterns with `ephemeral-memory-protocol`.
+
+## Pattern 1: Basic Usage
+
+Description of the pattern.
+
+```python
+# Example code
+```
+
+## Pattern 2: Advanced Usage
+
+Description of the pattern.
+
+```python
+# Example code
+```
+
+## Anti-Patterns
+
+Things to avoid when using this skill.
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/references/common-patterns.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/references/quick-start.md
+============================================================
+
+# Quick Start Guide
+
+Get started with `ephemeral-memory-protocol` in minutes.
+
+## Prerequisites
+
+- List prerequisites here
+
+## Installation
+
+```bash
+# Installation steps
+```
+
+## Basic Usage
+
+```python
+# Basic usage example
+```
+
+## Next Steps
+
+- See [Common Patterns](common-patterns.md) for more examples
+- Check [API Reference](api-reference.md) for detailed documentation
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/references/quick-start.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/references/troubleshooting.md
+============================================================
+
+# Troubleshooting
+
+Common issues and solutions for `ephemeral-memory-protocol`.
+
+## Common Issues
+
+### Issue 1: Description
+
+**Symptoms:** What you might see
+
+**Cause:** Why this happens
+
+**Solution:** How to fix it
+
+```python
+# Fix example
+```
+
+### Issue 2: Description
+
+**Symptoms:** What you might see
+
+**Cause:** Why this happens
+
+**Solution:** How to fix it
+
+## Getting Help
+
+If you encounter issues not covered here:
+1. Check the [API Reference](api-reference.md)
+2. Review [Common Patterns](common-patterns.md)
+3. Search existing issues
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/references/troubleshooting.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/resources/README.md
+============================================================
+
+# Resources
+
+Resource files for `ephemeral-memory-protocol`.
+
+Includes configuration files, data files, and other resources needed by the skill.
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/resources/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/scripts/README.md
+============================================================
+
+# Scripts
+
+Utility scripts for `ephemeral-memory-protocol`.
+
+These scripts help with setup, maintenance, or automation tasks.
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/scripts/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/README.md
+============================================================
+
+# Tests
+
+Integration tests for `ephemeral-memory-protocol`.
+
+These tests verify the skill's capabilities work as expected.
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/test_1.json
+============================================================
+
+{
+  "name": "State Retention Test",
+  "description": "Verify that a file path stored in turn 1 is still available in turn 5 after several unrelated messages.",
+  "input_data": "User: Store path '/etc/config' in ephemeral memory.\n... (4 unrelated turns) ...\nUser: What was that config path?",
+  "expected_result": "The agent retrieves '/etc/config' from the Ephemeral Memory block."
+}
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/test_1.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/test_2.json
+============================================================
+
+{
+  "name": "Overwrite Verification",
+  "description": "Ensure that updating a status doesn't result in two status lines.",
+  "input_data": "Current: - **Status:** Testing\nAction: Update status to 'Deploying'",
+  "expected_result": "The block contains '- **Status:** Deploying' and the 'Testing' line is removed."
+}
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/test_2.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/test_3.json
+============================================================
+
+{
+  "name": "Garbage Collection Trigger",
+  "description": "Verify that finishing a task clears the associated ephemeral data.",
+  "input_data": "Memory: - **Temp File:** 'temp.txt'\nUser: I'm done with the temp file, you can delete it and forget the path.",
+  "expected_result": "The Ephemeral Memory block no longer contains the 'Temp File' entry."
+}
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/memory_blocks/ephemeral-memory-protocol/tests/test_3.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/taxonomy_meta.json
+============================================================
+
+{
+  "total_skills": 1,
+  "generation_count": 1,
+  "statistics": {
+    "by_type": {
+      "memory": 1
+    },
+    "by_weight": {
+      "lightweight": 1
+    },
+    "by_priority": {
+      "task_specific": 1
+    }
+  },
+  "last_updated": "2026-01-16T09:26:17.152421+00:00"
+}
+
+
+============================================================
+END FILE: skills/_drafts/54dbf8d8-887a-43da-9eba-f4fb0819282d/taxonomy_meta.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/SKILL.md
+============================================================
+
+---
+name: docker-python-best-practices
+description: >
+  Use when Python Docker images are excessively large (>800MB), build times are slow due to redundant dependency installation, or security audits require non-root execution and minimal attack surfaces. Apply these practices when transitioning a Python application from local development to production-ready containerization.
+---
+
+# Docker Python Best Practices
+
+Containerizing Python applications effectively requires balancing build speed, image size, and security. A naive `dockerize` approach often results in "bloatware" containers that are slow to pull and vulnerable to exploits.
+
+**Core principle:** The Minimalist Container—Every byte, library, and privilege in a production container must be justified. If a tool isn't needed to *run* the app, it shouldn't be in the final image.
+
+## Capabilities
+
+- **Optimal Base Selection**: Choose between `slim` and `alpine` based on library dependencies (glibc vs musl).
+- **Efficient Layer Caching**: Structure Dockerfiles to ensure dependency installs only run when `requirements.txt` or `pyproject.toml` changes.
+- **Multi-Stage Orchestration**: Separate build-time tools (compilers, git) from the final execution environment.
+- **Environment Hardening**: Configure Python for containerized logging and bytecode management.
+- **Non-Root Execution**: Implement least-privilege security models by default.
+
+## Dependencies
+
+- **docker/basics** — Essential for understanding image layers, tags, and basic Dockerfile syntax.
+- **python/package-management** — Knowledge of `pip`, `wheels`, and dependency resolution is required to optimize installation layers.
+
+## When to Use
+
+**Use when:**
+- Transitioning from a "working" local Dockerfile to a production-ready image.
+- Image sizes exceed 500MB for a standard web API.
+- CI/CD pipelines are taking more than 5 minutes to build images.
+- Security scanners (Trivy, Snyk) report high numbers of OS-level vulnerabilities.
+
+**When NOT to use:**
+- Quick local prototyping where build speed and size are irrelevant.
+- Building data science "workbenches" where a full toolset (compilers, debuggers) is required interactively.
+
+## Quick Reference
+
+| Problem | Solution | Keywords |
+| ------- | -------- | -------- |
+| Large Image Size | Use `-slim` variants and Multi-stage builds | `multi-stage`, `slim` |
+| Slow Rebuilds | Copy requirements before source code | `layer caching` |
+| Security Risk | Create a non-root user and use `USER` | `least privilege` |
+| Missing Logs | Set `PYTHONUNBUFFERED=1` | `stdout`, `logging` |
+
+## Core Patterns
+
+### 1. The Layer Caching "Iron Law"
+
+**The problem:** Every time a single character of source code changes, Docker invalidates the cache for that line and all subsequent lines. If you copy your code *before* installing dependencies, you waste minutes reinstalling libraries on every build.
+
+**❌ Common mistake:**
+```dockerfile
+FROM python:3.11
+WORKDIR /app
+COPY . . 
+# ❌ ERROR: Any code change triggers a full reinstall of all packages!
+RUN pip install -r requirements.txt
+CMD ["python", "main.py"]
+```
+
+**✅ Production pattern:**
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+# ✅ GOOD: Cache requirements layer independently from source code
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+CMD ["python", "main.py"]
+```
+
+**Key insight:** Always copy dependency manifests (`requirements.txt`, `pyproject.toml`) and install them *before* copying the rest of the application source code.
+
+### 2. Multi-Stage Builds for Binary Dependencies
+
+**The problem:** Many Python packages (e.g., `pandas`, `psycopg2`, `cryptography`) require C compilers (`gcc`) and headers to install. Keeping these in your final image adds 300MB+ of attack surface.
+
+**✅ Production pattern:**
+```dockerfile
+# Stage 1: Build stage
+FROM python:3.11-slim AS builder
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends gcc python3-dev
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+
+# Stage 2: Final Runtime stage
+FROM python:3.11-slim
+WORKDIR /app
+# Only copy the pre-built wheels from the builder stage
+COPY --from=builder /app/wheels /wheels
+COPY --from=builder /app/requirements.txt .
+RUN pip install --no-cache-dir /wheels/*
+
+COPY . .
+USER python-user
+CMD ["python", "main.py"]
+```
+
+### 3. Essential Environment Configuration
+
+**The problem:** Python buffers output by default, meaning logs might not appear in `docker logs` until the buffer is full or the process crashes.
+
+**✅ Production pattern:**
+```dockerfile
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1
+```
+- `PYTHONDONTWRITEBYTECODE`: Prevents Python from writing `.pyc` files to disk (keeps container clean).
+- `PYTHONUNBUFFERED`: Forces stdout/stderr to be unbuffered (immediate logging).
+
+## Usage Examples
+
+### Example 1: Standard FastAPI Production Dockerfile
+Detailed template for a high-performance web service.
+*See `templates/production.Dockerfile` for the full annotated code.*
+
+### Example 2: Minimal `.dockerignore`
+Never allow sensitive or bulky local files into your build context.
+```text
+.git
+.env
+__pycache__
+*.pyc
+.pytest_cache
+node_modules
+venv
+.venv
+```
+
+## Common Mistakes
+
+| Mistake | Why It's Wrong | Fix |
+| ------- | -------------- | --- |
+| Using `python:latest` | It's based on Debian "full," containing hundreds of unnecessary packages. | Use `python:3.x-slim`. |
+| Running as `root` | A container breakout grants the attacker root access to the host. | Create a `user` and use the `USER` directive. |
+| Forgetting `.dockerignore` | Large folders like `.git` or `venv` are sent to the Docker daemon, slowing builds. | Always include a `.dockerignore` file. |
+| `pip install` without `--no-cache-dir` | Adds hundreds of MBs of temporary cache files to the image layer. | Always use `--no-cache-dir`. |
+
+## Real-World Impact
+
+- **Storage Cost**: Reducing image size from 900MB to 150MB reduces container registry costs by 80%.
+- **Deployment Speed**: Smaller images result in faster "Time to Ready" for Kubernetes pods and serverless functions.
+- **Security**: Switching to `slim` images and non-root users typically removes 90% of "High" and "Critical" OS vulnerabilities found by scanners.
+
+## Strong Guidance
+
+- **NEVER use the default `python:latest` or `python:3.x` (Debian Bookworm) images in production.** They are too large and contain unnecessary build tools.
+- **ALWAYS use `--no-cache-dir` with `pip install`.** This prevents the image from storing duplicate copies of packages in the cache.
+- **ALWAYS set `PYTHONUNBUFFERED=1`.** Without this, your application logs will be delayed, making debugging in production nearly impossible.
+- **NEVER include `.git` or `.env` in the image.** Use `.dockerignore` to exclude them.
+
+## Red Flags
+
+- Dockerfile lacks a `USER` instruction.
+- Dockerfile contains `apt-get install` without a multi-stage build or subsequent cleanup.
+- Image build time doesn't improve when changing only one line of Python code.
+- `pip install` is seen in the final stage of a build requiring `gcc`.
+
+---
+
+## Validation
+
+```bash
+# 1. Check Image Size (Should be < 200MB for simple apps)
+docker images | grep my-python-app
+
+# 2. Verify Non-Root User
+docker run my-python-app whoami
+# Expected: (not root)
+
+# 3. Verify Log Buffering
+docker run my-python-app python -c "import os; print(os.environ.get('PYTHONUNBUFFERED'))"
+# Expected: 1
+```
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/SKILL.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/best_practices.md
+============================================================
+
+[{'title': 'Use .dockerignore religiously', 'description': "Always exclude local virtual environments, git history, and secrets. This reduces the 'build context' size sent to the Docker daemon and prevents security leaks.", 'example': 'Create a .dockerignore containing: .venv, .git, .env, __pycache__, .pytest_cache'}, {'title': 'Pin base image versions', 'description': "Never use 'python:3-slim'. Use a specific minor version like 'python:3.11.5-slim-bookworm' to ensure builds are deterministic and don't break when a new Python version is released.", 'example': 'FROM python:3.11.7-slim-bookworm'}, {'title': 'Leverage Docker BuildKit Cache Mounts', 'description': "For extremely fast builds, use BuildKit's cache mount for pip. This persists the pip cache between builds without including it in the final image layers.", 'example': 'RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt'}, {'title': 'Combine RUN commands to reduce layers', 'description': "While Docker now compresses layers, it's still best practice to combine apt-get update, install, and cleanup into a single RUN command to minimize metadata and potential bloat.", 'example': 'RUN apt-get update && apt-get install -y libpq-dev && rm -rf /var/lib/apt/lists/*'}, {'title': 'Avoid Alpine unless strictly necessary', 'description': "Python on Alpine uses 'musl' instead of 'glibc'. Most Python wheels are built for glibc, meaning Alpine often has to compile from source, making builds MUCH slower and potentially introducing subtle C-level bugs.", 'example': 'Use python:3.11-slim (Debian based) as the default choice over Alpine.'}]
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/best_practices.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/examples/example_1.py
+============================================================
+
+FROM python:3.11-slim
+
+# Set work directory
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install dependencies separately to leverage cache
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create a non-root user
+RUN useradd --create-home appuser
+USER appuser
+
+# Copy source code
+COPY . .
+
+# Execute
+CMD ["python", "main.py"]
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/examples/example_1.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/examples/example_2.py
+============================================================
+
+# STAGE 1: BUILDER
+FROM python:3.11-slim as builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels -r requirements.txt
+
+# STAGE 2: RUNTIME
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy wheels from builder
+COPY --from=builder /build/wheels /wheels
+RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
+
+# Non-root setup
+RUN useradd -m worker
+USER worker
+
+COPY . .
+
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0"]
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/examples/example_2.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/examples/example_3.py
+============================================================
+
+# Build the image
+docker build -t my-safe-app .
+
+# Verify the user is not root
+docker run --rm my-safe-app id
+
+# Verify logs are unbuffered
+docker run --rm my-safe-app python -c "import sys; print(sys.stdout.reconfigure)" 
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/examples/example_3.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/metadata.json
+============================================================
+
+{
+  "skill_id": "docker/docker-python-best-practices",
+  "name": "docker-python-best-practices",
+  "description": "Use when Python Docker images are excessively large (>800MB), build times are slow due to redundant dependency installation, or security audits require non-root execution and minimal attack surfaces. Apply these practices when transitioning a Python application from local development to production-ready containerization.",
+  "version": "1.0.0",
+  "type": "technical",
+  "weight": "medium",
+  "load_priority": "task_specific",
+  "dependencies": [
+    "docker/basics"
+  ],
+  "capabilities": [],
+  "category": "docker",
+  "keywords": [
+    "docker",
+    "python",
+    "multi-stage-build",
+    "container-optimization",
+    "security",
+    "layer-caching"
+  ],
+  "scope": "Covers Python image optimization, multi-stage builds, .dockerignore, and non-root security. Does not cover Docker Compose, Kubernetes, or generic Python application logic.",
+  "see_also": [
+    "security/container-hardening",
+    "python/package-management"
+  ],
+  "tags": [
+    "devops",
+    "python",
+    "docker",
+    "security",
+    "cicd"
+  ],
+  "created_at": "2026-01-20T16:17:55.791287+00:00",
+  "last_modified": "2026-01-20T16:17:55.791287+00:00",
+  "evolution": {
+    "created_by": "skill-fleet-api",
+    "workflow": "SkillCreationProgram",
+    "validation_score": 0.88
+  }
+}
+
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/metadata.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/tests/test_1.json
+============================================================
+
+{
+  "name": "Image Size Audit",
+  "description": "Verify the image is significantly smaller than the standard Python base image.",
+  "input_data": "A standard FastAPI app Dockerfile.",
+  "expected_result": "The resulting image should be < 200MB, whereas the default 'python:3.11' would be ~1GB."
+}
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/tests/test_1.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/tests/test_2.json
+============================================================
+
+{
+  "name": "Layer Cache Verification",
+  "description": "Change a line of Python code and rebuild the image.",
+  "input_data": "Modify main.py.",
+  "expected_result": "The 'pip install' step must show 'CACHED' in the Docker build output. It should not reinstall packages."
+}
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/tests/test_2.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/tests/test_3.json
+============================================================
+
+{
+  "name": "Privilege Escalation Test",
+  "description": "Attempt to run a root-only command inside the container.",
+  "input_data": "docker run my-image apt-get update",
+  "expected_result": "Should fail with 'Permission denied' because the user is non-root."
+}
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/docker/docker-python-best-practices/tests/test_3.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/taxonomy_meta.json
+============================================================
+
+{
+  "total_skills": 1,
+  "generation_count": 1,
+  "statistics": {
+    "by_type": {
+      "technical": 1
+    },
+    "by_weight": {
+      "medium": 1
+    },
+    "by_priority": {
+      "task_specific": 1
+    }
+  },
+  "last_updated": "2026-01-20T16:17:55.794272+00:00"
+}
+
+
+============================================================
+END FILE: skills/_drafts/76ce3d21-e9cf-41f2-92ec-47776616c003/taxonomy_meta.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/taxonomy_meta.json
+============================================================
+
+{
+  "total_skills": 1,
+  "generation_count": 1,
+  "statistics": {
+    "by_type": {
+      "technical": 1
+    },
+    "by_weight": {
+      "medium": 1
+    },
+    "by_priority": {
+      "task_specific": 1
+    }
+  },
+  "last_updated": "2026-01-15T05:55:32.931939+00:00"
+}
+
+
+============================================================
+END FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/taxonomy_meta.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/SKILL.md
+============================================================
+
+---
+name: fastapi-pytest-workflow
+description: Standardized workflow and fixtures for isolated unit testing in FastAPI,
+  including SQLAlchemy session mocking and pyfakefs integration.
+category: technical_skills/python/testing
+keywords:
+- fastapi testing
+- pytest-asyncio
+- dependency overrides
+- database mocking
+- filesystem virtualization
+scope: Covers unit testing of FastAPI endpoints, dependency overrides for SQLAlchemy
+  AsyncSessions, and pyfakefs mocking. Does not cover end-to-end browser testing or
+  multi-container integration tests.
+see_also:
+- technical_skills/python/testing/mocking/pyfakefs
+- technical_skills/python/testing/coverage/pytest_cov
+metadata:
+  skill_id: technical_skills/python/testing/pytest/fastapi
+  version: 1.0.0
+  type: technical
+  weight: medium
+---
+
+# FastAPI Pytest Workflow
+
+## Overview
+
+Testing FastAPI applications requires a balance between speed and realism. A robust workflow ensures that every test case runs in a completely isolated environment, preventing side effects from leaking across tests. This skill covers the implementation of asynchronous test suites that mock database transactions and virtualize the filesystem.
+
+**Core principle:** **Atomic Isolation.** Every test must start with a clean state and end by reverting all changes (database rollbacks, filesystem wipes, and dependency reset) to ensure deterministic results.
+
+## Project Configuration
+
+To enable seamless async testing, create a `pytest.ini` and a `conftest.py` at your project root.
+
+### `pytest.ini`
+This file configures the test runner to handle async functions automatically.
+```ini
+[pytest]
+asyncio_mode = auto
+testpaths = tests
+python_files = test_*.py
+filterwarnings =
+    ignore::DeprecationWarning
+```
+
+### `conftest.py`
+Centralize fixtures for database connections and the test client here.
+```python
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from api.main import app
+from api.database import Base
+
+TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
+
+@pytest.fixture(scope="session", autouse=True)
+async def setup_database():
+    engine = create_async_engine(TEST_DATABASE_URL)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+@pytest.fixture
+async def db_session():
+    engine = create_async_engine(TEST_DATABASE_URL)
+    connection = await engine.connect()
+    trans = await connection.begin()
+    session = AsyncSession(bind=connection, expire_on_commit=False)
+    
+    await session.begin_nested() # Savepoint
+    yield session
+
+    await session.close()
+    await trans.rollback()
+    await connection.close()
+
+@pytest.fixture
+async def client():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
+```
+
+## Capabilities
+
+- **Asynchronous Testing**: Configure `pytest-asyncio` and `httpx.AsyncClient` for non-blocking endpoint testing.
+- **Transactional Rollbacks**: Implement a session-per-test pattern that rolls back database changes automatically.
+- **Dependency Injection Overriding**: Securely swap production services/databases with test mocks using `app.dependency_overrides`.
+- **Filesystem Virtualization**: Use `pyfakefs` to test file-handling logic without touching the physical disk.
+- **Global Teardowns**: Ensure FastAPI app state is reset after every test to prevent cross-contamination.
+
+## When to Use
+
+**Use when:**
+- Building production-grade FastAPI APIs with database interactions.
+- Testing endpoints that perform file I/O (uploads, downloads, logging).
+- You need high test speed without sacrificing the integrity of database constraints.
+
+**When NOT to use:**
+- For simple, stateless utility functions (use standard `pytest`).
+- For end-to-end browser-based testing (use Playwright or Selenium).
+
+## Core Patterns
+
+### The Transactional Rollback
+By using `session.begin_nested()` in a fixture, the database never actually "commits" the data to disk. This leaves the schema untouched and the tables empty for the next test without the overhead of recreating tables.
+
+**Key insight:** Always set `expire_on_commit=False` in the test `AsyncSession`. Otherwise, SQLAlchemy will try to refresh objects after the test finishes its local commit, which fails once the outer transaction is rolled back.
+
+## Usage Examples
+
+### 1. Testing a File Upload with DB Persistence
+```python
+@pytest.mark.asyncio
+async def test_upload_document(client, db_session, fs):
+    from api.main import app
+    from api.database import get_db
+    
+    fs.create_dir("/uploads/")
+    app.dependency_overrides[get_db] = lambda: db_session
+
+    files = {"file": ("test.pdf", b"content", "application/pdf")}
+    response = await client.post("/documents/", files=files)
+
+    assert response.status_code == 201
+    assert fs.exists("/uploads/test.pdf")
+    app.dependency_overrides.clear()
+```
+
+### 2. Testing a Protected GET Endpoint
+Demonstrates how to test data retrieval and mock authentication headers.
+```python
+@pytest.mark.asyncio
+async def test_get_user_profile(client, db_session):
+    # Setup: Add a user to the rolled-back session
+    new_user = User(username="tester", email="t@test.com")
+    db_session.add(new_user)
+    await db_session.flush()
+
+    response = await client.get(
+        f"/users/{new_user.id}", 
+        headers={"Authorization": "Bearer fake-token"}
+    )
+    
+    assert response.status_code == 200
+    assert response.json()["username"] == "tester"
+```
+
+### 3. Testing Error Handling (404 Scenario)
+Ensures the API handles missing resources gracefully.
+```python
+@pytest.mark.asyncio
+async def test_get_nonexistent_item(client):
+    response = await client.get("/items/99999")
+    
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Item not found"
+```
+
+## Common Mistakes
+
+| Mistake | Why It's Wrong | Fix |
+| ------- | -------------- | --- |
+| Forgetting `app.dependency_overrides.clear()` | Future tests will use the mock/session from the previous test. | Always clear overrides in a `yield` fixture or `finally` block. |
+| Using `TestClient` for Async | Leads to `RuntimeError: no running event loop`. | Use `httpx.AsyncClient`. |
+| Hardcoding paths with `pyfakefs` | If the app uses relative paths and the test uses absolute, the mock might fail. | Use `pathlib` consistently in both app and test code. |
+
+## Red Flags
+
+- **Test order matters**: If Test B fails when Test A is skipped, your database state is leaking.
+- **Physical files appear**: If you see files being created in your project directory during testing, `pyfakefs` is not configured correctly.
+- **"Database is locked" errors**: Usually indicates that a connection wasn't closed properly in a fixture.
+
+---
+
+## Validation
+
+```bash
+# Run tests with coverage reporting
+pytest --cov=api --cov-report=term-missing
+
+# Ensure no hanging async tasks
+pytest --asyncio-mode=auto
+```
+
+============================================================
+END FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/SKILL.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/assets/README.md
+============================================================
+
+# Assets
+
+Static assets for `fastapi-pytest-workflow`.
+
+Includes images, diagrams, and other static files.
+
+
+============================================================
+END FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/assets/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/capabilities/README.md
+============================================================
+
+# Capabilities
+
+Capability implementations for `fastapi-pytest-workflow`.
+
+Each file in this directory documents a specific capability provided by this skill.
+
+
+============================================================
+END FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/capabilities/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/examples/README.md
+============================================================
+
+# Examples
+
+Usage examples for `fastapi-pytest-workflow`.
+
+Each file demonstrates a specific use case or pattern.
+
+
+============================================================
+END FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/examples/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/metadata.json
+============================================================
+
+{
+  "skill_id": "technical_skills/python/testing/pytest/fastapi",
+  "name": "fastapi-pytest-workflow",
+  "description": "Standardized workflow and fixtures for isolated unit testing in FastAPI, including SQLAlchemy session mocking and pyfakefs integration.",
+  "version": "1.0.0",
+  "type": "technical",
+  "weight": "medium",
+  "load_priority": "task_specific",
+  "dependencies": [
+    "technical_skills/python/web_development/fastapi/basics",
+    "technical_skills/python/testing/pytest/basics",
+    "technical_skills/python/databases/sqlalchemy/async_session"
+  ],
+  "capabilities": [],
+  "category": "technical_skills/python/testing",
+  "keywords": [
+    "fastapi testing",
+    "pytest-asyncio",
+    "dependency overrides",
+    "database mocking",
+    "filesystem virtualization"
+  ],
+  "scope": "Covers unit testing of FastAPI endpoints, dependency overrides for SQLAlchemy AsyncSessions, and pyfakefs mocking. Does not cover end-to-end browser testing or multi-container integration tests.",
+  "see_also": [
+    "technical_skills/python/testing/mocking/pyfakefs",
+    "technical_skills/python/testing/coverage/pytest_cov"
+  ],
+  "tags": [
+    "fastapi",
+    "pytest",
+    "sqlalchemy",
+    "mocking",
+    "pyfakefs",
+    "unit-testing"
+  ],
+  "created_at": "2026-01-15T05:55:32.904542+00:00",
+  "last_modified": "2026-01-15T05:55:32.904542+00:00",
+  "evolution": {
+    "created_by": "skill-fleet-api",
+    "workflow": "SkillCreationProgram",
+    "validation_score": 0.9
+  }
+}
+
+
+============================================================
+END FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/metadata.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/references/README.md
+============================================================
+
+# References
+
+Reference documentation for `fastapi-pytest-workflow`.
+
+## Contents
+
+- [Quick Start](quick-start.md) - Get started quickly
+- [Common Patterns](common-patterns.md) - Frequently used patterns
+- [API Reference](api-reference.md) - Detailed API documentation
+- [Troubleshooting](troubleshooting.md) - Common issues and solutions
+
+
+============================================================
+END FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/references/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/be481007-7f46-4678-a959-f22cfb6468ce/technical_skills/python/testing/pytest/fastapi/references/api-reference.md
+============================================================
+
+# API Reference
+
+Detailed API documentation for `fastapi-pytest-workflow`.
+
+## Core Functions
+
+### function_name
+
+```python

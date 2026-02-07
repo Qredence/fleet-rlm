@@ -1,0 +1,24 @@
+<!-- Chunk 1358: bytes 5051689-5052425, type=function -->
+def get_user_data(user_id: int) -> dict:
+    user = db.session.query(User).filter(User.id == user_id).first()
+    response = requests.get(f"https://api.external.com/user/{user_id}")
+    return {"user": user, "external": response.json()}
+
+# After - async
+async def get_user_data(user_id: int, db: AsyncSession) -> dict:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"https://api.external.com/user/{user_id}")
+
+    return {"user": user, "external": response.json()}
+```
+
+### 5. Dependency Injection Patterns
+
+**Caching dependencies:**
+```python
+from functools import lru_cache
+
+@lru_cache()

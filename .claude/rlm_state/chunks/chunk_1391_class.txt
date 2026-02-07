@@ -1,0 +1,122 @@
+<!-- Chunk 1391: bytes 5118338-5121197, type=class -->
+class UserUpdate(BaseModel):
+    """
+    Model for partial user updates.
+
+    KEY FEATURE: All fields are Optional, allowing partial updates.
+    """
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = None
+    age: Optional[int] = Field(None, ge=0, le=150)
+```
+
+**Why this works:**
+- All fields are `Optional[T]` with default value `None`
+- Clients can provide any subset of fields
+- Unprovided fields default to `None`
+
+### 2. The PATCH Endpoint Implementation
+
+```python
+@app.patch("/users/{user_id}", response_model=User)
+async def update_user(user_id: int, user_update: UserUpdate):
+    """
+    PATCH endpoint for partial user updates.
+    """
+    # Get existing user
+    existing_user = fake_db[user_id]
+
+    # KEY: Get only fields that were actually provided
+    update_data = user_update.model_dump(exclude_unset=True)
+
+    # If no fields provided, return unchanged
+    if not update_data:
+        return existing_user
+
+    # Apply updates using model_copy
+    updated_user = existing_user.model_copy(update=update_data)
+
+    # Save and return
+    fake_db[user_id] = updated_user
+    return updated_user
+```
+
+**Key mechanisms:**
+
+1. **`exclude_unset=True`** - Returns only fields that were explicitly set in the request
+   - `{"name": "John"}` → `{"name": "John"}`
+   - `{}` → `{}` (empty dict)
+   - Excludes fields that weren't provided (instead of including them as `None`)
+
+2. **`model_copy(update=...)`** - Creates a copy with only specified fields updated
+   - Preserves existing values for fields not in `update_data`
+   - Returns a new instance without modifying the original
+
+3. **Empty check** - Returns user unchanged if no fields provided
+
+### 3. Handling Different Request Scenarios
+
+#### Scenario 1: Update Only Name
+**Request:**
+```json
+PATCH /users/1
+{
+  "name": "John Updated"
+}
+```
+
+**Result:**
+- `name` is updated to "John Updated"
+- `email` and `age` remain unchanged
+- `exclude_unset=True` → `{"name": "John Updated"}`
+- `model_copy(update=...)` updates only name
+
+#### Scenario 2: Update Only Age
+**Request:**
+```json
+PATCH /users/1
+{
+  "age": 35
+}
+```
+
+**Result:**
+- `age` is updated to 35
+- `name` and `email` remain unchanged
+- `exclude_unset=True` → `{"age": 35}`
+
+#### Scenario 3: Update Multiple Fields
+**Request:**
+```json
+PATCH /users/1
+{
+  "name": "John Updated",
+  "email": "john.new@example.com"
+}
+```
+
+**Result:**
+- `name` and `email` are updated
+- `age` remains unchanged
+- `exclude_unset=True` → `{"name": "John Updated", "email": "john.new@example.com"}`
+
+#### Scenario 4: Empty Request
+**Request:**
+```json
+PATCH /users/1
+{}
+```
+
+**Result:**
+- User is returned unchanged
+- `exclude_unset=True` → `{}`
+- Empty dict check returns early
+
+## Complete Example
+
+### Model Definitions
+
+```python
+from typing import Optional
+from pydantic import BaseModel, EmailStr, Field
+

@@ -1,0 +1,11 @@
+<!-- Chunk 2128: bytes 8049837-8050220, type=function -->
+def test_safe_json_loads_invalid_json_falls_back_and_logs(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    assert safe_json_loads("{not json}", default={"fallback": True}, field_name="x") == {
+        "fallback": True
+    }
+
+    messages = "\n".join(r.message for r in caplog.records)
+    assert "Failed to parse JSON for field 'x'" in messages
+
+

@@ -1,0 +1,44 @@
+<!-- Chunk 1050: bytes 3769971-3771011, type=function -->
+def sanitize_error_message(error: Exception, context: str) -> str:
+    """Sanitize error messages to remove sensitive paths."""
+    message = str(error)
+
+    # Remove absolute paths (keep relative paths only)
+    message = re.sub(r'/[^/\s]+(/[^/\s]+)*', '[PATH]', message)
+
+    # Replace with context if provided
+    if context:
+        message = f"{context}: {message.split(':', 1)[1] if ':' in message else message}"
+
+    return message
+
+# Usage:
+except FleetConfigError as exc:
+    error_msg = sanitize_error_message(exc, "config error")
+    console.print(f"[red]{error_msg}[/red]")
+```
+
+---
+
+## Additional Security Concerns
+
+### Issue 7: Hardcoded HTTP Timeout (Low Severity)
+
+**Location:** `client.py:19`
+
+**Problem:**
+HTTP client timeout is hardcoded:
+
+```python
+self.client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
+```
+
+**Concern:**
+- No timeout validation
+- Could allow very long connections (DoS vector if server is malicious)
+- No retry limit for failed requests
+
+**Mitigation Required:**
+```python
+import typer
+

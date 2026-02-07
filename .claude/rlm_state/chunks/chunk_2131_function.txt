@@ -1,0 +1,9 @@
+<!-- Chunk 2131: bytes 8051300-8051527, type=function -->
+def test_get_lm_rejects_unapproved_models() -> None:
+    pytest.importorskip("dspy")
+    from skill_fleet.core.optimization.optimizer import get_lm
+
+    with pytest.raises(ValueError):
+        get_lm("unapproved-test-model")
+
+

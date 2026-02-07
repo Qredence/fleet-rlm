@@ -1,0 +1,34 @@
+<!-- Chunk 778: bytes 2645776-2646486, type=class -->
+class HITLResponseRequest(BaseModel):
+    action: Literal["proceed", "revise", "refine", "cancel"] = Field(
+        ...,
+        description="Action to take based on HITL prompt"
+    )
+    response: str | None = Field(
+        default=None,
+        description="User's response to the prompt"
+    )
+    feedback: str | None = Field(
+        default=None,
+        description="Additional feedback for revise/refine actions"
+    )
+```
+
+**Example:**
+```json
+{
+    "action": "refine",
+    "response": "Add more examples",
+    "feedback": "The examples section should have at least 5 code examples"
+}
+```
+
+---
+
+## Response Schemas
+
+### CreateSkillResponse
+
+Response schema for skill creation initiation.
+
+```python

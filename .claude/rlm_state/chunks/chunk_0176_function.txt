@@ -1,0 +1,5 @@
+<!-- Chunk 176: bytes 287449-287565, type=function -->
+def process_order(order_id: str, items: list[dict[str, Any]]) -> OrderResult:
+    ...
+
+# Modern Python 3.10+ syntax

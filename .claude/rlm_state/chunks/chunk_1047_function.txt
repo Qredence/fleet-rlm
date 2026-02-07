@@ -1,0 +1,55 @@
+<!-- Chunk 1047: bytes 3766252-3767675, type=function -->
+def validate_api_url(url: str) -> str:
+    """Validate API URL uses secure protocol."""
+    parsed = urlparse(url)
+    if not parsed.scheme or parsed.scheme not in ('https', 'http'):
+        raise ValueError(f"API URL must use http:// or https:// protocol: {url}")
+
+    # In production, enforce HTTPS
+    # if parsed.scheme != 'https':
+    #     raise ValueError("API URL must use HTTPS in production")
+
+    return url
+
+# Usage:
+api_url: str = typer.Option(
+    "http://localhost:8000",
+    "--api-url", "-a",
+    help="API server URL (must use https:// in production)",
+    callback=validate_api_url
+)
+```
+
+### Issue 4: User IDs Not Sanitized for Injection (Low Severity)
+
+**Location:** `main.py:447, 512, 524, 613`, `app.py:44-49`
+
+**Problem:**
+User IDs are accepted without sanitization:
+
+```python
+# main.py:447
+create.add_argument("--user-id", default="default", help="User id for mounted skills context")
+
+# main.py:512
+onboard.add_argument("--user-id", required=True, help="Unique user identifier")
+
+# app.py:44-49
+user_id: str = typer.Option(
+    "default",
+    "--user", "-u",
+    help="User ID for context",
+    envvar="SKILL_FLEET_USER_ID"
+)
+```
+
+**Vulnerability:**
+Special characters in user IDs could cause issues:
+- Path injection if user ID used in file paths
+- Log injection if user ID logged without escaping
+- API injection if sent directly to API endpoints
+
+**Mitigation Required:**
+```python
+import re
+

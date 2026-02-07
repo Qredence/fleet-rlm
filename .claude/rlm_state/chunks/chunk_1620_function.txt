@@ -1,0 +1,29 @@
+<!-- Chunk 1620: bytes 6655838-6656748, type=function -->
+def validate_path_within_root(user_path: Path, root_path: Path, path_type: str = "Path") -> Path:
+    """
+    Validate that a path is within a root directory to prevent path traversal attacks.
+
+    Args:
+        user_path: The user-provided path to validate
+        root_path: The root directory that the path must be within
+        path_type: Description of the path type for error messages
+
+    Returns:
+        The resolved absolute path
+
+    Raises:
+        ValueError: If the path would escape the root directory
+    """
+    # Resolve both paths to absolute paths
+    resolved_user = user_path.resolve()
+    resolved_root = root_path.resolve()
+
+    # Check if user_path is within root_path
+    try:
+        resolved_user.relative_to(resolved_root)
+    except ValueError as e:
+        raise ValueError(f"{path_type} must be within {resolved_root}. Got: {resolved_user}") from e
+
+    return resolved_user
+
+

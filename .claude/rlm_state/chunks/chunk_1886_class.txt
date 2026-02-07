@@ -1,0 +1,31 @@
+<!-- Chunk 1886: bytes 7675152-7676524, type=class -->
+class UsageEvent(Base):
+    """Skill usage tracking events."""
+
+    __tablename__ = "usage_events"
+
+    event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    skill_id: Mapped[int] = mapped_column(Integer, ForeignKey("skills.skill_id"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    task_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    event_metadata: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    # Relationships
+    skill: Mapped["Skill"] = relationship("Skill", back_populates="usage_events")
+
+    __table_args__ = (
+        Index("idx_usage_events_skill", "skill_id"),
+        Index("idx_usage_events_user", "user_id"),
+        Index("idx_usage_events_occurred_at", "occurred_at"),
+        Index("idx_usage_events_task", "task_id"),
+        Index("idx_usage_events_skill_time", "skill_id", "occurred_at"),
+    )
+
+

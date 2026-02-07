@@ -1,0 +1,77 @@
+<!-- Chunk 487: bytes 838070-839811, type=class -->
+class dspy.Adapter:
+    """
+    Base adapter class for bridging DSPy modules with LMs.
+
+    Manages the transformation pipeline from DSPy inputs to LM prompts
+    and from LM responses to structured DSPy outputs.
+    """
+
+    def format(self, signature, demos, inputs):
+        """Format signature + demos + inputs into LM messages."""
+        pass
+
+    def parse(self, signature, output):
+        """Parse LM output into structured DSPy data."""
+        pass
+```
+
+### Message Structure
+
+Adapters format messages in recommended structure:
+
+```python
+[
+    {"role": "system", "content": system_message},
+    # Few-shot examples
+    {"role": "user", "content": few_shot_example_1_input},
+    {"role": "assistant", "content": few_shot_example_1_output},
+    # Conversation history
+    {"role": "user", "content": history_1_input},
+    {"role": "assistant", "content": history_1_output},
+    # Current input
+    {"role": "user", "content": current_input},
+]
+```
+
+### System Message Components
+
+System message contains:
+1. **Field descriptions**: Purpose of each input/output field
+2. **Field structure**: Input vs output field types
+3. **Task description**: High-level explanation of what to do
+
+## ChatAdapter
+
+### Basic ChatAdapter Usage
+
+```python
+import dspy
+
+# Create signature
+signature = dspy.Signature("question -> answer")
+
+# Format system message
+system_message = dspy.ChatAdapter().format_system_message(signature)
+print(system_message)
+```
+
+### System Message Format
+
+```python
+system_message = """
+You are a helpful assistant.
+
+Your task is to answer the given question.
+
+Input fields:
+- question (str): The question to answer
+
+Output fields:
+- answer (str): The answer to the question
+"""
+```
+
+### ChatAdapter in Module
+
+```python

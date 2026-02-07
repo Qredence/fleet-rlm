@@ -1,0 +1,147 @@
+<!-- Chunk 1460: bytes 6299576-6304256, type=class -->
+class RecommendationEngine:
+    """Suggests skills based on usage patterns and taxonomy."""
+
+    def __init__(self, analytics: AnalyticsEngine, taxonomy_manager: Any) -> None:
+        self.analytics = analytics
+        self.taxonomy = taxonomy_manager
+
+    def recommend_skills(self, user_id: str) -> list[dict[str, Any]]:
+        """Recommend skills the user might need."""
+        stats = self.analytics.analyze_usage(user_id)
+        most_used = [skill_id for skill_id, _ in stats["most_used_skills"]]
+
+        recommendations = []
+
+        # 1. Recommend dependencies of most used skills that aren't mounted/frequently used
+        for skill_id in most_used:
+            meta = self.taxonomy.get_skill_metadata(skill_id)
+            if meta:
+                for dep_id in meta.dependencies:
+                    if dep_id not in most_used:
+                        recommendations.append(
+                            {
+                                "skill_id": dep_id,
+                                "reason": f"Required by frequently used skill: {skill_id}",
+                                "priority": "high",
+                            }
+                        )
+
+        # 2. Recommend based on common combinations (if user uses A but not B, and A+B is common)
+        common_combos = stats.get("common_combinations", [])
+        user_skills = set(most_used)
+
+        for combo_entry in common_combos:
+            combo_skills = set(combo_entry["skills"])
+            # Check if user has some skills from combo but not all
+            overlap = user_skills & combo_skills
+            missing = combo_skills - user_skills
+
+            if overlap and missing:
+                for missing_skill in missing:
+                    recommendations.append(
+                        {
+                            "skill_id": missing_skill,
+                            "reason": f"Often used with {', '.join(overlap)}",
+                            "priority": "medium",
+                            "combo_count": combo_entry["count"],
+                        }
+                    )
+
+        return recommendations
+
+
+============================================================
+END FILE: src/skill_fleet/analytics/engine.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/__init__.py
+============================================================
+
+"""
+Skills Fleet FastAPI Application.
+
+This is the main application package. The FastAPI app serves as the primary
+interface for skill creation, taxonomy management, and all DSPy workflows.
+
+Directory Structure:
+- factory.py: FastAPI application entry point and factory
+- config.py: Application configuration (Pydantic settings)
+- dependencies.py: FastAPI dependency injection
+- middleware/: Custom middleware (logging, auth, etc.)
+- api/: API routes organized by domain
+  - v1/: Versioned API routes
+- schemas/: Pydantic request/response models
+- services/: Business logic and service layer
+
+Usage:
+    # Run the server
+    uvicorn skill_fleet.api.factory:app --reload
+
+    # Or via CLI
+    skill-fleet serve
+"""
+
+from .factory import app, create_app, get_app
+
+__all__ = ["create_app", "get_app", "app"]
+
+
+============================================================
+END FILE: src/skill_fleet/api/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/cache.py
+============================================================
+
+"""
+Caching layer for API performance optimization.
+
+This module provides a simple in-memory cache with TTL support
+that can be extended to use Redis in production environments.
+
+Features:
+- In-memory cache with configurable TTL
+- Cache key generation with prefix support
+- Automatic invalidation
+- Thread-safe operations
+- Redis-compatible interface for future migration
+
+Usage:
+    >>> from skill_fleet.api.cache import cache_manager
+    >>>
+    >>> # Cache a value
+    >>> cache_manager.set("taxonomy:global", taxonomy_data, ttl=300)
+    >>>
+    >>> # Get a value
+    >>> data = cache_manager.get("taxonomy:global")
+    >>>
+    >>> # Invalidate a cache entry
+    >>> cache_manager.invalidate("taxonomy:global")
+    >>>
+    >>> # Clear all cache
+    >>> cache_manager.clear()
+"""
+
+from __future__ import annotations
+
+import functools
+import hashlib
+import json
+import logging
+import threading
+import time
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+

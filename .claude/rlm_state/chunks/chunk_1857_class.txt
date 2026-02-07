@@ -1,0 +1,14 @@
+<!-- Chunk 1857: bytes 7638046-7638345, type=class -->
+class HITLTypeEnum:
+    """Human-in-the-loop interaction type."""
+
+    CLARIFY = "clarify"
+    CONFIRM = "confirm"
+    PREVIEW = "preview"
+    VALIDATE = "validate"
+    DEEP_UNDERSTANDING = "deep_understanding"
+    TDD_RED = "tdd_red"
+    TDD_GREEN = "tdd_green"
+    TDD_REFACTOR = "tdd_refactor"
+
+

@@ -1,0 +1,73 @@
+<!-- Chunk 1312: bytes 4778652-4781075, type=function -->
+def main():
+    parser = argparse.ArgumentParser(description="Skill Fleet Optimization Manager")
+    subparsers = parser.add_subparsers(dest="command", help="Optimization command")
+
+    # MIPROv2
+    mipro_parser = subparsers.add_parser("mipro", help="Run MIPROv2 optimization")
+    mipro_parser.add_argument("--trainset", default="config/training/trainset_v4.json")
+    mipro_parser.add_argument("--auto", default="medium", choices=["light", "medium", "heavy"])
+
+    # GEPA
+    gepa_parser = subparsers.add_parser("gepa", help="Run GEPA optimization")
+    gepa_parser.add_argument("--auto", default="light", choices=["light", "medium", "heavy"])
+
+    # Benchmark
+    subparsers.add_parser("benchmark", help="Benchmark optimizers")
+
+    args = parser.parse_args()
+
+    if args.command == "mipro":
+        # Pass args via env vars or modify run_optimization.py to accept CLI args
+        # For now, we'll just run it as-is since it has defaults
+        print(f"Running MIPROv2 with auto={args.auto}")
+        # Note: run_optimization.py currently hardcodes some values
+        run_script("run_optimization.py")
+
+    elif args.command == "gepa":
+        print(f"Running GEPA with auto={args.auto}")
+        # Pass auto level via env var as supported by run_gepa_optimization.py
+        import os
+
+        os.environ["GEPA_AUTO_LEVEL"] = args.auto
+        run_script("run_gepa_optimization.py")
+
+    elif args.command == "benchmark":
+        run_script("benchmark_optimizers.py")
+
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/manage_opt.py
+============================================================
+
+============================================================
+FILE: scripts/test_mlflow_tracking.py
+============================================================
+
+"""
+Test script to verify MLflow DSPy autologging integration.
+
+Run this script while MLflow UI is running to see traced DSPy operations.
+"""
+
+import dspy
+from skill_fleet.services.monitoring import MLflowContext, setup_dspy_autologging
+
+# Configure a simple LM with usage tracking
+lm = dspy.LM("gemini/gemini-3-flash-preview", cache=False)
+dspy.configure(lm=lm, track_usage=True)
+
+# Setup MLflow autologging (no tracking_uri needed for local backend)
+setup_dspy_autologging(
+    experiment_name="skill-fleet-test",
+)
+
+
+# Test a simple DSPy program

@@ -1,0 +1,165 @@
+<!-- Chunk 1786: bytes 7445681-7450224, type=function -->
+def main():
+    """CLI entry point for optimization."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Optimize skill creation workflow")
+    parser.add_argument(
+        "--optimizer",
+        choices=["miprov2", "gepa"],
+        default="miprov2",
+        help="Optimizer algorithm",
+    )
+    parser.add_argument(
+        "--model",
+        choices=list(APPROVED_MODELS.keys()),
+        default=DEFAULT_MODEL,
+        help="LLM model to use",
+    )
+    parser.add_argument(
+        "--trainset",
+        default="config/training/trainset.json",
+        help="Path to training data",
+    )
+    parser.add_argument(
+        "--output",
+        default="config/optimized/",
+        help="Output directory",
+    )
+    parser.add_argument(
+        "--auto",
+        choices=["light", "medium", "heavy"],
+        default="medium",
+        help="Optimization intensity",
+    )
+    parser.add_argument(
+        "--track",
+        action="store_true",
+        help="Enable MLflow tracking",
+    )
+    parser.add_argument(
+        "--evaluate-only",
+        action="store_true",
+        help="Only run evaluation, don't optimize",
+    )
+
+    parser.parse_args()
+
+    # TODO: LegacySkillCreationProgram has been removed - update optimizer
+    # from ..dspy.programs import LegacySkillCreationProgram
+    raise NotImplementedError("Optimizer needs to be updated to use new workflow architecture")
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: src/skill_fleet/core/optimization/optimizer.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/optimization/rewards/__init__.py
+============================================================
+
+"""
+Reward functions and metrics for DSPy optimization.
+
+This package provides:
+- Phase 1 completeness reward function
+- Phase 2 validity metric function
+- Step-specific reward functions for DSPy Refine/BestOfN wrappers
+
+These are used for:
+- DSPy Refine wrapper iterative improvement
+- DSPy BestOfN multi-attempt selection
+- MIPROv2 optimization metrics
+- Checkpoint validation scoring
+"""
+
+from .phase1_rewards import phase1_checkpoint_score, phase1_completeness_reward
+from .phase2_rewards import phase2_checkpoint_score, phase2_validity_metric
+from .step_rewards import (
+    capabilities_reward,
+    combined_edit_reward,
+    combined_package_reward,
+    combined_plan_reward,
+    metadata_completeness_reward,
+    quality_score_reward,
+    skill_content_reward,
+    taxonomy_path_reward,
+    usage_examples_reward,
+    validation_report_reward,
+)
+
+__all__ = [
+    # Step rewards from step_rewards.py
+    "taxonomy_path_reward",
+    "metadata_completeness_reward",
+    "capabilities_reward",
+    "skill_content_reward",
+    "usage_examples_reward",
+    "validation_report_reward",
+    "quality_score_reward",
+    "combined_plan_reward",
+    "combined_edit_reward",
+    "combined_package_reward",
+    # Phase-specific rewards
+    "phase1_completeness_reward",
+    "phase1_checkpoint_score",
+    "phase2_validity_metric",
+    "phase2_checkpoint_score",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/core/optimization/rewards/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/optimization/rewards/phase1_rewards.py
+============================================================
+
+"""
+Reward functions for Phase 1: Understanding the Need.
+
+These reward functions are used for:
+- DSPy Refine wrapper iterative improvement
+- Checkpoint validation scoring
+- MIPROv2 optimization
+
+From guidelines lines 1018-1024, Phase 1 validation criteria:
+1. Problem statement is clear and specific
+2. No existing skill covers this
+3. Capabilities are atomic and testable
+4. Dependencies are identified
+5. Taxonomy path is determined
+6. Domain is classified using 8-type matrix
+
+The phase1_completeness_reward function returns a 0.0-1.0 score based on
+how well the Phase 1 outputs meet these criteria.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+logger = logging.getLogger(__name__)
+
+# Valid skill types from phase1_signatures
+VALID_SKILL_TYPES = [
+    "cognitive",
+    "technical",
+    "domain",
+    "tool",
+    "mcp",
+    "specialization",
+    "task_focus",
+    "memory",
+]
+
+

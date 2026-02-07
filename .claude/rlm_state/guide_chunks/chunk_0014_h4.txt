@@ -1,0 +1,9 @@
+<!-- Chunk 14: bytes 4525-4887, type=h4 -->
+#### How they work together:
+
+| MCP (Connectivity) | Skills (Knowledge) |
+| :--- | :--- |
+| Connects Claude to your service (Notion, Asana, Linear, etc.) | Teaches Claude how to use your service effectively |
+| Provides real-time data access and tool invocation | Captures workflows and best practices |
+| **What Claude can do** | **How Claude should do it** |
+

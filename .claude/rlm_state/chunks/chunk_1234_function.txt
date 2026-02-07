@@ -1,0 +1,349 @@
+<!-- Chunk 1234: bytes 4629915-4642292, type=function -->
+def seed_taxonomy():
+    """Seed taxonomy categories and build closure table."""
+    engine = create_engine(DATABASE_URL)
+
+    with engine.begin() as conn:
+        print("=" * 60)
+        print("Skills-Fleet Taxonomy Seeding")
+        print("=" * 60)
+
+        # Root categories
+        print("\n📁 Creating root categories...")
+        root_categories = [
+            ("development", "Development", "Software development and programming skills", 1),
+            ("operations", "Operations", "DevOps, infrastructure, and deployment", 2),
+            ("data", "Data", "Data engineering, analytics, and ML", 3),
+            ("communication", "Communication", "Communication and collaboration skills", 4),
+            ("research", "Research", "Research and analysis capabilities", 5),
+        ]
+
+        for path, name, description, sort_order in root_categories:
+            conn.execute(
+                text("""
+                    INSERT INTO taxonomy_categories (path, name, description, parent_id, level, sort_order)
+                    VALUES (:path, :name, :description, NULL, 0, :sort_order)
+                    ON CONFLICT (path) DO NOTHING
+                """),
+                {"path": path, "name": name, "description": description, "sort_order": sort_order},
+            )
+            print(f"  ✓ {name}")
+
+        # Development sub-categories
+        print("\n📁 Creating development categories...")
+        dev_categories = [
+            # Languages
+            ("development/languages", "Languages", "Programming languages", "development", 1, 1),
+            (
+                "development/languages/python",
+                "Python",
+                "Python programming",
+                "development/languages",
+                2,
+                1,
+            ),
+            (
+                "development/languages/typescript",
+                "TypeScript",
+                "TypeScript programming",
+                "development/languages",
+                2,
+                2,
+            ),
+            (
+                "development/languages/javascript",
+                "JavaScript",
+                "JavaScript programming",
+                "development/languages",
+                2,
+                3,
+            ),
+            ("development/languages/go", "Go", "Go programming", "development/languages", 2, 4),
+            (
+                "development/languages/rust",
+                "Rust",
+                "Rust programming",
+                "development/languages",
+                2,
+                5,
+            ),
+            # Frameworks
+            (
+                "development/frameworks",
+                "Frameworks",
+                "Web and application frameworks",
+                "development",
+                1,
+                2,
+            ),
+            (
+                "development/frameworks/fastapi",
+                "FastAPI",
+                "FastAPI framework",
+                "development/frameworks",
+                2,
+                1,
+            ),
+            (
+                "development/frameworks/react",
+                "React",
+                "React framework",
+                "development/frameworks",
+                2,
+                2,
+            ),
+            (
+                "development/frameworks/dspy",
+                "DSPy",
+                "DSPy framework",
+                "development/frameworks",
+                2,
+                3,
+            ),
+            # Practices
+            ("development/practices", "Practices", "Development practices", "development", 1, 3),
+            (
+                "development/practices/tdd",
+                "Test-Driven Development",
+                "TDD workflow",
+                "development/practices",
+                2,
+                1,
+            ),
+            (
+                "development/practices/testing",
+                "Testing",
+                "Testing strategies",
+                "development/practices",
+                2,
+                2,
+            ),
+            (
+                "development/practices/refactoring",
+                "Refactoring",
+                "Code refactoring",
+                "development/practices",
+                2,
+                3,
+            ),
+        ]
+
+        for path, name, description, parent_path, level, sort_order in dev_categories:
+            conn.execute(
+                text("""
+                    INSERT INTO taxonomy_categories (path, name, description, parent_id, level, sort_order)
+                    VALUES (:path, :name, :description,
+                        (SELECT category_id FROM taxonomy_categories WHERE path = :parent_path),
+                        :level, :sort_order)
+                    ON CONFLICT (path) DO NOTHING
+                """),
+                {
+                    "path": path,
+                    "name": name,
+                    "description": description,
+                    "parent_path": parent_path,
+                    "level": level,
+                    "sort_order": sort_order,
+                },
+            )
+            print(f"  ✓ {name}")
+
+        # Operations sub-categories
+        print("\n📁 Creating operations categories...")
+        ops_categories = [
+            ("operations/deployment", "Deployment", "Deployment strategies", "operations", 1, 1),
+            (
+                "operations/deployment/docker",
+                "Docker",
+                "Containerization",
+                "operations/deployment",
+                2,
+                1,
+            ),
+            (
+                "operations/deployment/kubernetes",
+                "Kubernetes",
+                "K8s orchestration",
+                "operations/deployment",
+                2,
+                2,
+            ),
+            (
+                "operations/monitoring",
+                "Monitoring",
+                "Monitoring and observability",
+                "operations",
+                1,
+                2,
+            ),
+            ("operations/cicd", "CI/CD", "Continuous integration", "operations", 1, 3),
+        ]
+
+        for path, name, description, parent_path, level, sort_order in ops_categories:
+            conn.execute(
+                text("""
+                    INSERT INTO taxonomy_categories (path, name, description, parent_id, level, sort_order)
+                    VALUES (:path, :name, :description,
+                        (SELECT category_id FROM taxonomy_categories WHERE path = :parent_path),
+                        :level, :sort_order)
+                    ON CONFLICT (path) DO NOTHING
+                """),
+                {
+                    "path": path,
+                    "name": name,
+                    "description": description,
+                    "parent_path": parent_path,
+                    "level": level,
+                    "sort_order": sort_order,
+                },
+            )
+            print(f"  ✓ {name}")
+
+        # Data sub-categories
+        print("\n📁 Creating data categories...")
+        data_categories = [
+            ("data/analytics", "Analytics", "Data analytics", "data", 1, 1),
+            ("data/ml", "Machine Learning", "ML and AI", "data", 1, 2),
+            ("data/databases", "Databases", "Database management", "data", 1, 3),
+            (
+                "data/databases/postgresql",
+                "PostgreSQL",
+                "PostgreSQL database",
+                "data/databases",
+                2,
+                1,
+            ),
+            ("data/databases/redis", "Redis", "Redis caching", "data/databases", 2, 2),
+        ]
+
+        for path, name, description, parent_path, level, sort_order in data_categories:
+            conn.execute(
+                text("""
+                    INSERT INTO taxonomy_categories (path, name, description, parent_id, level, sort_order)
+                    VALUES (:path, :name, :description,
+                        (SELECT category_id FROM taxonomy_categories WHERE path = :parent_path),
+                        :level, :sort_order)
+                    ON CONFLICT (path) DO NOTHING
+                """),
+                {
+                    "path": path,
+                    "name": name,
+                    "description": description,
+                    "parent_path": parent_path,
+                    "level": level,
+                    "sort_order": sort_order,
+                },
+            )
+            print(f"  ✓ {name}")
+
+        # Communication and Research
+        print("\n📁 Creating communication & research categories...")
+        misc_categories = [
+            (
+                "communication/documentation",
+                "Documentation",
+                "Technical docs",
+                "communication",
+                1,
+                1,
+            ),
+            (
+                "communication/collaboration",
+                "Collaboration",
+                "Team collaboration",
+                "communication",
+                1,
+                2,
+            ),
+            ("research/analysis", "Analysis", "Analytical research", "research", 1, 1),
+            ("research/investigation", "Investigation", "Investigative research", "research", 1, 2),
+        ]
+
+        for path, name, description, parent_path, level, sort_order in misc_categories:
+            conn.execute(
+                text("""
+                    INSERT INTO taxonomy_categories (path, name, description, parent_id, level, sort_order)
+                    VALUES (:path, :name, :description,
+                        (SELECT category_id FROM taxonomy_categories WHERE path = :parent_path),
+                        :level, :sort_order)
+                    ON CONFLICT (path) DO NOTHING
+                """),
+                {
+                    "path": path,
+                    "name": name,
+                    "description": description,
+                    "parent_path": parent_path,
+                    "level": level,
+                    "sort_order": sort_order,
+                },
+            )
+            print(f"  ✓ {name}")
+
+        # Build closure table
+        print("\n🔗 Building taxonomy closure table...")
+        result = conn.execute(
+            text("""
+                INSERT INTO taxonomy_closure (ancestor_id, descendant_id, depth)
+                WITH RECURSIVE category_tree AS (
+                    -- Base case: each category is its own ancestor
+                    SELECT c1.category_id, c1.category_id, 0
+                    FROM taxonomy_categories c1
+
+                    UNION ALL
+
+                    -- Recursive case: find all descendants
+                    SELECT ct.category_tree_ancestor_id, c2.category_id, ct.category_tree_depth + 1
+                    FROM category_tree ct
+                    JOIN taxonomy_categories c2 ON c2.parent_id = ct.category_tree_descendant_id
+                    WHERE ct.category_tree_ancestor_id != c2.category_id
+                )
+                SELECT DISTINCT category_tree_ancestor_id, category_tree_descendant_id, category_tree_depth
+                FROM category_tree
+                ON CONFLICT (ancestor_id, descendant_id) DO NOTHING
+            """)
+        )
+        print(f"  ✓ Added {result.rowcount} closure entries")
+
+        # Verify
+        result = conn.execute(text("SELECT COUNT(*) FROM taxonomy_categories"))
+        category_count = result.scalar()
+        result = conn.execute(text("SELECT COUNT(*) FROM taxonomy_closure"))
+        closure_count = result.scalar()
+
+        print("\n" + "=" * 60)
+        print("✅ Taxonomy seeding complete!")
+        print(f"   Categories: {category_count}")
+        print(f"   Closure entries: {closure_count}")
+        print("=" * 60)
+
+    engine.dispose()
+
+
+if __name__ == "__main__":
+    try:
+        seed_taxonomy()
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+
+
+============================================================
+END FILE: scripts/internal/db/seed_taxonomy.py
+============================================================
+
+============================================================
+FILE: scripts/internal/dev/check_docstrings.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Script to find public functions missing docstrings in Python files.
+"""
+
+import ast
+from pathlib import Path
+
+

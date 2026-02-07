@@ -1,0 +1,77 @@
+<!-- Chunk 1934: bytes 7771051-7773080, type=function -->
+def _xml_escape(text: str) -> str:
+    """
+    Escape special XML characters.
+
+    Args:
+        text: Text to escape
+
+    Returns:
+        XML-escaped text
+
+    """
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+============================================================
+END FILE: src/skill_fleet/taxonomy/discovery.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/taxonomy/manager.py
+============================================================
+
+"""
+Taxonomy management for hierarchical skills.
+
+The taxonomy is stored on disk under a configurable `skills_root` directory.
+This manager provides:
+- Metadata loading for always-loaded skills (core, essential MCP, memory blocks)
+- Minimal branch selection for task keyword routing
+- Dependency validation and circular dependency detection
+- Skill registration (writes metadata + content, updates taxonomy stats)
+- agentskills.io compliance (YAML frontmatter, XML discovery)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from pydantic import ValidationError
+
+from ..analytics.engine import UsageTracker
+from ..common.security import resolve_path_within_root, sanitize_taxonomy_path
+from .discovery import (
+    ensure_all_skills_loaded,
+    generate_available_skills_xml,
+    get_skill_for_prompt,
+)
+from .models import TaxonomyIndex
+from .path_resolver import get_parent_skills, resolve_skill_location
+from .skill_loader import (
+    load_skill_dir_metadata,
+    load_skill_file,
+    parse_skill_frontmatter,
+)
+from .skill_registration import (
+    register_skill,
+)
+
+if TYPE_CHECKING:
+    from .metadata import SkillMetadata
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)

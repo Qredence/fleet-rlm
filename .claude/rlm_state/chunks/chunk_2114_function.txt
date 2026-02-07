@@ -1,0 +1,8 @@
+<!-- Chunk 2114: bytes 8043104-8043345, type=function -->
+def test_skill_exists_rejects_traversal_paths(temp_taxonomy: Path) -> None:
+    manager = TaxonomyManager(temp_taxonomy)
+
+    assert manager.skill_exists("../etc/passwd") is False
+    assert manager.skill_exists("/absolute/path") is False
+
+

@@ -1,0 +1,7 @@
+<!-- Chunk 1803: bytes 7481407-7481506, type=class -->
+class ValidationError(ServiceError):
+    """Validation failed in service operation."""
+
+    pass
+
+

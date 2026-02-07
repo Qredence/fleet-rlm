@@ -1,0 +1,185 @@
+<!-- Chunk 1501: bytes 6350343-6355130, type=class -->
+class ErrorHandlingMiddleware(BaseHTTPMiddleware):
+    """Middleware to catch and format unexpected errors."""
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable,
+    ) -> Response:
+        """
+        Process request and handle unexpected errors.
+
+        Args:
+            request: Incoming HTTP request
+            call_next: Next middleware or route handler
+
+        Returns:
+            HTTP response or JSON error response on exception
+
+        """
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            request_id = getattr(request.state, "request_id", "unknown")
+            logger.error(
+                f"[{request_id}] Unexpected error: {exc}",
+                extra={
+                    "request_id": request_id,
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                },
+                exc_info=True,
+            )
+
+            # Return generic error in production
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "Internal server error",
+                    "request_id": request_id,
+                },
+            )
+
+
+__all__: list[str] = [
+    "LoggingMiddleware",
+    "ErrorHandlingMiddleware",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/api/middleware/logging.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/schemas/__init__.py
+============================================================
+
+"""
+Pydantic schemas for API v1 endpoints.
+
+This module contains request/response models for all v1 API endpoints.
+These schemas provide type safety and automatic validation for API operations.
+
+Schema modules:
+    skills: Skill creation, validation, and refinement schemas
+    conversational: Chat interface schemas
+    taxonomy: Taxonomy management schemas
+    quality: Quality assurance schemas
+    optimization: Signature optimization schemas
+    hitl: Human-in-the-loop interaction schemas
+    models: Core job state models
+"""
+
+from __future__ import annotations
+
+from .conversational import (
+    SendMessageRequest,
+    SendMessageResponse,
+    SessionHistoryResponse,
+)
+from .hitl import (
+    QuestionOption,
+    StructuredQuestion,
+    normalize_questions,
+)
+from .models import (
+    DeepUnderstandingState,
+    JobState,
+    TDDWorkflowState,
+)
+from .optimization import (
+    AnalyzeFailuresRequest,
+    AnalyzeFailuresResponse,
+    CompareRequest,
+    CompareResponse,
+    ImproveRequest,
+    ImproveResponse,
+)
+from .quality import (
+    AssessQualityRequest,
+    AssessQualityResponse,
+    AutoFixRequest,
+    AutoFixResponse,
+    ValidateRequest,
+    ValidateResponse,
+)
+from .skills import (
+    CreateSkillRequest,
+    CreateSkillResponse,
+    RefineSkillRequest,
+    RefineSkillResponse,
+    SkillDetailResponse,
+    ValidateSkillRequest,
+    ValidateSkillResponse,
+)
+from .taxonomy import (
+    AdaptTaxonomyRequest,
+    AdaptTaxonomyResponse,
+    TaxonomyResponse,
+    UpdateTaxonomyRequest,
+    UserTaxonomyResponse,
+)
+
+__all__ = [
+    # Job state models
+    "TDDWorkflowState",
+    "DeepUnderstandingState",
+    "JobState",
+    # HITL models
+    "QuestionOption",
+    "StructuredQuestion",
+    "normalize_questions",
+    # Skills schemas
+    "CreateSkillRequest",
+    "CreateSkillResponse",
+    "SkillDetailResponse",
+    "ValidateSkillRequest",
+    "ValidateSkillResponse",
+    "RefineSkillRequest",
+    "RefineSkillResponse",
+    # Conversational schemas
+    "SendMessageRequest",
+    "SendMessageResponse",
+    "SessionHistoryResponse",
+    # Taxonomy schemas
+    "TaxonomyResponse",
+    "UpdateTaxonomyRequest",
+    "UserTaxonomyResponse",
+    "AdaptTaxonomyRequest",
+    "AdaptTaxonomyResponse",
+    # Quality schemas
+    "ValidateRequest",
+    "ValidateResponse",
+    "AssessQualityRequest",
+    "AssessQualityResponse",
+    "AutoFixRequest",
+    "AutoFixResponse",
+    # Optimization schemas
+    "AnalyzeFailuresRequest",
+    "AnalyzeFailuresResponse",
+    "ImproveRequest",
+    "ImproveResponse",
+    "CompareRequest",
+    "CompareResponse",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/api/schemas/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/schemas/conversational.py
+============================================================
+
+"""Pydantic schemas for conversational interface API endpoints."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+

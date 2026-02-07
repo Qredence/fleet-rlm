@@ -1,0 +1,14 @@
+<!-- Chunk 20: bytes 6304-6939, type=h4 -->
+#### Category 1: Document & Asset Creation
+
+**Used for:** Creating consistent, high-quality output including documents, presentations, apps, designs, code, etc.
+
+**Real example:** `frontend-design` skill (also see skills for docx, pptx, xlsx, and ppt)
+"Create distinctive, production-grade frontend interfaces with high design quality. Use when building web components, pages, artifacts, posters, or applications."
+
+**Key techniques:**
+•  Embedded style guides and brand standards
+•  Template structures for consistent output
+•  Quality checklists before finalizing
+•  No external tools required - uses Claude's built-in capabilities
+

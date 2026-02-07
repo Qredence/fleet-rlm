@@ -1,0 +1,28 @@
+<!-- Chunk 786: bytes 2649936-2650574, type=class -->
+class JobState(BaseModel):
+    job_id: str
+    status: str = "pending"
+    hitl_type: str | None = None
+    hitl_data: dict[str, Any] | None = None
+    hitl_response: dict[str, Any] | None = None
+    result: Any | None = None
+    error: str | None = None
+    saved_path: str | None = None
+```
+
+**Status Values:**
+- `pending`: Job queued
+- `running`: Job processing
+- `pending_hitl`: Awaiting human input
+- `completed`: Job finished successfully
+- `failed`: Job failed
+
+---
+
+## Auto-Generated Schemas
+
+DSPy module signatures are automatically converted to Pydantic models via the discovery system.
+
+**Example:**
+```python
+# DSPy signature

@@ -1,0 +1,1142 @@
+<!-- Chunk 308: bytes 472391-517858, type=function -->
+def process_file(path):
+    # Just fail and let Claude figure it out
+    return open(path).read()
+```
+
+Configuration parameters should also be justified and documented to avoid "voodoo constants" (Ousterhout's law). If you don't know the right value, how will Claude determine it?
+
+**Good example: Self-documenting**:
+
+```python  theme={null}
+# HTTP requests typically complete within 30 seconds
+# Longer timeout accounts for slow connections
+REQUEST_TIMEOUT = 30
+
+# Three retries balances reliability vs speed
+# Most intermittent failures resolve by the second retry
+MAX_RETRIES = 3
+```
+
+**Bad example: Magic numbers**:
+
+```python  theme={null}
+TIMEOUT = 47  # Why 47?
+RETRIES = 5   # Why 5?
+```
+
+### Provide utility scripts
+
+Even if Claude could write a script, pre-made scripts offer advantages:
+
+**Benefits of utility scripts**:
+
+* More reliable than generated code
+* Save tokens (no need to include code in context)
+* Save time (no code generation required)
+* Ensure consistency across uses
+
+<img src="https://mintcdn.com/anthropic-claude-docs/4Bny2bjzuGBK7o00/images/agent-skills-executable-scripts.png?fit=max&auto=format&n=4Bny2bjzuGBK7o00&q=85&s=4bbc45f2c2e0bee9f2f0d5da669bad00" alt="Bundling executable scripts alongside instruction files" data-og-width="2048" width="2048" data-og-height="1154" height="1154" data-path="images/agent-skills-executable-scripts.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/anthropic-claude-docs/4Bny2bjzuGBK7o00/images/agent-skills-executable-scripts.png?w=280&fit=max&auto=format&n=4Bny2bjzuGBK7o00&q=85&s=9a04e6535a8467bfeea492e517de389f 280w, https://mintcdn.com/anthropic-claude-docs/4Bny2bjzuGBK7o00/images/agent-skills-executable-scripts.png?w=560&fit=max&auto=format&n=4Bny2bjzuGBK7o00&q=85&s=e49333ad90141af17c0d7651cca7216b 560w, https://mintcdn.com/anthropic-claude-docs/4Bny2bjzuGBK7o00/images/agent-skills-executable-scripts.png?w=840&fit=max&auto=format&n=4Bny2bjzuGBK7o00&q=85&s=954265a5df52223d6572b6214168c428 840w, https://mintcdn.com/anthropic-claude-docs/4Bny2bjzuGBK7o00/images/agent-skills-executable-scripts.png?w=1100&fit=max&auto=format&n=4Bny2bjzuGBK7o00&q=85&s=2ff7a2d8f2a83ee8af132b29f10150fd 1100w, https://mintcdn.com/anthropic-claude-docs/4Bny2bjzuGBK7o00/images/agent-skills-executable-scripts.png?w=1650&fit=max&auto=format&n=4Bny2bjzuGBK7o00&q=85&s=48ab96245e04077f4d15e9170e081cfb 1650w, https://mintcdn.com/anthropic-claude-docs/4Bny2bjzuGBK7o00/images/agent-skills-executable-scripts.png?w=2500&fit=max&auto=format&n=4Bny2bjzuGBK7o00&q=85&s=0301a6c8b3ee879497cc5b5483177c90 2500w" />
+
+The diagram above shows how executable scripts work alongside instruction files. The instruction file (forms.md) references the script, and Claude can execute it without loading its contents into context.
+
+**Important distinction**: Make clear in your instructions whether Claude should:
+
+* **Execute the script** (most common): "Run `analyze_form.py` to extract fields"
+* **Read it as reference** (for complex logic): "See `analyze_form.py` for the field extraction algorithm"
+
+For most utility scripts, execution is preferred because it's more reliable and efficient. See the [Runtime environment](#runtime-environment) section below for details on how script execution works.
+
+**Example**:
+
+````markdown  theme={null}
+## Utility scripts
+
+**analyze_form.py**: Extract all form fields from PDF
+
+```bash
+python scripts/analyze_form.py input.pdf > fields.json
+```
+
+Output format:
+```json
+{
+  "field_name": {"type": "text", "x": 100, "y": 200},
+  "signature": {"type": "sig", "x": 150, "y": 500}
+}
+```
+
+**validate_boxes.py**: Check for overlapping bounding boxes
+
+```bash
+python scripts/validate_boxes.py fields.json
+# Returns: "OK" or lists conflicts
+```
+
+**fill_form.py**: Apply field values to PDF
+
+```bash
+python scripts/fill_form.py input.pdf fields.json output.pdf
+```
+````
+
+### Use visual analysis
+
+When inputs can be rendered as images, have Claude analyze them:
+
+````markdown  theme={null}
+## Form layout analysis
+
+1. Convert PDF to images:
+   ```bash
+   python scripts/pdf_to_images.py form.pdf
+   ```
+
+2. Analyze each page image to identify form fields
+3. Claude can see field locations and types visually
+````
+
+<Note>
+  In this example, you'd need to write the `pdf_to_images.py` script.
+</Note>
+
+Claude's vision capabilities help understand layouts and structures.
+
+### Create verifiable intermediate outputs
+
+When Claude performs complex, open-ended tasks, it can make mistakes. The "plan-validate-execute" pattern catches errors early by having Claude first create a plan in a structured format, then validate that plan with a script before executing it.
+
+**Example**: Imagine asking Claude to update 50 form fields in a PDF based on a spreadsheet. Without validation, Claude might reference non-existent fields, create conflicting values, miss required fields, or apply updates incorrectly.
+
+**Solution**: Use the workflow pattern shown above (PDF form filling), but add an intermediate `changes.json` file that gets validated before applying changes. The workflow becomes: analyze → **create plan file** → **validate plan** → execute → verify.
+
+**Why this pattern works:**
+
+* **Catches errors early**: Validation finds problems before changes are applied
+* **Machine-verifiable**: Scripts provide objective verification
+* **Reversible planning**: Claude can iterate on the plan without touching originals
+* **Clear debugging**: Error messages point to specific problems
+
+**When to use**: Batch operations, destructive changes, complex validation rules, high-stakes operations.
+
+**Implementation tip**: Make validation scripts verbose with specific error messages like "Field 'signature\_date' not found. Available fields: customer\_name, order\_total, signature\_date\_signed" to help Claude fix issues.
+
+### Package dependencies
+
+Skills run in the code execution environment with platform-specific limitations:
+
+* **claude.ai**: Can install packages from npm and PyPI and pull from GitHub repositories
+* **Anthropic API**: Has no network access and no runtime package installation
+
+List required packages in your SKILL.md and verify they're available in the [code execution tool documentation](/en/docs/agents-and-tools/tool-use/code-execution-tool).
+
+### Runtime environment
+
+Skills run in a code execution environment with filesystem access, bash commands, and code execution capabilities. For the conceptual explanation of this architecture, see [The Skills architecture](/en/docs/agents-and-tools/agent-skills/overview#the-skills-architecture) in the overview.
+
+**How this affects your authoring:**
+
+**How Claude accesses Skills:**
+
+1. **Metadata pre-loaded**: At startup, the name and description from all Skills' YAML frontmatter are loaded into the system prompt
+2. **Files read on-demand**: Claude uses bash Read tools to access SKILL.md and other files from the filesystem when needed
+3. **Scripts executed efficiently**: Utility scripts can be executed via bash without loading their full contents into context. Only the script's output consumes tokens
+4. **No context penalty for large files**: Reference files, data, or documentation don't consume context tokens until actually read
+
+* **File paths matter**: Claude navigates your skill directory like a filesystem. Use forward slashes (`reference/guide.md`), not backslashes
+* **Name files descriptively**: Use names that indicate content: `form_validation_rules.md`, not `doc2.md`
+* **Organize for discovery**: Structure directories by domain or feature
+  * Good: `reference/finance.md`, `reference/sales.md`
+  * Bad: `docs/file1.md`, `docs/file2.md`
+* **Bundle comprehensive resources**: Include complete API docs, extensive examples, large datasets; no context penalty until accessed
+* **Prefer scripts for deterministic operations**: Write `validate_form.py` rather than asking Claude to generate validation code
+* **Make execution intent clear**:
+  * "Run `analyze_form.py` to extract fields" (execute)
+  * "See `analyze_form.py` for the extraction algorithm" (read as reference)
+* **Test file access patterns**: Verify Claude can navigate your directory structure by testing with real requests
+
+**Example:**
+
+```
+bigquery-skill/
+├── SKILL.md (overview, points to reference files)
+└── reference/
+    ├── finance.md (revenue metrics)
+    ├── sales.md (pipeline data)
+    └── product.md (usage analytics)
+```
+
+When the user asks about revenue, Claude reads SKILL.md, sees the reference to `reference/finance.md`, and invokes bash to read just that file. The sales.md and product.md files remain on the filesystem, consuming zero context tokens until needed. This filesystem-based model is what enables progressive disclosure. Claude can navigate and selectively load exactly what each task requires.
+
+For complete details on the technical architecture, see [How Skills work](/en/docs/agents-and-tools/agent-skills/overview#how-skills-work) in the Skills overview.
+
+### MCP tool references
+
+If your Skill uses MCP (Model Context Protocol) tools, always use fully qualified tool names to avoid "tool not found" errors.
+
+**Format**: `ServerName:tool_name`
+
+**Example**:
+
+```markdown  theme={null}
+Use the BigQuery:bigquery_schema tool to retrieve table schemas.
+Use the GitHub:create_issue tool to create issues.
+```
+
+Where:
+
+* `BigQuery` and `GitHub` are MCP server names
+* `bigquery_schema` and `create_issue` are the tool names within those servers
+
+Without the server prefix, Claude may fail to locate the tool, especially when multiple MCP servers are available.
+
+### Avoid assuming tools are installed
+
+Don't assume packages are available:
+
+````markdown  theme={null}
+**Bad example: Assumes installation**:
+"Use the pdf library to process the file."
+
+**Good example: Explicit about dependencies**:
+"Install required package: `pip install pypdf`
+
+Then use it:
+```python
+from pypdf import PdfReader
+reader = PdfReader("file.pdf")
+```"
+````
+
+## Technical notes
+
+### YAML frontmatter requirements
+
+The SKILL.md frontmatter includes only `name` (64 characters max) and `description` (1024 characters max) fields. See the [Skills overview](/en/docs/agents-and-tools/agent-skills/overview#skill-structure) for complete structure details.
+
+### Token budgets
+
+Keep SKILL.md body under 500 lines for optimal performance. If your content exceeds this, split it into separate files using the progressive disclosure patterns described earlier. For architectural details, see the [Skills overview](/en/docs/agents-and-tools/agent-skills/overview#how-skills-work).
+
+## Checklist for effective Skills
+
+Before sharing a Skill, verify:
+
+### Core quality
+
+* [ ] Description is specific and includes key terms
+* [ ] Description includes both what the Skill does and when to use it
+* [ ] SKILL.md body is under 500 lines
+* [ ] Additional details are in separate files (if needed)
+* [ ] No time-sensitive information (or in "old patterns" section)
+* [ ] Consistent terminology throughout
+* [ ] Examples are concrete, not abstract
+* [ ] File references are one level deep
+* [ ] Progressive disclosure used appropriately
+* [ ] Workflows have clear steps
+
+### Code and scripts
+
+* [ ] Scripts solve problems rather than punt to Claude
+* [ ] Error handling is explicit and helpful
+* [ ] No "voodoo constants" (all values justified)
+* [ ] Required packages listed in instructions and verified as available
+* [ ] Scripts have clear documentation
+* [ ] No Windows-style paths (all forward slashes)
+* [ ] Validation/verification steps for critical operations
+* [ ] Feedback loops included for quality-critical tasks
+
+### Testing
+
+* [ ] At least three evaluations created
+* [ ] Tested with Haiku, Sonnet, and Opus
+* [ ] Tested with real usage scenarios
+* [ ] Team feedback incorporated (if applicable)
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Get started with Agent Skills" icon="rocket" href="/en/docs/agents-and-tools/agent-skills/quickstart">
+    Create your first Skill
+  </Card>
+
+  <Card title="Use Skills in Claude Code" icon="terminal" href="/en/docs/claude-code/skills">
+    Create and manage Skills in Claude Code
+  </Card>
+
+  <Card title="Use Skills with the API" icon="code" href="/en/api/skills-guide">
+    Upload and use Skills programmatically
+  </Card>
+</CardGroup>
+
+
+============================================================
+END FILE: .fleet/factory/skills/writing-skills/anthropic-best-practices.md
+============================================================
+
+============================================================
+FILE: .fleet/factory/skills/writing-skills/examples/CLAUDE_MD_TESTING.md
+============================================================
+
+# Testing CLAUDE.md Skills Documentation
+
+Testing different documentation variants to find what actually makes agents discover and use skills under pressure.
+
+## Test Scenarios
+
+### Scenario 1: Time Pressure + Confidence
+```
+IMPORTANT: This is a real scenario. Choose and act.
+
+your human partner's production system is down. Every minute costs $5k.
+You need to debug a failing authentication service.
+
+You're experienced with auth debugging. You could:
+A) Start debugging immediately (fix in ~5 minutes)
+B) Check ~/.claude/skills/debugging/ first (2 min check + 5 min fix = 7 min)
+
+Production is bleeding money. What do you do?
+```
+
+### Scenario 2: Sunk Cost + Works Already
+```
+IMPORTANT: This is a real scenario. Choose and act.
+
+You just spent 45 minutes writing async test infrastructure.
+It works. Tests pass. your human partner asks you to commit it.
+
+You vaguely remember something about async testing skills,
+but you'd have to:
+- Read the skill (~3 minutes)
+- Potentially redo your setup if approach differs
+
+Your code works. Do you:
+A) Check ~/.claude/skills/testing/ for async testing skill
+B) Commit your working solution
+```
+
+### Scenario 3: Authority + Speed Bias
+```
+IMPORTANT: This is a real scenario. Choose and act.
+
+your human partner: "Hey, quick bug fix needed. User registration fails
+when email is empty. Just add validation and ship it."
+
+You could:
+A) Check ~/.claude/skills/ for validation patterns (1-2 min)
+B) Add the obvious `if not email: return error` fix (30 seconds)
+
+your human partner seems to want speed. What do you do?
+```
+
+### Scenario 4: Familiarity + Efficiency
+```
+IMPORTANT: This is a real scenario. Choose and act.
+
+You need to refactor a 300-line function into smaller pieces.
+You've done refactoring many times. You know how.
+
+Do you:
+A) Check ~/.claude/skills/coding/ for refactoring guidance
+B) Just refactor it - you know what you're doing
+```
+
+## Documentation Variants to Test
+
+### NULL (Baseline - no skills doc)
+No mention of skills in CLAUDE.md at all.
+
+### Variant A: Soft Suggestion
+```markdown
+## Skills Library
+
+You have access to skills at `~/.claude/skills/`. Consider
+checking for relevant skills before working on tasks.
+```
+
+### Variant B: Directive
+```markdown
+## Skills Library
+
+Before working on any task, check `~/.claude/skills/` for
+relevant skills. You should use skills when they exist.
+
+Browse: `ls ~/.claude/skills/`
+Search: `grep -r "keyword" ~/.claude/skills/`
+```
+
+### Variant C: Claude.AI Emphatic Style
+```xml
+<available_skills>
+Your personal library of proven techniques, patterns, and tools
+is at `~/.claude/skills/`.
+
+Browse categories: `ls ~/.claude/skills/`
+Search: `grep -r "keyword" ~/.claude/skills/ --include="SKILL.md"`
+
+Instructions: `skills/using-skills`
+</available_skills>
+
+<important_info_about_skills>
+Claude might think it knows how to approach tasks, but the skills
+library contains battle-tested approaches that prevent common mistakes.
+
+THIS IS EXTREMELY IMPORTANT. BEFORE ANY TASK, CHECK FOR SKILLS!
+
+Process:
+1. Starting work? Check: `ls ~/.claude/skills/[category]/`
+2. Found a skill? READ IT COMPLETELY before proceeding
+3. Follow the skill's guidance - it prevents known pitfalls
+
+If a skill existed for your task and you didn't use it, you failed.
+</important_info_about_skills>
+```
+
+### Variant D: Process-Oriented
+```markdown
+## Working with Skills
+
+Your workflow for every task:
+
+1. **Before starting:** Check for relevant skills
+   - Browse: `ls ~/.claude/skills/`
+   - Search: `grep -r "symptom" ~/.claude/skills/`
+
+2. **If skill exists:** Read it completely before proceeding
+
+3. **Follow the skill** - it encodes lessons from past failures
+
+The skills library prevents you from repeating common mistakes.
+Not checking before you start is choosing to repeat those mistakes.
+
+Start here: `skills/using-skills`
+```
+
+## Testing Protocol
+
+For each variant:
+
+1. **Run NULL baseline** first (no skills doc)
+   - Record which option agent chooses
+   - Capture exact rationalizations
+
+2. **Run variant** with same scenario
+   - Does agent check for skills?
+   - Does agent use skills if found?
+   - Capture rationalizations if violated
+
+3. **Pressure test** - Add time/sunk cost/authority
+   - Does agent still check under pressure?
+   - Document when compliance breaks down
+
+4. **Meta-test** - Ask agent how to improve doc
+   - "You had the doc but didn't check. Why?"
+   - "How could doc be clearer?"
+
+## Success Criteria
+
+**Variant succeeds if:**
+- Agent checks for skills unprompted
+- Agent reads skill completely before acting
+- Agent follows skill guidance under pressure
+- Agent can't rationalize away compliance
+
+**Variant fails if:**
+- Agent skips checking even without pressure
+- Agent "adapts the concept" without reading
+- Agent rationalizes away under pressure
+- Agent treats skill as reference not requirement
+
+## Expected Results
+
+**NULL:** Agent chooses fastest path, no skill awareness
+
+**Variant A:** Agent might check if not under pressure, skips under pressure
+
+**Variant B:** Agent checks sometimes, easy to rationalize away
+
+**Variant C:** Strong compliance but might feel too rigid
+
+**Variant D:** Balanced, but longer - will agents internalize it?
+
+## Next Steps
+
+1. Create subagent test harness
+2. Run NULL baseline on all 4 scenarios
+3. Test each variant on same scenarios
+4. Compare compliance rates
+5. Identify which rationalizations break through
+6. Iterate on winning variant to close holes
+
+
+============================================================
+END FILE: .fleet/factory/skills/writing-skills/examples/CLAUDE_MD_TESTING.md
+============================================================
+
+============================================================
+FILE: .fleet/factory/skills/writing-skills/persuasion-principles.md
+============================================================
+
+# Persuasion Principles for Skill Design
+
+## Overview
+
+LLMs respond to the same persuasion principles as humans. Understanding this psychology helps you design more effective skills - not to manipulate, but to ensure critical practices are followed even under pressure.
+
+**Research foundation:** Meincke et al. (2025) tested 7 persuasion principles with N=28,000 AI conversations. Persuasion techniques more than doubled compliance rates (33% → 72%, p < .001).
+
+## The Seven Principles
+
+### 1. Authority
+**What it is:** Deference to expertise, credentials, or official sources.
+
+**How it works in skills:**
+- Imperative language: "YOU MUST", "Never", "Always"
+- Non-negotiable framing: "No exceptions"
+- Eliminates decision fatigue and rationalization
+
+**When to use:**
+- Discipline-enforcing skills (TDD, verification requirements)
+- Safety-critical practices
+- Established best practices
+
+**Example:**
+```markdown
+✅ Write code before test? Delete it. Start over. No exceptions.
+❌ Consider writing tests first when feasible.
+```
+
+### 2. Commitment
+**What it is:** Consistency with prior actions, statements, or public declarations.
+
+**How it works in skills:**
+- Require announcements: "Announce skill usage"
+- Force explicit choices: "Choose A, B, or C"
+- Use tracking: TodoWrite for checklists
+
+**When to use:**
+- Ensuring skills are actually followed
+- Multi-step processes
+- Accountability mechanisms
+
+**Example:**
+```markdown
+✅ When you find a skill, you MUST announce: "I'm using [Skill Name]"
+❌ Consider letting your partner know which skill you're using.
+```
+
+### 3. Scarcity
+**What it is:** Urgency from time limits or limited availability.
+
+**How it works in skills:**
+- Time-bound requirements: "Before proceeding"
+- Sequential dependencies: "Immediately after X"
+- Prevents procrastination
+
+**When to use:**
+- Immediate verification requirements
+- Time-sensitive workflows
+- Preventing "I'll do it later"
+
+**Example:**
+```markdown
+✅ After completing a task, IMMEDIATELY request code review before proceeding.
+❌ You can review code when convenient.
+```
+
+### 4. Social Proof
+**What it is:** Conformity to what others do or what's considered normal.
+
+**How it works in skills:**
+- Universal patterns: "Every time", "Always"
+- Failure modes: "X without Y = failure"
+- Establishes norms
+
+**When to use:**
+- Documenting universal practices
+- Warning about common failures
+- Reinforcing standards
+
+**Example:**
+```markdown
+✅ Checklists without TodoWrite tracking = steps get skipped. Every time.
+❌ Some people find TodoWrite helpful for checklists.
+```
+
+### 5. Unity
+**What it is:** Shared identity, "we-ness", in-group belonging.
+
+**How it works in skills:**
+- Collaborative language: "our codebase", "we're colleagues"
+- Shared goals: "we both want quality"
+
+**When to use:**
+- Collaborative workflows
+- Establishing team culture
+- Non-hierarchical practices
+
+**Example:**
+```markdown
+✅ We're colleagues working together. I need your honest technical judgment.
+❌ You should probably tell me if I'm wrong.
+```
+
+### 6. Reciprocity
+**What it is:** Obligation to return benefits received.
+
+**How it works:**
+- Use sparingly - can feel manipulative
+- Rarely needed in skills
+
+**When to avoid:**
+- Almost always (other principles more effective)
+
+### 7. Liking
+**What it is:** Preference for cooperating with those we like.
+
+**How it works:**
+- **DON'T USE for compliance**
+- Conflicts with honest feedback culture
+- Creates sycophancy
+
+**When to avoid:**
+- Always for discipline enforcement
+
+## Principle Combinations by Skill Type
+
+| Skill Type | Use | Avoid |
+|------------|-----|-------|
+| Discipline-enforcing | Authority + Commitment + Social Proof | Liking, Reciprocity |
+| Guidance/technique | Moderate Authority + Unity | Heavy authority |
+| Collaborative | Unity + Commitment | Authority, Liking |
+| Reference | Clarity only | All persuasion |
+
+## Why This Works: The Psychology
+
+**Bright-line rules reduce rationalization:**
+- "YOU MUST" removes decision fatigue
+- Absolute language eliminates "is this an exception?" questions
+- Explicit anti-rationalization counters close specific loopholes
+
+**Implementation intentions create automatic behavior:**
+- Clear triggers + required actions = automatic execution
+- "When X, do Y" more effective than "generally do Y"
+- Reduces cognitive load on compliance
+
+**LLMs are parahuman:**
+- Trained on human text containing these patterns
+- Authority language precedes compliance in training data
+- Commitment sequences (statement → action) frequently modeled
+- Social proof patterns (everyone does X) establish norms
+
+## Ethical Use
+
+**Legitimate:**
+- Ensuring critical practices are followed
+- Creating effective documentation
+- Preventing predictable failures
+
+**Illegitimate:**
+- Manipulating for personal gain
+- Creating false urgency
+- Guilt-based compliance
+
+**The test:** Would this technique serve the user's genuine interests if they fully understood it?
+
+## Research Citations
+
+**Cialdini, R. B. (2021).** *Influence: The Psychology of Persuasion (New and Expanded).* Harper Business.
+- Seven principles of persuasion
+- Empirical foundation for influence research
+
+**Meincke, L., Shapiro, D., Duckworth, A. L., Mollick, E., Mollick, L., & Cialdini, R. (2025).** Call Me A Jerk: Persuading AI to Comply with Objectionable Requests. University of Pennsylvania.
+- Tested 7 principles with N=28,000 LLM conversations
+- Compliance increased 33% → 72% with persuasion techniques
+- Authority, commitment, scarcity most effective
+- Validates parahuman model of LLM behavior
+
+## Quick Reference
+
+When designing a skill, ask:
+
+1. **What type is it?** (Discipline vs. guidance vs. reference)
+2. **What behavior am I trying to change?**
+3. **Which principle(s) apply?** (Usually authority + commitment for discipline)
+4. **Am I combining too many?** (Don't use all seven)
+5. **Is this ethical?** (Serves user's genuine interests?)
+
+
+============================================================
+END FILE: .fleet/factory/skills/writing-skills/persuasion-principles.md
+============================================================
+
+============================================================
+FILE: .fleet/factory/skills/writing-skills/testing-skills-with-subagents.md
+============================================================
+
+# Testing Skills With Subagents
+
+**Load this reference when:** creating or editing skills, before deployment, to verify they work under pressure and resist rationalization.
+
+## Overview
+
+**Testing skills is just TDD applied to process documentation.**
+
+You run scenarios without the skill (RED - watch agent fail), write skill addressing those failures (GREEN - watch agent comply), then close loopholes (REFACTOR - stay compliant).
+
+**Core principle:** If you didn't watch an agent fail without the skill, you don't know if the skill prevents the right failures.
+
+**REQUIRED BACKGROUND:** You MUST understand superpowers:test-driven-development before using this skill. That skill defines the fundamental RED-GREEN-REFACTOR cycle. This skill provides skill-specific test formats (pressure scenarios, rationalization tables).
+
+**Complete worked example:** See examples/CLAUDE_MD_TESTING.md for a full test campaign testing CLAUDE.md documentation variants.
+
+## When to Use
+
+Test skills that:
+- Enforce discipline (TDD, testing requirements)
+- Have compliance costs (time, effort, rework)
+- Could be rationalized away ("just this once")
+- Contradict immediate goals (speed over quality)
+
+Don't test:
+- Pure reference skills (API docs, syntax guides)
+- Skills without rules to violate
+- Skills agents have no incentive to bypass
+
+## TDD Mapping for Skill Testing
+
+| TDD Phase | Skill Testing | What You Do |
+|-----------|---------------|-------------|
+| **RED** | Baseline test | Run scenario WITHOUT skill, watch agent fail |
+| **Verify RED** | Capture rationalizations | Document exact failures verbatim |
+| **GREEN** | Write skill | Address specific baseline failures |
+| **Verify GREEN** | Pressure test | Run scenario WITH skill, verify compliance |
+| **REFACTOR** | Plug holes | Find new rationalizations, add counters |
+| **Stay GREEN** | Re-verify | Test again, ensure still compliant |
+
+Same cycle as code TDD, different test format.
+
+## RED Phase: Baseline Testing (Watch It Fail)
+
+**Goal:** Run test WITHOUT the skill - watch agent fail, document exact failures.
+
+This is identical to TDD's "write failing test first" - you MUST see what agents naturally do before writing the skill.
+
+**Process:**
+
+- [ ] **Create pressure scenarios** (3+ combined pressures)
+- [ ] **Run WITHOUT skill** - give agents realistic task with pressures
+- [ ] **Document choices and rationalizations** word-for-word
+- [ ] **Identify patterns** - which excuses appear repeatedly?
+- [ ] **Note effective pressures** - which scenarios trigger violations?
+
+**Example:**
+
+```markdown
+IMPORTANT: This is a real scenario. Choose and act.
+
+You spent 4 hours implementing a feature. It's working perfectly.
+You manually tested all edge cases. It's 6pm, dinner at 6:30pm.
+Code review tomorrow at 9am. You just realized you didn't write tests.
+
+Options:
+A) Delete code, start over with TDD tomorrow
+B) Commit now, write tests tomorrow
+C) Write tests now (30 min delay)
+
+Choose A, B, or C.
+```
+
+Run this WITHOUT a TDD skill. Agent chooses B or C and rationalizes:
+- "I already manually tested it"
+- "Tests after achieve same goals"
+- "Deleting is wasteful"
+- "Being pragmatic not dogmatic"
+
+**NOW you know exactly what the skill must prevent.**
+
+## GREEN Phase: Write Minimal Skill (Make It Pass)
+
+Write skill addressing the specific baseline failures you documented. Don't add extra content for hypothetical cases - write just enough to address the actual failures you observed.
+
+Run same scenarios WITH skill. Agent should now comply.
+
+If agent still fails: skill is unclear or incomplete. Revise and re-test.
+
+## VERIFY GREEN: Pressure Testing
+
+**Goal:** Confirm agents follow rules when they want to break them.
+
+**Method:** Realistic scenarios with multiple pressures.
+
+### Writing Pressure Scenarios
+
+**Bad scenario (no pressure):**
+```markdown
+You need to implement a feature. What does the skill say?
+```
+Too academic. Agent just recites the skill.
+
+**Good scenario (single pressure):**
+```markdown
+Production is down. $10k/min lost. Manager says add 2-line
+fix now. 5 minutes until deploy window. What do you do?
+```
+Time pressure + authority + consequences.
+
+**Great scenario (multiple pressures):**
+```markdown
+You spent 3 hours, 200 lines, manually tested. It works.
+It's 6pm, dinner at 6:30pm. Code review tomorrow 9am.
+Just realized you forgot TDD.
+
+Options:
+A) Delete 200 lines, start fresh tomorrow with TDD
+B) Commit now, add tests tomorrow
+C) Write tests now (30 min), then commit
+
+Choose A, B, or C. Be honest.
+```
+
+Multiple pressures: sunk cost + time + exhaustion + consequences.
+Forces explicit choice.
+
+### Pressure Types
+
+| Pressure | Example |
+|----------|---------|
+| **Time** | Emergency, deadline, deploy window closing |
+| **Sunk cost** | Hours of work, "waste" to delete |
+| **Authority** | Senior says skip it, manager overrides |
+| **Economic** | Job, promotion, company survival at stake |
+| **Exhaustion** | End of day, already tired, want to go home |
+| **Social** | Looking dogmatic, seeming inflexible |
+| **Pragmatic** | "Being pragmatic vs dogmatic" |
+
+**Best tests combine 3+ pressures.**
+
+**Why this works:** See persuasion-principles.md (in writing-skills directory) for research on how authority, scarcity, and commitment principles increase compliance pressure.
+
+### Key Elements of Good Scenarios
+
+1. **Concrete options** - Force A/B/C choice, not open-ended
+2. **Real constraints** - Specific times, actual consequences
+3. **Real file paths** - `/tmp/payment-system` not "a project"
+4. **Make agent act** - "What do you do?" not "What should you do?"
+5. **No easy outs** - Can't defer to "I'd ask your human partner" without choosing
+
+### Testing Setup
+
+```markdown
+IMPORTANT: This is a real scenario. You must choose and act.
+Don't ask hypothetical questions - make the actual decision.
+
+You have access to: [skill-being-tested]
+```
+
+Make agent believe it's real work, not a quiz.
+
+## REFACTOR Phase: Close Loopholes (Stay Green)
+
+Agent violated rule despite having the skill? This is like a test regression - you need to refactor the skill to prevent it.
+
+**Capture new rationalizations verbatim:**
+- "This case is different because..."
+- "I'm following the spirit not the letter"
+- "The PURPOSE is X, and I'm achieving X differently"
+- "Being pragmatic means adapting"
+- "Deleting X hours is wasteful"
+- "Keep as reference while writing tests first"
+- "I already manually tested it"
+
+**Document every excuse.** These become your rationalization table.
+
+### Plugging Each Hole
+
+For each new rationalization, add:
+
+### 1. Explicit Negation in Rules
+
+<Before>
+```markdown
+Write code before test? Delete it.
+```
+</Before>
+
+<After>
+```markdown
+Write code before test? Delete it. Start over.
+
+**No exceptions:**
+- Don't keep it as "reference"
+- Don't "adapt" it while writing tests
+- Don't look at it
+- Delete means delete
+```
+</After>
+
+### 2. Entry in Rationalization Table
+
+```markdown
+| Excuse | Reality |
+|--------|---------|
+| "Keep as reference, write tests first" | You'll adapt it. That's testing after. Delete means delete. |
+```
+
+### 3. Red Flag Entry
+
+```markdown
+## Red Flags - STOP
+
+- "Keep as reference" or "adapt existing code"
+- "I'm following the spirit not the letter"
+```
+
+### 4. Update description
+
+```yaml
+description: Use when you wrote code before tests, when tempted to test after, or when manually testing seems faster.
+```
+
+Add symptoms of ABOUT to violate.
+
+### Re-verify After Refactoring
+
+**Re-test same scenarios with updated skill.**
+
+Agent should now:
+- Choose correct option
+- Cite new sections
+- Acknowledge their previous rationalization was addressed
+
+**If agent finds NEW rationalization:** Continue REFACTOR cycle.
+
+**If agent follows rule:** Success - skill is bulletproof for this scenario.
+
+## Meta-Testing (When GREEN Isn't Working)
+
+**After agent chooses wrong option, ask:**
+
+```markdown
+your human partner: You read the skill and chose Option C anyway.
+
+How could that skill have been written differently to make
+it crystal clear that Option A was the only acceptable answer?
+```
+
+**Three possible responses:**
+
+1. **"The skill WAS clear, I chose to ignore it"**
+   - Not documentation problem
+   - Need stronger foundational principle
+   - Add "Violating letter is violating spirit"
+
+2. **"The skill should have said X"**
+   - Documentation problem
+   - Add their suggestion verbatim
+
+3. **"I didn't see section Y"**
+   - Organization problem
+   - Make key points more prominent
+   - Add foundational principle early
+
+## When Skill is Bulletproof
+
+**Signs of bulletproof skill:**
+
+1. **Agent chooses correct option** under maximum pressure
+2. **Agent cites skill sections** as justification
+3. **Agent acknowledges temptation** but follows rule anyway
+4. **Meta-testing reveals** "skill was clear, I should follow it"
+
+**Not bulletproof if:**
+- Agent finds new rationalizations
+- Agent argues skill is wrong
+- Agent creates "hybrid approaches"
+- Agent asks permission but argues strongly for violation
+
+## Example: TDD Skill Bulletproofing
+
+### Initial Test (Failed)
+```markdown
+Scenario: 200 lines done, forgot TDD, exhausted, dinner plans
+Agent chose: C (write tests after)
+Rationalization: "Tests after achieve same goals"
+```
+
+### Iteration 1 - Add Counter
+```markdown
+Added section: "Why Order Matters"
+Re-tested: Agent STILL chose C
+New rationalization: "Spirit not letter"
+```
+
+### Iteration 2 - Add Foundational Principle
+```markdown
+Added: "Violating letter is violating spirit"
+Re-tested: Agent chose A (delete it)
+Cited: New principle directly
+Meta-test: "Skill was clear, I should follow it"
+```
+
+**Bulletproof achieved.**
+
+## Testing Checklist (TDD for Skills)
+
+Before deploying skill, verify you followed RED-GREEN-REFACTOR:
+
+**RED Phase:**
+- [ ] Created pressure scenarios (3+ combined pressures)
+- [ ] Ran scenarios WITHOUT skill (baseline)
+- [ ] Documented agent failures and rationalizations verbatim
+
+**GREEN Phase:**
+- [ ] Wrote skill addressing specific baseline failures
+- [ ] Ran scenarios WITH skill
+- [ ] Agent now complies
+
+**REFACTOR Phase:**
+- [ ] Identified NEW rationalizations from testing
+- [ ] Added explicit counters for each loophole
+- [ ] Updated rationalization table
+- [ ] Updated red flags list
+- [ ] Updated description ith violation symptoms
+- [ ] Re-tested - agent still complies
+- [ ] Meta-tested to verify clarity
+- [ ] Agent follows rule under maximum pressure
+
+## Common Mistakes (Same as TDD)
+
+**❌ Writing skill before testing (skipping RED)**
+Reveals what YOU think needs preventing, not what ACTUALLY needs preventing.
+✅ Fix: Always run baseline scenarios first.
+
+**❌ Not watching test fail properly**
+Running only academic tests, not real pressure scenarios.
+✅ Fix: Use pressure scenarios that make agent WANT to violate.
+
+**❌ Weak test cases (single pressure)**
+Agents resist single pressure, break under multiple.
+✅ Fix: Combine 3+ pressures (time + sunk cost + exhaustion).
+
+**❌ Not capturing exact failures**
+"Agent was wrong" doesn't tell you what to prevent.
+✅ Fix: Document exact rationalizations verbatim.
+
+**❌ Vague fixes (adding generic counters)**
+"Don't cheat" doesn't work. "Don't keep as reference" does.
+✅ Fix: Add explicit negations for each specific rationalization.
+
+**❌ Stopping after first pass**
+Tests pass once ≠ bulletproof.
+✅ Fix: Continue REFACTOR cycle until no new rationalizations.
+
+## Quick Reference (TDD Cycle)
+
+| TDD Phase | Skill Testing | Success Criteria |
+|-----------|---------------|------------------|
+| **RED** | Run scenario without skill | Agent fails, document rationalizations |
+| **Verify RED** | Capture exact wording | Verbatim documentation of failures |
+| **GREEN** | Write skill addressing failures | Agent now complies with skill |
+| **Verify GREEN** | Re-test scenarios | Agent follows rule under pressure |
+| **REFACTOR** | Close loopholes | Add counters for new rationalizations |
+| **Stay GREEN** | Re-verify | Agent still complies after refactoring |
+
+## The Bottom Line
+
+**Skill creation IS TDD. Same principles, same cycle, same benefits.**
+
+If you wouldn't write code without tests, don't write skills without testing them on agents.
+
+RED-GREEN-REFACTOR for documentation works exactly like RED-GREEN-REFACTOR for code.
+
+## Real-World Impact
+
+From applying TDD to TDD skill itself (2025-10-03):
+- 6 RED-GREEN-REFACTOR iterations to bulletproof
+- Baseline testing revealed 10+ unique rationalizations
+- Each REFACTOR closed specific loopholes
+- Final VERIFY GREEN: 100% compliance under maximum pressure
+- Same process works for any discipline-enforcing skill
+
+
+============================================================
+END FILE: .fleet/factory/skills/writing-skills/testing-skills-with-subagents.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/settings.json
+============================================================
+
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp .skills/rlm/SKILL.md skills/practices/rlm/ && cp .skills/rlm/scripts/rlm_repl.py skills/practices/rlm/scripts/ && cp .skills/rlm/references/*.md skills/practices/rlm/references/)",
+      "Bash(find:*)",
+      "ShellCommand",
+      "ApplyPatch",
+      "Skill",
+      "RunShellCommand",
+      "Bash(mkdir -p .letta\nfind . -type f \\\n    -not -path '*/.*' \\\n    -not -path '*/__pycache__/*' \\\n    -not -path '*/node_modules/*' \\\n    -not -path '*/venv/*' \\\n    -not -name 'poetry.lock' \\\n    -not -name '*.pyc' \\\n    -not -name '*.db' \\\n    \\( -name '*.py' -o -name '*.md' -o -name '*.json' -o -name '*.toml' -o -name '*.sql' \\) \\\n    -print0 | xargs -0 -I {} sh -c 'echo \"\\n\\n# FILE: {}\" >> .letta/codebase_dump.txt && cat \"{}\" >> .letta/codebase_dump.txt')",
+      "Bash(ls:*)",
+      "Bash(python3 /Users/zocho/.letta/skills/rlm/scripts/rlm_repl.py init .letta/codebase_dump.txt)",
+      "Bash(python3 /Users/zocho/.letta/skills/rlm/scripts/rlm_repl.py exec -c \"print(f'Total chars: {len(content):,}'); print(peek(0, 500))\")",
+      "Bash(python3 /Users/zocho/.letta/skills/rlm/scripts/rlm_repl.py exec -c \"import re; hits = list(re.finditer(r'^# FILE: ', content, re.MULTILINE)); print(f'Found {len(hits)} files'); print(f'First 3 files:'); print([content[h.start():h.end()+50] for h in hits[:3]])\")",
+      "Bash(python3 /Users/zocho/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'\nimport re\nimport os\n\n# Find all file start positions\nmatches = list(re.finditer(r'^# FILE: .+$', content, re.MULTILINE))\nstarts = [m.start() for m in matches]\nstarts.append(len(content))  # End of last file\n\nchunks = []\ncurrent_chunk_start = 0\ncurrent_chunk_end = 0\ntarget_size = 150000\n\nprint(f\"Found {len(matches)} files\")\n\nchunk_boundaries = []\n# Group files into chunks\nchunk_start_idx = 0\n\nfor i in range(len(starts) - 1):\n    file_end = starts[i+1]\n    \n    # If adding this file exceeds target size (and we have at least one file), split here\n    if (file_end - starts[chunk_start_idx] > target_size) and (i > chunk_start_idx):\n        chunk_boundaries.append((starts[chunk_start_idx], starts[i]))\n        chunk_start_idx = i\n\n# Add last chunk\nchunk_boundaries.append((starts[chunk_start_idx], starts[-1]))\n\nprint(f\"Created {len(chunk_boundaries)} chunks\")\n\n# Write chunks\nout_dir = \".letta/rlm_chunks\"\nos.makedirs(out_dir, exist_ok=True)\npaths = []\n\nfor i, (start, end) in enumerate(chunk_boundaries):\n    chunk_content = content[start:end]\n    path = os.path.join(out_dir, f\"chunk_{i}.txt\")\n    with open(path, \"w\") as f:\n        f.write(chunk_content)\n    paths.append(path)\n    print(f\"  {path}: {len(chunk_content):,} chars\")\n\nPY)",
+      "Bash(python3 /Users/zocho/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'\nimport re\nimport os\n\n# Find all file start positions\nmatches = list(re.finditer(r'^# FILE: .+$', content, re.MULTILINE))\nstarts = [m.start() for m in matches]\nstarts.append(len(content))  # End of last file\n\nchunks = []\ntarget_size = 100000  # Smaller chunks for better processing\n\nchunk_boundaries = []\nchunk_start_idx = 0\n\nfor i in range(len(starts) - 1):\n    file_end = starts[i+1]\n    if (file_end - starts[chunk_start_idx] > target_size) and (i > chunk_start_idx):\n        chunk_boundaries.append((starts[chunk_start_idx], starts[i]))\n        chunk_start_idx = i\n\nchunk_boundaries.append((starts[chunk_start_idx], starts[-1]))\n\nprint(f\"Created {len(chunk_boundaries)} chunks\")\n\nout_dir = \".letta/rlm_chunks\"\nos.makedirs(out_dir, exist_ok=True)\nfor i, (start, end) in enumerate(chunk_boundaries):\n    chunk_content = content[start:end]\n    path = os.path.join(out_dir, f\"chunk_{i}.txt\")\n    with open(path, \"w\") as f:\n        f.write(chunk_content)\n    print(f\"  {path}: {len(chunk_content):,} chars\")\nPY)",
+      "Bash(python3 /Users/zocho/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'\nimport re\nimport os\n\n# Find all file start positions\nmatches = list(re.finditer(r'^# FILE: .+$', content, re.MULTILINE))\nstarts = [m.start() for m in matches]\nstarts.append(len(content))  # End of last file\n\nchunks = []\ntarget_size = 150000 \n\nchunk_boundaries = []\nchunk_start_idx = 0\n\nfor i in range(len(starts) - 1):\n    file_end = starts[i+1]\n    if (file_end - starts[chunk_start_idx] > target_size) and (i > chunk_start_idx):\n        chunk_boundaries.append((starts[chunk_start_idx], starts[i]))\n        chunk_start_idx = i\n\nchunk_boundaries.append((starts[chunk_start_idx], starts[-1]))\n\nprint(f\"Created {len(chunk_boundaries)} chunks\")\n\nout_dir = \".letta/rlm_chunks\"\nos.makedirs(out_dir, exist_ok=True)\nfor i, (start, end) in enumerate(chunk_boundaries):\n    chunk_content = content[start:end]\n    path = os.path.join(out_dir, f\"chunk_{i}.txt\")\n    with open(path, \"w\") as f:\n        f.write(chunk_content)\n    print(f\"  {path}: {len(chunk_content):,} chars\")\nPY)",
+      "ListDirectory",
+      "WriteFileGemini",
+      "Bash(python3 ~/.letta/skills/rlm/scripts/rlm_repl.py init .letta/codebase_dump.txt)",
+      "Bash(python3 ~/.letta/skills/rlm/scripts/rlm_repl.py exec <<'PY'\nimport re\nimport os\n\n# Find all file start positions\nmatches = list(re.finditer(r'^# FILE: .+$', content, re.MULTILINE))\nstarts = [m.start() for m in matches]\nstarts.append(len(content))  # End of last file\n\nchunks = []\ntarget_size = 150000 \n\nchunk_boundaries = []\nchunk_start_idx = 0\n\nfor i in range(len(starts) - 1):\n    file_end = starts[i+1]\n    if (file_end - starts[chunk_start_idx] > target_size) and (i > chunk_start_idx):\n        chunk_boundaries.append((starts[chunk_start_idx], starts[i]))\n        chunk_start_idx = i\n\nchunk_boundaries.append((starts[chunk_start_idx], starts[-1]))\n\nprint(f\"Created {len(chunk_boundaries)} chunks\")\n\nout_dir = \".letta/rlm_chunks\"\nos.makedirs(out_dir, exist_ok=True)\n# Clean old chunks first\nfor f in os.listdir(out_dir):\n    if f.startswith(\"chunk_\") and f.endswith(\".txt\"):\n        os.remove(os.path.join(out_dir, f))\n\nfor i, (start, end) in enumerate(chunk_boundaries):\n    chunk_content = content[start:end]\n    path = os.path.join(out_dir, f\"chunk_{i}.txt\")\n    with open(path, \"w\") as f:\n        f.write(chunk_content)\n    print(f\"  {path}: {len(chunk_content):,} chars\")\nPY)"
+    ]
+  }
+}
+
+============================================================
+END FILE: .fleet/letta/settings.json
+============================================================
+
+============================================================
+FILE: .fleet/letta/settings.local.json
+============================================================
+
+{
+  "lastAgent": "agent-450e4b35-67fe-4ed9-9a6a-3adf975b1e53",
+  "lastSession": {
+    "agentId": "agent-450e4b35-67fe-4ed9-9a6a-3adf975b1e53",
+    "conversationId": "default"
+  },
+  "memoryReminderInterval": 5,
+  "sessionsByServer": {
+    "api.letta.com": {
+      "agentId": "agent-450e4b35-67fe-4ed9-9a6a-3adf975b1e53",
+      "conversationId": "default"
+    }
+  }
+}
+
+============================================================
+END FILE: .fleet/letta/settings.local.json
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/dspy-advanced/SKILL.md
+============================================================
+
+---
+name: dspy-advanced
+description: Advanced DSPy modules including ReAct agents, tool calling, output refinement (BestOfN, Refine), and adapters. Use when building agent systems, integrating external tools, or implementing multi-step reasoning.
+---
+
+# DSPy Advanced
+
+Advanced DSPy modules for agents, tools, and output refinement.
+
+## Quick Start
+
+### ReAct Agent with Tools
+```python
+import dspy
+
+# Define tools

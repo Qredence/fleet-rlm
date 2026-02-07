@@ -1,0 +1,8 @@
+<!-- Chunk 104: bytes 30160-30407, type=h1 -->
+# More specific
+description: Processes PDF legal documents for contract review
+```
+
+**3.  Clarify scope**
+`description: PayFlow payment processing for e-commerce. Use specifically for online payment workflows, not for general financial queries.`
+

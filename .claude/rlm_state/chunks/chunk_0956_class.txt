@@ -1,0 +1,36 @@
+<!-- Chunk 956: bytes 3415657-3416645, type=class -->
+class CLIError(Exception):
+    """Base exception for CLI errors.
+
+    Attributes:
+        message: Human-readable error message.
+        exit_code: Process exit code for this error.
+        suggestion: Actionable suggestion for fixing the error.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = EXIT_ERROR,
+        suggestion: str = ""
+    ):
+        self.message = message
+        self.exit_code = exit_code
+        self.suggestion = suggestion
+        super().__init__(message)
+
+    def display(self, console: "Console") -> None:
+        """Display error using Rich formatting.
+
+        Args:
+            console: Rich console instance for output.
+        """
+        from rich.panel import Panel
+
+        content = f"[bold red]Error:[/bold red] {self.message}"
+        if self.suggestion:
+            content += f"\n\n[yellow]💡 Suggestion:[/yellow] {self.suggestion}"
+
+        console.print(Panel(content, title="❌ Error", border_style="red"))
+
+

@@ -1,0 +1,6 @@
+<!-- Chunk 1898: bytes 7704761-7704914, type=function -->
+def get_validation_repository(db: Session) -> ValidationRepository:
+    """Get a ValidationRepository instance."""
+    return ValidationRepository(db)
+
+

@@ -1,0 +1,19 @@
+<!-- Chunk 1559: bytes 6435158-6435619, type=function -->
+def _safe_single_filename(candidate: str) -> str | None:
+    """
+    Return a safe single-path filename or None.
+
+    LLM output is untrusted; keep this strict to prevent path traversal.
+    """
+    name = candidate.strip()
+    if not name:
+        return None
+    if "/" in name or "\\" in name:
+        return None
+    if name.startswith("."):
+        return None
+    if not all(c.isalnum() or c in "._-" for c in name):
+        return None
+    return name
+
+

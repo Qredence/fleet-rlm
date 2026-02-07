@@ -1,0 +1,224 @@
+<!-- Chunk 1244: bytes 4653884-4661255, type=class -->
+class CleanupManager:
+    """Manages cleanup operations during migration."""
+
+    def __init__(self, dry_run: bool = False):
+        self.dry_run = dry_run
+        self.removed: list[Path] = []
+        self.errors: list[tuple[Path, str]] = []
+
+    def remove_empty_directories(
+        self,
+        root: Path,
+        exclude_patterns: set[str] | None = None,
+    ) -> list[Path]:
+        """
+        Remove empty directories from root.
+
+        Args:
+            root: Root directory to search
+            exclude_patterns: Directory name patterns to exclude (e.g., {".git", "__pycache__"})
+
+        Returns:
+            List of removed directory paths
+        """
+        exclude_patterns = exclude_patterns or {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".venv",
+            "venv",
+        }
+        removed: list[Path] = []
+
+        for dirpath in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if not dirpath.is_dir():
+                continue
+
+            # Skip excluded patterns
+            if any(pattern in str(dirpath) for pattern in exclude_patterns):
+                continue
+
+            # Check if directory is empty
+            try:
+                if not list(dirpath.iterdir()):
+                    if not self.dry_run:
+                        shutil.rmtree(dirpath)
+                    removed.append(dirpath)
+                    print(f"{'[DRY RUN] ' if self.dry_run else ''}Removed empty dir: {dirpath}")
+            except Exception as e:
+                self.errors.append((dirpath, str(e)))
+
+        self.removed.extend(removed)
+        return removed
+
+    def remove_unused_imports(self, file_path: Path) -> bool:
+        """
+        Remove unused imports from a Python file.
+
+        Args:
+            file_path: Path to Python file
+
+        Returns:
+            True if file was modified
+        """
+        try:
+            content = file_path.read_text()
+            tree = ast.parse(content)
+
+            # Find all imported names
+            imported_names: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imported_names.add(alias.asname or alias.name.split(".")[0])
+                elif isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        imported_names.add(alias.asname or alias.name)
+
+            # Find all used names
+            used_names: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name):
+                    used_names.add(node.id)
+                elif isinstance(node, ast.Attribute):
+                    used_names.add(node.attr)
+
+            # Find unused imports
+            unused_imports: list[ast.Import | ast.ImportFrom] = []
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        name = alias.asname or alias.name
+                        if name not in used_names and name not in imported_names:
+                            # Check if it's a special import (e.g., __future__)
+                            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                                continue
+                            unused_imports.append(node)
+
+            if not unused_imports:
+                return False
+
+            # Remove unused imports (requires AST modification)
+            # For now, just report them
+            print(f"File {file_path} has {len(unused_imports)} unused imports:")
+            for imp in unused_imports:
+                print(f"  Line {imp.lineno}: {ast.unparse(imp)}")
+
+            return bool(unused_imports)
+
+        except Exception as e:
+            self.errors.append((file_path, str(e)))
+            return False
+
+    def cleanup_all(
+        self,
+        root: Path,
+        remove_empty: bool = True,
+        check_imports: bool = False,
+    ) -> dict:
+        """
+        Perform all cleanup operations.
+
+        Args:
+            root: Root directory to clean
+            remove_empty: Remove empty directories
+            check_imports: Check for unused imports
+
+        Returns:
+            Cleanup summary
+        """
+        summary = {
+            "empty_dirs_removed": [],
+            "files_with_unused_imports": [],
+            "errors": self.errors,
+        }
+
+        if remove_empty:
+            summary["empty_dirs_removed"] = self.remove_empty_directories(root)
+
+        if check_imports:
+            for py_file in root.rglob("*.py"):
+                if self.remove_unused_imports(py_file):
+                    summary["files_with_unused_imports"].append(py_file)
+
+        return summary
+
+    def generate_report(self) -> str:
+        """Generate cleanup report."""
+        report = ["Cleanup Report", "=" * 60]
+
+        if self.removed:
+            report.append(f"\nRemoved {len(self.removed)} items:")
+            for item in self.removed:
+                report.append(f"  - {item}")
+
+        if self.errors:
+            report.append(f"\nErrors ({len(self.errors)}):")
+            for path, error in self.errors:
+                report.append(f"  {path}: {error}")
+
+        return "\n".join(report)
+
+
+# CLI interface
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Cleanup utility for migration")
+    parser.add_argument("root", type=Path, help="Root directory to clean")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed without removing"
+    )
+    parser.add_argument("--remove-empty", action="store_true", help="Remove empty directories")
+    parser.add_argument("--check-imports", action="store_true", help="Check for unused imports")
+    parser.add_argument(
+        "--remove-all", action="store_true", help="Remove all (cleanup then delete legacy)"
+    )
+
+    args = parser.parse_args()
+
+    manager = CleanupManager(dry_run=args.dry_run)
+
+    if args.remove_all:
+        # Full cleanup
+        summary = manager.cleanup_all(
+            args.root,
+            remove_empty=True,
+            check_imports=False,
+        )
+        print(f"\nRemoved {len(summary['empty_dirs_removed'])} empty directories")
+    elif args.remove_empty:
+        manager.remove_empty_directories(args.root)
+    elif args.check_imports:
+        for py_file in args.root.rglob("*.py"):
+            manager.remove_unused_imports(py_file)
+    else:
+        parser.print_help()
+
+    if manager.removed or manager.errors:
+        print("\n" + manager.generate_report())
+
+
+============================================================
+END FILE: scripts/internal/migration/cleanup_legacy.py
+============================================================
+
+============================================================
+FILE: scripts/internal/migration/track_progress.py
+============================================================
+
+"""
+Migration progress tracker for Skills Fleet restructure.
+
+Tracks files moved, modified, and deleted during the restructuring process,
+and generates migration reports.
+"""
+
+import json
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
+
+
+@dataclass

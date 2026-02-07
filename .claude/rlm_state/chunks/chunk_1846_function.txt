@@ -1,0 +1,7 @@
+<!-- Chunk 1846: bytes 7631825-7632010, type=function -->
+def get_db_context_manager() -> SyncGenerator[Session, None, None]:
+    """Alias for get_db_context() for backward compatibility."""
+    with get_db_context() as db:
+        yield db
+
+

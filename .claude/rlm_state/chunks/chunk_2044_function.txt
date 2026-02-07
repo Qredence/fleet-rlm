@@ -1,0 +1,12 @@
+<!-- Chunk 2044: bytes 7944935-7945140, type=function -->
+def is_valid_uuid(uuid_string):
+    """Check if string is valid UUID."""
+    try:
+        from uuid import UUID
+
+        UUID(uuid_string)
+        return True
+    except ValueError:
+        return False
+
+

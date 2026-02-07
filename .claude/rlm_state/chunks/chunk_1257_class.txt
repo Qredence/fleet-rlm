@@ -1,0 +1,17 @@
+<!-- Chunk 1257: bytes 4680638-4680959, type=class -->
+class ExecutionMetrics:
+    """Metrics for a single DSPy execution."""
+
+    timestamp: str
+    model_name: str
+    task_type: str
+    execution_time_seconds: float
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+    success: bool
+    error: str | None = None
+
+
+@dataclass

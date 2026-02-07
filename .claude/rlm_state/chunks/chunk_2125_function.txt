@@ -1,0 +1,9 @@
+<!-- Chunk 2125: bytes 8049302-8049480, type=function -->
+def test_safe_json_loads_returns_dict_and_list_as_is() -> None:
+    d = {"a": 1}
+    lst = [1, 2, 3]
+
+    assert safe_json_loads(d) == d
+    assert safe_json_loads(lst) == lst
+
+

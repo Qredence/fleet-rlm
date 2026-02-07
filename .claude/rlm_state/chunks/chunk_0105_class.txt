@@ -1,0 +1,14 @@
+<!-- Chunk 105: bytes 152981-153346, type=class -->
+class CodeReview(dspy.Signature):
+    code = dspy.InputField(desc="Code to review")
+    issues: List[str] = dspy.OutputField(
+        desc="List of issues found (format: 'Line X: description')"
+    )
+    severity: str = dspy.OutputField(
+        desc="Overall severity: 'critical', 'high', 'medium', or 'low'"
+    )
+```
+
+### 4. Document Expected Formats
+
+```python

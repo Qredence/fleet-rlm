@@ -1,0 +1,39 @@
+<!-- Chunk 1057: bytes 3792247-3793593, type=class -->
+class UnderstandTaskForSkill(dspy.Signature):
+    """Step 1: Extract task requirements and map to taxonomy position.
+    
+    Analyzes user task to determine:
+    - Core intent and requirements
+    - Appropriate position in taxonomy hierarchy
+    - Related existing skills for context
+    - Dependencies that need to be resolved
+    """
+    
+    task_description: str = dspy.InputField(
+        desc="User's task or capability requirement"
+    )
+    existing_skills: str = dspy.InputField(
+        desc="JSON list of currently mounted skills in taxonomy"
+    )
+    taxonomy_structure: str = dspy.InputField(
+        desc="JSON object with relevant portions of hierarchical taxonomy"
+    )
+    
+    # Outputs
+    task_intent: str = dspy.OutputField(
+        desc="Core intent and specific requirements extracted from task"
+    )
+    taxonomy_path: str = dspy.OutputField(
+        desc="Proposed path in taxonomy (e.g., 'technical_skills/programming/python/async')"
+    )
+    parent_skills: str = dspy.OutputField(
+        desc="JSON list of parent and sibling skills in taxonomy for context"
+    )
+    dependency_analysis: str = dspy.OutputField(
+        desc="JSON object analyzing required dependency skills not yet mounted"
+    )
+    confidence_score: float = dspy.OutputField(
+        desc="Confidence in taxonomy placement (0.0-1.0)"
+    )
+
+

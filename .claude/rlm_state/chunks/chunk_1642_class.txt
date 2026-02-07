@@ -1,0 +1,12 @@
+<!-- Chunk 1642: bytes 6673199-6673440, type=class -->
+class ConversationStateError(AgentError):
+    """
+    Raised when conversation state is invalid or transition fails.
+
+    This can occur when:
+    - Invalid state transition
+    - State corruption
+    - Missing required state data
+    """
+
+

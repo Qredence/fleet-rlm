@@ -1,0 +1,9 @@
+<!-- Chunk 1730: bytes 7332508-7332826, type=class -->
+class DependencyRef(BaseModel):
+    """Reference to a dependency with justification."""
+
+    skill_id: str = Field(description="Path-style skill identifier")
+    justification: str = Field(description="Why this dependency is needed")
+    required: bool = Field(default=True, description="Whether strictly required")
+
+

@@ -1,0 +1,9 @@
+<!-- Chunk 193: bytes 294453-294637, type=function -->
+def process_large_file(filepath: str):
+    with open(filepath) as f:
+        for line in f:  # Generator, memory efficient
+            yield process_line(line)
+```
+
+**Bad:**
+```python

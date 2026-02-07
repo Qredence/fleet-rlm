@@ -1,0 +1,10 @@
+<!-- Chunk 122: bytes 167471-167768, type=class -->
+class MultipleOutputs(dspy.Signature):
+    """Signature with multiple outputs."""
+
+    input_data = dspy.InputField(desc="Input data")
+    output_1 = dspy.OutputField(desc="First output")
+    output_2 = dspy.OutputField(desc="Second output")
+    output_3 = dspy.OutputField(desc="Third output")
+
+

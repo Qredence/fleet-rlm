@@ -1,0 +1,39 @@
+<!-- Chunk 1087: bytes 3912507-3913800, type=class -->
+class PlanModule(dspy.Module):
+    """Module for Step 2: Planning skill structure."""
+    
+    def __init__(self):
+        super().__init__()
+        self.plan = dspy.ChainOfThought(PlanSkillStructure)
+    
+    def forward(
+        self,
+        task_intent: str,
+        taxonomy_path: str,
+        parent_skills: List[Dict],
+        dependency_analysis: str
+    ) -> Dict:
+        """Design skill structure with dependencies.
+        
+        Returns:
+            Dict with skill_metadata, dependencies, capabilities,
+            resource_requirements, compatibility_constraints,
+            and composition_strategy
+        """
+        result = self.plan(
+            task_intent=task_intent,
+            taxonomy_path=taxonomy_path,
+            parent_skills=json.dumps(parent_skills, indent=2),
+            dependency_analysis=dependency_analysis
+        )
+        
+        return {
+            'skill_metadata': json.loads(result.skill_metadata),
+            'dependencies': json.loads(result.dependencies),
+            'capabilities': json.loads(result.capabilities),
+            'resource_requirements': result.resource_requirements,
+            'compatibility_constraints': result.compatibility_constraints,
+            'composition_strategy': result.composition_strategy
+        }
+
+

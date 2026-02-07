@@ -1,0 +1,37 @@
+<!-- Chunk 1504: bytes 6355683-6356718, type=class -->
+class SessionHistoryResponse(BaseModel):
+    """Response model for retrieving session history."""
+
+    session_id: str
+    messages: list[dict[str, Any]]
+    metadata: dict[str, Any]
+
+
+============================================================
+END FILE: src/skill_fleet/api/schemas/conversational.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/schemas/hitl.py
+============================================================
+
+"""
+HITL (Human-in-the-Loop) schema models.
+
+This module provides structured models for HITL interactions, ensuring
+the API returns consistent, typed data that CLI clients can consume
+without additional parsing or normalization.
+
+Following the API-first principle: data transformation happens server-side,
+CLI is a thin client that only renders pre-structured data.
+"""
+
+from __future__ import annotations
+
+import re
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+

@@ -1,0 +1,8 @@
+<!-- Chunk 190: bytes 293162-293290, type=function -->
+def calculate_user_score(user: User) -> int:
+    MAX_SCORE = 100
+    return min(user.points, MAX_SCORE)
+```
+
+**Bad:**
+```python

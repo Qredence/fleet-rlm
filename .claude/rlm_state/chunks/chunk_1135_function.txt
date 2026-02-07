@@ -1,0 +1,49 @@
+<!-- Chunk 1135: bytes 4247660-4248960, type=function -->
+def test_existing_strip_calls_can_be_replaced_safely():
+    r = dspy.Reasoning(content=" hello ")
+    assert coerce_reasoning_text(r) == "hello"
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/unit/test_reasoning_field_runtime.py -v`
+Expected: FAIL until compat is used in modules
+
+**Step 3: Minimal implementation**
+
+Replace patterns like:
+
+`getattr(result, "reasoning", "").strip()`
+
+with:
+
+`coerce_reasoning_text(getattr(result, "reasoning", ""))`
+
+In modules that store reasoning in dicts for JSON, ensure it is coerced to string first.
+
+**Step 4: Run test to verify it passes**
+
+Run: `uv run pytest tests/unit/test_reasoning_field_runtime.py -v`
+Expected: PASS
+
+---
+
+### Task 5: Explicit adapter configuration in Skill Fleet
+
+**Files:**
+- Modify: `src/skill_fleet/llm/dspy_config.py`
+- Modify: `config/config.yaml` (and `src/skill_fleet/config/` packaged copy, via sync script)
+- Test: `tests/unit/test_dspy_adapter_config.py`
+
+**Goal:** Allow selecting adapter globally (and optionally per-task) so that:
+- Parsing is more reliable (JSONAdapter for structured outputs)
+- Streaming works with either ChatAdapter or JSONAdapter (StreamListener supports both)
+
+**Step 1: Write failing test**
+
+```python
+import dspy
+
+from skill_fleet.llm.dspy_config import configure_dspy
+
+

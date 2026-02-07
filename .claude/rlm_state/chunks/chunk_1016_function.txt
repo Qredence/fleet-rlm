@@ -1,0 +1,69 @@
+<!-- Chunk 1016: bytes 3564934-3567059, type=function -->
+def distribution_divergence_score(new_examples: list, training_examples: list) -> float:
+    """Measure how different new examples are from training set.
+    
+    0.0 = identical distribution
+    1.0 = completely different
+    
+    Uses semantic embeddings to compute divergence.
+    """
+    pass
+```
+
+**Integration in Evaluation**:
+```python
+async def evaluate_skill(skill_path: str):
+    program = load_program(skill_path)
+    
+    # Standard evaluation
+    metric = evaluate_metric(program, testset)
+    
+    # Check for drift
+    drift_report = monitor.check_drift(program)
+    
+    if drift_report.detected:
+        print(f"⚠️  Drift detected! Accuracy dropped {drift_report.accuracy_drop:.1%}")
+        print(f"📋 Recommendation: {drift_report.recommendation}")
+    
+    return {
+        "metric": metric,
+        "drift_detected": drift_report.detected,
+        "suggested_action": drift_report.suggested_action
+    }
+```
+
+**CLI Command**:
+```bash
+uv run skill-fleet evaluate --check-drift skills/python/async
+# Output:
+# Metric: 0.84
+# Golden standard accuracy: 0.81 (baseline was 0.85)
+# ⚠️  Drift detected! Drop of 4%
+# Recommendation: Re-optimize or add new golden examples
+```
+
+**Files to Create**:
+1. `src/skill_fleet/core/dspy/metrics/drift.py` (~200 lines)
+2. Update `src/skill_fleet/core/dspy/evaluation.py` to include drift check
+3. Update `src/skill_fleet/cli/commands/evaluate.py` with --check-drift flag
+4. Store golden examples history: `config/golden_standards/history.jsonl`
+
+**Timeline**: 1-2 days | **Impact**: Prevents optimizer degradation over time
+
+---
+
+#### **4B: Multi-Optimizer Ensemble Voting** 🗳️
+
+**Problem**: Single optimizer may fail; no hedging. User picks MIPROv2, but GEPA would have been better.
+
+**Solution**: Run all 3 optimizers in parallel; ensemble results via voting.
+
+**Implementation**:
+- Extend `EnsembleModule` in `core/dspy/modules/ensemble.py`
+  - New mode: `OptimizerEnsemble`
+  - Runs all 3 optimizers in parallel
+  - Weights results by historical accuracy of each optimizer type
+  - Returns: Ensemble program + confidence scores
+
+**Optimizer Ensemble Logic**:
+```python

@@ -1,0 +1,64 @@
+<!-- Chunk 1692: bytes 6719902-6721913, type=function -->
+def safe_json_loads(
+    value: str | Any,
+    default: dict | list | None = None,
+    field_name: str = "unknown",
+) -> dict | list:
+    """
+    Safely parse JSON string with fallback to default.
+
+    Handles:
+    - Already parsed objects (returns as-is)
+    - Valid JSON strings (parses and returns)
+    - Invalid JSON (returns default with warning)
+    - Pydantic models (extracts via model_dump())
+
+    This is essential when working with DSPy module outputs, as LLMs may
+    return structured data as JSON strings, pre-parsed objects, or Pydantic
+    models depending on the DSPy version and configuration.
+
+    Args:
+        value: String to parse or already-parsed object
+        default: Default value if parsing fails (dict or list)
+        field_name: Field name for logging
+
+    Returns:
+        Parsed JSON or default value (never None)
+
+    """
+    if default is None:
+        default = {}
+
+    # Already parsed (dict, list, or Pydantic model)
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        # Handle list of Pydantic models
+        return [item.model_dump() if hasattr(item, "model_dump") else item for item in value]
+    if hasattr(value, "model_dump"):  # Pydantic model
+        method = getattr(value, "model_dump", None)
+        if callable(method):
+            return method()
+        return value.model_dump()  # type: ignore[call-non-callable]
+
+    # Empty or None
+    if not value:
+        return default
+
+    # Try to parse JSON string
+    if isinstance(value, str):
+        candidate = _extract_json_candidate(value) or value.strip()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"Failed to parse JSON for field '{field_name}': {e}. "
+                f"Value preview: {value[:100]}..."
+            )
+            return default
+
+    # Unknown type
+    logger.warning(f"Unexpected type for field '{field_name}': {type(value)}")
+    return default
+
+

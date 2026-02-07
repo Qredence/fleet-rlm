@@ -1,0 +1,92 @@
+<!-- Chunk 163: bytes 233015-235825, type=function -->
+def optimize_module(
+    module_name: str,
+    metric_name: str,
+    examples_file: Path,
+    teleprompter_name: str,
+    max_trials: int,
+    output: Path,
+):
+    """Optimize a DSPy module with the specified metric."""
+    print(f"Optimizing module: {module_name}")
+    print(f"Metric: {metric_name}")
+    print(f"Examples file: {examples_file}")
+    print(f"Teleprompter: {teleprompter_name}")
+    print(f"Max trials: {max_trials}")
+
+    # Load examples
+    try:
+        examples = load_examples(examples_file)
+        print(f"Loaded {len(examples)} examples")
+    except Exception as e:
+        print(f"Error loading examples: {e}")
+        sys.exit(1)
+
+    # Import the module dynamically
+    try:
+        if module_name == "reasoner":
+            from agentic_fleet.dspy_modules.reasoner import DSPyReasoner
+            module = DSPyReasoner()
+        else:
+            print(f"Error: Unknown module '{module_name}'")
+            sys.exit(1)
+    except ImportError as e:
+        print(f"Error importing module: {e}")
+        sys.exit(1)
+
+    # Define metric function
+    def accuracy_metric(example, pred, trace=None):
+        """Default accuracy metric."""
+        return example.output == pred.output
+
+    # Use custom metric if provided
+    if metric_name != "accuracy":
+        # In a real implementation, you'd load custom metrics from a module
+        print(f"Warning: Using default accuracy metric (custom metric '{metric_name}' not implemented)")
+        metric = accuracy_metric
+    else:
+        metric = accuracy_metric
+
+    # Select teleprompter
+    teleprompters = {
+        "bootstrap": dspy.BootstrapFewShot,
+        "cot": dspy.ChainOfThought,
+        "knn": dspy.KNNFewShot,
+    }
+
+    if teleprompter_name not in teleprompters:
+        print(f"Error: Unknown teleprompter '{teleprompter_name}'")
+        sys.exit(1)
+
+    teleprompter_class = teleprompters[teleprompter_name]
+
+    # Create teleprompter with metric
+    try:
+        teleprompter = teleprompter_class(metric=metric, max_labeled_demos=max_trials)
+    except Exception as e:
+        print(f"Error creating teleprompter: {e}")
+        sys.exit(1)
+
+    # Optimize the module
+    try:
+        print("Optimizing...")
+        optimized = teleprompter.compile(module, trainset=examples)
+        print("Optimization successful!")
+    except Exception as e:
+        print(f"Optimization failed: {e}")
+        sys.exit(1)
+
+    # Ensure output directory exists
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save optimized module
+        try:
+            with open(output, "wb") as f:
+                pickle.dump(optimized, f)
+            print(f"Saved optimized module to: {output}")
+        except Exception as e:
+            print(f"Error saving optimized module: {e}")
+            sys.exit(1)
+
+

@@ -1,0 +1,16 @@
+<!-- Chunk 1544: bytes 6404086-6404447, type=function -->
+def get_job_manager() -> JobManager:
+    """
+    Get the global job manager instance.
+
+    Returns:
+        JobManager instance (creates default if not initialized)
+
+    """
+    global _job_manager
+    if _job_manager is None:
+        _job_manager = JobManager()
+        logger.info("Created default JobManager (no database backing)")
+    return _job_manager
+
+

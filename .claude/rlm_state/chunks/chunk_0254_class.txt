@@ -1,0 +1,6 @@
+<!-- Chunk 254: bytes 313252-313401, type=class -->
+class UserNotifier:
+    """User notifications."""
+    def send_welcome_email(self, user: User): ...
+    def send_reset_email(self, user: User): ...
+

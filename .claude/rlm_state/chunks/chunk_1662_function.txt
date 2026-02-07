@@ -1,0 +1,6 @@
+<!-- Chunk 1662: bytes 6685101-6685250, type=function -->
+def _iter_parents(start: Path) -> list[Path]:
+    start_dir = start if start.is_dir() else start.parent
+    return [start_dir, *start_dir.parents]
+
+

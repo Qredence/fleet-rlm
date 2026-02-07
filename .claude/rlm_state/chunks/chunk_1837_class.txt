@@ -1,0 +1,253 @@
+<!-- Chunk 1837: bytes 7604374-7613123, type=class -->
+class UnderstandingWorkflow:
+    """
+    Phase 1: Understanding & Planning Workflow.
+
+    Orchestrates understanding modules asynchronously:
+    1. Gather requirements (always first - may trigger HITL)
+    2. Analyze intent, find taxonomy path, analyze dependencies (parallel)
+    3. Synthesize complete plan using ReAct
+
+    Can suspend for HITL clarification if ambiguities found.
+
+    Example:
+        workflow = UnderstandingWorkflow()
+        result = await workflow.execute(
+            task_description="Build a React component library",
+            user_context={"experience": "intermediate"}
+        )
+        # Returns complete understanding + plan or HITL checkpoint
+
+    """
+
+    def __init__(self):
+        self.requirements = GatherRequirementsModule()
+        self.intent = AnalyzeIntentModule()
+        self.taxonomy = FindTaxonomyPathModule()
+        self.dependencies = AnalyzeDependenciesModule()
+        self.plan = SynthesizePlanModule()
+        self.hitl_questions = GenerateClarifyingQuestionsModule()
+
+    async def execute(
+        self,
+        task_description: str,
+        user_context: dict | None = None,
+        taxonomy_structure: dict | None = None,
+        existing_skills: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Execute understanding workflow asynchronously.
+
+        Args:
+            task_description: User's task description
+            user_context: Optional user context (preferences, history)
+            taxonomy_structure: Current taxonomy structure
+            existing_skills: List of existing skill paths
+
+        Returns:
+            Dictionary with either:
+            - Complete understanding + synthesized plan
+            - HITL checkpoint (if ambiguities detected)
+
+        """
+        logger.info(f"Starting understanding workflow for: {task_description[:50]}...")
+
+        # Step 1: Gather requirements (blocking - must complete first)
+        logger.debug("Step 1: Gathering requirements")
+        requirements = await self.requirements.aforward(
+            task_description=task_description, user_context=user_context or {}
+        )
+
+        # Check if clarification needed
+        if self._needs_clarification(requirements):
+            logger.info(f"Ambiguities detected: {len(requirements.get('ambiguities', []))} items")
+            return await self._suspend_for_clarification(
+                task_description=task_description,
+                requirements=requirements,
+                user_context=user_context or {},
+            )
+
+        # Step 2-4: Run in parallel for better performance
+        logger.debug("Steps 2-4: Analyzing intent, taxonomy, and dependencies (parallel)")
+        intent_task = self.intent.aforward(
+            task_description=task_description, requirements=requirements
+        )
+        taxonomy_task = self.taxonomy.aforward(
+            task_description=task_description,
+            requirements=requirements,
+            taxonomy_structure=taxonomy_structure or {},
+            existing_skills=existing_skills or [],
+        )
+        dependencies_task = self.dependencies.aforward(
+            task_description=task_description,
+            intent_analysis={},  # Will be updated after intent completes
+            taxonomy_path="",  # Will be updated after taxonomy completes
+            existing_skills=existing_skills or [],
+        )
+
+        # Wait for all parallel tasks
+        intent, taxonomy, dependencies = await asyncio.gather(
+            intent_task, taxonomy_task, dependencies_task
+        )
+
+        # Update dependencies with intent and taxonomy info
+        dependencies = await self.dependencies.aforward(
+            task_description=task_description,
+            intent_analysis=intent,
+            taxonomy_path=taxonomy.get("recommended_path", ""),
+            existing_skills=existing_skills or [],
+        )
+
+        # Step 5: Synthesize plan using ReAct
+        logger.debug("Step 5: Synthesizing plan with ReAct")
+        plan = await self.plan.aforward(
+            requirements=requirements,
+            intent_analysis=intent,
+            taxonomy_analysis=taxonomy,
+            dependency_analysis=dependencies,
+        )
+
+        logger.info("Understanding workflow completed successfully")
+
+        return {
+            "status": "completed",
+            "requirements": requirements,
+            "intent": intent,
+            "taxonomy": taxonomy,
+            "dependencies": dependencies,
+            "plan": plan,
+        }
+
+    def _needs_clarification(self, requirements: dict) -> bool:
+        """
+        Determine if HITL clarification is needed.
+
+        Args:
+            requirements: Requirements dictionary
+
+        Returns:
+            True if ambiguities exist and are significant
+
+        """
+        ambiguities = requirements.get("ambiguities", [])
+
+        # No ambiguities = no clarification needed
+        if not ambiguities:
+            return False
+
+        # Filter out minor ambiguities (less than 10 chars)
+        significant_ambiguities = [a for a in ambiguities if len(str(a)) > 10]
+
+        # Need clarification if we have significant ambiguities
+        if len(significant_ambiguities) > 0:
+            logger.debug(f"Significant ambiguities: {significant_ambiguities}")
+            return True
+
+        return False
+
+    async def _suspend_for_clarification(
+        self,
+        task_description: str,
+        requirements: dict,
+        user_context: dict,
+    ) -> dict[str, Any]:
+        """
+        Suspend workflow for HITL clarification with relevant questions.
+
+        Args:
+            task_description: Original task description
+            requirements: Requirements with ambiguities
+            user_context: User context
+
+        Returns:
+            HITL checkpoint with targeted questions
+
+        """
+        logger.info("Suspending for HITL clarification")
+
+        # Get ambiguities
+        ambiguities = requirements.get("ambiguities", [])
+
+        # Generate targeted questions based on ambiguities
+        questions_result = await self.hitl_questions.aforward(
+            task_description=task_description,
+            ambiguities=ambiguities,
+            initial_analysis=str(requirements),
+        )
+
+        # Create follow-up context with suggestions
+        follow_up_context = self._create_follow_up_context(requirements, questions_result)
+
+        return {
+            "status": "pending_user_input",
+            "hitl_type": "clarify",
+            "hitl_data": {
+                "questions": questions_result.get("questions", []),
+                "priority": questions_result.get("priority", "important"),
+                "rationale": questions_result.get("rationale", ""),
+                "follow_up_context": follow_up_context,
+            },
+            "context": {
+                "requirements": requirements,
+                "user_context": user_context,
+                "partial_understanding": {
+                    "domain": requirements.get("domain"),
+                    "topics": requirements.get("topics"),
+                    "target_level": requirements.get("target_level"),
+                },
+            },
+        }
+
+    def _create_follow_up_context(
+        self, requirements: dict, questions_result: dict
+    ) -> dict[str, Any]:
+        """
+        Create context for follow-up after HITL.
+
+        Args:
+            requirements: Current requirements
+            questions_result: Questions generated
+
+        Returns:
+            Context dictionary for resuming workflow
+
+        """
+        return {
+            "expected_improvements": [
+                "Clearer topic definitions",
+                "Specific technology choices",
+                "Scope boundaries",
+            ],
+            "resume_strategy": "Re-run understanding with clarified requirements",
+            "questions_asked": len(questions_result.get("questions", [])),
+            "critical_gaps": requirements.get("ambiguities", [])[:3],  # Top 3 gaps
+        }
+
+
+============================================================
+END FILE: src/skill_fleet/core/workflows/skill_creation/understanding.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/workflows/skill_creation/validation.py
+============================================================
+
+"""
+Phase 3: Validation Workflow.
+
+Validates generated skill content for compliance and quality.
+Can refine content if quality is insufficient.
+"""
+
+import logging
+from typing import Any
+
+from skill_fleet.core.modules.validation.compliance import (
+    AssessQualityModule,
+    RefineSkillModule,
+    ValidateComplianceModule,
+)
+
+logger = logging.getLogger(__name__)
+
+

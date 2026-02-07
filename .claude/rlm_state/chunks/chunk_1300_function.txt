@@ -1,0 +1,18 @@
+<!-- Chunk 1300: bytes 4769970-4770475, type=function -->
+def run_extract(skills_dirs: list[Path]) -> list:
+    """Extract examples from skill directories."""
+    examples = []
+    print(f"Scanning {len(skills_dirs)} directories for skills...")
+
+    for d in skills_dirs:
+        if not d.exists():
+            continue
+        for skill_path in d.glob("**/SKILL.md"):
+            ex = extract_training_example(skill_path)
+            if ex:
+                examples.append(ex)
+
+    print(f"✅ Extracted {len(examples)} examples from files")
+    return examples
+
+

@@ -1,0 +1,111 @@
+<!-- Chunk 1014: bytes 3560568-3563785, type=class -->
+class EvaluateComplexity(dspy.Signature):
+    """Evaluate if skill is simple or complex.
+    
+    Simple: Matches existing templates, straightforward content
+    Complex: Novel approach, multi-step reasoning needed
+    """
+    skill_description: str = dspy.InputField()
+    skill_content: str = dspy.InputField(desc="Partial content generated")
+    is_simple: bool = dspy.OutputField()
+    complexity_score: float = dspy.OutputField(desc="0.0 (simple) to 1.0 (complex)")
+    reasoning: str = dspy.OutputField()
+```
+
+**Phase Branching Logic**:
+```
+Phase 1: Understanding (always)
+    ↓
+Evaluate Complexity
+    ↓
+IF is_simple AND matches_template:
+    ├─ SKIP Phase 2 (use template)
+    └─ SKIP Phase 3 (template is pre-validated)
+    └─ Time: 5 min (vs 30 min full path)
+    
+ELSE IF complexity_score < 0.3:
+    ├─ Run Phase 2 (generation)
+    ├─ SKIP Phase 3 (low-risk generation)
+    └─ Time: 15 min
+    
+ELSE IF complexity_score > 0.8 AND require_high_quality:
+    ├─ Run Phase 2 (generation)
+    ├─ Run Phase 3 (validation)
+    ├─ ENABLE expert mode (extra HITL gates)
+    └─ Time: 45 min (thorough)
+    
+ELSE (default):
+    ├─ Run Phase 2 (generation)
+    ├─ Run Phase 3 (validation)
+    └─ Time: 30 min (standard)
+```
+
+**Configuration** (in `config/phase_rules.yaml`):
+```yaml
+phase_branching:
+  enabled: true
+  
+  fast_path:
+    enable_if_simple: true
+    complexity_threshold: 0.3
+    skip_phases: ["phase2", "phase3"]
+    time_estimate: "5 min"
+    
+  normal_path:
+    complexity_threshold: 0.7
+    run_phases: ["phase2", "phase3"]
+    time_estimate: "30 min"
+    
+  expert_path:
+    enable_if_complex: true
+    complexity_threshold: 0.8
+    run_phases: ["phase2", "phase3"]
+    expert_mode: true
+    extra_gates: ["semantic_validation", "style_review"]
+    time_estimate: "45 min"
+```
+
+**Metrics to Track**:
+```
+- % skills using fast path
+- % skills using normal path
+- % skills using expert path
+- Time saved via fast path (cumulative)
+- Quality difference (fast vs normal vs expert)
+```
+
+**CLI Integration**:
+```bash
+uv run skill-fleet create "simple python tutorial"
+# System detects: simple=true
+# Output: "Creating simple skill... (estimated 5 min)"
+# Actual result: 5 min vs 30 min for full path
+```
+
+**Files to Create**:
+1. Update `src/skill_fleet/core/dspy/signatures/phase1_understanding.py` with EvaluateComplexity
+2. Create `config/phase_rules.yaml`
+3. Update `src/skill_fleet/core/dspy/skill_creator.py` with branching logic
+4. Update `src/skill_fleet/core/dspy/modules/phase1_understanding.py` to use complexity
+
+**Timeline**: 1-2 days | **Impact**: 30-50% faster creation for simple skills
+
+---
+
+### TIER 4: Evaluation & Quality Feedback
+
+#### **4A: Golden Standard Drift Detection** 🎯
+
+**Problem**: Golden standards static; real-world distribution drifts over time. Optimizer optimizes for yesterday's good, not today's.
+
+**Solution**: Monitor optimizer accuracy on golden examples; detect & alert on drift.
+
+**Implementation**:
+- New module: `src/skill_fleet/core/dspy/metrics/drift.py`
+  - Class: `GoldenStandardMonitor`
+  - Tracks: Accuracy on golden examples over time
+  - Detects: Drop > 5% → signal drift
+  - Actions: Auto-retrain top performer, alert user
+
+**Monitor Logic**:
+```python

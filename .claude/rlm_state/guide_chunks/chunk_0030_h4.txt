@@ -1,0 +1,12 @@
+<!-- Chunk 30: bytes 10408-10581, type=h4 -->
+#### Minimal required format
+
+```yaml
+---
+name: your-skill-name
+description: What it does. Use when user asks to [specific phrases].
+---
+```
+
+That's all you need to start.
+

@@ -1,0 +1,87 @@
+<!-- Chunk 1831: bytes 7587064-7589971, type=function -->
+def web_search_research(query: str, max_results: int = 5) -> dict[str, Any]:
+    """
+    Execute web search using Google Search API for Gemini.
+
+    Uses Google's Search API integration with Gemini as documented at:
+    https://ai.google.dev/gemini-api/docs/google-search
+
+    Args:
+        query: Search query string
+        max_results: Maximum number of results to return
+
+    Returns:
+        Dict with keys:
+            - success: bool
+            - results: list[dict] with {url, title, snippet, ...}
+            - error: str | None
+            - query: str
+
+    """
+    try:
+        # Use Google Search API for Gemini
+        # Based on: https://ai.google.dev/gemini-api/docs/google-search
+        from google import genai
+        from google.genai import types
+
+        # Resolve API credentials preferring LiteLLM proxy (LITELLM_API_KEY)
+        from ...common.env_utils import resolve_api_credentials
+
+        creds = resolve_api_credentials(prefer_litellm=True)
+        api_key = creds.get("api_key")
+        if not api_key:
+            return {
+                "success": False,
+                "results": [],
+                "error": "No LITELLM_API_KEY or GOOGLE_API_KEY/GEMINI_API_KEY set",
+                "query": query,
+            }
+
+        # Initialize client — if using LiteLLM proxy provide base_url if present
+        # Note: google.genai.Client does not accept base_url in __init__.
+        # Ignoring base_url if present to prevent initialization error.
+        client = genai.Client(api_key=api_key)
+
+        # Define Google Search tool for grounding
+        grounding_tool = types.Tool(google_search=types.GoogleSearch())
+
+        # Configure request with Google Search tool
+        config = types.GenerateContentConfig(
+            tools=[grounding_tool],
+            temperature=1,
+        )
+
+        # Make request with search query
+        response = client.models.generate_content(
+            model="gemini/gemini-3-flash-preview",
+            contents=f"Search for and summarize the top {max_results} most relevant results about: {query}. Include URLs and key information.",
+            config=config,
+        )
+
+        # Parse response to extract search results
+        results = _parse_search_response(response, max_results)
+
+        return {
+            "success": True,
+            "results": results,
+            "error": None,
+            "query": query,
+        }
+    except ImportError:
+        logger.warning("google-genai package not installed, web search unavailable")
+        return {
+            "success": False,
+            "results": [],
+            "error": "google-genai package not installed",
+            "query": query,
+        }
+    except Exception as e:
+        logger.warning(f"Web search failed: {e}")
+        return {
+            "success": False,
+            "results": [],
+            "error": str(e),
+            "query": query,
+        }
+
+

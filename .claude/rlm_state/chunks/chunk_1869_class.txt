@@ -1,0 +1,19 @@
+<!-- Chunk 1869: bytes 7651975-7652653, type=class -->
+class FacetDefinition(Base):
+    """Facet lookup table for validation."""
+
+    __tablename__ = "facet_definitions"
+
+    facet_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    allowed_values: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+# =============================================================================
+# CAPABILITIES & DEPENDENCIES
+# =============================================================================
+
+

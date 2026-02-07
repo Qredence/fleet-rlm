@@ -1,0 +1,9 @@
+<!-- Chunk 207: bytes 298931-299152, type=class -->
+class ProductDataProcessor(DataProcessor):
+    def process(self, data):
+        return data.lower()
+```
+
+**Solution:** Start simple, abstract when pattern emerges
+```python
+# Just functions until abstraction is justified

@@ -1,0 +1,12 @@
+<!-- Chunk 1125: bytes 4220562-4220873, type=class -->
+class SimpleProgram(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.cot = dspy.ChainOfThought("task_description -> output")
+    
+    def forward(self, task_description: str):
+        return self.cot(task_description=task_description)
+
+program = SimpleProgram()
+
+# 4. Define metric

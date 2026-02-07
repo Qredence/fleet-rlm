@@ -1,0 +1,11 @@
+<!-- Chunk 1277: bytes 4727342-4727631, type=function -->
+def create_simple_program() -> dspy.Module:
+    """
+    Create a simplified program for testing optimization.
+
+    Returns a basic ChainOfThought module that we can optimize quickly.
+    For full optimization, use the actual SkillCreationProgram.
+    """
+    return SimpleSkillProgram()
+
+

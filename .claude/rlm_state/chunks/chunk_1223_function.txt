@@ -1,0 +1,114 @@
+<!-- Chunk 1223: bytes 4609110-4612692, type=function -->
+def main():
+    """
+    Generate synthetic training examples.
+
+    Creates additional training examples by varying
+    existing examples with different task descriptions.
+    """
+    # Load existing trainset_v3.json
+    trainset_path = Path("config/training/trainset_v3.json")
+
+    if not trainset_path.exists():
+        print(f"❌ {trainset_path} not found. Run expand_training_data.py first.")
+        return
+
+    with trainset_path.open("r", encoding="utf-8") as f:
+        existing_examples = json.load(f)
+
+    print("=" * 60)
+    print("Synthetic Training Examples Generator")
+    print("=" * 60)
+    print(f"\n📦 Loaded {len(existing_examples)} existing examples")
+    print(f"📝 Generating {len(SYNTHETIC_EXAMPLES)} synthetic examples")
+
+    # Combine existing and synthetic
+    all_examples = existing_examples + SYNTHETIC_EXAMPLES
+
+    # Deduplicate by name
+    seen_names = set()
+    unique_examples = []
+    for example in all_examples:
+        name = example.get("expected_name")
+        if name and name not in seen_names:
+            seen_names.add(name)
+            unique_examples.append(example)
+
+    print(f"🔧 After deduplication: {len(unique_examples)} total examples")
+
+    # Save updated trainset
+    output_path = Path("config/training/trainset_v4.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(unique_examples, f, indent=2, ensure_ascii=False)
+
+    print(f"\n✅ Saved {len(unique_examples)} training examples to {output_path}")
+
+    # Print statistics
+    print("\n" + "=" * 60)
+    print("Final Training Set Statistics")
+    print("=" * 60)
+
+    sources = {}
+    categories = {}
+    styles = {}
+
+    for example in unique_examples:
+        source = example.get("source", "unknown")
+        sources[source] = sources.get(source, 0) + 1
+
+        category = example.get("expected_taxonomy_path", "").split("/")[0]
+        categories[category] = categories.get(category, 0) + 1
+
+        style = example.get("expected_skill_style", "unknown")
+        styles[style] = styles.get(style, 0) + 1
+
+    print(f"\nTotal: {len(unique_examples)} examples")
+    print(f"By source: {dict(sorted(sources.items()))}")
+    print(f"By style: {dict(sorted(styles.items()))}")
+    print(f"By category: {dict(sorted(categories.items()))}")
+
+    # DSPy readiness
+    print("\n" + "=" * 60)
+    print("DSPy Optimization Readiness")
+    print("=" * 60)
+
+    if len(unique_examples) >= 50:
+        print(f"✅ Excellent! {len(unique_examples)} examples meets DSPy best practices (50-100)")
+        print("   Recommended: MIPROv2 with auto='medium' or auto='heavy'")
+    else:
+        print(f"⚠️  {len(unique_examples)} examples - close but below 50 threshold")
+        print(f"   Need {50 - len(unique_examples)} more examples for optimal results")
+
+    print("\n" + "=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/internal/data/generate_synthetic_examples.py
+============================================================
+
+============================================================
+FILE: scripts/internal/data/regenerate_training_data.py
+============================================================
+
+#!/usr/bin/env python
+"""
+Regenerate training data from .skills golden examples.
+
+This script reads the skill files from .skills/ and generates updated
+trainset.json and gold_skills.json files with v2 Golden Standard format.
+"""
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+

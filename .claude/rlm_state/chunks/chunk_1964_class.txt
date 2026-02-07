@@ -1,0 +1,43 @@
+<!-- Chunk 1964: bytes 7872083-7873675, type=class -->
+class TestCreateSkill:
+    """Tests for POST /api/v1/skills endpoint."""
+
+    def test_create_skill_success(self, client, valid_skill_request, mock_skill_service):
+        """Test successful skill creation returns job ID."""
+        response = client.post("/api/v1/skills", json=valid_skill_request)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "job_id" in data
+        assert data["status"] == "pending"
+        mock_skill_service.create_skill.assert_called_once()
+
+    def test_create_skill_missing_description(self, client):
+        """Test validation error when description is missing."""
+        response = client.post("/api/v1/skills", json={"user_id": "test-user"})
+
+        assert response.status_code == 422
+        assert "task_description" in str(response.json())
+
+    def test_create_skill_empty_description(self, client):
+        """Test validation error when description is empty."""
+        response = client.post(
+            "/api/v1/skills", json={"task_description": "", "user_id": "test-user"}
+        )
+
+        assert response.status_code == 422
+
+    def test_create_skill_invalid_json(self, client):
+        """Test error handling for invalid JSON."""
+        response = client.post(
+            "/api/v1/skills", data="invalid json", headers={"Content-Type": "application/json"}
+        )
+
+        assert response.status_code == 422
+
+
+# =============================================================================
+# Test Get Skill Endpoint
+# =============================================================================
+
+

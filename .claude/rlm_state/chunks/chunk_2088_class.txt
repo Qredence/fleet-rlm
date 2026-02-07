@@ -1,0 +1,18 @@
+<!-- Chunk 2088: bytes 8011689-8012183, type=class -->
+class TestRichFallbackUI:
+    @pytest.mark.asyncio
+    async def test_choose_many_parses_csv_and_filters_unknown_ids(self, monkeypatch):
+        # Arrange
+        monkeypatch.setattr(
+            "skill_fleet.cli.ui.prompts.RichPrompt.ask",
+            lambda *_args, **_kwargs: "a, x, c",
+        )
+        ui = RichFallbackUI()
+
+        # Act
+        selected = await ui.choose_many("Pick many", [("a", "A"), ("b", "B"), ("c", "C")])
+
+        # Assert
+        assert selected == ["a", "c"]
+
+

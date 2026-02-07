@@ -1,0 +1,50 @@
+<!-- Chunk 196: bytes 295913-297230, type=function -->
+def calculate_discount(price: float, customer_tier: str) -> float:
+    """
+    Calculate discount based on customer tier.
+
+    Args:
+        price: Original price of the item
+        customer_tier: Customer tier ("bronze", "silver", "gold")
+
+    Returns:
+        Discounted price
+
+    Raises:
+        ValueError: If customer_tier is invalid
+    """
+    # Implementation...
+```
+
+## Code Review Checklist
+
+- [ ] No duplicate code
+- [ ] Functions are small and focused
+- [ ] Type hints are present
+- [ ] Error handling is specific
+- [ ] Tests are included
+- [ ] Code follows naming conventions
+- [ ] No hardcoded values
+- [ ] Performance is reasonable
+- [ ] Security considerations addressed
+
+
+============================================================
+END FILE: .fleet/factory/skills/python-backend-reviewer/references/best_practices.md
+============================================================
+
+============================================================
+FILE: .fleet/factory/skills/python-backend-reviewer/references/python_antipatterns.md
+============================================================
+
+# Python Backend Anti-Patterns
+
+Common anti-patterns found in Python backend code, especially in AI-generated code.
+
+## Code Duplication
+
+### Duplicate Validation Logic
+
+**Anti-pattern:**
+```python
+# file1.py

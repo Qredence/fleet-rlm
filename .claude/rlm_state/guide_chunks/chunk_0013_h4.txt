@@ -1,0 +1,8 @@
+<!-- Chunk 13: bytes 4205-4525, type=h4 -->
+#### The kitchen analogy
+
+**MCP** provides the professional kitchen: access to tools, ingredients, and equipment.
+**Skills** provide the recipes: step-by-step instructions on how to create something valuable.
+
+Together, they enable users to accomplish complex tasks without needing to figure out every step themselves.
+

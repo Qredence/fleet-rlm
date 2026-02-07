@@ -1,0 +1,41 @@
+<!-- Chunk 406: bytes 580463-581577, type=class -->
+class ConditionalModule(dspy.Module):
+    """
+    DSPy module with conditional logic.
+
+    Use this template for tasks that require different
+    processing based on intermediate results.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.classify = dspy.Predict(ClassifySignature)
+        self.process_a = dspy.Predict(ProcessASignature)
+        self.process_b = dspy.Predict(ProcessBSignature)
+
+    def forward(self, input_data: str) -> dspy.Prediction:
+        """
+        Process input with conditional logic.
+
+        Args:
+            input_data: Input to process
+
+        Returns:
+            dspy.Prediction with appropriate output
+        """
+        # Classify input
+        classification = self.classify(input=input_data)
+
+        # Process based on classification
+        if classification.type == "A":
+            result = self.process_a(input=input_data)
+        else:
+            result = self.process_b(input=input_data)
+
+        # Return prediction
+        return dspy.Prediction(
+            output=result.output,
+            classification=classification.type
+        )
+
+

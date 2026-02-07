@@ -1,0 +1,28 @@
+<!-- Chunk 1917: bytes 7735780-7736531, type=function -->
+def log_phase_artifact(
+    phase: str,
+    artifact_name: str,
+    content: str,
+) -> None:
+    """
+    Log a text artifact for a phase.
+
+    Args:
+        phase: Phase identifier (e.g., "phase1", "phase2")
+        artifact_name: Name of the artifact file
+        content: Content to write to the artifact
+
+    Examples:
+        >>> log_phase_artifact("phase1", "problem_statement.txt", "Clear problem here...")
+
+    """
+    try:
+        import mlflow
+
+        artifact_file = f"{phase}_{artifact_name}"
+        mlflow.log_text(content, artifact_file=artifact_file)  # type: ignore[attr-defined]
+        logger.debug(f"Logged artifact for {phase}: {artifact_file}")
+    except Exception as e:
+        logger.warning(f"Failed to log artifact: {e}")
+
+

@@ -1,0 +1,44 @@
+<!-- Chunk 806: bytes 2709989-2711135, type=class -->
+class TaxonomyRepository(ABC):
+    @abstractmethod
+    async def get_path(self, path: str) -> TaxonomyPath | None:
+        pass
+```
+
+## Import Guidelines
+
+```python
+# Import all domain components from one place
+from skill_fleet.domain import (
+    # Models
+    Skill,
+    SkillMetadata,
+    Job,
+    JobStatus,
+    TaxonomyPath,
+    SkillType,
+    # Specifications
+    SkillIsReadyForPublication,
+    JobCanBeStarted,
+    AndSpecification,
+    # Domain Services
+    SkillDomainService,
+    # Repository Interfaces
+    SkillRepository,
+)
+```
+
+## Best Practices
+
+1. **Keep domain logic pure**: Domain models should not depend on external services
+2. **Use specifications for rules**: Business rules should be encapsulated in specifications
+3. **Value objects are immutable**: They should not be modified after creation
+4. **Entities have identity**: Entities are identified by their ID, not their attributes
+5. **Domain services for cross-entity logic**: Logic that involves multiple entities goes in domain services
+
+## Testing Domain Logic
+
+```python
+import pytest
+from skill_fleet.domain import Skill, SkillMetadata, SkillIsReadyForPublication
+

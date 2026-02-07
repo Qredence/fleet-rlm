@@ -1,0 +1,14 @@
+<!-- Chunk 971: bytes 3424643-3424994, type=function -->
+def display_success(message: str, title: str = "✓ Success") -> None:
+    """Display a success message.
+
+    Args:
+        message: The success message.
+        title: Panel title.
+    """
+    from rich.panel import Panel
+
+    console = get_console()
+    console.print(Panel(f"[bold green]{message}[/bold green]", title=title, border_style="green"))
+
+

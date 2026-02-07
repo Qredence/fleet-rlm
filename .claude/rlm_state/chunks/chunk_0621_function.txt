@@ -1,0 +1,18 @@
+<!-- Chunk 621: bytes 954293-954701, type=function -->
+def lenient_metric(example, pred, trace=None):
+    """At least one criterion must pass."""
+    criteria = {
+        'exact_match': example.output == pred.output,
+        'semantic_match': semantic_similarity(example, pred),
+        'keyword_match': keyword_match(example, pred)
+    }
+
+    return any(criteria.values())
+```
+
+## Best Practices
+
+### 1. Return Float Scores
+
+```python
+# Good: Return float score

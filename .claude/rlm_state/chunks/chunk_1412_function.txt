@@ -1,0 +1,29 @@
+<!-- Chunk 1412: bytes 5144951-5145632, type=function -->
+def test_full_update():
+    """
+    Test updating all fields.
+
+    Expected: All fields are updated with new values.
+    """
+    response = client.patch(
+        "/users/1",
+        json={
+            "name": "John Complete Update",
+            "email": "john.complete@example.com",
+            "age": 32
+        }
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # All fields should be updated
+    assert data["name"] == "John Complete Update"
+    assert data["email"] == "john.complete@example.com"
+    assert data["age"] == 32
+    assert data["id"] == 1
+
+    print("✓ Test 5 passed: Full update (all fields)")
+    print(f"  Updated user: {data}")
+
+

@@ -1,0 +1,8 @@
+<!-- Chunk 846: bytes 3005141-3005314, type=function -->
+def validate_migration(skills_root: Path) -> dict[str, Any]:
+    """Validate that all skills have valid agentskills.io frontmatter."""
+```
+
+### Validator Methods
+
+```python

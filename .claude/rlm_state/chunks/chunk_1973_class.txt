@@ -1,0 +1,51 @@
+<!-- Chunk 1973: bytes 7884314-7885549, type=class -->
+class TestTyperApp:
+    """Test Typer-based CLI app."""
+
+    def test_app_initialization(self):
+        """Test Typer app is properly initialized."""
+        # Act & Assert
+        assert app is not None
+        assert app.info.help == "Skills Fleet - Hierarchical skills taxonomy + DSPy workflow CLI"
+
+
+============================================================
+END FILE: tests/cli/test_cli_commands.py
+============================================================
+
+============================================================
+FILE: tests/cli/test_constants.py
+============================================================
+
+"""Tests for CLI constants."""
+
+from skill_fleet.cli.utils.constants import (
+    COLOR_ERROR,
+    COLOR_INFO,
+    COLOR_MUTED,
+    COLOR_SUCCESS,
+    COLOR_WARNING,
+    CONSOLE_REFRESH_RATE,
+    DEFAULT_API_TIMEOUT,
+    DEFAULT_API_URL,
+    EXIT_CONFIG_ERROR,
+    EXIT_ERROR,
+    EXIT_NETWORK_ERROR,
+    EXIT_SUCCESS,
+    EXIT_VALIDATION_ERROR,
+    HITL_POLL_INTERVAL,
+    ICON_ERROR,
+    ICON_INFO,
+    ICON_SUCCESS,
+    ICON_WARNING,
+    ICON_WORKING,
+    JSON_INDENT,
+    MAX_API_TIMEOUT,
+    MAX_POLL_ATTEMPTS,
+    MAX_USER_ID_LENGTH,
+    MIN_API_TIMEOUT,
+    MIN_USER_ID_LENGTH,
+    SEPARATOR_WIDTH,
+)
+
+

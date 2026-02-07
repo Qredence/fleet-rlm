@@ -1,0 +1,74 @@
+<!-- Chunk 765: bytes 2599220-2600996, type=function -->
+def migrate_with_custom_logic(skill_dir: Path):
+    """Custom migration with additional processing."""
+    
+    # Pre-migration custom logic
+    print(f"Processing {skill_dir.name}...")
+    
+    # Run migration
+    result = migrate_skill_to_agentskills_format(
+        skill_dir,
+        dry_run=False,
+        verbose=False
+    )
+    
+    if result['success']:
+        # Post-migration custom logic
+        skill_md = skill_dir / "SKILL.md"
+        content = skill_md.read_text()
+        
+        # Add custom footer
+        if "## References" not in content:
+            content += "\n\n## References\n\n- Internal wiki: https://wiki.example.com\n"
+            skill_md.write_text(content)
+        
+        print(f"✅ {result['name']} migrated with custom processing")
+    else:
+        print(f"❌ {result['skill_id']} failed: {result['errors']}")
+
+# Usage
+skills_root = Path("skills")
+for skill_dir in skills_root.rglob("metadata.json"):
+    migrate_with_custom_logic(skill_dir.parent)
+```
+
+---
+
+## Error Handling
+
+### Common Exceptions
+
+```python
+from pathlib import Path
+from skill_fleet.taxonomy.manager import TaxonomyManager
+
+manager = TaxonomyManager(Path("skills"))
+
+try:
+    metadata = manager.load_skill("nonexistent/skill")
+except FileNotFoundError as e:
+    print(f"Skill not found: {e}")
+
+try:
+    metadata = manager.load_skill("invalid_json/skill")
+except json.JSONDecodeError as e:
+    print(f"Invalid JSON in metadata: {e}")
+
+try:
+    yaml_content = Path("invalid.yaml").read_text()
+    import yaml
+    data = yaml.safe_load(yaml_content)
+except yaml.YAMLError as e:
+    print(f"Invalid YAML: {e}")
+```
+
+---
+
+## Type Hints
+
+All functions and methods include comprehensive type hints for IDE support:
+
+```python
+from pathlib import Path
+from typing import Any
+

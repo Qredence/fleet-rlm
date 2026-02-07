@@ -1,0 +1,129 @@
+<!-- Chunk 1815: bytes 7554528-7558322, type=class -->
+class ConversationSession(BaseModel):
+    """
+    Manages conversation session state.
+
+    Tracks the full state of a skill creation conversation, including
+    message history, collected examples, workflow state, and TDD checklist.
+    """
+
+    messages: list[ConversationMessage] = Field(
+        default_factory=list,
+        description="Full message history",
+    )
+    collected_examples: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Examples collected from user",
+    )
+    state: ConversationState = Field(
+        default=ConversationState.EXPLORING,
+        description="Current workflow state",
+    )
+    task_description: str = Field(
+        default="",
+        description="Refined task description",
+    )
+    multi_skill_queue: list[str] = Field(
+        default_factory=list,
+        description="Queue of skills to create (if multiple detected)",
+    )
+    current_skill_index: int = Field(
+        default=0,
+        description="Index of current skill being created",
+    )
+    skill_draft: dict[str, Any] | None = Field(
+        default=None,
+        description="Current skill draft (if in progress)",
+    )
+    checklist_state: ChecklistState = Field(
+        default_factory=ChecklistState,
+        description="TDD checklist completion state",
+    )
+    pending_confirmation: dict[str, Any] | None = Field(
+        default=None,
+        description="Pending confirmation data (if waiting for user)",
+    )
+    taxonomy_path: str = Field(
+        default="",
+        description="Proposed taxonomy path for skill",
+    )
+    skill_metadata_draft: dict[str, Any] | None = Field(
+        default=None,
+        description="Draft skill metadata",
+    )
+    deep_understanding: dict[str, Any] | None = Field(
+        default=None,
+        description="Deep understanding phase state",
+    )
+    user_problem: str | None = Field(
+        default=None,
+        description="User's stated problem",
+    )
+    user_goals: list[str] | None = Field(
+        default=None,
+        description="User's stated goals",
+    )
+    research_context: dict[str, Any] | None = Field(
+        default=None,
+        description="Research context gathered during understanding",
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="When the session was created",
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="When the session was last updated",
+    )
+
+    def add_message(
+        self,
+        role: MessageRole,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ConversationMessage:
+        """
+        Add a message to the conversation history.
+
+        Args:
+            role: Who sent the message
+            content: Message content
+            metadata: Optional metadata
+
+        Returns:
+            The created message
+
+        """
+        message = ConversationMessage(
+            role=role,
+            content=content,
+            metadata=metadata or {},
+        )
+        self.messages.append(message)
+        self.updated_at = datetime.now(UTC)
+        return message
+
+    def get_message_history(
+        self,
+        limit: int | None = None,
+        roles: list[MessageRole] | None = None,
+    ) -> list[ConversationMessage]:
+        """
+        Get message history with optional filtering.
+
+        Args:
+            limit: Maximum number of messages to return (from end)
+            roles: Filter to specific roles
+
+        Returns:
+            Filtered message list
+
+        """
+        messages = self.messages
+        if roles:
+            messages = [m for m in messages if m.role in roles]
+        if limit:
+            messages = messages[-limit:]
+        return messages
+
+

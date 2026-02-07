@@ -1,0 +1,35 @@
+<!-- Chunk 1704: bytes 7276813-7278072, type=class -->
+class ModelConfig(BaseModel):
+    """Configuration for a single model in the registry."""
+
+    model: str
+    model_type: ModelType = ModelType.CHAT
+    env: str | None = None  # Environment variable for API key
+    base_url_env: str | None = None  # Environment variable for base URL
+    base_url_default: str | None = None
+    env_fallback: str | None = None
+    timeout: int = Field(default=60, gt=0, le=600)
+    parameters: ModelParameters = Field(default_factory=ModelParameters)
+
+    @field_validator("env")
+    @classmethod
+    def validate_env(cls, v: str | None) -> str | None:
+        """Validate that the environment variable exists (if not None)."""
+        if v is not None and v not in os.environ:
+            # This is a warning - actual check happens at runtime
+            pass
+        return v
+
+    @model_validator(mode="after")
+    def validate_thinking_config(self) -> ModelConfig:
+        """Validate thinking_level is properly configured."""
+        if (
+            self.parameters.thinking_level is not None
+            and self.parameters.temperature is not None
+            and self.parameters.temperature != 1.0
+        ):
+            # This is a warning - we allow it but document the issue
+            pass
+        return self
+
+

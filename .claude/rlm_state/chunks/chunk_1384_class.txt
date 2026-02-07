@@ -1,0 +1,18 @@
+<!-- Chunk 1384: bytes 5106002-5106391, type=class -->
+class UserResponse(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+
+@app.post("/users", response_model=UserResponse)
+async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
+    db_user = User(**user.model_dump())
+    db.add(db_user)
+    await db.commit()
+    await db.refresh(db_user)
+    return db_user
+```
+
+### Exception → HTTPException
+```python
+# Before

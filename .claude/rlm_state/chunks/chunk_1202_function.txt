@@ -1,0 +1,77 @@
+<!-- Chunk 1202: bytes 4547042-4549626, type=function -->
+def apply_migration() -> None:
+    """
+    Apply the database migration to Neon.
+
+    This will:
+    1. Connect to your Neon database
+    2. Execute the migration SQL script
+    3. Create all tables, indexes, enums, and views
+    """
+    # Get database URL from environment or default
+    database_url = os.getenv("DATABASE_URL", DATABASE_URL)
+
+    print("Connecting to Neon database...")
+    print(f"Database: {database_url.split('@')[1] if '@' in database_url else 'unknown'}")
+
+    # Read migration script
+    print("\n📄 Reading migration script...")
+    migration_sql = read_migration_script()
+    print(f"   Migration script loaded ({len(migration_sql)} characters)")
+
+    # Connect and apply migration
+    print("\n🚀 Applying migration...")
+    try:
+        with psycopg.connect(database_url, autocommit=True) as conn, conn.cursor() as cur:
+            # Execute the migration
+            cur.execute(migration_sql)
+
+            # Verify tables were created
+            cur.execute("""
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name;
+                """)
+            tables = [row[0] for row in cur.fetchall()]
+
+            # Verify enums were created
+            cur.execute("""
+                    SELECT typname
+                    FROM pg_type
+                    WHERE typtype = 'e'
+                    ORDER BY typname;
+                """)
+            enums = [row[0] for row in cur.fetchall()]
+
+            # Verify views were created
+            cur.execute("""
+                    SELECT table_name
+                    FROM information_schema.views
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name;
+                """)
+            views = [row[0] for row in cur.fetchall()]
+
+        print("\n✅ Migration applied successfully!")
+        print("\n📊 Summary:")
+        print(f"   - {len(tables)} tables created")
+        print(f"   - {len(enums)} enum types created")
+        print(f"   - {len(views)} views created")
+        print("\n📋 Tables:")
+        for table in tables[:10]:  # Show first 10
+            print(f"   - {table}")
+        if len(tables) > 10:
+            print(f"   ... and {len(tables) - 10} more")
+        print("\n🔷 Enums:")
+        for enum in enums:
+            print(f"   - {enum}")
+        print("\n👁️  Views:")
+        for view in views:
+            print(f"   - {view}")
+
+    except psycopg.Error as e:
+        print(f"\n❌ Migration failed: {e}")
+        sys.exit(1)
+
+

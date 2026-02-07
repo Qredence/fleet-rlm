@@ -1,0 +1,12 @@
+<!-- Chunk 383: bytes 569578-569926, type=class -->
+class DocumentSummarization(dspy.Signature):
+    document = dspy.InputField(desc="The document to summarize")
+    max_length = dspy.InputField(desc="Maximum length of summary in words")
+    summary = dspy.OutputField(desc="Concise summary of the document")
+```
+
+### OutputField
+
+Use `dspy.OutputField` for data the program **produces**:
+
+```python

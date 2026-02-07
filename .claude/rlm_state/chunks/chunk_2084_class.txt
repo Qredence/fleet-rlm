@@ -1,0 +1,162 @@
+<!-- Chunk 2084: bytes 7995818-8000516, type=class -->
+class TestRunAsync:
+    """Tests for run_async function."""
+
+    def test_runs_async_function_without_event_loop(self):
+        """Test running async function when no event loop is running."""
+
+        async def async_func():
+            return "success"
+
+        result = run_async(lambda: async_func())
+
+        assert result == "success"
+
+    def test_returns_value_from_async_function(self):
+        """Test that return value is properly passed through."""
+
+        async def compute():
+            await asyncio.sleep(0.001)
+            return 42
+
+        result = run_async(lambda: compute())
+
+        assert result == 42
+
+    def test_handles_async_function_with_arguments(self):
+        """Test running async function that uses closure variables."""
+        value = "test_value"
+
+        async def async_func():
+            return f"received: {value}"
+
+        result = run_async(lambda: async_func())
+
+        assert result == "received: test_value"
+
+    def test_propagates_exception_from_async_function(self):
+        """Test that exceptions from async function are propagated."""
+
+        async def failing_func():
+            raise ValueError("async error")
+
+        with pytest.raises(ValueError, match="async error"):
+            run_async(lambda: failing_func())
+
+    def test_runs_in_thread_when_loop_already_running(self):
+        """Test running async function when event loop is already running."""
+
+        async def outer():
+            # Inside an async function, there's already a running loop
+            async def inner():
+                return "from_thread"
+
+            # This should use the thread-based execution path
+            result = run_async(lambda: inner())
+            return result
+
+        # Run the outer async function
+        result = asyncio.run(outer())
+
+        assert result == "from_thread"
+
+    def test_propagates_exception_when_loop_running(self):
+        """Test exception propagation when using thread-based execution."""
+
+        async def outer():
+            async def failing_inner():
+                raise RuntimeError("thread error")
+
+            return run_async(lambda: failing_inner())
+
+        with pytest.raises(RuntimeError, match="thread error"):
+            asyncio.run(outer())
+
+    def test_handles_complex_return_types(self):
+        """Test handling complex return types like dicts and lists."""
+
+        async def complex_return():
+            return {
+                "status": "ok",
+                "data": [1, 2, 3],
+                "nested": {"key": "value"},
+            }
+
+        result = run_async(lambda: complex_return())
+
+        assert result["status"] == "ok"
+        assert result["data"] == [1, 2, 3]
+        assert result["nested"]["key"] == "value"
+
+    def test_handles_none_return(self):
+        """Test handling None return value."""
+
+        async def returns_none():
+            return None
+
+        result = run_async(lambda: returns_none())
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_works_from_async_context(self):
+        """Test that run_async works when called from async context."""
+
+        async def inner_async():
+            await asyncio.sleep(0.001)
+            return "async_result"
+
+        # This tests the thread-based path
+        result = run_async(lambda: inner_async())
+
+        assert result == "async_result"
+
+    def test_handles_keyboard_interrupt(self):
+        """Test that KeyboardInterrupt is properly propagated."""
+
+        async def interrupted():
+            raise KeyboardInterrupt()
+
+        with pytest.raises(KeyboardInterrupt):
+            run_async(lambda: interrupted())
+
+    def test_handles_system_exit(self):
+        """Test that SystemExit is properly propagated."""
+
+        async def exits():
+            raise SystemExit(1)
+
+        with pytest.raises(SystemExit):
+            run_async(lambda: exits())
+
+    def test_sequential_calls(self):
+        """Test multiple sequential calls to run_async."""
+        results = []
+
+        for i in range(3):
+
+            async def make_value(val=i):
+                return val * 2
+
+            results.append(run_async(lambda val=i: make_value(val)))
+
+        assert results == [0, 2, 4]
+
+
+============================================================
+END FILE: tests/unit/test_async_utils.py
+============================================================
+
+============================================================
+FILE: tests/unit/test_cli_hitl_runner.py
+============================================================
+
+import io
+
+import pytest
+from rich.console import Console
+
+from skill_fleet.cli.hitl.runner import run_hitl_job
+from skill_fleet.cli.ui.prompts import PromptUI
+
+

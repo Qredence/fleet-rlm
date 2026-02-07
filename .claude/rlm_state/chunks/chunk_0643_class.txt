@@ -1,0 +1,9 @@
+<!-- Chunk 643: bytes 1013115-1013334, type=class -->
+class GenerateSkill(dspy.Signature):
+    """Generate production-ready skill content with examples and best practices."""
+    task: str = dspy.InputField()
+    content: str = dspy.OutputField()
+```
+
+❌ **Bad**:
+```python

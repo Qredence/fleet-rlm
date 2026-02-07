@@ -1,0 +1,166 @@
+<!-- Chunk 842: bytes 2999619-3004453, type=class -->
+class ValidationResult:
+    passed: bool
+    errors: list[str]
+    warnings: list[str]
+```
+
+## Extended Metadata
+
+While agentskills.io requires only `name` and `description`, skill-fleet stores extended metadata in the `metadata` field:
+
+```yaml
+---
+name: python-decorators
+description: Ability to design, implement
+metadata:
+  skill_id: technical_skills/programming/languages/python/decorators
+  version: 1.0.0
+  type: technical
+  weight: medium
+  load_priority: task_specific
+---
+```
+
+### Extended Fields
+
+These fields are specific to skill-fleet but don't violate the agentskills.io spec:
+
+- **`skill_id`**: Internal path-style identifier
+- **`version`**: Semantic version (e.g., `1.0.0`)
+- **`type`**: Skill category (`cognitive`, `technical`, `domain`, etc.)
+- **`weight`**: Resource intensity (`lightweight`, `medium`, `heavyweight`)
+- **`load_priority`**: When to load (`always`, `task_specific`, `on_demand`, `dormant`)
+
+These fields are also maintained in `metadata.json` for backward compatibility and internal use.
+
+## Creating New Skills
+
+When using the skill creator workflow, skills are automatically created with compliant frontmatter:
+
+```bash
+# Create a skill via the API workflow
+uv run skill-fleet create "Create a Python async programming skill"
+```
+
+The generated SKILL.md will include:
+- ✅ Valid YAML frontmatter
+- ✅ Kebab-case name
+- ✅ Appropriate description
+- ✅ Extended metadata
+
+### Skill Creation Workflow
+
+The skill creation process follows a three-phase workflow:
+
+1. **Understanding Phase**: Gathers requirements, analyzes intent, finds taxonomy path, analyzes dependencies
+2. **Generation Phase**: Creates skill content using templates and structured generation
+3. **Validation Phase**: Validates compliance, assesses quality, and refines if needed
+
+This workflow is orchestrated by the workflows in `src/skill_fleet/core/workflows/skill_creation/`.
+
+### Template Updates
+
+The SKILL.md template (`src/skill_fleet/config/templates/SKILL_md_template.md`) now includes frontmatter placeholders:
+
+```markdown
+---
+name: {{skill_name_kebab}}
+description: {{description}}
+metadata:
+  skill_id: {{skill_id}}
+  version: {{version}}
+  type: {{type}}
+  weight: {{weight}}
+---
+
+# {{skill_name}}
+
+## Overview
+...
+```
+
+## Benefits of Compliance
+
+### Interoperability
+- Skills can be shared across different agentskills.io-compliant systems
+- Standard format enables tool integration
+
+### Discoverability
+- XML generation for agent context injection
+- Machine-readable metadata for automated discovery
+- Consistent naming for easier search
+
+### Validation
+- Automated checks ensure quality
+- Prevents malformed skills from entering the taxonomy
+- Reduces debugging time
+
+### Maintainability
+- Consistent structure across all skills
+- Clear separation of metadata and content
+- Version tracking in frontmatter
+
+### Community
+- Follows open specification
+- Enables collaboration across projects
+- Standard format familiar to other developers
+
+## Backward Compatibility
+
+The migration maintains backward compatibility:
+
+- ✅ `metadata.json` files are preserved and updated
+- ✅ Existing SKILL.md content is kept intact
+- ✅ Extended metadata continues to work
+- ✅ Non-frontmatter skills still load (with warnings)
+
+## Best Practices
+
+### 1. Use Migration Tool
+Always migrate existing skills rather than manually editing:
+```bash
+uv run skill-fleet migrate
+```
+
+### 2. Validate After Creation
+Check compliance after creating or modifying skills:
+```bash
+uv run skill-fleet validate-skill path/to/skill
+```
+
+### 3. Keep Descriptions Concise
+- Aim for 50-200 characters when possible
+- Front-load important information
+- Use active voice
+
+### 4. Use Meaningful Names
+- Choose names that clearly indicate the skill's purpose
+- Be specific: `python-async` not just `async`
+- Use domain context: `fastapi-auth` not just `auth`
+
+### 5. Maintain metadata.json
+While frontmatter is the source of truth for agentskills.io compliance, `metadata.json` should be kept in sync for internal functionality.
+
+## Troubleshooting
+
+### Issue: Migration fails with "Invalid JSON"
+**Solution**: Fix syntax errors in `metadata.json` before migrating
+
+### Issue: Name contains uppercase or underscores
+**Solution**: The migration automatically converts to kebab-case. Run with `--dry-run` first to preview changes.
+
+### Issue: Description too long (>1024 chars)
+**Solution**: The migration truncates automatically, but manually edit for better quality. Detailed information belongs in the main SKILL.md content.
+
+### Issue: Frontmatter already exists but is invalid
+**Solution**: Migration will detect and replace invalid frontmatter. Use `--dry-run` to preview.
+
+### Issue: XML generation shows paths instead of names
+**Solution**: Ensure frontmatter is present. Run migration first.
+
+## Technical Details
+
+### TaxonomyManager Methods
+
+```python

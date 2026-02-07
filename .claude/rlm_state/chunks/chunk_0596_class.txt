@@ -1,0 +1,26 @@
+<!-- Chunk 596: bytes 914515-915208, type=class -->
+class CustomCache(dspy.clients.Cache):
+
+    def cache_key(
+        self,
+        request: dict[str, Any],
+        ignored_args_for_cache_key: Optional[list[str]] = None
+    ) -> str:
+        """Generate cache key with ignored arguments."""
+        # Get request data
+        request_copy = dict(request)
+
+        # Remove ignored arguments from cache key
+        if ignored_args_for_cache_key:
+            for arg in ignored_args_for_cache_key:
+                request_copy.pop(arg, None)
+
+        # Generate key from remaining data
+        return sha256(ujson.dumps(request_copy, sort_keys=True).encode()).hexdigest()
+```
+
+### Custom Cache with TTL
+
+```python
+from datetime import timedelta
+

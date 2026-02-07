@@ -1,0 +1,90 @@
+<!-- Chunk 1835: bytes 7596753-7599524, type=function -->
+def gather_context(
+    topic: str,
+    workspace_path: Path | None,
+    research_types: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Gather context from both web and filesystem search.
+
+    Args:
+        topic: Topic to research
+        workspace_path: Workspace root path (optional, for filesystem search)
+        research_types: List of research types to perform ["web", "filesystem", "both"]
+                       Default: ["both"]
+
+    Returns:
+        Combined context dict with web and filesystem results
+
+    """
+    if research_types is None:
+        research_types = ["both"]
+
+    context = {
+        "web": {},
+        "filesystem": {},
+    }
+
+    # Perform web search if requested
+    if "web" in research_types or "both" in research_types:
+        web_result = web_search_research(topic, max_results=5)
+        context["web"] = web_result
+
+    # Perform filesystem search if requested
+    if "filesystem" in research_types or "both" in research_types:
+        if workspace_path and workspace_path.exists():
+            fs_result = filesystem_research(topic, workspace_path, max_results=10)
+            context["filesystem"] = fs_result
+        else:
+            context["filesystem"] = {
+                "success": False,
+                "files_found": [],
+                "snippets": [],
+                "error": "Workspace path not provided or does not exist",
+                "query": topic,
+            }
+
+    return context
+
+
+============================================================
+END FILE: src/skill_fleet/core/tools/research.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/workflows/__init__.py
+============================================================
+
+"""
+Workflow orchestration for skill creation.
+
+This package contains high-level workflow implementations:
+- skill_creation/: Understanding, generation, and validation workflows
+
+Each workflow orchestrates multiple modules to accomplish a phase of skill creation.
+"""
+
+
+============================================================
+END FILE: src/skill_fleet/core/workflows/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/workflows/skill_creation/generation.py
+============================================================
+
+"""
+Phase 2: Content Generation Workflow.
+
+Generates skill content based on understanding and plan from Phase 1.
+Can show preview for user feedback before finalizing.
+"""
+
+import logging
+from typing import Any
+
+from skill_fleet.core.modules.generation.content import GenerateSkillContentModule
+
+logger = logging.getLogger(__name__)
+
+

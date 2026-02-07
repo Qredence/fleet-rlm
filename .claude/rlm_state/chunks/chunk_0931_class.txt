@@ -1,0 +1,56 @@
+<!-- Chunk 931: bytes 3368711-3370457, type=class -->
+class TestCreateSkillCommand:
+    """Test create-skill command."""
+
+    @patch('skill_fleet.cli.main.configure_dspy')
+    @patch('skill_fleet.cli.main.TaxonomySkillCreator')
+    def test_create_skill_with_auto_approve(self, mock_creator_class, mock_configure):
+        """Test create-skill with --auto-approve flag."""
+        # Arrange
+        mock_creator = MagicMock()
+        mock_creator.return_value = mock_creator_class.return_value
+        mock_creator.return_value = {
+            "status": "approved",
+            "skill_id": "test-skill",
+            "path": "/tmp/test-skill"
+        }
+
+        args = MagicMock()
+        args.task = "Create a test skill"
+        args.auto_approve = True
+        args.user_id = "test-user"
+        args.config = "config.yaml"
+        args.skills_root = "/tmp/skills"
+        args.feedback_type = "auto"
+        args.max_iterations = 3
+        args.min_rounds = 1
+        args.max_rounds = 4
+        args.cache_dir = None
+        args.reasoning = "none"
+        args.json = False
+        args.is_training_run = False
+
+        # Act
+        result = create_skill(args)
+
+        # Assert
+        assert result == 0
+        mock_creator.assert_called_once()
+
+    @patch('skill_fleet.cli.main.configure_dspy')
+    def test_create_skill_with_invalid_config(self, mock_configure):
+        """Test create-skill fails gracefully with invalid config."""
+        from skill_fleet.llm import FleetConfigError
+
+        mock_configure.side_effect = FleetConfigError("Invalid config")
+
+        args = MagicMock()
+        args.task = "Test"
+        args.config = "invalid.yaml"
+        args.skills_root = "/tmp/skills"
+
+        # Act & Assert
+        with pytest.raises(SystemExit):
+            create_skill(args)
+
+

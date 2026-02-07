@@ -1,0 +1,9 @@
+<!-- Chunk 544: bytes 877175-877381, type=class -->
+class SubModule(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.process = dspy.Predict(SubSignature)
+
+    def forward(self, data: str):
+        return self.process(data=data)
+

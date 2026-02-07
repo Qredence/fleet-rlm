@@ -1,0 +1,7 @@
+<!-- Chunk 828: bytes 2884168-2884292, type=function -->
+def create_job() -> str:
+    job_id = str(uuid.uuid4())
+    JOBS[job_id] = JobState(job_id=job_id)
+    return job_id
+
+# NEW

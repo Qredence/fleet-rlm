@@ -1,0 +1,31 @@
+<!-- Chunk 1901: bytes 7712515-7713443, type=function -->
+def get_conversation_session_repository(db: Session) -> ConversationSessionRepository:
+    """Get a ConversationSessionRepository instance."""
+    return ConversationSessionRepository(db)
+
+
+============================================================
+END FILE: src/skill_fleet/infrastructure/db/repositories.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/infrastructure/db/session.py
+============================================================
+
+"""
+Database session management.
+
+Provides context managers for handling database sessions, particularly
+short-lived transactional sessions to avoid idle-in-transaction timeouts
+during long-running operations.
+"""
+
+from collections.abc import Generator
+from contextlib import contextmanager
+
+from sqlalchemy.orm import Session
+
+from .database import SessionLocal
+
+
+@contextmanager

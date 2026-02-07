@@ -1,0 +1,1343 @@
+<!-- Chunk 1121: bytes 4181102-4215832, type=function -->
+def test_skill_edit_model():
+    """Test that skill_edit uses creative model."""
+    lm = get_task_lm("skill_edit")
+    assert "pro" in lm.model_name.lower() or lm.kwargs["temperature"] >= 0.5
+```
+
+---
+
+## See Also
+
+- **[LLM Configuration Overview](index.md)** - Configuration system
+- **[DSPy Config Documentation](dspy-config.md)** - Programmatic usage
+- **[Providers Documentation](providers.md)** - Provider setup
+
+
+============================================================
+END FILE: docs/llm/task-models.md
+============================================================
+
+============================================================
+FILE: docs/migration/archive/skill-format-v2-draft.md
+============================================================
+
+# Skill Format Migration Guide: v1 → v2 Golden Standard
+
+This guide documents the changes between v1 and v2 skill formats and provides instructions for migrating existing skills.
+
+## Overview
+
+The v2 Golden Standard simplifies skill structure while introducing a progressive disclosure pattern that organizes complex content into subdirectories.
+
+### Key Changes
+
+| Aspect                   | v1 Format                                       | v2 Format                                                       |
+| ------------------------ | ----------------------------------------------- | --------------------------------------------------------------- |
+| **Required Files**       | `SKILL.md` + `metadata.json`                    | `SKILL.md` only                                                 |
+| **Required Directories** | `assets/`, `examples/`                          | **None** (all optional)                                         |
+| **Optional Directories** | N/A                                             | `references/`, `guides/`, `templates/`, `scripts/`, `examples/` |
+| **Frontmatter**          | Complex (skill_id, version, type, weight, etc.) | Simplified (`name`, `description`, optional `allowed-tools`)    |
+| **Required Sections**    | Overview, When to Use, Quick Reference          | Overview, **When to Use This Skill**, Quick Start (recommended) |
+| **Skill Styles**         | Not defined                                     | `navigation_hub`, `comprehensive`, `minimal`                    |
+
+## Minimal Skill Structure
+
+The simplest valid v2 skill is just a directory with a single `SKILL.md` file:
+
+```
+skill-name/
+└── SKILL.md
+```
+
+This is perfect for guideline skills like `vibe-coding` or `frontend-ui-integration` where all content fits naturally in a single markdown file. Subdirectories are **only created when there's actual content that benefits from them**.
+
+## Migration Strategy
+
+### Option A: Update to v2 (Recommended for New Skills)
+
+New skills should follow the v2 format:
+
+1. Single `SKILL.md` with simplified frontmatter
+2. Use subdirectories **only when needed** for progressive disclosure
+3. Include "When to Use This Skill" section
+
+### Option B: Grandfather Existing Skills
+
+Existing v1 skills remain valid and will continue to work. The system supports both formats:
+
+- v1 skills with `metadata.json` are fully supported
+- v2 skills without `metadata.json` are also valid
+
+## Frontmatter Changes
+
+### v1 Frontmatter (Deprecated but Supported)
+
+```yaml
+---
+name: python-async
+description: Python async programming patterns
+metadata:
+  skill_id: python/async
+  version: 1.0.0
+  type: technical
+  weight: medium
+  load_priority: on_demand
+  category: python
+  keywords: [async, await, asyncio]
+  dependencies: [python/basics]
+  capabilities: [async_syntax, event_loops]
+  scope: "Covers asyncio. Does NOT cover threading."
+  see_also: [python/threading]
+license: MIT
+---
+```
+
+### v2 Frontmatter (Recommended)
+
+```yaml
+---
+name: python-async
+description: Use when implementing concurrent Python code with asyncio, managing event loops, or building async APIs.
+allowed-tools:
+  - python_repl
+  - web_search
+---
+```
+
+**Key Differences:**
+
+- `metadata` block is optional (validator extracts from content)
+- `description` should follow "Use when..." pattern
+- `allowed-tools` is new for MCP tool restrictions
+
+## Directory Structure Changes
+
+### v1 Structure
+
+```
+skill-name/
+├── SKILL.md
+├── metadata.json
+├── assets/
+│   └── config-file.yaml
+└── examples/
+    └── example_1.py
+```
+
+### v2 Minimal Structure (Most Common)
+
+```
+skill-name/
+└── SKILL.md          # Everything in one file
+```
+
+### v2 Structure with Subdirectories (When Needed)
+
+```
+skill-name/
+├── SKILL.md
+├── references/       # Deep-dive documentation
+│   └── advanced.md
+├── guides/          # Step-by-step procedures
+│   └── setup.md
+├── templates/       # Reusable code templates
+│   └── starter.py
+├── scripts/         # Automation scripts
+│   └── setup.sh
+└── examples/        # Usage examples (retained from v1)
+    └── basic.py
+```
+
+### Valid Subdirectories
+
+Only these subdirectories are recognized:
+
+- `references/` - Deep-dive documentation, API references
+- `guides/` - Step-by-step procedures, tutorials
+- `templates/` - Reusable code snippets, boilerplate
+- `scripts/` - Automation scripts, tooling
+- `examples/` - Usage examples, sample code
+
+## When to Add Subdirectories
+
+Subdirectories should be added **only when they provide clear organizational benefit**:
+
+### Add Subdirectories When:
+
+- You have multiple long-form reference documents (>2000 words each)
+- You need reusable templates that change independently
+- You have step-by-step tutorials that would bloat the main file
+- Scripts need to be executable or version-controlled separately
+
+### Keep Everything in SKILL.md When:
+
+- The skill is primarily guidance/principles (like `vibe-coding`)
+- All content fits comfortably in one readable file
+- The skill is focused on a single concept
+- You're creating a first draft (add subdirectories later if needed)
+
+**Rule of Thumb:** Start with just `SKILL.md`. Add subdirectories only when you find yourself wanting to link to separate detailed content.
+
+## Skill Styles
+
+v2 introduces three skill styles:
+
+### Navigation Hub
+
+Short SKILL.md (~2000-4000 chars) that acts as an entry point, with most content in subdirectories.
+
+**Characteristics:**
+
+- Concise main file with overview and navigation
+- Multiple references to subdirectory files
+- Good for complex topics with many aspects
+
+**Example:**
+
+```markdown
+---
+name: dspy-basics
+description: Core DSPy fundamentals. Use when creating signatures or building simple DSPy programs.
+---
+
+# DSPy Basics
+
+## Quick Start
+
+[Quick code examples here]
+
+## When to Use This Skill
+
+- Creating new signatures
+- Building simple programs
+
+## Core Concepts
+
+### Signatures
+
+See [references/signatures.md](references/signatures.md) for details.
+
+### Modules
+
+See [references/modules.md](references/modules.md) for details.
+```
+
+### Comprehensive
+
+Long, self-contained SKILL.md (>8000 chars) with all content inline.
+
+**Characteristics:**
+
+- All content in single file
+- Detailed sections with extensive examples
+- Good for reference-heavy topics
+
+### Minimal
+
+Focused SKILL.md (~3000-5000 chars) covering a specific capability.
+
+**Characteristics:**
+
+- Single responsibility
+- No subdirectories needed
+- Good for atomic skills
+
+## Required Sections in v2
+
+### 1. "When to Use This Skill" (Required)
+
+The section header must include "When to Use":
+
+```markdown
+## When to Use This Skill
+
+Use this skill when:
+
+- Building async APIs with FastAPI
+- Implementing concurrent data processing
+- Managing WebSocket connections
+```
+
+### 2. Quick Start (Recommended)
+
+````markdown
+## Quick Start
+
+### Basic Example
+
+```python
+import asyncio
+
+async def main():
+    await asyncio.sleep(1)
+    return "done"
+```
+````
+
+````
+
+### 3. Overview (Required)
+
+```markdown
+## Overview
+
+This skill covers Python's asyncio framework for asynchronous programming.
+````
+
+## Migration Commands
+
+### Validate a Skill
+
+```bash
+# Check if skill meets v2 requirements
+uv run skill-fleet validate path/to/skill
+
+# Dry-run migration
+uv run skill-fleet migrate --dry-run
+```
+
+### Generate Training Data
+
+```bash
+# Regenerate training data from .skills golden examples
+uv run python scripts/regenerate_training_data.py
+```
+
+## Validation Changes
+
+### v1 Validation (Still Supported)
+
+- Requires `SKILL.md` + `metadata.json`
+- Validates metadata fields (skill_id, version, type, etc.)
+- Checks for Overview section
+
+### v2 Validation
+
+- Requires `SKILL.md` only
+- `metadata.json` is optional
+- **Requires "When to Use" section**
+- Validates subdirectory structure
+- Checks for progressive disclosure pattern
+
+## Quality Scoring Changes
+
+v2 adds new quality metrics:
+
+| Metric                        | Weight | Description                               |
+| ----------------------------- | ------ | ----------------------------------------- |
+| `has_when_to_use_section`     | 6%     | Required "When to Use This Skill" section |
+| `has_quick_start`             | 4%     | Recommended Quick Start section           |
+| `uses_progressive_disclosure` | 4%     | References to subdirectory files          |
+
+## Backward Compatibility
+
+The system maintains full backward compatibility:
+
+1. **v1 skills continue to work** - No forced migration
+2. **Validation accepts both formats** - Detects format automatically
+3. **Mixed taxonomy supported** - v1 and v2 skills can coexist
+4. **Gradual migration** - Update skills as you edit them
+
+## Example: Converting a v1 Skill
+
+### Before (v1)
+
+```
+python-decorators/
+├── SKILL.md
+├── metadata.json
+└── examples/
+    └── basic.py
+```
+
+**metadata.json:**
+
+```json
+{
+  "skill_id": "python/decorators",
+  "name": "python-decorators",
+  "version": "1.0.0",
+  "type": "technical",
+  "weight": "lightweight"
+}
+```
+
+### After (v2)
+
+```
+python-decorators/
+├── SKILL.md
+├── references/
+│   └── advanced-patterns.md
+└── examples/
+    └── basic.py
+```
+
+**SKILL.md frontmatter:**
+
+```yaml
+---
+name: python-decorators
+description: Use when implementing cross-cutting concerns, creating reusable function wrappers, or understanding Python metaprogramming.
+---
+```
+
+## Troubleshooting
+
+### "Missing When to Use section"
+
+Add a section with the header:
+
+```markdown
+## When to Use This Skill
+```
+
+### "Invalid subdirectory"
+
+Only use these subdirectory names:
+
+- `references/`
+- `guides/`
+- `templates/`
+- `scripts/`
+- `examples/`
+
+### "Validation passed with warnings"
+
+Common warnings:
+
+- Missing Quick Start section (recommended but not required)
+- No progressive disclosure (fine for minimal skills)
+- Low code example count (add more examples)
+
+## Resources
+
+- [SKILL_md_template.md](../../config/templates/SKILL_md_template.md) - v2 template
+- [skill_template.json](../../config/templates/skill_template.json) - Directory structure
+- [Golden Examples](../../.skills/) - Reference implementations
+
+
+============================================================
+END FILE: docs/migration/archive/skill-format-v2-draft.md
+============================================================
+
+============================================================
+FILE: docs/migration/skill-format-v2-updated.md
+============================================================
+
+# Skill Format Migration Guide: v1 → v2 Golden Standard
+
+This guide documents the changes between v1 and v2 skill formats and provides instructions for migrating existing skills.
+
+## Overview
+
+The v2 Golden Standard simplifies skill structure while introducing a progressive disclosure pattern that organizes complex content into subdirectories.
+
+### Key Changes
+
+| Aspect                   | v1 Format                                       | v2 Format                                                       |
+| ------------------------ | ----------------------------------------------- | --------------------------------------------------------------- |
+| **Required Files**       | `SKILL.md` + `metadata.json`                    | `SKILL.md` only                                                 |
+| **Required Directories** | `assets/`, `examples/`                          | **None** (all optional)                                         |
+| **Optional Directories** | N/A                                             | `references/`, `guides/`, `templates/`, `scripts/`, `examples/` |
+| **Frontmatter**          | Complex (skill_id, version, type, weight, etc.) | Simplified (`name`, `description`, optional `allowed-tools`)    |
+| **Required Sections**    | Overview, When to Use, Quick Reference          | Overview, **When to Use This Skill**, Quick Start (recommended) |
+| **Skill Styles**         | Not defined                                     | `navigation_hub`, `comprehensive`, `minimal`                    |
+
+## Minimal Skill Structure
+
+The simplest valid v2 skill is just a directory with a single `SKILL.md` file:
+
+```
+skill-name/
+└── SKILL.md
+```
+
+This is perfect for guideline skills like `vibe-coding` or `frontend-ui-integration` where all content fits naturally in a single markdown file. Subdirectories are **only created when there's actual content that benefits from them**.
+
+## Migration Strategy
+
+### Option A: Update to v2 (Recommended for New Skills)
+
+New skills should follow the v2 format:
+
+1. Single `SKILL.md` with simplified frontmatter
+2. Use subdirectories **only when needed** for progressive disclosure
+3. Include "When to Use This Skill" section
+
+### Option B: Grandfather Existing Skills
+
+Existing v1 skills remain valid and will continue to work. The system supports both formats:
+
+- v1 skills with `metadata.json` are fully supported
+- v2 skills without `metadata.json` are also valid
+
+## Frontmatter Changes
+
+### v1 Frontmatter (Deprecated but Supported)
+
+```yaml
+---
+name: python-async
+description: Python async programming patterns
+metadata:
+  skill_id: python/async
+  version: 1.0.0
+  type: technical
+  weight: medium
+  load_priority: on_demand
+  category: python
+  keywords: [async, await, asyncio]
+  dependencies: [python/basics]
+  capabilities: [async_syntax, event_loops]
+  scope: "Covers asyncio. Does NOT cover threading."
+  see_also: [python/threading]
+license: MIT
+---
+```
+
+### v2 Frontmatter (Recommended)
+
+```yaml
+---
+name: python-async
+description: Use when implementing concurrent Python code with asyncio, managing event loops, or building async APIs.
+allowed-tools:
+  - python_repl
+  - web_search
+---
+```
+
+**Key Differences:**
+
+- `metadata` block is optional (validator extracts from content)
+- `description` should follow "Use when..." pattern
+- `allowed-tools` is new for MCP tool restrictions
+
+## Directory Structure Changes
+
+### v1 Structure
+
+```
+skill-name/
+├── SKILL.md
+├── metadata.json
+├── assets/
+│   └── config-file.yaml
+└── examples/
+    └── example_1.py
+```
+
+### v2 Minimal Structure (Most Common)
+
+```
+skill-name/
+└── SKILL.md          # Everything in one file
+```
+
+### v2 Structure with Subdirectories (When Needed)
+
+```
+skill-name/
+├── SKILL.md
+├── references/       # Deep-dive documentation
+│   └── advanced.md
+├── guides/          # Step-by-step procedures
+│   └── setup.md
+├── templates/       # Reusable code templates
+│   └── starter.py
+├── scripts/         # Automation scripts
+│   └── setup.sh
+└── examples/        # Usage examples (retained from v1)
+    └── basic.py
+```
+
+### Valid Subdirectories
+
+Only these subdirectories are recognized:
+
+- `references/` - Deep-dive documentation, API references
+- `guides/` - Step-by-step procedures, tutorials
+- `templates/` - Reusable code snippets, boilerplate
+- `scripts/` - Automation scripts, tooling
+- `examples/` - Usage examples, sample code
+
+## When to Add Subdirectories
+
+Subdirectories should be added **only when they provide clear organizational benefit**:
+
+### Add Subdirectories When:
+
+- You have multiple long-form reference documents (>2000 words each)
+- You need reusable templates that change independently
+- You have step-by-step tutorials that would bloat the main file
+- Scripts need to be executable or version-controlled separately
+
+### Keep Everything in SKILL.md When:
+
+- The skill is primarily guidance/principles (like `vibe-coding`)
+- All content fits comfortably in one readable file
+- The skill is focused on a single concept
+- You're creating a first draft (add subdirectories later if needed)
+
+**Rule of Thumb:** Start with just `SKILL.md`. Add subdirectories only when you find yourself wanting to link to separate detailed content.
+
+## Skill Styles
+
+v2 introduces three skill styles:
+
+### Navigation Hub
+
+Short SKILL.md (~2000-4000 chars) that acts as an entry point, with most content in subdirectories.
+
+**Characteristics:**
+
+- Concise main file with overview and navigation
+- Multiple references to subdirectory files
+- Good for complex topics with many aspects
+
+**Example:**
+
+```markdown
+---
+name: dspy-basics
+description: Core DSPy fundamentals. Use when creating signatures or building simple DSPy programs.
+---
+
+# DSPy Basics
+
+## Quick Start
+
+[Quick code examples here]
+
+## When to Use This Skill
+
+- Creating new signatures
+- Building simple programs
+
+## Core Concepts
+
+### Signatures
+
+See [references/signatures.md](references/signatures.md) for details.
+
+### Modules
+
+See [references/modules.md](references/modules.md) for details.
+```
+
+### Comprehensive
+
+Long, self-contained SKILL.md (>8000 chars) with all content inline.
+
+**Characteristics:**
+
+- All content in single file
+- Detailed sections with extensive examples
+- Good for reference-heavy topics
+
+### Minimal
+
+Focused SKILL.md (~3000-5000 chars) covering a specific capability.
+
+**Characteristics:**
+
+- Single responsibility
+- No subdirectories needed
+- Good for atomic skills
+
+## Required Sections in v2
+
+### 1. "When to Use This Skill" (Required)
+
+The section header must include "When to Use":
+
+```markdown
+## When to Use This Skill
+
+Use this skill when:
+
+- Building async APIs with FastAPI
+- Implementing concurrent data processing
+- Managing WebSocket connections
+```
+
+### 2. Quick Start (Recommended)
+
+```markdown
+## Quick Start
+
+### Basic Example
+
+```python
+import asyncio
+
+async def main():
+    await asyncio.sleep(1)
+    return "done"
+```
+```
+
+### 3. Overview (Required)
+
+```markdown
+## Overview
+
+This skill covers Python's asyncio framework for asynchronous programming.
+```
+
+## Migration Commands
+
+### Validate a Skill
+
+```bash
+# Check if skill meets v2 requirements
+uv run skill-fleet validate path/to/skill
+
+# Dry-run migration
+uv run skill-fleet migrate --dry-run
+```
+
+### Generate Training Data
+
+```bash
+# Regenerate training data from .skills golden examples
+uv run python scripts/regenerate_training_data.py
+```
+
+## Validation Changes
+
+### v1 Validation (Still Supported)
+
+- Requires `SKILL.md` + `metadata.json`
+- Validates metadata fields (skill_id, version, type, etc.)
+- Checks for Overview section
+
+### v2 Validation
+
+- Requires `SKILL.md` only
+- `metadata.json` is optional
+- **Requires "When to Use" section**
+- Validates subdirectory structure
+- Checks for progressive disclosure pattern
+
+## Quality Scoring Changes
+
+v2 adds new quality metrics:
+
+| Metric                        | Weight | Description                               |
+| ----------------------------- | ------ | ----------------------------------------- |
+| `has_when_to_use_section`     | 6%     | Required "When to Use This Skill" section |
+| `has_quick_start`             | 4%     | Recommended Quick Start section           |
+| `uses_progressive_disclosure` | 4%     | References to subdirectory files          |
+
+## Backward Compatibility
+
+The system maintains full backward compatibility:
+
+1. **v1 skills continue to work** - No forced migration
+2. **Validation accepts both formats** - Detects format automatically
+3. **Mixed taxonomy supported** - v1 and v2 skills can coexist
+4. **Gradual migration** - Update skills as you edit them
+
+## Dual Metadata Source Strategy
+
+**The system supports reading metadata from both sources simultaneously:**
+
+### Priority Order
+
+1. **Frontmatter (highest priority)** - SKILL.md YAML frontmatter
+2. **metadata.json** - Extended metadata file (v1 style)
+3. **Inferred values** - Generated from skill_id or file structure
+
+### How It Works
+
+When loading a skill:
+
+```python
+# TaxonomyManager uses this priority:
+name = frontmatter.get("name") or metadata_json.get("name") or skill_id_to_name(skill_id)
+description = frontmatter.get("description") or metadata_json.get("description", "")
+version = metadata_json.get("version", "1.0.0")
+type = metadata_json.get("type", "technical")
+```
+
+### Mixed v1/v2 Skills
+
+A skill can have both frontmatter (in SKILL.md) and metadata.json:
+
+```yaml
+# SKILL.md frontmatter (takes precedence)
+---
+name: python-decorators
+description: Use when implementing cross-cutting concerns.
+---
+```
+
+```json
+// metadata.json (provides extended fields, name/description ignored if in frontmatter)
+{
+  "skill_id": "python/decorators",
+  "version": "2.0.0",
+  "type": "technical",
+  "weight": "lightweight",
+  "dependencies": ["python/basics"]
+}
+```
+
+**Resulting metadata:**
+- `name`: "python-decorators" (from frontmatter)
+- `description`: "Use when implementing cross-cutting concerns." (from frontmatter)
+- `version`: "2.0.0" (from metadata.json)
+- `type`: "technical" (from metadata.json)
+- `skill_id`, `weight`, `dependencies`: from metadata.json
+
+### Best Practices
+
+**For New Skills (v2 only):**
+- Only SKILL.md with frontmatter
+- Use `allowed-tools` in frontmatter for MCP restrictions
+- No metadata.json needed
+
+**For Existing Skills (v1 with upgrades):**
+- Keep metadata.json for extended fields (version, type, weight, dependencies)
+- Add frontmatter to SKILL.md for agentskills.io compliance
+- Frontmatter name/description will override metadata.json
+
+**For Fully Migrated Skills:**
+- All metadata in frontmatter
+- No metadata.json file
+- Follow v2 Golden Standard structure
+
+### When to Delete metadata.json
+
+You can safely delete `metadata.json` when:
+
+1. All essential fields are in frontmatter:
+   - `name` in frontmatter
+   - `description` in frontmatter
+   - Extended fields (version, type, weight) in frontmatter `metadata:` block
+2. Dependencies are documented in SKILL.md body
+3. You don't need extended taxonomy management (always_loaded flag, etc.)
+
+**Migration command to check readiness:**
+```bash
+# Validate to see if all fields are present
+uv run skill-fleet validate path/to/skill
+```
+
+If validation passes with only warnings (no errors about missing fields), you can delete metadata.json.
+
+## Example: Converting a v1 Skill
+
+### Before (v1)
+
+```
+python-decorators/
+├── SKILL.md
+├── metadata.json
+└── examples/
+    └── basic.py
+```
+
+**metadata.json:**
+
+```json
+{
+  "skill_id": "python/decorators",
+  "name": "python-decorators",
+  "version": "1.0.0",
+  "type": "technical",
+  "weight": "lightweight"
+}
+```
+
+### After (v2)
+
+```
+python-decorators/
+├── SKILL.md
+├── references/
+│   └── advanced-patterns.md
+└── examples/
+    └── basic.py
+```
+
+**SKILL.md frontmatter:**
+
+```yaml
+---
+name: python-decorators
+description: Use when implementing cross-cutting concerns, creating reusable function wrappers, or understanding Python metaprogramming.
+---
+```
+
+## Troubleshooting
+
+### "Missing When to Use section"
+
+Add a section with the header:
+
+```markdown
+## When to Use This Skill
+```
+
+### "Invalid subdirectory"
+
+Only use these subdirectory names:
+
+- `references/`
+- `guides/`
+- `templates/`
+- `scripts/`
+- `examples/`
+
+### "Validation passed with warnings"
+
+Common warnings:
+
+- Missing Quick Start section (recommended but not required)
+- No progressive disclosure (fine for minimal skills)
+- Low code example count (add more examples)
+
+## Resources
+
+- [SKILL_md_template.md](../../config/templates/SKILL_md_template.md) - v2 template
+- [skill_template.json](../../config/templates/skill_template.json) - Directory structure
+- [Golden Examples](../../.skills/) - Reference implementations
+
+
+============================================================
+END FILE: docs/migration/skill-format-v2-updated.md
+============================================================
+
+============================================================
+FILE: docs/notes/DEPLOYMENT_CHECKLIST.md
+============================================================
+
+# Job Persistence Deployment Checklist
+
+## ✅ Pre-Deployment Verification (Jan 20, 2026)
+
+### Code Quality
+- [x] All imports working
+- [x] All tests passing (30/30)
+- [x] No type errors
+- [x] No linting issues
+- [x] FastAPI app loads successfully
+
+### Integration Tests
+- [x] JobManager tested in isolation
+- [x] JobMemoryStore TTL/cleanup verified
+- [x] Database fallback tested
+- [x] Concurrent access patterns tested
+- [x] App startup verified
+
+### API Routes
+- [x] Jobs routes: 3 endpoints (/jobs, /jobs/{id})
+- [x] HITL routes: 2 endpoints (/prompt, /response)
+- [x] Total endpoints: 27
+
+---
+
+## 📋 Deployment Steps
+
+### 1. Pre-Deployment (Dev Environment)
+
+```bash
+# Verify code state
+git status  # Should be clean or have intentional changes
+
+# Run full test suite
+uv run pytest tests/api/test_job_manager.py -v
+# Expected: 30/30 PASSED
+
+# Type checking
+uv run ty check src/
+# Expected: No errors (only optional warnings)
+
+# Linting
+uv run ruff check src/skill_fleet/api/
+# Expected: No errors
+```
+
+### 2. Staging Deployment
+
+```bash
+# Start API server
+uv run skill-fleet serve --reload
+# Expected output:
+# ✅ JobManager initialized with database persistence
+# ✅ Background cleanup task started (runs every 5 minutes)
+
+# In separate terminal: Create a test skill
+curl -X POST http://localhost:8000/api/v2/jobs
+# Returns: {"job_id": "..."}
+
+# Get job state
+curl http://localhost:8000/api/v2/jobs/{job_id}
+# Returns: JobState with metadata
+```
+
+### 3. Validation Tests (Staging)
+
+#### Test 1: Jobs Created and Retrieved
+```bash
+# Create job
+JOB_ID=$(curl -s -X POST http://localhost:8000/api/v2/jobs | jq -r '.job_id')
+echo "Created job: $JOB_ID"
+
+# Retrieve job
+curl http://localhost:8000/api/v2/jobs/$JOB_ID
+# Expected: Status 200, JobState returned
+```
+
+#### Test 2: Server Restart Persistence
+```bash
+# Create a job and note its ID
+JOB_ID=$(curl -s -X POST http://localhost:8000/api/v2/jobs | jq -r '.job_id')
+
+# Stop server (Ctrl+C)
+# Note: Job will be in memory only
+
+# Restart server
+uv run skill-fleet serve
+
+# Retrieve same job (will load from memory cache, still fresh)
+curl http://localhost:8000/api/v2/jobs/$JOB_ID
+# Expected: Status 200, JobState returned
+
+# Now stop server and wait 65+ minutes, then restart
+# (Simulates job expiration from memory, must load from DB)
+# Expected: Job still retrieves from database
+```
+
+#### Test 3: Background Cleanup
+```bash
+# Watch logs for cleanup messages (every 5 minutes)
+# Look for: "🧹 Cleaned X expired job(s) from memory cache"
+# Or: "No expired jobs to clean"
+
+# Create multiple jobs, let server run for 5+ minutes
+# Expected: Cleanup task runs and logs results
+```
+
+#### Test 4: HITL Interactions
+```bash
+# Create job
+JOB_ID=$(curl -s -X POST http://localhost:8000/api/v2/jobs | jq -r '.job_id')
+
+# Get HITL prompt
+curl http://localhost:8000/api/v2/hitl/$JOB_ID/prompt
+# Expected: Status 200 or 404 (if no prompt pending)
+
+# Post response (if HITL pending)
+curl -X POST http://localhost:8000/api/v2/hitl/$JOB_ID/response \
+  -H "Content-Type: application/json" \
+  -d '{"answer": "yes", "confidence": 0.9}'
+# Expected: Status 200, response accepted
+```
+
+### 4. Monitoring (First 24 Hours)
+
+```bash
+# Check startup logs
+grep "JobManager initialized" server.log
+grep "cleanup task started" server.log
+
+# Check cleanup runs every 5 minutes
+grep "Cleaned.*expired" server.log
+# Should see entries at: :00, :05, :10, :15, ... of each hour
+
+# Monitor for errors
+grep "ERROR\|CRITICAL" server.log
+# Expected: No job persistence errors
+
+# Check database connectivity
+# (Should be working if cleanup task is running)
+```
+
+### 5. Production Deployment
+
+#### Prerequisites
+- [x] Database is running and accessible
+- [x] SKILL_FLEET_SKILLS_ROOT directory exists
+- [x] All environment variables configured (.env)
+- [x] Staging validation passed
+
+#### Deploy
+```bash
+# Pull latest changes
+git pull origin main
+
+# Install dependencies (if needed)
+uv sync
+
+# Start server
+uv run skill-fleet serve
+
+# Expected:
+# ✅ JobManager initialized with database persistence
+# ✅ Background cleanup task started (runs every 5 minutes)
+```
+
+#### Post-Deployment Monitoring
+- Monitor server logs for 24 hours
+- Verify cleanup task runs every 5 minutes
+- Test job persistence with manual skill creation
+- Confirm no job losses or errors
+
+---
+
+## 🔄 Rollback Plan (If Issues)
+
+### Issue: Jobs not persisting to DB
+
+```bash
+# 1. Check database connectivity
+psql -d neondb
+SELECT COUNT(*) FROM jobs;
+
+# 2. Verify JobManager initialized
+grep "JobManager initialized" server.log
+
+# 3. Check DB repo configuration
+# (Verify db_repo is set in JobManager)
+```
+
+### Issue: Memory usage growing unbounded
+
+```bash
+# Verify cleanup task running
+grep "Cleaned" server.log
+
+# Check TTL setting (default: 60 minutes)
+# If needed, reduce TTL:
+# - Edit JobMemoryStore(ttl_minutes=30)  # 30 minutes instead of 60
+
+# Restart server
+```
+
+### Issue: HITL responses not persisting
+
+```bash
+# Check that notify_hitl_response() is called
+grep "hitl_response\|HITL" server.log
+
+# Verify manager.update_job() succeeds
+# Check for database write permissions
+```
+
+### Complete Rollback (If Critical)
+
+```bash
+# 1. Keep JobManager (only writes, doesn't break anything)
+# 2. Revert API route changes (git checkout routes/)
+# 3. Jobs revert to memory-only (acceptable temporary state)
+# 4. Fix and redeploy
+
+# Note: Database records remain intact - no data loss
+```
+
+---
+
+## 📊 Success Metrics
+
+### Immediate (Day 1)
+- [x] Server starts without errors
+- [x] Jobs created successfully
+- [x] Jobs retrieved successfully
+- [x] Background task runs every 5 minutes
+- [x] No error logs related to JobManager
+
+### Short-Term (Week 1)
+- Jobs created stay in database after restart
+- No memory bloat (cleanup working)
+- HITL interactions persist reliably
+- Multi-instance deployments work (shared DB)
+
+### Long-Term (Month 1)
+- Historical job data queryable
+- Analytics dashboard operational
+- Zero job losses reported
+- Performance stable
+
+---
+
+## 📞 Support & Troubleshooting
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| "Job not found after restart" | Database may be down. Check: `psql -d neondb` |
+| "Memory growing unbounded" | Cleanup task not running. Check logs for errors. Restart server. |
+| "HITL responses not persisting" | Check DB write permissions. Verify update_job() succeeds. |
+| "Server slow on startup" | JobManager initialization. Check DB connection. May take 1-2 seconds. |
+
+### Logs to Watch
+
+```bash
+# Startup
+✅ JobManager initialized with database persistence
+✅ Background cleanup task started (runs every 5 minutes)
+
+# Every 5 minutes
+🧹 Cleaned 3 expired job(s) from memory cache
+# OR
+(No cleanup needed - all jobs still within TTL)
+
+# Errors (should not appear)
+❌ Error loading job from database
+❌ Failed to update job in database
+❌ Error in cleanup task
+```
+
+---
+
+## ✅ Deployment Sign-Off
+
+| Aspect | Status | Verified By | Date |
+|--------|--------|------------|------|
+| Code quality | ✅ Pass | ruff/ty | Jan 20 |
+| Tests | ✅ 30/30 | pytest | Jan 20 |
+| Integration | ✅ Pass | manual | Jan 20 |
+| Staging | ⏳ Pending | (staging team) | - |
+| Production | ⏳ Pending | (ops team) | - |
+
+---
+
+## 🚀 Deployment Command
+
+When ready to deploy to production:
+
+```bash
+# Navigate to skills-fleet repo
+cd /path/to/skills-fleet
+
+# Verify latest code
+git pull origin main
+uv sync
+
+# Start production server
+uv run skill-fleet serve
+
+# Monitor in separate terminal
+tail -f server.log | grep -E "JobManager\|Cleaned\|ERROR"
+```
+
+That's it! 🎉 The system handles the rest.
+
+---
+
+**Last Updated**: Jan 20, 2026  
+**Status**: Ready for Production Deployment ✅
+
+
+============================================================
+END FILE: docs/notes/DEPLOYMENT_CHECKLIST.md
+============================================================
+
+============================================================
+FILE: docs/notes/OPTIMIZATION_GUIDE.md
+============================================================
+
+# DSPy Optimization Guide for Skills-Fleet
+
+**Last Updated**: January 19, 2026  
+**Status**: Production Ready ✅
+
+## Quick Start
+
+### Run Baseline + Optimization
+
+```bash
+# Execute optimization with BootstrapFewShot (fastest)
+uv run python scripts/run_optimization.py
+
+# Expected output:
+#   Baseline score: 80.0
+#   Optimized score: 80.0-85.0
+#   Results saved to: config/optimized/
+```
+
+### Optimization Script Features
+
+The `scripts/run_optimization.py` script provides:
+- **Training data loading** from `config/training/trainset_v4.json` (50 examples)
+- **Train/test split** (80/20 by default)
+- **Baseline evaluation** before optimization
+- **Multiple optimizer support**: BootstrapFewShot, MIPROv2, GEPA
+- **Result tracking** with JSON reports
+- **Program serialization** (when possible)
+
+## Optimizer Selection
+
+### Quick Decision Matrix
+
+| Optimizer | Speed | Quality | Cost | Best For |
+|-----------|-------|---------|------|----------|
+| **BootstrapFewShot** | ⚡ Fast | ⭐⭐ Good | 💰 Cheap | Quick baselines, testing |
+| **MIPROv2** | 🐢 Slow | ⭐⭐⭐ Excellent | 💵 Medium | Production optimization |
+| **GEPA** | 🚀 Very Fast | ⭐⭐ Good | 💵 Medium | Reflection-based improvement |
+
+### Optimizer Details
+
+#### 1. BootstrapFewShot (Recommended for Testing)
+
+**When to use**: Quick iteration, testing, baseline establishment
+
+```python
+optimizer = dspy.BootstrapFewShot(
+    metric=your_metric,
+    max_bootstrapped_demos=2,      # Few-shot examples
+    max_labeled_demos=1,            # Labeled examples from data
+)
+optimized = optimizer.compile(program, trainset=trainset)
+```
+
+**Characteristics**:
+- ✅ Simplest to use
+- ✅ No additional LM needed
+- ✅ Fastest execution
+- ⚠️ Lower quality improvements (5-10%)
+
+#### 2. MIPROv2 (Recommended for Production)
+
+**When to use**: Maximum quality, production systems, thorough optimization
+
+```python
+optimizer = dspy.MIPROv2(
+    metric=your_metric,
+    auto="medium",                  # light, medium, heavy
+    num_threads=8,                  # Parallel optimization
+)
+optimized = optimizer.compile(
+    program,
+    trainset=trainset,
+    max_bootstrapped_demos=2,
+    max_labeled_demos=2,
+    num_candidate_programs=16,
+)
+```
+
+**Characteristics**:
+- ✅ Best quality improvements (15-25%)
+- ✅ Systematic search over instructions + demos
+- ⚠️ Slower execution (10-30 minutes typical)
+- ⚠️ Higher cost (depends on `auto` setting)
+
+**Budget Modes**:
+- `"light"`: ~5 min, ~$2-5, good for testing
+- `"medium"`: ~15 min, ~$10-15, recommended default
+- `"heavy"`: ~30 min, ~$20-30, maximum quality
+
+#### 3. GEPA (Recommended for Reflection-Based Optimization)
+
+**When to use**: When you have rich feedback, prefer reflection-based optimization
+
+```python
+# Important: GEPA requires a reflection LM
+reflection_lm = dspy.LM(model='gpt-4o', temperature=1.0, max_tokens=32000)
+

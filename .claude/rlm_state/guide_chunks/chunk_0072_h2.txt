@@ -1,0 +1,12 @@
+<!-- Chunk 72: bytes 25210-25449, type=h2 -->
+## Step 4: Send Welcome Email
+Call MCP tool: `send_email`
+Template: welcome_email_template
+```
+
+**Key techniques:**
+•  Explicit step ordering
+•  Dependencies between steps
+•  Validation at each stage
+•  Rollback instructions for failures
+

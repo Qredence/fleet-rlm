@@ -1,0 +1,69 @@
+<!-- Chunk 1029: bytes 3657405-3659915, type=class -->
+class SkillStyle(StrEnum):  # ✅ Better than plain strings
+    NAVIGATION_HUB = "navigation_hub"
+    # Can be used in JSON, but type-checked in code
+
+# Pattern 2: Factory method for style-based configuration
+MetricWeights.for_style(style)  # ✅ Single source of truth for weights
+```
+
+**Potential Issues**:
+- ⚠️ **DSPy module instantiation**: `SkillStyleDetector` and `WeightAdjuster` are instantiated in `__init__`
+  - **Why it matters**: Modules are heavyweight (they hold LM state)
+  - **Current approach**: Fresh instance per `AdaptiveMetricWeighting()` call
+  - **Trade-off**: Simple API, but creates new modules per request (acceptable for HTTP endpoint)
+  - **Recommendation**: If called frequently, cache modules at module level (low priority)
+
+---
+
+### 2. API Integration (`evaluation.py`)
+
+**Strengths**:
+- ✅ **Clean integration**: Endpoint follows skill-fleet patterns (Request → Response DTOs)
+- ✅ **Error handling**: Try-catch wraps LLM calls, graceful degradation
+- ✅ **Optional scoring**: Composite score only computed if scores provided
+- ✅ **Improvement estimation**: Provides actionable feedback ("+5.2% on composite score")
+- ✅ **Type safety**: Pydantic v2 with `Field` descriptions
+
+**API Design**:
+```
+POST /api/v1/evaluation/adaptive-weights
+├─ Input: DetectStyleRequest
+│  ├─ skill_title, skill_content, skill_description (required)
+│  └─ current_scores (optional dict)
+└─ Output: StyleDetectionResponse
+   ├─ style, confidence, reasoning
+   ├─ weights (dict[str, float])
+   ├─ composite_score (optional)
+   └─ expected_improvement (optional)
+```
+
+**Status**: ✅ **Follows skill-fleet conventions**
+
+**Missing (Low Priority)**:
+- OpenAPI documentation examples (can be auto-generated from Pydantic)
+- Rate limiting (delegated to API layer)
+
+---
+
+### 3. Test Suite (`test_adaptive_weighting.py`)
+
+**Coverage Analysis**:
+
+| Category | Tests | Status |
+|----------|-------|--------|
+| **MetricWeights** | 7/7 | ✅ Complete |
+| **SkillStyleDetector** | 4/4 | ✅ Complete |
+| **AdaptiveMetricWeighting** | 8/8 | ✅ Complete |
+| **compute_adaptive_score** | 5/5 | ✅ Complete |
+| **Integration** | 2/2 | ✅ Complete |
+| **Total** | **26/26** | ✅ **All Passing** |
+
+**Test Quality**:
+- ✅ **Unit tests**: Isolated, fast, deterministic
+- ✅ **Edge cases**: Empty dicts, missing metrics, invalid input, clamping
+- ✅ **Integration tests**: Full workflow (detect → apply weights → score)
+- ✅ **Mock-friendly**: No actual LLM calls in tests (tests use detector/adjuster modules)
+
+**Test Examples**:
+```python

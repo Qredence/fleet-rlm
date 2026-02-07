@@ -1,0 +1,19 @@
+<!-- Chunk 539: bytes 874081-874606, type=class -->
+class DocumentProcessor(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.summarize = dspy.Predict(SummarizeText)
+        self.extract_keywords = dspy.Predict(ExtractKeywords)
+
+    def forward(self, document: str):
+        summary = self.summarize(document=document)
+        keywords = self.extract_keywords(document=document)
+        return dspy.Prediction(
+            summary=summary.summary,
+            keywords=keywords.keywords
+        )
+```
+
+### Module with Pre/Post Processing
+
+```python

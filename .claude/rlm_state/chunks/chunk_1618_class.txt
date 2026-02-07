@@ -1,0 +1,72 @@
+<!-- Chunk 1618: bytes 6647183-6649609, type=class -->
+class RichFallbackUI:
+    """Prompt UI backed by Rich typed prompts."""
+
+    async def ask_text(self, prompt: str, *, default: str = "") -> str:
+        """Ask for free-form text using Rich prompt."""
+
+        def _rich_ask_wrapper(p: str, d: str) -> Any:
+            return RichPrompt.ask(p, default=d)
+
+        result = await asyncio.to_thread(_rich_ask_wrapper, prompt, default)
+        return str(result) if result is not None else default
+
+    async def choose_one(
+        self,
+        prompt: str,
+        choices: list[tuple[str, str]],
+        *,
+        default_id: str | None = None,
+    ) -> str:
+        """Choose a single option by typing an id (Rich fallback)."""
+        if not choices:
+            return ""
+        ids = [c[0] for c in choices]
+        default = default_id or ids[0]
+
+        # RichPrompt.ask accepts keyword arguments
+        def _rich_choose_wrapper(p: str, c: list[str], d: str, sc: bool) -> Any:
+            return RichPrompt.ask(p, choices=c, default=d, show_choices=sc)
+
+        result = await asyncio.to_thread(
+            _rich_choose_wrapper,
+            prompt,
+            ids,
+            default,
+            True,
+        )
+        return str(result) if result is not None else default
+
+    async def choose_many(
+        self,
+        prompt: str,
+        choices: list[tuple[str, str]],
+        *,
+        default_ids: list[str] | None = None,
+    ) -> list[str]:
+        """Choose multiple options by entering comma-separated ids (Rich fallback)."""
+        if not choices:
+            return []
+
+        ids = [c[0] for c in choices]
+        default_str = ",".join(default_ids) if default_ids else ""
+
+        # RichPrompt.ask accepts keyword arguments
+        def _rich_ask_wrapper(p: str, d: str) -> Any:
+            return RichPrompt.ask(p, default=d)
+
+        raw = await asyncio.to_thread(
+            _rich_ask_wrapper,
+            f"{prompt} (comma-separated, options: {', '.join(ids)})",
+            default_str,
+        )
+        selected = [part.strip() for part in raw.split(",") if part.strip()]
+        # Keep only known ids to avoid surprising downstream behavior.
+        valid_selections = [s for s in selected if s in ids]
+        if valid_selections != selected:
+            unknown = set(selected) - set(valid_selections)
+            if unknown:
+                logger.debug(f"Filtered unknown selections: {unknown}")
+        return valid_selections
+
+

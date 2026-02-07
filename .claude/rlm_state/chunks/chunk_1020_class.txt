@@ -1,0 +1,25 @@
+<!-- Chunk 1020: bytes 3602429-3603301, type=class -->
+class OptimizerContext:
+    """Context for optimizer selection decision.
+    
+    Attributes:
+        trainset_size: Number of training examples available
+        budget_dollars: Maximum budget in USD
+        quality_target: Target quality score (0.0-1.0)
+        complexity_score: Task complexity (0.0-1.0, higher = more complex)
+        domain: Skill domain/category
+        time_constraint_minutes: Maximum time allowed (optional)
+        previous_optimizer: Last optimizer used (for iteration)
+        historical_quality: Quality from previous optimization runs
+    """
+    trainset_size: int
+    budget_dollars: float = 10.0
+    quality_target: float = 0.85
+    complexity_score: float = 0.5
+    domain: str = "general"
+    time_constraint_minutes: int | None = None
+    previous_optimizer: str | None = None
+    historical_quality: float | None = None
+
+
+@dataclass 

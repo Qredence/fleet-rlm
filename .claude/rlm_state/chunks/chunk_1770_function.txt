@@ -1,0 +1,34 @@
+<!-- Chunk 1770: bytes 7413972-7414794, type=function -->
+def load_trainset(
+    path: str | Path = "config/training/trainset.json",
+) -> list[dspy.Example]:
+    """
+    Load training examples from JSON file.
+
+    Args:
+        path: Path to the trainset JSON file
+
+    Returns:
+        List of dspy.Example objects with inputs marked
+
+    """
+    import dspy
+
+    from ...common.paths import resolve_repo_relative_path
+
+    path = resolve_repo_relative_path(path)
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Training set not found at {path}")
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    examples = []
+    for item in data:
+        example = dspy.Example(**item).with_inputs("task_description")
+        examples.append(example)
+
+    logger.info(f"Loaded {len(examples)} training examples from {path}")
+    return examples
+
+

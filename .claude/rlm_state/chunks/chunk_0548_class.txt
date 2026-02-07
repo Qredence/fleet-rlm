@@ -1,0 +1,21 @@
+<!-- Chunk 548: bytes 879089-879561, type=class -->
+class CustomReasoner(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.reason = dspy.ChainOfThought(
+            MySignature,
+            max_tokens=1000,  # Limit reasoning tokens
+            temperature=0.7   # Control creativity
+        )
+
+    def forward(self, input_data: str):
+        return self.reason(input=input_data)
+```
+
+## Program Patterns
+
+### 1. Map-Reduce Pattern
+
+Process multiple items in parallel, then aggregate:
+
+```python

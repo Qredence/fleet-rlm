@@ -1,0 +1,4 @@
+<!-- Chunk 1041: bytes 3732759-3732826, type=function -->
+def forward(self, metadata: dict | str) -> dict:
+
+# After (clear):

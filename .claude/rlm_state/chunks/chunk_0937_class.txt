@@ -1,0 +1,21 @@
+<!-- Chunk 937: bytes 3401973-3402494, type=class -->
+class APIError(CLIError):
+    """API communication errors."""
+    def __init__(self, message: str, status_code: int = None, suggestion: str = ""):
+        full_msg = f"{message}"
+        if status_code:
+            full_msg += f" (HTTP {status_code})"
+        super().__init__(full_msg, exit_code=1, suggestion)
+```
+
+### 2. Create Error Display Utility
+
+```python
+# src/skill_fleet/cli/utils/errors.py
+
+from rich.console import Console
+from rich.panel import Panel
+from ..exceptions import CLIError
+
+console = Console()
+

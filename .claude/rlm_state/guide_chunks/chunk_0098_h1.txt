@@ -1,0 +1,11 @@
+<!-- Chunk 98: bytes 29070-29210, type=h1 -->
+# Correct
+---
+name: my-skill
+description: Does things
+---
+```
+
+**Error: "Invalid skill name"**
+*Cause:* Name has spaces or capitals
+```yaml

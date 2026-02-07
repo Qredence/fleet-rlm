@@ -1,0 +1,28 @@
+<!-- Chunk 1867: bytes 7650223-7651163, type=class -->
+class SkillAlias(Base):
+    """Legacy path support for skills."""
+
+    __tablename__ = "skill_aliases"
+
+    alias_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    skill_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("skills.skill_id", ondelete="CASCADE"), nullable=False
+    )
+    alias_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    # Relationships
+    skill: Mapped["Skill"] = relationship("Skill", back_populates="aliases")
+
+    __table_args__ = (
+        Index("idx_skill_aliases_path", "alias_path"),
+        Index("idx_skill_aliases_skill", "skill_id"),
+        CheckConstraint(
+            "alias_path ~ '^[a-z0-9_.-]+(?:/[a-z0-9_.-]+)*$'", name="alias_path_format"
+        ),
+    )
+
+

@@ -1,0 +1,12 @@
+<!-- Chunk 77: bytes 25976-26249, type=h2 -->
+## Phase 4: Notification (Slack MCP)
+1. Post handoff summary to #engineering
+2. Include asset links and task references
+```
+
+**Key techniques:**
+•  Clear phase separation
+•  Data passing between MCPs
+•  Validation before moving to next phase
+•  Centralized error handling
+

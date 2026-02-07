@@ -1,0 +1,22 @@
+<!-- Chunk 388: bytes 571191-571787, type=class -->
+class CodeAnalysis(dspy.Signature):
+    code = dspy.InputField(desc="Code to analyze")
+    language = dspy.InputField(desc="Programming language")
+    bugs: List[str] = dspy.OutputField(desc="List of identified bugs")
+    suggestions: Optional[List[str]] = dspy.OutputField(desc="Optional suggestions")
+```
+
+### Common Types
+
+- `str`: Text data
+- `int`: Integer values
+- `float`: Floating-point values
+- `bool`: Boolean values
+- `List[str]`: List of strings
+- `Optional[str]`: Optional string (may be None)
+
+### Type Validation
+
+DSPy uses type hints for validation during compilation:
+
+```python

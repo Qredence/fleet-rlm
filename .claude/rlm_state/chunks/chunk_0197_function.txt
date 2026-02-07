@@ -1,0 +1,7 @@
+<!-- Chunk 197: bytes 297230-297361, type=function -->
+def create_user(email: str):
+    if not email or "@" not in email:
+        raise ValueError("Invalid email")
+    # ...
+
+# file2.py

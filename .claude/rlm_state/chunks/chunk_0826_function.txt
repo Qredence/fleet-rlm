@@ -1,0 +1,8 @@
+<!-- Chunk 826: bytes 2883532-2883721, type=function -->
+def get_job_manager() -> JobManager:
+    """Get the global job manager."""
+    global _job_manager
+    if _job_manager is None:
+        _job_manager = JobManager()
+    return _job_manager
+

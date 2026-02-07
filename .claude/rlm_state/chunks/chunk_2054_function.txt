@@ -1,0 +1,14 @@
+<!-- Chunk 2054: bytes 7955896-7957063, type=function -->
+def mock_plan_response():
+    """Mock response for plan synthesis."""
+    return """skill_name: react-component-library
+skill_description: Use when you need to build a reusable React component library with TypeScript. Helps when: your team has inconsistent UI patterns, you're starting a new design system, or you need production-ready components.
+taxonomy_path: technical/frontend/react-components
+content_outline: ["Introduction to Component Libraries", "Project Setup with TypeScript", "Component Design Patterns", "Building Reusable Components", "Testing Components", "Documentation with Storybook", "Publishing and Distribution"]
+generation_guidance: Write in a clear, instructional style. Use practical examples. Include TypeScript types. Show both good and bad patterns. Target intermediate developers.
+success_criteria: ["All code examples are TypeScript-typed", "Includes 5+ component patterns", "Has testing examples", "Documentation is complete"]
+estimated_length: medium
+tags: ["react", "typescript", "components", "frontend", "design-system"]
+rationale: This plan covers the full lifecycle of building a component library, from setup to publishing."""
+
+

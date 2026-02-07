@@ -1,0 +1,8 @@
+<!-- Chunk 2013: bytes 7894763-7894985, type=function -->
+def test_validate_timeout_accepts_valid_values():
+    """Test timeout validation accepts valid values."""
+    assert validate_timeout(0) == 0
+    assert validate_timeout(30) == 30
+    assert validate_timeout(300) == 300
+
+

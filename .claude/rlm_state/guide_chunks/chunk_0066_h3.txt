@@ -1,0 +1,11 @@
+<!-- Chunk 66: bytes 23923-24707, type=h3 -->
+### Choosing your approach: Problem-first vs. tool-first
+
+Think of it like Home Depot. You might walk in with a problem - "I need to fix a kitchen cabinet" - and an employee points you to the right tools. Or you might pick out a new drill and ask how to use it for your specific job.
+
+**Skills work the same way:**
+•  **Problem-first:** "I need to set up a project workspace" → Your skill orchestrates the right MCP calls in the right sequence. Users describe outcomes; the skill handles the tools.
+•  **Tool-first:** "I have Notion MCP connected" → Your skill teaches Claude the optimal workflows and best practices. Users have access; the skill provides expertise.
+
+Most skills lean one direction. Knowing which framing fits your use case helps you choose the right pattern below.
+

@@ -1,0 +1,80 @@
+<!-- Chunk 1051: bytes 3771011-3773513, type=function -->
+def validate_timeout(seconds: float) -> float:
+    """Validate timeout is reasonable."""
+    if not (0 < seconds <= 300):
+        raise ValueError("Timeout must be between 0 and 300 seconds")
+    return seconds
+
+# In CLI arguments:
+timeout: float = typer.Option(
+    30.0,
+    "--timeout",
+    help="API timeout in seconds (max: 300)",
+    callback=validate_timeout
+)
+```
+
+---
+
+## Recommendations
+
+### High Priority (Address Immediately)
+
+1. **Implement path validation for all user-provided paths**
+   - Use `.relative_to()` to check paths are within allowed directories
+   - Add validation to `--skills-root`, `--config`, `--output` arguments
+   - Validate session file paths before read/write operations
+
+2. **Add API URL protocol validation**
+   - Enforce HTTPS for production environments
+   - Add warning if HTTP used with non-localhost URLs
+   - Validate URL format before HTTP client initialization
+
+3. **Sanitize user IDs**
+   - Remove special characters that could cause injection
+   - Validate length constraints
+   - Use in file paths only after sanitization
+
+### Medium Priority (Address Soon)
+
+4. **Redact sensitive paths in error messages**
+   - Remove absolute paths from exception messages
+   - Keep error context without exposing filesystem structure
+   - Use sanitized error display utility
+
+5. **Add configuration file validation**
+   - Validate config file exists and is readable before loading
+   - Check file permissions (world-readable should be warning)
+   - Validate config schema before application startup
+
+### Low Priority (Address When Convenient)
+
+6. **Make HTTP timeout configurable**
+   - Add CLI argument for timeout
+   - Set reasonable limits (max 300 seconds)
+   - Add connection timeout separate from read timeout
+
+7. **Add logging redaction for production**
+   - Implement RedactingFormatter for log messages
+   - Redact API keys, tokens, passwords
+   - Enable in production via environment variable
+
+---
+
+## Security Testing Recommendations
+
+### Manual Testing Checklist
+
+- [ ] Test path traversal: `skill-fleet validate-skill ../../etc/passwd`
+- [ ] Test malicious output path: `skill-fleet generate-xml -o /tmp/malicious.xml`
+- [ ] Test HTTP vs HTTPS: `skill-fleet --api-url http://malicious.com`
+- [ ] Test user ID injection: `skill-fleet --user-id "../../../test"`
+- [ ] Test session file path injection: `skill-fleet interactive --session /tmp/test.json`
+
+### Automated Testing
+
+```python
+# tests/cli/test_security.py
+import pytest
+from pathlib import Path
+

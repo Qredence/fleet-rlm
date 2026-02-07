@@ -1,0 +1,17 @@
+<!-- Chunk 1485: bytes 6326675-6327100, type=class -->
+class UnprocessableEntityException(SkillFleetAPIError):
+    """Unprocessable entity exception for valid syntax but semantic errors."""
+
+    status_code: int = 422
+
+    def __init__(self, detail: str) -> None:
+        """
+        Initialize unprocessable entity exception.
+
+        Args:
+            detail: Error message explaining the validation error
+
+        """
+        super().__init__(detail=detail, status_code=422)
+
+

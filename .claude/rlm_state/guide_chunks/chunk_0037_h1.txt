@@ -1,0 +1,8 @@
+<!-- Chunk 37: bytes 12666-12978, type=h1 -->
+# Good - clear value proposition
+description: End-to-end customer onboarding workflow for PayFlow. Handles account creation, payment setup, and subscription management. Use when user says "onboard new customer", "set up subscription", or "create PayFlow account".
+```
+
+**Examples of bad descriptions:**
+
+```yaml

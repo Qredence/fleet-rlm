@@ -1,0 +1,9 @@
+<!-- Chunk 711: bytes 1413819-1414047, type=function -->
+def run_understanding(job_id):
+    db = get_db_session()
+    job = JobRepository(db).get_by_id(job_id)
+    questions = llm.generate_questions(job.description)  # 30s+ hold
+    job.questions = questions
+    db.commit()
+
+# After:

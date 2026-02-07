@@ -1,0 +1,24 @@
+<!-- Chunk 522: bytes 864048-864555, type=function -->
+def get_weather(city: str) -> str:
+    """Get weather for a city."""
+    return f"Weather in {city}: 72°F, sunny"
+
+react = dspy.ReAct(
+    "user -> weather_report",
+    tools=[get_city_name, get_weather],
+    max_iters=5
+)
+
+result = react(user="Alice")
+# ReAct will:
+# 1. Call get_city_name("Alice") → "San Francisco"
+# 2. Call get_weather("San Francisco") → "Weather in San Francisco: 72°F, sunny"
+```
+
+## Tool Error Handling
+
+### Graceful Error Handling
+
+Tools should handle errors gracefully:
+
+```python

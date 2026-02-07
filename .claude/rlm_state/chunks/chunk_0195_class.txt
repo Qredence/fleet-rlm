@@ -1,0 +1,35 @@
+<!-- Chunk 195: bytes 295277-295913, type=class -->
+class UserInput(BaseModel):
+    username: str
+
+    @validator("username")
+    def validate_username(cls, v):
+        if not v.isalnum():
+            raise ValueError("Username must be alphanumeric")
+        return v
+```
+
+### Use Parameterized Queries
+
+**Good:**
+```python
+# Parameterized query (safe from SQL injection)
+user = session.execute(
+    "SELECT * FROM users WHERE email = :email",
+    {"email": user_email}
+).first()
+```
+
+**Bad:**
+```python
+# String interpolation (SQL injection risk!)
+user = session.execute(
+    f"SELECT * FROM users WHERE email = '{user_email}'"
+).first()
+```
+
+## Documentation
+
+### Docstrings
+
+```python

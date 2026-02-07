@@ -1,0 +1,34 @@
+<!-- Chunk 1074: bytes 3835912-3837148, type=function -->
+def create(ctx, task, user_id, auto_approve):
+    """Create a new skill from task description."""
+    taxonomy = ctx.obj['taxonomy']
+    creator = TaxonomySkillCreator(taxonomy_manager=taxonomy)
+    
+    console.print(f"\n[bold green]Creating skill for task:[/bold green] {task}")
+    
+    with Progress() as progress:
+        task_progress = progress.add_task("[cyan]Generating skill...", total=100)
+        
+        result = creator.forward(
+            task_description=task,
+            user_context={"user_id": user_id},
+            auto_approve=auto_approve
+        )
+        
+        progress.update(task_progress, completed=100)
+    
+    if result['status'] == 'approved':
+        console.print(f"\n[bold green]✓ Skill created successfully![/bold green]")
+        console.print(f"Skill ID: {result['skill_id']}")
+        console.print(f"Path: {result['path']}")
+        console.print(f"Quality: {result.get('quality_score', 0):.2f}")
+    else:
+        console.print(f"\n[bold red]✗ Skill creation failed[/bold red]")
+        console.print(f"Status: {result['status']}")
+        if 'message' in result:
+            console.print(f"Message: {result['message']}")
+
+
+@cli.command()
+@click.argument('skill_path')
+@click.pass_context

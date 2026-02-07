@@ -1,0 +1,9 @@
+<!-- Chunk 91: bytes 27945-28168, type=h2 -->
+## Before Processing (Compliance Check)
+1. Fetch transaction details via MCP
+2. Apply compliance rules:
+   - Check sanctions lists
+   - Verify jurisdiction allowances
+   - Assess risk level
+3. Document compliance decision
+

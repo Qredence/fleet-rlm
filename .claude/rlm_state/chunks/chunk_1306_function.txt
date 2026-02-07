@@ -1,0 +1,39 @@
+<!-- Chunk 1306: bytes 4773344-4774393, type=function -->
+def split_sql_script(script: str) -> list[str]:
+    """Split SQL script into individual statements, handling PostgreSQL dollar quotes."""
+    statements = []
+    current = []
+    in_body = False
+
+    for line in script.split("\n"):
+        if "$$" in line:
+            if not in_body:
+                in_body = True
+                current.append(line)
+                continue
+            elif in_body:
+                in_body = False
+                current.append(line)
+                if ";" in line:
+                    stmt = "\n".join(current).strip()
+                    if stmt:
+                        statements.append(stmt)
+                    current = []
+                continue
+
+        current.append(line)
+
+        if not in_body and line.strip().endswith(";"):
+            stmt = "\n".join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+
+    if current:
+        stmt = "\n".join(current).strip()
+        if stmt:
+            statements.append(stmt)
+
+    return statements
+
+

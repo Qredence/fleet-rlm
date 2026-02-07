@@ -1,0 +1,9 @@
+<!-- Chunk 1250: bytes 4669655-4669938, type=function -->
+def reflection_metric(example, pred, trace=None):
+    """Reflection metric wrapper (returns float for benchmarking)."""
+    result = gepa_composite_metric(example, pred, trace)
+    if isinstance(result, dict) and "score" in result:
+        return result["score"]
+    return result
+
+

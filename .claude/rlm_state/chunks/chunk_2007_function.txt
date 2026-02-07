@@ -1,0 +1,7 @@
+<!-- Chunk 2007: bytes 7893361-7893634, type=function -->
+def test_validate_api_url_accepts_valid_protocols():
+    """Test API URL validation accepts http/https."""
+    assert validate_api_url("http://localhost:8000") == "http://localhost:8000"
+    assert validate_api_url("https://api.example.com") == "https://api.example.com"
+
+

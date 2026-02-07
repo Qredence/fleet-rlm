@@ -1,0 +1,18 @@
+<!-- Chunk 1334: bytes 4993202-4994000, type=function -->
+def verify_step(context, candidate_step, critic_model):
+    prompt = f"Is this step logically sound given the context?\nContext: {context}\nStep: {candidate_step}\nAnswer Yes/No."
+    response = critic_model.generate(prompt)
+    return 1.0 if "Yes" in response else 0.0
+
+# Usage in a loop
+if verify_step(history, next_move, critic) > 0.8:
+    history.append(next_move)
+
+============================================================
+END FILE: skills/_drafts/recur/llm-inference/recursive-language-models/examples/example_2.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/recur/llm-inference/recursive-language-models/examples/example_3.py
+============================================================
+

@@ -1,0 +1,30 @@
+<!-- Chunk 908: bytes 3192126-3193184, type=class -->
+class GuidedResponseSignature(dspy.Signature):
+    """Generate the next agent response in a guided skill creation conversation."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `history` | `str` | Conversation history so far |
+| `current_state` | `str` | Current workflow state: GATHERING, PROPOSING, GENERATING |
+| `user_input` | `str` | The latest message from the user |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_message` | `str` | The natural language response to the user |
+| `action_required` | `Literal` | Internal action: ask_clarification, propose_plan, start_generation, none |
+| `rationale` | `str` | Reasoning behind the chosen response and action |
+| `understanding_summary` | `str` | Persistent, evolving summary of user's intent |
+| `confidence_score` | `float` | Confidence 0.0-1.0. >0.9 triggers proposal |
+
+**Used by**: `GuidedCreatorProgram` with `dspy.ChainOfThought`
+
+---
+
+### ClarificationSignature
+
+Generate a single focused clarifying question.
+
+```python

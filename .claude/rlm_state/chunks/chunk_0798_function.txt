@@ -1,0 +1,22 @@
+<!-- Chunk 798: bytes 2688635-2689151, type=function -->
+def test_session_state_transitions():
+    session = ConversationSession(session_id="test", user_id="user")
+
+    assert session.state == ConversationState.IDLE
+
+    session.start_conversation()
+    assert session.state == ConversationState.ACTIVE
+
+    session.add_message(ConversationMessage(
+        role=MessageRole.USER,
+        content="test"
+    ))
+    assert session.message_count == 1
+
+    session.complete()
+    assert session.state == ConversationState.COMPLETED
+```
+
+### Testing Intent Detection
+
+```python

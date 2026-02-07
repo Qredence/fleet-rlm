@@ -1,0 +1,4 @@
+<!-- Chunk 484: bytes 833250-833332, type=function -->
+def get_weather(city: str) -> str:
+    return f"The weather in {city} is sunny."
+

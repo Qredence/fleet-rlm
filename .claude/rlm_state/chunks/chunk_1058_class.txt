@@ -1,0 +1,45 @@
+<!-- Chunk 1058: bytes 3793593-3795238, type=class -->
+class PlanSkillStructure(dspy.Signature):
+    """Step 2: Design skill structure with taxonomy integration.
+    
+    Creates detailed plan for skill including:
+    - Metadata conforming to taxonomy schema
+    - Dependency resolution
+    - Capability identification
+    - Resource requirements
+    - Compatibility constraints
+    """
+    
+    task_intent: str = dspy.InputField()
+    taxonomy_path: str = dspy.InputField()
+    parent_skills: str = dspy.InputField()
+    dependency_analysis: str = dspy.InputField()
+    
+    # Outputs
+    skill_metadata: str = dspy.OutputField(
+        desc="""JSON metadata including:
+        - skill_id (from taxonomy_path)
+        - version (semantic versioning)
+        - type (cognitive/technical/domain/tool/mcp/specialization/task_focus/memory)
+        - weight (lightweight/medium/heavyweight)
+        - load_priority (always/task_specific/on_demand/dormant)
+        - tags for categorization
+        """
+    )
+    dependencies: str = dspy.OutputField(
+        desc="JSON array of dependency skill_ids with justification for each"
+    )
+    capabilities: str = dspy.OutputField(
+        desc="JSON array of discrete, testable capabilities this skill provides"
+    )
+    resource_requirements: str = dspy.OutputField(
+        desc="JSON object of external resources (APIs, tools, files) needed"
+    )
+    compatibility_constraints: str = dspy.OutputField(
+        desc="JSON object with version constraints, conflicting skills, platform requirements"
+    )
+    composition_strategy: str = dspy.OutputField(
+        desc="How this skill composes with others (extends/complements/requires/conflicts)"
+    )
+
+

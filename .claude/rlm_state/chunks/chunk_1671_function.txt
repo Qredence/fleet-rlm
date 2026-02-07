@@ -1,0 +1,15 @@
+<!-- Chunk 1671: bytes 6688220-6688708, type=function -->
+def default_skills_root() -> Path:
+    """Resolve the default skills root path with safe fallbacks."""
+    candidates: list[Path] = []
+
+    for root in (find_repo_root(Path.cwd()), find_repo_root(Path(__file__).resolve())):
+        if root:
+            candidates.append(root / "skills")
+
+    # Prefer a writable local skills directory when running from an installed wheel.
+    candidates.append(Path.cwd() / "skills")
+
+    return _first_existing(candidates) or (Path.cwd() / "skills")
+
+

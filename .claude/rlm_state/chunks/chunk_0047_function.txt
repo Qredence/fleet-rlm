@@ -1,0 +1,44 @@
+<!-- Chunk 47: bytes 123997-125055, type=function -->
+def calculate(expression: str) -> float:
+    """
+    Calculate the result of a mathematical expression.
+
+    Args:
+        expression: A mathematical expression as a string (e.g., "2+2", "10*5")
+
+    Returns:
+        float: The result of the calculation
+    """
+    try:
+        import ast
+        import operator
+
+        ops = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+        }
+
+        node = ast.parse(expression, mode='eval').body
+
+        def eval_node(n):
+            if isinstance(n, ast.Num):
+                return n.n
+            elif isinstance(n, ast.BinOp):
+                left = eval_node(n.left)
+                right = eval_node(n.right)
+                return ops[type(n.op)](left, right)
+            else:
+                raise ValueError(f"Unsupported operation: {type(n)}")
+
+        return float(eval_node(node))
+    except Exception as e:
+        return float('nan')
+```
+
+### Tool Example: API Caller
+
+```python
+import requests
+

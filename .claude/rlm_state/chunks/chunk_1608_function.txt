@@ -1,0 +1,23 @@
+<!-- Chunk 1608: bytes 6613844-6614607, type=function -->
+def _render_questions(questions: object) -> str:
+    """
+    Render questions to a displayable string.
+
+    Now expects pre-structured questions from the server (StructuredQuestion format).
+    """
+    if isinstance(questions, str):
+        return questions
+    if isinstance(questions, list):
+        lines: list[str] = []
+        for idx, q in enumerate(questions, 1):
+            if isinstance(q, dict):
+                # Server returns StructuredQuestion with 'text' field
+                q_dict = cast("dict[str, Any]", q)
+                text = q_dict.get("text") or q_dict.get("question") or str(q)
+            else:
+                text = str(q)
+            lines.append(f"{idx}. {text}")
+        return "\n".join(lines)
+    return str(questions or "")
+
+

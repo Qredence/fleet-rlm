@@ -1,0 +1,17 @@
+<!-- Chunk 1656: bytes 6677249-6677660, type=class -->
+class LLMResponseError(LLMProviderError):
+    """
+    Raised when LLM response is invalid or unexpected.
+
+    This can occur when:
+    - Malformed JSON response
+    - Missing expected fields
+    - Content filter triggered
+    """
+
+
+# =============================================================================
+# Session Errors
+# =============================================================================
+
+

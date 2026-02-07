@@ -1,0 +1,23 @@
+<!-- Chunk 1818: bytes 7562222-7563139, type=class -->
+class GenerateSkillSection(dspy.Signature):
+    """
+    Generate a specific section of skill content.
+
+    Used for generating individual sections when breaking up large skills,
+    or for subdirectory files in navigation_hub style.
+    """
+
+    # Inputs
+    section_title: str = dspy.InputField(desc="Title of the section to generate")
+    section_outline: str = dspy.InputField(desc="Bullet points describing what to cover")
+    plan: str = dspy.InputField(desc="Overall skill plan for context")
+    examples_needed: bool = dspy.InputField(desc="Whether to include code examples", default=True)
+
+    # Outputs
+    section_content: str = dspy.OutputField(desc="Complete markdown content for this section")
+    examples_included: list[str] = dspy.OutputField(
+        desc="List of example titles/descriptions included"
+    )
+    key_points: list[str] = dspy.OutputField(desc="3-5 key takeaways from this section")
+
+

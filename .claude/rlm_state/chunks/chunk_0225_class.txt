@@ -1,0 +1,54 @@
+<!-- Chunk 225: bytes 304245-305234, type=class -->
+class User:
+    def validate(self) -> bool:
+        from services import UserService  # Import at runtime
+        return UserService.validate(self)
+```
+
+## Error Handling
+
+### Bare Except
+
+**Anti-pattern:** Catching all exceptions
+```python
+try:
+    process_data()
+except:  # Catches everything, including KeyboardInterrupt
+    pass
+```
+
+**Solution:** Specific exceptions
+```python
+try:
+    process_data()
+except (ValueError, KeyError) as e:
+    logger.error(f"Data processing error: {e}")
+    raise
+```
+
+### Silent Failures
+
+**Anti-pattern:** Hiding errors
+```python
+try:
+    result = critical_operation()
+except Exception:
+    pass  # Error is lost
+```
+
+**Solution:** Log and handle appropriately
+```python
+try:
+    result = critical_operation()
+except Exception as e:
+    logger.exception("Critical operation failed")
+    # Either raise, return default, or handle explicitly
+    raise
+```
+
+## Performance
+
+### N+1 Queries
+
+**Anti-pattern:** Repeated database queries in loops
+```python

@@ -1,0 +1,106 @@
+<!-- Chunk 1542: bytes 6388549-6391042, type=class -->
+class JobMemoryStore:
+    """
+    Hot cache for in-flight jobs.
+
+    Stores recently created/active jobs in memory for fast access.
+    Automatically expires entries older than TTL.
+    """
+
+    def __init__(self, ttl_minutes: int = 60):
+        """
+        Initialize memory store.
+
+        Args:
+            ttl_minutes: Time-to-live for cached jobs (default: 60 minutes)
+
+        """
+        self.ttl_minutes = ttl_minutes
+        self.store: dict[str, tuple[JobState, datetime]] = {}
+
+    def set(self, job_id: str, job: JobState) -> None:
+        """
+        Store job in memory with timestamp.
+
+        Args:
+            job_id: Job identifier
+            job: JobState instance
+
+        """
+        self.store[job_id] = (job, datetime.now(UTC))
+
+    def get(self, job_id: str) -> JobState | None:
+        """
+        Get job from memory if not expired.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            JobState if found and not expired, None otherwise
+
+        """
+        if job_id not in self.store:
+            return None
+
+        job, created_at = self.store[job_id]
+        age = datetime.now(UTC) - created_at
+
+        if age > timedelta(minutes=self.ttl_minutes):
+            # Expired: remove from memory
+            del self.store[job_id]
+            logger.debug(f"Job {job_id} expired from memory cache (age: {age})")
+            return None
+
+        return job
+
+    def delete(self, job_id: str) -> bool:
+        """
+        Remove job from memory.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            True if job was deleted, False if not found
+
+        """
+        if job_id in self.store:
+            del self.store[job_id]
+            return True
+        return False
+
+    def cleanup_expired(self) -> int:
+        """
+        Remove all expired entries.
+
+        Should be called periodically by background task.
+
+        Returns:
+            Number of jobs removed
+
+        """
+        expired_ids = [
+            job_id
+            for job_id, (_, created_at) in self.store.items()
+            if datetime.now(UTC) - created_at > timedelta(minutes=self.ttl_minutes)
+        ]
+
+        for job_id in expired_ids:
+            del self.store[job_id]
+
+        return len(expired_ids)
+
+    def clear(self) -> int:
+        """
+        Clear all entries from memory.
+
+        Returns:
+            Number of jobs cleared
+
+        """
+        count = len(self.store)
+        self.store.clear()
+        return count
+
+

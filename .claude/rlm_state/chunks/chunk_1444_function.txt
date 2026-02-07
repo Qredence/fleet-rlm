@@ -1,0 +1,29 @@
+<!-- Chunk 1444: bytes 5529404-5530258, type=function -->
+def say_hello(name):
+    print(f"Hello, {name}!")
+
+say_hello("David")
+```
+
+**Explanation:**
+
+1.  `repeat` is a function that takes the `num_times` argument and returns a decorator function `my_decorator`.
+2.  `my_decorator` takes the function to be decorated (`func`) and returns the `wrapper` function.
+3.  The `wrapper` function executes the original function `num_times` times.
+4.  The `@repeat(num_times=3)` syntax first calls `repeat(3)`, which returns the decorator function `my_decorator`. Then, it applies `my_decorator` to the `say_hello` function.
+
+**Output:**
+
+```
+Hello, David!
+Hello, David!
+Hello, David!
+```
+
+# Decorators with State
+
+Decorators can also maintain state. This can be useful for tasks such as counting the number of times a function has been called or caching the results of a function.
+
+## Counting Function Calls
+
+```python

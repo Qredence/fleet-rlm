@@ -1,0 +1,44 @@
+<!-- Chunk 262: bytes 324154-325548, type=function -->
+def print_analysis_results(results: list[dict[str, Any]]) -> None:
+    """Print analysis results in a readable format."""
+    total_issues = sum(len(r.get("issues", [])) for r in results)
+
+    if total_issues == 0:
+        print("✅ No import or utility issues found!")
+        return
+
+    print(f"🔍 Found {total_issues} potential issues:\n")
+
+    # Group issues by severity
+    by_severity: dict[str, list[dict]] = defaultdict(list)
+
+    for result in results:
+        if "error" in result:
+            print(f"⚠️  Error analyzing {result['filepath']}: {result['error']}\n")
+            continue
+
+        for issue in result.get("issues", []):
+            issue["filepath"] = result["filepath"]
+            by_severity[issue["severity"]].append(issue)
+
+    # Print warnings first
+    if "warning" in by_severity:
+        print(f"{'='*80}")
+        print(f"⚠️  WARNINGS ({len(by_severity['warning'])})")
+        print(f"{'='*80}\n")
+
+        for issue in by_severity["warning"]:
+            print(f"📄 {issue['filepath']}:{issue['line']}")
+            print(f"   {issue['message']}\n")
+
+    # Then info
+    if "info" in by_severity:
+        print(f"{'='*80}")
+        print(f"ℹ️  INFO ({len(by_severity['info'])})")
+        print(f"{'='*80}\n")
+
+        for issue in by_severity["info"]:
+            print(f"📄 {issue['filepath']}:{issue['line']}")
+            print(f"   {issue['message']}\n")
+
+

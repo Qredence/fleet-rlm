@@ -1,0 +1,35 @@
+<!-- Chunk 877: bytes 3139033-3139694, type=class -->
+class ContentGeneratorModule(dspy.Module):
+    """Generate initial skill content from the Phase 1 plan."""
+```
+
+**Implementation**: `dspy.ChainOfThought(GenerateSkillContent)`
+
+**Input:**
+```python
+skill_metadata: Any
+content_plan: str
+generation_instructions: str
+parent_skills_content: str
+dependency_summaries: str
+```
+
+**Output:**
+```python
+{
+    "skill_content": str,
+    "usage_examples": list[UsageExample],
+    "best_practices": list[BestPractice],
+    "test_cases": list[TestCase],
+    "estimated_reading_time": int,
+    "rationale": str,
+}
+```
+
+---
+
+### FeedbackIncorporatorModule
+
+Apply user feedback and change requests to draft content.
+
+```python

@@ -1,0 +1,20 @@
+<!-- Chunk 59: bytes 128551-128927, type=function -->
+def calculate_expression(expr: str) -> float:
+    """
+    Calculate a mathematical expression.
+
+    Supports basic operations: +, -, *, /
+    Example: "2+2" returns 4.0
+
+    Args:
+        expr: Mathematical expression as string
+
+    Returns:
+        float: Calculation result
+
+    Raises:
+        ValueError: For invalid expressions
+    """
+    pass
+
+# Bad: Minimal docstring

@@ -1,0 +1,10 @@
+<!-- Chunk 353: bytes 550741-550898, type=function -->
+def calculate(expr: str) -> float:
+    """Calculate."""
+    pass
+```
+
+### 3. Type Hints for All Parameters
+
+```python
+# Good: All parameters have type hints

@@ -1,0 +1,43 @@
+<!-- Chunk 1553: bytes 6413360-6414644, type=function -->
+def save_job_session(job_id: str) -> bool:
+    """
+    Save job state to disk for persistence.
+
+    Args:
+        job_id: The job ID to save
+
+    Returns:
+        True if save succeeded, False otherwise
+
+    """
+    if not _is_safe_job_id(job_id):
+        logger.warning("Cannot save session: unsafe job id %s", _sanitize_for_log(job_id))
+        return False
+
+    job = JOBS.get(job_id)
+    if not job:
+        logger.warning("Cannot save session: job %s not found", _sanitize_for_log(job_id))
+        return False
+
+    try:
+        session_file = resolve_path_within_root(SESSION_DIR, f"{job_id}.json")
+        session_data = job.model_dump(mode="json", exclude_none=True)
+        session_file.write_text(json.dumps(session_data, indent=2, default=str), encoding="utf-8")
+        logger.debug("Saved session for job %s", _sanitize_for_log(job_id))
+        return True
+    except ValueError as e:
+        logger.warning(
+            "Cannot save session for job %s: %s",
+            _sanitize_for_log(job_id),
+            _sanitize_for_log(e),
+        )
+        return False
+    except Exception as e:
+        logger.error(
+            "Failed to save session for job %s: %s",
+            _sanitize_for_log(job_id),
+            _sanitize_for_log(e),
+        )
+        return False
+
+

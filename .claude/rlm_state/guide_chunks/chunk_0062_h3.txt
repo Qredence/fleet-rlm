@@ -1,0 +1,18 @@
+<!-- Chunk 62: bytes 21684-22415, type=h3 -->
+### Recommended approach today
+
+Start by hosting your skill on GitHub with a public repo, clear README (for human visitors — this is separate from your skill folder, which should not contain a README.md), and example usage with screenshots. Then add a section to your MCP documentation that links to the skill, explains why using both together is valuable, and provides a quick-start guide.
+
+**1. Host on GitHub**
+ – Public repo for open-source skills
+ – Clear README with installation instructions
+ – Example usage and screenshots
+
+**2. Document in Your MCP Repo**
+ – Link to skills from MCP documentation
+ – Explain the value of using both together
+ – Provide quick-start guide
+
+**3. Create an Installation Guide**
+
+**Example:**

@@ -1,0 +1,446 @@
+<!-- Chunk 1930: bytes 7754240-7768011, type=class -->
+class ReasoningTracer:
+    """
+    Capture reasoning traces during skill creation.
+
+    This tracer supports multiple modes for different use cases:
+    - CLI mode: Display reasoning in real-time with --verbose flag
+    - MLflow mode: Log to MLflow with --debug flag for experiment tracking
+    - Training mode: Save to file for MIPROv2 optimization
+    - Combined modes: e.g., "cli+mlflow+training" for all three at once
+
+    Args:
+        mode: Tracing mode ("cli", "mlflow", "training", combined like "cli+mlflow", "none")
+        output_dir: Directory for trace output files
+
+    Attributes:
+        mode: Current tracing mode (can be combined with "+")
+        output_dir: Directory for output files
+        traces: List of captured traces
+        _mlflow_run_id: Active MLflow run ID (if mlflow is enabled in mode)
+        _cli_enabled: Whether CLI display is enabled
+        _mlflow_enabled: Whether MLflow logging is enabled
+        _save_traces: Whether to save traces to file
+
+    Examples:
+        CLI mode only:
+        >>> tracer = ReasoningTracer(mode="cli")
+        >>> tracer.start_run("Create async Python skill")
+        >>> # ... run modules ...
+        >>> tracer.trace("phase1", "extract_problem", result, inputs)
+        >>> tracer.end_run()
+
+        Combined mode (CLI + MLflow + save traces):
+        >>> tracer = ReasoningTracer(mode="cli+mlflow+training", output_dir=Path("traces"))
+        >>> tracer.start_run("Create async Python skill")
+        >>> # ... run modules ...
+        >>> tracer.end_run(save_traces=True)
+
+    """
+
+    # Valid tracing modes
+    VALID_MODES = ("cli", "mlflow", "training", "none")
+
+    def __init__(
+        self,
+        mode: str = "cli",
+        output_dir: Path | None = None,
+    ) -> None:
+        """
+        Initialize ReasoningTracer.
+
+        Args:
+            mode: Tracing mode ("cli", "mlflow", "training", combined like "cli+mlflow", "none")
+            output_dir: Directory for trace output files (default: "traces")
+
+        Raises:
+            ValueError: If mode contains invalid components
+
+        """
+        # Parse combined mode
+        mode_parts = mode.split("+") if "+" in mode else [mode]
+
+        # Validate all mode parts
+        for part in mode_parts:
+            if part not in self.VALID_MODES:
+                raise ValueError(
+                    f"Invalid mode '{part}'. Must be one of: {', '.join(self.VALID_MODES)}"
+                )
+
+        self.mode = mode
+        self.output_dir = output_dir or Path("traces")
+        self.traces: list[ReasoningTrace] = []
+        self._mlflow_run_id: str | None = None
+
+        # Parse enabled features from mode
+        self._cli_enabled = "cli" in mode_parts
+        self._mlflow_enabled = "mlflow" in mode_parts
+        self._save_traces = "training" in mode_parts
+
+    def start_run(self, task_description: str, is_training: bool = False) -> None:
+        """
+        Start a new tracing run.
+
+        Args:
+            task_description: Description of the skill being created
+            is_training: Whether this is a training run (affects MLflow logging)
+
+        Examples:
+            >>> tracer = ReasoningTracer(mode="mlflow")
+            >>> tracer.start_run("Create async Python skill", is_training=False)
+
+            >>> # Combined mode
+            >>> tracer = ReasoningTracer(mode="cli+mlflow+training")
+            >>> tracer.start_run("Create async Python skill", is_training=True)
+
+        """
+        self.traces = []
+
+        if self._mlflow_enabled or (is_training and self._save_traces):
+            try:
+                import mlflow
+
+                mlflow.start_run()  # type: ignore[attr-defined]
+                mlflow.log_params({"task_description": task_description})  # type: ignore[attr-defined]
+                active_run = mlflow.active_run()
+                if active_run:
+                    self._mlflow_run_id = active_run.info.run_id
+                logger.info(f"Started MLflow run: {self._mlflow_run_id}")
+            except ImportError:
+                logger.warning("MLflow not installed, skipping MLflow logging")
+            except Exception as e:
+                logger.warning(f"Failed to start MLflow run: {e}")
+
+    def trace(
+        self,
+        phase: str,
+        step: str,
+        result: dspy.Prediction,
+        inputs: dict[str, Any],
+    ) -> ReasoningTrace:
+        """
+        Capture reasoning from a DSPy module result.
+
+        This method:
+        1. Extracts reasoning from the DSPy Prediction result
+        2. Creates a ReasoningTrace object
+        3. Displays in CLI if mode is "cli"
+        4. Logs to MLflow if run is active
+
+        Args:
+            phase: Phase identifier (e.g., "phase1", "phase2")
+            step: Step identifier (e.g., "extract_problem", "decide_novelty")
+            result: DSPy Prediction object from module execution
+            inputs: Input values provided to the module
+
+        Returns:
+            ReasoningTrace object with captured data
+
+        Examples:
+            >>> result = my_module(input="test")
+            >>> trace = tracer.trace(
+            ...     phase="phase1",
+            ...     step="extract_problem",
+            ...     result=result,
+            ...     inputs={"input": "test"}
+            ... )
+
+        """
+        # Extract reasoning from DSPy Prediction
+        reasoning = ""
+        if hasattr(result, "reasoning"):
+            reasoning = coerce_reasoning_text(getattr(result, "reasoning", ""))
+        elif hasattr(result, "rationale"):
+            reasoning = coerce_reasoning_text(getattr(result, "rationale", ""))
+
+        # Convert outputs to dict (handle Pydantic models)
+        outputs = {}
+        for key, value in dict(result).items():
+            if hasattr(value, "model_dump"):
+                outputs[key] = value.model_dump()
+            else:
+                outputs[key] = value
+
+        trace = ReasoningTrace(
+            phase=phase,
+            step=step,
+            timestamp=datetime.now().isoformat(),
+            reasoning=reasoning,
+            inputs=inputs,
+            outputs=outputs,
+        )
+        self.traces.append(trace)
+
+        # Display in CLI mode
+        if self._cli_enabled:
+            self._display_trace(trace)
+
+        # Log to MLflow if active
+        if self._mlflow_run_id:
+            self._log_to_mlflow(trace)
+
+        return trace
+
+    def _display_trace(self, trace: ReasoningTrace) -> None:
+        """
+        Display reasoning in CLI with formatted output.
+
+        Args:
+            trace: ReasoningTrace to display
+
+        """
+        print(f"\n{'=' * 70}")
+        print(f"[{trace.phase.upper()}] {trace.step}")
+        print(f"{'=' * 70}")
+        print(f"\n📝 Reasoning:\n{trace.reasoning}")
+        print("\n✓ Output:")
+        for key, value in trace.outputs.items():
+            if key != "reasoning":
+                # Truncate long values for display
+                value_str = str(value)
+                if len(value_str) > 200:
+                    value_str = value_str[:200] + "..."
+                print(f"  • {key}: {value_str}")
+
+    def _log_to_mlflow(self, trace: ReasoningTrace) -> None:
+        """
+        Log reasoning trace to MLflow.
+
+        Args:
+            trace: ReasoningTrace to log
+
+        """
+        try:
+            import mlflow
+
+            # Log as artifact
+            trace_file = self.output_dir / f"{trace.step}_{trace.trace_id}.json"
+            trace_file.parent.mkdir(parents=True, exist_ok=True)
+            trace_file.write_text(json.dumps(trace.to_dict(), indent=2))
+
+            mlflow.log_artifact(str(trace_file))  # type: ignore[attr-defined]
+
+            # Log as metrics
+            mlflow.log_metrics(  # type: ignore[attr-defined]
+                {
+                    f"{trace.step}_success": 1.0,
+                    f"{trace.step}_reasoning_length": len(trace.reasoning),
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log trace to MLflow: {e}")
+
+    def end_run(self, save_traces: bool = False) -> None:
+        """
+        End tracing run.
+
+        Args:
+            save_traces: If True, save traces to file (training mode)
+
+        Examples:
+            >>> tracer.end_run(save_traces=False)
+
+            For training data collection:
+            >>> tracer.end_run(save_traces=True)
+
+        """
+        if self._mlflow_run_id:
+            try:
+                import mlflow
+
+                mlflow.end_run()  # type: ignore[attr-defined]
+                logger.info(f"Ended MLflow run: {self._mlflow_run_id}")
+            except Exception as e:
+                logger.warning(f"Failed to end MLflow run: {e}")
+            finally:
+                self._mlflow_run_id = None
+
+        # Save traces to file if training mode enabled
+        if save_traces and self._save_traces:
+            self._save_training_traces()
+
+    def _save_training_traces(self) -> None:
+        """
+        Save all traces to training data file.
+
+        Creates a JSONL file with one trace per line for easy processing.
+        """
+        output_file = self.output_dir / "training_traces.jsonl"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_file, "a") as f:
+            for trace in self.traces:
+                f.write(json.dumps(trace.to_dict()) + "\n")
+
+        logger.info(f"Saved {len(self.traces)} traces to {output_file}")
+
+    def get_traces_by_phase(self, phase: str) -> list[ReasoningTrace]:
+        """
+        Get all traces for a specific phase.
+
+        Args:
+            phase: Phase identifier (e.g., "phase1", "phase2")
+
+        Returns:
+            List of ReasoningTrace objects for the phase
+
+        """
+        return [t for t in self.traces if t.phase == phase]
+
+    def get_traces_by_step(self, step: str) -> list[ReasoningTrace]:
+        """
+        Get all traces for a specific step.
+
+        Args:
+            step: Step identifier (e.g., "extract_problem", "decide_novelty")
+
+        Returns:
+            List of ReasoningTrace objects for the step
+
+        """
+        return [t for t in self.traces if t.step == step]
+
+    def to_dict_list(self) -> list[dict[str, Any]]:
+        """
+        Convert all traces to a list of dictionaries.
+
+        Returns:
+            List of trace dictionaries
+
+        """
+        return [trace.to_dict() for trace in self.traces]
+
+
+__all__ = [
+    "ReasoningTrace",
+    "ReasoningTracer",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/infrastructure/tracing/tracer.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/services/__init__.py
+============================================================
+
+"""
+Cross-cutting services for Skills Fleet.
+
+This is the SINGLE services directory consolidating all service logic:
+
+- llm/: LLM service layer (clients, routing, fallback)
+- cache/: Caching service
+- monitoring/: Observability (traces, metrics, logging)
+- tools/: External tool integrations (filesystem, web, git)
+- conversation/: Conversation service (from core/services/)
+
+Import Guidelines:
+    from skill_fleet.services import BaseService
+    from skill_fleet.services.llm import LLMClient
+    from skill_fleet.services.conversation import ConversationEngine
+"""
+
+from __future__ import annotations
+
+# Re-export from existing core.services during migration
+from skill_fleet.core.services import (
+    AgentResponse,
+    BaseService,
+    ConfigurationError,
+    ConversationMessage,
+    ConversationSession,
+    ConversationState,
+    MessageRole,
+    ServiceError,
+    ValidationError,
+)
+
+__all__ = [
+    "AgentResponse",
+    "BaseService",
+    "ConfigurationError",
+    "ConversationMessage",
+    "ConversationSession",
+    "ConversationState",
+    "MessageRole",
+    "ServiceError",
+    "ValidationError",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/services/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/taxonomy/__init__.py
+============================================================
+
+"""Taxonomy subsystem for the agentic skills system."""
+
+from __future__ import annotations
+
+# Export submodules for direct access if needed
+from . import (
+    discovery,
+    metadata,
+    naming,
+    path_resolver,
+    skill_loader,
+    skill_registration,
+)
+from .manager import TaxonomyManager
+from .metadata import SkillMetadata
+from .naming import name_to_skill_id, skill_id_to_name, validate_skill_name
+
+__all__ = [
+    "TaxonomyManager",
+    "SkillMetadata",
+    "skill_id_to_name",
+    "name_to_skill_id",
+    "validate_skill_name",
+    # Submodules
+    "discovery",
+    "metadata",
+    "naming",
+    "path_resolver",
+    "skill_loader",
+    "skill_registration",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/taxonomy/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/taxonomy/discovery.py
+============================================================
+
+"""
+Skill discovery and agentskills.io integration utilities.
+
+Provides XML generation for agent context injection and skill discovery
+capabilities following the agentskills.io integration standard.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+from .naming import skill_id_to_name
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .metadata import SkillMetadata
+
+logger = logging.getLogger(__name__)
+
+

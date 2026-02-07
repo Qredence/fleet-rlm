@@ -1,0 +1,18 @@
+<!-- Chunk 1004: bytes 3545717-3546461, type=class -->
+class Job(Base):
+    __tablename__ = "jobs"
+    
+    id: str = Column(String, primary_key=True)
+    type: str = Column(String)  # "skill_creation", "optimization", etc
+    status: str = Column(String)  # "queued", "running", "completed", "error"
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    started_at: Optional[datetime] = Column(DateTime, nullable=True)
+    completed_at: Optional[datetime] = Column(DateTime, nullable=True)
+    result_path: Optional[str] = Column(String, nullable=True)
+    error_message: Optional[str] = Column(String, nullable=True)
+    metadata: dict = Column(JSON)  # optimizer type, config, etc
+    
+    __table_args__ = (
+        Index('idx_status_created', 'status', 'created_at'),
+    )
+

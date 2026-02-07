@@ -1,0 +1,11 @@
+<!-- Chunk 1511: bytes 6363761-6364094, type=class -->
+class TDDWorkflowState(BaseModel):
+    """TDD workflow state for job tracking."""
+
+    phase: str | None = None
+    checklist: ChecklistState = Field(default_factory=ChecklistState)
+    baseline_tests_run: bool = False
+    compliance_tests_run: bool = False
+    rationalizations_identified: list[str] = Field(default_factory=list)
+
+

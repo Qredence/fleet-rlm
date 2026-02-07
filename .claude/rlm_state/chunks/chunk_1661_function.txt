@@ -1,0 +1,56 @@
+<!-- Chunk 1661: bytes 6683314-6685101, type=function -->
+def _remove_empty_dirs(path: Path) -> None:
+    """Recursively remove empty directories and .gitkeep files."""
+    if not path.is_dir():
+        return
+
+    # First pass: Remove all .gitkeep files
+    for p in path.rglob(".gitkeep"):
+        try:
+            p.unlink()
+            print(f"Removed: {p.relative_to(path.parent.parent)}")
+        except OSError as e:
+            print(f"Error removing {p}: {e}")
+
+    # Second pass: Remove empty directories bottom up
+    for p in list(path.rglob("*"))[::-1]:
+        if p.is_dir():
+            try:
+                # Don't delete metadata directories or root itself
+                if p.name.startswith("_") or p == path:
+                    continue
+                # Check if empty
+                if not any(p.iterdir()):
+                    p.rmdir()
+                    print(f"Removed empty dir: {p.relative_to(path.parent.parent)}")
+            except OSError as e:
+                print(f"Error removing directory {p}: {e}")
+
+
+============================================================
+END FILE: src/skill_fleet/common/migration.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/common/paths.py
+============================================================
+
+"""
+Path resolution helpers for skill_fleet defaults.
+
+These helpers avoid assuming a checked-out repo and prefer packaged defaults
+when running from an installed wheel.
+
+Separately, some resources (like a seed skills taxonomy) are bundled for
+bootstrapping new working directories without requiring the repo to be cloned.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from shutil import copy2
+
+_REPO_MARKERS = (".git", "pyproject.toml")
+
+

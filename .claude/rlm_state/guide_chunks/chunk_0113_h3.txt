@@ -1,0 +1,7 @@
+<!-- Chunk 113: bytes 33409-33546, type=h3 -->
+### Example skills
+
+**Public skills repository:**
+•  GitHub: `anthropics/skills`
+•  Contains Anthropic-created skills you can customize
+

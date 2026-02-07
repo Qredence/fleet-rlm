@@ -1,0 +1,37 @@
+<!-- Chunk 1049: bytes 3768909-3769971, type=class -->
+class RedactingFormatter(logging.Formatter):
+    """Redact sensitive information from log messages."""
+
+    def format(self, record):
+        message = super().format(record)
+        # Redact API keys
+        message = re.sub(r'api[_-]?key[=\s]+\S+', 'api_key=***REDACTED***', message, flags=re.IGNORECASE)
+        # Redact tokens
+        message = re.sub(r'token[=\s]+\S+', 'token=***REDACTED***', message, flags=re.IGNORECASE)
+        return message
+```
+
+### Issue 6: Config File Paths May Be Exposed (Low Severity)
+
+**Location:** `main.py:665`, `interactive_typer.py:93`
+
+**Problem:**
+Config file error messages include full path:
+
+```python
+# main.py:665
+print(f"config error: {exc}", file=sys.stderr)
+
+# interactive_typer.py:93
+console.print(f"[red]Config error: {e}[/red]")
+```
+
+**Vulnerability:**
+If exception includes the config file path and verbose mode is enabled, it could expose:
+- Project directory structure
+- Sensitive configuration file locations
+- File system layout
+
+**Mitigation Required:**
+```python
+# In error handling, sanitize file paths

@@ -1,0 +1,27 @@
+<!-- Chunk 1585: bytes 6544361-6545151, type=function -->
+def _wait_for_api_ready(url: str, timeout: float = 30.0) -> bool:
+    """
+    Wait for the API server to be ready (accepting requests).
+
+    Args:
+        url: The base API URL (e.g., http://127.0.0.1:8000)
+        timeout: Maximum time to wait in seconds
+
+    Returns:
+        True if API is ready, False if timeout reached
+    """
+    start = time.time()
+    health_url = f"{url}/docs"  # FastAPI docs endpoint (lightweight check)
+
+    while time.time() - start < timeout:
+        try:
+            with httpx.Client(timeout=2.0) as client:
+                response = client.get(health_url)
+                if response.status_code == 200:
+                    return True
+        except (httpx.ConnectError, httpx.TimeoutException, OSError):
+            time.sleep(0.5)
+
+    return False
+
+

@@ -1,0 +1,20 @@
+<!-- Chunk 587: bytes 903290-904008, type=class -->
+class MySignature(dspy.Signature):
+    """
+    [One-line description of what this signature does]
+
+    [Optional: More detailed description of the signature's purpose,
+    when to use it, and any important considerations]
+    """
+
+    # Input fields - data provided to the program
+    input_field = dspy.InputField(desc="[Description of what this input represents]")
+    optional_input = dspy.InputField(desc="[Description of optional input]", default="")
+
+    # Output fields - data the program produces
+    output_field = dspy.OutputField(desc="[Description of what this output represents]")
+    optional_output = dspy.OutputField(desc="[Description of optional output]")
+
+
+# Example signatures for common patterns
+

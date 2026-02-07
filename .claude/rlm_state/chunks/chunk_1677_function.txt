@@ -1,0 +1,91 @@
+<!-- Chunk 1677: bytes 6697249-6700082, type=function -->
+def resolve_skill_md_path(skills_root: Path, taxonomy_path: str) -> Path:
+    """
+    Resolve the path to a skill's SKILL.md file atomically.
+
+    This function is TOCTOU (time-of-check-time-of-use) safe and
+    prevents symlink-based path traversal attacks.
+
+    Args:
+        skills_root: Root directory for skills
+        taxonomy_path: The taxonomy path to the skill (e.g., "python/fastapi")
+
+    Returns:
+        The absolute path to the SKILL.md file
+
+    Raises:
+        ValueError: If the path is invalid or escapes the skills root
+        FileNotFoundError: If the SKILL.md file doesn't exist
+
+    """
+    # Sanitize and validate taxonomy path
+    safe_taxonomy_path = sanitize_taxonomy_path(taxonomy_path)
+    if safe_taxonomy_path is None:
+        raise ValueError("Invalid path")
+
+    skills_root_resolved = skills_root.resolve()
+
+    # Resolve path atomically to prevent TOCTOU attacks
+    # resolve(strict=True) raises FileNotFoundError if path doesn't exist
+    # and resolves symlinks automatically while preserving safety
+    skill_dir = skills_root_resolved / safe_taxonomy_path
+    candidate_md = skill_dir / "SKILL.md"
+
+    # Atomic check: verify SKILL.md exists
+    # Using resolve(strict=True) is safe against TOCTOU
+    try:
+        resolved_md = candidate_md.resolve(strict=True)
+    except FileNotFoundError:
+        raise FileNotFoundError(candidate_md.as_posix()) from None
+
+    # Verify resolved path is within skills root (prevents symlink escapes)
+    try:
+        resolved_md.relative_to(skills_root_resolved)
+    except ValueError as e:
+        raise ValueError("Invalid path") from e
+
+    return resolved_md
+
+
+__all__ = [
+    "is_safe_path_component",
+    "resolve_path_within_root",
+    "sanitize_relative_file_path",
+    "sanitize_taxonomy_path",
+    "resolve_skill_md_path",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/common/security.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/common/serialization.py
+============================================================
+
+"""
+Consolidated serialization utilities for Pydantic models and DSPy outputs.
+
+This module provides unified functions for serializing Pydantic models,
+dicts, and other complex objects to JSON-serializable formats.
+Consolidates duplicate logic from phase2_generation.py.
+
+Usage:
+    from skill_fleet.common.serialization import serialize_pydantic_object
+
+    # Serialize a single object
+    result = serialize_pydantic_object(my_object, output_format="dict")
+
+    # Serialize a list of objects
+    results = serialize_pydantic_objects([obj1, obj2], output_format="dict")
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from pydantic import BaseModel
+
+

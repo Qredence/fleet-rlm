@@ -1,0 +1,42 @@
+<!-- Chunk 1084: bytes 3858708-3860264, type=function -->
+def onboard(user_id, skills_root):
+    """Interactive onboarding workflow."""
+    console.print("\n[bold cyan]Welcome to the Agentic Skills System![/bold cyan]\n")
+    console.print("Let's set up your personalized skill set.\n")
+    
+    # Initialize components
+    taxonomy = TaxonomyManager(skills_root)
+    creator = TaxonomySkillCreator(taxonomy_manager=taxonomy)
+    bootstrapper = SkillBootstrapper(
+        taxonomy_manager=taxonomy,
+        skill_creator=creator,
+        profiles_path="config/profiles/bootstrap_profiles.json"
+    )
+    
+    # Collect onboarding responses
+    responses = collect_onboarding_responses()
+    
+    # Run bootstrap process
+    console.print("\n[bold green]Setting up your skills...[/bold green]\n")
+    
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Bootstrapping skills...", total=100)
+        
+        # Run async onboarding
+        loop = asyncio.get_event_loop()
+        user_profile = loop.run_until_complete(
+            bootstrapper.onboard_user(user_id, responses)
+        )
+        
+        progress.update(task, completed=100)
+    
+    # Display results
+    console.print("\n[bold green]✓ Onboarding complete![/bold green]\n")
+    console.print(f"Profile: {user_profile['profile']['primaryRole']}")
+    console.print(f"Mounted Skills: {len(user_profile['mounted_skills'])}")
+    console.print(f"On-Demand Skills: {len(user_profile['on_demand_skills'])}")
+    
+    console.print("\n[bold]You're ready to start![/bold]")
+    console.print("Try: askill create \"your task here\"")
+
+

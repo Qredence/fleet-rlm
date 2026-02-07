@@ -1,0 +1,94 @@
+<!-- Chunk 1037: bytes 3727440-3730029, type=function -->
+def forward(
+    self,
+    skill_skeleton: dict,
+    parent_skills: str,
+    composition_strategy: str,
+    revision_feedback: str | None = None,
+) -> dict:
+    """Generate comprehensive skill content.
+
+    Args:
+        skill_skeleton: Directory structure
+        parent_skills: Context from related skills
+        composition_strategy: How skill composes with others
+        revision_feedback: Optional feedback for regeneration
+
+    Returns:
+        Dict with skill_content, capability_implementations,
+        usage_examples, best_practices, and integration_guide
+    """
+    result = self.edit(
+        skill_skeleton=json.dumps(skill_skeleton, indent=2),
+        parent_skills=parent_skills,
+        composition_strategy=composition_strategy,
+        revision_feedback=revision_feedback or "",  # NOW INCORPORATED
+    )
+
+    return {
+        "skill_content": result.skill_content,
+        "capability_implementations": safe_json_loads(
+            result.capability_implementations,
+            default={},
+            field_name="capability_implementations",
+        ),
+        "usage_examples": safe_json_loads(
+            result.usage_examples, default=[], field_name="usage_examples"
+        ),
+        "best_practices": safe_json_loads(
+            result.best_practices, default=[], field_name="best_practices"
+        ),
+        "integration_guide": result.integration_guide,
+    }
+```
+
+### 3.2 Fix Hardcoded Evolution Metadata
+
+**File**: `src/skill_fleet/agent/agent.py:1130`
+
+**Problem**: Evolution dict has empty hardcoded values.
+
+**Solution**:
+```python
+from datetime import datetime
+
+# In _save_skill method:
+evolution = EvolutionMetadata(
+    skill_id=plan["skill_metadata"]["skill_id"],
+    version=plan["skill_metadata"]["version"],
+    status="approved",
+    timestamp=datetime.now().isoformat(),
+    previous_versions=[],
+    change_summary=f"Initial creation via conversational agent with TDD verification",
+)
+```
+
+---
+
+## Phase 4: DSPy Best Practices Alignment (Low-Medium Priority)
+
+### 4.1 Centralize DSPy Configuration
+
+**Problem**: No central DSPy setup; LM configuration scattered across modules.
+
+**Solution**: Create `src/skill_fleet/llm/dspy_config.py`:
+
+```python
+"""Centralized DSPy configuration for skill_fleet.
+
+This module provides a single entry point for configuring DSPy settings
+across all skill_fleet modules, ensuring consistent LM usage and settings.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+import dspy
+import yaml
+
+from .fleet_config import build_lm_for_task, load_fleet_config
+
+

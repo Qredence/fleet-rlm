@@ -1,0 +1,15 @@
+<!-- Chunk 1658: bytes 6677753-6678105, type=class -->
+class SessionNotFoundError(SessionError):
+    """
+    Raised when a session cannot be found.
+
+    Attributes:
+        session_id: The session ID that was searched for
+
+    """
+
+    def __init__(self, message: str, *, session_id: str) -> None:
+        super().__init__(message, details={"session_id": session_id})
+        self.session_id = session_id
+
+

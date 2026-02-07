@@ -1,0 +1,17 @@
+<!-- Chunk 192: bytes 294056-294453, type=function -->
+def validate_order(order):
+    if not order.items:
+        raise ValueError("Order must have items")
+    if order.total < 0:
+        raise ValueError("Order total cannot be negative")
+    if not order.customer_id:
+        raise ValueError("Order must have customer")
+    # ... 10 more validation rules
+```
+
+## Performance Considerations
+
+### Use Generators for Large Datasets
+
+**Good:**
+```python

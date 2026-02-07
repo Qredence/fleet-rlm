@@ -1,0 +1,81 @@
+<!-- Chunk 1824: bytes 7573375-7576526, type=class -->
+class SynthesizePlan(dspy.Signature):
+    """
+    Combine all Phase 1 analyses into a coherent, executable skill plan.
+
+    Create unified plan incorporating requirements, intent, taxonomy placement,
+    dependencies, and any HITL feedback. This plan drives Phase 2 generation.
+
+    The plan should be specific enough to guide content generation but flexible
+    enough to allow creative adaptation during writing.
+    """
+
+    # Inputs
+    requirements: str = dspy.InputField(
+        desc="JSON requirements: domain, category, target_level, topics, constraints"
+    )
+    intent_analysis: str = dspy.InputField(
+        desc="JSON intent analysis: purpose, problem_statement, target_audience, skill_type, scope"
+    )
+    taxonomy_analysis: str = dspy.InputField(
+        desc="JSON taxonomy: recommended_path, path_rationale, confidence"
+    )
+    dependency_analysis: str = dspy.InputField(
+        desc="JSON dependencies: prerequisite_skills, complementary_skills"
+    )
+    user_confirmation: str = dspy.InputField(
+        desc="User feedback from HITL confirmation (empty if no HITL)", default=""
+    )
+
+    # Outputs
+    skill_name: str = dspy.OutputField(
+        desc="Skill name in kebab-case (e.g., 'async-patterns', 'component-library')"
+    )
+    skill_description: str = dspy.OutputField(
+        desc="CSO-optimized description: 'Use when...' + triggering conditions/symptoms"
+    )
+    taxonomy_path: str = dspy.OutputField(
+        desc="Final taxonomy path in format 'category/skill-name'"
+    )
+    content_outline: list[str] = dspy.OutputField(
+        desc="Structured content outline (5-15 bullet points): main sections with subsections"
+    )
+    generation_guidance: str = dspy.OutputField(
+        desc="Specific generation guidance: writing style, tone, depth, quality requirements"
+    )
+    success_criteria: list[str] = dspy.OutputField(
+        desc="3-5 measurable success criteria for generated content"
+    )
+    estimated_length: SkillLength = dspy.OutputField(
+        desc="Estimated length: short (<500 lines), medium (500-1500), long (>1500)"
+    )
+    tags: list[str] = dspy.OutputField(desc="3-7 keyword tags for categorization and search")
+    rationale: str = dspy.OutputField(
+        desc="Brief rationale explaining plan decisions and how components fit together"
+    )
+
+
+============================================================
+END FILE: src/skill_fleet/core/signatures/understanding/plan.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/signatures/understanding/requirements.py
+============================================================
+
+"""
+DSPy signature for gathering requirements from task descriptions.
+
+This signature extracts structured requirements including domain, topics,
+constraints, and ambiguities that may require HITL clarification.
+"""
+
+from typing import Literal
+
+import dspy
+
+# Type definitions for constrained outputs
+Domain = Literal["technical", "cognitive", "domain_knowledge", "tool", "meta"]
+TargetLevel = Literal["beginner", "intermediate", "advanced", "expert"]
+
+

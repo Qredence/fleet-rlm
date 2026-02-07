@@ -1,0 +1,15 @@
+<!-- Chunk 1753: bytes 7350161-7350752, type=class -->
+class IterateResult(BaseModel):
+    """Result from the Iterate step (Step 6)."""
+
+    approval_status: Literal["approved", "needs_revision", "rejected"]
+    revision_plan: RevisionPlan | None = Field(default=None, description="Plan if needs_revision")
+    evolution_metadata: EvolutionMetadata
+    next_steps: str = Field(description="Concrete next steps based on approval status")
+
+
+# =============================================================================
+# Composite Models for Full Workflow Results
+# =============================================================================
+
+

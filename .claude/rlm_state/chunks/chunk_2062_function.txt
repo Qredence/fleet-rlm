@@ -1,0 +1,16 @@
+<!-- Chunk 2062: bytes 7967126-7967585, type=function -->
+def dependency_override_cleanup():
+    """Fixture to ensure dependency overrides are cleaned up after each test.
+
+    This prevents test isolation issues where overrides from one test
+    affect subsequent tests.
+    """
+    yield
+    get_app().dependency_overrides.clear()
+
+
+# ============================================================================
+# Test Health Endpoint
+# ============================================================================
+
+

@@ -1,0 +1,20 @@
+<!-- Chunk 243: bytes 310077-310501, type=function -->
+def process_order(order):
+    if order is not None:
+        if order.is_valid():
+            if order.total > 0:
+                if order.customer.is_active:
+                    # Process order (20 lines)
+                    pass
+                else:
+                    return None
+            else:
+                return None
+        else:
+            return None
+    else:
+        return None
+```
+
+**After:**
+```python

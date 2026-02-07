@@ -1,0 +1,11 @@
+<!-- Chunk 1538: bytes 6377907-6378177, type=function -->
+def _sanitize_for_log(value: Any) -> str:
+    """
+    Sanitize a value for safe inclusion in log messages.
+
+    Removes newline and carriage return characters to mitigate log injection.
+    """
+    text = str(value)
+    return text.replace("\r", "").replace("\n", "")
+
+

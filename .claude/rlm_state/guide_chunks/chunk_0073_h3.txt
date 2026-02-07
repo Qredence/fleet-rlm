@@ -1,0 +1,7 @@
+<!-- Chunk 73: bytes 25449-25592, type=h3 -->
+### Pattern 2: Multi-MCP coordination
+
+**Use when:** Workflows span multiple services.
+
+**Example: Design-to-development handoff**
+```markdown

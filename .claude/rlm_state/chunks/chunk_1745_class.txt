@@ -1,0 +1,8 @@
+<!-- Chunk 1745: bytes 7345033-7345253, type=class -->
+class CapabilityImplementation(BaseModel):
+    """Documentation content for a capability."""
+
+    name: str = Field(description="Capability name")
+    content: str = Field(description="Markdown documentation content")
+
+

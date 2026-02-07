@@ -1,0 +1,17 @@
+<!-- Chunk 146: bytes 213804-214214, type=function -->
+def keyword_match(example, pred, trace=None):
+    """Check if required keywords are present."""
+    required_keywords = example.keywords
+    output = pred.output.lower()
+    return all(keyword.lower() in output for keyword in required_keywords)
+```
+
+## Semantic Metrics
+
+### Semantic Similarity
+
+```python
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer('all-MiniLM-L6-v2')
+

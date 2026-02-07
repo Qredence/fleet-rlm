@@ -1,0 +1,14 @@
+<!-- Chunk 51: bytes 15080-16130, type=h2 -->
+## Chapter 3: Testing and iteration
+
+Skills can be tested at varying levels of rigor depending on your needs:
+
+•  **Manual testing in Claude.ai** - Run queries directly and observe behavior. Fast iteration, no setup required.
+•  **Scripted testing in Claude Code** - Automate test cases for repeatable validation across changes.
+•  **Programmatic testing via skills API** - Build evaluation suites that run systematically against defined test sets.
+
+Choose the approach that matches your quality requirements and the visibility of your skill. A skill used internally by a small team has different testing needs than one deployed to thousands of enterprise users.
+
+**Pro Tip: Iterate on a single task before expanding**
+We’ve found that the most effective skill creators iterate on a single challenging task until Claude succeeds, then extract the winning approach into a skill. This leverages Claude’s in-context learning and provides faster signal than broad testing. Once you have a working foundation, expand to multiple test cases for coverage.
+

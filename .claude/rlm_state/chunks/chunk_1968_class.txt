@@ -1,0 +1,44 @@
+<!-- Chunk 1968: bytes 7878432-7880050, type=class -->
+class TestRefineSkill:
+    """Tests for POST /api/v1/skills/{skill_id}/refine endpoint."""
+
+    def test_refine_skill_success(self, client, sample_skill):
+        """Test successful skill refinement."""
+        refine_request = {"feedback": "Add more examples", "focus_areas": ["examples", "clarity"]}
+
+        with patch("skill_fleet.api.v1.skills.refine_skill") as mock_refine:
+            mock_refine.return_value = {
+                "job_id": "refine-job-789",
+                "status": "pending",
+                "message": "Refinement started",
+            }
+
+            response = client.post(
+                f"/api/v1/skills/{sample_skill['skill_id']}/refine", json=refine_request
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "job_id" in data
+            assert data["status"] == "pending"
+
+    def test_refine_skill_not_found(self, client):
+        """Test 404 when refining non-existent skill."""
+        response = client.post(
+            "/api/v1/skills/non-existent-id/refine", json={"feedback": "Test feedback"}
+        )
+
+        assert response.status_code == 404
+
+    def test_refine_skill_missing_feedback(self, client, sample_skill):
+        """Test validation error when feedback is missing."""
+        response = client.post(f"/api/v1/skills/{sample_skill['skill_id']}/refine", json={})
+
+        assert response.status_code == 422
+
+
+# =============================================================================
+# Test List Skills Endpoint
+# =============================================================================
+
+

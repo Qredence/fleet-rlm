@@ -1,0 +1,31 @@
+<!-- Chunk 599: bytes 917842-918525, type=class -->
+class CustomCache(dspy.clients.Cache):
+
+    def cache_key(self, request, ignored_args_for_cache_key=None):
+        # Extract only relevant parts of request
+        messages = request.get("messages", [])
+        return sha256(ujson.dumps(messages, sort_keys=True).encode()).hexdigest()
+
+# Bad: Default cache key for all arguments
+```
+
+### 3. Clear Cache When Changing Programs
+
+```python
+# Good: Clear cache after program changes
+import dspy
+
+# Modify program
+program = MyModifiedProgram()
+
+# Clear cache to avoid stale results
+dspy.cache.clear()
+
+# Use modified program
+result = program(input="test")
+```
+
+### 4. Monitor Cache Hit Rate
+
+```python
+# Good: Monitor cache effectiveness

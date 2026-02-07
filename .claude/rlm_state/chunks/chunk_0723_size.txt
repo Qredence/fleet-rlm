@@ -1,0 +1,2663 @@
+<!-- Chunk 723: bytes 2398285-2548285, type=size -->
+def hello():
+    """Returns a standardized hello message."""
+    return {"message": "Hello, world! System is operational."}
+```
+
+---
+
+## Anatomy of a Minimal Skill
+
+Every skill MUST contain three primary components to be considered "production-ready" within the system:
+
+1.  **The Manifest (`metadata.json`):** The identity card of the skill. It defines the `skill_id`, versioning, and dependencies.
+2.  **The Documentation (`SKILL.md`):** The manual for the Agent. It uses "Common Skill Optimization" (CSO) to tell the agent *when* and *how* to use the skill.
+3.  **The Logic Directory:** Contains the executable code (e.g., Python scripts or JavaScript modules).
+
+---
+
+## Core Patterns
+
+### Pattern 1: Naming Conventions
+❌ **NEVER** use CamelCase or spaces in skill names (e.g., `HelloWorld` or `hello world`).
+✅ **ALWAYS** use kebab-case for directory names and `skill_id` (e.g., `hello-world`).
+
+### Pattern 2: Dependency Declaration
+❌ **NEVER** rely on "hidden" dependencies that aren't listed in `metadata.json`.
+✅ **ALWAYS** explicitly list dependencies, even for core communication modules, to ensure proper load ordering.
+
+### Pattern 3: Response Structure
+❌ **NEVER** return a raw, unformatted string (e.g., `return "Hello"`).
+✅ **ALWAYS** return a structured dictionary or JSON object to maintain compatibility with `_core/communication`.
+
+### Pattern 4: Directory Depth
+❌ **NEVER** nest skill logic deep within unrelated folders (e.g., `skills/misc/test/hello/`).
+✅ **ALWAYS** follow the `skills/{category}/{skill-name}/` flat hierarchy for discovery efficiency.
+
+### Pattern 5: Metadata Descriptions
+❌ **NEVER** provide vague descriptions like "A test skill."
+✅ **ALWAYS** provide triggering conditions in the description (e.g., "Use when verifying system integrity...").
+
+---
+
+## Real-World Impact
+
+Implementing and maintaining a `hello-world` baseline provides measurable benefits:
+- **Reduction in Bootstrap Time:** New developers can clone the atomic skill and start coding in < 60 seconds.
+- **System Readiness Signal:** Automating a "Hello World" check after CI/CD deployments ensures zero-configuration failure detection.
+- **Standardization Compliance:** Forces all new skills to adopt the correct directory and metadata patterns from day one.
+
+---
+
+## Validation
+
+Verify your `hello-world` installation using the following CLI commands:
+
+### Skill Discovery
+Confirm the system sees the skill and its metadata:
+```bash
+agent skills list --filter _core/hello-world
+```
+
+### Logic Execution
+Run the primary function to verify the runtime environment:
+```bash
+agent call hello-world:hello
+```
+
+### Metadata Integrity
+Validate that the `metadata.json` conforms to the system schema:
+```bash
+agent skills validate _core/hello-world
+```
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='_core/hello-world' name='hello-world' description=\"Use when you need to verify the integrity of a new agent installation or require a minimal, functional template for bootstrapping new skill development. Triggers include initial setup validation, testing skill-loading mechanisms, or establishing a 'clean slate' for prototyping.\" version='1.0.0' type='technical' weight='lightweight' load_priority='on_demand' dependencies=['_core/communication'] capabilities=['skill-bootstrapping', 'system-readiness-check'] category='_core' keywords=[] scope='Covers directory layout, manifest creation, and static string return. Does not cover complex logic, tool-calling, or state persistence.' see_also=[] tags=['boilerplate', 'getting-started', 'minimal-example', 'bootstrap', 'system-verification'] taxonomy_path='_core/hello-world' allowed_tools=None skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/artifacts/validation_report.json
+============================================================
+
+"passed=True status='passed' score=0.98 errors=[] warnings=[] checks_performed=['check_frontmatter', 'check_metadata_match', 'check_naming_convention', 'check_sections_presence', 'check_pattern_count', 'check_code_examples'] checks=[ValidationCheckItem(id='check_frontmatter', check='Frontmatter validation', passed=True, message='Frontmatter is present and correctly formatted with name and description.', severity='info', required=True), ValidationCheckItem(id='check_metadata_match', check='Metadata consistency', passed=True, message='The SKILL.md frontmatter matches the provided SkillMetadata object.', severity='info', required=True), ValidationCheckItem(id='check_naming_convention', check='Kebab-case naming', passed=True, message=\"Skill name 'hello-world' follows the mandatory kebab-case convention.\", severity='info', required=True), ValidationCheckItem(id='check_sections_presence', check='Required sections from content plan', passed=True, message='All planned sections (Core Principle, Anatomy, Patterns, Impact, Validation) are present.', severity='info', required=True), ValidationCheckItem(id='check_pattern_count', check='Pattern contrasts count', passed=True, message='Exactly 5 pattern contrasts (\u274c/\u2705) were provided as per the content plan.', severity='info', required=True), ValidationCheckItem(id='check_code_examples', check='Code example quality', passed=True, message='Code snippets are minimal, clean, and immediately executable.', severity='info', required=True)] feedback='The skill documentation is excellent and adheres strictly to the agentskills.io specification and the provided content plan.'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/artifacts
+end_time: 1769531653895
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: d9ca0c80f73349639d153bbd2fda0e7e
+run_name: Create a simple hello world skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769531555711
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/d9ca0c80f73349639d153bbd2fda0e7e/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.88,
+  "strengths": [
+    "Effective use of \u274c Anti-Pattern vs \u2705 Production Pattern contrasts, specifically regarding 'Inline Redundancy' vs 'Reusable Schemas'.",
+    "Clear 'Core Principle' statement that establishes a strong 'API-First' stance.",
+    "Inclusion of modern validation tools (Redocly/Spectral) and a concrete 'Success Criteria' checklist.",
+    "Practical focus on LLM tool-calling compatibility, which is highly relevant for AI-driven development."
+  ],
+  "weaknesses": [
+    "The 'Quick Start' template is extremely minimal and lacks a response schema, which slightly contradicts the core principle of being schema-driven.",
+    "Missing mention of common intermediate-level complexities like 'oneOf' or 'anyOf' for polymorphic responses.",
+    "Does not address versioning strategies beyond the info/version field (e.g., URL vs Header versioning)."
+  ],
+  "recommendations": [
+    "Update the 'Quick Start' template to include a minimal schema reference for the /health endpoint to reinforce the schema-driven principle.",
+    "Add a section or example demonstrating the use of 'oneOf' for handling multiple possible success/error objects, which is common at the intermediate level.",
+    "Include a specific example of how the 'description' field influences LLM tool-calling performance, as mentioned in the Impact section.",
+    "Add a recommendation to use 'tags' for grouping operations, which is essential for organized documentation and SDK generation."
+  ],
+  "audience_alignment": 0.95,
+  "rationale": "The skill content is of high quality and adheres closely to the 'Iron Law' style of documentation. It provides a clear core principle (API-First Design) and utilizes strong contrast patterns (\u274c/\u2705) to illustrate best practices versus anti-patterns. The technical depth is appropriate for an intermediate audience, covering advanced OAS 3.1 concepts like `allOf`, `writeOnly`, and global security overrides. The inclusion of validation tools (Redocly, Spectral) and specific success criteria makes the skill actionable and production-ready. It also bridges the gap between traditional REST development and modern LLM tool-calling contexts, making it highly relevant.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.4619565217391303,
+    "pattern_count": 5,
+    "has_core_principle": false,
+    "has_strong_guidance": false,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 7,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns",
+      "Missing core principle statement (add '**Core principle:**')",
+      "Missing strong guidance (add imperative rules like 'NO X WITHOUT Y')"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Excellent pattern coverage (5 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Rich code examples (7 blocks)",
+      "Has Good/Bad contrast examples",
+      "Adequate description quality"
+    ]
+  },
+  "calibrated_score": 0.4619565217391303
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/skill_content.md
+============================================================
+
+---
+name: openapi-integration
+description: Use when an API lacks a machine-readable contract, when integrating external REST services into LLM tool-calling ecosystems, or when developers face manual documentation overhead. This skill provides the standard for defining paths, schemas, and security requirements to create a single source of truth for API consumers.
+---
+
+# OpenAPI Integration (OAS 3.1)
+
+Establish a machine-readable "Single Source of Truth" for RESTful services using the OpenAPI Specification. This skill ensures your API is discoverable, testable, and compatible with automated client generation and LLM tool-calling ecosystems.
+
+## Core Principle
+**API-First Design:** The OpenAPI document is the source of truth, not a byproduct of the code. Documentation MUST be declarative, versioned, and schema-driven to enable automation and cross-team consistency.
+
+## When to Use This Skill
+- **Contract-First Development:** Before writing backend code to align stakeholders on API behavior.
+- **LLM Tool Integration:** When exposing internal services to AI agents via MCP or other tool-calling frameworks.
+- **Automated SDK Generation:** To generate client libraries (TypeScript, Python, Go) without manual effort.
+- **Breaking Change Detection:** Using the schema to validate that updates do not break existing consumers.
+
+## Quick Start (Minimal Template)
+
+Create a `openapi.yaml` file with this baseline structure:
+
+```yaml
+openapi: 3.1.0
+info:
+  title: Service Name API
+  version: 1.0.0
+  description: Brief description of the service capabilities.
+servers:
+  - url: https://api.production.com/v1
+    description: Production server
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service is operational
+```
+
+## Core Patterns
+
+### 1. Path & Operation Design
+Every endpoint MUST have a `summary`, `operationId`, and at least one success/error response.
+
+❌ **Anti-Pattern: Vague Definitions**
+```yaml
+/users/{id}:
+  get:
+    responses:
+      '200':
+        description: OK
+```
+*Why: Missing `operationId` breaks SDK generation; missing schema makes the response useless for tools.*
+
+✅ **Production Pattern: Explicit Operations**
+```yaml
+/users/{userId}:
+  get:
+    summary: Get user profile
+    operationId: getUserById
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '200':
+        description: User found
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      '404':
+        $ref: '#/components/responses/NotFound'
+```
+
+### 2. Request & Response Modeling
+Use `components/schemas` to define reusable data structures. NEVER define complex objects inline within paths.
+
+❌ **Anti-Pattern: Inline Redundancy**
+```yaml
+# Inside a POST path
+requestBody:
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          name: { type: string }
+          email: { type: string }
+```
+
+✅ **Production Pattern: Reusable Schemas**
+```yaml
+components:
+  schemas:
+    UserBase:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string, example: "Jane Doe" }
+        email: { type: string, format: email }
+    
+    UserCreate:
+      allOf:
+        - $ref: '#/components/schemas/UserBase'
+        - type: object
+          properties:
+            password: { type: string, writeOnly: true }
+```
+
+### 3. Security Implementation
+Centralize security schemes to avoid duplicating logic across every endpoint.
+
+✅ **Production Pattern: Global vs. Local Security**
+```yaml
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+# Apply globally
+security:
+  - bearerAuth: []
+
+paths:
+  /public/info:
+    get:
+      security: [] # Explicitly override for public endpoints
+      responses:
+        '200': { description: "Public data" }
+```
+
+## Real-World Impact
+- **Integration Speed:** Reduces developer onboarding time by 60-80% through interactive docs (Swagger/ReDoc).
+- **Quality Assurance:** Enables automated contract testing using tools like `Dredd` or `Schemathesis`.
+- **LLM Readiness:** Properly defined `description` fields in OpenAPI files allow LLMs to accurately select tools for complex tasks.
+
+## Validation Section
+
+### CLI Validation
+ALWAYS validate your OpenAPI file before committing:
+```bash
+# Using Redocly CLI (Recommended)
+npx @redocly/cli lint openapi.yaml
+
+# Using Spectral
+npx @stoplight/spectral lint openapi.yaml
+```
+
+### Success Criteria
+1. **No Linting Errors:** 0 errors from a standard OAS linter.
+2. **Schema Coverage:** Every 2xx, 4xx, and 5xx response has a defined schema.
+3. **Unique OperationIDs:** No duplicate `operationId` values across the document.
+4. **Parameter Types:** All path/query parameters have explicit types (string, integer, etc.).
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='mcp_capabilities/openapi-integration' name='openapi-integration' description='Use when an API lacks a machine-readable contract, when integrating external REST services into LLM tool-calling ecosystems, or when developers face manual documentation overhead. This skill provides the standard for defining paths, schemas, and security requirements to create a single source of truth for API consumers.' version='1.0.0' type='technical' weight='medium' load_priority='task_specific' dependencies=[] capabilities=[] category='mcp_capabilities' keywords=['oas', 'api-contract', 'restful', 'mcp-tooling', 'schema-definition'] scope='Covers OpenAPI 3.0/3.1 structural components (info, paths, components). Does not cover backend code generation, server-side implementation, or CI/CD deployment pipelines.' see_also=['mcp_capabilities/tool_integration'] tags=['openapi', 'swagger', 'rest-api', 'api-documentation', 'json-schema', 'yaml'] taxonomy_path='' allowed_tools=['write', 'read_file', 'bash'] skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/validation_report.json
+============================================================
+
+"passed=True status='passed' score=0.88 errors=[] warnings=['Content plan requested 5 patterns, only 3 distinct pattern groups were provided.', \"Missing 'Paginated list response' and 'Error response' patterns from plan.\"] checks_performed=['Frontmatter validation', 'Kebab-case name', 'Required sections', 'Plan alignment', 'Code syntax', 'Metadata consistency'] checks=[ValidationCheckItem(id='V001', check='Frontmatter validation', passed=True, message='', severity='critical', required=True), ValidationCheckItem(id='V002', check='Kebab-case name check', passed=True, message='', severity='critical', required=True), ValidationCheckItem(id='V003', check='Content plan alignment', passed=False, message='Missing specific patterns for Pagination and Error Standardization requested in plan.', severity='warning', required=True), ValidationCheckItem(id='V004', check='Anti-pattern/Best practice contrasts', passed=True, message='', severity='critical', required=True), ValidationCheckItem(id='V005', check='Metadata consistency', passed=True, message='', severity='critical', required=True)] feedback='The skill content is high quality and follows the specification. However, the original content plan requested 5 specific patterns, and the current draft combines some and omits the pagination/error patterns.'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/db253a52a21b4e7eae4438bab60a2195/artifacts
+end_time: 1769530844879
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: db253a52a21b4e7eae4438bab60a2195
+run_name: Create an OpenAPI skill for REST endpoints
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769530792744
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/db253a52a21b4e7eae4438bab60a2195/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e0e7359773184e54b143e1010e899f65/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e0e7359773184e54b143e1010e899f65/artifacts
+end_time: 1769530129390
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e0e7359773184e54b143e1010e899f65
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769530078254
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e0e7359773184e54b143e1010e899f65/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e2272e8aba914f44b284aed908b8b949/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e2272e8aba914f44b284aed908b8b949/artifacts
+end_time: 1769513450580
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e2272e8aba914f44b284aed908b8b949
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513450555
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e2272e8aba914f44b284aed908b8b949/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e4bd32eaca2f4235b430508f8677ef86/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e4bd32eaca2f4235b430508f8677ef86/artifacts
+end_time: 1769516243368
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e4bd32eaca2f4235b430508f8677ef86
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769516218431
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e4bd32eaca2f4235b430508f8677ef86/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e6577d1cdfde45e49897b97f12c83d66/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e6577d1cdfde45e49897b97f12c83d66/artifacts
+end_time: 1769513275699
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e6577d1cdfde45e49897b97f12c83d66
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513214294
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e6577d1cdfde45e49897b97f12c83d66/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.88,
+  "strengths": [
+    "Excellent use of \u274c/\u2705 contrast patterns for common design mistakes like versioning and operation naming.",
+    "Strong, authoritative 'Core Principle' that sets the correct mindset for contract-first development.",
+    "Practical integration of external validation tools (Spectral) which moves the skill beyond syntax into workflow.",
+    "Clear explanation of why certain fields, like operationId, are critical for automation and SDK generation."
+  ],
+  "weaknesses": [
+    "Missing guidance on 'requestBody' objects, which are essential for any API performing POST, PUT, or PATCH operations.",
+    "Lacks coverage of 'securitySchemes' in the components section, a critical part of professional API contracts.",
+    "Does not discuss the use of 'oneOf', 'anyOf', or 'allOf', which are key intermediate/advanced features for polymorphic data modeling.",
+    "The 'Success Criteria' are somewhat high-level and could benefit from more technical depth regarding schema integrity."
+  ],
+  "recommendations": [
+    "Add a dedicated section for 'Request Bodies' illustrating how to use '$ref' for payload schemas.",
+    "Include a basic 'Security Schemes' example in the components section to demonstrate how to define Bearer or API Key authentication.",
+    "Enhance the 'Modeling Data' section with an example of 'allOf' to demonstrate schema inheritance/composition.",
+    "Add a 'Breaking Changes' warning in the validation section to explain how OAS can be used for contract testing."
+  ],
+  "audience_alignment": 0.9,
+  "rationale": "The content is of high quality and aligns well with the intermediate target level. It establishes a strong 'Core Principle' (Contract as Single Source of Truth) and provides clear, prescriptive guidance. The use of contrast patterns (Anti-Pattern vs. Production Pattern) is particularly effective for teaching professional standards. Technical examples are accurate and use modern OpenAPI 3.1.0 conventions. The inclusion of a validation section with real-world tooling (Spectral) adds practical value. However, the guide is slightly incomplete for a 'comprehensive' style as it omits request body definitions and security schemes, which are standard in production APIs.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.4770652173913043,
+    "pattern_count": 2,
+    "has_core_principle": false,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 10,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing Core Patterns section",
+      "Limited patterns (2), target is 5+",
+      "Missing key insights after patterns",
+      "Missing core principle statement (add '**Core principle:**')"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Rich code examples (10 blocks)",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "Adequate description quality"
+    ]
+  },
+  "calibrated_score": 0.4770652173913043
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/skill_content.md
+============================================================
+
+---
+name: openapi-specification
+description: Use when API documentation is inconsistent, outdated, or manually maintained, leading to integration friction. Trigger this skill when you need to define a single source of truth for RESTful services, share machine-readable contracts with frontend teams, or automate client-side SDK generation.
+---
+
+# OpenAPI Specification (3.1.0)
+
+The OpenAPI Specification (OAS) is the industry-standard framework for defining RESTful API contracts. It provides a machine-readable format that describes every aspect of an API: endpoints, input parameters, authentication, and response structures.
+
+## Core Principle
+**The API Contract is the Single Source of Truth.**
+In a mature development lifecycle, the OpenAPI document is the authoritative definition of the system. If the implementation deviates from the specification, the implementation is considered "broken." NEVER allow the code to dictate the contract post-hoc; ALWAYS design the contract first to ensure cross-team alignment.
+
+## When to Use
+- **Contract-First Development**: Before writing a single line of backend code to align stakeholders.
+- **Client SDK Generation**: When you need to generate TypeScript/Python/Java clients automatically.
+- **Automated Testing**: Using the spec to drive contract testing or fuzzing.
+- **Documentation**: Providing interactive "Try it out" UIs (e.g., Swagger UI, Redoc).
+
+## Quick Start
+Every OpenAPI document MUST begin with the version and basic metadata.
+
+```yaml
+openapi: 3.1.0
+info:
+  title: "Order Management API"
+  version: "1.0.0"
+  description: "Handles customer orders and fulfillment status."
+  contact:
+    name: "API Support"
+    email: "support@example.com"
+servers:
+  - url: "https://api.example.com/v1"
+    description: "Production Server"
+paths: {}
+components:
+  schemas: {}
+```
+
+## 1. Anatomy of an OpenAPI Document
+A valid document is composed of hierarchical objects. The `info` object is mandatory for identifying the API version (which follows Semantic Versioning) versus the specification version.
+
+### ❌ Anti-Pattern: Version Confusion
+```yaml
+# ❌ INCORRECT: Mixing API version with OpenAPI version
+info:
+  title: "My API"
+  version: "3.1.0" # This is the API's version, not the tool version
+```
+
+### ✅ Production Pattern: Precise Metadata
+```yaml
+# ✅ CORRECT: Clear separation
+openapi: 3.1.0
+info:
+  title: "Inventory Service"
+  version: "2.4.1" # Semantic version of YOUR API logic
+  license:
+    name: "Apache 2.0"
+    url: "https://www.apache.org/licenses/LICENSE-2.0.html"
+```
+
+---
+
+## 2. Defining Paths and Operations
+Paths define the endpoints, and operations (GET, POST, etc.) define the actions.
+
+### Operation IDs
+The `operationId` MUST be unique across the entire API. It is used by generators as the function name in the client SDK.
+
+### ❌ Anti-Pattern: Implementation-Leaking Paths
+```yaml
+# ❌ INCORRECT: Using verbs in paths or missing operationIds
+paths:
+  /getUserData:
+    get:
+      responses:
+        '200':
+          description: OK
+```
+
+### ✅ Production Pattern: Resource-Oriented Paths
+```yaml
+# ✅ CORRECT: Noun-based resources and explicit operationIds
+paths:
+  /users/{userId}:
+    get:
+      summary: "Retrieve user details"
+      operationId: "getUserById"
+      parameters:
+        - name: "userId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        '200':
+          description: "User details retrieved successfully"
+```
+
+---
+
+## 3. Describing Request Parameters
+Parameters can reside in the `path`, `query`, `header`, or `cookie`.
+
+| Location | Usage | Example |
+| :--- | :--- | :--- |
+| `path` | Identify a specific resource. | `/orders/{orderId}` |
+| `query` | Filter, sort, or paginate results. | `?status=shipped&limit=10` |
+| `header` | Metadata like `X-Request-ID` or `Authorization`. | `X-Api-Key: abc123` |
+
+### ❌ Anti-Pattern: Resource IDs in Query
+```yaml
+# ❌ INCORRECT: Using query params for primary resource identity
+/orders?id=123
+```
+
+### ✅ Production Pattern: Logical Parameter Scoping
+```yaml
+# ✅ CORRECT: Path for ID, Query for modifiers
+/orders/123?include_details=true
+```
+
+---
+
+## 4. Modeling Data with Components
+Reusability is the hallmark of a professional specification. Use `components/schemas` to define data structures once and reference them using `$ref`.
+
+### ❌ Anti-Pattern: Inline Redundancy
+```yaml
+# ❌ INCORRECT: Defining the same User object in every response
+responses:
+  '200':
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+```
+
+### ✅ Production Pattern: Centralized Schemas
+```yaml
+components:
+  schemas:
+    User:
+      type: object
+      required: [id, username]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+          minLength: 3
+    Error:
+      type: object
+      properties:
+        code: { type: integer }
+        message: { type: string }
+
+paths:
+  /users/{userId}:
+    get:
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+```
+
+---
+
+## 5. Handling Responses and Status Codes
+Every operation MUST define at least one successful response (2xx) and SHOULD define common error responses (4xx, 5xx).
+
+### Status Code Standards
+- **200 OK**: Request succeeded.
+- **201 Created**: Resource created (usually via POST).
+- **400 Bad Request**: Client-side validation error.
+- **401 Unauthorized**: Missing or invalid credentials.
+- **404 Not Found**: Resource does not exist.
+
+---
+
+## Real-World Impact
+- **0% Integration Drift**: Frontend and Backend stay in sync via shared types.
+- **80% Reduction in SDK Maintenance**: Generate clients automatically for 5+ languages.
+- **Instant Documentation**: High-quality, interactive docs updated on every commit.
+
+## Validation
+ALWAYS validate your specification before committing. Use a CLI tool like `spectral`.
+
+```bash
+# Install linting tool
+npm install -g @stoplight/spectral-cli
+
+# Run linting against your file
+spectral lint openapi.yaml
+```
+
+**Success Criteria:**
+1. Zero "Error" level issues reported.
+2. All `$ref` pointers resolve correctly.
+3. Every operation has a summary and description.
+4. All schemas have defined types.
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='api/openapi-specification' name='openapi-specification' description='Use when API documentation is inconsistent, outdated, or manually maintained, leading to integration friction. Trigger this skill when you need to define a single source of truth for RESTful services, share machine-readable contracts with frontend teams, or automate client-side SDK generation.' version='1.0.0' type='technical' weight='medium' load_priority='task_specific' dependencies=['api/rest-fundamentals', 'data/json-yaml-syntax'] capabilities=[] category='api' keywords=['openapi', 'swagger', 'api-contract', 'rest-api', 'api-design', 'yaml-schema'] scope='Covers OpenAPI 3.0/3.1 core objects including Info, Paths, Operations, Parameters (Path/Query/Header), Request Bodies, and Component Schemas. Does not cover advanced OAuth2 scopes, vendor-specific x-extensions, or specific UI rendering tools like Swagger UI.' see_also=['data/json-schema', 'api/security-concepts'] tags=['api-design', 'documentation', 'contract-first', 'backend-development'] taxonomy_path='api/openapi-specification' allowed_tools=None skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/validation_report.json
+============================================================
+
+"passed=True status='passed' score=0.98 errors=[] warnings=[] checks_performed=['frontmatter_validation', 'metadata_consistency', 'section_completeness', 'example_quality', 'anti_pattern_presence', 'yaml_validity'] checks=[ValidationCheckItem(id='spec_compliance_frontmatter', check='Validate frontmatter name and description', passed=True, message='Frontmatter name is kebab-case and description matches metadata exactly.', severity='critical', required=True), ValidationCheckItem(id='content_completeness', check='Check for required sections from content plan', passed=True, message='All 7 sections from the content plan are present and well-structured.', severity='critical', required=True), ValidationCheckItem(id='pattern_quality', check='Verify \u274c/\u2705 contrast blocks', passed=True, message='Each major section includes clear anti-pattern vs. production-pattern comparisons.', severity='info', required=True), ValidationCheckItem(id='schema_requirement', check='Validate schema count in components', passed=True, message='Found 5 reusable models (User, Address, Product, Order, Error) as required by success criteria.', severity='warning', required=True)] feedback='The skill is excellent, follows all architectural guidelines, and meets the specific success criteria of the content plan. It provides high-quality, valid YAML examples and clear conceptual guidance.'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/artifacts
+end_time: 1769533782953
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e6d093f1a9b84dc2b0d22eccc4e1ea3b
+run_name: Create an OpenAPI skill for REST endpoints
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769533599959
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e6d093f1a9b84dc2b0d22eccc4e1ea3b/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e7a988a6dd65434b936a5787a9702087/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e7a988a6dd65434b936a5787a9702087/artifacts
+end_time: 1769536368756
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e7a988a6dd65434b936a5787a9702087
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769536320217
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e7a988a6dd65434b936a5787a9702087/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e897846770f54bebb2940d2c214c8a40/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e897846770f54bebb2940d2c214c8a40/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e897846770f54bebb2940d2c214c8a40
+run_name: test endpoint fix
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769515975747
+status: 1
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e897846770f54bebb2940d2c214c8a40/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/e8dff8fedff046ad891e71230b396110/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/e8dff8fedff046ad891e71230b396110/artifacts
+end_time: 1769513143378
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: e8dff8fedff046ad891e71230b396110
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513143337
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/e8dff8fedff046ad891e71230b396110/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.92,
+  "strengths": [
+    "Clear multi-tier variable architecture (Primitive/Semantic/Component) with specific naming examples.",
+    "Strong implementation of the 'Slot' component pattern which solves for complex layout flexibility.",
+    "Highly actionable 'Validation & Quality Audit' checklist that enforces system integrity.",
+    "Excellent use of \u274c/\u2705 contrasts to discourage legacy workflows like 'Variant Bloat'.",
+    "Strong architectural advice on multi-file library strategies to prevent file performance degradation."
+  ],
+  "weaknesses": [
+    "The 'CLI/Tooling Audit' section is slightly vague, as Figma lacks a native CLI and relies on 3rd party API integrations or plugins.",
+    "Typography tokens are mentioned in the Foundations section but omitted from the naming convention table.",
+    "Lacks mention of Figma 'Modes' which is the primary mechanism for switching between the Semantic variables mentioned."
+  ],
+  "recommendations": [
+    "Add a section on 'Variable Modes' to explain how to practically implement the Light/Dark mode mentioned in the 'When to Use' section.",
+    "Expand the Variable Architecture table to include a Typography row (e.g., 'font-size/16' to 'text/body-md').",
+    "Add an accessibility check to the Validation section, specifically regarding contrast ratios for Semantic color pairings.",
+    "Include a brief naming convention guide for Auto Layout layers to ensure the 'Layer Naming' audit point is actionable."
+  ],
+  "audience_alignment": 0.95,
+  "rationale": "The skill content is exceptionally high quality, adhering to the \"Iron Law\" of documentation by providing definitive, authoritative guidance (using \"MUST\" and \"NEVER\"). It moves beyond basic tool usage into architectural theory suitable for an intermediate audience. The inclusion of the \"Slot\" pattern and a multi-tier token strategy demonstrates a deep understanding of production-grade design systems. The use of \u274c/\u2705 contrasts effectively highlights common pitfalls (Variant Bloat, Hardcoded hexes). The quality score is high because it includes a practical validation checklist and addresses developer handoff\u2014a critical aspect of design systems. Minor improvements could be made in detailing typography tokens and explaining Variable \"Modes\" for theme switching.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.6304347826086955,
+    "pattern_count": 4,
+    "has_core_principle": true,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 1,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Good pattern coverage (4 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Has clear core principle statement",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "Adequate description quality"
+    ]
+  },
+  "calibrated_score": 0.6304347826086955
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/skill_content.md
+============================================================
+
+---
+name: figma-design-systems
+description: Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.
+---
+
+# Figma Design Systems Architecture
+
+Design systems in Figma are not merely "UI Kits"—they are technical products that serve as the single source of truth for design and code. You MUST treat your Figma files as logic-driven frameworks, utilizing multi-tier variables and optimized component properties to ensure scalability and developer alignment.
+
+## The Core Principle: Systems Over Assets
+A design system is a language of logic, not a collection of parts. Every element must be governed by a **Token-First** philosophy. If a value (color, spacing, radius) exists in the UI, it MUST be tied to a semantic variable. Fragmented, hardcoded values are technical debt.
+
+## When to Use
+- **Scaling Product Teams:** Multiple designers working on different features requiring a shared language.
+- **Multi-Brand/Multi-Platform:** Rebranding or supporting Light/Dark modes via a single component library.
+- **Handoff Friction:** Developers are guessing spacing, hex codes, or component behavior during implementation.
+- **Library Performance Issues:** Large Figma files are lagging due to excessive variants (Variant Bloat).
+
+## Quick Start: The Systemic Setup
+
+1.  **Initialize Variables:** Open Local Variables. Create a `Primitives` collection (e.g., `blue-500`) and a `Semantic` collection (e.g., `color-action-primary-default`). Map Primitives to Semantics.
+2.  **Define Layout:** Set a grid and spacing scale (e.g., 4px or 8px base). Create variables for `spacing-xs`, `spacing-sm`, etc.
+3.  **Construct Base Components:** Build an atom (e.g., a button label) using Auto Layout (`Shift + A`).
+4.  **Apply Component Properties:** Add Text and Boolean properties to the component to handle logic without creating extra variants.
+5.  **Publish:** Move the component to a dedicated "Components" library file and publish to the Team Library.
+
+---
+
+## Core Patterns
+
+### 1. Multi-tier Variable Architecture (Tokens)
+Variables provide the logic for themes (Light/Dark) and brands. ALWAYS use a three-tier system to decouple technical values from design intent.
+
+| Tier | Purpose | Example Naming |
+| :--- | :--- | :--- |
+| **Primitive** | Global raw values (Do not use in UI) | `color/blue/500`, `size/16` |
+| **Semantic** | Intent-based aliases (Primary use in UI) | `bg/surface-primary`, `spacing/gap-md` |
+| **Component** | Specific overrides (Used for overrides) | `button/bg-hover`, `header/height-fixed` |
+
+**The Contrast:**
+- ❌ **Legacy:** Selecting `#007BFF` directly or using a Style named "Blue 500."
+- ✅ **Systematic:** Assigning the `action-primary-default` variable, which points to `blue-500`.
+
+### 2. Component Construction: The Property-First Method
+Variants create file bloat and performance lag. You MUST use Component Properties to manage state and content wherever possible.
+
+**The Contrast:**
+- ❌ **Anti-pattern:** Creating 24 variants of a button just to toggle an icon on/off or change text.
+- ✅ **Production Pattern:** Use one variant with a **Boolean Property** for the icon visibility and a **Text Property** for the label. Use **Instance Swap** properties to allow icon changes without detaching.
+
+### 3. The 'Slot' Component Pattern
+For complex organisms (Modals, Sidebars, Cards), use "Slots" to maintain system integrity while allowing content flexibility.
+
+- **Mechanism:** Create a placeholder component called `_internal/slot`. Inside your Modal component, place an instance of this slot. 
+- **Usage:** In the consumer file, use the **Instance Swap** property to replace the slot with a specific content local component.
+
+### 4. Library Architecture (Multi-file Strategy)
+NEVER put foundations (colors, grids) and complex components (tables, modals) in the same file for large-scale systems.
+
+- **Foundations File:** Primitives, Semantic Variables, Icons, Typography.
+- **Components File:** Atoms and Molecules that consume the Foundations library.
+- **Prototyping File:** Page-level layouts that consume the Components library.
+
+---
+
+## Real-World Impact: Design Ops Metrics
+Implementing a Figma Design System creates measurable ROI:
+- **Handoff Efficiency:** Reduction in "red-lining" time. Developers use Figma Dev Mode to see variable names that match CSS variables/Tailwind config.
+- **Maintenance Speed:** Global updates (e.g., changing a brand color) take minutes instead of weeks across 100+ files.
+- **Consistency:** Component adoption tracking (via Figma Analytics) ensures >90% of UI is built using system-owned components.
+
+---
+
+## Validation & Quality Audit
+
+Before publishing any component or library update, run this checklist:
+
+1.  **Variable Linkage:** Is every color, spacing, and radius value linked to a Semantic Variable? (Use the "Selection Colors" panel to check for "raw" hex codes).
+2.  **Auto Layout:** Does the component respond correctly when the container is resized? (Test "Hug," "Fill," and "Fixed" settings).
+3.  **Layer Naming:** Are layers named semantically (e.g., `Container` vs `Frame 5132`)?
+4.  **Property Logic:** Are Boolean and Instance Swap properties used to reduce variant count by at least 50%?
+5.  **Documentation:** Does the component have a description and a link to the functional spec (Jira/Storybook)?
+
+**CLI/Tooling Audit (Advanced):**
+If using a plugin like `Design Lint` or `Instance Health`:
+```bash
+# Conceptually: Validate Figma tokens against code
+npx style-dictionary build --config config.json
+# Ensure no 'orphaned' values exist in the JSON export
+```
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='design/figma-design-systems' name='figma-design-systems' description='Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.' version='1.0.0' type='specialization' weight='medium' load_priority='task_specific' dependencies=[] capabilities=[] category='design' keywords=['figma', 'design-systems', 'design-tokens', 'ui-ux', 'component-library', 'auto-layout', 'variables'] scope='Covers Figma architecture, variable (token) mapping, component property optimization, and library publishing. Excludes brand strategy and frontend coding.' see_also=['_core/communication'] tags=['design-ops', 'product-design', 'figma-expert', 'system-thinking'] taxonomy_path='design/figma-design-systems' allowed_tools=['browser', 'write_file'] skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/validation_report.json
+============================================================
+
+"passed=True status='warnings' score=0.85 errors=[] warnings=['Pattern count (4) is below the plan requirement (5+).', \"Missing dedicated 'Organization & Searchability' section.\", \"Content length is significantly shorter than the 'comprehensive' target (>1000 lines) suggested in the success criteria.\"] checks_performed=['frontmatter_validation', 'naming_convention_check', 'metadata_consistency', 'content_plan_alignment', 'pattern_count_verification', 'contrast_pattern_check', 'technical_accuracy_check'] checks=[ValidationCheckItem(id='SPEC_01', check='Frontmatter matches Metadata', passed=True, message='Frontmatter name and description align with skill_metadata.', severity='info', required=True), ValidationCheckItem(id='SPEC_02', check='Kebab-case name', passed=True, message=\"Name 'figma-design-systems' is correct.\", severity='critical', required=True), ValidationCheckItem(id='PLAN_01', check='Core Patterns Count', passed=False, message='The content plan requested 5+ patterns, but only 4 are explicitly documented and numbered.', severity='warning', required=True), ValidationCheckItem(id='PLAN_02', check='Organization & Searchability Section', passed=False, message=\"The specific section for 'Organization & Searchability' mentioned in the plan is merged into the audit checklist rather than being a distinct section.\", severity='warning', required=False), ValidationCheckItem(id='QUAL_01', check='Contrast Pattern (Legacy vs Systematic)', passed=True, message='The skill consistently uses \u274c/\u2705 contrasts as required.', severity='info', required=True)] feedback=\"The skill is technically sound and follows the agentskills.io spec. However, it falls short of the ambitious content plan in terms of pattern count and section depth. Specifically, the 'Publication' and 'Organization' aspects from the plan were condensed into the audit section.\""
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/f4ec23dc75b448a882d794069f50c163/artifacts
+end_time: 1769513360298
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: f4ec23dc75b448a882d794069f50c163
+run_name: a skill for figma design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513214270
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/f4ec23dc75b448a882d794069f50c163/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/fccaaeb37bba48238ea8121a6a50547f/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/fccaaeb37bba48238ea8121a6a50547f/artifacts
+end_time: 1769512788293
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: fccaaeb37bba48238ea8121a6a50547f
+run_name: a skill for figma
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769512728361
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/fccaaeb37bba48238ea8121a6a50547f/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/fd3901590cd443c281cd7a58bf87216e/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/fd3901590cd443c281cd7a58bf87216e/artifacts
+end_time: 1769536907383
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: fd3901590cd443c281cd7a58bf87216e
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769536868355
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/fd3901590cd443c281cd7a58bf87216e/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/fdf3228021154c129477508f74561079/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/fdf3228021154c129477508f74561079/artifacts
+end_time: 1769544016378
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: fdf3228021154c129477508f74561079
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769543970023
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/fdf3228021154c129477508f74561079/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495
+creation_time: 1769343105971
+experiment_id: '330001648406427495'
+last_update_time: 1769343105971
+lifecycle_stage: active
+name: skill-creation
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/695989964083835088/meta.yaml
+============================================================
+
+artifact_location: file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/695989964083835088
+creation_time: 1769536919923
+experiment_id: '695989964083835088'
+last_update_time: 1769536919923
+lifecycle_stage: active
+name: skill-fleet
+
+
+============================================================
+END FILE: data/mlflow/runs/695989964083835088/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/741328112547904795/e7fef7c8097543e684e24f2bd10318e7/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/741328112547904795/e7fef7c8097543e684e24f2bd10318e7/artifacts
+end_time: 1769273469590
+entry_point_name: ''
+experiment_id: '741328112547904795'
+lifecycle_stage: active
+run_id: e7fef7c8097543e684e24f2bd10318e7
+run_name: resilient-kit-22
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769273469580
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/741328112547904795/e7fef7c8097543e684e24f2bd10318e7/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/741328112547904795/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/741328112547904795
+creation_time: 1769273469578
+experiment_id: '741328112547904795'
+last_update_time: 1769273469578
+lifecycle_stage: active
+name: signature-tuning
+
+
+============================================================
+END FILE: data/mlflow/runs/741328112547904795/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/857861304234484170/1f47627c902645669e0bba2911df5f0a/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/857861304234484170/1f47627c902645669e0bba2911df5f0a/artifacts
+end_time: 1769273469138
+entry_point_name: ''
+experiment_id: '857861304234484170'
+lifecycle_stage: active
+run_id: 1f47627c902645669e0bba2911df5f0a
+run_name: stately-fawn-115
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769273469131
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/857861304234484170/1f47627c902645669e0bba2911df5f0a/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/857861304234484170/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/857861304234484170
+creation_time: 1769273469130
+experiment_id: '857861304234484170'
+last_update_time: 1769273469130
+lifecycle_stage: active
+name: quality-assurance-workflow
+
+
+============================================================
+END FILE: data/mlflow/runs/857861304234484170/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/108ff275aeb2483f98a0ccb8d42f41a4/meta.yaml
+============================================================
+
+artifact_uri: file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/994395946356952812/108ff275aeb2483f98a0ccb8d42f41a4/artifacts
+end_time: 1769530744804
+entry_point_name: ''
+experiment_id: '994395946356952812'
+lifecycle_stage: active
+run_id: 108ff275aeb2483f98a0ccb8d42f41a4
+run_name: test-dspy-tracking
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769530743320
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/108ff275aeb2483f98a0ccb8d42f41a4/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/17a785f9b0f44997a036048ef227bec5/meta.yaml
+============================================================
+
+artifact_uri: file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/994395946356952812/17a785f9b0f44997a036048ef227bec5/artifacts
+end_time: 1769320139311
+entry_point_name: ''
+experiment_id: '994395946356952812'
+lifecycle_stage: active
+run_id: 17a785f9b0f44997a036048ef227bec5
+run_name: test-dspy-tracking
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769320138165
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/17a785f9b0f44997a036048ef227bec5/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/e6692a109d5a4f069bb9bcec750cf4ec/meta.yaml
+============================================================
+
+artifact_uri: file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/994395946356952812/e6692a109d5a4f069bb9bcec750cf4ec/artifacts
+end_time: 1769531058469
+entry_point_name: ''
+experiment_id: '994395946356952812'
+lifecycle_stage: active
+run_id: e6692a109d5a4f069bb9bcec750cf4ec
+run_name: test-dspy-tracking
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769531056740
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/e6692a109d5a4f069bb9bcec750cf4ec/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/e740ba4336c24d1a83a9fb6a64a84b94/meta.yaml
+============================================================
+
+artifact_uri: file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/994395946356952812/e740ba4336c24d1a83a9fb6a64a84b94/artifacts
+end_time: 1769320072987
+entry_point_name: ''
+experiment_id: '994395946356952812'
+lifecycle_stage: active
+run_id: e740ba4336c24d1a83a9fb6a64a84b94
+run_name: test-dspy-tracking
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769320071872
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/e740ba4336c24d1a83a9fb6a64a84b94/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/meta.yaml
+============================================================
+
+artifact_location: file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/994395946356952812
+creation_time: 1769320071557
+experiment_id: '994395946356952812'
+last_update_time: 1769320071557
+lifecycle_stage: active
+name: skill-fleet-test
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-06f3bf9f320f2c88b152b04ed2afbb9d/artifacts/traces.json
+============================================================
+
+{"spans": [{"trace_id": "BvO/nzIPLIixUrBO0q+7nQ==", "span_id": "/XGhU6FDNiQ=", "parent_span_id": null, "name": "SimpleProgram.forward", "start_time_unix_nano": 1769320138223243000, "end_time_unix_nano": 1769320139301604000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-06f3bf9f320f2c88b152b04ed2afbb9d\"", "mlflow.spanType": "\"CHAIN\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "mlflow.spanOutputs": "\"4\""}}, {"trace_id": "BvO/nzIPLIixUrBO0q+7nQ==", "span_id": "nzokD5PAR44=", "parent_span_id": "/XGhU6FDNiQ=", "name": "Predict.forward", "start_time_unix_nano": 1769320138334338000, "end_time_unix_nano": 1769320139301469000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-06f3bf9f320f2c88b152b04ed2afbb9d\"", "mlflow.spanType": "\"LLM\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "signature": "\"question -> answer\"", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}, {"trace_id": "BvO/nzIPLIixUrBO0q+7nQ==", "span_id": "LsKE+5N3e2k=", "parent_span_id": "nzokD5PAR44=", "name": "ChatAdapter.format", "start_time_unix_nano": 1769320138335278000, "end_time_unix_nano": 1769320138335695000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-06f3bf9f320f2c88b152b04ed2afbb9d\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"demos\": [], \"inputs\": {\"question\": \"What is 2 + 2?\"}}", "mlflow.spanOutputs": "[{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}]"}}, {"trace_id": "BvO/nzIPLIixUrBO0q+7nQ==", "span_id": "dz0TiftoTWA=", "parent_span_id": "nzokD5PAR44=", "name": "LM.__call__", "start_time_unix_nano": 1769320138335899000, "end_time_unix_nano": 1769320139301071000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-06f3bf9f320f2c88b152b04ed2afbb9d\"", "mlflow.spanType": "\"CHAT_MODEL\"", "mlflow.spanInputs": "{\"messages\": [{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}], \"prompt\": null}", "temperature": "null", "max_tokens": "null", "model": "\"gemini/gemini-3-flash-preview\"", "model_type": "\"chat\"", "cache": "false", "mlflow.message.format": "\"dspy\"", "mlflow.spanOutputs": "[\"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"]"}}, {"trace_id": "BvO/nzIPLIixUrBO0q+7nQ==", "span_id": "lz9RGI0zCWs=", "parent_span_id": "nzokD5PAR44=", "name": "ChatAdapter.parse", "start_time_unix_nano": 1769320139301333000, "end_time_unix_nano": 1769320139301399000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-06f3bf9f320f2c88b152b04ed2afbb9d\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"completion\": \"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"}", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}]}
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-06f3bf9f320f2c88b152b04ed2afbb9d/artifacts/traces.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-06f3bf9f320f2c88b152b04ed2afbb9d/trace_info.yaml
+============================================================
+
+execution_duration_ms: 1078
+request_preview: '{"question": "What is 2 + 2?"}'
+request_time: '2026-01-25T05:48:58.223Z'
+response_preview: '"4"'
+state: OK
+trace_id: tr-06f3bf9f320f2c88b152b04ed2afbb9d
+trace_location:
+  mlflow_experiment:
+    experiment_id: '994395946356952812'
+  type: MLFLOW_EXPERIMENT
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-06f3bf9f320f2c88b152b04ed2afbb9d/trace_info.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-0ecaac5a5f1d70bcbd319ba9ddffd8af/artifacts/traces.json
+============================================================
+
+{"spans": [{"trace_id": "DsqsWl8dcLy9MZup3f/Yrw==", "span_id": "No6+VwEZg8Q=", "parent_span_id": null, "name": "SimpleProgram.forward", "start_time_unix_nano": 1769530743415655000, "end_time_unix_nano": 1769530744794538000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-0ecaac5a5f1d70bcbd319ba9ddffd8af\"", "mlflow.spanType": "\"CHAIN\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "mlflow.spanOutputs": "\"4\""}}, {"trace_id": "DsqsWl8dcLy9MZup3f/Yrw==", "span_id": "jGms/qtUpr8=", "parent_span_id": "No6+VwEZg8Q=", "name": "Predict.forward", "start_time_unix_nano": 1769530743547066000, "end_time_unix_nano": 1769530744794326000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-0ecaac5a5f1d70bcbd319ba9ddffd8af\"", "mlflow.spanType": "\"LLM\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "signature": "\"question -> answer\"", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}, {"trace_id": "DsqsWl8dcLy9MZup3f/Yrw==", "span_id": "rTWIKFM11Zw=", "parent_span_id": "jGms/qtUpr8=", "name": "ChatAdapter.format", "start_time_unix_nano": 1769530743548053000, "end_time_unix_nano": 1769530743548438000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-0ecaac5a5f1d70bcbd319ba9ddffd8af\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"demos\": [], \"inputs\": {\"question\": \"What is 2 + 2?\"}}", "mlflow.spanOutputs": "[{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}]"}}, {"trace_id": "DsqsWl8dcLy9MZup3f/Yrw==", "span_id": "KqrmZ+mwR+I=", "parent_span_id": "jGms/qtUpr8=", "name": "LM.__call__", "start_time_unix_nano": 1769530743548660000, "end_time_unix_nano": 1769530744793914000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-0ecaac5a5f1d70bcbd319ba9ddffd8af\"", "mlflow.spanType": "\"CHAT_MODEL\"", "mlflow.spanInputs": "{\"messages\": [{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}], \"prompt\": null}", "temperature": "null", "max_tokens": "null", "model": "\"gemini/gemini-3-flash-preview\"", "model_type": "\"chat\"", "cache": "false", "mlflow.message.format": "\"dspy\"", "mlflow.spanOutputs": "[\"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"]"}}, {"trace_id": "DsqsWl8dcLy9MZup3f/Yrw==", "span_id": "G32g7J1cVUk=", "parent_span_id": "jGms/qtUpr8=", "name": "ChatAdapter.parse", "start_time_unix_nano": 1769530744794166000, "end_time_unix_nano": 1769530744794236000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-0ecaac5a5f1d70bcbd319ba9ddffd8af\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"completion\": \"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"}", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}]}
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-0ecaac5a5f1d70bcbd319ba9ddffd8af/artifacts/traces.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-0ecaac5a5f1d70bcbd319ba9ddffd8af/trace_info.yaml
+============================================================
+
+execution_duration_ms: 1378
+request_preview: '{"question": "What is 2 + 2?"}'
+request_time: '2026-01-27T16:19:03.415Z'
+response_preview: '"4"'
+state: OK
+trace_id: tr-0ecaac5a5f1d70bcbd319ba9ddffd8af
+trace_location:
+  mlflow_experiment:
+    experiment_id: '994395946356952812'
+  type: MLFLOW_EXPERIMENT
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-0ecaac5a5f1d70bcbd319ba9ddffd8af/trace_info.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-32fcd528c2ba42c2d66c0efdde8155da/artifacts/traces.json
+============================================================
+
+{"spans": [{"trace_id": "MvzVKMK6QsLWbA793oFV2g==", "span_id": "GmEGywV71S4=", "parent_span_id": null, "name": "SimpleProgram.forward", "start_time_unix_nano": 1769320071941087000, "end_time_unix_nano": 1769320072913256000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-32fcd528c2ba42c2d66c0efdde8155da\"", "mlflow.spanType": "\"CHAIN\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "mlflow.spanOutputs": "\"4\""}}, {"trace_id": "MvzVKMK6QsLWbA793oFV2g==", "span_id": "H8xCZ3QmCVs=", "parent_span_id": "GmEGywV71S4=", "name": "Predict.forward", "start_time_unix_nano": 1769320072057825000, "end_time_unix_nano": 1769320072912897000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-32fcd528c2ba42c2d66c0efdde8155da\"", "mlflow.spanType": "\"LLM\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "signature": "\"question -> answer\"", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}, {"trace_id": "MvzVKMK6QsLWbA793oFV2g==", "span_id": "xwb5bv9sm3U=", "parent_span_id": "H8xCZ3QmCVs=", "name": "ChatAdapter.format", "start_time_unix_nano": 1769320072058941000, "end_time_unix_nano": 1769320072059354000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-32fcd528c2ba42c2d66c0efdde8155da\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"demos\": [], \"inputs\": {\"question\": \"What is 2 + 2?\"}}", "mlflow.spanOutputs": "[{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}]"}}, {"trace_id": "MvzVKMK6QsLWbA793oFV2g==", "span_id": "juTNwnGwkzY=", "parent_span_id": "H8xCZ3QmCVs=", "name": "LM.__call__", "start_time_unix_nano": 1769320072059578000, "end_time_unix_nano": 1769320072911249000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-32fcd528c2ba42c2d66c0efdde8155da\"", "mlflow.spanType": "\"CHAT_MODEL\"", "mlflow.spanInputs": "{\"messages\": [{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}], \"prompt\": null}", "temperature": "null", "max_tokens": "null", "model": "\"gemini/gemini-3-flash-preview\"", "model_type": "\"chat\"", "cache": "false", "mlflow.message.format": "\"dspy\"", "mlflow.spanOutputs": "[\"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"]"}}, {"trace_id": "MvzVKMK6QsLWbA793oFV2g==", "span_id": "Q4fiLbd8/nM=", "parent_span_id": "H8xCZ3QmCVs=", "name": "ChatAdapter.parse", "start_time_unix_nano": 1769320072912448000, "end_time_unix_nano": 1769320072912610000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-32fcd528c2ba42c2d66c0efdde8155da\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"completion\": \"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"}", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}]}
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-32fcd528c2ba42c2d66c0efdde8155da/artifacts/traces.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-32fcd528c2ba42c2d66c0efdde8155da/trace_info.yaml
+============================================================
+
+execution_duration_ms: 972
+request_preview: '{"question": "What is 2 + 2?"}'
+request_time: '2026-01-25T05:47:51.941Z'
+response_preview: '"4"'
+state: OK
+trace_id: tr-32fcd528c2ba42c2d66c0efdde8155da
+trace_location:
+  mlflow_experiment:
+    experiment_id: '994395946356952812'
+  type: MLFLOW_EXPERIMENT
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-32fcd528c2ba42c2d66c0efdde8155da/trace_info.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-4fbcb5aad01cf73f70ab272e83278899/artifacts/traces.json
+============================================================
+
+{"spans": [{"trace_id": "T7y1qtAc9z9wqycugyeImQ==", "span_id": "D9SqtOd6TW8=", "parent_span_id": null, "name": "SimpleProgram.forward", "start_time_unix_nano": 1769531056802038000, "end_time_unix_nano": 1769531058449055000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-4fbcb5aad01cf73f70ab272e83278899\"", "mlflow.spanType": "\"CHAIN\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "mlflow.spanOutputs": "\"4\""}}, {"trace_id": "T7y1qtAc9z9wqycugyeImQ==", "span_id": "60KuuTj24Ko=", "parent_span_id": "D9SqtOd6TW8=", "name": "Predict.forward", "start_time_unix_nano": 1769531056947252000, "end_time_unix_nano": 1769531058448859000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-4fbcb5aad01cf73f70ab272e83278899\"", "mlflow.spanType": "\"LLM\"", "mlflow.spanInputs": "{\"question\": \"What is 2 + 2?\"}", "signature": "\"question -> answer\"", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}, {"trace_id": "T7y1qtAc9z9wqycugyeImQ==", "span_id": "dF0fJmquDh8=", "parent_span_id": "60KuuTj24Ko=", "name": "ChatAdapter.format", "start_time_unix_nano": 1769531056948782000, "end_time_unix_nano": 1769531056949655000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-4fbcb5aad01cf73f70ab272e83278899\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"demos\": [], \"inputs\": {\"question\": \"What is 2 + 2?\"}}", "mlflow.spanOutputs": "[{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}]"}}, {"trace_id": "T7y1qtAc9z9wqycugyeImQ==", "span_id": "FTBtXqeMRDA=", "parent_span_id": "60KuuTj24Ko=", "name": "LM.__call__", "start_time_unix_nano": 1769531056950564000, "end_time_unix_nano": 1769531058448312000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-4fbcb5aad01cf73f70ab272e83278899\"", "mlflow.spanType": "\"CHAT_MODEL\"", "mlflow.spanInputs": "{\"messages\": [{\"role\": \"system\", \"content\": \"Your input fields are:\\n1. `question` (str):\\nYour output fields are:\\n1. `answer` (str):\\nAll interactions will be structured in the following way, with the appropriate values filled in.\\n\\n[[ ## question ## ]]\\n{question}\\n\\n[[ ## answer ## ]]\\n{answer}\\n\\n[[ ## completed ## ]]\\nIn adhering to this structure, your objective is: \\n        Given the fields `question`, produce the fields `answer`.\"}, {\"role\": \"user\", \"content\": \"[[ ## question ## ]]\\nWhat is 2 + 2?\\n\\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\"}], \"prompt\": null}", "temperature": "null", "max_tokens": "null", "model": "\"gemini/gemini-3-flash-preview\"", "model_type": "\"chat\"", "cache": "false", "mlflow.message.format": "\"dspy\"", "mlflow.spanOutputs": "[\"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"]"}}, {"trace_id": "T7y1qtAc9z9wqycugyeImQ==", "span_id": "UmMuKooWD3M=", "parent_span_id": "60KuuTj24Ko=", "name": "ChatAdapter.parse", "start_time_unix_nano": 1769531058448625000, "end_time_unix_nano": 1769531058448730000, "events": [], "status": {"code": "STATUS_CODE_OK", "message": ""}, "attributes": {"mlflow.traceRequestId": "\"tr-4fbcb5aad01cf73f70ab272e83278899\"", "mlflow.spanType": "\"PARSER\"", "mlflow.spanInputs": "{\"signature\": \"StringSignature(question -> answer\\n    instructions='Given the fields `question`, produce the fields `answer`.'\\n    question = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'input', 'prefix': 'Question:', 'desc': '${question}'})\\n    answer = Field(annotation=str required=True json_schema_extra={'__dspy_field_type': 'output', 'prefix': 'Answer:', 'desc': '${answer}'})\\n)\", \"completion\": \"[[ ## answer ## ]]\\n4\\n\\n[[ ## completed ## ]]\"}", "mlflow.spanOutputs": "{\"answer\": \"4\"}"}}]}
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-4fbcb5aad01cf73f70ab272e83278899/artifacts/traces.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/994395946356952812/traces/tr-4fbcb5aad01cf73f70ab272e83278899/trace_info.yaml
+============================================================
+
+execution_duration_ms: 1647
+request_preview: '{"question": "What is 2 + 2?"}'
+request_time: '2026-01-27T16:24:16.802Z'
+response_preview: '"4"'
+state: OK
+trace_id: tr-4fbcb5aad01cf73f70ab272e83278899
+trace_location:
+  mlflow_experiment:
+    experiment_id: '994395946356952812'
+  type: MLFLOW_EXPERIMENT
+
+
+============================================================
+END FILE: data/mlflow/runs/994395946356952812/traces/tr-4fbcb5aad01cf73f70ab272e83278899/trace_info.yaml
+============================================================
+
+============================================================
+FILE: data/sessions/c18587ed-007d-4e5a-bca1-c0f1e5912234.json
+============================================================
+
+{
+  "job_id": "c18587ed-007d-4e5a-bca1-c0f1e5912234",
+  "status": "completed",
+  "hitl_type": "validate",
+  "hitl_data": {
+    "report": "### Summary: PASS (Score: 0.96)\nThe skill **\"Recursive Language Models\"** has successfully passed all validation checks. The content is technically robust, well-structured, and aligns perfectly with the proposed content plan.\n\n### Issues by Severity\n#### Critical Issues\n- No critical issues found.\n\n#### Warnings\n- No warnings found.\n\n#### Info / Successes\n- **Frontmatter Validation**: Name matches metadata and follows kebab-case.\n- **Section Compliance**: All required sections (Overview, When to Use, Core Patterns, etc.) are present.\n- **Content Plan Alignment**: Content effectively covers Recursive Loops, PRM, Search, and Budgeting.\n- **Metadata Consistency**: Skill ID and dependencies are correctly aligned.\n- **Code Quality**: Examples are idiomatic, commented, and clear.\n\n### Suggested Fixes\n- No fixes required. The skill is ready for acceptance.",
+    "passed": true
+  },
+  "result": {
+    "status": "completed",
+    "skill_content": "---\nname: recursive-language-models\ndescription: >\n  Use when standard LLM generation fails on complex logic, math, or coding tasks due to 'one-pass' limitations. This skill provides the framework for implementing iterative reasoning loops, process-based verification (PRMs), and path optimization strategies like MCTS to scale inference-time compute for high-reasoning accuracy.\n---\n\n# Recursive Language Models (RLM)\n\n## Overview\n\nRecursive Language Models represent a shift from \"System 1\" (intuitive, one-pass) to \"System 2\" (deliberate, iterative) inference. Instead of generating a single token stream and stopping, RLMs treat reasoning as a search problem over a state-space of \"thoughts.\" This skill provides the architectural blueprints for building agents that can verify their own steps, backtrack from dead ends, and spend additional compute at inference time to achieve higher accuracy.\n\n**Core principle:** Inference-time compute scales reasoning. Accuracy is a function of the number of reasoning paths explored and the granularity of the verification applied to those paths.\n\n## Capabilities\n\n- **Recursive Step Generation**: Decomposing problems into discrete reasoning steps with explicit state transitions.\n- **Process-Based Verification (PRM)**: Implementing \"verifiers\" that score intermediate reasoning steps rather than just final outcomes.\n- **Inference-time Search (MCTS/Beam)**: Navigating a tree of possible reasoning paths to identify the most probable correct solution.\n- **Dynamic Compute Budgeting**: Adjusting the depth and breadth of search based on task complexity and confidence thresholds.\n- **Self-Correction & Pruning**: Detecting logic errors within a branch and terminating or backtracking to a prior valid state.\n\n## Dependencies\n\n- `_core/reasoning` \u2014 Required for fundamental step decomposition logic.\n- `_core/state_management` \u2014 Essential for handling branching \"thought\" states and history snapshots.\n- `search-algorithms/tree-search` (Recommended) \u2014 For complex path optimization using Monte Carlo Tree Search.\n\n## When to Use\n\n**Use when:**\n- The task requires multiple steps where an error in step 2 invalidates all subsequent steps (e.g., formal logic, math).\n- The model consistently hallucinates mid-way through long-form generation.\n- The \"correctness\" of intermediate steps can be verified (e.g., code execution, symbolic math).\n- You are building high-stakes agents where accuracy is more critical than latency.\n\n**When NOT to use:**\n- Creative writing or open-ended chat where there is no objective \"correct\" path.\n- Low-latency applications where sub-second response times are required.\n- Simple retrieval-augmented generation (RAG) tasks where the answer is directly present in the context.\n\n## Quick Reference\n\n| Problem | Solution | Keywords |\n| ------- | -------- | -------- |\n| Infinite Loop | Implement Entropy-based Termination | Loop Pruning, Max Depth |\n| Hallucination in Logic | Step-wise PRM Verification | Process-Reward, Verifier |\n| Sub-optimal Pathing | Monte Carlo Tree Search (MCTS) | UCT, Tree Search, Rollouts |\n| State Corruption | Immutable State Snapshots | Checkpointing, Backtracking |\n\n## Core Patterns\n\n### The Verify-and-Branch Loop\n\n**The problem:** Standard LLMs often commit to a wrong logical path early and \"hallucinate\" justifications to maintain consistency with the initial error.\n\n**\u274c Common mistake (Linear Generation):**\n```python\n# One-pass generation: Model goes off the rails at Step 2 and never recovers.\nresponse = llm.generate(\"Solve this complex 10-step math problem.\")\n# Result: Error at Step 2, entire 1000-token output is useless.\n```\n\n**\u2705 Production pattern (Recursive Loop):**\n```python\ndef recursive_solve(initial_state, max_depth=10):\n    state = initial_state\n    for depth in range(max_depth):\n        # 1. Generate next reasoning step\n        thought_step = llm.generate_step(state)\n        \n        # 2. Verify step (PRM)\n        score = prm_verifier.score(state, thought_step)\n        \n        if score > THRESHOLD:\n            state.append(thought_step)\n            if is_terminal(state): return state\n        else:\n            # 3. Backtrack or retry\n            state = backtrack(state)\n```\n\n**Key insight:** By decoupling \"Generation\" from \"Verification,\" you prevent the error-accumulation problem inherent in autoregressive models.\n\n### Compute Budgeting (Best-of-N)\n\n**The problem:** Not all problems require 100 reasoning paths. Hard-coding search depth leads to wasted tokens or insufficient reasoning.\n\n**\u274c Common mistake:**\n```python\n# Fixed width search\nresults = [llm.generate(prompt) for _ in range(10)]\nfinal = orm_verifier.select_best(results)\n```\n\n**\u2705 Production pattern:**\n```python\ndef adaptive_search(prompt, budget_tokens=5000):\n    paths = []\n    tokens_used = 0\n    while tokens_used < budget_tokens:\n        path = generate_reasoning_path(prompt)\n        tokens_used += path.token_count\n        paths.append(path)\n        \n        # Early exit if a high-confidence path is found\n        if path.score > 0.98:\n            break\n    return select_best(paths)\n```\n\n## Usage Examples\n\n### Example 1: Basic PRM Step Verification\nDemonstrates how to score an individual reasoning step before committing it to the context.\n\n```python\nfrom typing import List\n\nclass Reasoner:\n    def __init__(self, model, verifier):\n        self.model = model\n        self.verifier = verifier\n\n    def solve(self, task: str):\n        context = f\"Task: {task}\\nReasoning steps:\"\n        for i in range(5):\n            # Generate 3 candidate next steps\n            candidates = self.model.generate_candidates(context, n=3)\n            # Verifier (PRM) ranks them\n            scores = [self.verifier.score(context, c) for c in candidates]\n            \n            best_idx = scores.index(max(scores))\n            if scores[best_idx] < 0.5:\n                return \"Failed to find valid reasoning path.\"\n            \n            context += f\"\\n{i+1}. {candidates[best_idx]}\"\n            if \"Final Answer:\" in candidates[best_idx]:\n                break\n        return context\n```\n\n## Common Mistakes\n\n| Mistake | Why It's Wrong | Fix |\n| ------- | -------------- | --- |\n| Outcome-only scoring | Does not penalize \"right for the wrong reasons\" logic. | Implement Step-wise PRM. |\n| No depth limit | Recursive loops can enter infinite \"self-reflection\" loops. | Enforce `max_depth` and `max_tokens`. |\n| Context bloat | Passing the entire search tree into every prompt exceeds context. | Pass only the current path and a summary of failed attempts. |\n| Soft verification | Using LLM prompts for verification without deterministic checks. | Use external tools (Python, Math solvers) as \"hard\" verifiers where possible. |\n\n## Real-World Impact\n\n- **Math Accuracy**: Can improve GSM8K performance by 20-30% compared to zero-shot COT.\n- **Code Quality**: Reduces logic bugs in complex algorithmic tasks by allowing the model to \"test\" its logic before final submission.\n- **Traceability**: Provides a full tree of \"rejected\" thoughts, making it easier for humans to debug why a model reached a specific conclusion.\n\n## Strong Guidance\n\n- **NEVER proceed to the next reasoning step if the current step score is below your safety threshold.**\n- **ALWAYS include a \"Reflection\" step where the model explicitly checks for contradictions in its own state.**\n- **ALWAYS use immutable state snapshots when branching reasoning paths to prevent context contamination.**\n- **MUST implement a hard token budget to prevent unbounded inference costs.**\n\n## Red Flags\n\n- The model repeats the same reasoning step more than twice (Loop detection failure).\n- The verification score remains flat despite multiple retries.\n- The context window is filled with \"I'm thinking...\" or \"Wait, let me re-evaluate\" without progress.\n\n---\n\n## Validation\n\n```bash\n# Validate the skill directory\nuv run skill-fleet validate skills/llm-inference/recursive-language-models\n\n# Ensure the search loop boilerplate is functional\npython -m pytest tests/test_reasoning_loops.py\n```",
+    "metadata": {
+      "skill_id": "llm-inference/recursive-language-models",
+      "name": "recursive-language-models",
+      "description": "Use when standard LLM generation fails on complex logic, math, or coding tasks due to 'one-pass' limitations. This skill provides the framework for implementing iterative reasoning loops, process-based verification (PRMs), and path optimization strategies like MCTS to scale inference-time compute for high-reasoning accuracy.",
+      "version": "1.0.0",
+      "type": "technical",
+      "weight": "heavyweight",
+      "load_priority": "task_specific",
+      "dependencies": [
+        "_core/reasoning",
+        "_core/state_management"
+      ],
+      "capabilities": [
+        "recursive-step-generation",
+        "process-based-verification",
+        "inference-search-optimization",
+        "compute-budget-management"
+      ],
+      "category": "llm-inference",
+      "keywords": [
+        "rlm",
+        "inference-time-compute",
+        "mcts",
+        "prm",
+        "reasoning-loops",
+        "o1-style-inference"
+      ],
+      "scope": "Covers the implementation of recursive inference loops, search algorithms (MCTS, Best-of-N), and step-wise verification models. Excludes model training, fine-tuning, and low-level hardware optimizations like CUDA kernels.",
+      "see_also": [
+        "_core/reasoning",
+        "mcp_capabilities/tool_integration"
+      ],
+      "tags": [
+        "ai-engineering",
+        "inference-scaling",
+        "search-algorithms",
+        "reasoning"
+      ],
+      "taxonomy_path": "llm-inference/recursive-language-models",
+      "allowed_tools": [
+        "bash",
+        "write_file",
+        "read_file"
+      ],
+      "skill_style": "comprehensive"
+    },
+    "validation_report": {
+      "passed": true,
+      "status": "passed",
+      "score": 0.96,
+      "errors": [],
+      "warnings": [],
+      "checks_performed": [
+        "frontmatter_validation",
+        "section_presence",
+        "content_plan_verification",
+        "metadata_consistency",
+        "style_check"
+      ],
+      "checks": [
+        {
+          "id": "spec-frontmatter",
+          "check": "Frontmatter validation",
+          "passed": true,
+          "message": "Frontmatter name matches metadata and follows kebab-case.",
+          "severity": "info",
+          "required": true
+        },
+        {
+          "id": "spec-sections",
+          "check": "Section compliance",
+          "passed": true,
+          "message": "All required sections (Overview, When to Use, Core Patterns, etc.) are present.",
+          "severity": "info",
+          "required": true
+        },
+        {
+          "id": "plan-alignment",
+          "check": "Content plan alignment",
+          "passed": true,
+          "message": "Content covers Recursive Loops, PRM, Search, and Budgeting as planned.",
+          "severity": "info",
+          "required": true
+        },
+        {
+          "id": "metadata-sync",
+          "check": "Metadata consistency",
+          "passed": true,
+          "message": "Skill ID and dependencies align with the metadata object provided.",
+          "severity": "info",
+          "required": true
+        },
+        {
+          "id": "code-quality",
+          "check": "Code example quality",
+          "passed": true,
+          "message": "Code examples are idiomatic, include comments, and demonstrate the logic clearly.",
+          "severity": "info",
+          "required": true
+        }
+      ],
+      "feedback": "The skill is excellently structured and technically sound. It effectively translates complex 'System 2' reasoning concepts into actionable patterns."
+    },
+    "quality_assessment": {
+      "quality_score": 0.94,
+      "strengths": [
+        "Excellent \u274c/\u2705 contrast patterns that clearly articulate the shift from linear to recursive inference.",
+        "Strong, prescriptive guidance using imperative language (ALWAYS/NEVER) which is critical for expert-level implementation.",
+        "Highly relevant technical content covering State-of-the-Art reasoning techniques like Process-Based Reward Models (PRM) and MCTS.",
+        "Well-defined 'Red Flags' section that aids in debugging complex runtime behaviors."
+      ],
+      "weaknesses": [
+        "The Python code examples utilize abstract functions like 'backtrack(state)' and 'prm_verifier.score' without defining their expected interface or state structure.",
+        "While MCTS is mentioned as a core capability, there is no pseudo-code or detailed pattern provided for its implementation compared to the simpler loops.",
+        "Lacks specific advice on 'State Compression' which is often a critical bottleneck in long-running recursive reasoning tasks."
+      ],
+      "recommendations": [
+        "Add a concrete interface definition (e.g., an Abstract Base Class) for the 'State' and 'Verifier' objects to clarify the contract in the 'Verify-and-Branch' pattern.",
+        "Include a section or example on 'State Pruning' or 'Context Summarization' to handle token limits in deep reasoning trees.",
+        "Provide a simplified MCTS rollout pseudo-code in the 'Core Patterns' section to move beyond the basic 'Best-of-N' approach.",
+        "Elaborate on 'Entropy-based Termination' mentioned in the Quick Reference with a short code snippet or logic description."
+      ],
+      "audience_alignment": 0.95,
+      "rationale": "The content is exceptionally high-quality and aligns perfectly with the 'advanced' target level. It addresses current frontier AI engineering concepts (System 2 reasoning, PRMs, MCTS) with technical rigor. The structure follows a logical progression from theory to production patterns, and the inclusion of 'Strong Guidance' and 'Red Flags' provides the prescriptive 'Iron Law' style required for high-utility skills. The \u274c/\u2705 contrasts are highly effective at illustrating the pitfalls of naive LLM implementations versus robust recursive architectures.",
+      "deterministic_metrics": {
+        "deterministic_score": 0.6526086956521738,
+        "pattern_count": 3,
+        "has_core_principle": true,
+        "has_strong_guidance": false,
+        "has_good_bad_contrast": true,
+        "code_examples_count": 6,
+        "deterministic_issues": [
+          "Missing strong guidance (add imperative rules like 'NO X WITHOUT Y')"
+        ],
+        "deterministic_strengths": [
+          "Has skill name",
+          "Description follows 'Use when...' pattern",
+          "Has Overview section",
+          "Has When to Use section",
+          "Has Core Patterns section",
+          "Has Quick Reference section",
+          "Has Common Mistakes section",
+          "Has Red Flags section",
+          "Includes real-world impact/benefits",
+          "Good pattern coverage (3 patterns)",
+          "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+          "Includes key insights after patterns",
+          "All code blocks have language specification",
+          "Code examples are complete (no placeholders)",
+          "Code examples are substantial",
+          "Rich code examples (6 blocks)",
+          "Has clear core principle statement",
+          "Has Good/Bad contrast examples",
+          "High-quality description with specific triggers"
+        ]
+      },
+      "calibrated_score": 0.6526086956521738
+    },
+    "timestamp": "2026-01-24T18:26:05.751596Z",
+    "extra_files": {
+      "usage_examples": [
+        {
+          "title": "Iterative Step-Wise Generation",
+          "description": "A basic loop that generates one reasoning step at a time, checking for a termination condition at each step.",
+          "code": "def iterative_reasoning(task, model):\n    state = {'task': task, 'steps': [], 'complete': False}\n    while not state['complete']:\n        next_step = model.predict(f\"Context: {state['steps']}\\nNext step:\")\n        if \"FINAL_ANSWER\" in next_step:\n            state['complete'] = True\n        state['steps'].append(next_step)\n        if len(state['steps']) > 10: break # Safety break\n    return state['steps']",
+          "expected_output": "['Step 1: Analyzed...', 'Step 2: Calculated...', 'FINAL_ANSWER: 42']",
+          "language": "python"
+        },
+        {
+          "title": "Process-Based Reward Model (PRM) Implementation",
+          "description": "Uses a separate 'critic' model to evaluate the logical validity of an intermediate reasoning step.",
+          "code": "def verify_step(context, candidate_step, critic_model):\n    prompt = f\"Is this step logically sound given the context?\\nContext: {context}\\nStep: {candidate_step}\\nAnswer Yes/No.\"\n    response = critic_model.generate(prompt)\n    return 1.0 if \"Yes\" in response else 0.0\n\n# Usage in a loop\nif verify_step(history, next_move, critic) > 0.8:\n    history.append(next_move)",
+          "expected_output": "1.0",
+          "language": "python"
+        },
+        {
+          "title": "MCTS for Reasoning Path Selection",
+          "description": "A simplified Monte Carlo Tree Search skeleton for selecting the best reasoning path.",
+          "code": "def mcts_search(root_node, iterations=50):\n    for _ in range(iterations):\n        node = select_leaf(root_node)\n        child = expand(node)\n        reward = simulate(child) # Rollout or PRM\n        backpropagate(child, reward)\n    return best_child(root_node).state",
+          "expected_output": "Optimal state following max UCT value.",
+          "language": "python"
+        }
+      ],
+      "best_practices": [
+        {
+          "title": "Granular Step Definition",
+          "description": "Break reasoning into the smallest possible logical units. Large steps are harder to verify and more likely to contain hidden errors.",
+          "example": "Instead of 'Calculate the orbital trajectory', use 'Step 1: Identify the central mass. Step 2: Determine initial velocity...'"
+        },
+        {
+          "title": "Deterministic Verification",
+          "description": "Whenever possible, use code execution or symbolic solvers as verifiers rather than another LLM to avoid 'double hallucination'.",
+          "example": "If the model generates code, run it against test cases to verify the reasoning step."
+        },
+        {
+          "title": "State Checkpointing",
+          "description": "Save the full context and model KV-cache (if possible) at each branching point to allow for instantaneous backtracking.",
+          "example": "Use a dictionary to store {step_id: context_snapshot} for easy recovery."
+        },
+        {
+          "title": "Entropy-Based Pruning",
+          "description": "If the model's confidence in the next token is very low across multiple candidates, the reasoning branch is likely a dead end. Prune early.",
+          "example": "If max(candidate_scores) < 0.2, discard the branch."
+        },
+        {
+          "title": "Diversity in Sampling",
+          "description": "When generating candidates for search, use a higher temperature (e.g., 0.7-0.9) to ensure the search explores a broad space of thoughts.",
+          "example": "Generate 5 paths at temp 0.8 rather than 5 paths at temp 0.1."
+        }
+      ],
+      "integration_tests": [
+        {
+          "name": "Backtracking Verification",
+          "description": "Verify the model can recover when the PRM rejects a candidate step.",
+          "input_data": "Task: Solve a math riddle where the first logical step is intentionally deceptive.",
+          "expected_result": "The model should generate Step 1, have it rejected by the verifier, and successfully generate an alternative Step 1a."
+        },
+        {
+          "name": "Budget Termination",
+          "description": "Ensure the system stops when the token budget is reached, returning the best path found so far.",
+          "input_data": "Task: Complex optimization problem with budget=1000 tokens.",
+          "expected_result": "System terminates at ~1000 tokens and returns the path with the highest PRM score."
+        }
+      ]
+    }
+  },
+  "hitl_event": null,
+  "hitl_lock": null,
+  "current_phase": "validation",
+  "progress_message": "Validation complete. Preparing final report...",
+  "intended_taxonomy_path": "llm-inference/recursive-language-models",
+  "draft_path": "/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/skills/_drafts/c18587ed-007d-4e5a-bca1-c0f1e5912234/llm-inference/recursive-language-models",
+  "promoted": false,
+  "validation_passed": true,
+  "validation_status": "passed",
+  "validation_score": 0.96,
+  "tdd_workflow": {
+    "checklist": {
+      "red_scenarios_created": false,
+      "baseline_tests_run": false,
+      "baseline_behavior_documented": false,
+      "rationalization_patterns_identified": false,
+      "green_tests_run": false,
+      "compliance_verified": false,
+      "baseline_failures_addressed": false,
+      "new_rationalizations_identified": false,
+      "explicit_counters_added": false,
+      "retested_until_bulletproof": false,
+      "rationalization_table_built": false,
+      "flowchart_present": false,
+      "quick_reference_included": false,
+      "common_mistakes_included": false,
+      "no_narrative_storytelling": false,
+      "supporting_files_appropriate": false
+    },
+    "baseline_tests_run": false,
+    "compliance_tests_run": false,
+    "rationalizations_identified": []
+  },
+  "deep_understanding": {
+    "questions_asked": [],
+    "answers": [],
+    "research_performed": [],
+    "understanding_summary": "",
+    "user_problem": "",
+    "user_goals": [],
+    "readiness_score": 0.0,
+    "complete": false
+  },
+  "multi_skill_queue": [],
+  "current_skill_index": 0,
+  "task_description_refined": "",
+  "created_at": "2026-01-24T18:19:49.205113Z",
+  "updated_at": "2026-01-24T18:26:05.751493Z",
+  "user_id": "default",
+  "user_context": {}
+}
+
+============================================================
+END FILE: data/sessions/c18587ed-007d-4e5a-bca1-c0f1e5912234.json
+============================================================
+
+============================================================
+FILE: docs/DOCUMENTATION_RESTRUCTURING_PLAN.md
+============================================================
+
+# Documentation Restructuring Plan
+
+**Date**: 2026-01-27
+**Status**: Proposed
+**Objective**: Simplify and reorganize the documentation for better navigation, reduced redundancy, and improved clarity.
+
+---
+
+## Current Problems Identified
+
+### 1. API Documentation Confusion
+
+- **Conflicting version info**: `api/index.md` shows only v1 as current, but `api/MIGRATION_V1_TO_V2.md` says v2 is production and v1 is experimental
+- **Overlapping files**: `api-reference.md`, `V2_ENDPOINTS.md`, `V2_SCHEMAS.md`, `endpoints.md`, `schemas.md` likely contain duplicate information
+- **Unclear versioning**: Users may not know which API version to use
+
+### 2. Excessive Top-Level Categories (10 current)
+
+- 🚀 Getting Started
+- 🏗️ Architecture
+- 📡 API
+- 💻 CLI
+- ⚙️ LLM Configuration
+- 🤝 HITL
+- 📚 Concept Guides
+- 🛠️ Development
+- 📋 Migration & Notes
+- (Plus workflows/, intro/, archive/)
+
+### 3. Redundant or Overlapping Content
+
+- **Workflow docs**: 7 files in `workflows/` (content-generation, conversational, hitl, quality-assurance, signature-tuning, task-analysis) that may overlap with other sections
+- **Historical notes**: 29 notes in `archive/historical-notes/` that clutter the docs
+- **CLI docs**: Multiple CLI files that may duplicate information
+
+### 4. Complex Main Index
+
+- Long "Quick Links" section
+- Extensive "What's New" with detailed architecture changes
+- Too many sub-lists making navigation difficult
+
+---
+
+## Proposed Simplified Structure (5 Main Sections)
+
+```
+docs/
+├── index.md (Main hub - simplified)
+│
+├── getting-started/ (User-focused quick start)
+│   ├── index.md (Installation, quick start, templates)
+│   └── user-guide.md (User workflows: creating, managing, promoting skills)
+│
+├── guides/ (Task-based guides - merged & simplified)
+│   ├── api.md (Unified API guide - v2 production, v1 experimental clearly labeled)
+│   ├── cli.md (Unified CLI guide)
+│   ├── workflows.md (Unified workflow guide - merges all workflow/)
+│   ├── hitl.md (HITL system guide)
+│   └── dspy.md (DSPy framework guide)
+│
+├── architecture/ (System architecture for developers)
+│   ├── overview.md (High-level architecture)
+│   ├── domain-layer.md (DDD patterns, entities)
+│   ├── service-layer.md (Service architecture, DI)
+│   ├── caching-layer.md (Cache architecture)
+│   └── api-architecture.md (API design, versioning)
+│
+├── development/ (For contributors)
+│   ├── setup.md (Development setup)
+│   ├── contributing.md (Contribution guidelines)
+│   └── extending.md (How to extend the system)
+│
+└── reference/ (Deep technical reference)
+    ├── schemas.md (Data models and schemas)
+    ├── agentskills-compliance.md (agentskills.io spec)
+    └── migration.md (Format migration guide)
+```
+
+---
+
+## Simplification Actions
+
+### Phase 1: API Documentation Unification
+
+**Goal**: Resolve API version confusion and eliminate overlap
+
+**Actions**:
+
+1. Create single `guides/api.md` that:
+   - Clearly states v2 is the production API
+   - Documents v1 as experimental chat API
+   - Merges content from: `api/endpoints.md`, `api/V2_ENDPOINTS.md`
+   - Includes schema information inline (no separate file)
+   - Provides clear "Quick Start" section for each version
+
+2. Remove/Archive these files:
+   - `api/MIGRATION_V1_TO_V2.md` → Move to `reference/` as historical context
+   - `api/V2_ENDPOINTS.md` → Consolidate into `guides/api.md`
+   - `api/V2_SCHEMAS.md` → Merge schemas into `guides/api.md`
+   - `api/api-reference.md` → Consolidate if different content
+   - `api/schemas.md` → Merge into reference/schemas.md
+
+3. Keep:
+   - `api/index.md` → Simplified landing page that points to `guides/api.md`
+   - `api/jobs.md` → Keep if distinct content
+   - `api/middleware.md` → Merge into architecture/api-architecture.md
+
+---
+
+### Phase 2: Workflow Documentation Consolidation
+
+**Goal**: Merge 7 workflow files into 1 cohesive guide
+
+**Actions**:
+
+1. Create `guides/workflows.md` that consolidates:
+   - Phase 1: Task Analysis
+   - Phase 2: Content Generation
+   - Phase 3: Quality Assurance
+   - HITL Workflow
+   - Conversational Workflows
+   - Signature Tuning (if needed for users)
+
+2. Archive technical details:
+   - Move orchestrator implementation details to `reference/workflows-reference.md`
+   - Or create `development/workflows-implementation.md` for contributors
+
+3. Remove:
+   - `workflows/content-generation.md`
+   - `workflows/conversational.md`
+   - `workflows/hitl.md`
+   - `workflows/quality-assurance.md`
+   - `workflows/signature-tuning.md`
+   - `workflows/task-analysis.md`
+
+4. Keep:
+   - `workflows/index.md` → Rename to `guides/workflows.md`
+
+---
+
+### Phase 3: CLI Documentation Simplification
+
+**Goal**: Reduce CLI files from 7 to 2
+
+**Actions**:
+
+1. Create `guides/cli.md` that includes:
+   - Quick start commands
+   - Common workflows
+   - Command reference (condensed)
+
+2. Move technical details:
+   - `cli/architecture.md` → `development/cli-architecture.md`
+   - `cli/architecture.md` already exists - check if needed
+   - `cli/tui-architecture.md` → Keep if TUI is active, else archive
+   - `cli/dev-command.md` → Merge into `guides/cli.md` or `development/setup.md`
+   - `cli/CLI_SYNC_COMMANDS.md` → Merge into `guides/cli.md`
+   - `cli/cli-reference.md` → Merge into `guides/cli.md`
+   - `cli/commands.md` → Merge into `guides/cli.md`
+   - `cli/interactive-chat.md` → Merge into `guides/workflows.md` or `guides/cli.md`
+
+3. Keep:
+   - `cli/index.md` → Simplified landing page
+
+---
+
+### Phase 4: Main Index Simplification
+
+**Goal**: Create a clean, user-friendly hub
+
+**Actions**:
+
+1. Simplify `docs/index.md`:
+   - Remove extensive "Quick Links" section
+   - Consolidate "What's New" into a brief section
+   - Use 2-column layout or tabs for different user types
+   - Focus on "What do you want to do?" navigation
+
+2. New structure for `index.md`:
+
+```markdown
+# Skills Fleet Documentation
+
+**Version**: Post-FastAPI-Centric Restructure | **Last Updated**: 2026-01-27
+
+## Quick Start
+
+[🚀 Getting Started](getting-started/) | [📡 API Guide](guides/api.md) | [💻 CLI Guide](guides/cli.md)
+
+## Navigate by Role
+
+### For Users
+
+Creating and managing skills? Start here:
+
+- [Getting Started Guide](getting-started/)
+- [User Guide - Creating Skills](getting-started/user-guide.md)
+- [API Guide](guides/api.md)
+- [CLI Guide](guides/cli.md)
+
+### For Developers
+
+Building integrations or contributing to the code?
+
+- [Development Setup](development/)
+- [Architecture Overview](architecture/)
+- [API Guide](guides/api.md)
+- [Contributing Guide](development/contributing.md)
+
+### For AI Agents
+
+Working with the system programmatically?
+
+- [AGENTS.md](../AGENTS.md) - Complete working guide
+- [Architecture Overview](architecture/)
+- [Workflows Guide](guides/workflows.md)
+
+## Topic Index
+
+- [Workflows & HITL](guides/workflows.md) - Skill creation workflow
+- [HITL System](guides/hitl.md) - Human-in-the-loop
+- [DSPy Framework](guides/dspy.md) - DSPy 3.1.2+ integration
+- [LLM Configuration](reference/llm-config.md) - LLM setup (MOVED from docs/llm/)
+- [Data Schemas](reference/schemas.md) - Request/response models
+- [agentskills.io Compliance](reference/agentskills-compliance.md)
+
+---
+
+## What's New
+
+**FastAPI-Centric Restructure Complete** (January 2026):
+
+- ✅ Domain layer with DDD patterns
+- ✅ Service layer with dependency injection
+- ✅ Caching layer architecture in place
+- ✅ Conversational interface (v1 chat API - experimental)
+- ✅ API v2 is now the production API for skill operations
+
+[See full changelog](../CHANGELOG.md)
+```
+
+---
+
+### Phase 5: Archive Cleanup
+
+**Goal**: Reduce clutter from historical notes
+
+**Actions**:
+
+1. Keep only the most relevant historical notes in main docs:
+   - `archive/historical-notes/DOCUMENTATION_RESTRUCTURING.md` - Document this restructure!
+   - Keep summary files like `JOB_PERSISTENCE_IMPLEMENTATION_SUMMARY.md`
+
+2. Consider moving `archive/` entirely outside `docs/`:
+   - Suggested: Move to `REFACTORING_NOTES/` at repo root
+   - Or keep but add a README explaining it's historical
+
+3. Simplify `docs/archive/README.md` to explain it's historical only
+
+---
+
+### Phase 6: Remove Low-Value Categories
+
+**Actions**:
+
+1. Eliminate or merge these sections:
+   - `concepts/` (2 files) - Merge content into reference/ or relevant guides
+   - `llm/` (4 files) - Merge into `reference/llm-config.md`
+   - `notes/` (4 files) - Evaluate if needed, likely archive
+   - `intro/` (1 file) - Merge into getting-started/
+
+2. Result: 5 main sections instead of 10
+
+---
+
+## File-by-File Consolidation Plan
+
+### API Documentation
+
+| Keep/Archive/Merge | File                                                       | Action                   |
+| ------------------ | ---------------------------------------------------------- | ------------------------ |
+| Keep               | `api/index.md`                                             | Simplify to landing page |
+| Merge              | `api/MIGRATION_V1_TO_V2.md` → `reference/api-migration.md` | Historical reference     |
+| Merge              | `api/V2_ENDPOINTS.md` → `guides/api.md`                    | Consolidate              |
+| Merge              | `api/V2_SCHEMAS.md` → `guides/api.md`                      | Merge schemas inline     |
+| Merge              | `api/endpoints.md` → `guides/api.md`                       | Consolidate              |
+| Merge              | `api/schemas.md` → `reference/schemas.md`                  | Move to reference        |
+| Merge              | `api/middleware.md` → `architecture/api-architecture.md`   | Merge                    |
+| Keep               | `api/jobs.md`                                              | Keep if distinct         |
+
+### Workflow Documentation
+
+| Keep/Archive/Merge | File                                         | Action      |
+| ------------------ | -------------------------------------------- | ----------- |
+| Keep               | `workflows/index.md` → `guides/workflows.md` | Main guide  |
+| Remove             | `workflows/content-generation.md`            | Consolidate |
+| Remove             | `workflows/conversational.md`                | Consolidate |
+| Remove             | `workflows/hitl.md`                          | Consolidate |
+| Remove             | `workflows/quality-assurance.md`             | Consolidate |
+| Remove             | `workflows/signature-tuning.md`              | Consolidate |
+| Remove             | `workflows/task-analysis.md`                 | Consolidate |
+
+### CLI Documentation
+
+| Keep/Archive/Merge | File                                                                 | Action                   |
+| ------------------ | -------------------------------------------------------------------- | ------------------------ |
+| Keep               | `cli/index.md`                                                       | Simplify to landing page |
+| Merge              | `cli/cli-reference.md` → `guides/cli.md`                             | Consolidate              |
+| Merge              | `cli/commands.md` → `guides/cli.md`                                  | Consolidate              |
+| Merge              | `cli/interactive-chat.md` → `guides/cli.md`                          | Consolidate              |
+| Merge              | `cli/CLI_SYNC_COMMANDS.md` → `guides/cli.md`                         | Consolidate              |
+| Merge              | `cli/dev-command.md` → `guides/cli.md` or `development/setup.md`     | Consolidate              |
+| Archive            | `cli/architecture.md` → `development/cli-architecture.md` or archive | Move to dev              |
+| Evaluate           | `cli/tui-architecture.md`                                            | Keep if TUI active       |
+
+### Concepts
+
+| Keep/Archive/Merge | File                                                  | Action      |
+| ------------------ | ----------------------------------------------------- | ----------- |
+| Merge              | `concepts/concept-guide.md` → `reference/` or archive | Evaluate    |
+| Merge              | `concepts/concept-guide.md`                           | Evaluate    |
+| Keep               | `concepts/agentskills-compliance.md` → `reference/`   | Important   |
+| Merge              | `concepts/developer-reference.md` → `development/`    | Move to dev |
+
+### LLM Configuration
+
+| Keep/Archive/Merge | File                                                                 | Action                  |
+| ------------------ | -------------------------------------------------------------------- | ----------------------- |
+| Merge              | `llm/index.md` → `reference/llm-config.md`                           | Create single LLM guide |
+| Merge              | `llm/providers.md` → `reference/llm-config.md`                       | Merge                   |
+| Merge              | `llm/dspy-config.md` → `reference/llm-config.md`                     | Merge                   |
+| Merge              | `llm/task-models.md` → `guides/dspy.md` or `reference/llm-config.md` | Merge                   |
+
+### Notes
+
+| Keep/Archive/Merge | File                            | Action                            |
+| ------------------ | ------------------------------- | --------------------------------- |
+| Evaluate           | `notes/TESTING_REPORT.md`       | Archive if outdated               |
+| Evaluate           | `notes/OPTIMIZATION_GUIDE.md`   | Move to `guides/dspy.md`          |
+| Evaluate           | `notes/DEPLOYMENT_CHECKLIST.md` | Move to `development/` or archive |
+| Merge              | `notes/README.md`               | Archive                           |
+
+### Intro
+
+| Keep/Archive/Merge | File                                                 | Action |
+| ------------------ | ---------------------------------------------------- | ------ |
+| Merge              | `intro/introduction.md` → `getting-started/index.md` | Merge  |
+
+### Migration
+
+| Keep/Archive/Merge | File                                                              | Action          |
+| ------------------ | ----------------------------------------------------------------- | --------------- |
+| Merge              | `migration/skill-format-v2-updated.md` → `reference/migration.md` | Keep important  |
+| Archive            | `migration/archive/skill-format-v2-draft.md`                      | Historical only |
+
+---
+
+## Implementation Order
+
+1. **Create backup** of current `docs/` directory
+2. **Phase 1**: API documentation unification (highest priority)
+3. **Phase 2**: Workflow consolidation
+4. **Phase 3**: CLI simplification
+5. **Phase 4**: Main index rewrite
+6. **Phase 5**: Archive cleanup
+7. **Phase 6**: Remove low-value categories
+8. **Update**: AGENTS.md references
+9. **Test**: Navigation and link correctness
+10. **Commit**: With descriptive commit message
+
+---
+
+## Success Criteria
+
+✅ Reduced top-level categories from 10 to 5
+✅ API version confusion resolved (v2 production, v1 experimental clear)
+✅ Workflow files reduced from 7 to 1
+✅ Archive cleared of historical notes from main view
+✅ Main index is <100 lines (currently ~150)
+✅ No broken internal links
+✅ Clear navigation by user role (User/Developer/AI Agent)
+✅ Documentation file count reduced by ~40%
+
+---
+
+## Notes
+
+- This restructuring should be documented in `archive/historical-notes/` for future reference
+- Update any external links or READMEs that reference old paths
+- Consider using a static site generator later (MkDocs, Docusaurus) for better navigation
+- Get approval from maintainers before implementing
+
+
+============================================================
+END FILE: docs/DOCUMENTATION_RESTRUCTURING_PLAN.md
+============================================================
+
+============================================================
+FILE: docs/README.md
+============================================================
+
+# Skills Fleet: System Overview
+
+This document introduces the **skill-fleet** system: a taxonomy-driven, on‑disk skills library with a DSPy workflow for generating and validating new skills on demand.
+
+## Audience
+
+- **Builders** integrating the skills workflow into agentic systems
+- **Maintainers** evolving the taxonomy and skill quality standards
+- **Operators** running the workflow via CLI or TUI
+
+## Why This System Exists
+
+Agentic systems fail when they cannot **reliably compose, reuse, and audit** the behavior they generate. This repo treats “skills” as **first‑class, versioned artifacts** on disk, with a consistent taxonomy and validation rules. The result is a system where capabilities are:
+
+- discoverable (taxonomy paths, agentskills.io-compliant metadata)
+- composable (dependencies + capabilities)
+- auditable (metadata + SKILL.md + history)
+- reproducible (workflow outputs can be cached)
+- interoperable (agentskills.io standard for cross-system compatibility)
+
+## Core Idea
+
+Instead of a monolithic prompt or ad‑hoc tool chain, the system stores skills as **structured folders and metadata** inside a taxonomy. A DSPy‑based workflow then **creates new skills from tasks** and **registers them** in the taxonomy with validation and traceability.
+
+`★ Draft-First Execution (Current) ───────────────`
+Skill creation runs as a FastAPI background job and is **draft-first**:
+
+- Jobs write drafts under `skills/_drafts/<job_id>/...` once content exists.
+- Promotion into the taxonomy is explicit (`skill-fleet promote <job_id>` or `POST /api/v1/drafts/{job_id}/promote`).
+
+This design keeps the taxonomy stable and makes review/iteration the default before “publishing” a new skill.
+`─────────────────────────────────────────────────`
+
+## Primary Use Cases
+
+- **Skill bootstrapping**: generate a new skill from a user task and store it in the taxonomy.
+- **Capability standardization**: enforce consistent metadata, structure, and documentation across skills.
+- **Skill discovery**: search by taxonomy path and dependencies to assemble working sets.
+- **Operational reliability**: run skill creation with caching and validation to avoid regressions.
+
+## Benefits
+
+- **Structured knowledge**: skills are stable artifacts, not ephemeral prompts.
+- **Repeatable creation**: the workflow follows a 6‑step process with validations.
+- **Controlled growth**: taxonomy conventions keep the system scalable.
+- **Operational visibility**: metadata + validation reports + cache stats aid debugging.
+- **Composable behavior**: skills can declare dependencies and capabilities.
+
+## System Context
+
+```mermaid
+flowchart LR
+  User[User/Operator] --> TUI[TUI / CLI]
+  TUI --> Workflow[DSPy Skill Workflow]
+  Workflow --> Taxonomy[(Skills Taxonomy on Disk)]
+  Workflow --> LLM[LLM Provider]
+```
+
+This system is local-first: the taxonomy lives on disk and is updated by the workflow. The only external dependency is the LLM provider (Google Gemini 3 by default) defined in `config/config.yaml`.
+
+## Conceptual Components
+
+```mermaid
+flowchart TB
+  subgraph Runtime
+    CLI[CLI + TUI]
+    WF[Skill Workflow]
+  end
+  subgraph Taxonomy
+    Meta[taxonomy_meta.json]
+    SkillDir[skills/<path>/]
+  end
+  WF --> Meta
+  WF --> SkillDir
+  CLI --> WF
+```
+
+- **CLI/TUI**: entry points to trigger skill creation and validation.
+- **Workflow**: DSPy modules that map tasks to taxonomy paths and generate content.
+
+- **Automatic Code Quality**: All generated skills are automatically linted and formatted using ruff to ensure consistent Python code style in examples and scripts.
+
+- **Taxonomy**: on‑disk storage for skills, metadata, and templates.
+
+## Taxonomy Model
+
+Skills are stored under:
+
+- `skills/`
+
+Each skill typically includes:
+
+- `metadata.json` — required metadata (type, weight, dependencies, etc.)
+- `SKILL.md` — full documentation with agentskills.io-compliant YAML frontmatter
+- `references/` (v2 standard) — reference documentation, replacing `capabilities/`
+- `guides/` (v2 standard) — how-to guides, replacing `resources/`
+- `templates/` (v2 standard) — boilerplate code
+- `scripts/` — utility scripts
+- `examples/` — usage examples
+- `tests/` — integration tests
+
+**Legacy directories** (`capabilities/`, `resources/`) are supported for backward compatibility.
+
+Some always‑loaded skills are single JSON files under:
+
+- `_core/`, `mcp_capabilities/`, `memory_blocks/`
+
+## agentskills.io Compliance
+
+All skills follow the [agentskills.io](https://agentskills.io) specification for skill standardization and discoverability:
+
+- **YAML Frontmatter**: Every SKILL.md file starts with YAML frontmatter containing:
+  - `name`: Kebab-case identifier (e.g., `python-decorators`)
+  - `description`: 1-1024 character description
+  - `metadata`: Extended fields (skill_id, version, type, weight)
+- **XML Generation**: The system can generate `<available_skills>` XML for agent context injection
+- **Migration Tools**: Utilities to convert existing skills to the agentskills.io format
+- **Validation**: Automated checks ensure compliance with the specification
+
+See [agentskills.io Compliance Guide](concepts/agentskills-compliance.md) for detailed information.
+
+## DSPy Integration
+
+### Centralized Configuration
+
+Skills Fleet provides centralized DSPy configuration through `src/skill_fleet/llm/dspy_config.py`. This module ensures consistent language model settings across all workflow steps:
+
+- **`configure_dspy()`** — One-time initialization that sets up DSPy's global LM from `config/config.yaml`
+- **`get_task_lm(task_name)`** — Returns task-specific LM instances without changing global settings
+- **Environment variables** — Supports `DSPY_CACHEDIR` and `DSPY_TEMPERATURE` for overrides
+- **Configuration priority** — Environment variables → config.yaml → defaults
+
+The CLI automatically calls `configure_dspy()` at startup, ensuring all commands use consistent LM settings.
+
+```python
+from skill_fleet.llm.dspy_config import configure_dspy, get_task_lm
+
+# Configure once at startup
+lm = configure_dspy(default_task="skill_understand")
+
+# Get task-specific LM when needed
+edit_lm = get_task_lm("skill_edit")
+```
+
+### Evolution Tracking
+
+Skills track their evolution through proper metadata in `metadata.json`:
+
+- **`timestamp`** — ISO 8601 UTC timestamp of creation/revision
+- **`change_summary`** — Human-readable description of changes
+- **`status`** — Current state (approved, needs_revision, etc.)
+- **`previous_versions`** — List of prior version references (future enhancement)
+
+This enables:
+- **Skill versioning** — Track changes over time
+- **Rollback support** — Revert to previous versions if needed
+- **Change history** — Audit trail for compliance and debugging
+- **Quality metrics** — Link revisions to feedback and validation results
+
+### Task-Specific LMs
+
+The system uses different LM configurations for different workflow phases:
+
+| Task | Purpose | Configuration |
+|------|---------|---------------|
+| `skill_understand` | Task analysis and understanding | High temperature for creativity |
+| `skill_plan` | Structure planning | Medium temperature |
+| `skill_initialize` | Directory and metadata initialization | Minimal temperature |
+| `skill_edit` | Content generation | Medium temperature |
+| `skill_package` | Validation and packaging | Low temperature for precision |
+| `skill_validate` | Compliance checking | Minimal temperature |
+
+These are configured in `config/config.yaml` under the `model_tasks` section.
+
+## Hierarchical Skills Taxonomy for Agentic Systems
+
+The taxonomy is a **hierarchical, path‑addressable catalog** of skills. Each node is a skill or a category. Paths encode semantics, ownership, and scope so that agents (and humans) can reason about what a skill does, where it belongs, and how it composes.
+
+### Goals of the Hierarchy
+
+- **Discoverability**: skills live at predictable paths.
+- **Composability**: dependencies form a directed graph that mirrors the tree.
+- **Scalability**: new branches can be added without breaking older ones.
+- **Governance**: metadata enforces consistency and prevents drift.
+
+### Taxonomy Shape
+
+The tree is intentionally broad at the top and deep where needed.
+
+```mermaid
+flowchart TB
+  Root[skills/] --> Core[_core]
+  Root --> Technical[technical_skills]
+  Root --> Domain[domain_knowledge]
+  Root --> Tool[tool_proficiency]
+  Root --> MCP[mcp_capabilities]
+  Root --> Specialization[specializations]
+  Root --> TaskFocus[task_focus_areas]
+  Root --> Memory[memory_blocks]
+```
+
+### Path Semantics (Skill IDs)
+
+Skill IDs are **path strings**, not dots:
+
+- `technical_skills/programming/languages/python`
+- `task_focus_areas/debug_fix`
+- `mcp_capabilities/tool_integration`
+
+These paths function as **stable identifiers** and are used as dependency references.
+
+### Skill vs. Category Nodes
+
+- **Category nodes**: directories that organize skills (may not contain metadata).
+- **Skill nodes**: directories that contain `metadata.json` + `SKILL.md`.
+- **Single‑file skills**: JSON files in `_core`, `mcp_capabilities`, `memory_blocks` that are always‑loaded and lightweight.
+
+### Required Structure
+
+Directory skills must include:
+
+- `metadata.json`
+- `SKILL.md`
+
+**Optional subdirectories** (v2 Golden Standard):
+- `references/` — reference documentation (replaces `capabilities/`)
+- `guides/` — how-to guides (replaces `resources/`)
+- `templates/` — boilerplate code
+- `scripts/` — utility scripts
+- `examples/` — usage examples
+- `tests/` — integration tests
+
+**Legacy support:** `capabilities/` and `resources/` are still supported for backward compatibility.
+
+Single‑file skills include metadata only (no `SKILL.md`), optimized for always‑loaded runtime features.
+
+### Core Metadata Fields
+
+Every directory skill must contain metadata fields used for routing, validation, and composition:
+
+- `skill_id`: path‑style ID (e.g., `general/testing`)
+- `version`: semantic version (e.g., `1.0.0`)
+- `type`: one of `cognitive | technical | domain | tool | mcp | specialization | task_focus | memory`
+- `weight`: `lightweight | medium | heavyweight`
+- `load_priority`: `always | task_specific | on_demand | dormant`
+- `dependencies`: list of skill IDs
+- `capabilities`: list of discrete capabilities
+
+### Weight & Load Priority
+
+These control how the system treats skills:
+
+- **weight**: estimated complexity/size
+  - `lightweight`: small, reusable building blocks
+  - `medium`: multi‑capability modules
+  - `heavyweight`: complex workflows or domain bundles
+- **load_priority**: when to mount the skill
+  - `always`: loaded at startup
+  - `task_specific`: loaded by router intent
+  - `on_demand`: loaded only when referenced
+  - `dormant`: archived or experimental
+
+### Capability Granularity
+
+Capabilities are expected to be **atomic and testable**. A single skill typically exposes 1–10 capabilities, depending on weight. This enables:
+
+- targeted testing
+- dependency validation
+- precise capability coverage checks
+
+### Dependency Graph (Beyond the Tree)
+
+The taxonomy tree organizes skills, but dependencies form a **graph**. This enables composition across branches.
+
+```mermaid
+flowchart LR
+  A[technical_skills/programming/languages/python] --> B[task_focus_areas/debug_fix]
+  A --> C[tool_proficiency/git]
+  B --> D[_core/reasoning]
+```
+
+### Discovery & Routing
+
+At runtime, tasks are mapped to branches using keyword heuristics (Phase 1) and later semantic routing. The router uses:
+
+- keywords from the request
+- existing mounted skills
+- branch summaries from the taxonomy
+
+### Governance and Evolution
+
+The taxonomy is designed to evolve:
+
+- New branches are appended rather than reshaped.
+- Skills are versioned and can be superseded.
+- Validation enforces structural consistency.
+- Evolution metadata records approvals and changes.
+
+### Example: Skill Node Layout (v2 Golden Standard)
+
+```
+skills/
+  technical_skills/
+    programming/
+      languages/
+        python/
+          metadata.json
+          SKILL.md
+          references/          # v2 standard (replaces capabilities/)
+          guides/              # v2 standard (replaces resources/)
+          templates/           # v2 standard
+          scripts/
+          examples/
+          tests/
+```
+
+### Example: Always‑Loaded Skill
+
+```
+skills/_core/reasoning.json
+```
+
+### Design Trade‑offs
+
+- **File‑based vs DB**: file system keeps it inspectable and easy to version control.
+- **Path‑style IDs**: readable and composable, but require governance to avoid collisions.
+- **Strict metadata**: adds friction but prevents taxonomy drift over time.
+
+## Workflow (6‑Step Pattern)
+
+1. **Understand** — infer intent and map to taxonomy path
+2. **Plan** — define metadata, dependencies, and capabilities
+3. **Initialize** — create the skill skeleton
+4. **Edit** — generate SKILL.md and capability docs
+5. **Package** — validate and produce a packaging manifest
+6. **Iterate** — human‑in‑the‑loop approval and evolution metadata
+
+These steps are implemented in `src/skill_fleet/workflow/` and use task‑scoped LLMs configured in `config/config.yaml`.
+
+## Caching and Validation
+
+- **Workflow caching**: optional cache of step outputs to speed up repeated tasks.
+- **Validation**: checks metadata completeness, structure, documentation, and naming.
+
+## How to Run
+
+```bash
+# from repo root
+
+# Install Python deps
+uv sync --group dev
+
+# Install TUI deps (requires Zig for OpenTUI)
+bun install
+
+# Create a skill (CLI)
+uv run skill-fleet create-skill --task "Create a Python async programming skill"
+
+# Create a skill with auto-approval (skips interactive review)
+uv run skill-fleet create-skill --task "Create a Python async programming skill" --auto-approve
+
+# Validate a skill
+uv run skill-fleet validate-skill skills/general/testing
+
+# Run the TUI
+bun run tui
+```
+
+## Key Configurations
+
+- `config/config.yaml`: LLM configuration for workflow steps
+- `skills/_templates/skill_template.json`: structure template
+
+## What This System Is Not
+
+- It is **not** a runtime agent orchestrator — it produces skills, it doesn’t execute them.
+- It is **not** a centralized database — taxonomy is local and file‑based.
+- It is **not** a general knowledge base — skills are operational artifacts with strict structure.
+
+## Extension Points
+
+- Add new taxonomy branches under `skills/`
+- Introduce specialized validators
+- Add a richer HITL interface for approvals
+- Integrate with multi‑agent runners to consume the generated skills
+
+---
+
+## Getting Started with Skill Creation
+
+For practical, hands-on guidance on creating skills, see **[Skill Creation Guidelines](getting-started/skill-creation-guidelines.md)**, which provides:
+- Comprehensive skill creation interrogations (discovery questions)
+- Structure and format requirements
+- Content guidelines and best practices
+- Step-by-step process workflow
+- Validation checklist
+- Troubleshooting guide
+
+For workflow internals, see [`architecture/skill-creation-workflow.md`](architecture/skill-creation-workflow.md).
+
+---
+
+## Further Reading
+
+### Core System Documentation
+
+| Topic | Description |
+|-------|-------------|
+| **[Project README](../README.md)** | Project overview, quick start, and differentiation |
+| **[DSPy Documentation](dspy/)** | 3-phase workflow, signatures, modules, programs, optimization |
+| **[API Documentation](api/)** | REST API endpoints, schemas, jobs, middleware |
+| **[CLI Documentation](cli/)** | Command reference, interactive chat, architecture |
+| **[LLM Configuration](llm/)** | Provider setup, DSPy config, task-specific models |
+| **[HITL System](hitl/)** | Callbacks, interactions, runner implementation |
+
+### Concept Guides
+
+- **[Introduction](intro/introduction.md)** - System introduction and documentation map
+- **[Getting Started](getting-started/)** - Installation, quick start, templates
+- **[Developer Reference](concepts/developer-reference.md)** - Development workflows and patterns
+- **[agentskills.io Compliance](concepts/agentskills-compliance.md)** - Schema and validation rules
+
+
+============================================================
+END FILE: docs/README.md
+============================================================
+
+============================================================
+FILE: docs/api/MIGRATION_V1_TO_V2.md
+============================================================
+
+# API Versioning Guide
+
+**Last Updated**: 2026-01-25
+
+## Overview
+
+Skills Fleet has two API versions with different purposes and stability levels:
+
+| Version | Status | Purpose | Base Path |
+|---------|--------|---------|-----------|
+| **v2** | ✅ **Current/Stable** | Main API for skill creation, taxonomy, validation, HITL | `/api/v2/` |
+| **v1** | 🔄 **Experimental** | Chat streaming endpoints (newer feature) | `/api/v1/` |
+
+`★ Insight ─────────────────────────────────────`
+The version numbers reflect the order of implementation, not stability. v2 is the production-ready, well-documented API. v1 was introduced later for experimental chat features and uses the v1 namespace to indicate it's still evolving.
+`─────────────────

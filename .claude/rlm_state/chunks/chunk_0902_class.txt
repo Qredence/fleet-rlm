@@ -1,0 +1,40 @@
+<!-- Chunk 902: bytes 3184573-3186027, type=class -->
+class GenerateSkillContent(dspy.Signature):
+    """Generate complete SKILL.md content based on the plan."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill_metadata` | `SkillMetadata` | Complete skill metadata from Phase 1 synthesis |
+| `content_plan` | `str` | Detailed content plan: sections, topics, example count |
+| `generation_instructions` | `str` | Specific instructions for generation (style, tone, depth) |
+| `parent_skills_content` | `str` | Content from parent skills for reference |
+| `dependency_summaries` | `str` | Summaries of dependency skills |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill_content` | `str` | Complete SKILL.md with YAML frontmatter, all sections, examples |
+| `usage_examples` | `list[UsageExample]` | 3-5 concrete usage examples |
+| `best_practices` | `list[BestPractice]` | 5-10 best practices and gotchas |
+| `test_cases` | `list[TestCase]` | Test cases to verify skill understanding |
+| `estimated_reading_time` | `int` | Estimated reading time in minutes |
+
+**Requirements:**
+
+- YAML frontmatter at top (name in kebab-case, description)
+- Clear sections with headers
+- Code examples with explanations
+- Best practices and gotchas
+- Usage examples
+
+**Used by**: `ContentGeneratorModule` with `dspy.ChainOfThought`
+
+---
+
+### GenerateSkillSection
+
+Generate a single section of skill content (alternative to full generation).
+
+```python

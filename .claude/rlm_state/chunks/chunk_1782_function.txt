@@ -1,0 +1,35 @@
+<!-- Chunk 1782: bytes 7438358-7439358, type=function -->
+def load_optimized_program(
+    path: str | Path = "config/optimized/miprov2/",
+) -> dspy.Module:
+    """
+    Load a previously optimized program.
+
+    Args:
+        path: Directory containing the saved program state file or a state file path
+
+    Returns:
+        Loaded dspy.Module (optimized program) with optimized state
+
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Optimized program not found at {path}")
+
+    if path.is_dir():
+        state_path = path / STATE_FILENAME
+        if state_path.exists():
+            program = dspy.load(str(state_path))
+            logger.info(f"Loaded optimized program state from {state_path}")
+            return program
+
+        # Fallback for older full-program saves.
+        program = dspy.load(str(path))
+        logger.info(f"Loaded optimized program from {path}")
+        return program
+
+    program = dspy.load(str(path))
+    logger.info(f"Loaded optimized program state from {path}")
+    return program
+
+

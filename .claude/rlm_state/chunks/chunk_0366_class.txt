@@ -1,0 +1,20 @@
+<!-- Chunk 366: bytes 559953-560539, type=class -->
+class PipelineProcessor(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.step1 = dspy.Predict(Step1Signature)
+        self.step2 = dspy.Predict(Step2Signature)
+        self.step3 = dspy.Predict(Step3Signature)
+
+    def forward(self, input_data: str):
+        result1 = self.step1(input=input_data)
+        result2 = self.step2(intermediate=result1.output)
+        result3 = self.step3(intermediate=result2.output)
+        return dspy.Prediction(final_output=result3.output)
+```
+
+### Conditional Composition
+
+Branch based on intermediate results:
+
+```python

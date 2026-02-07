@@ -1,0 +1,320 @@
+<!-- Chunk 1563: bytes 6439721-6451155, type=function -->
+def save_skill_to_draft(
+    *, drafts_root: Path, job_id: str, result: SkillCreationResult
+) -> str | None:
+    """
+    Save a completed skill to the draft area.
+
+    v2 Golden Standard: Also writes subdirectory files if provided in edit_result.
+
+    Args:
+        drafts_root: Base directory for drafts
+        job_id: Unique job identifier
+        result: SkillCreationResult from the workflow
+
+    Returns:
+        Path where the draft skill was saved, or None if save failed
+
+    """
+    if not result.skill_content or not result.metadata:
+        logger.warning("Cannot save skill: missing content or metadata")
+        return None
+
+    try:
+        draft_root = _ensure_draft_root(drafts_root, job_id)
+        manager = TaxonomyManager(draft_root)
+
+        # Extract metadata for registration
+        metadata = result.metadata
+        taxonomy_path = (
+            metadata.taxonomy_path if hasattr(metadata, "taxonomy_path") else metadata.skill_id
+        )
+
+        # Use centralized path sanitization to prevent traversal attacks
+        safe_taxonomy_path = sanitize_taxonomy_path(taxonomy_path)
+        if not safe_taxonomy_path:
+            logger.error("Unsafe taxonomy path provided by workflow: %s", taxonomy_path)
+            return None
+
+        # Build metadata dict for register_skill.
+        #
+        # Important: preserve workflow-produced metadata (capabilities, load_priority, etc.)
+        # so deterministic validators and downstream tooling see the same intent the DSPy
+        # planner produced.
+        meta_dict = {
+            "skill_id": metadata.skill_id,
+            "name": metadata.name,
+            "description": metadata.description,
+            "version": metadata.version,
+            "type": metadata.type,
+            "weight": getattr(metadata, "weight", "medium"),
+            "load_priority": getattr(metadata, "load_priority", "on_demand"),
+            "dependencies": getattr(metadata, "dependencies", []) or [],
+            "capabilities": getattr(metadata, "capabilities", []) or [],
+            "category": getattr(metadata, "category", ""),
+            "keywords": getattr(metadata, "keywords", []) or [],
+            "scope": getattr(metadata, "scope", ""),
+            "see_also": getattr(metadata, "see_also", []) or [],
+            "tags": getattr(metadata, "tags", []) or [],
+        }
+
+        # Evolution tracking
+        evolution = {
+            "created_by": "skill-fleet-api",
+            "workflow": "SkillCreationProgram",
+            "validation_score": result.validation_report.score
+            if result.validation_report
+            else None,
+        }
+
+        # Register the skill (writes SKILL.md + metadata.json + standard subdirs)
+        success = manager.register_skill(
+            path=safe_taxonomy_path,
+            metadata=meta_dict,
+            content=result.skill_content,
+            evolution=evolution,
+            extra_files=result.extra_files,
+            overwrite=True,
+        )
+
+        if success:
+            full_path = draft_root / safe_taxonomy_path
+            try:
+                skill_md_path = full_path / "SKILL.md"
+                if skill_md_path.exists():
+                    skill_md = skill_md_path.read_text(encoding="utf-8")
+                    assets = _extract_named_file_code_blocks(skill_md)
+                    examples = _extract_usage_example_code_blocks(skill_md)
+
+                    if assets:
+                        assets_dir = full_path / "assets"
+                        assets_dir.mkdir(parents=True, exist_ok=True)
+                        for filename, content in assets.items():
+                            (assets_dir / filename).write_text(content, encoding="utf-8")
+
+                    if examples:
+                        examples_dir = full_path / "examples"
+                        examples_dir.mkdir(parents=True, exist_ok=True)
+                        for filename, content in examples.items():
+                            (examples_dir / filename).write_text(content, encoding="utf-8")
+            except Exception:
+                logger.warning(
+                    "Failed to extract skill artifacts (assets/examples) for %s", full_path
+                )
+
+            # v2 Golden Standard: Write subdirectory files if provided in edit_result
+            # Subdirectory files come from the DSPy generation phase
+            try:
+                if result.edit_result and hasattr(result.edit_result, "subdirectory_files"):
+                    subdir_files = result.edit_result.subdirectory_files
+                    if subdir_files and isinstance(subdir_files, dict):
+                        # Valid subdirectories per v2 standard
+                        valid_subdirs = {"references", "guides", "templates", "scripts", "examples"}
+                        for subdir_name, files in subdir_files.items():
+                            if subdir_name not in valid_subdirs:
+                                logger.warning("Skipping invalid subdirectory: %s", subdir_name)
+                                continue
+                            if not isinstance(files, dict):
+                                continue
+                            subdir_path = full_path / subdir_name
+                            subdir_path.mkdir(parents=True, exist_ok=True)
+                            for filename, content in files.items():
+                                # Validate filename for safety
+                                safe_filename = _safe_single_filename(filename)
+                                if safe_filename:
+                                    file_path = subdir_path / safe_filename
+                                    file_path.write_text(str(content), encoding="utf-8")
+                                    logger.debug(
+                                        "Wrote subdirectory file: %s/%s",
+                                        subdir_name,
+                                        safe_filename,
+                                    )
+            except Exception as e:
+                logger.warning("Failed to write subdirectory files for %s: %s", full_path, e)
+
+            logger.info("Draft saved successfully to: %s", full_path)
+            return str(full_path)
+        else:
+            logger.error("Failed to register draft skill at path: %s", taxonomy_path)
+            return None
+
+    except Exception as e:
+        logger.error(f"Error saving skill to draft: {e}", exc_info=True)
+        return None
+
+
+============================================================
+END FILE: src/skill_fleet/api/utils/draft_save.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/v1/__init__.py
+============================================================
+
+"""
+V1 API routes.
+
+This package contains all v1 API endpoint modules.
+"""
+
+
+============================================================
+END FILE: src/skill_fleet/api/v1/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/v1/conversational.py
+============================================================
+
+"""
+Conversational interface routes for v1 API.
+
+This module provides endpoints for chat and conversational interactions.
+
+Note: These endpoints are temporarily unavailable pending migration to new workflow architecture.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from skill_fleet.infrastructure.db.database import get_db
+
+from ..schemas.conversational import (
+    SendMessageRequest,
+    SendMessageResponse,
+    SessionHistoryResponse,
+)
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session as DbSession
+
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+# Type alias for database dependency
+DbSessionDep = Annotated["DbSession", Depends(get_db)]
+
+
+@router.post("/message", response_model=SendMessageResponse)
+async def send_message(
+    request: SendMessageRequest,
+    db: DbSessionDep,
+) -> SendMessageResponse:
+    """
+    Send a message in a conversation.
+
+    Temporarily unavailable - pending migration to new workflow architecture.
+    """
+    raise HTTPException(
+        status_code=503,
+        detail="Conversational interface is temporarily unavailable. Migration to new workflow architecture in progress.",
+    )
+
+
+@router.post("/session/{session_id}", response_model=dict[str, str])
+async def create_session(
+    session_id: str,
+    db: DbSessionDep,
+) -> dict[str, str]:
+    """
+    Create or resume a conversation session.
+
+    Temporarily unavailable - pending migration to new workflow architecture.
+    """
+    raise HTTPException(
+        status_code=503,
+        detail="Conversational interface is temporarily unavailable. Migration to new workflow architecture in progress.",
+    )
+
+
+@router.get("/session/{session_id}/history", response_model=SessionHistoryResponse)
+async def get_session_history(
+    session_id: str,
+    db: DbSessionDep,
+) -> SessionHistoryResponse:
+    """
+    Get the history of a conversation session.
+
+    Temporarily unavailable - pending migration to new workflow architecture.
+    """
+    raise HTTPException(
+        status_code=503,
+        detail="Conversational interface is temporarily unavailable. Migration to new workflow architecture in progress.",
+    )
+
+
+@router.get("/sessions", response_model=dict[str, Any])
+async def list_sessions(
+    db: DbSessionDep,
+) -> dict[str, Any]:
+    """
+    List all active conversation sessions.
+
+    Temporarily unavailable - pending migration to new workflow architecture.
+    """
+    raise HTTPException(
+        status_code=503,
+        detail="Conversational interface is temporarily unavailable. Migration to new workflow architecture in progress.",
+    )
+
+
+@router.post("/stream")
+async def stream_chat(
+    request: SendMessageRequest,
+    db: DbSessionDep,
+):
+    """
+    Stream chat responses.
+
+    Temporarily unavailable - pending migration to new workflow architecture.
+    """
+    raise HTTPException(
+        status_code=503,
+        detail="Conversational interface is temporarily unavailable. Migration to new workflow architecture in progress.",
+    )
+
+
+============================================================
+END FILE: src/skill_fleet/api/v1/conversational.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/v1/drafts.py
+============================================================
+
+"""
+Draft lifecycle routes for v1 API.
+
+This module provides endpoints for draft promotion.
+Skill creation is draft-first: jobs write drafts under `skills/_drafts/<job_id>/...`
+Promotion into the real taxonomy is explicit.
+
+Endpoints:
+    POST /api/v1/drafts/{job_id}/promote - Promote a draft to the taxonomy
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from skill_fleet.common.security import resolve_path_within_root, sanitize_taxonomy_path
+
+from ..dependencies import SkillsRoot, TaxonomyManagerDep
+from ..services.jobs import delete_job_session, get_job, save_job_session
+
+router = APIRouter()
+
+

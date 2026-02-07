@@ -1,0 +1,6 @@
+<!-- Chunk 995: bytes 3484072-3484177, type=class -->
+class ConfirmPrompt(BaseModel):
+    type: Literal["confirm"] = "confirm"
+    summary: str
+    path: str
+

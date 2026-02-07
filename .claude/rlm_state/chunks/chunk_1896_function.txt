@@ -1,0 +1,6 @@
+<!-- Chunk 1896: bytes 7704491-7704616, type=function -->
+def get_job_repository(db: Session) -> JobRepository:
+    """Get a JobRepository instance."""
+    return JobRepository(db)
+
+

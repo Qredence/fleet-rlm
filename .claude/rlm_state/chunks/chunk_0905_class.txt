@@ -1,0 +1,38 @@
+<!-- Chunk 905: bytes 3188168-3189504, type=class -->
+class ValidateSkill(dspy.Signature):
+    """Comprehensive validation of generated skill content."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill_content` | `str` | Complete SKILL.md content to validate |
+| `skill_metadata` | `SkillMetadata` | Skill metadata |
+| `content_plan` | `str` | Original content plan from Phase 1 |
+| `validation_rules` | `str` | JSON validation rules and thresholds |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `validation_report` | `ValidationReport` | Complete report with passed, checks, issues, warnings |
+| `critical_issues` | `list[ValidationCheckItem]` | Issues that MUST be fixed |
+| `warnings` | `list[ValidationCheckItem]` | Issues that SHOULD be fixed |
+| `suggestions` | `list[str]` | Optional suggestions for improvement |
+| `overall_score` | `float` | Overall quality score 0-1. >0.8 means high quality |
+
+**Validates:**
+
+1. agentskills.io Compliance (YAML frontmatter, naming)
+2. Content Quality (sections, examples, code validity)
+3. Structural Integrity (markdown formatting, links)
+4. Metadata Consistency (matches content, tags, dependencies)
+
+**Used by**: `SkillValidatorModule` with `dspy.Predict`
+
+---
+
+### RefineSkillFromFeedback
+
+Refine skill content based on validation issues and user feedback.
+
+```python

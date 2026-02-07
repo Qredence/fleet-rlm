@@ -1,0 +1,35 @@
+<!-- Chunk 1415: bytes 5164017-5164854, type=class -->
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+@app.patch("/users/{user_id}")
+async def update_user(user_id: int, update: UserUpdate, db: AsyncSession = Depends(get_db)):
+    user = await db.get(User, user_id)
+    update_data = update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(user, field, value)
+    await db.commit()
+    return user
+```
+
+## Async Testing
+
+```python
+@pytest.fixture
+async def async_client():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
+
+@pytest.mark.asyncio
+async def test_endpoint(async_client: AsyncClient):
+    response = await async_client.get("/users")
+    assert response.status_code == 200
+```
+
+## Dependency Injection
+
+```python
+from functools import lru_cache
+
+@lru_cache()

@@ -1,0 +1,6 @@
+<!-- Chunk 994: bytes 3483940-3484072, type=class -->
+class ClarifyPrompt(BaseModel):
+    type: Literal["clarify"] = "clarify"
+    questions: list[str]
+    rationale: str | None = None
+

@@ -1,0 +1,152 @@
+<!-- Chunk 486: bytes 833722-838070, type=function -->
+def one_word_answer(args, pred: dspy.Prediction) -> float:
+    return 1.0 if len(pred.answer.split()) == 1 else 0.0
+
+best_of_3 = dspy.BestOfN(
+    module=dspy.ChainOfThought("question -> answer"),
+    N=3,
+    reward_fn=one_word_answer,
+    threshold=1.0
+)
+
+result = best_of_3(question="What is the capital of Belgium?")
+print(result.answer)  # Brussels
+```
+
+### Refine for Iterative Improvement
+```python
+refine = dspy.Refine(
+    module=dspy.ChainOfThought("question -> answer"),
+    N=3,
+    reward_fn=one_word_answer,
+    threshold=1.0
+)
+
+result = refine(question="What is the capital of Belgium?")
+print(result.answer)  # Brussels
+```
+
+## When to Use This Skill
+
+Use this skill when:
+- Building ReAct agents with tool calling
+- Implementing output refinement strategies
+- Integrating external tools and APIs
+- Using custom adapters for LM integration
+- Implementing multi-step reasoning with feedback loops
+
+## Core Concepts
+
+### ReAct Agents
+ReAct combines reasoning and action, enabling agents to use tools to answer questions.
+
+**Key features:**
+- Automatic reasoning before tool calls
+- Tool trajectory tracking
+- Multi-iteration tool usage
+- Dynamic tool selection
+
+**See:** [references/react-tools.md](references/react-tools.md) for:
+- ReAct agent patterns
+- Tool definition best practices
+- Multi-tool coordination
+
+### Output Refinement
+Improve output quality through multiple attempts or iterative refinement.
+
+**Strategies:**
+- **BestOfN**: Generate N candidates and select best
+- **Refine**: Iteratively improve with feedback loop
+
+**See:** [references/output-refinement.md](references/output-refinement.md) for:
+- BestOfN vs Refine comparison
+- Reward function patterns
+- Use cases and examples
+
+### Adapters
+Adapters bridge DSPy modules with Language Models, handling prompt formatting and output parsing.
+
+**Adapter types:**
+- **ChatAdapter**: For chat-based LMs
+- **JSONAdapter**: For structured output
+- **Custom adapters**: For specialized use cases
+
+**See:** [references/adapters.md](references/adapters.md) for:
+- Adapter architecture
+- Custom adapter implementation
+- Multi-provider configuration
+
+## Progressive Disclosure
+
+This skill uses progressive disclosure:
+
+1. **SKILL.md** (this file): Quick reference and navigation
+2. **references/**: Detailed technical docs loaded as needed
+
+Load reference files only when you need detailed information on a specific topic.
+
+## Related Skills
+
+- **dspy-basics**: Signature design, basic modules, program composition
+- **dspy-optimization**: Teleprompters, metrics, optimization workflows
+- **dspy-configuration**: LM setup, caching, and version management
+
+
+============================================================
+END FILE: .fleet/skills/dspy-advanced/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-advanced/references/adapters.md
+============================================================
+
+# DSPy Adapters
+
+Adapters bridge DSPy modules with Language Models, handling prompt formatting and output parsing. This guide covers adapter architecture and usage.
+
+## Table of Contents
+
+- [Adapter Overview](#adapter-overview)
+- [Adapter Architecture](#adapter-architecture)
+- [ChatAdapter](#chatadapter)
+- [JSONAdapter](#jsonadapter)
+- [Custom Adapters](#custom-adapters)
+- [Multi-Provider Configuration](#multi-provider-configuration)
+
+## Adapter Overview
+
+### What are Adapters?
+
+Adapters are the interface layer that transforms DSPy modules/signatures into LM prompts and parses LM responses back into structured data.
+
+### Where Adapters Fit in the System
+
+```
+1. User calls DSPy module with inputs
+   ↓
+2. Module calls dspy.Predict
+   ↓
+3. Adapter.format() converts signature + inputs → LM messages
+   ↓
+4. Language Model generates response
+   ↓
+5. Adapter.parse() converts LM response → structured outputs
+   ↓
+6. Module returns structured outputs to user
+```
+
+### Why Use Adapters?
+
+- **Automatic formatting**: No manual prompt engineering
+- **Type validation**: Enforces signature field types
+- **Multi-provider support**: Same code works across different LMs
+- **Conversation history**: Manages multi-turn conversations
+- **Native features**: Enables function calling, citations, etc.
+
+## Adapter Architecture
+
+### Base Adapter Class
+
+```python
+import dspy
+

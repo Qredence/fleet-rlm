@@ -1,0 +1,32 @@
+<!-- Chunk 2016: bytes 7896027-7897068, type=class -->
+class TestIterParents:
+    """Tests for _iter_parents function."""
+
+    def test_returns_parents_for_directory(self, tmp_path: Path):
+        """Test returning parent directories for a directory path."""
+        subdir = tmp_path / "a" / "b" / "c"
+        subdir.mkdir(parents=True)
+
+        result = _iter_parents(subdir)
+
+        assert subdir in result
+        assert subdir.parent in result  # tmp_path/a/b
+        assert subdir.parent.parent in result  # tmp_path/a
+        assert tmp_path in result
+
+    def test_returns_parents_for_file(self, tmp_path: Path):
+        """Test returning parent directories for a file path."""
+        subdir = tmp_path / "a" / "b"
+        subdir.mkdir(parents=True)
+        file_path = subdir / "file.txt"
+        file_path.touch()
+
+        result = _iter_parents(file_path)
+
+        # Should start from parent directory, not the file itself
+        assert subdir in result
+        assert subdir.parent in result  # tmp_path/a
+        assert tmp_path in result
+        assert file_path not in result
+
+

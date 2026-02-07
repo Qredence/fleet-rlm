@@ -1,0 +1,34 @@
+<!-- Chunk 1509: bytes 6359807-6360859, type=function -->
+def _normalize_string_questions(text: str) -> list[StructuredQuestion]:
+    r"""
+    Split a string that may contain numbered questions into individual questions.
+
+    Handles formats like:
+    - "1. First question\n2. Second question"
+    - "Single question without numbering"
+    """
+    text = text.strip()
+    if not text:
+        return []
+
+    # Check if it looks like a numbered list ("1. ...\n2. ...")
+    matches = list(re.finditer(r"(?m)^\s*\d+\.\s+", text))
+
+    if len(matches) <= 1:
+        # Single question or no numbering
+        return [StructuredQuestion(text=text)]
+
+    # Split numbered list into individual questions
+    parts: list[StructuredQuestion] = []
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        chunk = text[start:end].strip()
+        # Remove the number prefix (e.g., "1. ")
+        chunk = re.sub(r"^\s*\d+\.\s*", "", chunk)
+        if chunk:
+            parts.append(StructuredQuestion(text=chunk))
+
+    return parts
+
+

@@ -1,0 +1,20 @@
+<!-- Chunk 610: bytes 949661-950087, type=function -->
+def my_metric(example, pred, trace=None):
+    """
+    Custom metric for evaluation.
+
+    Args:
+        example: The ground truth example
+        pred: The program's prediction
+        trace: Optional execution trace for debugging
+
+    Returns:
+        bool or float: True/1.0 for success, False/0.0 for failure
+    """
+    return example.output == pred.output
+```
+
+### Using Metrics in Optimization
+
+```python
+# Define metric

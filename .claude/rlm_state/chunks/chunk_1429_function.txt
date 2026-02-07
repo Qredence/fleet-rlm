@@ -1,0 +1,11 @@
+<!-- Chunk 1429: bytes 5514807-5515085, type=function -->
+def repeat(num_times):
+    def decorator_repeat(func):
+        def wrapper(*args, **kwargs):
+            for _ in range(num_times):
+                result = func(*args, **kwargs)
+            return result
+        return wrapper
+    return decorator_repeat
+
+@repeat(num_times=3)

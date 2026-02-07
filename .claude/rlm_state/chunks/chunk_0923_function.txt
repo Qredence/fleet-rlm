@@ -1,0 +1,10 @@
+<!-- Chunk 923: bytes 3348878-3349157, type=function -->
+def payment_endpoint(user_id: int, amount: float, card: dict):
+    return process_payment(user_id, amount, card)  # Blocking! No validation!
+```
+
+**After - Production conversion:**
+```python
+# models.py - Add Pydantic validation
+from pydantic import BaseModel, Field, validator
+

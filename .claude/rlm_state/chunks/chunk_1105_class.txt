@@ -1,0 +1,38 @@
+<!-- Chunk 1105: bytes 3947498-3948728, type=class -->
+class EditSkillContent(dspy.Signature):
+    """Step 4: Generate comprehensive skill content with composition support."""
+    
+    skill_skeleton = dspy.InputField()
+    parent_skills = dspy.InputField(
+        desc="Content from parent/sibling skills for consistency"
+    )
+    
+    # Key addition: composition patterns
+    composition_strategy = dspy.OutputField(
+        desc="""How this skill composes with others:
+        - Extends: Inherits from parent skill
+        - Complements: Works alongside sibling skills
+        - Requires: Hard dependency on other skills
+        - Conflicts: Cannot be mounted with specific skills
+        """
+    )
+    
+    skill_content = dspy.OutputField(
+        desc="Full SKILL.md content following Anthropic patterns"
+    )
+    capability_implementations = dspy.OutputField(
+        desc="Detailed capability documentation"
+    )
+    usage_examples = dspy.OutputField(
+        desc="Runnable examples showing skill in context"
+    )
+    best_practices = dspy.OutputField(
+        desc="Dos and don'ts when using this skill"
+    )
+```
+
+**Why:** Skills rarely exist in isolation; composition is crucial for taxonomy coherence.
+
+### 5. **PACKAGE Should Include Taxonomy Validation**
+
+```python

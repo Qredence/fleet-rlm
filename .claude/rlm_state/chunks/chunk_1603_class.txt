@@ -1,0 +1,96 @@
+<!-- Chunk 1603: bytes 6601602-6605016, type=class -->
+class DeepUnderstandingHandler(InteractionHandler):
+    """
+    Handler for deep_understanding interaction type.
+
+    Asks WHY questions to understand the user's true problem and goals.
+    Shows research performed and current understanding.
+
+    User Actions:
+    - proceed: Answer question and provide context
+    - skip: Skip this question
+    - cancel: Cancel skill creation
+    """
+
+    async def handle(
+        self,
+        job_id: str,
+        prompt_data: dict[str, Any],
+        client: Any,
+    ) -> None:
+        """Handle deep understanding interaction and post response to API."""
+        question = prompt_data.get("question", "")
+        research = prompt_data.get("research_performed", [])
+        current = prompt_data.get("current_understanding", "")
+        readiness_score = prompt_data.get("readiness_score")
+
+        # Show current understanding
+        if current:
+            self.console.print(
+                Panel(
+                    Markdown(current) if current else "No understanding yet.",
+                    title="[bold cyan]💭 Current Understanding[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
+
+        # Show research performed
+        if research:
+            self.console.print("[dim]Research performed:[/dim]")
+            for r in research:
+                self.console.print(f"  • {r}")
+
+        if readiness_score is not None:
+            self.console.print(f"[dim]Readiness score:[/dim] {readiness_score:.2f} (target 0.80)")
+
+        # Ask the question
+        if question:
+            self.console.print(
+                Panel(
+                    Markdown(question) if "**" in question else question,
+                    title="[bold yellow]🤔 Deep Understanding Question[/bold yellow]",
+                    border_style="yellow",
+                )
+            )
+
+        action = await self.ui.choose_one(
+            "Continue?",
+            [
+                ("proceed", "Answer & Continue"),
+                ("skip", "Skip Question"),
+                ("cancel", "Cancel"),
+            ],
+            default_id="proceed",
+        )
+
+        if action == "cancel":
+            await client.post_hitl_response(job_id, {"action": "cancel"})
+        elif action == "proceed":
+            answer = await self.ui.ask_text("Your answer (or /cancel)", default="")
+            if answer.strip().lower() in {"/cancel", "/exit", "/quit"}:
+                await client.post_hitl_response(job_id, {"action": "cancel"})
+            else:
+                # Ask for additional context
+                problem = await self.ui.ask_text(
+                    "What problem are you solving? (optional)", default=""
+                )
+                goals_input = await self.ui.ask_text(
+                    "What are your goals? (comma-separated, optional)", default=""
+                )
+                goals = (
+                    [g.strip() for g in goals_input.split(",") if g.strip()] if goals_input else []
+                )
+
+                await client.post_hitl_response(
+                    job_id,
+                    {
+                        "action": "proceed",
+                        "answer": answer,
+                        "problem": problem,
+                        "goals": goals,
+                    },
+                )
+        else:  # skip
+            await client.post_hitl_response(job_id, {"action": "proceed"})
+
+

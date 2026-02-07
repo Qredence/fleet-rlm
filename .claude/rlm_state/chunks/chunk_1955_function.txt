@@ -1,0 +1,206 @@
+<!-- Chunk 1955: bytes 7824275-7830135, type=function -->
+def function_name(param1: type, param2: type) -> return_type:
+    \"\"\"Description of the function.\"\"\"
+```
+
+**Parameters:**
+- `param1`: Description
+- `param2`: Description
+
+**Returns:** Description of return value
+
+**Example:**
+```python
+# Usage example
+```
+
+## Classes
+
+### ClassName
+
+Description of the class.
+
+#### Methods
+
+- `method_name()`: Description
+"""
+
+    troubleshooting_content = f"""# Troubleshooting
+
+Common issues and solutions for `{skill_name}`.
+
+## Common Issues
+
+### Issue 1: Description
+
+**Symptoms:** What you might see
+
+**Cause:** Why this happens
+
+**Solution:** How to fix it
+
+```python
+# Fix example
+```
+
+### Issue 2: Description
+
+**Symptoms:** What you might see
+
+**Cause:** Why this happens
+
+**Solution:** How to fix it
+
+## Getting Help
+
+If you encounter issues not covered here:
+1. Check the [API Reference](api-reference.md)
+2. Review [Common Patterns](common-patterns.md)
+3. Search existing issues
+"""
+
+    # Write reference documentation files if they don't exist
+    ref_files = {
+        "quick-start.md": quick_start_content,
+        "common-patterns.md": common_patterns_content,
+        "api-reference.md": api_reference_content,
+        "troubleshooting.md": troubleshooting_content,
+    }
+
+    for filename, content in ref_files.items():
+        file_path = references_dir / filename
+        if not file_path.exists():
+            file_path.write_text(content, encoding="utf-8")
+
+
+async def lint_and_format_skill(skill_dir: Path) -> None:
+    """
+    Lint and format Python files in generated skill directory asynchronously.
+
+    Runs ruff linting and formatting on all Python files in the skill's
+    examples/ and scripts/ subdirectories to ensure code quality.
+
+    Args:
+        skill_dir: Path to skill directory
+
+    """
+    python_files = []
+    examples_dir = skill_dir / "examples"
+    scripts_dir = skill_dir / "scripts"
+
+    # Collect Python files from examples/
+    if examples_dir.exists():
+        python_files.extend(examples_dir.rglob("*.py"))
+
+    # Collect Python files from scripts/
+    if scripts_dir.exists():
+        python_files.extend(scripts_dir.rglob("*.py"))
+
+    if not python_files:
+        return
+
+    # Run ruff check (linting)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "uv",
+            "run",
+            "ruff",
+            "check",
+            *[str(f) for f in python_files],
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                logger.warning(
+                    f"Linting issues in skill {skill_dir.name}: "
+                    f"{stdout.decode() if stdout else stderr.decode()}"
+                )
+        except TimeoutError:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except TimeoutError:
+                logger.error(f"Failed to terminate linting process for {skill_dir.name}")
+            logger.warning(f"Linting timed out for skill {skill_dir.name}")
+    except (FileNotFoundError, OSError) as e:
+        logger.warning(f"Failed to lint skill {skill_dir.name}: {e}")
+
+    # Run ruff format
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "uv",
+            "run",
+            "ruff",
+            "format",
+            *[str(f) for f in python_files],
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                logger.warning(
+                    f"Formatting issues in skill {skill_dir.name}: "
+                    f"{stdout.decode() if stdout else stderr.decode()}"
+                )
+        except TimeoutError:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except TimeoutError:
+                logger.error(f"Failed to terminate formatting process for {skill_dir.name}")
+            logger.warning(f"Formatting timed out for skill {skill_dir.name}")
+    except (FileNotFoundError, OSError) as e:
+        logger.warning(f"Failed to format skill {skill_dir.name}: {e}")
+
+
+============================================================
+END FILE: src/skill_fleet/taxonomy/skill_registration.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/validators/__init__.py
+============================================================
+
+"""Validation utilities for the agentic skills system."""
+
+from .skill_validator import SkillValidator
+
+__all__ = ["SkillValidator"]
+
+
+============================================================
+END FILE: src/skill_fleet/validators/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/validators/skill_validator.py
+============================================================
+
+"""
+Skill validation utilities for taxonomy and agentskills.io compliance.
+
+v2 Golden Standard (Jan 2026):
+- Only SKILL.md is required (no metadata.json)
+- Supports 3 skill styles: navigation_hub, comprehensive, minimal
+- New subdirectory structure: references/, guides/, templates/, scripts/, examples/
+- "When to Use" section required (replaces rigid Overview/Capabilities)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+import yaml
+
+from ..common.security import resolve_path_within_root, sanitize_relative_file_path
+
+
+@dataclass(frozen=True, slots=True)

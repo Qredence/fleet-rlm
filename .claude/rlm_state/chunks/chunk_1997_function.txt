@@ -1,0 +1,7 @@
+<!-- Chunk 1997: bytes 7890417-7890622, type=function -->
+def test_api_error_default_suggestion():
+    """Test APIError has default suggestion."""
+    error = APIError("Failed")
+    assert "Check your network connection and API URL" in (error.suggestion or "")
+
+

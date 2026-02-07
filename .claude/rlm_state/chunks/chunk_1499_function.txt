@@ -1,0 +1,74 @@
+<!-- Chunk 1499: bytes 6346416-6348187, type=function -->
+def get_app() -> FastAPI:
+    """
+    Get or create the FastAPI application instance (cached).
+
+    Returns:
+        FastAPI: Cached application instance.
+
+    """
+    from .factory import get_app as _get_app
+
+    return _get_app()
+
+
+# Module-level app instance for uvicorn compatibility
+# Usage: uvicorn skill_fleet.api.main:app
+app = get_app()
+
+
+============================================================
+END FILE: src/skill_fleet/api/main.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/middleware/__init__.py
+============================================================
+
+"""
+FastAPI app middleware.
+
+This module provides custom middleware for the app layer.
+"""
+
+from __future__ import annotations
+
+from .logging import (
+    ErrorHandlingMiddleware,
+    LoggingMiddleware,
+)
+
+__all__ = ["ErrorHandlingMiddleware", "LoggingMiddleware"]
+
+
+============================================================
+END FILE: src/skill_fleet/api/middleware/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/middleware/logging.py
+============================================================
+
+"""Middleware for request logging and request ID tracking."""
+
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from typing import TYPE_CHECKING
+
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from ..config import get_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from fastapi import Request, Response
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
+
+

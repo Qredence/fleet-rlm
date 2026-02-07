@@ -1,0 +1,78 @@
+<!-- Chunk 746: bytes 2580312-2581993, type=class -->
+class JobStatus(str, Enum):
+    """Status of a skill creation job."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    PENDING_HITL = "pending_hitl"
+    COMPLETED = "completed"
+    FAILED = "failed"
+```
+
+---
+
+## Schema Locations
+
+The schemas are defined in:
+- `src/skill_fleet/api/schemas/models.py` - Main API schemas
+- `src/skill_fleet/api/schemas/hitl.py` - HITL-specific schemas
+
+## See Also
+
+- **[v2 Endpoints](V2_ENDPOINTS.md)** - Complete endpoint reference
+- **[API Overview](index.md)** - API architecture and setup
+- **[HITL System](../hitl/)** - Human-in-the-Loop details
+
+
+============================================================
+END FILE: docs/api/V2_SCHEMAS.md
+============================================================
+
+============================================================
+FILE: docs/api/api-reference.md
+============================================================
+
+# API Reference
+
+Python API reference for programmatic interaction with the skill-fleet system.
+
+## Core Classes
+
+### TaxonomyManager
+
+Central class for managing the skills taxonomy.
+
+**Import:**
+```python
+from pathlib import Path
+from skill_fleet.taxonomy.manager import TaxonomyManager
+```
+
+**Constructor:**
+```python
+TaxonomyManager(skills_root: Path)
+```
+
+**Parameters:**
+- `skills_root` (Path): Root directory of the skills taxonomy
+
+**Example:**
+```python
+from pathlib import Path
+from skill_fleet.taxonomy.manager import TaxonomyManager
+
+manager = TaxonomyManager(
+    Path("skills")
+)
+```
+
+---
+
+#### Methods
+
+##### `generate_available_skills_xml()`
+
+Generate `<available_skills>` XML for agent context injection following agentskills.io standard.
+
+**Signature:**
+```python

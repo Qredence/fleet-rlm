@@ -1,0 +1,28 @@
+<!-- Chunk 868: bytes 3124388-3125165, type=class -->
+class AnalyzeIntent(dspy.Signature):
+    """Deeply analyze user intent to understand what skill is needed."""
+
+    # Inputs
+    task_description: str = dspy.InputField(
+        desc="User's task description with any clarifications"
+    )
+    user_context: str = dspy.InputField(
+        desc="JSON user context (user_id, existing skills, preferences)"
+    )
+
+    # Outputs
+    task_intent: TaskIntent = dspy.OutputField(
+        desc="Structured intent with: purpose, problem_statement, target_audience"
+    )
+    skill_type: str = dspy.OutputField(
+        desc="Type of skill: 'how_to', 'reference', 'concept', 'workflow'"
+    )
+```
+
+See [Signatures Documentation](signatures.md) for all signatures.
+
+### Modules
+
+Modules implement the **logic** using signatures:
+
+```python

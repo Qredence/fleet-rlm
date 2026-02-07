@@ -1,0 +1,30 @@
+<!-- Chunk 1395: bytes 5125445-5126122, type=class -->
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    age: Optional[int] = None
+
+# 2. PATCH endpoint
+@app.patch("/users/{user_id}")
+async def update_user(user_id: int, user_update: UserUpdate):
+    existing_user = get_user(user_id)
+
+    # Extract only provided fields
+    update_data = user_update.model_dump(exclude_unset=True)
+
+    # Handle empty update
+    if not update_data:
+        return existing_user
+
+    # Apply partial updates
+    updated_user = existing_user.model_copy(update=update_data)
+
+    return save_user(updated_user)
+```
+
+---
+
+## The Three Key Steps
+
+### 1. Create Update Model with Optional Fields
+```python

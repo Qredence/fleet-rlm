@@ -1,0 +1,7 @@
+<!-- Chunk 816: bytes 2737742-2738042, type=class -->
+class SkillService(BaseService):
+    async def calculate_overlap(self, skill1: Skill, skill2: Skill):
+        domain_service = SkillDomainService(self.skill_repository)
+        return await domain_service.calculate_overlap(skill1, skill2)
+
+# ❌ Avoid: Implementing domain logic in application service

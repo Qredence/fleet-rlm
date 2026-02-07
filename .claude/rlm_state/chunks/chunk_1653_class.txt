@@ -1,0 +1,5 @@
+<!-- Chunk 1653: bytes 6676454-6676548, type=class -->
+class LLMProviderError(SkillsFleetError):
+    """Base exception for LLM provider errors."""
+
+

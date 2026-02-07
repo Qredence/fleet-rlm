@@ -1,0 +1,6 @@
+<!-- Chunk 1668: bytes 6686374-6686533, type=function -->
+def default_config_root() -> Path:
+    """Resolve the default fleet config directory (the parent of config.yaml)."""
+    return default_config_path().parent
+
+

@@ -1,0 +1,46 @@
+<!-- Chunk 1136: bytes 4248960-4250276, type=function -->
+def test_configure_dspy_sets_adapter(tmp_path, monkeypatch):
+    # Provide a minimal config that specifies adapter=json.
+    # This test should validate dspy.settings.adapter is set.
+    pass
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/unit/test_dspy_adapter_config.py -v`
+Expected: FAIL
+
+**Step 3: Minimal implementation**
+
+Implement adapter selection in `configure_dspy()`:
+- Determine adapter from config (e.g., `dspy.adapter: chat|json|two_step`) or env override.
+- Call `dspy.configure(lm=lm, adapter=adapter_instance)`.
+
+**Step 4: Run test to verify it passes**
+
+Run: `uv run pytest tests/unit/test_dspy_adapter_config.py -v`
+Expected: PASS
+
+---
+
+### Task 6: Make streaming robust across adapters and Reasoning models
+
+**Files:**
+- Modify: `src/skill_fleet/common/streaming.py`
+- Test: `tests/unit/test_streaming_reasoning_type.py`
+
+**Goal:** Ensure our streaming collection still works when:
+- adapter is JSONAdapter (different field delimiters)
+- reasoning is native `reasoning_content` (Reasoning type parse_stream_chunk)
+
+**Step 1: Write failing test**
+
+The easiest unit test is to validate we build stream listeners for the reasoning field and do not
+assume it is plain text elsewhere.
+
+```python
+import dspy
+
+from skill_fleet.common.streaming import create_streaming_module
+
+

@@ -1,0 +1,73 @@
+<!-- Chunk 927: bytes 3351175-3353325, type=function -->
+def get_user_data(user_id: int) -> dict:
+    # Blocking DB call
+    user = db.session.query(User).filter(User.id == user_id).first()
+    # Blocking HTTP call
+    response = requests.get(f"https://api.external.com/user/{user_id}")
+    return {"user": user, "external": response.json()}
+
+# Naive "async" wrapper (still blocks!)
+@app.get("/users/{user_id}")
+async def get_user_endpoint(user_id: int):
+    return await run_in_executor(None, get_user_data, user_id)
+```
+
+**After - Proper async:**
+```python
+# New async version
+async def get_user_data(user_id: int, db: AsyncSession) -> dict:
+    # Async DB call
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    # Async HTTP call
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"https://api.external.com/user/{user_id}")
+
+    return {"user": user, "external": response.json()}
+
+@app.get("/users/{user_id}")
+async def get_user_endpoint(user_id: int, db: AsyncSession = Depends(get_db)):
+    return await get_user_data(user_id, db)
+```
+
+**Sync → Async Mapping:**
+| Sync Library | Async Replacement |
+|--------------|-------------------|
+| `requests` | `httpx` |
+| `sqlalchemy` | `sqlalchemy.ext.asyncio` |
+| `time.sleep()` | `asyncio.sleep()` |
+| `open()` | `aiofiles` |
+| `subprocess` | `asyncio.create_subprocess` |
+| `redis` | `asyncio-redis` or `aioredis` |
+
+### 7. File Upload Handling
+
+**The Problem:** Converting utilities that process files (CSV parsing, image processing, document generation) to handle FastAPI file uploads.
+
+**Pattern:**
+
+```python
+from fastapi import UploadFile
+import pandas as pd
+
+@app.post("/upload-csv")
+async def upload_csv(file: UploadFile):
+    # Stream the file - don't load entirely into memory
+    df = pd.read_csv(file.file)
+
+    # Process
+    results = process_data_frame(df)
+
+    return {"uploaded": len(results), "data": results}
+```
+
+### 8. Background Tasks
+
+**The Problem:** Converting utilities that take minutes to run (video processing, large file generation, batch imports). HTTP requests timeout.
+
+**Pattern:**
+
+```python
+from fastapi import BackgroundTasks
+

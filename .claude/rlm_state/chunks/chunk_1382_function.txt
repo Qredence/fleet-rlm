@@ -1,0 +1,6 @@
+<!-- Chunk 1382: bytes 5105842-5105938, type=function -->
+def create_user(data: dict) -> dict:
+    user = User(**data)
+    return user.to_dict()
+
+# After

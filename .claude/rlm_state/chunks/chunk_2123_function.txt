@@ -1,0 +1,24 @@
+<!-- Chunk 2123: bytes 8048556-8049243, type=function -->
+def test_create_feedback_handler_factory() -> None:
+    assert isinstance(create_feedback_handler("auto"), AutoApprovalHandler)
+
+    with pytest.raises(ValueError):
+        create_feedback_handler("does_not_exist")
+
+
+============================================================
+END FILE: tests/unit/test_workflow_feedback.py
+============================================================
+
+============================================================
+FILE: tests/unit/test_workflow_modules_utils.py
+============================================================
+
+import logging
+
+import pytest
+from pydantic import BaseModel
+
+from skill_fleet.common.utils import safe_float, safe_json_loads
+
+

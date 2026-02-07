@@ -1,0 +1,23 @@
+<!-- Chunk 1920: bytes 7738795-7739375, type=function -->
+def end_mlflow_run() -> None:
+    """
+    End the current active MLflow run.
+
+    Examples:
+        >>> end_mlflow_run()
+
+    """
+    try:
+        import mlflow
+
+        mlflow.end_run()  # type: ignore[attr-defined]
+        logger.info("Ended MLflow run")
+    except Exception as e:
+        logger.warning(f"Failed to end MLflow run: {e}")
+
+
+# =============================================================================
+# Enhanced MLflow Functions (v2.0) - Hierarchical runs, tagging, artifacts
+# =============================================================================
+
+

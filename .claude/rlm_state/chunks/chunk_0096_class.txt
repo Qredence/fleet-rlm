@@ -1,0 +1,14 @@
+<!-- Chunk 96: bytes 149985-150339, type=class -->
+class TaskRouting(dspy.Signature):
+    task = dspy.InputField(desc="Task to route")
+    agent_id: str = dspy.OutputField(desc="ID of the agent to handle the task")
+    confidence: float = dspy.OutputField(desc="Routing confidence score")
+```
+
+## Descriptions and Hints
+
+### Field Descriptions
+
+Descriptions explain what each field represents:
+
+```python

@@ -1,0 +1,15 @@
+<!-- Chunk 2066: bytes 7972981-7973455, type=function -->
+def test_cors_production_with_wildcard_fails():
+    """Test that the app fails to start in production if CORS is set to wildcard."""
+    with patch(
+        "skill_fleet.api.factory.settings",
+        MagicMock(
+            is_development=False,
+            cors_origins_list=["*"],
+        ),
+    ):
+        with pytest.raises(ValueError) as excinfo:
+            create_app()
+        assert "Wildcard CORS origin ('*') is not allowed in production" in str(excinfo.value)
+
+

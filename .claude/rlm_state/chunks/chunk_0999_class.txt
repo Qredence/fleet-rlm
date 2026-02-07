@@ -1,0 +1,427 @@
+<!-- Chunk 999: bytes 3490744-3509608, type=class -->
+class JobStore(ABC):
+    @abstractmethod
+    async def create(self) -> str: ...
+    
+    @abstractmethod
+    async def get(self, job_id: str) -> JobState | None: ...
+    
+    @abstractmethod
+    async def update(self, job_id: str, state: JobState) -> None: ...
+    
+    @abstractmethod
+    async def wait_for_response(self, job_id: str, timeout: float) -> dict: ...
+```
+
+---
+
+## Phase 5: Automated SDK Generation
+
+**Duration:** 1 week  
+**Priority:** Low-Medium
+
+### Objectives
+
+1. Auto-generate CLI client from OpenAPI spec
+2. Ensure CLI↔Server contract is always in sync
+3. Reduce manual client maintenance
+
+### Tasks
+
+| Task | File(s) | Description |
+|------|---------|-------------|
+| 5.1 | `scripts/generate_client.py` | Script to run `openapi-python-client` |
+| 5.2 | `src/skill_fleet/cli/generated/` | Output directory for generated client |
+| 5.3 | `src/skill_fleet/cli/client.py` | Wrap generated client with convenience methods |
+| 5.4 | `.github/workflows/` | CI step to regenerate client on API changes |
+| 5.5 | `docs/api-client.md` | Document client generation process |
+
+### Success Criteria
+
+- [ ] `uv run python scripts/generate_client.py` produces working client
+- [ ] CI fails if generated client differs from committed version
+- [ ] TypeScript types generated for UI from same OpenAPI spec
+- [ ] Breaking API changes detected automatically
+
+---
+
+## Phase 6: Cleanup & Consistency
+
+**Duration:** 1 week  
+**Priority:** Low
+
+### Objectives
+
+1. Align command names across CLI and UI
+2. Implement automated session cleanup
+3. Deprecate legacy components
+
+### Tasks
+
+| Task | File(s) | Description |
+|------|---------|-------------|
+| 6.1 | `src/skill_fleet/ui/src/services/cliBridge.ts` | Fix `create-skill` → `create` command name |
+| 6.2 | `src/skill_fleet/api/app.py` | Add startup task for `cleanup_old_sessions()` |
+| 6.3 | `src/skill_fleet/agent/agent.py` | Mark `ConversationalSkillAgent` as deprecated |
+| 6.4 | `src/skill_fleet/taxonomy/manager.py` | Add TODO for vector-based routing (future) |
+| 6.5 | `docs/migration.md` | Document migration from legacy agent to new workflow |
+
+### Success Criteria
+
+- [ ] No command name mismatches between CLI and UI
+- [ ] Sessions older than 24h auto-deleted on server startup
+- [ ] Deprecation warnings logged when legacy code is used
+- [ ] All TODOs tracked in GitHub issues
+
+---
+
+## Implementation Timeline
+
+```
+Week 1-2:   Phase 1 (Schema Unification)
+Week 3-5:   Phase 2 (Thin Client Refactoring)
+Week 6-7:   Phase 3 (SSE Real-Time)
+Week 8-10:  Phase 4 (Persistent Job State)
+Week 11:    Phase 5 (SDK Generation)
+Week 12:    Phase 6 (Cleanup)
+```
+
+---
+
+## Risk Mitigation
+
+| Risk | Mitigation |
+|------|------------|
+| Breaking CLI during refactor | Feature flags to toggle old/new client code |
+| SSE browser compatibility | Fallback to polling with exponential backoff |
+| Redis dependency in production | Keep `MemoryJobStore` as default, Redis opt-in |
+| Generated client drift | CI enforcement + semantic versioning |
+
+---
+
+## Testing Strategy
+
+1. **Unit Tests:** Mock `JobStore`, `TaxonomyManager` via dependency injection
+2. **Integration Tests:** Spin up test server, run CLI commands against it
+3. **Contract Tests:** Validate CLI client against OpenAPI spec
+4. **Load Tests:** 50+ concurrent jobs with SSE streams
+
+---
+
+## Definition of Done (Overall)
+
+- [ ] CLI contains zero data transformation logic
+- [ ] All API endpoints have typed `response_model` annotations
+- [ ] Swagger UI (`/docs`) is the authoritative API documentation
+- [ ] Server restart preserves job state (with persistent store)
+- [ ] UI calls API directly (no CLI subprocess spawning)
+- [ ] Generated SDK matches committed client code
+- [ ] All tests pass in CI pipeline
+
+---
+
+## References
+
+- [FastAPI Best Practices](https://fastapi.tiangolo.com/tutorial/)
+- [agentskills.io Specification](https://agentskills.io)
+- [DSPy Documentation](https://dspy-docs.vercel.app/)
+
+
+============================================================
+END FILE: docs/internal/plans/archive/2026-01-15-api-first-evolution-plan.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/2026-01-15-skill-creation-hardening.md
+============================================================
+
+# 2026-01-15 — Skill Creation Hardening (HITL + Validation + Artifacts)
+
+## Goal
+
+Make `skill-fleet create/chat` reliably produce **promotion-ready** drafts:
+
+- No duplicate HITL prompts
+- Minimal log noise (no DSPy forward warnings; Pydantic warnings understood/fixed)
+- Draft artifacts match validator expectations (sections, metadata, examples)
+- Validation results reflect the **final** content (re-validated after auto-refinement)
+
+---
+
+## Progress (as of 2026-01-15)
+
+Completed:
+- Server HITL is now event-driven (no polling race): `wait_for_hitl_response()` uses a Future + `notify_hitl_response()` and `/hitl/{job_id}/response` ignores late responses.
+- DSPy `.forward(...)` warnings removed by switching to DSPy primitive `.acall(...)` in Phase 1/2/3 modules.
+- Phase 3 now re-validates after refinement so `validation_report` matches `refined_content`.
+- Draft saves now preserve workflow metadata (capabilities, load_priority, keywords/scope/see_also, etc.).
+- Authoring template updated to include validator-required sections (`## Capabilities`, `## Dependencies`, `## Usage Examples`).
+- `SkillValidator.validate_examples()` skips `examples/README.md` to reduce placeholder noise.
+- Phase 3 HITL validate/refine now loops and re-renders updated reports (bounded iterations).
+- Phase 3 canonicalizes YAML frontmatter from `SkillMetadata` before validation/refinement to prevent version drift failures.
+- Draft saves extract embedded artifacts:
+  - Headings like `### \`pytest.ini\`` / `### \`conftest.py\`` are written into `assets/`.
+  - Code blocks under `## Usage Examples` are written into `examples/` as `example_N.<ext>`.
+
+Remaining:
+- Pydantic serializer warnings (Message/Choices/StreamingChoices) still occur; need stack trace and a targeted fix or suppression-at-source.
+- Optional: add `prompt_id` versioning so clients can be fully idempotent across retries.
+
+## What We Observed (from 2026-01-15 logs + draft inspection)
+
+### 1) DSPy warnings (`module.forward(...)` discouraged)
+
+Example warnings:
+- `Calling module.forward(...) on RequirementsGathererModule directly is discouraged. Please use module(...) instead.`
+
+Cause:
+- Several DSPy modules implement `aforward()` via `asyncio.to_thread(self.forward, ...)`, which calls `.forward(...)` directly and triggers the DSPy warning.
+
+Likely locations:
+- `src/skill_fleet/core/dspy/modules/phase1_understanding.py`
+- `src/skill_fleet/core/dspy/modules/phase2_generation.py`
+- `src/skill_fleet/core/dspy/modules/phase3_validation.py`
+
+Fix:
+- Implement module `aforward()` using the underlying DSPy primitive `.acall(...)` instead of `to_thread(self.forward, ...)`, or call the module via `await asyncio.to_thread(self.__call__, ...)` (still suboptimal vs `.acall`).
+
+### 2) Pydantic serializer warnings (Message / Choices / StreamingChoices)
+
+Example warnings (as logged by Pydantic):
+- `Expected 10 fields but got 8: Expected Message`
+- `Expected StreamingChoices ... got Choices`
+
+Cause:
+- These appear to originate from `litellm`’s OpenAI-compatible typed models (`litellm.types.utils.Message`, `Choices`, `StreamingChoices`) during serialization.
+
+Fix direction:
+- Capture stack traces (once) to confirm call-site, then either:
+  - upgrade/downgrade `litellm` to a known-good version for our provider stack, or
+  - adjust our streaming/non-streaming handling so we never serialize the “wrong” choice types, or
+  - ensure we don’t persist/cache raw `litellm` objects inside job state (store primitives only).
+
+### 3) Duplicate clarification prompts in `skill-fleet chat`
+
+Symptom:
+- The CLI can re-render the same “Clarification Needed” questions twice.
+
+Root cause (likely):
+- Server-side `wait_for_hitl_response()` polls every 1s; after posting a HITL response, the job can remain `pending_hitl` briefly until the polling loop wakes up.
+- The CLI immediately re-polls after posting, sees the old pending prompt, and re-enters the clarify UI.
+
+Fix:
+- Server: use an `asyncio.Event` (or similar) to signal HITL responses instead of polling.
+- CLI: after `POST /response`, wait until the prompt changes (status != `pending_hitl` OR `hitl_type` changes) before showing another prompt.
+- Add prompt versioning (`prompt_id`) so clients can avoid re-answering the same prompt.
+
+### 4) Validation results can be stale vs final content
+
+Symptom:
+- Phase 3 can “refine” content, but the job still ends as validation failed with a report describing issues that are already fixed in the saved `SKILL.md`.
+
+Root cause:
+- `Phase3ValidationModule` refines content when validation fails, but does **not** re-run validation after refinement; it returns the original failed report and score.
+
+Fix:
+- After refinement, re-run validation and update:
+  - `validation_report`
+  - `job.validation_passed`, `job.validation_score`, `job.validation_status`
+
+### 5) Draft artifacts don’t match validator expectations
+
+Observed on drafts under `skills/_drafts/<job_id>/...`:
+- Missing required documentation sections expected by `SkillValidator`:
+  - `## Capabilities`
+  - `## Dependencies`
+  - `## Usage Examples`
+- `metadata.json` often loses richer fields (e.g., `capabilities`) despite the workflow producing them.
+- Example markdown files may be placeholders or non-markdown (no fenced code blocks).
+
+Root causes:
+- The authoring template (`config/templates/SKILL_md_template.md`) does not currently include those sections, but `SkillValidator.validate_documentation()` expects them.
+- The API draft saver (`src/skill_fleet/api/routes/skills.py::_save_skill_to_draft`) only forwards a subset of metadata into `TaxonomyManager.register_skill()`.
+- `TaxonomyManager._write_extra_files()` does not handle Pydantic `BaseModel` items in `usage_examples`/`integration_tests` well (writes `str(model)`).
+
+Fix:
+- Align template + validator: add missing sections to `SKILL_md_template.md` OR relax validator requirements (prefer: template alignment).
+- Preserve metadata: pass through `capabilities`, `keywords`, `scope`, `see_also`, `weight`, `load_priority`, etc.
+- Write examples as markdown with fenced code blocks (or expand validator to accept `.py` examples too).
+
+---
+
+## Success Criteria (Definition of Done)
+
+1. `skill-fleet chat` never re-prompts the same HITL payload after a response is posted.
+2. Server logs:
+   - no DSPy `.forward(...)` warnings
+   - Pydantic serializer warnings either eliminated or captured + traced to a known harmless source (and suppressed at source with justification).
+3. Draft skill validation:
+   - `uv run skill-fleet validate _drafts/<job_id>/<path>` passes with **0 errors** and only expected draft-specific warnings (ideally none).
+4. Phase 3:
+   - after auto-refinement, validation is re-run and the report matches the final saved `SKILL.md`.
+5. Generated artifacts:
+   - `SKILL.md` contains `## Overview`, `## Capabilities`, `## Dependencies`, `## Usage Examples`.
+   - `examples/` contains at least one `.md` file with a fenced code block.
+   - `metadata.json` includes `capabilities` and other workflow-produced metadata (not silently dropped).
+
+---
+
+## Plan (Prioritized)
+
+### P0 — Reliability + Correctness (do first)
+
+1. HITL response signaling (server)
+   - Replace polling in `wait_for_hitl_response()` with an event-based mechanism.
+   - Add `prompt_id` to `/prompt` responses; require it in `/response` payloads for idempotency.
+
+2. HITL runner “ack wait” (CLI)
+   - After posting `/response`, wait for prompt transition (status/type change) before rendering UI again.
+   - Add unit tests to prevent regressions (fake client that returns the same prompt for 1–2 polls).
+
+3. Phase 3 revalidation after refinement
+   - After `SkillRefinerModule` output, re-run validator and update job-level pass/score fields.
+   - Cap iterations (e.g., max 2–3 refine+validate loops) to avoid infinite loops.
+
+4. Preserve workflow metadata in draft saves
+   - Update `_save_skill_to_draft` to pass through key metadata fields (at minimum `capabilities`, `weight`, `load_priority`, `keywords`, `scope`, `see_also`, `category`, `tags`).
+
+### P1 — Artifact Quality (validator-aligned output)
+
+5. Align authoring template with validator
+   - Update `config/templates/SKILL_md_template.md` to include:
+     - `## Capabilities` (bulleted list)
+     - `## Dependencies` (bulleted list + “why”)
+     - `## Usage Examples` (at least one fenced code block)
+   - Update template’s validation commands to the real CLI (`uv run skill-fleet validate ...`).
+
+6. Ensure examples are real markdown (and runnable)
+   - Update `TaxonomyManager._write_extra_files()` to:
+     - detect Pydantic `BaseModel` items and convert via `model_dump()`
+     - generate markdown example files like:
+       - Title + description
+       - fenced code block with declared language
+       - expected output block (optional)
+   - Consider updating `SkillValidator.validate_examples()` to also accept `.py`/`.sh` examples as valid “runnable” examples.
+
+7. Surface deterministic validation details in the CLI/API
+   - Add a deterministic validation step (SkillValidator) and include results in the job’s validation report payload.
+   - Make the final “validation score” a composition of:
+     - deterministic validation (hard gates)
+     - LLM quality scoring (soft score with explainability)
+
+### P2 — Enhancements (quality + UX)
+
+8. Reference-doc ingestion (user-provided URLs)
+   - Parse URLs from clarify/confirm feedback.
+   - Add them to:
+     - `references/README.md` (sources list)
+     - `SKILL.md` “References” section
+   - Optionally auto-summarize into `references/api-reference.md` when web access is allowed.
+
+9. Reduce polling overhead
+   - Replace `/prompt` polling with server push (SSE or WS), building on the event-based HITL core.
+
+10. Jobs persistence
+   - Persist job state in Redis for production mode; keep in-memory default for dev.
+
+---
+
+## Validation / Test Commands
+
+```bash
+# from repo root
+uv run ruff check .
+uv run pytest
+
+# Validate a draft (note: path is skills-root relative)
+uv run skill-fleet validate _drafts/<job_id>/<taxonomy_path>
+```
+
+
+============================================================
+END FILE: docs/internal/plans/archive/2026-01-15-skill-creation-hardening.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/2026-01-15-skill-creation-improvement-plan.md
+============================================================
+
+# Skill Creation Improvement Plan
+
+**Date:** 2026-01-15  
+**Status:** Draft  
+**Purpose:** Improve skill-fleet creation quality using DSPy optimizations and industry best practices
+
+---
+
+## Executive Summary
+
+Analysis of three skill quality levels (FastAPI=excellent, shadcn-registry=mediocre, mermaid-diagrams=incomplete) combined with DSPy documentation review and external skill examples (Anthropics, Obra/Superpowers) reveals significant opportunities to improve skill creation quality through:
+
+1. **DSPy Optimization Integration** - Implement MIPROv2/BootstrapFewShot optimizers
+2. **Quality Metrics & Evaluation** - Define measurable skill quality criteria
+3. **Skill Structure Simplification** - Adopt leaner, more focused skill format
+4. **TDD-Based Validation** - Test skills with pressure scenarios before deployment
+
+---
+
+## Part 1: Quality Analysis Findings
+
+### 1.1 Skill Quality Comparison
+
+| Aspect                | FastAPI (Excellent)                          | shadcn-registry (Mediocre) | mermaid-diagrams (Incomplete)      |
+|-----------------------|----------------------------------------------|----------------------------|------------------------------------|
+| SKILL.md Lines        | 458                                          | 199                        | 169                                |
+| Core Patterns         | 9 detailed patterns                          | 2 patterns                 | 2 patterns                         |
+| Anti-pattern Examples | ❌/✅ for each pattern                         | Some ❌/✅                   | Some ❌/✅                           |
+| Key Insights          | After each pattern                           | Missing                    | Missing                            |
+| Real-World Impact     | Quantified metrics                           | Missing                    | Missing                            |
+| Capability Documents  | 10 detailed files                            | Placeholder READMEs        | Placeholder READMEs                |
+| Test Files            | JSON test cases                              | JSON test cases            | Text descriptions (not executable) |
+| Frontmatter           | Rich (license, compatibility, load_priority) | Basic                      | Basic                              |
+
+### 1.2 Quality Indicators for Excellent Skills
+
+From FastAPI analysis:
+1. **Rich YAML frontmatter** - name, description, license, compatibility, metadata (skill_id, version, type, weight, load_priority)
+2. **Clear Overview** with core principle statement
+3. **When to Use / When NOT to use** with visual decision diagram
+4. **Quick Reference table** - Problem → Solution → Keywords mapping
+5. **Multiple Core Patterns** (5-10) each with:
+   - Problem statement
+   - ❌ Common mistake (anti-pattern with explanation)
+   - ✅ Production pattern (working code)
+   - **Key insight** summary
+6. **Common Mistakes table** - Mistake → Why It's Wrong → Fix
+7. **Real-World Impact** - Quantified benefits
+8. **Red Flags section** - Clear warning signs
+
+### 1.3 Quality Gaps in Current Generation
+
+1. **Insufficient patterns** - Generating only 2 patterns vs 9 in excellent skills
+2. **Missing Key Insights** - Not summarizing critical learnings after patterns
+3. **No Real-World Impact** - Missing quantified benefits
+4. **Placeholder files** - Creating empty README.md files instead of real content
+5. **Non-executable tests** - Test files are text descriptions, not runnable code
+6. **No validation against gold standards** - No comparison to excellent examples
+
+---
+
+## Part 2: DSPy Optimization Strategy
+
+### 2.1 Current Architecture Gaps
+
+The current `SkillCreationProgram` (skill_creator.py):
+- ✅ Has 3-phase architecture (Understanding → Generation → Validation)
+- ✅ Has HITL integration for feedback loops
+- ✅ Has quality_assured flag
+- ❌ **No DSPy optimizers** (MIPROv2, BootstrapFewShot)
+- ❌ **No gold-standard training examples**
+- ❌ **No defined quality metrics for optimization**
+- ❌ **No few-shot examples from excellent skills**
+
+### 2.2 Recommended DSPy Optimizations
+
+#### 2.2.1 Define Quality Metrics
+
+```python

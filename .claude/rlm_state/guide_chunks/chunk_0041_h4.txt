@@ -1,0 +1,13 @@
+<!-- Chunk 41: bytes 13235-13423, type=h4 -->
+#### Writing the main instructions
+
+After the frontmatter, write the actual instructions in Markdown.
+
+**Recommended structure:**
+
+```markdown
+---
+name: your-skill
+description: [--.]
+---
+

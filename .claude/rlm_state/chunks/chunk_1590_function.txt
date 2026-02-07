@@ -1,0 +1,44 @@
+<!-- Chunk 1590: bytes 6552189-6553481, type=function -->
+def list_command(ctx: typer.Context):
+    """List all available skills in the taxonomy."""
+    config = ctx.obj
+
+    async def _run():
+        try:
+            skills = await config.client.list_skills()
+            if not skills:
+                console.print("[yellow]No skills found.[/yellow]")
+                return
+            for s in skills:
+                console.print(
+                    f"- [bold]{s.get('name', 'Unknown')}[/bold] ({s.get('skill_id', 'N/A')})"
+                )
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+        finally:
+            await config.client.close()
+
+    asyncio.run(_run())
+
+
+============================================================
+END FILE: src/skill_fleet/cli/commands/list_skills.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/commands/migrate.py
+============================================================
+
+"""CLI command for migrating skills to agentskills.io format."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import typer
+
+from ...common.migration import migrate_all_skills
+from ...common.paths import default_skills_root, ensure_skills_root_initialized
+
+

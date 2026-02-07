@@ -1,0 +1,8 @@
+<!-- Chunk 1666: bytes 6685771-6685917, type=function -->
+def _first_existing(paths: list[Path]) -> Path | None:
+    for path in paths:
+        if path.exists():
+            return path
+    return None
+
+

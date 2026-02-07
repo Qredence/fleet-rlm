@@ -1,0 +1,27 @@
+<!-- Chunk 913: bytes 3196411-3197171, type=class -->
+class GeneratePreview(dspy.Signature):
+    """Generate a preview of skill content for user review."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill_content` | `str` | Full generated skill content (SKILL.md) |
+| `metadata` | `str` | JSON skill metadata |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `preview` | `str` | Concise preview with TOC, key points, stats |
+| `highlights` | `list[str]` | 3-5 highlights of what makes this skill valuable |
+| `potential_issues` | `list[str]` | Potential issues user might want to address |
+
+**Used by**: `PreviewGeneratorModule` with `dspy.Predict`
+
+---
+
+### AnalyzeFeedback
+
+Analyze user feedback and determine what changes to make.
+
+```python

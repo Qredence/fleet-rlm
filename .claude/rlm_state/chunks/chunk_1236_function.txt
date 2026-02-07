@@ -1,0 +1,22 @@
+<!-- Chunk 1236: bytes 4643323-4644001, type=function -->
+def check_file_for_missing_docstrings(filepath: Path) -> list[tuple[str, int, str]]:
+    """Check a Python file for public functions missing docstrings."""
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            content = f.read()
+
+        tree = ast.parse(content)
+        visitor = FunctionVisitor()
+        visitor.visit(tree)
+
+        missing_docs = []
+        for func_name, line_num, has_docstring in visitor.functions:
+            if not has_docstring:
+                missing_docs.append((func_name, line_num, filepath.name))
+
+        return missing_docs
+    except Exception as e:
+        print(f"Error processing {filepath}: {e}")
+        return []
+
+

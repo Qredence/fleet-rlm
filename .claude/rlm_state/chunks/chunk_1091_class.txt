@@ -1,0 +1,65 @@
+<!-- Chunk 1091: bytes 3917260-3918912, type=class -->
+class IterateModule(dspy.Module):
+    """Module for Step 6: Iteration with human feedback."""
+    
+    def __init__(self):
+        super().__init__()
+        self.iterate = dspy.ChainOfThought(IterateSkillWithFeedback)
+    
+    def forward(
+        self,
+        packaged_skill: str,
+        validation_report: Dict,
+        human_feedback: str,
+        usage_analytics: Optional[Dict] = None
+    ) -> Dict:
+        """Process human feedback and determine next steps.
+        
+        Returns:
+            Dict with approval_status, revision_plan,
+            evolution_metadata, and next_steps
+        """
+        result = self.iterate(
+            packaged_skill=packaged_skill,
+            validation_report=json.dumps(validation_report, indent=2),
+            human_feedback=human_feedback,
+            usage_analytics=json.dumps(usage_analytics or {})
+        )
+        
+        return {
+            'approval_status': result.approval_status.strip().lower(),
+            'revision_plan': result.revision_plan,
+            'evolution_metadata': json.loads(result.evolution_metadata),
+            'next_steps': result.next_steps
+        }
+```
+
+---
+
+## File 2: `src/workflow/programs.py`
+
+**DSPy Programs - Complete workflows**
+
+```python
+"""DSPy programs for complete skill creation workflows.
+
+Programs compose multiple modules into end-to-end workflows
+with proper error handling and state management.
+"""
+
+import dspy
+from typing import Dict, Optional
+import logging
+
+from .modules import (
+    UnderstandModule,
+    PlanModule,
+    InitializeModule,
+    EditModule,
+    PackageModule,
+    IterateModule
+)
+
+logger = logging.getLogger(__name__)
+
+

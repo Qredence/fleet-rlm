@@ -1,0 +1,28 @@
+<!-- Chunk 2102: bytes 8027656-8028555, type=function -->
+def test_validation_failure_for_missing_when_to_use(temp_skills_root: Path) -> None:
+    """Test v2 skill validation fails when 'When to Use' section is missing."""
+    skill_dir = temp_skills_root / "general/bad_skill"
+    skill_dir.mkdir(parents=True)
+    # NOTE: No subdirectories - they are optional in v2
+
+    # v2: SKILL.md with frontmatter but missing required "When to Use" section
+    skill_md = """---
+name: bad-skill
+description: A skill missing the When to Use section.
+---
+
+# Bad Skill
+
+## Overview
+This skill is missing required sections.
+"""
+    (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+
+    validator = SkillValidator(temp_skills_root)
+    results = validator.validate_complete(skill_dir)
+
+    assert results["passed"] is False
+    # Should have error about missing "When to Use" section
+    assert any("When to Use" in error for error in results["errors"])
+
+

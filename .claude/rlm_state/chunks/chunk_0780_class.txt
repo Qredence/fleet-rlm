@@ -1,0 +1,38 @@
+<!-- Chunk 780: bytes 2646941-2647785, type=class -->
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["pending", "running", "pending_hitl", "completed", "failed"]
+    hitl_type: str | None = None
+    hitl_data: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    saved_path: str | None = None
+    created_at: str
+    updated_at: str
+```
+
+**Example:**
+```json
+{
+    "job_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "status": "pending_hitl",
+    "hitl_type": "clarify",
+    "hitl_data": {
+        "questions": ["What level of detail?"],
+        "rationale": "Need target audience info"
+    },
+    "result": null,
+    "error": null,
+    "saved_path": null,
+    "created_at": "2026-01-12T10:30:00Z",
+    "updated_at": "2026-01-12T10:31:00Z"
+}
+```
+
+---
+
+### HITLPromptResponse
+
+Response schema for HITL prompts.
+
+```python

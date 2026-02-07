@@ -1,0 +1,8 @@
+<!-- Chunk 1529: bytes 6372827-6373062, type=class -->
+class ValidateSkillRequest(BaseModel):
+    """Request body for validating a skill."""
+
+    skill_id: str = Field(..., description="Skill ID to validate")
+    user_id: str = Field(default="default", description="User ID for context")
+
+

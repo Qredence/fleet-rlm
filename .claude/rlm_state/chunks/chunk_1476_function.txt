@@ -1,0 +1,20 @@
+<!-- Chunk 1476: bytes 6321665-6322172, type=function -->
+def get_taxonomy_manager(
+    skills_root: Annotated[Path, Depends(get_skills_root)],
+) -> TaxonomyManager:
+    """
+    Get a TaxonomyManager instance for the configured skills root.
+
+    The manager is cached per skills_root path to avoid repeated
+    filesystem scans and metadata loading.
+
+    Args:
+        skills_root: The skills root directory (injected)
+
+    Returns:
+        TaxonomyManager instance for the skills root
+
+    """
+    return _get_cached_taxonomy_manager(str(skills_root.resolve()))
+
+

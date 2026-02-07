@@ -1,0 +1,10 @@
+<!-- Chunk 237: bytes 308903-309078, type=function -->
+def create_user(data):
+    validate_email(data.get("email"))
+    # ...
+```
+
+### Pattern: Use Inheritance or Composition
+
+**Before:** Duplicate data processing logic
+```python

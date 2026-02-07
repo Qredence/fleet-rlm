@@ -1,0 +1,30 @@
+<!-- Chunk 900: bytes 3182203-3183231, type=class -->
+class AnalyzeDependencies(dspy.Signature):
+    """Analyze skill dependencies and prerequisites."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_description` | `str` | User's task description |
+| `task_intent` | `str` | Analyzed task intent from AnalyzeIntent |
+| `taxonomy_path` | `str` | Recommended taxonomy path |
+| `existing_skills` | `str` | JSON list of existing skills with metadata |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `dependency_analysis` | `DependencyAnalysis` | Complete analysis with required, recommended, conflicts |
+| `prerequisite_skills` | `list[DependencyRef]` | Skills user must know first |
+| `complementary_skills` | `list[DependencyRef]` | Skills that complement this one |
+| `missing_prerequisites` | `list[str]` | Prerequisites that don't exist yet |
+
+**Used by**: `DependencyAnalyzerModule` with `dspy.Predict`
+
+---
+
+### SynthesizePlan
+
+Synthesize all Phase 1 analyses into a coherent skill creation plan.
+
+```python

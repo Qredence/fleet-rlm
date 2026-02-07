@@ -1,0 +1,20 @@
+<!-- Chunk 1612: bytes 6629060-6629548, type=function -->
+def create_skill(args: Any) -> int:
+    """
+    Programmatic entrypoint for creating a skill.
+
+    .. deprecated::
+        This function is temporarily unavailable during migration to
+        new workflow architecture.
+    """
+    print(
+        "Error: The create_skill function is temporarily unavailable.",
+        file=sys.stderr,
+    )
+    print(
+        "The skill creation feature is being migrated to the new workflow architecture.",
+        file=sys.stderr,
+    )
+    return 1
+
+

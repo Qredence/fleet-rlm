@@ -1,0 +1,99 @@
+<!-- Chunk 1009: bytes 3554890-3557710, type=class -->
+class ModuleRegistry:
+    def __init__(self):
+        self.modules = {
+            "phase1": {
+                "understanding": {
+                    "v1.0": UnderstandingModule,
+                    "v2.0": UnderstandingModuleV2,  # Future
+                    "latest": UnderstandingModule
+                }
+            },
+            "phase2": {
+                "generation": {"v1.0": GenerationModule, "latest": GenerationModule},
+                "scoping": {"v1.0": ScopingModule, "latest": ScopingModule}
+            },
+            "phase3": {
+                "validation": {"v1.0": ValidationModule, "latest": ValidationModule}
+            }
+        }
+    
+    def create(self, phase: str, type: str, version: str = "latest", config: dict = None):
+        module_class = self.modules[phase][type][version]
+        return module_class(**(config or {}))
+    
+    def list_available(self) -> dict:
+        return self.modules
+    
+    def get_version(self, phase: str, type: str) -> str:
+        # Get current version of a module
+        pass
+    
+    def register(self, phase: str, type: str, version: str, module_class):
+        # Register new module version
+        pass
+```
+
+**Usage in `skill_creator.py`**:
+```python
+# Before (ad-hoc)
+self.understanding_module = UnderstandingModule(config)
+
+# After (registry-based)
+self.understanding_module = self.registry.create("phase1", "understanding", config=config)
+```
+
+**New API Endpoint**:
+```
+GET /api/v1/modules/available
+Response: {
+  "phase1": {
+    "understanding": {
+      "versions": ["v1.0", "v2.0"],
+      "latest": "v1.0",
+      "config_schema": {...}
+    }
+  },
+  ...
+}
+```
+
+**CLI Command**:
+```bash
+uv run skill-fleet modules list --with-versions
+# Shows available modules, versions, configs
+
+uv run skill-fleet modules info phase1 understanding
+# Shows detailed info about understanding module
+```
+
+**Benefits**:
+- Easier to swap modules for testing/A/B testing
+- Version control built-in
+- Configuration schema validation
+- Discovery of available options
+
+**Files to Create**:
+1. `src/skill_fleet/core/dspy/modules/registry.py` (~200 lines)
+2. Update `src/skill_fleet/core/dspy/skill_creator.py` to use registry
+3. Update `src/skill_fleet/api/routes/modules.py` (new route)
+4. Update `src/skill_fleet/cli/commands/modules.py` (new command)
+
+**Timeline**: 1-2 days | **Impact**: Easier testing, versioning, A/B testing of modules
+
+---
+
+#### **3B: Signature Version Control** 📜
+
+**Problem**: Signatures change; old programs break; no migration path.
+
+**Solution**: Track signature versions with migration logic.
+
+**Implementation**:
+- Decorator: `@signature_version` on all signature classes
+- Manager: `SignatureVersionManager` handles versioning
+- Migration: Auto-migration of old inputs on load
+
+**Decorator Usage**:
+```python
+@signature_version("1.0")

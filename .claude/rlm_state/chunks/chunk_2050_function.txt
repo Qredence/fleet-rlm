@@ -1,0 +1,11 @@
+<!-- Chunk 2050: bytes 7953968-7954334, type=function -->
+def mock_requirements_with_ambiguities_response():
+    """Mock response for requirements with ambiguities."""
+    return """domain: technical
+category: general
+target_level: intermediate  
+topics: ["general-programming"]
+constraints: []
+ambiguities: ["Unclear what specific technology or framework", "Scope not well-defined - could be web, mobile, or desktop"]"""
+
+

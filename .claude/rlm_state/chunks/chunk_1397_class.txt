@@ -1,0 +1,7 @@
+<!-- Chunk 1397: bytes 5127441-5127566, type=class -->
+class UserUpdate(BaseModel):
+    name: str  # Required! Can't do partial updates
+```
+
+### ✅ Right: Optional fields
+```python

@@ -1,0 +1,45 @@
+<!-- Chunk 2109: bytes 8039907-8041139, type=function -->
+def test_bundled_resources_binary_assets(temp_taxonomy: Path) -> None:
+    """Verify that binary assets are saved correctly."""
+    manager = TaxonomyManager(temp_taxonomy)
+
+    skill_path = "test/binary_asset_skill"
+    metadata = {"description": "Test binary assets"}
+    content = "# Binary Test"
+    evolution = {}
+
+    binary_content = b"\x89PNG\r\n\x1a\n"
+
+    extra_files = {"assets": {"image.png": binary_content}}
+
+    success = manager.register_skill(
+        path=skill_path,
+        metadata=metadata,
+        content=content,
+        evolution=evolution,
+        extra_files=extra_files,
+    )
+
+    assert success is True
+
+    skill_dir = temp_taxonomy / skill_path
+    assert (skill_dir / "assets" / "image.png").read_bytes() == binary_content
+
+
+============================================================
+END FILE: tests/unit/test_taxonomy_bundled_resources.py
+============================================================
+
+============================================================
+FILE: tests/unit/test_taxonomy_manager.py
+============================================================
+
+import json
+from pathlib import Path
+
+import pytest
+
+from skill_fleet.taxonomy.manager import TaxonomyManager
+
+
+@pytest.fixture

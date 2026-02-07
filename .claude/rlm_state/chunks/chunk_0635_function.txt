@@ -1,0 +1,40 @@
+<!-- Chunk 635: bytes 991415-992698, type=function -->
+def simple_quality_metric(example: dspy.Example, prediction: dspy.Prediction, trace=None) -> float:
+    """Simple metric for testing optimization.
+    
+    Checks basic quality indicators without complex logic.
+    Good for initial experiments and debugging.
+    
+    Args:
+        example: Training example with expected outputs
+        prediction: Model prediction to evaluate
+        trace: Optional execution trace (unused)
+    
+    Returns:
+        Score between 0.0 and 1.0
+    """
+    score = 0.0
+    
+    # Check required fields exist
+    if hasattr(prediction, "domain") and prediction.domain:
+        score += 0.25
+    
+    if hasattr(prediction, "category") and prediction.category:
+        score += 0.25
+    
+    # Check field matches expected (if available)
+    if hasattr(example, "expected_taxonomy_path"):
+        expected_parts = example.expected_taxonomy_path.split("/")
+        predicted_category = getattr(prediction, "category", "")
+        
+        if predicted_category.lower() in expected_parts[0].lower():
+            score += 0.25
+    
+    # Check topics list is reasonable
+    if hasattr(prediction, "topics") and isinstance(prediction.topics, list):
+        if 3 <= len(prediction.topics) <= 7:
+            score += 0.25
+    
+    return min(score, 1.0)
+
+

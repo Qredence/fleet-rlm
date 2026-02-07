@@ -1,0 +1,134 @@
+<!-- Chunk 1256: bytes 4677124-4680638, type=function -->
+def main():
+    """Run all benchmarks."""
+    print("\n" + "=" * 70)
+    print("🚀 DSPy OPTIMIZER BENCHMARK - All Comparisons")
+    print("=" * 70)
+
+    # Load data
+    logger.info("Loading data...")
+    all_data = load_training_data("config/training/trainset_v4.json")
+
+    # Split
+    split_idx = int(len(all_data) * 0.8)
+    trainset = all_data[:split_idx]
+    testset = all_data[split_idx:]
+
+    logger.info(f"Train: {len(trainset)}, Test: {len(testset)}")
+
+    # Configure DSPy
+    lm = get_lm("gemini-3-flash-preview", temperature=1.0)
+    dspy.configure(lm=lm)
+
+    # Run benchmarks
+    results = []
+
+    try:
+        results.append(benchmark_bootstrap(trainset, testset))
+    except Exception as e:
+        logger.error(f"BootstrapFewShot failed: {e}")
+        results.append(
+            {
+                "optimizer": "BootstrapFewShot",
+                "error": str(e),
+            }
+        )
+
+    try:
+        results.append(benchmark_reflection(trainset, testset))
+    except Exception as e:
+        logger.error(f"Reflection metrics failed: {e}")
+        results.append(
+            {
+                "optimizer": "Reflection Metrics",
+                "error": str(e),
+            }
+        )
+
+    try:
+        results.append(benchmark_miprov2(trainset, testset))
+    except Exception as e:
+        logger.warning(f"MIPROv2 failed (expected if budget constrained): {e}")
+        results.append(
+            {
+                "optimizer": "MIPROv2",
+                "error": str(e),
+            }
+        )
+
+    # Print comparison
+    print_comparison(results)
+
+    # Save results
+    output_path = Path("config/optimized/benchmark_results.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, default=str)
+
+    logger.info(f"✅ Benchmark results saved to {output_path}")
+
+    print("\n" + "=" * 70)
+    print("✅ BENCHMARK COMPLETE")
+    print("=" * 70)
+    print("\nResults saved to: config/optimized/benchmark_results.json")
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/internal/opt/benchmark_optimizers.py
+============================================================
+
+============================================================
+FILE: scripts/internal/opt/dspy_tracker.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Comprehensive DSPy tracking utility for production monitoring.
+
+Tracks:
+- Execution metrics (time, tokens, cost)
+- LM call details (requests, responses, errors)
+- Optimization progress (parameter changes, score improvements)
+- Model performance metrics
+- Artifact tracking (optimized programs, results)
+
+Integration:
+- Works with DSPy v3.1.0
+- Compatible with Reflection Metrics, MIPROv2, BootstrapFewShot
+- Supports MLflow (optional)
+- Outputs to JSON for dashboard integration
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import time
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import dspy
+
+from skill_fleet.core.optimization.optimizer import get_lm
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+@dataclass

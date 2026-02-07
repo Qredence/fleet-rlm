@@ -1,0 +1,28 @@
+<!-- Chunk 1907: bytes 7726608-7727513, type=function -->
+def get_reasoning_lm(task_name: str = "skill_understand") -> dspy.LM:
+    """
+    Get reasoning LM for a specific task.
+
+    Uses the existing config.yaml model registry and role-based configuration.
+    Phase 1 and Phase 2 will use the 'planner' role with thinking_level overrides.
+
+    Args:
+        task_name: Task name from config.yaml (default: 'skill_understand' for Phase 1)
+
+    Returns:
+        Configured dspy.LM instance with reasoning parameters
+
+    Examples:
+        Get Phase 1 LM (understand task with planner role, thinking_level: medium):
+        >>> lm = get_reasoning_lm("skill_understand")
+
+        Get Phase 2 LM (plan task with planner role, thinking_level: high):
+        >>> lm = get_reasoning_lm("skill_plan")
+
+    """
+    global _config_loader
+    if _config_loader is None:
+        _config_loader = ConfigModelLoader()
+    return _config_loader.get_model_for_task(task_name)
+
+

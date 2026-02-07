@@ -1,0 +1,25 @@
+<!-- Chunk 840: bytes 2987155-2987727, type=class -->
+class CommandExecutor {
+  async execute(command: string): Promise<CommandResult> {
+    // Parse command
+    // Execute via API
+    // Return formatted result
+  }
+}
+```
+
+**Available Commands**:
+- `/list` → GET `/api/v2/taxonomy/list`
+- `/optimize` → POST `/api/v2/optimize/start`
+- `/validate` → POST `/api/v2/skills/validate`
+- `/promote` → POST `/api/v2/drafts/{job_id}/promote`
+- `/status` → GET `/api/v2/jobs/{job_id}`
+```
+
+Add StreamingClient retry logic section:
+```
+### Streaming Client Retry Logic
+
+The StreamingClient implements robust retry logic:
+
+```typescript

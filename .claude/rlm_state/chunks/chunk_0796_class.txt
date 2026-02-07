@@ -1,0 +1,279 @@
+<!-- Chunk 796: bytes 2674997-2683330, type=class -->
+class CacheConfig:
+    """Cache configuration."""
+
+    # Default TTL
+    DEFAULT_TTL = 300  # 5 minutes
+
+    # Per-type TTL
+    GLOBAL_TTL = 300
+    USER_TTL = 120
+    BRANCH_TTL = 600
+
+    # Cache limits
+    MAX_SIZE = 10000  # Maximum entries (in-memory only)
+    EVICTION_POLICY = "lru"  # or "fifo", "lfu"
+
+    # Redis configuration
+    REDIS_URL = "redis://localhost:6379/0"
+    REDIS_PREFIX = "skill_fleet:"
+```
+
+## See Also
+
+- **[Service Layer](SERVICE_LAYER.md)** - Service architecture with caching
+- **[API Endpoints](../api/endpoints.md)** - Cached endpoints
+- **[Performance Tuning](../operations/PERFORMANCE.md)** - Production optimization
+
+
+============================================================
+END FILE: docs/architecture/CACHING_LAYER.md
+============================================================
+
+============================================================
+FILE: docs/architecture/CONVERSATIONAL_INTERFACE.md
+============================================================
+
+# Conversational Interface Architecture
+
+**Last Updated**: 2026-01-25
+
+## Overview
+
+The conversational interface provides a real-time chat experience for skill creation and interaction. It uses Server-Sent Events (SSE) for streaming responses, supports multi-turn conversations with session management, and implements intent-based routing for intelligent task handling.
+
+`★ Insight ─────────────────────────────────────`
+The conversational interface separates streaming from business logic. A StreamingAssistant handles the SSE mechanics, while ConversationSession manages state and intent routing. This separation allows easy testing and swapping of transport layers (e.g., switching from SSE to WebSockets).
+`─────────────────────────────────────────────────`
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Client                                │
+│  (Browser, CLI, Mobile App with SSE/EventSource support)    │
+└────────────────────────────┬────────────────────────────────┘
+                             │ HTTP/SSE
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     API Routes (v1)                          │
+│  POST /api/v1/chat/stream  - SSE streaming                  │
+│  POST /api/v1/chat/sync    - Non-streaming (compatibility)   │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 StreamingAssistant                           │
+│  • Event generation (thinking, response, error)             │
+│  • SSE formatting                                           │
+│  • Stream management                                        │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│               ConversationSession (State Machine)           │
+│  • Session management (ID, user context)                    │
+│  • Message history (role-based)                             │
+│  • Intent detection & routing                               │
+│  • State transitions (idle → active → awaiting_input)       │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Intent Handlers                           │
+│  • CreateSkillIntent  - Route to skill creation workflow    │
+│  • QueryIntent        - Answer questions about skills       │
+│  • RefineIntent       - Refine existing skills              │
+│  • ChatIntent         - General conversation                │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    DSPy/LLM Layer                            │
+│  • Language model calls                                     │
+│  • Prompt engineering                                       │
+│  • Response generation                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## v1 API Endpoints
+
+### 1. Streaming Chat (SSE)
+
+**Endpoint**: `POST /api/v1/chat/stream`
+
+**Content-Type**: `text/event-stream`
+
+```python
+import requests
+import json
+
+# Start streaming (use SSE client library or raw EventSource)
+response = requests.post(
+    "http://localhost:8000/api/v1/chat/stream",
+    json={"message": "Create a Python decorators skill"},
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line:
+        event = json.loads(line.decode('utf-8').split('data: ')[1])
+        if event['type'] == 'thinking':
+            print(f"Thinking: {event['data']}")
+        elif event['type'] == 'response':
+            print(f"Response: {event['data']}")
+        elif event['type'] == 'complete':
+            print("Done!")
+            break
+```
+
+**Event Types**:
+- `thinking` - Intermediate reasoning steps
+- `response` - Generated response chunks
+- `error` - Error information
+- `complete` - Stream finished
+
+### 2. Non-Streaming Chat
+
+**Endpoint**: `POST /api/v1/chat/sync`
+
+```python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/api/v1/chat/sync",
+    json={"message": "What skills exist for Python?"}
+)
+
+result = response.json()
+# Returns:
+# {
+#   "message": "...",
+#   "thinking": ["step1", "step2"],
+#   "response": "complete response",
+#   "thinking_summary": "reasoning summary"
+# }
+```
+
+### JavaScript Example
+
+```javascript
+// Using EventSource for SSE
+const eventSource = new EventSource('/api/v1/chat/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ message: 'Create a skill' })
+});
+
+eventSource.addEventListener('thinking', (e) => {
+  const data = JSON.parse(e.data);
+  console.log('Thinking:', data.content);
+});
+
+eventSource.addEventListener('response', (e) => {
+  const data = JSON.parse(e.data);
+  console.log('Response:', data.content);
+});
+
+eventSource.addEventListener('complete', () => {
+  eventSource.close();
+});
+```
+
+## Session Management
+
+### ConversationSession
+
+```python
+from skill_fleet.core.services import (
+    ConversationSession,
+    ConversationMessage,
+    MessageRole,
+    ConversationState,
+)
+
+# Create a new session
+session = ConversationSession(
+    session_id="sess-123",
+    user_id="user-456",
+    context={},
+)
+
+# Add messages
+session.add_message(ConversationMessage(
+    role=MessageRole.USER,
+    content="Create a Redis caching skill"
+))
+
+session.add_message(ConversationMessage(
+    role=MessageRole.ASSISTANT,
+    content="I'll help you create a Redis caching skill..."
+))
+
+# Check state
+print(session.state)  # ConversationState.IDLE, ACTIVE, etc.
+print(session.message_count)  # 2
+```
+
+### Session States
+
+```python
+from skill_fleet.core.services import ConversationState
+
+# State transitions
+ConversationState.IDLE          # No active conversation
+ConversationState.ACTIVE        # Conversation in progress
+ConversationState.AWAITING_INPUT # Waiting for user response
+ConversationState.COMPLETED     # Conversation finished
+ConversationState.ERROR         # Error occurred
+```
+
+## Intent-Based Routing
+
+### Intent Detection
+
+The system automatically detects user intent from messages:
+
+```python
+# CreateSkillIntent
+"Create a Python decorators skill"
+"Make a skill for Redis caching"
+"Build a new capability"
+
+# QueryIntent
+"What skills exist?"
+"Show me Python skills"
+"List all testing skills"
+
+# RefineIntent
+"Improve the decorators skill"
+"Fix the async skill"
+"Update the caching skill"
+
+# ChatIntent
+"Hello"
+"How are you?"
+"Tell me a joke"
+```
+
+### Intent Handlers
+
+```python
+from skill_fleet.core.dspy.streaming import StreamingAssistant
+
+assistant = StreamingAssistant()
+
+# Intent is automatically detected and routed
+async for event in assistant.forward_streaming(
+    user_message="Create a Redis skill",
+    context={"user_id": "user-123"}
+):
+    # Events stream based on detected intent
+    print(event)
+```
+
+### Custom Intent Handlers
+
+```python
+from skill_fleet.core.dspy.streaming import IntentHandler
+

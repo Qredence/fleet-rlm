@@ -1,0 +1,35 @@
+<!-- Chunk 1086: bytes 3911353-3912507, type=class -->
+class UnderstandModule(dspy.Module):
+    """Module for Step 1: Understanding task and mapping to taxonomy."""
+    
+    def __init__(self):
+        super().__init__()
+        self.understand = dspy.ChainOfThought(UnderstandTaskForSkill)
+    
+    def forward(
+        self,
+        task_description: str,
+        existing_skills: List[str],
+        taxonomy_structure: Dict
+    ) -> Dict:
+        """Analyze task and determine taxonomy placement.
+        
+        Returns:
+            Dict with task_intent, taxonomy_path, parent_skills, 
+            dependency_analysis, and confidence_score
+        """
+        result = self.understand(
+            task_description=task_description,
+            existing_skills=json.dumps(existing_skills, indent=2),
+            taxonomy_structure=json.dumps(taxonomy_structure, indent=2)
+        )
+        
+        return {
+            'task_intent': result.task_intent,
+            'taxonomy_path': result.taxonomy_path.strip(),
+            'parent_skills': result.parent_skills,
+            'dependency_analysis': result.dependency_analysis,
+            'confidence_score': float(result.confidence_score)
+        }
+
+

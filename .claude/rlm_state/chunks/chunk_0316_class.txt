@@ -1,0 +1,28 @@
+<!-- Chunk 316: bytes 526298-526977, type=class -->
+class CustomCache(dspy.clients.Cache):
+
+    def cache_key(
+        self,
+        request: dict[str, Any],
+        ignored_args_for_cache_key: Optional[list[str]] = None
+    ) -> str:
+        """
+        Generate custom cache key.
+
+        This example creates key based solely on messages,
+        ignoring other parameters.
+        """
+        messages = request.get("messages", [])
+        return sha256(ujson.dumps(messages, sort_keys=True).encode()).hexdigest()
+
+# Configure custom cache
+dspy.cache = CustomCache(
+    enable_disk_cache=True,
+    enable_memory_cache=True,
+    disk_cache_dir=dspy.clients.DISK_CACHE_DIR
+)
+```
+
+### Custom Adapter for Special Format
+
+```python

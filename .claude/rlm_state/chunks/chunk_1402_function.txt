@@ -1,0 +1,69 @@
+<!-- Chunk 1402: bytes 5130532-5132701, type=function -->
+def demonstrate_update_scenario(scenario_name: str, request_json: dict, existing_user: User):
+    """Demonstrate a single update scenario"""
+    print(f"\n{'='*70}")
+    print(f"SCENARIO: {scenario_name}")
+    print(f"{'='*70}")
+
+    # Step 1: Show request
+    print("\n1. CLIENT REQUEST:")
+    print(f"   PATCH /users/{existing_user.id}")
+    print(f"   {request_json}")
+
+    # Step 2: Parse with Pydantic
+    user_update = UserUpdate(**request_json)
+    print("\n2. PYDANTIC PARSED MODEL:")
+    print("   UserUpdate(")
+    print(f"     name={repr(user_update.name)},")
+    print(f"     email={repr(user_update.email)},")
+    print(f"     age={repr(user_update.age)}")
+    print("   )")
+
+    # Step 3: Extract with exclude_unset
+    update_data = user_update.model_dump(exclude_unset=True)
+    print("\n3. EXTRACT PROVIDED FIELDS (exclude_unset=True):")
+    if update_data:
+        for key, value in update_data.items():
+            print(f"   {key}: {repr(value)}")
+    else:
+        print("   {} (empty - no fields provided)")
+
+    # Step 4: Show existing user
+    print("\n4. EXISTING USER:")
+    print(f"   {existing_user.model_dump()}")
+
+    # Step 5: Apply update
+    if update_data:
+        updated_user = existing_user.model_copy(update=update_data)
+        print("\n5. APPLY PARTIAL UPDATE:")
+        print(f"   existing_user.model_copy(update={update_data})")
+    else:
+        updated_user = existing_user
+        print("\n5. NO UPDATE NEEDED:")
+        print("   Returning existing user unchanged")
+
+    # Step 6: Show result
+    print("\n6. RESULT:")
+    result = updated_user.model_dump()
+    print(f"   {result}")
+
+    # Step 7: Highlight changes
+    print("\n7. CHANGES:")
+    existing_dict = existing_user.model_dump()
+    changes_found = False
+
+    for field in ["name", "email", "age"]:
+        if field in update_data:
+            old_val = existing_dict[field]
+            new_val = result[field]
+            print(f"   ✓ {field}: {repr(old_val)} → {repr(new_val)}")
+            changes_found = True
+        else:
+            print(f"   - {field}: unchanged")
+
+    if not changes_found:
+        print("   (no changes)")
+
+    return updated_user
+
+

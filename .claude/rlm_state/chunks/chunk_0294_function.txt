@@ -1,0 +1,84 @@
+<!-- Chunk 294: bytes 366247-368646, type=function -->
+def cmd_exec(args: argparse.Namespace) -> int:
+    state_path = Path(args.state)
+    state = _load_state(state_path)
+
+    ctx = state.get("context")
+    if not isinstance(ctx, dict) or "content" not in ctx:
+        raise RlmReplError("State is missing a valid 'context'. Re-run init.")
+
+    buffers = state.setdefault("buffers", [])
+    if not isinstance(buffers, list):
+        buffers = []
+        state["buffers"] = buffers
+
+    persisted = state.setdefault("globals", {})
+    if not isinstance(persisted, dict):
+        persisted = {}
+        state["globals"] = persisted
+
+    code = args.code
+    if code is None:
+        code = sys.stdin.read()
+
+    # Build execution environment.
+    # Start from persisted variables, then inject context, buffers and helpers.
+    env: Dict[str, Any] = dict(persisted)
+    env["context"] = ctx
+    env["content"] = ctx.get("content", "")
+    env["buffers"] = buffers
+
+    helpers = _make_helpers(ctx, buffers)
+    env.update(helpers)
+
+    # Capture output.
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+
+    try:
+        with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+            exec(code, env, env)
+    except Exception:
+        traceback.print_exc(file=stderr_buf)
+
+    # Pull back possibly mutated context/buffers.
+    maybe_ctx = env.get("context")
+    if isinstance(maybe_ctx, dict) and "content" in maybe_ctx:
+        state["context"] = maybe_ctx
+        ctx = maybe_ctx
+
+    maybe_buffers = env.get("buffers")
+    if isinstance(maybe_buffers, list):
+        state["buffers"] = maybe_buffers
+        buffers = maybe_buffers
+
+    # Persist any new variables, excluding injected keys.
+    injected_keys = {
+        "__builtins__",
+        "context",
+        "content",
+        "buffers",
+        *helpers.keys(),
+    }
+    to_persist = {k: v for k, v in env.items() if k not in injected_keys}
+    filtered, dropped = _filter_pickleable(to_persist)
+    state["globals"] = filtered
+
+    _save_state(state, state_path)
+
+    out = stdout_buf.getvalue()
+    err = stderr_buf.getvalue()
+
+    if dropped and args.warn_unpickleable:
+        msg = "Dropped unpickleable variables: " + ", ".join(dropped)
+        err = (err + ("\n" if err else "") + msg + "\n")
+
+    if out:
+        sys.stdout.write(_truncate(out, args.max_output_chars))
+
+    if err:
+        sys.stderr.write(_truncate(err, args.max_output_chars))
+
+    return 0
+
+

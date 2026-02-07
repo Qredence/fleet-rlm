@@ -1,0 +1,58 @@
+<!-- Chunk 1272: bytes 4716434-4718117, type=function -->
+def evaluate_program(
+    program: dspy.Module,
+    testset: list[dspy.Example],
+    metric_fn,
+) -> dict:
+    """
+    Evaluate program on test set.
+
+    Args:
+        program: DSPy program to evaluate
+        testset: Test examples
+        metric_fn: Evaluation metric (may return float or dict)
+
+    Returns:
+        Dictionary with score and details
+
+    """
+    logger.info(f"\nEvaluating on {len(testset)} test examples...")
+
+    from dspy.evaluate import Evaluate
+
+    # GEPA metrics return {"score": float, "feedback": str}
+    # But Evaluate expects float, so we wrap it
+    def metric_wrapper(example, pred, trace=None, pred_name=None, pred_trace=None):
+        result = metric_fn(example, pred, trace, pred_name, pred_trace)
+        if isinstance(result, dict) and "score" in result:
+            return result["score"]
+        return result
+
+    evaluator = Evaluate(
+        devset=testset,
+        metric=metric_wrapper,
+        num_threads=4,
+        display_progress=True,
+    )
+
+    score = evaluator(program)
+
+    # Convert to float
+    if hasattr(score, "__float__") or isinstance(score, (int, float)):
+        score_float = float(score)
+    else:
+        try:
+            score_float = float(str(score))
+        except (ValueError, TypeError):
+            logger.warning(f"Could not convert score to float: {score}")
+            score_float = 0.0
+
+    logger.info(f"Evaluation score: {score_float:.3f}")
+    return {"score": score_float, "num_examples": len(testset)}
+
+
+# ============================================================================
+# COMPARISON WITH OTHER OPTIMIZERS
+# ============================================================================
+
+

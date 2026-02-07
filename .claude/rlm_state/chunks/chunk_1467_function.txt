@@ -1,0 +1,29 @@
+<!-- Chunk 1467: bytes 6311728-6312526, type=function -->
+def invalidate_pattern(pattern: str) -> int:
+    """
+    Invalidate all cache entries matching a pattern.
+
+    Args:
+        pattern: Glob-style pattern to match keys (e.g., "taxonomy:*")
+
+    Returns:
+        Number of entries invalidated
+
+    Examples:
+        >>> invalidate_pattern("taxonomy:*")  # Invalidate all taxonomy keys
+        >>> invalidate_pattern("skill:python:*")  # Invalidate all Python skill caches
+        >>> invalidate_pattern("*")  # Clear all cache
+
+    """
+    import fnmatch
+
+    with _cache._lock:
+        keys_to_delete = [key for key in _cache._cache if fnmatch.fnmatch(key, pattern)]
+        for key in keys_to_delete:
+            del _cache._cache[key]
+
+        _cache._stats["invalidations"] += len(keys_to_delete)
+        return len(keys_to_delete)
+
+
+# Public API

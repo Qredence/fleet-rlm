@@ -1,0 +1,29 @@
+<!-- Chunk 1434: bytes 5523800-5524833, type=function -->
+def say_hello():
+    print("Hello!")
+
+say_hello()
+```
+
+**Explanation:**
+
+1.  `my_decorator` is a decorator function that takes another function `func` as an argument.
+2.  Inside `my_decorator`, we define a `wrapper` function. This function will contain the additional functionality we want to add.
+3.  The `wrapper` function first prints "Before calling the function.", then calls the original function `func()`, and finally prints "After calling the function.".
+4.  `my_decorator` returns the `wrapper` function.
+5.  The `@my_decorator` syntax is syntactic sugar for `say_hello = my_decorator(say_hello)`. It applies the `my_decorator` to the `say_hello` function.
+6.  When we call `say_hello()`, we are actually calling the `wrapper` function returned by `my_decorator`.
+
+**Output:**
+
+```
+Before calling the function.
+Hello!
+After calling the function.
+```
+
+## Decorating Functions with Arguments
+
+If the function you want to decorate takes arguments, you need to modify the decorator to accept those arguments as well.
+
+```python

@@ -1,0 +1,23 @@
+<!-- Chunk 1919: bytes 7738342-7738795, type=function -->
+def get_mlflow_run_id() -> str | None:
+    """
+    Get the current active MLflow run ID.
+
+    Returns:
+        Active MLflow run ID or None if no run is active
+
+    Examples:
+        >>> run_id = get_mlflow_run_id()
+        >>> if run_id:
+        ...     print(f"Active run: {run_id}")
+
+    """
+    try:
+        import mlflow
+
+        run = mlflow.active_run()
+        return run.info.run_id if run else None
+    except Exception:
+        return None
+
+

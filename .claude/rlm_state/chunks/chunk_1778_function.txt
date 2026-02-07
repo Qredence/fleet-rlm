@@ -1,0 +1,35 @@
+<!-- Chunk 1778: bytes 7427494-7428420, type=function -->
+def get_lm(
+    model_name: str = DEFAULT_MODEL,
+    temperature: float = 0.7,
+    **kwargs,
+) -> dspy.LM:
+    """
+    Get a DSPy LM instance for an approved model.
+
+    Args:
+        model_name: Name of approved model (without provider prefix)
+        temperature: LLM temperature
+        **kwargs: Additional LM configuration
+
+    Returns:
+        Configured dspy.LM instance
+
+    Raises:
+        ValueError: If model is not in approved list
+
+    """
+    if model_name not in APPROVED_MODELS:
+        raise ValueError(
+            f"Model '{model_name}' is not approved. Use one of: {list(APPROVED_MODELS.keys())}"
+        )
+
+    model_path = APPROVED_MODELS[model_name]
+    return dspy.LM(model_path, temperature=temperature, **kwargs)
+
+
+# =============================================================================
+# Optimization Wrapper
+# =============================================================================
+
+

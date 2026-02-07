@@ -1,0 +1,149 @@
+<!-- Chunk 1768: bytes 7405835-7410250, type=class -->
+class RefineSkillModule(BaseModule):
+    """Refine skill based on quality assessment."""
+
+    def __init__(self):
+        super().__init__()
+        self.refine = dspy.ChainOfThought(RefineSkill)
+
+    async def aforward(  # type: ignore[override]
+        self, current_content: str, weaknesses: list[str], target_score: float = 0.8
+    ) -> dict[str, Any]:
+        """
+        Refine skill content.
+
+        Args:
+            current_content: Current SKILL.md
+            weaknesses: List of weaknesses to address
+            target_score: Target quality score
+
+        Returns:
+            Refined content
+
+        """
+        start_time = time.time()
+
+        result = await self.refine.acall(
+            current_content=current_content, weaknesses=weaknesses, target_score=target_score
+        )
+
+        output = {
+            "refined_content": result.refined_content
+            if hasattr(result, "refined_content")
+            else current_content,
+            "improvements_made": result.improvements_made
+            if isinstance(result.improvements_made, list)
+            else [],
+            "new_score_estimate": float(result.new_score_estimate)
+            if hasattr(result, "new_score_estimate")
+            else 0.0,
+            "requires_another_pass": bool(result.requires_another_pass)
+            if hasattr(result, "requires_another_pass")
+            else False,
+        }
+
+        # Validate
+        if not self._validate_result(output, ["refined_content"]):
+            output["refined_content"] = current_content
+
+        # Log
+        duration_ms = (time.time() - start_time) * 1000
+        improvements_list = output.get("improvements_made", [])
+        if not isinstance(improvements_list, list):
+            improvements_list = []
+        self._log_execution(
+            inputs={"weaknesses_count": len(weaknesses), "target": target_score},
+            outputs={"improvements": len(improvements_list)},
+            duration_ms=duration_ms,
+        )
+
+        return output
+
+    def forward(self, **kwargs) -> dict[str, Any]:
+        """Synchronous forward - delegates to async."""
+        import asyncio
+
+        return asyncio.run(self.aforward(**kwargs))
+
+
+============================================================
+END FILE: src/skill_fleet/core/modules/validation/compliance.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/optimization/__init__.py
+============================================================
+
+"""Optimization utilities for DSPy programs."""
+
+from .cache import WorkflowOptimizer
+from .evaluation import (
+    content_quality_metric,
+    evaluate_program,
+    load_trainset,
+    metadata_metric,
+    print_evaluation_report,
+    skill_creation_metric,
+    split_dataset,
+    taxonomy_path_metric,
+)
+from .optimizer import (
+    OptimizationWrapper,
+    get_lm,
+    load_optimized_program,
+    optimize_with_gepa,
+    optimize_with_miprov2,
+    optimize_with_tracking,
+    quick_evaluate,
+    save_program_state,
+)
+
+__all__ = [
+    # Cache/Workflow
+    "WorkflowOptimizer",
+    # Evaluation
+    "load_trainset",
+    "split_dataset",
+    "taxonomy_path_metric",
+    "metadata_metric",
+    "content_quality_metric",
+    "skill_creation_metric",
+    "evaluate_program",
+    "print_evaluation_report",
+    # Optimizer
+    "get_lm",
+    "OptimizationWrapper",
+    "optimize_with_miprov2",
+    "optimize_with_gepa",
+    "load_optimized_program",
+    "save_program_state",
+    "optimize_with_tracking",
+    "quick_evaluate",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/core/optimization/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/optimization/cache.py
+============================================================
+
+"""
+Workflow caching and optimization helpers.
+
+Note: This module uses pickle for caching workflow results. The cached data
+is generated and consumed by the same application, not from untrusted sources.
+The MD5 hash is used only for cache key generation (non-cryptographic purpose).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import pickle  # nosec B403 - Used for internal caching only, not untrusted data
+from pathlib import Path
+from typing import Any
+
+

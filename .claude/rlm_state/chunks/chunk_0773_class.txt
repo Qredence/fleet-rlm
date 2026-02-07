@@ -1,0 +1,5 @@
+<!-- Chunk 773: bytes 2638546-2638640, type=class -->
+class SkillFleetError(Exception):
+    """Base exception for Skills Fleet errors."""
+    pass
+

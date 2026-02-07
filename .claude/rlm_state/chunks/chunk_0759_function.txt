@@ -1,0 +1,42 @@
+<!-- Chunk 759: bytes 2592243-2593420, type=function -->
+def safe_json_loads(
+    value: str | Any,
+    default: dict | list | None = None,
+    field_name: str = "unknown",
+) -> dict | list
+```
+
+**Parameters:**
+- `value` (str | Any): String to parse or already-parsed object
+- `default` (dict | list): Default value if parsing fails (defaults to `{}`)
+- `field_name` (str): Field name for logging purposes
+
+**Returns:**
+- `dict | list`: Parsed JSON or default value (never None)
+
+**Handles:**
+- Already parsed objects (dict, list) - returns as-is
+- Valid JSON strings - parses and returns
+- Invalid JSON - returns default with warning log
+- Pydantic models - extracts via `model_dump()`
+- Empty/None values - returns default
+- Unknown types - returns default with warning
+
+**Example:**
+```python
+from skill_fleet.common.utils import safe_json_loads
+
+# Parse JSON string
+data = safe_json_loads('{"key": "value"}')
+# Returns: {"key": "value"}
+
+# Handle invalid JSON with fallback
+data = safe_json_loads('invalid json', default={})
+# Returns: {} (with warning logged)
+
+# Handle already-parsed objects
+data = safe_json_loads({"already": "parsed"})
+# Returns: {"already": "parsed"}
+
+# Handle Pydantic models
+from pydantic import BaseModel

@@ -1,0 +1,57 @@
+<!-- Chunk 1212: bytes 4572028-4573489, type=function -->
+def main():
+    """Main entry point."""
+    # Default skills directory
+    project_root = Path(__file__).parent.parent
+    skills_dir = project_root / ".skills"
+
+    # Allow override via env var or argument
+    if len(sys.argv) > 1:
+        skills_dir = Path(sys.argv[1])
+
+    env_skills_dir = os.getenv("SKILLS_DIR")
+    if env_skills_dir:
+        skills_dir = Path(env_skills_dir)
+
+    if not skills_dir.exists():
+        print(f"❌ Skills directory not found: {skills_dir}")
+        print("\nUsage: python import_skills.py [skills_directory]")
+        print("       SKILLS_DIR=/path/to/.skills python import_skills.py")
+        sys.exit(1)
+
+    # Dry run mode
+    dry_run = "--dry-run" in sys.argv or "-n" in sys.argv
+
+    # Run import
+    importer = SkillImporter(str(skills_dir), DATABASE_URL)
+    importer.import_all(dry_run=dry_run)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/archive/import_skills.py
+============================================================
+
+============================================================
+FILE: scripts/check.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Unified Development & Quality Checker.
+
+Wraps various dev scripts:
+- quality.sh (Lint, Test, Typecheck)
+- run_dev.sh (Start Dev Server)
+- cleanup-technical-debt.sh
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+

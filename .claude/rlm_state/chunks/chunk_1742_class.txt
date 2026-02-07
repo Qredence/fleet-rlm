@@ -1,0 +1,13 @@
+<!-- Chunk 1742: bytes 7343935-7344346, type=class -->
+class InitializeResult(BaseModel):
+    """Result from the Initialize step (Step 3)."""
+
+    skill_skeleton: SkillSkeleton
+    validation_checklist: list[ValidationCheckItem] = Field(default_factory=list)
+
+
+# =============================================================================
+# Step 4: Edit - Content Generation Models
+# =============================================================================
+
+

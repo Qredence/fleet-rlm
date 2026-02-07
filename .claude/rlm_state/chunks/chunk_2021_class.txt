@@ -1,0 +1,56 @@
+<!-- Chunk 2021: bytes 7903122-7904922, type=class -->
+class TestDefaultSkillsRoot:
+    """Tests for default_skills_root function."""
+
+    def test_returns_skills_from_repo_root(self, tmp_path: Path):
+        """Test returning skills path from repo root."""
+        (tmp_path / ".git").mkdir()
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        with patch("skill_fleet.common.paths.Path.cwd", return_value=tmp_path):
+            result = default_skills_root()
+
+        assert result == skills_dir
+
+    def test_returns_fallback_when_no_skills_exist(self, tmp_path: Path):
+        """Test returning fallback path when skills directory doesn't exist."""
+        isolated = tmp_path / "isolated"
+        isolated.mkdir()
+
+        with patch("skill_fleet.common.paths.Path.cwd", return_value=isolated):
+            with patch("skill_fleet.common.paths.find_repo_root", return_value=None):
+                with patch("skill_fleet.common.paths._package_root", return_value=isolated):
+                    result = default_skills_root()
+
+        assert result == isolated / "skills"
+
+
+============================================================
+END FILE: tests/common/test_paths.py
+============================================================
+
+============================================================
+FILE: tests/common/test_security.py
+============================================================
+
+"""Tests for common security utilities.
+
+Tests path sanitization and validation functions that protect against
+path traversal attacks and ensure paths remain within expected boundaries.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from skill_fleet.common.security import (
+    is_safe_path_component,
+    resolve_path_within_root,
+    sanitize_relative_file_path,
+    sanitize_taxonomy_path,
+)
+
+

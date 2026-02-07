@@ -1,0 +1,11 @@
+<!-- Chunk 114: bytes 33546-33871, type=h3 -->
+### skill-creator skill:
+•  Built into Claude.ai and available for Claude Code
+•  Can generate skills from descriptions
+•  Reviews and provides recommendations
+•  Use: "Help me build a skill using skill-creator"
+
+**Validation:**
+•  `skill-creator` can assess your skills
+•  Ask: "Review this skill and suggest improvements"
+

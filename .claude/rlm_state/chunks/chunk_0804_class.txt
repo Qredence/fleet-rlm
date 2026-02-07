@@ -1,0 +1,14 @@
+<!-- Chunk 804: bytes 2709495-2709799, type=class -->
+class SkillRepository(ABC):
+    @abstractmethod
+    async def get(self, skill_id: str) -> Skill | None:
+        pass
+
+    @abstractmethod
+    async def save(self, skill: Skill) -> None:
+        pass
+
+    @abstractmethod
+    async def find_by_path(self, path: TaxonomyPath) -> Skill | None:
+        pass
+

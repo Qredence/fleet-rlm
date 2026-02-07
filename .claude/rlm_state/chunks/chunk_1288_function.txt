@@ -1,0 +1,19 @@
+<!-- Chunk 1288: bytes 4747801-4748283, type=function -->
+def test_export_to_db():
+    """Test actual export to database."""
+    print("\n" + "=" * 60)
+    print("Test 2: Export to DB (Actual)")
+    print("=" * 60)
+
+    result = runner.invoke(app, ["export-to-db", "--force"])
+
+    if result.exit_code != 0:
+        print(f"❌ Test failed with exit code {result.exit_code}")
+        print(f"Output: {result.output}")
+        return False
+
+    print("✅ Export to database successful")
+    print(f"Output:\n{result.output}")
+    return True
+
+

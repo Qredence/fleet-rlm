@@ -1,0 +1,11 @@
+<!-- Chunk 227: bytes 305472-305687, type=function -->
+def get_users_with_orders():
+    return User.query.options(
+        joinedload(User.orders)
+    ).all()  # 1-2 queries total
+```
+
+### Unnecessary Copies
+
+**Anti-pattern:** Creating unnecessary data copies
+```python

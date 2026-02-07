@@ -1,0 +1,13 @@
+<!-- Chunk 829: bytes 2884292-2884559, type=function -->
+def create_job() -> str:
+    from .job_manager import get_job_manager
+    
+    job_id = str(uuid.uuid4())
+    job_state = JobState(job_id=job_id)
+    
+    manager = get_job_manager()
+    manager.create_job(job_state)  # Saves to memory + DB
+    return job_id
+
+
+# OLD

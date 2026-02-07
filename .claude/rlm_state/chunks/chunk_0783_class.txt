@@ -1,0 +1,6 @@
+<!-- Chunk 783: bytes 2648470-2648579, type=class -->
+class ValidationIssue(BaseModel):
+    check: str
+    message: str
+    severity: Literal["error", "warning"]
+

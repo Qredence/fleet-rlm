@@ -1,0 +1,5 @@
+<!-- Chunk 1131: bytes 4244867-4244961, type=function -->
+def test_coerce_reasoning_text_handles_none():
+    assert coerce_reasoning_text(None) == ""
+
+

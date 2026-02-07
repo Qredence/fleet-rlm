@@ -1,0 +1,5 @@
+<!-- Chunk 1650: bytes 6675770-6675865, type=class -->
+class ResearchError(SkillsFleetError):
+    """Base exception for research-related errors."""
+
+

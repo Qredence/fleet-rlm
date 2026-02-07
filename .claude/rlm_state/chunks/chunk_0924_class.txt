@@ -1,0 +1,13 @@
+<!-- Chunk 924: bytes 3349157-3349505, type=class -->
+class CreditCard(BaseModel):
+    number: str = Field(..., min_length=13, max_length=19)
+    expiry: str
+    cvv: str = Field(..., min_length=3, max_length=4)
+
+    @validator('number')
+    def luhn_check(cls, v):
+        # Luhn algorithm validation
+        if not luhn_valid(v):
+            raise ValueError('Invalid card number')
+        return v
+

@@ -1,0 +1,44 @@
+<!-- Chunk 24: bytes 105155-106257, type=class -->
+class MyCustomAdapter(dspy.Adapter):
+    """Custom adapter for special output format."""
+
+    def format_user_message_content(
+        self,
+        signature,
+        inputs,
+        main_request=True
+    ):
+        """Custom input formatting."""
+        # Format input as special XML tags
+        content = "<input>\n"
+        for field_name, field_value in inputs.items():
+            content += f"  <{field_name}>{field_value}</{field_name}>\n"
+        content += "</input>"
+        return content
+
+    def parse(
+        self,
+        signature,
+        output
+    ):
+        """Custom output parsing."""
+        # Parse output from special XML tags
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(f"<output>{output}</output>")
+
+        result = {}
+        for field in signature.output_fields:
+            field_elem = root.find(field)
+            if field_elem is not None:
+                result[field] = field_elem.text
+
+        return dspy.Prediction(**result)
+```
+
+### Using Custom Adapter
+
+```python
+# Create module with custom adapter
+adapter = MyCustomAdapter()
+

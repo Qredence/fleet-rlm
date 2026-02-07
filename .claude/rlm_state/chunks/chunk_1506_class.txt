@@ -1,0 +1,9 @@
+<!-- Chunk 1506: bytes 6356982-6357307, type=class -->
+class QuestionOption(BaseModel):
+    """A single option for a multiple-choice question."""
+
+    id: str = Field(..., description="Unique identifier for the option")
+    label: str = Field(..., description="Display label for the option")
+    description: str | None = Field(default=None, description="Optional description")
+
+

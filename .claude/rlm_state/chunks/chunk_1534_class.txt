@@ -1,0 +1,8 @@
+<!-- Chunk 1534: bytes 6374340-6374581, type=class -->
+class UpdateTaxonomyRequest(BaseModel):
+    """Request body for updating taxonomy."""
+
+    updates: dict[str, Any] = Field(..., description="Taxonomy updates")
+    user_id: str = Field(default="default", description="User ID for context")
+
+

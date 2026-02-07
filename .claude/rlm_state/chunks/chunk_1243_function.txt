@@ -1,0 +1,74 @@
+<!-- Chunk 1243: bytes 4651612-4653884, type=function -->
+def main(argv: list[str] | None = None) -> int:
+    """Sync top-level `config/` + `skills/` into `src/skill_fleet/` resources."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=None,
+        help="Repo root (defaults to the parent of this script's directory)",
+    )
+    args = parser.parse_args(argv)
+
+    repo_root = args.repo_root or Path(__file__).resolve().parents[1]
+
+    src_config = repo_root / "config"
+    dst_config = repo_root / "src" / "skill_fleet" / "config"
+    if not src_config.is_dir():
+        print(f"error: missing source config dir: {src_config}", file=sys.stderr)
+        return 2
+
+    _sync_tree(
+        src_root=src_config,
+        dst_root=dst_config,
+        exclude={
+            # Binary: keep it repo-only unless we explicitly decide to ship it.
+            "optimized/miprov2/program.pkl",
+        },
+    )
+
+    # Seed skills (minimal bootstrap files only)
+    src_skills = repo_root / "skills"
+    dst_seed = repo_root / "src" / "skill_fleet" / "_seed" / "skills"
+    dst_seed_templates = dst_seed / "_templates"
+    dst_seed_templates.mkdir(parents=True, exist_ok=True)
+
+    for rel in (
+        Path("taxonomy_index.json"),
+        Path("taxonomy_meta.json"),
+        Path("_templates") / "skill_template.json",
+    ):
+        src_path = src_skills / rel
+        dst_path = dst_seed / rel
+        if not src_path.exists():
+            print(f"error: missing seed file: {src_path}", file=sys.stderr)
+            return 2
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        copy2(src_path, dst_path)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+============================================================
+END FILE: scripts/internal/dev/sync_packaged_resources.py
+============================================================
+
+============================================================
+FILE: scripts/internal/migration/cleanup_legacy.py
+============================================================
+
+"""
+Cleanup utility for removing legacy files and directories during migration.
+
+Safely removes empty directories, unused imports, and generates cleanup reports.
+"""
+
+import ast
+import shutil
+from pathlib import Path
+
+

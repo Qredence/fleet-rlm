@@ -1,0 +1,8 @@
+<!-- Chunk 1985: bytes 7887824-7888017, type=function -->
+def test_cli_error_has_exit_code():
+    """Test CLIError has default exit code."""
+    error = CLIError("Test error")
+    assert error.exit_code == 1
+    assert error.message == "Test error"
+
+

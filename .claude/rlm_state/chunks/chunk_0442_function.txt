@@ -1,0 +1,23 @@
+<!-- Chunk 442: bytes 637377-637822, type=function -->
+def format_metric(example, pred, trace=None):
+    """Validate output format."""
+    try:
+        # Parse output as JSON
+        import json
+        data = json.loads(pred.output)
+
+        # Check required keys
+        if 'answer' not in data:
+            return False
+
+        if 'confidence' not in data:
+            return False
+
+        return True
+    except json.JSONDecodeError:
+        return False
+```
+
+### Length Constraints
+
+```python

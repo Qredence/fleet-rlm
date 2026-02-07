@@ -1,0 +1,57 @@
+<!-- Chunk 1466: bytes 6309919-6311728, type=function -->
+def cache_result(
+    key_func: Callable[..., str] | None = None,
+    ttl: int = 300,
+    prefix: str = "",
+):
+    """
+    Cache function results with custom key generation.
+
+    Args:
+        key_func: Optional function to generate cache key
+        ttl: Time-to-live in seconds
+        prefix: Prefix for cache keys
+
+    Examples:
+        >>> def get_key(user_id: str, skill_type: str) -> str:
+        ...     return f"user:{user_id}:skill_type:{skill_type}"
+        >>>
+        >>> @cache_result(key_func=get_key, ttl=600, prefix="skills")
+        ... def get_user_skills(user_id: str, skill_type: str):
+        ...     return fetch_skills(user_id, skill_type)
+
+    """
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            # Generate cache key
+            if key_func:
+                key_suffix = key_func(*args, **kwargs)
+                key = cache_key(prefix, key_suffix) if prefix else cache_key("custom", key_suffix)
+            else:
+                func_name = getattr(func, "__name__", "unknown")
+                args_str = str(args) + str(sorted(kwargs.items()))
+                key_suffix = hash_key(args_str)
+                key = (
+                    cache_key(func_name, key_suffix) if prefix else cache_key(func_name, key_suffix)
+                )
+
+            # Try to get from cache
+            result = _cache.get(key)
+            if result is not None:
+                logger.debug(f"Cache hit: {key}")
+                return result
+
+            # Call function and cache result
+            logger.debug(f"Cache miss: {key}")
+            result = func(*args, **kwargs)
+            _cache.set(key, result, ttl=ttl)
+
+            return result
+
+        return wrapper
+
+    return decorator
+
+

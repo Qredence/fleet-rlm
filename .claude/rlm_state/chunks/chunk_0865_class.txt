@@ -1,0 +1,230 @@
+<!-- Chunk 865: bytes 3063792-3071708, type=class -->
+class SkillService(BaseService):
+    @lru_cache(maxsize=128)
+    def _get_skill_type_weights(self) -> dict[str, float]:
+        """Get cached skill type weights."""
+        return self.config.get("skill_type_weights", {})
+```
+
+---
+
+## See Also
+
+- **[Domain Layer](../architecture/DOMAIN_LAYER.md)** - Domain entities and specifications
+- **[Import Path Guide](IMPORT_PATH_GUIDE.md)** - Service import patterns
+- **[Service Layer Architecture](../architecture/SERVICE_LAYER.md)** - Service layer overview
+
+
+============================================================
+END FILE: docs/development/SERVICE_EXTENSION_GUIDE.md
+============================================================
+
+============================================================
+FILE: docs/development/dev-command-analysis.md
+============================================================
+
+# Analysis of `skill-fleet dev`
+
+This document analyzes the implementation of the `skill-fleet dev` command (`src/skill_fleet/cli/commands/dev.py`), which orchestrates the development environment by running both the FastAPI backend and the Node.js TUI.
+
+## Process Management
+
+The command manages two distinct subprocesses:
+
+1.  **API Server (Python/Uvicorn)**
+    *   **Command:** `sys.executable -m uvicorn skill_fleet.app.main:app ...`
+    *   **Logging:** `stdout` and `stderr` are redirected to a file: `.skill_fleet_logs/api-dev.log`. This prevents API logs from interfering with the TUI interface.
+    *   **Readiness:** The command polls the `/docs` endpoint (via `_wait_for_api_ready`) to ensure the API is accepting requests before launching the TUI.
+
+2.  **TUI (Node/NPM)**
+    *   **Command:** `npm run <script>` (default script is `dev`).
+    *   **Directory:** Runs in `cli/tui` relative to the repository root.
+    *   **Environment:** Injects `SKILL_FLEET_API_URL` and `SKILL_FLEET_USER_ID` into the process environment.
+    *   **Output:** Inherits `stdout`/`stderr` (default `subprocess.Popen` behavior), allowing the TUI to render directly to the terminal.
+
+## Reload Handling
+
+*   **Implementation:** The `--reload` flag is passed directly to Uvicorn.
+*   **Default:** Disabled (`False`) by default.
+*   **Caveats:**
+    *   **State Loss:** The CLI explicitly warns that in-memory state (like active jobs) is lost when Uvicorn reloads.
+    *   **Port Conflicts:** The help text notes that reload is disabled by default to "prevent port binding issues," suggesting historical issues with Uvicorn holding onto ports during rapid restarts.
+
+## Cleanup Strategy
+
+The command uses a robust cleanup strategy in a `finally` block:
+
+1.  **Monitoring Loop:** A `while True` loop continuously polls both processes using `.poll()`.
+2.  **Coupled Lifecycle:**
+    *   If the API stops, the TUI is terminated.
+    *   If the TUI stops, the API is terminated.
+3.  **Termination Protocol:**
+    *   Upon exit (including `KeyboardInterrupt`), it iterates through both process handles.
+    *   Attempts `terminate()` (SIGTERM).
+    *   Waits up to 5 seconds.
+    *   Escalates to `kill()` (SIGKILL) if the process refuses to exit.
+    *   Closes the API log file handle.
+
+## Identified Risks & Observations
+
+1.  **Log Management:** API logs are appended (`"a"`) indefinitely without rotation. Frequent use could lead to large log files in `.skill_fleet_logs/`.
+2.  **Path Coupling:** The TUI directory is hardcoded as `repo_root / "cli" / "tui"`. Changes to the project structure would break this command.
+3.  **Zombie Processes:** While the `finally` block handles SIGINT, an abrupt SIGKILL to the main process would leave the subprocesses running (orphaned).
+4.  **Health Check Limitations:** The readiness check relies on the `/docs` endpoint. This proves the web server is running but does not guarantee that internal subsystems (databases, LLM connections) are fully operational.
+5.  **NPM Dependency:** The command assumes `npm` is in the system PATH. While it catches `FileNotFoundError`, it doesn't validate the node version or `node_modules` state before execution.
+
+
+============================================================
+END FILE: docs/development/dev-command-analysis.md
+============================================================
+
+============================================================
+FILE: docs/dspy/ADAPTIVE_METRIC_WEIGHTING.md
+============================================================
+
+# Adaptive Metric Weighting
+
+**Date**: January 21, 2026  
+**Status**: ✅ Production Ready  
+**API Endpoint**: `POST /api/v1/evaluation/adaptive-weights`
+
+## Overview
+
+Adaptive Metric Weighting enables the skill evaluation system to prioritize different metrics based on the detected skill **style**. This ensures that evaluation metrics align with the actual purpose and design of each skill, improving quality scores and optimizer effectiveness.
+
+## Three Skill Styles
+
+### 1. Navigation Hub (`navigation_hub`)
+
+**Characteristics**: 
+- Clear, well-organized guide with multiple examples
+- Prioritizes **clarity** and **structure**
+- Emphasizes **readability** and **coverage**
+
+**Metric Weights**:
+- `skill_quality`: 0.30 (↑ prioritized)
+- `semantic_f1`: 0.15
+- `entity_f1`: 0.05 (↓ de-emphasized)
+- `readability`: 0.35 (↑ highest)
+- `coverage`: 0.15 (↑ many examples expected)
+
+**Example Skills**:
+- Python Async Programming Guide
+- Docker Best Practices
+- React Hooks Tutorial
+
+### 2. Comprehensive (`comprehensive`)
+
+**Characteristics**:
+- Balanced coverage with patterns and examples
+- Addresses multiple use cases
+- Good for general-purpose reference
+
+**Metric Weights**:
+- `skill_quality`: 0.25
+- `semantic_f1`: 0.25 (balanced)
+- `entity_f1`: 0.20
+- `readability`: 0.20
+- `coverage`: 0.10
+
+**Example Skills**:
+- Advanced Python Concurrency
+- Testing Strategies
+- API Design Patterns
+
+### 3. Minimal (`minimal`)
+
+**Characteristics**:
+- Concise and correct
+- Minimal overhead, maximum value
+- Prioritizes semantic correctness
+
+**Metric Weights**:
+- `skill_quality`: 0.20
+- `semantic_f1`: 0.50 (↑↑ highest, pure correctness)
+- `entity_f1`: 0.15
+- `readability`: 0.10
+- `coverage`: 0.05 (↓ few examples ok)
+
+**Example Skills**:
+- Quick Git Cheatsheet
+- SQL Window Functions Reference
+- Kubernetes API Quick Reference
+
+## API Usage
+
+### Detect Style and Get Weights
+
+```bash
+curl -X POST http://localhost:8000/api/v1/evaluation/adaptive-weights \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_title": "Python Async Programming",
+    "skill_content": "[skill content here]",
+    "skill_description": "Complete guide to asyncio framework",
+    "current_scores": {
+      "skill_quality": 0.8,
+      "semantic_f1": 0.75,
+      "readability": 0.9
+    }
+  }'
+```
+
+### Response
+
+```json
+{
+  "style": "navigation_hub",
+  "confidence": 0.92,
+  "reasoning": "Skill emphasizes clarity with multiple examples...",
+  "weights": {
+    "skill_quality": 0.30,
+    "semantic_f1": 0.15,
+    "entity_f1": 0.05,
+    "readability": 0.35,
+    "coverage": 0.15
+  },
+  "composite_score": 0.82,
+  "expected_improvement": "+5.2% on composite score"
+}
+```
+
+## Usage in Evaluation Pipeline
+
+### Manual Integration
+
+```python
+from skill_fleet.core.dspy.metrics.adaptive_weighting import AdaptiveMetricWeighting, compute_adaptive_score
+
+# Initialize
+weighting = AdaptiveMetricWeighting()
+
+# Detect style
+style, confidence, reasoning = weighting.detect_style(
+    skill_title="My Skill",
+    skill_content="[skill markdown]",
+    skill_description="A skill description"
+)
+
+# Get weights for style
+weights = weighting.get_weights(style)
+
+# Compute adaptive score
+scores = {
+    "skill_quality": 0.8,
+    "semantic_f1": 0.75,
+    "readability": 0.9,
+    "coverage": 0.85,
+    "entity_f1": 0.7
+}
+
+result = compute_adaptive_score(scores, style)
+print(f"Composite Score: {result['composite']}")
+```
+
+### Integration with Optimizer
+
+```python
+# In your skill creation workflow:
+from skill_fleet.core.dspy.metrics.adaptive_weighting import AdaptiveMetricWeighting
+

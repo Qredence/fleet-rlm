@@ -1,0 +1,23 @@
+<!-- Chunk 518: bytes 862921-863420, type=function -->
+def summarize(text: str) -> str:
+    """Summarize the given text."""
+    return f"Summary of: {text[:50]}..."
+
+react = dspy.ReAct(
+    "task -> summary",
+    tools=[search_web, summarize],
+    max_iters=5
+)
+
+result = react(task="Summarize the latest news about AI")
+# ReAct will:
+# 1. Call search_web with "latest news about AI"
+# 2. Call summarize with search results
+# 3. Return final summary
+```
+
+### Conditional Tool Selection
+
+ReAct reasons about which tool to use based on context:
+
+```python

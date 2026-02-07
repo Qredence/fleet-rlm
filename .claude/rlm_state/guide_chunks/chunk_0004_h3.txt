@@ -1,0 +1,8 @@
+<!-- Chunk 4: bytes 1916-2179, type=h3 -->
+### What you'll learn:
+
+•  Technical requirements and best practices for skill structure
+•  Patterns for standalone skills and MCP-enhanced workflows
+•  Patterns we've seen work well across different use cases
+•  How to test, iterate, and distribute your skills
+

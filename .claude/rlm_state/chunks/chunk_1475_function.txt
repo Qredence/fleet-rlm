@@ -1,0 +1,17 @@
+<!-- Chunk 1475: bytes 6321301-6321665, type=function -->
+def _get_cached_taxonomy_manager(skills_root_str: str) -> TaxonomyManager:
+    """
+    Create and cache a TaxonomyManager instance.
+
+    Uses string path for hashability with lru_cache.
+
+    Args:
+        skills_root_str: String path to skills root
+
+    Returns:
+        Cached TaxonomyManager instance
+
+    """
+    return TaxonomyManager(Path(skills_root_str))
+
+

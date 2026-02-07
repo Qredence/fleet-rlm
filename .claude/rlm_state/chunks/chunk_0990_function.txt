@@ -1,0 +1,7 @@
+<!-- Chunk 990: bytes 3452536-3452698, type=function -->
+def test_serve_command_has_help():
+    """Test serve command has help."""
+    result = runner.invoke(app, ["serve", "--help"])
+    assert result.exit_code == 0
+
+

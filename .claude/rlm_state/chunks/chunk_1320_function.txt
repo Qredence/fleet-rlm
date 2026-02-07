@@ -1,0 +1,230 @@
+<!-- Chunk 1320: bytes 4849954-4859062, type=function -->
+def process_payment(amount: float) -> bool:
+    # ty will flag this as redundant if it can solve the type safely
+    # Use ty's redundant-ignore flag to clean these up.
+    return external_lib.charge(amount)  # type: ignore[reportGeneralTypeIssues]
+
+============================================================
+END FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/examples/example_2.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/examples/example_3.py
+============================================================
+
+uv run ruff check . && uv run ruff format --check . && uv run ty check .
+
+============================================================
+END FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/examples/example_3.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/examples/example_3.yml
+============================================================
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Run Type Checker
+        run: uv run ty check . --format github
+
+
+============================================================
+END FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/examples/example_3.yml
+============================================================
+
+============================================================
+FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/metadata.json
+============================================================
+
+{
+  "$schema": "https://skill-fleet.dev/schemas/metadata.json",
+  "_comment": [
+    "skill-fleet Metadata - separate from SKILL.md frontmatter",
+    "Frontmatter (name, description) is the source of truth for agent discovery",
+    "This file extends with skill-fleet specific fields for taxonomy and tooling"
+  ],
+  "skill_id": "python/ty-type-checker",
+  "name": "ty-type-checker",
+  "description": "Use when type checking is slow, migrating from Mypy/Pyright, or integrating with the Ruff/UV ecosystem without complex plugin dependencies.",
+  "version": "1.0.0",
+  "type": "technical",
+  "weight": "medium",
+  "load_priority": "normal",
+  "category": "python",
+  "tags": ["type-checking", "static-analysis", "astral", "ruff", "uv", "performance"],
+  "capabilities": [
+    "Execute full-project type checks in milliseconds",
+    "Integrate with Ruff and UV ecosystem",
+    "Apply strict-by-default type safety",
+    "Run incremental checks",
+    "Support modern PEP typing standards"
+  ],
+  "created_at": "2026-01-20T04:37:00Z",
+  "last_modified": "2026-01-20T04:37:00Z",
+  "evolution": {
+    "version": "1.0.0",
+    "parent_id": null,
+    "evolution_path": "initial_release",
+    "change_log": "Initial skill creation with CSO-compliant description and agentskills.io compliance",
+    "validation_score": null,
+    "integrity_hash": null
+  }
+}
+
+
+============================================================
+END FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/metadata.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/tests/test_1.json
+============================================================
+
+{
+  "name": "Strict Mode Enforcement",
+  "description": "Verify that ty correctly catches a missing return type in strict mode.",
+  "input_data": "def add(a: int, b: int):\n    return a + b",
+  "expected_result": "Error: Function 'add' is missing a return type annotation."
+}
+
+============================================================
+END FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/tests/test_1.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/tests/test_2.json
+============================================================
+
+{
+  "name": "Astral Integration Test",
+  "description": "Verify that ty respects exclusions defined in pyproject.toml while ruff still lints them (if desired).",
+  "input_data": "[tool.ty]\nexclude = [\"legacy.py\"]\n[tool.ruff]\n# no exclude",
+  "expected_result": "ty check . should skip legacy.py, while ruff check . should still process it."
+}
+
+============================================================
+END FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/tests/test_2.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/taxonomy_meta.json
+============================================================
+
+{
+  "total_skills": 1,
+  "generation_count": 1,
+  "statistics": {
+    "by_type": {
+      "technical": 1
+    },
+    "by_weight": {
+      "medium": 1
+    },
+    "by_priority": {
+      "task_specific": 1
+    }
+  },
+  "last_updated": "2026-01-20T03:36:37.081699+00:00"
+}
+
+
+============================================================
+END FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/taxonomy_meta.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/51a31ca6-3c08-47eb-b2de-d0b5bf962271/taxonomy_meta.json
+============================================================
+
+{
+  "total_skills": 1,
+  "generation_count": 1,
+  "statistics": {
+    "by_type": {
+      "tool": 1
+    },
+    "by_weight": {
+      "medium": 1
+    },
+    "by_priority": {
+      "on_demand": 1
+    }
+  },
+  "last_updated": "2026-01-15T04:09:36.352154+00:00"
+}
+
+
+============================================================
+END FILE: skills/_drafts/51a31ca6-3c08-47eb-b2de-d0b5bf962271/taxonomy_meta.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/51a31ca6-3c08-47eb-b2de-d0b5bf962271/tools/web_search/tavily/SKILL.md
+============================================================
+
+---
+name: tavily-rest-api-tool
+description: A Python implementation of a REST API wrapper for the Tavily Search service, designed to provide structured web search capabilities to AI agents.
+category: tools/web_search
+metadata:
+  skill_id: tools/web_search/tavily
+  version: 1.0.0
+  type: tool
+  weight: medium
+---
+
+# Tavily REST API Tool
+
+## Overview
+
+The Tavily REST API Tool is a production-ready Python wrapper built with FastAPI that exposes the Tavily Search engine as an internal service. While direct SDK usage is possible, this REST-based approach provides a central point for validation, rate-limiting, and security, allowing multiple agents to share a single search interface.
+
+**Core principle:** Abstract search engine complexity into a strictly typed, asynchronous JSON interface that returns "LLM-optimized" results.
+
+## Prerequisites
+
+To run these examples, you need to install the following dependencies:
+
+```bash
+pip install fastapi httpx pydantic-settings uvicorn
+```
+
+## When to Use
+
+**Use when:**
+- You are building an agentic system where multiple agents need a standardized way to browse the web.
+- You need to enforce request validation (e.g., ensuring `search_depth` is valid) before hitting the external API.
+- You want to centralize API key management and monitoring.
+- You are using an agent framework that prefers tool-calling via HTTP (like many MCP-based systems).
+
+**When NOT to use:**
+- Simple scripts where the overhead of a FastAPI server is unnecessary (use the official `tavily-python` SDK instead).
+- Use cases requiring real-time streaming of search results (Tavily's POST API is request-response).
+- Environments where external web access is restricted.
+
+## Quick Reference
+
+| Problem | Solution | Keywords |
+| ------- | -------- | -------- |
+| Unstructured Search | Use `TavilySearchRequest` model | Pydantic, Validation |
+| Token Overflow | Filter results to only `title`, `url`, `content` | LLM Optimization |
+| Connection Leaks | Use FastAPI Lifespan with `httpx.AsyncClient` | Async, Resource Management |
+| API Key Exposure | Implement `pydantic-settings` with `.env` | Security, Environment |
+
+## Core Patterns
+
+### 1. The Asynchronous Wrapper Pattern
+This pattern ensures the service can handle concurrent search requests from multiple agents without blocking by using connection pooling.
+
+```python
+from typing import List, Optional, Literal
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from contextlib import asynccontextmanager
+import httpx
+from pydantic_settings import BaseSettings
+

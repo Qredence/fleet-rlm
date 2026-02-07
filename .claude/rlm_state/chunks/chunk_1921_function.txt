@@ -1,0 +1,76 @@
+<!-- Chunk 1921: bytes 7739375-7741624, type=function -->
+def start_parent_run(
+    run_name: str,
+    user_id: str | None = None,
+    job_id: str | None = None,
+    skill_type: str | None = None,
+    description: str | None = None,
+    experiment_name: str = "skill-creation",
+) -> str | None:
+    """
+    Start a parent MLflow run for a skill creation workflow.
+
+    Parent runs provide a hierarchical structure where each phase can be
+    logged as a child run. This makes it easy to see the complete skill
+    creation workflow in MLflow UI.
+
+    Args:
+        run_name: Name for the run (e.g., task description or skill name)
+        user_id: Optional user ID for tagging
+        job_id: Optional job ID for tagging
+        skill_type: Optional skill type for tagging (guide, tool_integration, etc.)
+        description: Optional description for the run
+        experiment_name: MLflow experiment name (default: "skill-creation")
+
+    Returns:
+        Parent run ID, or None if MLflow is not available
+
+    Examples:
+        >>> run_id = start_parent_run(
+        ...     "python-decorators-skill",
+        ...     user_id="user123",
+        ...     job_id="job456",
+        ...     skill_type="guide"
+        ... )
+
+    """
+    try:
+        from datetime import datetime
+
+        import mlflow
+
+        mlflow.set_tracking_uri(DEFAULT_TRACKING_URI)
+        mlflow.set_experiment(experiment_name)
+
+        # Start the parent run
+        run = mlflow.start_run(
+            run_name=run_name[:100],  # MLflow limits run name to 100 chars
+            description=description,
+        )
+
+        # Log tags for easy filtering
+        tags: dict[str, str] = {
+            "workflow_version": "2.0",
+            "run_type": "parent",
+        }
+
+        if user_id:
+            tags["user_id"] = user_id
+        if job_id:
+            tags["job_id"] = job_id
+        if skill_type:
+            tags["skill_type"] = skill_type
+
+        # Add date tag for time-based filtering
+        tags["date"] = datetime.now(UTC).strftime("%Y-%m-%d")
+
+        mlflow.set_tags(tags)  # type: ignore[attr-defined]
+
+        logger.info(f"Started parent MLflow run: {run.info.run_id}")
+        return run.info.run_id
+
+    except Exception as e:
+        logger.warning(f"Failed to start parent run: {e}")
+        return None
+
+

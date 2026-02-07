@@ -1,0 +1,28 @@
+<!-- Chunk 946: bytes 3410635-3411372, type=function -->
+def sanitize_user_id(user_id: str) -> str:
+    """Sanitize user ID to prevent injection attacks.
+
+    Args:
+        user_id: The raw user ID input.
+
+    Returns:
+        The sanitized user ID.
+
+    Raises:
+        ValueError: If the user ID contains invalid characters or is invalid length.
+    """
+    # Remove dangerous characters (keep alphanumeric, @, -, ., _)
+    sanitized = re.sub(r'[^\w\-@.]', '', user_id)
+
+    if len(sanitized) != len(user_id):
+        raise ValueError(
+            f"User ID contains invalid characters. "
+            f"Only alphanumeric, @, -, ., and _ are allowed"
+        )
+
+    if not sanitized or len(sanitized) > 100:
+        raise ValueError("User ID must be 1-100 characters")
+
+    return sanitized
+
+

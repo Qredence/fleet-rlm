@@ -1,0 +1,36 @@
+<!-- Chunk 1797: bytes 7475783-7476652, type=function -->
+def quality_score_reward(args, pred: dspy.Prediction) -> float:
+    """
+    Score the quality_score field validity.
+
+    Returns:
+        float: Score between 0.0 and 1.0
+
+    """
+    try:
+        quality = getattr(pred, "quality_score", None)
+        if isinstance(quality, str):
+            try:
+                quality = float(quality)
+            except ValueError:
+                return 0.0
+
+        if quality is None:
+            return 0.0
+
+        # Valid range (0.0-1.0)
+        if 0.0 <= quality <= 1.0:
+            return 1.0
+        else:
+            return 0.0
+
+    except Exception as e:
+        logger.warning(f"Error in quality_score_reward: {e}")
+        return 0.0
+
+
+# =============================================================================
+# Composite Rewards
+# =============================================================================
+
+

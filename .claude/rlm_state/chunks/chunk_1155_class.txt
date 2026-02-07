@@ -1,0 +1,89 @@
+<!-- Chunk 1155: bytes 4410329-4413249, type=class -->
+class WorkflowOptimizer:
+    """Optimizes DSPy workflow performance through caching and tuning."""
+    
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.hit_rate = {"hits": 0, "misses": 0}
+    
+    def cache_key(self, step: str, inputs: Dict) -> str:
+        """Generate cache key from step name and inputs."""
+        # Create deterministic hash from inputs
+        input_str = f"{step}::{str(sorted(inputs.items()))}"
+        return hashlib.md5(input_str.encode()).hexdigest()
+    
+    def get_cached(self, step: str, inputs: Dict) -> Optional[Dict]:
+        """Retrieve cached result if available."""
+        key = self.cache_key(step, inputs)
+        cache_file = self.cache_dir / f"{key}.pkl"
+        
+        if cache_file.exists():
+            with open(cache_file, 'rb') as f:
+                self.hit_rate["hits"] += 1
+                return pickle.load(f)
+        
+        self.hit_rate["misses"] += 1
+        return None
+    
+    def cache_result(self, step: str, inputs: Dict, result: Dict):
+        """Cache workflow step result."""
+        key = self.cache_key(step, inputs)
+        cache_file = self.cache_dir / f"{key}.pkl"
+        
+        with open(cache_file, 'wb') as f:
+            pickle.dump(result, f)
+    
+    def clear_cache(self):
+        """Clear all cached results."""
+        for cache_file in self.cache_dir.glob("*.pkl"):
+            cache_file.unlink()
+    
+    def get_cache_stats(self) -> Dict:
+        """Get cache performance statistics."""
+        total = self.hit_rate["hits"] + self.hit_rate["misses"]
+        hit_rate = self.hit_rate["hits"] / total if total > 0 else 0
+        
+        return {
+            "hits": self.hit_rate["hits"],
+            "misses": self.hit_rate["misses"],
+            "hit_rate": hit_rate,
+            "cache_size": len(list(self.cache_dir.glob("*.pkl")))
+        }
+    
+    def optimize_signatures(
+        self,
+        training_examples: List[dspy.Example],
+        metric_fn: callable
+    ):
+        """Optimize DSPy signatures using training examples.
+        
+        This uses DSPy's built-in optimization to improve prompt quality.
+        """
+        # TODO: Implement signature optimization
+        # This would use dspy.BootstrapFewShot or similar
+        pass
+```
+
+### Day 19-21: CLI Tool
+
+**File: src/cli/skill_cli.py**
+```python
+"""Command-line interface for skill management."""
+import click
+import json
+from pathlib import Path
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress
+
+from ..taxonomy.manager import TaxonomyManager
+from ..workflow.skill_creator import TaxonomySkillCreator
+from ..validators.skill_validator import SkillValidator
+
+console = Console()
+
+
+@click.group()
+@click.option('--skills-root', default='./skills', help='Path to skills directory')
+@click.pass_context

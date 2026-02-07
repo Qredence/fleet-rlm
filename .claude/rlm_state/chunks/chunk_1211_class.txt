@@ -1,0 +1,307 @@
+<!-- Chunk 1211: bytes 4560524-4572028, type=class -->
+class SkillImporter:
+    """Import skills from .skills/ directory to database."""
+
+    def __init__(self, skills_dir: str, db_url: str):
+        self.skills_dir = Path(skills_dir)
+        self.db_url = db_url
+        self.engine = create_engine(db_url)
+        self.stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+
+    def parse_frontmatter(self, content: str) -> tuple[dict[str, Any], str]:
+        """
+        Parse YAML frontmatter from markdown content.
+
+        Returns:
+            Tuple of (metadata_dict, content_without_frontmatter)
+
+        """
+        # Match YAML frontmatter between --- delimiters
+        pattern = r"^---\s*\n(.*?)\n---\s*\n(.*)$"
+        match = re.match(pattern, content, re.DOTALL)
+
+        if match:
+            try:
+                metadata = yaml.safe_load(match.group(1))
+                content = match.group(2)
+                return metadata or {}, content
+            except yaml.YAMLError as e:
+                print(f"  ⚠️  Warning: Failed to parse YAML: {e}")
+                return {}, content
+
+        return {}, content
+
+    def extract_capability_data(self, content: str) -> list[dict[str, Any]]:
+        """
+        Extract capabilities from skill content.
+
+        Looks for sections like:
+        ## Capabilities
+        - [capability_name]: description
+        """
+        capabilities = []
+
+        # Find capabilities section
+        pattern = r"##\s*Capabilities\s*\n(.*?)(?=##\s|\Z)"
+        match = re.search(pattern, content, re.DOTALL)
+
+        if match:
+            cap_section = match.group(1)
+            # Parse list items: "- **name**: description"
+            cap_pattern = r"-\s*\*\*(.*?)\*\*:\s*(.*?)(?=\n-|\n\n|\Z)"
+            for cap_match in re.finditer(cap_pattern, cap_section, re.DOTALL):
+                name = cap_match.group(1).strip()
+                description = cap_match.group(2).strip()
+                if name:
+                    capabilities.append(
+                        {"name": name, "description": description, "test_criteria": None}
+                    )
+
+        return capabilities
+
+    def extract_keywords(self, metadata: dict[str, Any], content: str) -> list[str]:
+        """Extract keywords from metadata and content."""
+        keywords = set()
+
+        # From metadata
+        if "keywords" in metadata:
+            if isinstance(metadata["keywords"], list):
+                keywords.update(metadata["keywords"])
+            elif isinstance(metadata["keywords"], str):
+                keywords.update(kw.strip() for kw in metadata["keywords"].split(","))
+
+        # From tags (common alt field)
+        if "tags" in metadata:
+            if isinstance(metadata["tags"], list):
+                keywords.update(metadata["tags"])
+            elif isinstance(metadata["tags"], str):
+                keywords.update(tag.strip() for tag in metadata["tags"].split(","))
+
+        return list(keywords)
+
+    def infer_taxonomy(self, skill_path: str, metadata: dict[str, Any]) -> str | None:
+        """Infer taxonomy category from skill path and metadata."""
+        # Use explicit taxonomy if provided
+        if "taxonomy" in metadata:
+            return metadata["taxonomy"]
+
+        # Infer from path
+        parts = skill_path.split("/")
+        if len(parts) > 1:
+            # Common mappings
+            path_to_tax = {
+                "python": "development/languages/python",
+                "typescript": "development/languages/typescript",
+                "javascript": "development/languages/javascript",
+                "go": "development/languages/go",
+                "rust": "development/languages/rust",
+                "fastapi": "development/frameworks/fastapi",
+                "react": "development/frameworks/react",
+                "dspy": "development/frameworks/dspy",
+                "tdd": "development/practices/tdd",
+                "testing": "development/practices/testing",
+                "docker": "operations/deployment/docker",
+                "kubernetes": "operations/deployment/kubernetes",
+                "postgresql": "data/databases/postgresql",
+                "redis": "data/databases/redis",
+                "ml": "data/ml",
+                "analytics": "data/analytics",
+                "documentation": "communication/documentation",
+            }
+
+            for part in parts:
+                if part.lower() in path_to_tax:
+                    return path_to_tax[part.lower()]
+
+        return "development"  # Default
+
+    def normalize_enum(self, value: Any, enum_class, default):
+        """Normalize a value to an enum member."""
+        if value is None:
+            return default
+        if isinstance(value, enum_class):
+            return value
+        try:
+            # Try as string
+            return enum_class[value.lower()] if isinstance(value, str) else enum_class(value)
+        except (KeyError, ValueError):
+            return default
+
+    def import_skill_file(self, skill_path: Path) -> Skill | None:
+        """Import a single skill from SKILL.md file."""
+        skill_md = skill_path / "SKILL.md"
+
+        if not skill_md.exists():
+            return None
+
+        # Read content
+        with open(skill_md, encoding="utf-8") as f:
+            content = f.read()
+
+        # Parse frontmatter
+        metadata, skill_content = self.parse_frontmatter(content)
+
+        # Build skill data
+        relative_path = str(skill_path.relative_to(self.skills_dir))
+        skill_path_db = relative_path.replace("\\", "/")  # Normalize to forward slashes
+
+        # Extract data
+        name = metadata.get("name", skill_path.name)
+        description = metadata.get("description", f"{name} skill")
+        version = metadata.get("version", "1.0.0")
+
+        # Normalize enums
+        skill_type = self.normalize_enum(
+            metadata.get("type"), skill_type_enum, skill_type_enum.technical
+        )
+        weight = self.normalize_enum(
+            metadata.get("weight"), skill_weight_enum, skill_weight_enum.medium
+        )
+        load_priority = self.normalize_enum(
+            metadata.get("load_priority"), load_priority_enum, load_priority_enum.task_specific
+        )
+        status = self.normalize_enum(
+            metadata.get("status"), skill_status_enum, skill_status_enum.draft
+        )
+
+        # Infer taxonomy
+        taxonomy_path = self.infer_taxonomy(skill_path_db, metadata)
+
+        # Extract additional data
+        capabilities_data = self.extract_capability_data(skill_content)
+        keywords = self.extract_keywords(metadata, skill_content)
+        tags = metadata.get("tags", []) if isinstance(metadata.get("tags"), list) else []
+
+        # Build skill dict
+        skill_data = {
+            "skill_path": skill_path_db,
+            "name": name,
+            "description": description,
+            "version": version,
+            "type": skill_type,
+            "weight": weight,
+            "load_priority": load_priority,
+            "status": status,
+            "skill_content": skill_content,
+            "scope": metadata.get("scope"),
+        }
+
+        return {
+            "data": skill_data,
+            "taxonomy": taxonomy_path,
+            "capabilities": capabilities_data,
+            "keywords": keywords,
+            "tags": tags,
+        }
+
+    def scan_skills_directory(self) -> list[Path]:
+        """Scan .skills directory for skill directories."""
+        skills = []
+
+        for skill_path in self.skills_dir.rglob("*"):
+            if (
+                skill_path.is_dir()
+                and (skill_path / "SKILL.md").exists()
+                and not any(part.startswith(".") for part in skill_path.parts)
+            ):
+                skills.append(skill_path)
+
+        return sorted(skills)
+
+    def import_all(self, dry_run: bool = False) -> dict[str, int]:
+        """Import all skills from the directory."""
+        print("\n" + "=" * 60)
+        print("Skills-Fleet Skill Importer")
+        print("=" * 60)
+        print(f"Source: {self.skills_dir}")
+        print(f"Database: {self.db_url.split('@')[1] if '@' in self.db_url else 'unknown'}")
+        if dry_run:
+            print("⚠️  DRY RUN MODE - No changes will be made")
+        print("=" * 60)
+
+        # Find all skills
+        skill_dirs = self.scan_skills_directory()
+        print(f"\n🔍 Found {len(skill_dirs)} skill directories")
+
+        if not skill_dirs:
+            print("  (No skills found to import)")
+            return self.stats
+
+        # Import each skill
+        with Session(self.engine) as session:
+            skill_repo = SkillRepository(session)
+            TaxonomyRepository(session)
+
+            for skill_path in skill_dirs:
+                print(f"\n📄 Processing: {skill_path.relative_to(self.skills_dir)}")
+
+                try:
+                    # Parse skill file
+                    skill_info = self.import_skill_file(skill_path)
+                    if not skill_info:
+                        print("  ⚠️  Skipped: No SKILL.md found")
+                        self.stats["skipped"] += 1
+                        continue
+
+                    skill_data = skill_info["data"]
+                    print(f"  Name: {skill_data['name']}")
+                    print(f"  Type: {skill_data['type'].value}")
+                    print(f"  Status: {skill_data['status'].value}")
+
+                    if dry_run:
+                        print("  [DRY RUN] Would create skill")
+                        self.stats["created"] += 1
+                        continue
+
+                    # Check if skill exists
+                    existing = skill_repo.get_by_path(skill_data["skill_path"])
+
+                    if existing:
+                        print(f"  ⚠️  Skill already exists (ID: {existing.skill_id})")
+                        # Update existing
+                        skill_repo.update(
+                            existing.skill_id,
+                            skill_data,
+                            capabilities=skill_info["capabilities"],
+                            keywords=skill_info["keywords"],
+                            tags=skill_info["tags"],
+                        )
+                        self.stats["updated"] += 1
+                        print("  ✓ Updated skill")
+
+                    else:
+                        # Create new skill
+                        skill = skill_repo.create_with_relations(
+                            skill_data=skill_data,
+                            capabilities=skill_info["capabilities"],
+                            dependencies=[],
+                            keywords=skill_info["keywords"],
+                            tags=skill_info["tags"],
+                            taxonomy_paths=[skill_info["taxonomy"]],
+                        )
+                        self.stats["created"] += 1
+                        print(f"  ✓ Created skill (ID: {skill.skill_id})")
+
+                except Exception as e:
+                    print(f"  ❌ Error: {e}")
+                    self.stats["errors"] += 1
+                    import traceback
+
+                    traceback.print_exc()
+
+            if not dry_run:
+                session.commit()
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("Import Summary")
+        print("=" * 60)
+        print(f"  Created: {self.stats['created']}")
+        print(f"  Updated: {self.stats['updated']}")
+        print(f"  Skipped: {self.stats['skipped']}")
+        print(f"  Errors:  {self.stats['errors']}")
+        print("=" * 60)
+
+        return self.stats
+
+

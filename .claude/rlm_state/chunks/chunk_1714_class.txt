@@ -1,0 +1,34 @@
+<!-- Chunk 1714: bytes 7293053-7294010, type=class -->
+class FeedbackHandler(ABC):
+    """Abstract base class for feedback handlers."""
+
+    @abstractmethod
+    def get_feedback(
+        self,
+        packaging_manifest: str,
+        validation_report: dict,
+        skill_content: str = "",
+        task_description: str = "",
+    ) -> str:
+        """
+        Get human feedback on packaged skill.
+
+        Args:
+            packaging_manifest: JSON string with skill metadata and manifest
+            validation_report: Dict with validation results
+            skill_content: The generated SKILL.md content (for review display)
+            task_description: Original task description (for contextual questions)
+
+        Returns:
+            JSON string with feedback structure:
+            {
+                "status": "approved" | "needs_revision" | "rejected",
+                "comments": "...",
+                "reviewer": "...",
+                "timestamp": "..."
+            }
+
+        """
+        pass
+
+

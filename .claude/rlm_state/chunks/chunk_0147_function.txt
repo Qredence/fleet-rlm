@@ -1,0 +1,41 @@
+<!-- Chunk 147: bytes 214214-215152, type=function -->
+def semantic_similarity(example, pred, trace=None):
+    """
+    Semantic similarity using sentence embeddings.
+    Returns float between 0 and 1.
+    """
+    emb1 = model.encode(example.output)
+    emb2 = model.encode(pred.output)
+    similarity = (emb1 @ emb2.T).item()
+    return similarity > 0.8  # Threshold
+```
+
+### SemanticF1 with Decompositional Mode
+
+```python
+from dspy.evaluate import SemanticF1
+
+# Instantiate the metric
+metric = SemanticF1(decompositional=True)
+
+# Produce a prediction
+pred = program(**example.inputs())
+
+# Evaluate
+score = metric(example, pred)
+```
+
+**When to use SemanticF1:**
+- Need semantic overlap rather than exact match
+- Want to measure coverage of key facts
+- Complex answers with multiple components
+
+**Parameters:**
+- `decompositional`: Enable decompositional mode for better coverage
+- `model`: Custom sentence transformer model (optional)
+
+## Custom Metrics
+
+### Structured Evaluation
+
+```python

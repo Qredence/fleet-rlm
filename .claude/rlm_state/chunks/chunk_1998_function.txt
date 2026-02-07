@@ -1,0 +1,8 @@
+<!-- Chunk 1998: bytes 7890622-7890861, type=function -->
+def test_validation_error_default_suggestion():
+    """Test ValidationError has default suggestion."""
+    error = ValidationError("Invalid")
+    assert "Run with --help for usage information" in (error.suggestion or "")
+
+
+# CLIExit tests

@@ -1,0 +1,14 @@
+<!-- Chunk 1518: bytes 6368312-6368872, type=class -->
+class CompareRequest(BaseModel):
+    """Request body for A/B testing signatures."""
+
+    signature_a_name: str = Field(..., description="Name of signature A")
+    signature_a_version: str | None = Field(default=None, description="Version of signature A")
+    signature_b_name: str = Field(..., description="Name of signature B")
+    signature_b_version: str | None = Field(default=None, description="Version of signature B")
+    test_inputs: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Test inputs for comparison",
+    )
+
+

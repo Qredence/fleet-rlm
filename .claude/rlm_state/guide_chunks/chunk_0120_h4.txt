@@ -1,0 +1,8 @@
+<!-- Chunk 120: bytes 35228-35427, type=h4 -->
+#### After upload
+- [ ] Test in real conversations
+- [ ] Monitor for under/over-triggering
+- [ ] Collect user feedback
+- [ ] Iterate on description and instructions
+- [ ] Update version in metadata
+

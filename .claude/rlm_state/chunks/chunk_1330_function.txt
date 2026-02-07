@@ -1,0 +1,33 @@
+<!-- Chunk 1330: bytes 4985357-4986378, type=function -->
+def recursive_solve(initial_state, max_depth=10):
+    state = initial_state
+    for depth in range(max_depth):
+        # 1. Generate next reasoning step
+        thought_step = llm.generate_step(state)
+        
+        # 2. Verify step (PRM)
+        score = prm_verifier.score(state, thought_step)
+        
+        if score > THRESHOLD:
+            state.append(thought_step)
+            if is_terminal(state): return state
+        else:
+            # 3. Backtrack or retry
+            state = backtrack(state)
+```
+
+**Key insight:** By decoupling "Generation" from "Verification," you prevent the error-accumulation problem inherent in autoregressive models.
+
+### Compute Budgeting (Best-of-N)
+
+**The problem:** Not all problems require 100 reasoning paths. Hard-coding search depth leads to wasted tokens or insufficient reasoning.
+
+**❌ Common mistake:**
+```python
+# Fixed width search
+results = [llm.generate(prompt) for _ in range(10)]
+final = orm_verifier.select_best(results)
+```
+
+**✅ Production pattern:**
+```python

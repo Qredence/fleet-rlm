@@ -1,0 +1,68 @@
+<!-- Chunk 1126: bytes 4220873-4222568, type=function -->
+def metric(example, pred, trace=None):
+    return 0.8  # Placeholder
+
+# 5. Optimize
+optimizer = dspy.BootstrapFewShot(metric=metric)
+optimized = optimizer.compile(program, trainset=examples)
+```
+
+## Results Interpretation
+
+### Output Files
+
+After running optimization, check:
+
+```
+config/optimized/
+├── optimization_results_bootstrap_v1.json    # Results summary
+├── skill_program_bootstrap_v1.pkl           # Optimized program (if serialized)
+└── ...
+```
+
+### Results JSON
+
+```json
+{
+  "optimizer": "BootstrapFewShot",
+  "trainset_size": 40,
+  "testset_size": 10,
+  "baseline_score": 80.0,
+  "optimized_score": 85.0,
+  "improvement": 5.0,
+  "improvement_percent": 6.25
+}
+```
+
+### Interpreting Scores
+
+- **No improvement** (0%): Metric may be too simple or data not representative
+- **Small improvement** (5-10%): Typical with BootstrapFewShot
+- **Good improvement** (15-25%): Typical with MIPROv2
+- **Great improvement** (>25%): Excellent results, consider production deployment
+
+## Advanced Optimization
+
+### Multi-Stage Optimization
+
+```python
+# Stage 1: Quick baseline with BootstrapFewShot
+optimizer1 = dspy.BootstrapFewShot(metric=metric)
+program_v1 = optimizer1.compile(program, trainset=trainset)
+
+# Stage 2: Further optimize with MIPROv2
+optimizer2 = dspy.MIPROv2(metric=metric, auto="light")
+program_v2 = optimizer2.compile(program_v1, trainset=trainset)
+
+# Stage 3: Heavy optimization if needed
+optimizer3 = dspy.MIPROv2(metric=metric, auto="heavy")
+program_v3 = optimizer3.compile(program_v2, trainset=trainset)
+```
+
+### Ensemble Optimization Results
+
+```python
+# Combine multiple optimized versions
+ensemble = dspy.Module()
+ensemble.programs = [program_v1, program_v2, program_v3]
+

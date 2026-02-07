@@ -1,0 +1,6 @@
+<!-- Chunk 2126: bytes 8049480-8049652, type=function -->
+def test_safe_json_loads_handles_pydantic_model() -> None:
+    model = _PydanticExample(x=1, y="ok")
+    assert safe_json_loads(model, default={}) == {"x": 1, "y": "ok"}
+
+

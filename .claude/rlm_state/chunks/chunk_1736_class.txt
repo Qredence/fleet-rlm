@@ -1,0 +1,12 @@
+<!-- Chunk 1736: bytes 7339472-7339942, type=class -->
+class ResourceRequirements(BaseModel):
+    """External resources needed by a skill."""
+
+    apis: list[str] = Field(default_factory=list, description="Required API endpoints")
+    tools: list[str] = Field(default_factory=list, description="Required tools/CLIs")
+    files: list[str] = Field(default_factory=list, description="Required files/configs")
+    environment: list[str] = Field(
+        default_factory=list, description="Required environment variables"
+    )
+
+

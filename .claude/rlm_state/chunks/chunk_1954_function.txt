@@ -1,0 +1,105 @@
+<!-- Chunk 1954: bytes 7820560-7824275, type=function -->
+def create_skill_subdirectories(skill_dir: Path, skill_name: str) -> None:
+    """
+    Create standard skill subdirectories with README.md files.
+
+    Creates the following structure (v2 Golden Standard format):
+    - references/README.md, quick-start.md, common-patterns.md, api-reference.md, troubleshooting.md
+    - guides/README.md (formerly resources/)
+    - templates/README.md
+    - scripts/README.md
+    - examples/README.md
+    - tests/README.md
+    - assets/README.md
+
+    Legacy directories (capabilities/, resources/) are created for backward compatibility
+    but new skills should use references/ and guides/ instead.
+
+    Args:
+        skill_dir: Path to the skill directory
+        skill_name: Name of the skill (for README content)
+
+    """
+    # Define subdirectories and their README content
+    subdirs = {
+        "capabilities": f"# Capabilities (Legacy)\n\n**Note:** This directory is deprecated. Use `references/` instead for new skills.\n\nCapability implementations for `{skill_name}`.\n\nEach file in this directory documents a specific capability provided by this skill.\n",
+        "resources": f"# Resources (Legacy)\n\n**Note:** This directory is deprecated. Use `guides/` instead for new skills.\n\nResource files for `{skill_name}`.\n\nIncludes configuration files, data files, and other resources needed by the skill.\n",
+        "examples": f"# Examples\n\nUsage examples for `{skill_name}`.\n\nEach file demonstrates a specific use case or pattern.\n",
+        "tests": f"# Tests\n\nIntegration tests for `{skill_name}`.\n\nThese tests verify the skill's capabilities work as expected.\n",
+        "guides": f"# Guides\n\nHow-to guides and tutorials for `{skill_name}`.\n\nStep-by-step instructions for common tasks and workflows.\n",
+        "references": f"# References\n\nReference documentation for `{skill_name}`.\n\n## Contents\n\n- [Quick Start](quick-start.md) - Get started quickly\n- [Common Patterns](common-patterns.md) - Frequently used patterns\n- [API Reference](api-reference.md) - Detailed API documentation\n- [Troubleshooting](troubleshooting.md) - Common issues and solutions\n",
+        "scripts": f"# Scripts\n\nUtility scripts for `{skill_name}`.\n\nThese scripts help with setup, maintenance, or automation tasks.\n",
+        "assets": f"# Assets\n\nStatic assets for `{skill_name}`.\n\nIncludes images, diagrams, and other static files.\n",
+    }
+
+    # Create each subdirectory with README.md
+    for subdir, readme_content in subdirs.items():
+        subdir_path = skill_dir / subdir
+        subdir_path.mkdir(exist_ok=True)
+        readme_path = subdir_path / "README.md"
+        if not readme_path.exists():
+            readme_path.write_text(readme_content, encoding="utf-8")
+
+    # Create reference documentation templates
+    references_dir = skill_dir / "references"
+
+    quick_start_content = f"""# Quick Start Guide
+
+Get started with `{skill_name}` in minutes.
+
+## Prerequisites
+
+- List prerequisites here
+
+## Installation
+
+```bash
+# Installation steps
+```
+
+## Basic Usage
+
+```python
+# Basic usage example
+```
+
+## Next Steps
+
+- See [Common Patterns](common-patterns.md) for more examples
+- Check [API Reference](api-reference.md) for detailed documentation
+"""
+
+    common_patterns_content = f"""# Common Patterns
+
+Frequently used patterns with `{skill_name}`.
+
+## Pattern 1: Basic Usage
+
+Description of the pattern.
+
+```python
+# Example code
+```
+
+## Pattern 2: Advanced Usage
+
+Description of the pattern.
+
+```python
+# Example code
+```
+
+## Anti-Patterns
+
+Things to avoid when using this skill.
+"""
+
+    api_reference_content = f"""# API Reference
+
+Detailed API documentation for `{skill_name}`.
+
+## Core Functions
+
+### function_name
+
+```python

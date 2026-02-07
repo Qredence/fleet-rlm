@@ -1,0 +1,10 @@
+<!-- Chunk 622: bytes 954701-954916, type=function -->
+def quality_metric(example, pred, trace=None):
+    score = 0.0
+    if example.output == pred.output:
+        score += 0.5
+    if len(pred.output) > 50:
+        score += 0.5
+    return score
+
+# Bad: Return only bool

@@ -1,0 +1,23 @@
+<!-- Chunk 2100: bytes 8025941-8026684, type=function -->
+def test_validate_file_skill(temp_skills_root: Path) -> None:
+    """Test validating a single .json file skill (legacy format)."""
+    skill_file = temp_skills_root / "_core" / "reasoning.json"
+    skill_file.parent.mkdir(parents=True)
+    metadata = {
+        "skill_id": "_core/reasoning",
+        "version": "1.0.0",
+        "type": "cognitive",
+        "weight": "lightweight",
+        "load_priority": "always",
+        "dependencies": [],
+        "capabilities": ["logical_inference"],
+    }
+    skill_file.write_text(json.dumps(metadata), encoding="utf-8")
+
+    validator = SkillValidator(temp_skills_root)
+    results = validator.validate_complete(skill_file)
+
+    assert results["passed"] is True
+    assert results["errors"] == []
+
+

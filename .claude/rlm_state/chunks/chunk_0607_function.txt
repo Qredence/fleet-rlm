@@ -1,0 +1,55 @@
+<!-- Chunk 607: bytes 939770-941487, type=function -->
+def main():
+    parser = argparse.ArgumentParser(description="Clear DSPy cache")
+    parser.add_argument("--cache-dir", default=".var/cache/dspy", help="Cache directory")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed output")
+
+    args = parser.parse_args()
+
+    cache_dir = Path(args.cache_dir)
+    clear_cache(cache_dir, args.verbose)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: .fleet/skills/dspy-configuration/scripts/clear-cache.py
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-configuration/scripts/compile-dspy.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Compile DSPy modules with proper caching and validation.
+
+This script compiles DSPy modules and saves artifacts to the cache directory.
+It handles cache validation and provides detailed logging.
+
+Usage:
+    python compile-dspy.py --module <module_name> --teleprompter <teleprompter_name>
+    python compile-dspy.py --module reasoner --teleprompter bootstrap
+
+Options:
+    --module: Name of the DSPy module to compile (e.g., reasoner, task_analyzer)
+    --teleprompter: Name of the teleprompter to use (e.g., bootstrap, cot)
+    --cache-dir: Cache directory (default: .var/cache/dspy)
+    --output: Output file path (default: .var/logs/compiled_<module>.pkl)
+    --verbose: Enable verbose logging
+"""
+
+import argparse
+import pickle
+import sys
+from pathlib import Path
+
+try:
+    import dspy
+except ImportError:
+    print("Error: dspy is not installed. Install with: pip install dspy-ai")
+    sys.exit(1)
+
+

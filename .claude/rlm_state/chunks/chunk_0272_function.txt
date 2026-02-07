@@ -1,0 +1,29 @@
+<!-- Chunk 272: bytes 343833-344614, type=function -->
+def analyze_file(filepath: Path) -> dict[str, Any]:
+    """Analyze a single Python file for concurrency issues."""
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            source = f.read()
+
+        tree = ast.parse(source, filename=str(filepath))
+
+        # Run both analyzers
+        concurrency = ConcurrencyAnalyzer(str(filepath))
+        concurrency.visit(tree)
+
+        shared_state = SharedStateDetector(str(filepath))
+        shared_state.visit(tree)
+
+        return {
+            "filepath": str(filepath),
+            "issues": concurrency.issues + shared_state.issues,
+        }
+
+    except (SyntaxError, UnicodeDecodeError) as e:
+        return {
+            "filepath": str(filepath),
+            "error": str(e),
+            "issues": [],
+        }
+
+

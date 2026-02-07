@@ -1,0 +1,9 @@
+<!-- Chunk 1735: bytes 7339148-7339472, type=class -->
+class Capability(BaseModel):
+    """A discrete, testable capability within a skill."""
+
+    name: str = Field(description="Capability name (snake_case)")
+    description: str = Field(description="What this capability provides")
+    test_criteria: str = Field(default="", description="How to verify this capability works")
+
+

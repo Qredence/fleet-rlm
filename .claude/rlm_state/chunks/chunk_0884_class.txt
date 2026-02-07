@@ -1,0 +1,30 @@
+<!-- Chunk 884: bytes 3144084-3144634, type=class -->
+class ClarifyingQuestionsModule(dspy.Module):
+    """Generate clarifying questions to understand user intent better."""
+```
+
+**Implementation**: `dspy.ChainOfThought(GenerateClarifyingQuestions)`
+
+**Input:**
+```python
+task_description: str
+initial_analysis: str
+ambiguities: list[str]
+```
+
+**Output:**
+```python
+{
+    "questions": list[ClarifyingQuestion],  # 2-3 questions
+    "priority": str,  # critical/important/optional
+    "rationale": str,
+}
+```
+
+---
+
+### ConfirmUnderstandingModule
+
+Summarize understanding for user confirmation.
+
+```python

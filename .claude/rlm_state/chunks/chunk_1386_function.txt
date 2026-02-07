@@ -1,0 +1,22 @@
+<!-- Chunk 1386: bytes 5106914-5107393, type=function -->
+def generate_report(start_date: date, end_date: date) -> dict:
+    data = db.query(Sales).filter(
+        Sales.date.between(start_date, end_date)
+    ).all()
+
+    total = sum(s.amount for s in data)
+    average = total / len(data) if data else 0
+
+    return {
+        "total_sales": total,
+        "average_sale": average,
+        "transaction_count": len(data)
+    }
+```
+
+**API Version:**
+```python
+# routes/reports.py
+from datetime import date
+from pydantic import BaseModel
+

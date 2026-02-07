@@ -1,0 +1,75 @@
+<!-- Chunk 1240: bytes 4647994-4650633, type=function -->
+def main():
+    """Find and report public functions missing docstrings with detailed breakdown."""
+    src_dir = Path("src/skill_fleet")
+    all_missing = []
+
+    # Check all Python files
+    for py_file in src_dir.rglob("*.py"):
+        missing = check_file_for_missing_docstrings(py_file)
+        if missing:
+            all_missing.append((py_file, missing))
+
+    # Print results with detailed information
+    if all_missing:
+        print("Functions missing docstrings:")
+        print("=" * 80)
+
+        # Group by file for better readability
+        for filepath, functions in sorted(all_missing):
+            print(f"\n📁 {filepath}:")
+            for func in functions:
+                func_type = "async " if func["is_async"] else ""
+                location = f"class {func['class_name']}" if func["is_method"] else "module"
+                print(f"  - {func_type}{func['name']} (line {func['line']}, {location})")
+    else:
+        print("✅ No public functions missing docstrings found!")
+
+    # Summary statistics
+    total_missing = sum(len(functions) for _, functions in all_missing)
+    print("\n📊 Summary:")
+    print(f"  Total files with missing docstrings: {len(all_missing)}")
+    print(f"  Total functions missing docstrings: {total_missing}")
+
+    # Detailed breakdown
+    if all_missing:
+        print("\n🔍 Detailed breakdown:")
+        for filepath, functions in sorted(all_missing):
+            print(f"\n{filepath}:")
+            for func in functions:
+                func_type = "async " if func["is_async"] else ""
+                print(f"  def {func_type}{func['name']}(...)  # line {func['line']}")
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/internal/dev/final_docstring_check.py
+============================================================
+
+============================================================
+FILE: scripts/internal/dev/sync_packaged_resources.py
+============================================================
+
+"""
+Sync packaged runtime resources into `src/skill_fleet/`.
+
+Skill Fleet ships a small set of runtime defaults inside the Python package so
+the wheel works out-of-the-box (no repo checkout required):
+- `src/skill_fleet/config/**` (config.yaml, templates, training data)
+- `src/skill_fleet/_seed/skills/**` (minimal skills taxonomy bootstrap)
+
+In-repo development uses the top-level `config/` and `skills/` directories as
+the source of truth. Run this script after updating those directories.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from shutil import copy2
+
+

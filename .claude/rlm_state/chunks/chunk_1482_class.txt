@@ -1,0 +1,17 @@
+<!-- Chunk 1482: bytes 6325501-6325900, type=class -->
+class UnauthorizedException(SkillFleetAPIError):
+    """Unauthorized exception for missing or invalid authentication."""
+
+    status_code: int = 401
+
+    def __init__(self, detail: str = "Authentication required") -> None:
+        """
+        Initialize unauthorized exception.
+
+        Args:
+            detail: Error message
+
+        """
+        super().__init__(detail=detail, status_code=401)
+
+

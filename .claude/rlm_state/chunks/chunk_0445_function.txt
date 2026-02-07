@@ -1,0 +1,15 @@
+<!-- Chunk 445: bytes 638751-639093, type=function -->
+def strict_metric(example, pred, trace=None):
+    """All criteria must pass."""
+    criteria = {
+        'accuracy': example.output == pred.output,
+        'format': '|' in pred.output,  # Check format
+        'length': 10 < len(pred.output) < 1000
+    }
+
+    return all(criteria.values())
+```
+
+### At Least One Criteria Must Pass
+
+```python

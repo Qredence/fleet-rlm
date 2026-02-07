@@ -1,0 +1,80 @@
+<!-- Chunk 1601: bytes 6598343-6600524, type=class -->
+class CLIExit(Exception):
+    """
+    Exception for clean CLI exits.
+
+    This exception is compatible with typer.Exit and can be used
+    for clean exits without displaying error messages.
+
+    Attributes:
+        message: Optional exit message
+        exit_code: Process exit code (default: EXIT_SUCCESS = 0)
+
+    Example:
+        raise CLIExit("Operation completed successfully")
+    """
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        exit_code: int = EXIT_SUCCESS,
+    ) -> None:
+        """
+        Initialize a CLI exit.
+
+        Args:
+            message: Optional exit message
+            exit_code: Process exit code (default: 0)
+        """
+        self.message = message
+        self.exit_code = exit_code
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        """Return string representation of the exit."""
+        return self.message or ""
+
+
+============================================================
+END FILE: src/skill_fleet/cli/exceptions.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/hitl/__init__.py
+============================================================
+
+"""CLI HITL utils for Skill Fleet."""
+
+
+============================================================
+END FILE: src/skill_fleet/cli/hitl/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/hitl/handlers/__init__.py
+============================================================
+
+"""
+CLI interaction handlers for HITL workflow.
+
+Each handler is responsible for:
+1. Rendering the interaction prompt to the user
+2. Collecting user response via the UI
+3. Posting the response back to the API
+
+This keeps the runner focused on polling/coordination while
+each handler encapsulates the interaction logic for its type.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+
+from ...ui.prompts import PromptUI, get_default_ui
+
+

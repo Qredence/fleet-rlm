@@ -1,0 +1,30 @@
+<!-- Chunk 1294: bytes 4763147-4764077, type=function -->
+def test_taxonomy():
+    """Test taxonomy repository."""
+    print("\n" + "=" * 60)
+    print("Testing Taxonomy Repository")
+    print("=" * 60)
+
+    engine = create_engine(DATABASE_URL)
+    with Session(engine) as session:
+        repo = TaxonomyRepository(session)
+
+        # List all categories
+        print("\n📋 Listing all categories:")
+        categories = repo.list(limit=20)
+        for cat in categories:
+            indent = "  " * cat.level
+            print(f"{indent}→ {cat.name} ({cat.path})")
+
+        # Get tree structure
+        print("\n🌲 Getting category tree for 'development':")
+        dev_tree = repo.get_tree("development")
+        print_tree(dev_tree, indent="  ")
+
+        # Get descendants
+        print("\n📂 Getting descendants of 'development':")
+        descendants = repo.get_descendants("development")
+        for d in descendants:
+            print(f"  → {d['path']} (depth: {d['distance']})")
+
+

@@ -1,0 +1,10 @@
+<!-- Chunk 641: bytes 1011947-1012253, type=class -->
+class AnalyzeIntent(dspy.Signature):
+    """Analyze user intent."""
+    task_description: str = dspy.InputField()
+    domain: Literal["python", "web", "devops", "testing"] = dspy.OutputField()
+    target_level: Literal["beginner", "intermediate", "advanced"] = dspy.OutputField()
+```
+
+❌ **Bad**:
+```python

@@ -1,0 +1,11 @@
+<!-- Chunk 1732: bytes 7333878-7334232, type=class -->
+class ParentSkillInfo(BaseModel):
+    """Information about a related skill in the taxonomy."""
+
+    skill_id: str = Field(description="Path-style skill identifier")
+    name: str = Field(description="Kebab-case skill name")
+    relationship: Literal["parent", "sibling", "dependency"] = Field(
+        description="Relationship to the new skill"
+    )
+
+

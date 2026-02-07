@@ -1,0 +1,16 @@
+<!-- Chunk 320: bytes 530214-530655, type=class -->
+class RobustAdapter(dspy.Adapter):
+    def parse(self, signature, output):
+        try:
+            return super().parse(signature, output)
+        except Exception as e:
+            # Return default values on parse error
+            return dspy.Prediction(
+                **{field: "" for field in signature.output_fields}
+            )
+```
+
+### 4. Use Appropriate Adapter for Task
+
+```python
+# Good: Use JSONAdapter for structured output

@@ -1,0 +1,104 @@
+<!-- Chunk 817: bytes 2738042-2742645, type=class -->
+class SkillService(BaseService):
+    async def calculate_overlap(self, skill1: Skill, skill2: Skill):
+        # Complex overlap calculation belongs in domain
+        # This is domain logic, not application orchestration
+        ...
+```
+
+### 3. Handle Errors Appropriately
+
+```python
+# ✅ Good: Specific error handling
+try:
+    job = await self.job_repository.get(job_id)
+except NotFoundError:
+    raise NotFoundException("Job", job_id)
+except DatabaseError as e:
+    self.logger.error(f"Database error: {e}")
+    raise ServiceError("Failed to retrieve job")
+
+# ❌ Avoid: Generic error handling
+try:
+    job = await self.job_repository.get(job_id)
+except Exception:
+    raise ServiceError("Something went wrong")  # Not helpful
+```
+
+## See Also
+
+- **[Domain Layer](DOMAIN_LAYER.md)** - Domain entities and specifications
+- **[Import Path Guide](../development/IMPORT_PATH_GUIDE.md)** - Service import patterns
+- **[Service Extension Guide](../development/SERVICE_EXTENSION_GUIDE.md)** - Extending services
+
+
+============================================================
+END FILE: docs/architecture/SERVICE_LAYER.md
+============================================================
+
+============================================================
+FILE: docs/architecture/STREAMING_ARCHITECTURE.md
+============================================================
+
+# Streaming Architecture: Real-Time Thinking & Response Output
+
+This document explains the streaming architecture for Skills Fleet, enabling real-time display of:
+- **Thinking/Reasoning Content** - Shows the AI's step-by-step reasoning
+- **Intermediate Steps** - Displays progress as computations happen
+- **Response Chunks** - Streams response text as it's generated
+- **Signatures & Thought Process** - Full visibility into LM behavior
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Ink TUI (TypeScript/React)                  │
+│                                                                 │
+│  ┌────────────────┐  ┌──────────────┐  ┌─────────────────┐   │
+│  │  Chat Tab      │  │ Skills Tab   │  │ Jobs Monitor    │   │
+│  │                │  │              │  │                 │   │
+│  │ • Input field  │  │ • Skill list │  │ • Progress bar  │   │
+│  │ • Messages     │  │ • Search     │  │ • Job status    │   │
+│  │ • Thinking     │  │ • Validate   │  │ • Results       │   │
+│  │ • Suggestions  │  │ • Promote    │  │                 │   │
+│  └────────────────┘  └──────────────┘  └─────────────────┘   │
+│         │                                                       │
+│         │ fetch() POST /api/v1/chat/stream                     │
+└─────────┼───────────────────────────────────────────────────────┘
+          │
+          │ HTTP/1.1 Server-Sent Events (SSE)
+          │
+┌─────────▼───────────────────────────────────────────────────────┐
+│              FastAPI Backend (Python/DSPy)                      │
+│                                                                 │
+│  POST /api/v1/chat/stream                                      │
+│  │                                                              │
+│  ├─► StreamingAssistant (DSPy Module)                         │
+│  │   │                                                         │
+│  │   ├─ StreamingIntentParser                                │
+│  │   │  └─ Yields thinking steps as LM analyzes intent       │
+│  │   │                                                         │
+│  │   └─ DSPy ChainOfThought                                  │
+│  │      └─ Yields thinking + response chunks                 │
+│  │                                                             │
+│  └─► Streams ServerSentEvents (SSE)                          │
+│      │                                                         │
+│      ├─ event: thinking                                       │
+│      │  data: {"type": "thought", "content": "...", ...}    │
+│      │                                                         │
+│      ├─ event: response                                       │
+│      │  data: {"type": "response", "content": "..."}         │
+│      │                                                         │
+│      └─ event: complete                                       │
+│         data:                                                 │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Key Components
+
+### 1. Python Backend: Streaming DSPy Module
+
+**File**: `src/skill_fleet/core/dspy/streaming.py`
+
+```python

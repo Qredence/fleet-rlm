@@ -1,0 +1,52 @@
+<!-- Chunk 1372: bytes 5082446-5083593, type=function -->
+def get_redis_client():
+    return redis.Redis(host=settings.REDIS_HOST)
+
+@app.get("/config")
+async def get_config(settings: Settings = Depends(get_settings)):
+    return settings.dict()
+```
+
+### 3. Yield Dependencies (Cleanup)
+
+```python
+async def get_db():
+    async with AsyncSession(engine) as session:
+        yield session
+        # Automatic cleanup after response
+        await session.close()
+```
+
+### 4. Dependency Chaining
+
+```python
+async def get_db():
+    async with AsyncSession(engine) as session:
+        yield session
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db)
+):
+    user = await authenticate_token(token, db)
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
+async def get_admin_user(
+    user: User = Depends(get_current_user)
+):
+    if not user.is_admin:
+        raise HTTPException(status_code=403)
+    return user
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(admin: User = Depends(get_admin_user)):
+    return {"admin": admin.email}
+```
+
+## Testing with Overrides
+
+```python
+from fastapi.testclient import TestClient
+

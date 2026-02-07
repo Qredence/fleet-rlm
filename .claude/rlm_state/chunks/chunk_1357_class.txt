@@ -1,0 +1,38 @@
+<!-- Chunk 1357: bytes 5050540-5051689, type=class -->
+class PaymentResponse(BaseModel):
+    status: str
+    transaction_id: str
+
+@app.post("/payment", response_model=PaymentResponse)
+async def payment_endpoint(
+    request: PaymentRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    # Async database call
+    user = await db.get(User, request.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.balance < request.amount:
+        raise HTTPException(status_code=400, detail="Insufficient funds")
+
+    transaction_id = await process_payment_async(request, db)
+    return PaymentResponse(status="success", transaction_id=transaction_id)
+```
+
+### 4. Sync to Async Conversion
+
+**Sync → Async library mapping:**
+
+| Sync Library   | Async Replacement           |
+|----------------|-----------------------------|
+| `requests`     | `httpx.AsyncClient`         |
+| `sqlalchemy`   | `sqlalchemy.ext.asyncio`    |
+| `time.sleep()` | `asyncio.sleep()`           |
+| `open()`       | `aiofiles`                  |
+| `subprocess`   | `asyncio.create_subprocess` |
+| `redis`        | `aioredis`                  |
+
+**Pattern:**
+```python
+# Before - blocking

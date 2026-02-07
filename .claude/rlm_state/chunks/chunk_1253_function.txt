@@ -1,0 +1,45 @@
+<!-- Chunk 1253: bytes 4671866-4673269, type=function -->
+def benchmark_reflection(
+    trainset: list[dspy.Example],
+    testset: list[dspy.Example],
+) -> dict:
+    """Benchmark reflection metrics optimization."""
+    print("\n" + "=" * 70)
+    print("🔶 REFLECTION METRICS - Feedback-Based Optimization")
+    print("=" * 70)
+
+    start_time = time.time()
+
+    # Create program
+    program = SimpleSkillProgram()
+
+    # Baseline
+    baseline = evaluate_program(program, testset, reflection_metric)
+    print(f"Baseline score: {baseline:.1%}")
+
+    # Optimize with reflection-aware metric
+    logger.info("Running BootstrapFewShot with reflection metrics...")
+    optimizer = dspy.BootstrapFewShot(metric=reflection_metric)
+    optimized = optimizer.compile(program, trainset=trainset)
+
+    # Test
+    optimized_score = evaluate_program(optimized, testset, reflection_metric)
+
+    elapsed = time.time() - start_time
+    improvement = optimized_score - baseline
+
+    print(f"Optimized score: {optimized_score:.1%}")
+    print(f"Improvement: {improvement:+.1%}")
+    print(f"Time: {elapsed:.1f}s")
+
+    return {
+        "optimizer": "BootstrapFewShot (Reflection Metrics)",
+        "baseline": baseline,
+        "optimized": optimized_score,
+        "improvement": improvement,
+        "improvement_pct": improvement / baseline * 100 if baseline > 0 else 0,
+        "time_seconds": elapsed,
+        "cost_estimate": "$0.01-0.05 (metrics evaluation only)",
+    }
+
+

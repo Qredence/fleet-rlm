@@ -1,0 +1,49 @@
+<!-- Chunk 181: bytes 288465-289449, type=function -->
+def get_user(user_id: str) -> User:
+    user = db.query(User).filter_by(id=user_id).first()
+    if not user:
+        raise UserNotFoundError(user_id)
+    return user
+```
+
+## Async Best Practices
+
+### Use Async Consistently
+
+**Good:**
+```python
+async def fetch_user_data(user_id: str) -> dict:
+    user = await db.get_user(user_id)
+    orders = await db.get_orders(user_id)
+    return {"user": user, "orders": orders}
+```
+
+**Bad:**
+```python
+async def fetch_user_data(user_id: str) -> dict:
+    user = db.get_user(user_id)  # Blocking call in async function!
+    orders = await db.get_orders(user_id)
+    return {"user": user, "orders": orders}
+```
+
+### Parallel Async Operations
+
+**Good:**
+```python
+import asyncio
+
+async def fetch_all_data(user_ids: list[str]) -> list[dict]:
+    tasks = [fetch_user_data(uid) for uid in user_ids]
+    return await asyncio.gather(*tasks)
+```
+
+## Logging
+
+### Structured Logging
+
+**Good:**
+```python
+import structlog
+
+logger = structlog.get_logger()
+

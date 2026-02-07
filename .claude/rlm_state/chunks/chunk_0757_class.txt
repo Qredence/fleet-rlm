@@ -1,0 +1,35 @@
+<!-- Chunk 757: bytes 2590404-2591438, type=class -->
+class SkillMetadata:
+    skill_id: str                  # Path-style identifier
+    name: str                      # Kebab-case name
+    description: str               # 1-1024 char description
+    version: str                   # Semantic version
+    type: str                      # Skill category
+    weight: str                    # Resource intensity
+    load_priority: str             # When to load
+    dependencies: list[str]        # Required skills
+    capabilities: list[str]        # Discrete capabilities
+    path: Path                     # File system path
+    always_loaded: bool = False    # Load at startup?
+```
+
+**Example:**
+```python
+metadata = manager.load_skill("technical_skills/programming/languages/python/decorators")
+
+print(f"ID: {metadata.skill_id}")
+print(f"Name: {metadata.name}")
+print(f"Type: {metadata.type}")
+print(f"Weight: {metadata.weight}")
+print(f"Capabilities: {', '.join(metadata.capabilities)}")
+```
+
+---
+
+### ValidationResult
+
+Represents validation result.
+
+**Fields:**
+```python
+@dataclass

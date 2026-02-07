@@ -1,0 +1,10 @@
+<!-- Chunk 939: bytes 3407785-3408098, type=function -->
+def test_validate_path_within_root_accepts_valid_path():
+    """Test path validation accepts paths within root."""
+    root = Path("/tmp/skills")
+    user_path = Path("/tmp/skills/general/testing")
+
+    result = validate_path_within_root(user_path, root, "Skills root")
+    assert result == user_path.resolve()
+
+

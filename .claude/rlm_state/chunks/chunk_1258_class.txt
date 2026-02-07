@@ -1,0 +1,20 @@
+<!-- Chunk 1258: bytes 4680959-4681371, type=class -->
+class OptimizationMetrics:
+    """Metrics for a DSPy optimization run."""
+
+    timestamp: str
+    optimizer_type: str
+    trainset_size: int
+    testset_size: int
+    baseline_score: float
+    optimized_score: float
+    improvement: float
+    improvement_percent: float
+    execution_time_seconds: float
+    lm_calls: int
+    total_cost_usd: float
+    iterations: int
+    parameters: dict[str, Any]
+
+
+@dataclass

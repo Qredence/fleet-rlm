@@ -1,0 +1,36 @@
+<!-- Chunk 1922: bytes 7741624-7742633, type=function -->
+def start_child_run(run_name: str) -> Any:
+    """
+    Start a child MLflow run nested under the current parent run.
+
+    Child runs are used for individual phases of the skill creation workflow.
+    They inherit the parent run's tags and provide a hierarchical view
+    in the MLflow UI.
+
+    Args:
+        run_name: Name for the child run (e.g., "phase1_task_analysis")
+
+    Returns:
+        Context manager for the child run (use with 'with' statement)
+
+    Examples:
+        >>> with start_child_run("phase1_task_analysis"):
+        ...     log_phase_metrics("phase1", "understanding", {...})
+        ...     log_lm_usage(prediction)
+
+    """
+    try:
+        import mlflow
+
+        return mlflow.start_run(
+            run_name=run_name,
+            nested=True,  # type: ignore[attr-defined]
+        )
+    except Exception as e:
+        logger.warning(f"Failed to start child run: {e}")
+        # Return a no-op context manager
+        from contextlib import nullcontext
+
+        return nullcontext()
+
+

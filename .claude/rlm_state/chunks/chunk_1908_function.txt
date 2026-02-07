@@ -1,0 +1,21 @@
+<!-- Chunk 1908: bytes 7727513-7727987, type=function -->
+def get_phase1_lm() -> dspy.LM:
+    """
+    Get LM for Phase 1: Understand task.
+
+    Uses the 'skill_understand' task configuration which includes:
+    - Model: gemini:gemini-3-flash-preview
+    - Role: planner
+    - Parameters: thinking_level: medium
+
+    Returns:
+        Configured dspy.LM instance for Phase 1
+
+    Examples:
+        >>> lm = get_phase1_lm()
+        >>> dspy.configure(lm=lm, track_usage=True)
+
+    """
+    return get_reasoning_lm("skill_understand")
+
+

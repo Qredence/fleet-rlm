@@ -1,0 +1,34 @@
+<!-- Chunk 1893: bytes 7700101-7701137, type=class -->
+class ValidationRepository(BaseRepository[ValidationReport]):
+    """Repository for ValidationReport entity."""
+
+    def __init__(self, db: Session):
+        """
+        Initialize the validation repository.
+
+        Args:
+            db: The database session.
+
+        """
+        super().__init__(ValidationReport, db)
+
+    def get_latest_for_skill(self, skill_id: int) -> ValidationReport | None:
+        """Get the latest validation report for a skill."""
+        return (
+            self.db.query(ValidationReport)
+            .filter(ValidationReport.skill_id == skill_id)
+            .order_by(ValidationReport.created_at.desc())
+            .first()
+        )
+
+    def get_failed_validations(self, *, limit: int = 50) -> list[ValidationReport]:
+        """Get all failed validation reports."""
+        return (
+            self.db.query(ValidationReport)
+            .filter(ValidationReport.status == "failed")
+            .order_by(ValidationReport.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+

@@ -1,0 +1,11 @@
+<!-- Chunk 1308: bytes 4775851-4776064, type=function -->
+def run_seed():
+    """Run taxonomy seeding."""
+    if seed_taxonomy:
+        print("Seeding taxonomy...")
+        seed_taxonomy()
+    else:
+        print("❌ seed_taxonomy module not found")
+        sys.exit(1)
+
+

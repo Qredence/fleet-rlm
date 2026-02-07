@@ -1,0 +1,28 @@
+<!-- Chunk 182: bytes 289449-290173, type=function -->
+def process_order(order_id: str):
+    logger.info("processing_order", order_id=order_id)
+    try:
+        result = process(order_id)
+        logger.info("order_processed", order_id=order_id, result=result)
+        return result
+    except Exception as e:
+        logger.exception("order_processing_failed", order_id=order_id, error=str(e))
+        raise
+```
+
+### Log Levels
+
+- `DEBUG`: Detailed diagnostic information
+- `INFO`: General informational messages
+- `WARNING`: Warning messages for potential issues
+- `ERROR`: Error messages for failures
+- `CRITICAL`: Critical failures requiring immediate attention
+
+## Configuration
+
+### Environment-Based Config
+
+**Good:**
+```python
+from pydantic_settings import BaseSettings
+

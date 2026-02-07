@@ -1,0 +1,22 @@
+<!-- Chunk 1464: bytes 6308191-6308651, type=function -->
+def hash_key(value: str | dict | BaseModel) -> str:
+    """
+    Generate a hash key from a value.
+
+    Useful for caching results based on input parameters.
+
+    Args:
+        value: Value to hash
+
+    Returns:
+        Hash string
+
+    """
+    if isinstance(value, BaseModel):
+        value = value.model_dump_json()
+    elif isinstance(value, dict):
+        value = json.dumps(value, sort_keys=True)
+
+    return hashlib.md5(value.encode()).hexdigest()[:16]
+
+

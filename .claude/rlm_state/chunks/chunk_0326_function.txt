@@ -1,0 +1,35 @@
+<!-- Chunk 326: bytes 535361-536395, type=function -->
+def one_word_answer(args, pred: dspy.Prediction) -> float:
+    """Reward function: 1.0 for single word, 0.0 otherwise."""
+    return 1.0 if len(pred.answer.split()) == 1 else 0.0
+
+refine = dspy.Refine(
+    module=dspy.ChainOfThought("question -> answer"),
+    N=3,
+    reward_fn=one_word_answer,
+    threshold=1.0
+)
+
+result = refine(question="What is the capital of Belgium?")
+print(result.answer)  # Brussels
+```
+
+### How Refine Works
+
+1. **Generate candidate**: Run module to get initial prediction
+2. **Score candidate**: Apply reward function
+3. **Generate feedback**: If score below threshold, generate detailed feedback
+4. **Refine**: Use feedback as hints for next attempt
+5. **Iterate**: Repeat until threshold met or N attempts exhausted
+
+### Refine Parameters
+
+- `module`: Base module to refine
+- `N`: Maximum number of refinement attempts
+- `reward_fn`: Function to score predictions
+- `threshold`: Minimum score to accept
+- `fail_count`: Stop after N failed attempts (optional)
+
+### Refine with Custom Feedback
+
+```python

@@ -1,0 +1,44 @@
+<!-- Chunk 1820: bytes 7564104-7565724, type=class -->
+class GenerateCodeExamples(dspy.Signature):
+    """
+    Generate practical code examples for a skill.
+
+    Create working, tested code examples that demonstrate
+    the concepts being taught.
+    """
+
+    # Inputs
+    concept: str = dspy.InputField(desc="Concept or pattern to demonstrate")
+    language: str = dspy.InputField(desc="Programming language (e.g., 'python', 'typescript')")
+    difficulty: str = dspy.InputField(
+        desc="Difficulty level: 'basic', 'intermediate', 'advanced'", default="intermediate"
+    )
+    include_tests: bool = dspy.InputField(desc="Whether to include test cases", default=True)
+
+    # Outputs
+    example_code: str = dspy.OutputField(desc="Complete, runnable code example with comments")
+    explanation: str = dspy.OutputField(desc="Line-by-line or section explanation of the code")
+    common_pitfalls: list[str] = dspy.OutputField(desc="Common mistakes and how to avoid them")
+    test_cases: str = dspy.OutputField(
+        desc="Test cases to verify the example works (if include_tests=True)"
+    )
+
+
+============================================================
+END FILE: src/skill_fleet/core/signatures/generation/content.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/signatures/hitl/questions.py
+============================================================
+
+"""
+DSPy signature for generating clarifying questions.
+
+This signature generates focused questions to resolve ambiguities
+and better understand user requirements during HITL checkpoints.
+"""
+
+import dspy
+
+

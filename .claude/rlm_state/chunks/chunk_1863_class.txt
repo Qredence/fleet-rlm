@@ -1,0 +1,193 @@
+<!-- Chunk 1863: bytes 7639693-7646743, type=class -->
+class Skill(Base):
+    """
+    Primary skills table.
+
+    Represents a single skill with its metadata, content, and classification.
+    """
+
+    __tablename__ = "skills"
+
+    # Primary key
+    skill_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # Identity
+    skill_path: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Versioning
+    version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0.0")
+    parent_version_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("skills.skill_id"), nullable=True
+    )
+
+    # Classification
+    type: Mapped[str] = mapped_column(
+        Enum(
+            SkillTypeEnum.COGNITIVE,
+            SkillTypeEnum.TECHNICAL,
+            SkillTypeEnum.DOMAIN,
+            SkillTypeEnum.TOOL,
+            SkillTypeEnum.MCP,
+            SkillTypeEnum.SPECIALIZATION,
+            SkillTypeEnum.TASK_FOCUS,
+            SkillTypeEnum.MEMORY,
+            name="skill_type_enum",
+            create_constraint=True,
+        ),
+        nullable=False,
+        default=SkillTypeEnum.COGNITIVE,
+    )
+    weight: Mapped[str] = mapped_column(
+        Enum(
+            SkillWeightEnum.LIGHTWEIGHT,
+            SkillWeightEnum.MEDIUM,
+            SkillWeightEnum.HEAVYWEIGHT,
+            name="skill_weight_enum",
+            create_constraint=True,
+        ),
+        nullable=False,
+        default=SkillWeightEnum.MEDIUM,
+    )
+    load_priority: Mapped[str] = mapped_column(
+        Enum(
+            LoadPriorityEnum.ALWAYS,
+            LoadPriorityEnum.TASK_SPECIFIC,
+            LoadPriorityEnum.ON_DEMAND,
+            LoadPriorityEnum.DORMANT,
+            name="load_priority_enum",
+            create_constraint=True,
+        ),
+        nullable=False,
+        default=LoadPriorityEnum.TASK_SPECIFIC,
+    )
+    status: Mapped[str] = mapped_column(
+        Enum(
+            SkillStatusEnum.DRAFT,
+            SkillStatusEnum.ACTIVE,
+            SkillStatusEnum.DEPRECATED,
+            SkillStatusEnum.ARCHIVED,
+            name="skill_status_enum",
+            create_constraint=True,
+        ),
+        nullable=False,
+        default=SkillStatusEnum.DRAFT,
+    )
+    skill_style: Mapped[str | None] = mapped_column(
+        Enum(
+            SkillStyleEnum.NAVIGATION_HUB,
+            SkillStyleEnum.COMPREHENSIVE,
+            SkillStyleEnum.MINIMAL,
+            name="skill_style_enum",
+            create_constraint=True,
+        ),
+        nullable=True,
+    )
+
+    # Content
+    skill_content: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_modified: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Evolution tracking
+    change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    integrity_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Performance metadata
+    performance_stats: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+    # Relationships
+    capabilities: Mapped[list["Capability"]] = relationship(
+        "Capability", back_populates="skill", cascade="all, delete-orphan"
+    )
+    dependencies_as_dependent: Mapped[list["SkillDependency"]] = relationship(
+        "SkillDependency",
+        foreign_keys="SkillDependency.dependent_id",
+        back_populates="dependent",
+        cascade="all, delete-orphan",
+    )
+    dependencies_as_dependency: Mapped[list["SkillDependency"]] = relationship(
+        "SkillDependency",
+        foreign_keys="SkillDependency.dependency_skill_id",
+        back_populates="dependency_skill",
+        cascade="all, delete-orphan",
+    )
+    files: Mapped[list["SkillFile"]] = relationship(
+        "SkillFile", back_populates="skill", cascade="all, delete-orphan"
+    )
+    keywords: Mapped[list["SkillKeyword"]] = relationship(
+        "SkillKeyword", back_populates="skill", cascade="all, delete-orphan"
+    )
+    tags: Mapped[list["SkillTag"]] = relationship(
+        "SkillTag", back_populates="skill", cascade="all, delete-orphan"
+    )
+    categories: Mapped[list["SkillCategory"]] = relationship(
+        "SkillCategory", back_populates="skill", cascade="all, delete-orphan"
+    )
+    aliases: Mapped[list["SkillAlias"]] = relationship(
+        "SkillAlias", back_populates="skill", cascade="all, delete-orphan"
+    )
+    facets: Mapped[list["SkillFacet"]] = relationship(
+        "SkillFacet", back_populates="skill", cascade="all, delete-orphan"
+    )
+    allowed_tools: Mapped[list["SkillAllowedTool"]] = relationship(
+        "SkillAllowedTool", back_populates="skill", cascade="all, delete-orphan"
+    )
+    validation_reports: Mapped[list["ValidationReport"]] = relationship(
+        "ValidationReport", back_populates="skill", cascade="all, delete-orphan"
+    )
+    test_coverage: Mapped[list["SkillTestCoverage"]] = relationship(
+        "SkillTestCoverage", back_populates="skill", cascade="all, delete-orphan"
+    )
+    usage_events: Mapped[list["UsageEvent"]] = relationship("UsageEvent", back_populates="skill")
+
+    # Parent version relationship
+    parent_version: Mapped[Optional["Skill"]] = relationship(
+        "Skill", remote_side=[skill_id], backref="child_versions"
+    )
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_skills_path", "skill_path"),
+        Index("idx_skills_status", "status"),
+        Index("idx_skills_type", "type"),
+        Index("idx_skills_version_lookup", "skill_path", "version"),
+        Index("idx_skills_parent_version", "parent_version_id"),
+        Index("idx_skills_created_at", "created_at"),
+        Index("idx_skills_published_at", "published_at"),
+        Index("idx_skills_status_type", "status", "type"),
+        Index("idx_skills_status_priority", "status", "load_priority"),
+        CheckConstraint("skill_path ~ '^[a-z0-9_-]+(?:/[a-z0-9_-]+)*$'", name="skill_path_format"),
+        CheckConstraint("name ~ '^[a-z0-9]+(-[a-z0-9]+)*$'", name="name_kebab_case"),
+        CheckConstraint("version ~ '^\\d+\\.\\d+\\.\\d+$'", name="version_format"),
+    )
+
+    def __repr__(self) -> str:
+        """
+        Return a string representation of the Skill.
+
+        Returns:
+            A string with skill_id, skill_path, and name.
+
+        """
+        return (
+            f"<Skill(skill_id={self.skill_id}, skill_path='{self.skill_path}', name='{self.name}')>"
+        )
+
+
+# =============================================================================
+# TAXONOMY & ORGANIZATION
+# =============================================================================
+
+

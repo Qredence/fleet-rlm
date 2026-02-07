@@ -1,0 +1,8 @@
+<!-- Chunk 845: bytes 3004952-3005141, type=function -->
+def migrate_all_skills(
+    skills_root: Path,
+    dry_run: bool = False,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Migrate all skills in taxonomy to agentskills.io format."""
+

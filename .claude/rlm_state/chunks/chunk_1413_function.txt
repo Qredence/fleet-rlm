@@ -1,0 +1,36 @@
+<!-- Chunk 1413: bytes 5145632-5146877, type=function -->
+def test_model_dump_exclude_unset():
+    """
+    Demonstrate how Pydantic's exclude_unset works.
+
+    This is the key mechanism that makes partial updates possible.
+    """
+    print("\n" + "="*70)
+    print("PYDANTIC MODEL DEMONSTRATION")
+    print("="*70)
+
+    # Create an update model with only name set
+    update_data = UserUpdate(name="Test Name")
+
+    print("\nModel with only 'name' field set:")
+    print(f"  update_data.model_dump() = {update_data.model_dump()}")
+    print("  -> Includes all fields with defaults (None)")
+
+    print("\nupdate_data.model_dump(exclude_unset=True):")
+    print(f"  -> {update_data.model_dump(exclude_unset=True)}")
+    print("  -> Includes ONLY fields that were explicitly set!")
+
+    # Create with multiple fields
+    update_data2 = UserUpdate(name="Test", age=25)
+    print("\nModel with 'name' and 'age' fields set:")
+    print(f"  update_data.model_dump(exclude_unset=True) = {update_data2.model_dump(exclude_unset=True)}")
+
+    # Create with no fields
+    update_data3 = UserUpdate()
+    print("\nModel with no fields set:")
+    print(f"  update_data.model_dump(exclude_unset=True) = {update_data3.model_dump(exclude_unset=True)}")
+    print("  -> Returns empty dict!")
+
+    print("\n" + "="*70)
+
+

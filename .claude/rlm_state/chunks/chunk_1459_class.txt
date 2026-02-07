@@ -1,0 +1,70 @@
+<!-- Chunk 1459: bytes 6296817-6299576, type=class -->
+class AnalyticsEngine:
+    """Analyzes skill usage patterns from logs."""
+
+    def __init__(self, usage_file: Path) -> None:
+        self.usage_file = Path(usage_file).resolve(strict=False)
+
+    def get_usage_data(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Read all usage events, optionally filtered by user."""
+        if not self.usage_file.exists():
+            return []
+
+        events = []
+        with self.usage_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                event = json.loads(line)
+                if user_id is None or event["user_id"] == user_id:
+                    events.append(event)
+        return events
+
+    def analyze_usage(self, user_id: str | None = None) -> dict[str, Any]:
+        """Perform comprehensive usage analysis."""
+        events = self.get_usage_data(user_id)
+        if not events:
+            return {
+                "total_events": 0,
+                "most_used_skills": [],
+                "success_rate": 0.0,
+                "common_combinations": [],
+                "unique_skills_used": 0,
+                "cold_skills": [],
+            }
+
+        skill_counts = Counter(e["skill_id"] for e in events)
+        successes = [e for e in events if e.get("success", True)]
+
+        # Simple combination analysis (skills used in the same task)
+        task_skills: dict[str, set[str]] = {}
+        for e in events:
+            task_id = e.get("task_id")
+            if task_id:
+                task_skills.setdefault(task_id, set()).add(e["skill_id"])
+
+        combinations = Counter()
+        for skills in task_skills.values():
+            if len(skills) > 1:
+                # Store sorted tuple to ensure order doesn't matter
+                sorted_skills = tuple(sorted(skills))
+                combinations[sorted_skills] += 1
+
+        return {
+            "total_events": len(events),
+            "most_used_skills": skill_counts.most_common(10),
+            "success_rate": len(successes) / len(events) if events else 0.0,
+            "common_combinations": [
+                {"skills": combo, "count": count} for combo, count in combinations.most_common(5)
+            ],
+            "unique_skills_used": len(skill_counts),
+            "cold_skills": self._identify_cold_skills(skill_counts),
+        }
+
+    def _identify_cold_skills(self, skill_counts: Counter) -> list[str]:
+        """Identify skills that haven't been used much (placeholder for actual aging logic)."""
+        # In a real system, this would compare against all available skills
+        # and check the last usage timestamp.
+        return [skill_id for skill_id, count in skill_counts.items() if count == 1]
+
+

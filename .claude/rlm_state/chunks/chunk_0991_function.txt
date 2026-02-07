@@ -1,0 +1,94 @@
+<!-- Chunk 991: bytes 3452698-3454777, type=function -->
+def test_chat_command_has_help():
+    """Test chat command has help."""
+    result = runner.invoke(app, ["chat", "--help"])
+    assert result.exit_code == 0
+```
+
+**Step 5: Run tests**
+
+```bash
+uv run pytest tests/cli/test_remaining_commands.py -v
+```
+
+**Step 6: Commit**
+
+```bash
+git add src/skill_fleet/cli/commands/ tests/cli/test_remaining_commands.py
+git commit -m "refactor(cli): standardize error handling in all commands
+
+- Replace Console() with get_console() singleton
+- Replace bare Exception with specific error types
+- Add proper finally blocks for cleanup
+- Use display_* functions for consistent formatting
+- Add tests for all remaining commands
+
+Fixes error handling issues from cli-error-handling-review.md"
+```
+
+---
+
+## Task 9: Update pyproject.toml Entry Point
+
+**Files:**
+- Modify: `pyproject.toml`
+
+**Step 1: Check current entry points**
+
+```bash
+uv run grep -A 10 "\[project.scripts\]" pyproject.toml
+```
+
+**Step 2: Update entry point if needed**
+
+If `main.py` entry point exists, comment it out and add new one:
+
+```toml
+[project.scripts]
+skill-fleet = "skill_fleet.cli:cli_entrypoint"
+# Old entry point (keep for migration period):
+# skill-fleet-old = "skill_fleet.cli.main:cli_entrypoint"
+```
+
+**Step 3: Test the new entry point**
+
+```bash
+# Uninstall and reinstall to register entry point
+uv sync
+
+# Test CLI
+uv run skill-fleet --help
+```
+
+**Step 4: Commit**
+
+```bash
+git add pyproject.toml
+git commit -m "feat(cli): update entry point to Typer app
+
+- Register skill-fleet CLI to use Typer app
+- Keep old entry point commented for migration reference
+
+Addresses dual CLI issue from cli-review-architecture.md"
+```
+
+---
+
+## Task 10: Add Type Hints to All Public Functions
+
+**Files:**
+- Modify: `src/skill_fleet/cli/**/*.py`
+
+**Step 1: Check for missing type hints**
+
+```bash
+# Run mypy or ruff to check for missing type hints
+uv run ruff check src/skill_fleet/cli/ --select ANN001,ANN002,ANN003,ANN201,ANN202,ANN204,ANN206
+```
+
+**Step 2: Add type hints to all functions**
+
+For each function missing type hints, add proper annotations:
+
+```python
+# Before

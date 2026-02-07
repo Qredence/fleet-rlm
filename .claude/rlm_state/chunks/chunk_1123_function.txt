@@ -1,0 +1,31 @@
+<!-- Chunk 1123: bytes 4216572-4217387, type=function -->
+def simple_metric(example: dspy.Example, prediction: dspy.Prediction, trace=None) -> float:
+    """
+    Simple metric returns 0.0-1.0 score.
+    
+    Args:
+        example: Gold example with expected outputs
+        prediction: Model's prediction
+        trace: Execution trace (optional)
+    
+    Returns:
+        float: Score between 0.0 and 1.0
+    """
+    score = 0.0
+    
+    # Check quality dimensions
+    if hasattr(prediction, "field1") and prediction.field1:
+        score += 0.25
+    if hasattr(prediction, "field2") and prediction.field2:
+        score += 0.25
+    if hasattr(prediction, "field3") and prediction.field3:
+        score += 0.25
+    if hasattr(prediction, "field4") and prediction.field4:
+        score += 0.25
+    
+    return score
+```
+
+### GEPA-Enhanced Metric (With Feedback)
+
+```python

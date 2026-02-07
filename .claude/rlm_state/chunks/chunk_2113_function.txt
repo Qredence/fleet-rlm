@@ -1,0 +1,11 @@
+<!-- Chunk 2113: bytes 8042704-8043104, type=function -->
+def test_skill_exists_check_for_directory_skills(temp_taxonomy: Path) -> None:
+    manager = TaxonomyManager(temp_taxonomy)
+
+    skill_dir = temp_taxonomy / "technical_skills/programming/languages/python"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "metadata.json").write_text("{}", encoding="utf-8")
+
+    assert manager.skill_exists("technical_skills/programming/languages/python") is True
+
+

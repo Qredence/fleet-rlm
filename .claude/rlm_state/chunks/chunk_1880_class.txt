@@ -1,0 +1,47 @@
+<!-- Chunk 1880: bytes 7665576-7667412, type=class -->
+class HITLInteraction(Base):
+    """Human-in-the-Loop interaction tracking."""
+
+    __tablename__ = "hitl_interactions"
+
+    interaction_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[UUID] = mapped_column(
+        ForeignKey("jobs.job_id", ondelete="CASCADE"), nullable=False
+    )
+    interaction_type: Mapped[str] = mapped_column(
+        Enum(
+            HITLTypeEnum.CLARIFY,
+            HITLTypeEnum.CONFIRM,
+            HITLTypeEnum.PREVIEW,
+            HITLTypeEnum.VALIDATE,
+            HITLTypeEnum.DEEP_UNDERSTANDING,
+            HITLTypeEnum.TDD_RED,
+            HITLTypeEnum.TDD_GREEN,
+            HITLTypeEnum.TDD_REFACTOR,
+            name="hitl_type_enum",
+            create_constraint=True,
+        ),
+        nullable=False,
+    )
+    round_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    prompt_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    response_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    timeout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hitl_metadata: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+
+    # Relationships
+    job: Mapped["Job"] = relationship("Job", back_populates="hitl_interactions")
+
+    __table_args__ = (
+        Index("idx_hitl_job", "job_id"),
+        Index("idx_hitl_type", "interaction_type"),
+        Index("idx_hitl_status", "status"),
+        Index("idx_hitl_created_at", "created_at"),
+    )
+
+

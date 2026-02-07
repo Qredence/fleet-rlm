@@ -1,0 +1,7 @@
+<!-- Chunk 1996: bytes 7890211-7890417, type=function -->
+def test_config_error_default_suggestion():
+    """Test ConfigError has default suggestion."""
+    error = ConfigError("Bad config")
+    assert "Check your configuration file" in (error.suggestion or "")
+
+

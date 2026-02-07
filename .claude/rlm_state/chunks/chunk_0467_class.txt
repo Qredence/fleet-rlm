@@ -1,0 +1,1260 @@
+<!-- Chunk 467: bytes 784071-820653, type=class -->
+class SkillSystem {
+  // Always loaded
+  categories: Category[]
+  
+  // Lazy loaded
+  categoryCache: Map<string, CategoryContent>
+  skillCache: Map<string, SkillContent>
+  
+  async discoverSkill(query: string): Skill {
+    // 1. Identify category from query
+    const category = await this.selectCategory(query);
+    
+    // 2. Load category if not cached
+    if (!this.categoryCache.has(category.id)) {
+      const content = await this.loadCategory(category.id);
+      this.categoryCache.set(category.id, content);
+    }
+    
+    // 3. Select skill from category
+    const categoryContent = this.categoryCache.get(category.id);
+    const skill = await this.selectSkill(categoryContent, query);
+    
+    return skill;
+  }
+}
+```
+
+### Pattern 2: Skill Preloading
+
+**Use case:** Agent working in specific domain, likely to use multiple related skills
+
+```typescript
+async preloadCategory(categoryId: string) {
+  const category = await this.loadCategory(categoryId);
+  
+  // Preload all skills in category (parallel)
+  const skills = await Promise.all(
+    category.skills.map(s => this.loadSkill(s.id))
+  );
+  
+  // Now agent can access any skill in category instantly
+}
+```
+
+**When to use:** Task spans entire domain (e.g., "build a web app" → preload all web skills)
+
+### Pattern 3: Skill Dependency Loading
+
+**Problem:** Some skills reference other skills
+
+```yaml
+# In api-integration/SKILL.md
+Prerequisites: Load api-authentication skill first
+Related skills: error-handling, rate-limiting
+```
+
+**Implementation:**
+```typescript
+async loadSkillWithDependencies(skillId: string): SkillContent {
+  const skill = await this.loadSkill(skillId);
+  
+  // Parse dependencies from skill content
+  const deps = this.parseDependencies(skill);
+  
+  // Load dependencies
+  for (const dep of deps) {
+    if (!this.skillCache.has(dep)) {
+      await this.loadSkill(dep);
+    }
+  }
+  
+  return skill;
+}
+```
+
+**Warning:** Can lead to cascade loading. Use sparingly and document clearly.
+
+---
+
+## Operational Patterns
+
+### Skill Discovery Analytics
+
+**Essential metrics at scale:**
+
+1. **Discovery funnel:**
+   - Queries → Categories identified → Skills loaded → Skills used
+   - Drop-off points indicate discovery problems
+
+2. **Skill usage distribution:**
+   - 80/20 rule: 20% of skills = 80% of usage
+   - Long tail: Many skills rarely used (candidates for archival or deletion)
+
+3. **Failed discoveries:**
+   - Agent searches but loads wrong skill
+   - Agent searches but loads no skill
+   - High failure rate = metadata quality issues
+
+### Skill Maintenance at Scale
+
+**Patterns for 500+ skills:**
+
+**1. Automated validation:**
+```bash
+# Daily checks
+- All SKILL.md files have valid frontmatter
+- All references/ links in SKILL.md are valid
+- Category structures match file system
+- Skill registry in sync with actual files
+```
+
+**2. Version tracking:**
+```yaml
+# In SKILL.md frontmatter
+version: 2.1.0
+last_updated: 2025-12-15
+changelog:
+  - 2.1.0: Added GraphQL support
+  - 2.0.0: Breaking change - new API
+```
+
+**3. Deprecation process:**
+```yaml
+# Mark as deprecated
+deprecated: true
+deprecated_message: "Use api-testing-v2 instead"
+replacement: api-testing-v2
+sunset_date: 2026-03-15
+```
+
+**4. Usage-based pruning:**
+- Track skill load frequency
+- Skills not loaded in 6 months → candidates for archival
+- Archive to separate repo, remove from active set
+
+---
+
+## Migration Path
+
+### Growing from 50 → 100 → 500 skills
+
+**Phase 1: 50 skills (flat structure)**
+```
+.skills/
+├── skill-1/
+├── skill-2/
+└── ...
+```
+**Memory block:** All metadata (manageable)
+
+**Phase 2: 100 skills (add categories)**
+```
+.skills/
+├── category-1/
+│   ├── skill-1/
+│   └── skill-2/
+└── category-2/
+    └── skill-3/
+```
+**Memory block:** Categories + skill metadata (tight but ok)
+
+**Phase 3: 500 skills (hierarchical)**
+```
+.skills/
+├── domain-1/
+│   ├── subdomain-1/
+│   │   └── skill-1/
+│   └── subdomain-2/
+│       └── skill-2/
+└── domain-2/
+    └── subdomain-3/
+        └── skill-3/
+```
+**Memory block:** Just categories, lazy load everything else
+
+**Phase 4: 1000+ skills (add infrastructure)**
+- Skill registry file
+- Search/query tools
+- Analytics pipeline
+- Automated maintenance
+
+### Refactoring Checklist
+
+**Before reorganizing 100+ skills:**
+- [ ] Audit current usage patterns (which skills actually used?)
+- [ ] Identify natural category boundaries
+- [ ] Create category structure
+- [ ] Write CATEGORY.md files for each category
+- [ ] Update skill metadata to reference categories
+- [ ] Test discovery with representative queries
+- [ ] Update documentation
+- [ ] Monitor discovery metrics after migration
+
+---
+
+## Key Takeaways
+
+1. **At 100+ skills, you're building a discovery system, not a documentation library**
+
+2. **Hierarchical organization is mandatory at scale** - flat structures fail beyond ~100 skills
+
+3. **Metadata quality determines success** - poor metadata = undiscoverable skills
+
+4. **Standardization enables learning** - consistent structure across skills lets agents navigate efficiently
+
+5. **Discovery scales O(log n)** - hierarchical approach necessary for 1000+ skills
+
+6. **Memory block must be dynamic** - update during task execution, don't front-load everything
+
+7. **Categories should be 10-30 skills** - smaller = over-categorized, larger = unhelpful
+
+8. **Measure discovery funnel** - query → category → skill → use (drop-offs indicate problems)
+
+---
+
+## Recommended Architecture (500+ skills)
+
+```
+Memory Block:
+  - Category list (20-50 categories, <2k words)
+  
+Discovery Process:
+  1. Query → Identify categories (parallel evaluation)
+  2. Load CATEGORY.md for relevant categories
+  3. Scan category skills
+  4. Load specific SKILL.md
+  5. Navigate to references/ as needed
+  
+Infrastructure:
+  - Skill registry (single JSON index)
+  - Search tool (keyword + optional semantic)
+  - Analytics (discovery funnel + usage)
+  - Automated validation (daily)
+  
+Organization:
+  domain/subdomain/skill-name/
+    ├── SKILL.md (standardized structure)
+    ├── references/
+    │   ├── README.md (required)
+    │   ├── quick-start.md
+    │   ├── common-patterns.md
+    │   └── api-reference.md
+    └── scripts/ (optional)
+```
+
+**This architecture scales to 10,000+ skills with O(log n) discovery.**
+
+---
+
+**Research conducted December 2025 during skills repository restructuring and scaling analysis.**
+
+
+============================================================
+END FILE: .fleet/letta/skills/meta/skill-learning/references/progressive-disclosure-research.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/meta/skill-learning/references/recognizing-learnings.md
+============================================================
+
+# Recognizing Learnings
+
+Valuable learnings often reveal themselves through specific signals during your work. Train yourself to notice these patterns.
+
+## Time Investment Signals
+
+### Debugging Time
+**Signal:** "I spent 20+ minutes debugging this issue"
+
+**Questions to ask:**
+- Was this documented anywhere?
+- Did I search existing skills first?
+- Would documenting this prevent future debugging time?
+- Is this a one-off or recurring pattern?
+
+**Example:**
+```
+Spent 45 minutes figuring out why Playwright tests were flaky. 
+Root cause: Need to wait for network idle, not just element presence.
+Pattern documented? No. Should be? Yes - common issue with webapp-testing.
+```
+
+### Trial and Error
+**Signal:** "I tried 3+ approaches before finding what worked"
+
+**Questions to ask:**
+- Were the failed approaches reasonable attempts?
+- What made the winning approach better?
+- Could guidance have prevented the trial-and-error?
+
+**Example:**
+```
+Tried git rebase -i (failed - interactive not supported)
+Tried git reset (lost work)
+Finally: git rebase HEAD~3 worked
+Could this be documented in git-workflows? Yes.
+```
+
+### "Wish I Had Known"
+**Signal:** "I wish I had known this at the start"
+
+**Questions to ask:**
+- Where would I have looked for this info?
+- What skill should contain this?
+- How much time would it have saved?
+
+**Example:**
+```
+Spent hour implementing custom retry logic for API calls.
+Later discovered: Most API libraries have built-in retry with backoff.
+Should be in api-integration skill: "Check library features first"
+```
+
+## Repetition Signals
+
+### Recurring Problem
+**Signal:** "This is the third time I've solved this exact problem"
+
+**Strong indicator** that knowledge should be captured.
+
+**Questions to ask:**
+- Am I solving it the same way each time?
+- Have I refined my approach across iterations?
+- Would other agents encounter this?
+
+**Example:**
+```
+Third time setting up Letta agent with file system access.
+Same steps each time: attach folder, verify tools appear, test read access.
+Create quick-start pattern in letta-agent-designer.
+```
+
+### Deja Vu Moments
+**Signal:** "I remember doing something similar before"
+
+**Questions to ask:**
+- What was different about the previous context?
+- What was the same (the generalizable pattern)?
+- Can I extract the common pattern?
+
+**Example:**
+```
+Configuring environment variables for third different framework.
+Pattern: All frameworks need .env file, loading mechanism differs.
+Extract: Common env var patterns, framework-specific loading details.
+```
+
+### Teaching Moments
+**Signal:** "Let me explain how this works..."
+
+**When you explain something to a user, you're identifying knowledge worth documenting.**
+
+**Questions to ask:**
+- Did I explain this clearly?
+- Would this explanation help in a skill?
+- Are there examples that made it click?
+
+**Example:**
+```
+Explained memory_insert vs memory_replace to user with concurrent scenario.
+User understood immediately with the example.
+Capture example in letta-memory-architect for future clarity.
+```
+
+## Correction Signals
+
+### Skill Led Astray
+**Signal:** "The skill said X, but Y actually works better"
+
+**Critical learning moment - either skill is wrong or you misunderstood.**
+
+**Questions to ask:**
+- Did I follow instructions correctly?
+- Are there conditions where X is right but Y is better for my case?
+- Is the skill outdated or incomplete?
+
+**Example:**
+```
+Skill said: "Use GPT-4 for complex tasks"
+But: GPT-4o is newer, faster, same quality, lower cost
+Skill needs update: GPT-4o is now preferred over GPT-4
+```
+
+### Approach Failed
+**Signal:** "This approach failed in ways not documented"
+
+**Questions to ask:**
+- Was the failure predictable?
+- Should the skill warn about this?
+- What's the workaround?
+
+**Example:**
+```
+Followed git-workflows to use git add -i (interactive add)
+Failed: Interactive mode not supported in Bash tool
+Add warning to skill about non-interactive environment
+```
+
+### Misunderstanding Caused Issue
+**Signal:** "I misunderstood the instruction and it caused problems"
+
+**Even if you made the mistake, ambiguous instructions should be clarified.**
+
+**Questions to ask:**
+- Would others misunderstand the same way?
+- What clarification would have prevented this?
+- Are there examples that would make it clearer?
+
+**Example:**
+```
+Skill said: "Use appropriate model for task"
+I chose GPT-4 (expensive) when GPT-4o-mini would've worked
+Add decision criteria: task complexity, budget, latency needs
+```
+
+## Discovery Signals
+
+### Gap Found
+**Signal:** "I needed to know X but no skill covers it"
+
+**Questions to ask:**
+- Is this narrow domain or broadly applicable?
+- Have I validated my approach?
+- Would this help others or just me?
+
+**Example:**
+```
+Needed to parse YAML frontmatter from markdown files.
+No skill covers this common pattern in document processing.
+Create: parsing-markdown skill or add to document patterns.
+```
+
+### Better Pattern Emerged
+**Signal:** "I've found a better way to structure this"
+
+**Questions to ask:**
+- Better in what way? (Faster, clearer, more reliable?)
+- What's the tradeoff?
+- Is this preference or objective improvement?
+
+**Example:**
+```
+Initially: Put all customer info in one block
+Better: Split into customer_business, customer_contact, customer_history
+Why: Each grows independently, clearer boundaries, easier to manage
+Objective improvement: Addresses size management and clarity
+```
+
+### New Tool/Technique
+**Signal:** "This tool/approach is much better than what we're using"
+
+**Questions to ask:**
+- Is this genuinely better or just different?
+- What's the learning curve?
+- Are there situations where old approach is still better?
+
+**Example:**
+```
+Discovered ripgrep (rg) is much faster than grep for codebase search.
+Already in use: Grep tool actually uses ripgrep under the hood
+No action needed, but validates existing choice.
+```
+
+## False Positives to Avoid
+
+### One-Off Edge Case
+**Signal:** "This weird situation needed a weird fix"
+
+**Usually NOT worth documenting unless:**
+- Edge case is common
+- Others will likely hit it
+- The fix is non-obvious
+
+### Personal Preference
+**Signal:** "I prefer doing it this way"
+
+**Only document if:**
+- Preference has objective advantages
+- Multiple valid approaches exist and should be explained
+- Tradeoffs are worth documenting
+
+### Temporary Workaround
+**Signal:** "This hack works for now"
+
+**Document IF:**
+- Others will hit same issue
+- Workaround is reliable enough
+- Note it as temporary/workaround
+
+**Don't document IF:**
+- Proper fix is known and achievable
+- Workaround is fragile
+- Problem is specific to your environment
+
+## Building Recognition Habit
+
+**During work:**
+- Keep mental note of "moments of friction"
+- Notice when you reference external docs repeatedly
+- Track time spent on recurring problems
+
+**After completing task:**
+- Review: What was hard? What took time?
+- Ask: Could this be prevented next time?
+- Consider: Would documenting this help others?
+
+**Over time:**
+- Pattern recognition improves
+- You'll spot learnings faster
+- Contributing becomes natural
+
+## When NOT to Contribute
+
+**CRITICAL:** Skills must be **general-purpose knowledge**, not project-specific solutions.
+
+Sometimes the learning is valuable for you but not for the repository:
+
+### ❌ Project-Specific Information
+
+**Do NOT contribute:**
+- Your company's API endpoints or credentials
+- Configuration specific to your environment
+- Project-specific file paths or structure
+- Internal tool names or processes unique to your organization
+- Solutions that only work in your exact setup
+
+**Example of what NOT to contribute:**
+```
+"Our API endpoint for user data is https://api.acme.com/v2/users. 
+Use header X-Acme-Key for authentication."
+
+This is configuration for one specific project, not generalizable knowledge.
+```
+
+### ❌ Personal Preferences
+
+**Do NOT contribute:**
+- "I prefer approach X" without objective benefit
+- Code organization that's just your style
+- Tool choices based on personal taste
+- Workflows that work for you but aren't broadly better
+
+**Example of what NOT to contribute:**
+```
+"I like to organize my code with all API calls in src/api/ directory."
+
+This is personal preference, not a pattern with clear advantages.
+```
+
+### ❌ One-Off Situations
+
+**Do NOT contribute:**
+- Temporary workarounds that will be obsolete soon
+- One-time edge cases unlikely to recur
+- Unusual situations unique to your context
+- Hacks that address symptoms not root causes
+
+**Example of what NOT to contribute:**
+```
+"When Docker container won't start, run docker network prune then restart."
+
+This addresses a symptom in your environment, not a general pattern.
+```
+
+### ❌ Overly Narrow Knowledge
+
+**Do NOT contribute:**
+- How you implemented one specific feature
+- Step-by-step for your exact use case
+- Details that only matter in narrow contexts
+- Information too specific to be broadly useful
+
+**Example of what NOT to contribute:**
+```
+"How I built the user authentication for my todo app using Firebase Auth 
+with Google OAuth and custom claims for role-based access."
+
+This is one specific implementation, not teaching general patterns.
+```
+
+### ✅ What TO Contribute Instead
+
+Transform specific learnings into general patterns:
+
+**Bad (too specific):**
+```
+"Fix Docker networking issue by running docker network prune"
+```
+
+**Good (general pattern):**
+```
+"Debugging network connectivity in containerized environments: 
+systematic approaches to isolate network vs. application issues"
+```
+
+**Bad (too specific):**
+```
+"Our database connection string for production"
+```
+
+**Good (general pattern):**
+```
+"Database connection pooling patterns and configuration strategies 
+for high-traffic applications"
+```
+
+**The test:** Would this help an agent working on a completely different project? If no → too specific.
+
+Focus contributions on **generalizable, validated, impactful learnings** that help the collective across different projects and contexts.
+
+
+============================================================
+END FILE: .fleet/letta/skills/meta/skill-learning/references/recognizing-learnings.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/meta/skill-learning/references/validation-criteria.md
+============================================================
+
+# Validation Criteria
+
+Before contributing changes to the repository, validate that your learning is solid and will benefit others. Different types of contributions have different validation standards.
+
+## Contribution Types
+
+### Tool/SDK Documentation
+**Purpose:** Help agents integrate widely-used tools with battle-tested insights
+
+**What qualifies as "widely-used":**
+- Has 1000+ GitHub stars OR
+- Appears in top search results for its problem domain OR  
+- Is a Letta product
+
+**Validation standards:**
+- Shares battle-tested insights beyond official docs (what you struggled with, not basic usage)
+- Documents common pitfalls, workarounds, and agent-specific patterns
+- Well-documented with working examples
+- Accurate and up-to-date
+- NOT just "getting started" guides (official docs already cover that)
+
+**Examples:** 
+- ✅ Claude SDK: Common pitfalls when streaming responses
+- ✅ Playwright: Testing patterns for AI-driven web apps  
+- ✅ MCP servers: Integration patterns for tool calling
+- ❌ "How to install FastAPI" (just use official docs)
+
+### Pattern Contributions
+**Purpose:** Share patterns discovered through agent experience
+
+**Validation standards:**
+- Seen 2-3+ times across different contexts
+- Tested and proven better than alternatives
+- Generalizable beyond specific projects
+- Explains tradeoffs and edge cases
+- Framework-specific patterns require validation through real agent experience (not just "well-established practices")
+
+**Examples:** 
+- General: API rate limiting patterns, memory architecture principles, error handling strategies
+- Framework-specific (validated): React patterns tested across multiple agent UI projects, FastAPI patterns proven in production
+
+## Core Validation Questions
+
+The questions below apply primarily to **pattern contributions**. Tool/SDK documentation follows different standards (see above).
+
+### 1. Did You Test That Your Approach Works Better?
+
+**What this means:**
+- Compare before and after
+- Measure improvement (time saved, errors prevented, clarity gained)
+- Try both approaches if possible
+
+**Example - PASS:**
+```
+Old approach: memory_rethink for all updates
+New approach: memory_insert for concurrent writes
+Test: Ran 10 concurrent update scenarios
+Result: 0 data loss with memory_insert vs 7/10 data loss with memory_rethink
+Validated: Yes, objectively better for concurrent scenarios
+```
+
+**Example - FAIL:**
+```
+Old approach: Use GPT-4o
+New approach: Use Claude Sonnet  
+Test: Tried once, seemed fine
+Result: Personal preference, no systematic comparison
+Validated: No, insufficient evidence
+```
+
+### 2. Is This Generalizable Beyond Your Specific Context?
+
+**CRITICAL:** This is the most important validation criterion. Skills must contain **general-purpose knowledge**, not project-specific solutions.
+
+**What this means:**
+- Works across different projects/contexts
+- Not dependent on your unique setup/environment
+- Solves problems many agents will encounter
+- Teaches patterns, principles, or widely-applicable practices
+
+**Example - PASS (General pattern):**
+```
+Pattern: API rate limiting with exponential backoff
+Context tested: OpenRouter, Anthropic API, OpenAI API
+Result: Pattern worked across all three
+Generalizable: Yes, applies to most HTTP APIs
+Why general: HTTP rate limiting is universal problem with standard solution
+```
+
+**Example - FAIL (Too specific):**
+```
+Pattern: Our company API endpoint for user data is https://api.acme.com/v2/users
+Context: My project at Acme Corp
+Result: Works for my project
+Generalizable: No, this is project-specific configuration
+Why not general: Only applies to one company's API
+```
+
+**Example - FAIL (Environment-specific):**
+```
+Pattern: Restart Docker container to fix database connection
+Context: My local setup with specific networking config
+Result: Works for me
+Generalizable: No, this is environment-specific workaround
+Why not general: Root cause likely in specific environment, not universal pattern
+```
+
+**Red flags for overly-specific contributions:**
+- Contains specific URLs, API keys, or credentials for one project
+- Describes configuration unique to your environment
+- Only tested in one narrow context
+- Solution is "what I did" vs "what pattern works generally"
+- Other agents won't encounter this exact situation
+
+### 3. Have You Seen This Pattern Multiple Times?
+
+**What this means:**
+- Not a one-off occurrence
+- Recurring problem or consistent improvement
+- Can be demonstrated with multiple examples
+
+**Example - PASS:**
+```
+Pattern: Playwright tests need networkidle wait
+Occurrences: Failed 5 times across 3 projects
+Fix applied: Consistent success after adding wait
+Evidence: Strong, recurring pattern
+```
+
+**Example - FAIL:**
+```
+Pattern: Specific npm package version fixes issue
+Occurrences: Once in my project
+Fix applied: Worked that one time
+Evidence: Weak, might be coincidental
+```
+
+### 4. Does This Address Real Gap vs Personal Preference?
+
+**What this means:**
+- Objective improvement vs subjective style
+- Solves actual problem vs changes working approach
+- Benefits others vs just how you like to work
+
+**Example - PASS:**
+```
+Gap: No documentation on handling streaming responses
+Impact: Agents repeatedly implement from scratch
+Benefit: Common pattern that saves time
+Real gap: Yes
+```
+
+**Example - FAIL:**
+```
+Preference: I prefer using arrow functions in JavaScript
+Current: Skill uses regular functions
+Benefit: Purely stylistic
+Real gap: No, just preference
+```
+
+### 5. Are There Edge Cases or Tradeoffs?
+
+**What this means:**
+- Identified when approach doesn't work
+- Documented limitations
+- Considered alternatives
+
+**Example - PASS:**
+```
+Approach: Use memory_insert for concurrent writes
+Tradeoff: Block grows faster, need monitoring
+Edge case: Single-agent can still use memory_replace for precision
+Documented: Yes, included both benefits and tradeoffs
+```
+
+**Example - FAIL:**
+```
+Approach: Always use GPT-4o-mini for cost savings
+Tradeoff: Not considered - some tasks need GPT-4o
+Edge case: Not identified - complex reasoning suffers
+Documented: No, presented as universal solution
+```
+
+## Evidence Strength Levels
+
+### Strong Evidence ✅
+- Multiple independent occurrences (3+)
+- Measured improvement (time, errors, cost)
+- Tested across different contexts
+- Confirmed with documentation/community
+- Has clear before/after comparison
+
+### Moderate Evidence ⚠️
+- 2-3 occurrences
+- Logical reasoning for improvement
+- Works in your context reliably
+- Some validation but not exhaustive
+- Can articulate trade-offs
+
+### Weak Evidence ❌
+- Single occurrence
+- "Feels better" without measurement
+- Untested in other contexts
+- Based on assumption not experience
+- No comparison with alternatives
+
+**Contribution guideline:** 
+- Strong evidence → Contribute confidently
+- Moderate evidence → Contribute with caveats noted
+- Weak evidence → More testing needed before contributing
+
+## Specific vs General: Examples
+
+Understanding the difference between project-specific solutions and general-purpose knowledge is critical.
+
+### ❌ Too Specific (Do NOT contribute)
+
+**Example 1: Project configuration**
+```
+Skill: "How to connect to our company database"
+Content: "Use postgres://user:pass@db.acme.com:5432/production"
+Why bad: Only applies to one company's infrastructure
+```
+
+**Example 2: One-off workaround**
+```
+Skill: "Fix for my Docker networking issue"
+Content: "Run docker network prune && restart container"
+Why bad: Addresses symptom in specific environment, not root cause or pattern
+```
+
+**Example 3: Personal workflow**
+```
+Skill: "My preferred way to organize code"
+Content: "I like to put all API calls in src/api/ folder"
+Why bad: Personal preference without objective benefit or widespread adoption
+```
+
+**Example 4: Narrow tool usage**
+```
+Skill: "How I used library X for project Y"
+Content: Specific implementation details for one project
+Why bad: Too narrow - describes one implementation vs teaching general patterns
+```
+
+### ✅ Appropriately General (Good contributions)
+
+**Example 1: General pattern**
+```
+Skill: "Database connection pooling patterns"
+Content: When to use pooling, configuration strategies, common pitfalls
+Why good: Applies to any database connection, teaches principles
+```
+
+**Example 2: Universal problem**
+```
+Skill: "Handling API rate limits with exponential backoff"
+Content: Pattern, implementation strategies, when to use
+Why good: Common problem with well-established solution, broadly applicable
+```
+
+**Example 3: Framework-agnostic principle**
+```
+Skill: "Error handling in async operations"
+Content: Strategies for retry, timeout, graceful degradation
+Why good: Teaches concepts that apply across languages/frameworks
+```
+
+**Example 4: Tool pattern**
+```
+Skill: "Testing strategies for web applications"
+Content: When to use unit vs integration vs e2e tests, how to structure tests
+Why good: Principles apply regardless of specific testing framework
+```
+
+### The Test: "Would this help an agent working on a different project?"
+
+**Ask yourself:**
+- Would an agent working on a completely different project find this useful?
+- Does this teach a pattern/principle or just document my specific setup?
+- Am I solving a universal problem or my unique situation?
+- Is this "how to think about X" or "what I did for Y"?
+
+**If the answer is "this only helps agents working on my exact project" → Too specific**
+
+## Validation Methods
+
+### Method 1: Direct Testing
+
+**Process:**
+1. Implement old approach
+2. Implement new approach
+3. Compare objectively
+4. Document results
+
+**Example:**
+```
+Testing model selection for code review task:
+
+GPT-4o-mini:
+- Time: 2.3s average
+- Cost: $0.002 per review
+- Quality: Missed 2/10 subtle issues
+
+GPT-4o:
+- Time: 3.1s average  
+- Cost: $0.012 per review
+- Quality: Caught all issues
+
+Conclusion: GPT-4o worth cost for code review quality
+```
+
+### Method 2: Comparative Analysis
+
+**Process:**
+1. Search for alternative approaches
+2. Compare pros/cons
+3. Identify use cases for each
+4. Document decision criteria
+
+**Example:**
+```
+Analyzing memory update tools:
+
+memory_insert:
++ Safe for concurrent writes
++ Simple append operation
+- Block grows unbounded
+
+memory_replace:
++ Precise edits
++ Control over size
+- Race conditions possible
+
+memory_rethink:
++ Complete reorganization
++ Can consolidate/summarize
+- Highest concurrency risk
+
+Recommendation: Choose based on concurrency needs and update patterns
+```
+
+### Method 3: Community Validation
+
+**Process:**
+1. Check official documentation
+2. Search community discussions
+3. Verify with examples from others
+4. Cite sources
+
+**Example:**
+```
+Pattern: Streaming responses from OpenAI
+
+Verified:
+- OpenAI docs show stream=true parameter
+- Letta forum has 3 threads about streaming
+- Pattern documented in OpenAI cookbook
+
+Confidence: High, community-validated pattern
+```
+
+### Method 4: Reasoning from First Principles
+
+**Process:**
+1. Understand underlying mechanism
+2. Reason about why approach works
+3. Identify assumptions
+4. Test assumptions if possible
+
+**Example:**
+```
+Pattern: Use environment variables for API keys
+
+Reasoning:
+- Keeps secrets out of code
+- Different keys per environment (dev/prod)
+- Standard practice across platforms
+- Security principle: separation of config and code
+
+Assumptions:
+- Environment is secure
+- Deployment supports env vars
+
+Validation: Principle-based, industry standard
+```
+
+## Red Flags (Don't Contribute Yet)
+
+🚩 **"It worked once so it must be the answer"**
+→ Need more instances
+
+🚩 **"This is obviously better"**  
+→ Need objective comparison
+
+🚩 **"Everyone should do it this way"**
+→ Consider different use cases
+
+🚩 **"I prefer this approach"**
+→ Separate preference from improvement
+
+🚩 **"The skill is wrong because I had a problem"**
+→ Verify skill isn't right for different context
+
+🚩 **"This hack fixes it"**
+→ Understand why it works, ensure it's reliable
+
+## Validation Checklist
+
+Before submitting PR, confirm:
+
+- [ ] I tested my approach works reliably
+- [ ] I compared it with existing approach or alternatives
+- [ ] I've seen this pattern 2+ times OR have strong evidence
+- [ ] This helps others, not just my specific case
+- [ ] I documented tradeoffs and edge cases
+- [ ] I considered when NOT to use this approach
+- [ ] I can explain WHY this is better
+- [ ] I preserved valid existing information
+
+If all checked → Strong contribution
+
+If 5-6 checked → Good contribution with caveats
+
+If <5 checked → More validation needed
+
+## Examples of Validated Contributions
+
+### Example 1: Well-Validated
+
+**Contribution:** Add rate limiting pattern to API integration
+
+**Validation:**
+- ✅ Tested across 5 different APIs
+- ✅ Prevented 100% of rate limit errors in testing
+- ✅ Pattern is standard (documented in HTTP RFCs)
+- ✅ Generalizable to any HTTP API
+- ✅ Documented when to use (high-traffic scenarios)
+- ✅ Noted trade-off (adds retry latency)
+
+**Verdict:** Ready to contribute
+
+### Example 2: Needs More Work
+
+**Contribution:** Always use Claude Sonnet instead of GPT-4o
+
+**Validation:**
+- ❌ Only tried on one type of task
+- ❌ Subjective assessment ("felt better")
+- ❌ Didn't measure quality difference
+- ❌ Presented as universal when context-dependent
+- ❌ No discussion of trade-offs
+- ✅ Used both models at least
+
+**Verdict:** Need systematic comparison across task types
+
+### Example 3: Validated with Caveats
+
+**Contribution:** Add warning about interactive git commands
+
+**Validation:**
+- ✅ git add -i failed consistently in Bash tool
+- ✅ Clear reason why (non-interactive environment)
+- ✅ Helps others avoid same error
+- ⚠️ Only tested in Letta Code Bash tool environment
+- ✅ Documented the limitation clearly
+- ✅ Provided alternative approach
+
+**Verdict:** Good contribution, specify environment context
+
+## When in Doubt
+
+**Ask yourself:**
+- "Would I want to find this information if I were another agent?"
+- "Is my evidence strong enough that I'd bet on it working?"
+- "Have I done due diligence to validate this?"
+
+**If unsure:**
+- Add more testing
+- Seek feedback in discussion before PR
+- Mark contribution as "preliminary" or "needs validation"
+- Include your uncertainty in the PR description
+
+**Remember:** It's better to validate thoroughly than to contribute questionable information that misleads others.
+
+
+============================================================
+END FILE: .fleet/letta/skills/meta/skill-learning/references/validation-criteria.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/rlm/SKILL.md
+============================================================
+
+---
+name: rlm
+description: Run a Recursive Language Model-style loop for long-context tasks. Uses a persistent local Python REPL and an rlm-subcall subagent as the sub-LLM (llm_query).
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - Bash
+---
+
+# rlm (Recursive Language Model workflow)
+
+Use this Skill when:
+- The user provides (or references) a very large context file (docs, logs, transcripts, scraped webpages) that won't fit comfortably in chat context.
+- You need to iteratively inspect, search, chunk, and extract information from that context.
+- You can delegate chunk-level analysis to a subagent.
+
+## Mental model
+
+- Main Claude Code conversation = the root LM.
+- Persistent Python REPL (`rlm_repl.py`) = the external environment.
+- Subagent `rlm-subcall` = the sub-LM used like `llm_query`.
+
+## How to run
+
+### Inputs
+
+This Skill reads `$ARGUMENTS`. Accept these patterns:
+- `context=<path>` (required): path to the file containing the large context.
+- `query=<question>` (required): what the user wants.
+- Optional: `chunk_chars=<int>` (default ~200000) and `overlap_chars=<int>` (default 0).
+
+If the user didn't supply arguments, ask for:
+1) the context file path, and
+2) the query.
+
+### Step-by-step procedure
+
+1. Initialise the REPL state
+   ```bash
+   python3 .claude/skills/rlm/scripts/rlm_repl.py init <context_path>
+   python3 .claude/skills/rlm/scripts/rlm_repl.py status
+   ```
+
+2. Scout the context quickly
+   ```bash
+   python3 .claude/skills/rlm/scripts/rlm_repl.py exec -c "print(peek(0, 3000))"
+   python3 .claude/skills/rlm/scripts/rlm_repl.py exec -c "print(peek(len(content)-3000, len(content)))"
+   ```
+
+3. Choose a chunking strategy
+   - Prefer semantic chunking if the format is clear (markdown headings, JSON objects, log timestamps).
+   - Otherwise, chunk by characters (size around chunk_chars, optional overlap).
+
+4. Materialise chunks as files (so subagents can read them)
+   ```bash
+   python3 .claude/skills/rlm/scripts/rlm_repl.py exec <<'PY'
+   paths = write_chunks('.claude/rlm_state/chunks', size=200000, overlap=0)
+   print(len(paths))
+   print(paths[:5])
+   PY
+   ```
+
+5. Subcall loop (delegate to rlm-subcall)
+   - For each chunk file, invoke the rlm-subcall subagent with:
+     - the user query,
+     - the chunk file path,
+     - and any specific extraction instructions.
+   - Keep subagent outputs compact and structured (JSON preferred).
+   - Append each subagent result to buffers (either manually in chat, or by pasting into a REPL add_buffer(...) call).
+
+6. Synthesis
+   - Once enough evidence is collected, synthesise the final answer in the main conversation.
+   - Optionally ask rlm-subcall once more to merge the collected buffers into a coherent draft.
+
+## Guardrails
+
+- Do not paste large raw chunks into the main chat context.
+- Use the REPL to locate exact excerpts; quote only what you need.
+- Subagents cannot spawn other subagents. Any orchestration stays in the main conversation.
+- Keep scratch/state files under .claude/rlm_state/.
+
+
+============================================================
+END FILE: .fleet/letta/skills/rlm/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/rlm/scripts/rlm_repl.py
+============================================================
+
+#!/usr/bin/env python3
+"""Persistent mini-REPL for RLM-style workflows in Claude Code.
+
+This script provides a *stateful* Python environment across invocations by
+saving a pickle file to disk. It is intentionally small and dependency-free.
+
+Typical flow:
+  1) Initialise context:
+       python rlm_repl.py init path/to/context.txt
+  2) Execute code repeatedly (state persists):
+       python rlm_repl.py exec -c 'print(len(content))'
+       python rlm_repl.py exec <<'PYCODE'
+       # you can write multi-line code
+       hits = grep('TODO')
+       print(hits[:3])
+       PYCODE
+
+The script injects these variables into the exec environment:
+  - context: dict with keys {path, loaded_at, content}
+  - content: string alias for context['content']
+  - buffers: list[str] for storing intermediate text results
+
+It also injects helpers:
+  - peek(start=0, end=1000) -> str
+  - grep(pattern, max_matches=20, window=120, flags=0) -> list[dict]
+  - chunk_indices(size=200000, overlap=0) -> list[(start,end)]
+  - write_chunks(out_dir, size=200000, overlap=0, prefix='chunk') -> list[str]
+  - add_buffer(text: str) -> None
+
+Security note:
+  This runs arbitrary Python via exec. Treat it like running code you wrote.
+"""
+
+from __future__ import annotations
+
+import argparse
+import io
+import os
+import pickle
+import re
+import sys
+import textwrap
+import time
+import traceback
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+
+DEFAULT_STATE_PATH = Path(".claude/rlm_state/state.pkl")
+DEFAULT_MAX_OUTPUT_CHARS = 8000
+
+

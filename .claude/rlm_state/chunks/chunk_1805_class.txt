@@ -1,0 +1,276 @@
+<!-- Chunk 1805: bytes 7488603-7499849, type=class -->
+class ConversationService(ConversationHandlers):
+    """
+    Service for orchestrating conversational skill creation.
+
+    Manages state, DSPy module execution, and business logic for
+    interactive skill creation workflow.
+    """
+
+    def __init__(
+        self,
+        taxonomy_manager: TaxonomyManager,
+        skills_root: Path | None = None,
+    ):
+        """
+        Initialize conversation service.
+
+        Args:
+            taxonomy_manager: Taxonomy management instance
+            skills_root: Skills root directory (optional)
+
+        """
+        self.taxonomy = taxonomy_manager
+        self.skills_root = skills_root
+
+        # TODO: Re-enable when modules are refactored
+        # # Initialize conversational modules
+        # self.interpret_intent = InterpretIntentModule()
+        # self.detect_multi_skill = DetectMultiSkillModule()
+        # self.generate_question = GenerateQuestionModule()
+        # self.assess_readiness = AssessReadinessModule()
+        # self.deep_understanding_module = DeepUnderstandingModule()
+        # self.understanding_summary = UnderstandingSummaryModule()
+        # self.confirm_understanding = ConfirmUnderstandingModule()
+        # self.present_skill = PresentSkillModule()
+        # self.process_feedback = ProcessFeedbackModule()
+        # self.suggest_tests = SuggestTestsModule()
+        # self.verify_tdd = VerifyTDDModule()
+        # self.enhance_skill = EnhanceSkillModule()
+        #
+        # # Initialize Phase modules for creation workflow
+        # self.phase1 = Phase1UnderstandingModule()
+        # self.phase2 = Phase2GenerationModule()
+        # self.phase3 = Phase3ValidationModule()
+
+    async def _execute_with_streaming(
+        self,
+        module: dspy.Module,
+        thinking_callback: Callable[[str], None] | None = None,
+        **kwargs,
+    ) -> tuple[dict[str, Any], str]:
+        """
+        Execute a DSPy module with async streaming support.
+
+        Args:
+            module: DSPy module to execute
+            thinking_callback: Optional callback for streaming thinking chunks
+            **kwargs: Arguments to pass to the module
+
+        Returns:
+            Tuple of (prediction result, thinking content string)
+
+        """
+        # Create streaming wrapper in async mode
+        streaming_module = create_streaming_module(
+            module,
+            reasoning_field="reasoning",
+            async_mode=True,
+        )
+
+        thinking_parts: list[str] = []
+        prediction: Any = None
+
+        async for chunk in streaming_module(**kwargs):
+            if isinstance(chunk, dspy.streaming.StreamResponse):
+                # Collect thinking tokens
+                content = chunk.chunk
+                thinking_parts.append(content)
+                if thinking_callback:
+                    thinking_callback(content)
+            elif isinstance(chunk, dspy.streaming.StatusMessage):
+                logger.debug(f"Status: {chunk.message}")
+            elif isinstance(chunk, dspy.Prediction):
+                prediction = chunk
+
+        thinking_content = "".join(thinking_parts)
+
+        # Handle different return types from DSPy modules
+        if isinstance(prediction, dspy.Prediction):
+            # If labels() is available (Prediction object), use it
+            if hasattr(prediction, "labels"):
+                try:
+                    result = dict(prediction)
+                except (ValueError, TypeError):
+                    # Fallback if iteration fails
+                    result = {
+                        k: getattr(prediction, k)
+                        for k in dir(prediction)
+                        if not k.startswith("_") and k != "labels"
+                    }
+            else:
+                result = {
+                    k: getattr(prediction, k) for k in dir(prediction) if not k.startswith("_")
+                }
+        elif isinstance(prediction, dict):
+            result = prediction
+        elif prediction is None:
+            result = {}
+        else:
+            result = {"value": prediction}
+
+        return result, thinking_content
+
+    async def respond(
+        self,
+        user_message: str,
+        session: ConversationSession,
+        thinking_callback: Callable[[str], None] | None = None,
+    ) -> AgentResponse:
+        """
+        Generate conversational response to user message.
+
+        Args:
+            user_message: User's message
+            session: Current conversation session
+            thinking_callback: Optional callback for real-time thinking
+
+        Returns:
+            AgentResponse with message and state updates
+
+        """
+        try:
+            prior_state = session.state
+
+            # Handle empty/continue messages for automatic progression
+            user_message_trimmed = user_message.strip().lower() if user_message else ""
+            is_continue = user_message_trimmed in ("", "continue", "proceed", "next")
+
+            # Don't add empty messages to history
+            if user_message.strip():
+                session.messages.append({"role": "user", "content": user_message})
+
+            # Route based on current state
+            if session.state == ConversationState.EXPLORING:
+                response = await self.handle_exploring(user_message, session, thinking_callback)
+            elif session.state == ConversationState.DEEP_UNDERSTANDING:
+                response = await self.handle_deep_understanding(
+                    user_message, session, thinking_callback
+                )
+            elif session.state == ConversationState.MULTI_SKILL_DETECTED:
+                response = self.handle_multi_skill(user_message, session)
+            elif session.state == ConversationState.CONFIRMING:
+                response = await self.handle_confirmation(user_message, session, thinking_callback)
+            elif session.state == ConversationState.CREATING:
+                response = self.handle_creating(user_message, session)
+            elif session.state == ConversationState.TDD_RED_PHASE:
+                if is_continue:
+                    response = await self.execute_tdd_red_phase(session, thinking_callback)
+                else:
+                    response = await self.handle_tdd_red(user_message, session, thinking_callback)
+            elif session.state == ConversationState.TDD_GREEN_PHASE:
+                if is_continue:
+                    response = await self.execute_tdd_green_phase(session, thinking_callback)
+                else:
+                    response = await self.handle_tdd_green(user_message, session, thinking_callback)
+            elif session.state == ConversationState.TDD_REFACTOR_PHASE:
+                response = await self.handle_tdd_refactor(user_message, session, thinking_callback)
+            elif session.state == ConversationState.REVIEWING:
+                response = await self.handle_reviewing(user_message, session, thinking_callback)
+            elif session.state == ConversationState.REVISING:
+                response = await self.handle_revising(user_message, session, thinking_callback)
+            elif session.state == ConversationState.CHECKLIST_COMPLETE:
+                response = await self.handle_checklist_complete(
+                    user_message, session, thinking_callback
+                )
+            else:
+                response = AgentResponse(
+                    message="I'm ready to help you create a skill. What would you like to create?",
+                    state=ConversationState.EXPLORING,
+                    action="greet",
+                )
+
+            # Attach compact progress + readiness information to the user-visible message.
+            response = self._decorate_with_progress(response, session, prior_state)
+
+            # Add agent response to history
+            if response.state is not None:
+                session.state = response.state
+            session.messages.append({"role": "assistant", "content": response.message})
+            if response.thinking_content:
+                session.messages.append({"role": "thinking", "content": response.thinking_content})
+
+            return response
+
+        except Exception as e:
+            logger.exception("Error in conversation service")
+            import traceback
+
+            tb = traceback.format_exc()
+            return AgentResponse(
+                message=f"I encountered an error: {str(e)}\n\nTraceback:\n{tb}",
+                state=session.state,
+                action="error",
+                requires_user_input=True,
+            )
+
+    def _decorate_with_progress(
+        self,
+        response: AgentResponse,
+        session: ConversationSession,
+        prior_state: ConversationState,
+    ) -> AgentResponse:
+        """
+        Add compact, consistent progress + readiness info to messages/data.
+
+        This helps prevent "silent loops" and makes it obvious whether the agent is
+        moving forward, stuck, or missing info.
+        """
+        next_state = response.state or session.state
+
+        readiness_score = None
+        if isinstance(response.data, dict):
+            readiness_score = response.data.get("readiness_score")
+        if readiness_score is None and session.deep_understanding:
+            readiness_score = session.deep_understanding.get("readiness_score")
+
+        # Only include if parseable; keep user-facing formatting stable.
+        readiness_str = ""
+        if isinstance(readiness_score, (int, float)):
+            readiness_str = f"{float(readiness_score):.2f}"
+
+        # Multi-skill progress, if relevant.
+        multi_str = ""
+        if session.multi_skill_queue:
+            total = len(session.multi_skill_queue)
+            idx = max(0, min(session.current_skill_index, max(0, total - 1))) + 1
+            multi_str = f" | Skill {idx}/{total}"
+
+        progress_line = f"Progress: {prior_state.value} -> {next_state.value}{multi_str}"
+        if readiness_str:
+            progress_line += f" | Readiness: {readiness_str} (target >= 0.80)"
+
+        # Expose in machine-readable payload as well.
+        response.data = dict(response.data or {})
+        response.data.setdefault("readiness_score", readiness_score)
+        response.data["progress"] = {
+            "prior_state": prior_state.value,
+            "state": next_state.value,
+            "readiness_score": readiness_score,
+            "multi_skill_index": session.current_skill_index,
+            "multi_skill_total": len(session.multi_skill_queue),
+        }
+
+        # Add as a footer so it doesn't break any existing parsing of message bodies.
+        if response.message:
+            response.message = f"{response.message}\n\n---\n{progress_line}"
+        else:
+            response.message = f"---\n{progress_line}"
+
+        return response
+
+
+============================================================
+END FILE: src/skill_fleet/core/services/conversation/engine.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/services/conversation/handlers/__init__.py
+============================================================
+
+"""Conversation handler exports."""
+
+from .exploration import ExplorationHandlers
+from .tdd import TDDHandlers
+
+

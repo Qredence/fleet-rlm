@@ -1,0 +1,68 @@
+<!-- Chunk 1561: bytes 6437052-6438825, type=function -->
+def _extract_usage_example_code_blocks(skill_md: str) -> dict[str, str]:
+    """
+    Extract fenced code blocks under the '## Usage Examples' section.
+
+    Writes as simple `example_N.<ext>` files (best-effort).
+    """
+    lines = skill_md.splitlines()
+    start = None
+    for idx, line in enumerate(lines):
+        if line.strip() == "## Usage Examples":
+            start = idx + 1
+            break
+    if start is None:
+        return {}
+
+    end = len(lines)
+    for idx in range(start, len(lines)):
+        # Stop at the next section at the same/higher level.
+        if lines[idx].startswith("#") and lines[idx].lstrip().startswith("## "):
+            end = idx
+            break
+
+    section = lines[start:end]
+
+    ext_for_lang = {
+        "python": "py",
+        "py": "py",
+        "bash": "sh",
+        "sh": "sh",
+        "zsh": "sh",
+        "shell": "sh",
+        "ini": "ini",
+        "toml": "toml",
+        "yaml": "yml",
+        "yml": "yml",
+        "json": "json",
+    }
+
+    examples: dict[str, str] = {}
+    i = 0
+    example_idx = 0
+    while i < len(section):
+        fence = _FENCE_START_RE.match(section[i])
+        if not fence:
+            i += 1
+            continue
+
+        lang = (fence.group("lang") or "").lower()
+        i += 1
+        body: list[str] = []
+        while i < len(section) and not section[i].strip().startswith("```"):
+            body.append(section[i])
+            i += 1
+
+        if i < len(section) and section[i].strip().startswith("```"):
+            example_idx += 1
+            ext = ext_for_lang.get(lang, "txt")
+            filename = f"example_{example_idx}.{ext}"
+            examples[filename] = "\n".join(body).rstrip() + "\n"
+            i += 1
+            continue
+
+        i += 1
+
+    return examples
+
+

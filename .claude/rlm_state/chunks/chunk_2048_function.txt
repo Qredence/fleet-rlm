@@ -1,0 +1,8 @@
+<!-- Chunk 2048: bytes 7953545-7953678, type=function -->
+def setup_mock_lm():
+    """Setup mock LM for testing."""
+    mock_lm = MockLM()
+    dspy.configure(lm=mock_lm)
+    return mock_lm
+
+

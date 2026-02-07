@@ -1,0 +1,75 @@
+<!-- Chunk 295: bytes 368646-371036, type=function -->
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="rlm_repl",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent(
+            """\
+            Persistent mini-REPL for RLM-style workflows.
+
+            Examples:
+              python rlm_repl.py init context.txt
+              python rlm_repl.py status
+              python rlm_repl.py exec -c "print(len(content))"
+              python rlm_repl.py exec <<'PY'
+              print(peek(0, 2000))
+              PY
+            """
+        ),
+    )
+    p.add_argument(
+        "--state",
+        default=str(DEFAULT_STATE_PATH),
+        help=f"Path to state pickle (default: {DEFAULT_STATE_PATH})",
+    )
+
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    p_init = sub.add_parser("init", help="Initialise state from a context file")
+    p_init.add_argument("context", help="Path to the context file")
+    p_init.add_argument(
+        "--max-bytes",
+        type=int,
+        default=None,
+        help="Optional cap on bytes read from the context file",
+    )
+    p_init.set_defaults(func=cmd_init)
+
+    p_status = sub.add_parser("status", help="Show current state summary")
+    p_status.add_argument(
+        "--show-vars", action="store_true", help="List persisted variable names"
+    )
+    p_status.set_defaults(func=cmd_status)
+
+    p_reset = sub.add_parser("reset", help="Delete the current state file")
+    p_reset.set_defaults(func=cmd_reset)
+
+    p_export = sub.add_parser(
+        "export-buffers", help="Export buffers list to a text file"
+    )
+    p_export.add_argument("out", help="Output file path")
+    p_export.set_defaults(func=cmd_export_buffers)
+
+    p_exec = sub.add_parser("exec", help="Execute Python code with persisted state")
+    p_exec.add_argument(
+        "-c",
+        "--code",
+        default=None,
+        help="Inline code string. If omitted, reads code from stdin.",
+    )
+    p_exec.add_argument(
+        "--max-output-chars",
+        type=int,
+        default=DEFAULT_MAX_OUTPUT_CHARS,
+        help=f"Truncate stdout/stderr to this many characters (default: {DEFAULT_MAX_OUTPUT_CHARS})",
+    )
+    p_exec.add_argument(
+        "--warn-unpickleable",
+        action="store_true",
+        help="Warn on stderr when variables could not be persisted",
+    )
+    p_exec.set_defaults(func=cmd_exec)
+
+    return p
+
+

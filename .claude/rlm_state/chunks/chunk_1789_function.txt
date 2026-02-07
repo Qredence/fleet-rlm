@@ -1,0 +1,117 @@
+<!-- Chunk 1789: bytes 7456592-7460876, type=function -->
+def phase2_validity_metric(
+    gold: Any,
+    pred: Any,
+    trace: Any = None,
+) -> float:
+    """
+    Metric function for MultiChainComparison.
+
+    This function evaluates Phase 2 outputs against the validation criteria
+    from guidelines lines 1066-1073 and returns a score from 0.0 to 1.0.
+
+    Evaluates:
+    1. Type determination (must use decision matrix) - 20%
+    2. Weight assignment (must follow guidelines) - 20%
+    3. Load priority (must follow decision tree) - 20%
+    4. Capability count (must be 3-7) - 20%
+    5. Dependency validation (must pass 5 rules) - 20%
+
+    Args:
+        gold: Ground truth (not used in current implementation)
+        pred: Prediction object with Phase 2 outputs
+        trace: Optional trace information (not used)
+
+    Returns:
+        Float score from 0.0 to 1.0
+
+    Examples:
+        >>> # A perfect Phase 2 result
+        >>> result = {
+        ...     "skill_type": "technical",
+        ...     "weight": "medium",
+        ...     "load_priority": "task_specific",
+        ...     "capabilities": ["cap1", "cap2", "cap3", "cap4", "cap5"],
+        ...     "dependencies_valid": True
+        ... }
+        >>> score = phase2_validity_metric({}, result)
+        >>> print(score)  # Should be 1.0
+
+    """
+    score = 0.0
+
+    # Convert pred to dict if it's not already
+    if hasattr(pred, "model_dump"):
+        pred_dict = pred.model_dump()
+    elif isinstance(pred, dict):
+        pred_dict = pred
+    else:
+        pred_dict = dict(pred)
+
+    # ========================================================================
+    # Check 1: Type is valid (8-type decision matrix)
+    # From guidelines line 1071
+    # ========================================================================
+    skill_type = pred_dict.get("confirmed_type") or pred_dict.get("skill_type", "")
+    if skill_type in VALID_SKILL_TYPES:
+        score += 0.20
+        logger.debug(f"✓ Valid skill_type: {skill_type}")
+    else:
+        logger.debug(f"✗ Invalid skill_type: {skill_type}")
+
+    # ========================================================================
+    # Check 2: Weight is valid (follows guidelines matrix)
+    # From guidelines line 1072
+    # ========================================================================
+    weight = pred_dict.get("weight", "")
+    if weight in VALID_WEIGHTS:
+        score += 0.20
+        logger.debug(f"✓ Valid weight: {weight}")
+    else:
+        logger.debug(f"✗ Invalid weight: {weight}")
+
+    # ========================================================================
+    # Check 3: Load priority is valid (follows decision tree)
+    # From guidelines line 1073
+    # ========================================================================
+    load_priority = pred_dict.get("load_priority", "")
+    if load_priority in VALID_PRIORITIES:
+        score += 0.20
+        logger.debug(f"✓ Valid load_priority: {load_priority}")
+    else:
+        logger.debug(f"✗ Invalid load_priority: {load_priority}")
+
+    # ========================================================================
+    # Check 4: Capability count in range (3-7)
+    # From guidelines line 1068
+    # ========================================================================
+    capabilities = pred_dict.get("capabilities", [])
+    cap_count = len(capabilities) if isinstance(capabilities, list) else 0
+
+    if 3 <= cap_count <= 7:
+        score += 0.20
+        logger.debug(f"✓ Valid capability count: {cap_count}")
+    elif cap_count < 3:
+        # Partial credit for too few
+        score += 0.10
+        logger.debug(f"✗ Too few capabilities: {cap_count} (partial credit)")
+    else:
+        # No credit for too many
+        logger.debug(f"✗ Too many capabilities: {cap_count}")
+
+    # ========================================================================
+    # Check 5: Dependencies valid (5 composition rules)
+    # From guidelines lines 318-344
+    # ========================================================================
+    dependencies_valid = pred_dict.get("dependencies_valid", False)
+    if dependencies_valid:
+        score += 0.20
+        logger.debug("✓ Dependencies validated")
+    else:
+        logger.debug("✗ Dependencies not validated")
+
+    logger.info(f"Phase 2 validity score: {score:.2f}")
+
+    return score
+
+

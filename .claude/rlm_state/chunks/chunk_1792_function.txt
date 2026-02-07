@@ -1,0 +1,91 @@
+<!-- Chunk 1792: bytes 7465540-7468251, type=function -->
+def metadata_completeness_reward(args, pred: dspy.Prediction) -> float:
+    """
+    Score metadata completeness and agentskills.io compliance.
+
+    Checks:
+    - skill_id with valid path format
+    - name in kebab-case (agentskills.io)
+    - description of reasonable length
+    - capabilities list
+    - type and weight fields
+
+    Returns:
+        float: Score between 0.0 and 1.0
+
+    """
+    score = 0.0
+
+    try:
+        # Handle both Pydantic model and dict/JSON string
+        meta = getattr(pred, "skill_metadata", None)
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except json.JSONDecodeError:
+                return 0.0
+
+        if meta is None:
+            return 0.0
+
+        # For Pydantic models, convert to dict-like access
+        def get_field(obj, field, default=None):
+            """
+            Get field value from object or dict with fallback.
+
+            Args:
+                obj: Object or dict to get field from
+                field: Field name to retrieve
+                default: Default value if field not found
+
+            Returns:
+                Field value or default if not found
+
+            """
+            if hasattr(obj, field):
+                return getattr(obj, field)
+            if isinstance(obj, dict):
+                return obj.get(field, default)
+            return default
+
+        # skill_id with path format
+        skill_id = get_field(meta, "skill_id", "")
+        if skill_id and "/" in skill_id:
+            score += 0.2
+
+        # name in kebab-case
+        name = get_field(meta, "name", "")
+        if name and re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", name):
+            score += 0.2
+        elif name:
+            score += 0.1  # Partial credit for having a name
+
+        # description length (50-1024 chars)
+        description = get_field(meta, "description", "")
+        if 50 <= len(description) <= 1024:
+            score += 0.2
+        elif len(description) > 20:
+            score += 0.1
+
+        # capabilities (2-10 items)
+        capabilities = get_field(meta, "capabilities", [])
+        if isinstance(capabilities, list) and 2 <= len(capabilities) <= 10:
+            score += 0.2
+        elif isinstance(capabilities, list) and len(capabilities) >= 1:
+            score += 0.1
+
+        # type and weight fields present
+        skill_type = get_field(meta, "type", "")
+        weight = get_field(meta, "weight", "")
+        if skill_type and weight:
+            score += 0.2
+        elif skill_type or weight:
+            score += 0.1
+
+    except Exception as e:
+        logger.warning(f"Error in metadata_completeness_reward: {e}")
+        return 0.0
+
+    return min(score, 1.0)
+
+

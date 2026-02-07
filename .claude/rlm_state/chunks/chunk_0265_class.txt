@@ -1,0 +1,129 @@
+<!-- Chunk 265: bytes 327299-332521, type=class -->
+class ComplexityAnalyzer(ast.NodeVisitor):
+    """Analyze complexity metrics for Python code."""
+
+    def __init__(self, filepath: str, max_complexity: int = 10, max_length: int = 50):
+        self.filepath = filepath
+        self.max_complexity = max_complexity
+        self.max_length = max_length
+        self.issues: list[dict[str, Any]] = []
+        self.current_function: str | None = None
+        self.current_depth = 0
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Visit function definitions and check complexity."""
+        self._analyze_function(node, is_async=False)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Visit async function definitions and check complexity."""
+        self._analyze_function(node, is_async=True)
+        self.generic_visit(node)
+
+    def _analyze_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, is_async: bool) -> None:
+        """Analyze a function for complexity issues."""
+        func_name = node.name
+        func_type = "async function" if is_async else "function"
+
+        # Calculate cyclomatic complexity
+        complexity = self._calculate_complexity(node)
+        if complexity > self.max_complexity:
+            self.issues.append({
+                "type": "high_complexity",
+                "severity": "warning",
+                "line": node.lineno,
+                "function": func_name,
+                "complexity": complexity,
+                "message": (
+                    f"{func_type.capitalize()} '{func_name}' has cyclomatic complexity of {complexity} "
+                    f"(threshold: {self.max_complexity}). Consider breaking it into smaller functions."
+                ),
+            })
+
+        # Calculate function length
+        func_length = node.end_lineno - node.lineno + 1
+        if func_length > self.max_length:
+            self.issues.append({
+                "type": "long_function",
+                "severity": "info",
+                "line": node.lineno,
+                "function": func_name,
+                "length": func_length,
+                "message": (
+                    f"{func_type.capitalize()} '{func_name}' is {func_length} lines long "
+                    f"(threshold: {self.max_length}). Consider breaking it into smaller functions."
+                ),
+            })
+
+        # Check nesting depth
+        max_depth = self._calculate_max_depth(node)
+        if max_depth > 4:
+            self.issues.append({
+                "type": "deep_nesting",
+                "severity": "warning",
+                "line": node.lineno,
+                "function": func_name,
+                "depth": max_depth,
+                "message": (
+                    f"{func_type.capitalize()} '{func_name}' has maximum nesting depth of {max_depth}. "
+                    f"Consider extracting nested logic into separate functions."
+                ),
+            })
+
+    def _calculate_complexity(self, node: ast.AST) -> int:
+        """Calculate cyclomatic complexity of a node."""
+        complexity = 1  # Base complexity
+
+        for child in ast.walk(node):
+            # Count decision points
+            if isinstance(child, (ast.If, ast.While, ast.For, ast.AsyncFor)):
+                complexity += 1
+            elif isinstance(child, ast.ExceptHandler):
+                complexity += 1
+            elif isinstance(child, ast.BoolOp):
+                # Count and/or operators
+                complexity += len(child.values) - 1
+            elif isinstance(child, ast.comprehension):
+                # List/dict/set comprehensions with conditionals
+                complexity += len(child.ifs)
+
+        return complexity
+
+    def _calculate_max_depth(self, node: ast.AST, current_depth: int = 0) -> int:
+        """Calculate maximum nesting depth of control structures."""
+        max_depth = current_depth
+
+        for child in ast.iter_child_nodes(node):
+            # Count nesting for control structures
+            if isinstance(child, (ast.If, ast.While, ast.For, ast.AsyncFor, ast.With, ast.AsyncWith, ast.Try)):
+                child_max = self._calculate_max_depth(child, current_depth + 1)
+                max_depth = max(max_depth, child_max)
+            else:
+                child_max = self._calculate_max_depth(child, current_depth)
+                max_depth = max(max_depth, child_max)
+
+        return max_depth
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Visit class definitions and check for god classes."""
+        method_count = sum(
+            1 for child in node.body
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+        )
+
+        if method_count > 20:
+            self.issues.append({
+                "type": "god_class",
+                "severity": "warning",
+                "line": node.lineno,
+                "class": node.name,
+                "method_count": method_count,
+                "message": (
+                    f"Class '{node.name}' has {method_count} methods. "
+                    f"Consider splitting it into smaller, more focused classes."
+                ),
+            })
+
+        self.generic_visit(node)
+
+

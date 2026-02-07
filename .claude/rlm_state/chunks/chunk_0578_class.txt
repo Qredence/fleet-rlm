@@ -1,0 +1,33 @@
+<!-- Chunk 578: bytes 892829-893655, type=class -->
+class SimpleModule(dspy.Module):
+    """
+    Simple DSPy module with a single signature.
+
+    Use this template for straightforward tasks that require
+    a single prediction or transformation.
+    """
+
+    def __init__(self):
+        super().__init__()
+        # Initialize your signature here
+        self.predict = dspy.Predict(MySignature)
+
+    def forward(self, input_data: str) -> dspy.Prediction:
+        """
+        Process input data and return prediction.
+
+        Args:
+            input_data: Input to process
+
+        Returns:
+            dspy.Prediction with output fields from signature
+        """
+        # Call the signature
+        result = self.predict(input=input_data)
+
+        # Return prediction (always use dspy.Prediction)
+        return dspy.Prediction(
+            output=result.output
+        )
+
+

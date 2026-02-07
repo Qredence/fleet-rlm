@@ -1,0 +1,8 @@
+<!-- Chunk 180: bytes 288256-288465, type=class -->
+class UserNotFoundError(Exception):
+    """Raised when user is not found."""
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        super().__init__(f"User {user_id} not found")
+
+# Usage

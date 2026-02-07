@@ -1,0 +1,24 @@
+<!-- Chunk 979: bytes 3430243-3431000, type=class -->
+class CLIConfig:
+    """Container for CLI configuration and shared state.
+
+    Attributes:
+        api_url: The API server URL.
+        user_id: The user ID for context.
+        client: The HTTP client for API communication.
+    """
+    def __init__(self, api_url: str, user_id: str, timeout: float = 30.0):
+        """Initialize CLI configuration.
+
+        Args:
+            api_url: API server URL.
+            user_id: User ID for context.
+            timeout: HTTP client timeout in seconds.
+        """
+        self.api_url = validate_api_url(api_url)
+        self.user_id = sanitize_user_id(user_id)
+        self.timeout = validate_timeout(timeout)
+        self.client = SkillFleetClient(base_url=self.api_url, timeout=self.timeout)
+
+
+@app.callback()

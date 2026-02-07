@@ -1,0 +1,18 @@
+<!-- Chunk 1724: bytes 7327370-7328165, type=class -->
+class HITLSession(BaseModel):
+    """Complete HITL session tracking for skill creation."""
+
+    min_rounds: int = Field(default=1, ge=1, description="Minimum required rounds")
+    max_rounds: int = Field(default=4, le=4, description="Maximum allowed rounds")
+    completed_rounds: list[HITLRound] = Field(
+        default_factory=list, description="All completed HITL rounds"
+    )
+    is_complete: bool = Field(default=False, description="Whether HITL session is complete")
+    final_approval: bool = Field(default=False, description="Whether user gave final approval")
+
+
+# =============================================================================
+# Step 0: Example Gathering - Understanding Before Creation
+# =============================================================================
+
+

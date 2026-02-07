@@ -1,0 +1,67 @@
+<!-- Chunk 1219: bytes 4580091-4582580, type=function -->
+def extract_training_example(skill_path: Path) -> dict[str, Any] | None:
+    """Extract a training example from a skill."""
+    try:
+        skill_content = skill_path.read_text(encoding="utf-8")
+        frontmatter = parse_skill_frontmatter(skill_content)
+
+        if not frontmatter.get("name") or not frontmatter.get("description"):
+            print(f"  ⚠️  Skipping {skill_path} - missing required frontmatter fields")
+            return None
+
+        name = frontmatter["name"]
+        description = frontmatter["description"]
+
+        # Determine taxonomy path from file location
+        # Path format: .skills/category/skill-name/SKILL.md or skills/category/skill-name/SKILL.md
+        parts = skill_path.parts
+
+        # Find the skills or .skills directory
+        skills_idx = -1
+        for i, part in enumerate(parts):
+            if part in ["skills", ".skills"]:
+                skills_idx = i
+                break
+
+        if skills_idx == -1:
+            print(f"  ⚠️  Skipping {skill_path} - cannot determine taxonomy path")
+            return None
+
+        # Extract path components after skills/ or .skills/
+        path_parts = parts[skills_idx + 1 : -1]  # Exclude SKILL.md filename
+
+        # Handle neon-db special case
+        if "neon-db" in path_parts:
+            # neon-db/neon-auth -> neon-db/neon-auth
+            taxonomy_path = "/".join(path_parts)
+        else:
+            # category/skill-name
+            taxonomy_path = "/".join(path_parts)
+
+        # Detect style and subdirectories
+        skill_style = detect_skill_style(skill_content, skill_path)
+        subdirs = get_subdirectories(skill_path)
+        keywords = extract_keywords_from_description(description, name)
+
+        # Create task description
+        task_description = f"Create a {name} skill: {description}"
+
+        training_example = {
+            "task_description": task_description,
+            "expected_taxonomy_path": taxonomy_path,
+            "expected_name": name,
+            "expected_skill_style": skill_style,
+            "expected_subdirectories": subdirs,
+            "expected_keywords": keywords,
+            "expected_description": description[:200],  # Truncate for consistency
+            "source": "extracted_from_existing",
+        }
+
+        print(f"  ✓ Extracted: {name} ({skill_style}, {len(subdirs)} subdirs)")
+        return training_example
+
+    except Exception as e:
+        print(f"  ✗ Error extracting from {skill_path}: {e}")
+        return None
+
+

@@ -1,0 +1,10 @@
+<!-- Chunk 1993: bytes 7889412-7889704, type=function -->
+def test_cli_error_str_with_suggestion():
+    """Test CLIError string representation with suggestion."""
+    error = CLIError("Test error", suggestion="Try again")
+    result = str(error)
+    assert "Test error" in result
+    assert "Try again" in result
+
+
+# CLIError display base class test

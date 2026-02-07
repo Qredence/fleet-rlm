@@ -1,0 +1,29 @@
+<!-- Chunk 897: bytes 3179006-3179995, type=class -->
+class GatherRequirements(dspy.Signature):
+    """Initial requirements gathering from task description."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_description` | `str` | User's task description (may include clarifications) |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `domain` | `str` | Primary domain: 'technical', 'cognitive', 'domain_knowledge', etc. |
+| `category` | `str` | Category within domain: 'programming', 'devops', 'data_science', etc. |
+| `target_level` | `str` | Target level: 'beginner', 'intermediate', 'advanced', 'expert' |
+| `topics` | `list[str]` | List of specific topics to cover (3-7 items) |
+| `constraints` | `list[str]` | Any constraints or preferences |
+| `ambiguities` | `list[str]` | Detected ambiguities needing HITL clarification |
+
+**Used by**: `RequirementsGathererModule`
+
+---
+
+### AnalyzeIntent
+
+Deep analysis of user intent to understand what skill is needed.
+
+```python

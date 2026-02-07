@@ -1,0 +1,11 @@
+<!-- Chunk 567: bytes 888430-888691, type=class -->
+class SubtaskExecution(dspy.Signature):
+    subtask = dspy.InputField(desc="Subtask to execute")
+    result = dspy.OutputField(desc="Result of subtask execution")
+```
+
+### 2. Progressive Refinement
+
+Use multiple signatures for iterative improvement:
+
+```python

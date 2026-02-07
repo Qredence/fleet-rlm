@@ -1,0 +1,473 @@
+<!-- Chunk 1571: bytes 6474633-6491141, type=function -->
+def _load_skill_content(skill_id: str, skill_service: SkillService) -> tuple[str, dict]:
+    """
+    Load skill content and metadata by skill ID.
+
+    Args:
+        skill_id: The skill ID or path
+        skill_service: The skill service instance
+
+    Returns:
+        Tuple of (content, metadata)
+
+    Raises:
+        HTTPException: If skill not found
+
+    """
+    try:
+        skill_data = skill_service.get_skill_by_path(skill_id)
+        content = skill_data.get("content", "")
+        metadata = {
+            "skill_id": skill_data.get("skill_id"),
+            "name": skill_data.get("name"),
+            "description": skill_data.get("description"),
+            "type": skill_data.get("type"),
+            **skill_data.get("metadata", {}),
+        }
+        return content, metadata
+    except FileNotFoundError as e:
+        raise NotFoundException("Skill", skill_id) from e
+
+
+@router.post("/validate", response_model=ValidateResponse)
+async def validate(
+    request: ValidateRequest, skill_service: Annotated[SkillService, Depends(get_skill_service)]
+) -> ValidateResponse:
+    """
+    Validate a skill or content.
+
+    Args:
+        request: Validation request with skill_id or content
+        skill_service: Injected skill service for loading skills
+
+    Returns:
+        ValidateResponse: Validation results with pass/fail status
+
+    Raises:
+        HTTPException: If skill_id is provided but skill not found (404)
+        HTTPException: If neither skill_id nor content is provided (400)
+
+    """
+    # Determine content to validate
+    if request.skill_id:
+        content, metadata = _load_skill_content(request.skill_id, skill_service)
+    elif request.content:
+        content = request.content
+        metadata = {}
+    else:
+        raise HTTPException(status_code=400, detail="Either skill_id or content must be provided")
+
+    # Initialize workflow and run validation
+    workflow = ValidationWorkflow()
+
+    try:
+        # Run validation workflow
+        result = await workflow.execute(
+            skill_content=content,
+            plan={"skill_metadata": metadata},
+            taxonomy_path=metadata.get("taxonomy_path", ""),
+        )
+
+        # Extract validation report
+        validation_report = result.get("validation_report", {})
+        issues = validation_report.get("issues", [])
+
+        # Build issues list for response
+        formatted_issues = []
+        for issue in issues:
+            formatted_issues.append(
+                {
+                    "severity": issue.get("severity", "warning"),
+                    "message": issue.get("message", str(issue)),
+                    "location": issue.get("location", "unknown"),
+                }
+            )
+
+        # Extract recommendations from quality assessment
+        quality_assessment = result.get("quality_assessment", {})
+        recommendations = quality_assessment.get("recommendations", [])
+
+        return ValidateResponse(
+            passed=validation_report.get("passed", False),
+            status="passed" if validation_report.get("passed", False) else "failed",
+            score=validation_report.get("score", 0.0),
+            issues=formatted_issues,
+            recommendations=recommendations,
+        )
+
+    except Exception as e:
+        logger.exception(f"Error in validation workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {e}") from e
+
+
+@router.post("/assess", response_model=AssessQualityResponse)
+async def assess_quality(
+    request: AssessQualityRequest,
+    skill_service: Annotated[SkillService, Depends(get_skill_service)],
+) -> AssessQualityResponse:
+    """
+    Assess content quality across multiple dimensions.
+
+    Args:
+        request: Assessment request with skill_id or content
+        skill_service: Injected skill service for loading skills
+
+    Returns:
+        AssessQualityResponse: Quality scores, strengths, weaknesses, and suggestions
+
+    Raises:
+        HTTPException: If skill_id is provided but skill not found (404)
+        HTTPException: If neither skill_id nor content is provided (400)
+
+    """
+    # Determine content to assess
+    if request.skill_id:
+        content, metadata = _load_skill_content(request.skill_id, skill_service)
+    elif request.content:
+        content = request.content
+        metadata = {}
+    else:
+        raise HTTPException(status_code=400, detail="Either skill_id or content must be provided")
+
+    # Initialize workflow
+    workflow = ValidationWorkflow()
+
+    try:
+        # Run quality assessment workflow
+        result = await workflow.execute(
+            skill_content=content,
+            plan={"skill_metadata": metadata},
+            taxonomy_path=metadata.get("taxonomy_path", ""),
+        )
+
+        # Extract quality assessment
+        quality_assessment = result.get("quality_assessment", {})
+
+        # Extract dimension scores
+        dimensions = quality_assessment.get("dimensions", {})
+        if not dimensions:
+            # Fallback to calibrated score as overall if no dimensions
+            overall_score = quality_assessment.get("calibrated_score", 0.0)
+            dimensions = {"overall": overall_score}
+
+        # Extract strengths and weaknesses
+        strengths = quality_assessment.get("strengths", [])
+        weaknesses = quality_assessment.get("weaknesses", [])
+        suggestions = quality_assessment.get(
+            "suggestions", quality_assessment.get("recommendations", [])
+        )
+
+        # Calculate overall score from dimensions or use calibrated
+        overall_score = quality_assessment.get("calibrated_score")
+        if overall_score is None and dimensions:
+            overall_score = sum(dimensions.values()) / len(dimensions)
+
+        return AssessQualityResponse(
+            overall_score=overall_score or 0.0,
+            dimensions=dimensions,
+            strengths=strengths,
+            weaknesses=weaknesses,
+            suggestions=suggestions,
+        )
+
+    except Exception as e:
+        logger.exception(f"Error in quality assessment workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Quality assessment failed: {e}") from e
+
+
+@router.post("/fix", response_model=AutoFixResponse)
+async def auto_fix(
+    request: AutoFixRequest, skill_service: Annotated[SkillService, Depends(get_skill_service)]
+) -> AutoFixResponse:
+    """
+    Automatically fix issues in skill or content.
+
+    Args:
+        request: Auto-fix request with skill_id or content and issues list
+        skill_service: Injected skill service for loading skills
+
+    Returns:
+        AutoFixResponse: Fixed content, applied fixes, remaining issues, and confidence
+
+    Raises:
+        HTTPException: If skill_id is provided but skill not found (404)
+        HTTPException: If neither skill_id nor content is provided (400)
+
+    """
+    # Determine content to fix
+    if request.skill_id:
+        content, metadata = _load_skill_content(request.skill_id, skill_service)
+    elif request.content:
+        content = request.content
+        metadata = {}
+    else:
+        raise HTTPException(status_code=400, detail="Either skill_id or content must be provided")
+
+    # Initialize workflow
+    workflow = ValidationWorkflow()
+
+    # Build user feedback from issues
+    user_feedback_items = []
+    for issue in request.issues:
+        message = issue.get("message", "")
+        location = issue.get("location", "")
+        if location:
+            user_feedback_items.append(f"Fix issue at {location}: {message}")
+        else:
+            user_feedback_items.append(f"Fix: {message}")
+    "\n".join(user_feedback_items)
+
+    try:
+        # Run refinement workflow
+        result = await workflow.execute(
+            skill_content=content,
+            plan={"skill_metadata": metadata},
+            taxonomy_path=metadata.get("taxonomy_path", ""),
+        )
+
+        # Extract refined content
+        fixed_content = result.get("refined_content", content)
+
+        # Build fixes applied list
+        fixes_applied = []
+        if "refined_content" in result:
+            for issue in request.issues:
+                fixes_applied.append(
+                    {
+                        "issue": issue.get("message", str(issue)),
+                        "fix": f"Addressed: {issue.get('message', '')}",
+                    }
+                )
+
+        # Get remaining issues from the result
+        validation_report = result.get("validation_report", {})
+        remaining_issues = validation_report.get("issues", [])
+        formatted_remaining = []
+        for issue in remaining_issues:
+            formatted_remaining.append(
+                {
+                    "severity": issue.get("severity", "warning"),
+                    "message": issue.get("message", str(issue)),
+                    "location": issue.get("location", "unknown"),
+                }
+            )
+
+        # Calculate confidence from quality score
+        quality_assessment = result.get("quality_assessment", {})
+        confidence = quality_assessment.get("calibrated_score", 0.9)
+
+        return AutoFixResponse(
+            fixed_content=fixed_content,
+            fixes_applied=fixes_applied,
+            remaining_issues=formatted_remaining,
+            confidence=confidence,
+        )
+
+    except Exception as e:
+        logger.exception(f"Error in auto-fix workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Auto-fix failed: {e}") from e
+
+
+============================================================
+END FILE: src/skill_fleet/api/v1/quality.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/v1/router.py
+============================================================
+
+"""
+V1 API router.
+
+This module aggregates all v1 API routes into a single router.
+The v1 API follows the structure outlined in the main restructure plan.
+
+Routes are organized by domain:
+- /api/v1/chat - Conversational interface
+- /api/v1/skills - Skill creation and management
+- /api/v1/taxonomy - Taxonomy management
+- /api/v1/quality - Quality assurance
+- /api/v1/optimization - Signature optimization
+- /api/v1/hitl - Human-in-the-loop interactions
+- /api/v1/jobs - Job status and management
+- /api/v1/drafts - Draft promotion
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from .conversational import router as conversational_router
+from .drafts import router as drafts_router
+from .hitl import router as hitl_router
+from .jobs import router as jobs_router
+from .optimization import router as optimization_router
+from .quality import router as quality_router
+from .skills import router as skills_router
+from .taxonomy import router as taxonomy_router
+
+router = APIRouter()
+
+# Include sub-routers with prefixes
+router.include_router(conversational_router, prefix="/chat", tags=["conversational"])
+router.include_router(skills_router, prefix="/skills", tags=["skills"])
+router.include_router(taxonomy_router, prefix="/taxonomy", tags=["taxonomy"])
+router.include_router(quality_router, prefix="/quality", tags=["quality"])
+router.include_router(optimization_router, prefix="/optimization", tags=["optimization"])
+router.include_router(hitl_router, prefix="/hitl", tags=["hitl"])
+router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
+router.include_router(drafts_router, prefix="/drafts", tags=["drafts"])
+
+
+============================================================
+END FILE: src/skill_fleet/api/v1/router.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/v1/skills.py
+============================================================
+
+"""
+Skill creation and management routes for v1 API.
+
+This module provides endpoints for skill operations.
+These routes use skill workflow orchestrators via the service layer.
+
+Endpoints:
+    POST /api/v1/skills - Create a new skill (starts HITL workflow)
+    GET  /api/v1/skills/{skill_id} - Get skill details
+    PUT  /api/v1/skills/{skill_id} - Update a skill
+    POST /api/v1/skills/{skill_id}/validate - Validate a skill
+    POST /api/v1/skills/{skill_id}/refine - Refine a skill
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Annotated
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel
+
+from skill_fleet.core.workflows.skill_creation.validation import ValidationWorkflow
+
+from ..dependencies import get_skill_service
+from ..exceptions import NotFoundException
+from ..schemas.skills import (
+    CreateSkillRequest,
+    CreateSkillResponse,
+    RefineSkillRequest,
+    RefineSkillResponse,
+    SkillDetailResponse,
+    ValidateSkillRequest,
+    ValidateSkillResponse,
+)
+from ..services.skill_service import SkillService
+
+logger = logging.getLogger(__name__)
+
+
+router = APIRouter()
+
+
+@router.post("/", response_model=CreateSkillResponse)
+async def create_skill(
+    request: CreateSkillRequest,
+    background_tasks: BackgroundTasks,
+    skill_service: Annotated[SkillService, Depends(get_skill_service)],
+) -> CreateSkillResponse:
+    """
+    Create a new skill from a natural language description.
+
+    This initiates a background job that executes the 3-phase skill creation workflow:
+    1. Understanding & Planning (with HITL clarification)
+    2. Content Generation (with HITL preview)
+    3. Validation & Refinement (with HITL review)
+
+    Args:
+        request: Skill creation request with task description and user ID
+        background_tasks: FastAPI background tasks for async execution
+        skill_service: Injected SkillService for workflow operations
+
+    Returns:
+        CreateSkillResponse: Response with job_id for tracking
+
+    """
+    # Import here to avoid circular dependency with job system
+    from ..services.jobs import create_job, get_job
+
+    job_id = create_job(
+        task_description=request.task_description,
+        user_id=request.user_id,
+    )
+
+    async def run_workflow():
+        """Run the skill creation workflow in background."""
+        try:
+            result = await skill_service.create_skill(
+                request,
+                existing_job_id=job_id,
+            )
+            
+            # Update job status and result upon completion
+            # This ensures the job moves to a terminal state (completed or pending_review)
+            if result.status in ("completed", "pending_review"):
+                from ..services.jobs import update_job
+                
+                update_job(job_id, {
+                    "status": result.status,
+                    "result": result.model_dump(),
+                    "progress_percent": 100.0,
+                    "progress_message": "Skill creation completed"
+                })
+                
+            logger.info(f"Skill creation job {job_id} completed with status: {result.status}")
+        except Exception as e:
+            logger.error(f"Skill creation job {job_id} failed: {e}")
+            # Update job status to failed
+            job = get_job(job_id)
+            if job:
+                from ..services.jobs import update_job
+
+                update_job(job_id, {"status": "failed", "error": str(e)})
+
+    # Add workflow to background tasks and return immediately
+    background_tasks.add_task(run_workflow)
+
+    return CreateSkillResponse(job_id=job_id, status="pending")
+
+
+@router.get("/{skill_id}", response_model=SkillDetailResponse)
+async def get_skill(
+    skill_id: str, skill_service: Annotated[SkillService, Depends(get_skill_service)]
+) -> SkillDetailResponse:
+    """
+    Get details for a skill by ID.
+
+    Args:
+        skill_id: Unique skill identifier
+        skill_service: Injected SkillService for data access
+
+    Returns:
+        SkillDetailResponse: Detailed skill information
+
+    Raises:
+        HTTPException: If skill not found (404)
+
+    """
+    try:
+        skill_data = skill_service.get_skill_by_path(skill_id)
+        return SkillDetailResponse(
+            skill_id=skill_data.get("skill_id", skill_id),
+            name=skill_data.get("name", ""),
+            description=skill_data.get("description", ""),
+            version=skill_data.get("version", "1.0"),
+            type=skill_data.get("type", "unknown"),
+            metadata=skill_data.get("metadata", {}),
+            content=skill_data.get("content"),
+        )
+    except FileNotFoundError as err:
+        raise NotFoundException("Skill", skill_id) from err
+
+

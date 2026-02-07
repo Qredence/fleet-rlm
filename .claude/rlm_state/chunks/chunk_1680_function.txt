@@ -1,0 +1,50 @@
+<!-- Chunk 1680: bytes 6703543-6705053, type=function -->
+def normalize_dict_output(
+    obj: Any,
+    expected_keys: list[str] | None = None,
+    remove_none: bool = True,
+) -> dict[str, Any]:
+    """
+    Normalize an object to dict format with optional validation.
+
+    Args:
+        obj: Object to normalize (Pydantic model, dict, etc.)
+        expected_keys: List of keys that should be present (raises if missing)
+        remove_none: Whether to remove None values from output
+
+    Returns:
+        Normalized dictionary
+
+    Raises:
+        ValueError: If expected_keys are provided and some are missing
+
+    Examples:
+        >>> class Example(BaseModel):
+        ...     name: str
+        ...     value: int | None
+        >>> obj = Example(name="test", value=None)
+        >>> normalize_dict_output(obj, remove_none=True)
+        {'name': 'test'}
+        >>> normalize_dict_output(obj, expected_keys=["name", "value"], remove_none=False)
+        {'name': 'test', 'value': None}
+
+    """
+    # Convert to dict
+    result = serialize_pydantic_object(obj, output_format="dict")
+
+    if not isinstance(result, dict):
+        raise ValueError(f"Cannot normalize object of type {type(obj)} to dict")
+
+    # Validate expected keys
+    if expected_keys:
+        missing_keys = [k for k in expected_keys if k not in result]
+        if missing_keys:
+            raise ValueError(f"Missing expected keys: {missing_keys}")
+
+    # Remove None values if requested
+    if remove_none:
+        result = {k: v for k, v in result.items() if v is not None}
+
+    return result
+
+

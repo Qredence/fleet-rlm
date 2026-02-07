@@ -1,0 +1,29 @@
+<!-- Chunk 1039: bytes 3731277-3732155, type=function -->
+def get_task_lm(task_name: str, config_path: Path | None = None) -> dspy.LM:
+    """Get an LM for a specific task without changing global settings.
+
+    Use this when you need a task-specific LM temporarily.
+    For persistent task-specific LMs, use dspy.context() instead.
+
+    Args:
+        task_name: Task name from config (e.g., "skill_understand", "skill_edit")
+        config_path: Path to config/config.yaml
+
+    Returns:
+        Configured LM for the specified task
+    """
+    if config_path is None:
+        config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
+
+    config = load_fleet_config(config_path)
+    return build_lm_for_task(config, task_name)
+```
+
+### 4.2 Update CLI to Use Centralized Configuration
+
+**File**: `src/skill_fleet/cli/main.py`
+
+Add initialization call:
+```python
+from skill_fleet.llm.dspy_config import configure_dspy
+

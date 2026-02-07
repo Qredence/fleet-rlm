@@ -1,0 +1,59 @@
+<!-- Chunk 457: bytes 657579-659537, type=function -->
+def main():
+    parser = argparse.ArgumentParser(description="Optimize DSPy programs")
+    parser.add_argument("--module", required=True, help="Name of the DSPy module to optimize")
+    parser.add_argument("--metric", default="accuracy", help="Name of the metric function")
+    parser.add_argument("--examples", required=True, help="Path to examples file (JSONL)")
+    parser.add_argument("--teleprompter", default="bootstrap", help="Teleprompter to use")
+    parser.add_argument("--max-trials", type=int, default=10, help="Maximum optimization trials")
+    parser.add_argument("--output", help="Output file path for optimized program")
+
+    args = parser.parse_args()
+
+    output = Path(args.output) if args.output else None
+    optimize_module(
+        args.module,
+        args.metric,
+        Path(args.examples),
+        args.teleprompter,
+        args.max_trials,
+        output,
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: .fleet/letta/skills/dspy-optimization/scripts/optimize-dspy.py
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/dspy-optimization/scripts/test-signature.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Validate DSPy signature structure and types.
+
+This script validates that a DSPy signature is properly structured,
+has correct type hints, and follows best practices.
+
+Usage:
+    python test-signature.py --signature <signature_name>
+    python test-signature.py --signature TaskAnalysis
+
+Options:
+    --signature: Name of the signature class to validate
+    --module: Module path (default: agentic_fleet.dspy_modules.signatures)
+    --strict: Enable strict validation (fail on warnings)
+"""
+
+import argparse
+import importlib
+import inspect
+import sys
+from typing import get_type_hints, get_origin, get_args
+
+

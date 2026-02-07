@@ -1,0 +1,32 @@
+<!-- Chunk 380: bytes 566755-567461, type=class -->
+class DocumentedModule(dspy.Module):
+    """
+    A module that processes text and extracts key information.
+
+    Usage:
+        module = DocumentedModule()
+        result = module.forward(text="Your text here")
+
+    Args:
+        text: Input text to process
+
+    Returns:
+        dspy.Prediction with:
+            - summary: Text summary
+            - keywords: List of keywords
+            - entities: List of entities
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.summarize = dspy.Predict(SummarizeSignature)
+        self.extract = dspy.Predict(ExtractSignature)
+
+    def forward(self, text: str):
+        # Implementation
+        pass
+```
+
+### 5. Use Configuration
+
+```python

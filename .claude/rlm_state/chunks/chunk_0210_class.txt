@@ -1,0 +1,22 @@
+<!-- Chunk 210: bytes 299396-299820, type=class -->
+class EmailSender:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        use_tls: bool,
+        timeout: int,
+        retry_count: int,
+        retry_delay: int,
+        max_message_size: int,
+        compression: bool,
+        # ... 20 more parameters
+    ):
+        # ...
+```
+
+**Solution:** Use sensible defaults, allow overrides when needed
+```python
+from dataclasses import dataclass
+
+@dataclass

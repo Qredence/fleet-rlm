@@ -1,0 +1,31 @@
+<!-- Chunk 890: bytes 3147384-3147845, type=class -->
+class ReadinessAssessorModule(dspy.Module):
+    """Assess if ready to proceed to next phase."""
+```
+
+**Implementation**: `dspy.Predict(AssessReadiness)`
+
+**Input:**
+```python
+phase: str
+collected_info: str
+min_requirements: str
+```
+
+**Output:**
+```python
+{
+    "ready": bool,
+    "readiness_score": float,
+    "missing_info": list[str],
+    "next_questions": list[str],
+}
+```
+
+---
+
+### HITLStrategyModule
+
+Determine optimal HITL strategy for a task.
+
+```python

@@ -1,0 +1,25 @@
+<!-- Chunk 1385: bytes 5106391-5106914, type=function -->
+def update_item(item_id: int, data: dict):
+    item = get_item(item_id)
+    if not item:
+        raise ValueError("Item not found")  # Returns 500!
+
+# After
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, data: ItemUpdate):
+    item = await get_item(item_id)
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Item not found"
+        )
+    return item
+```
+
+## Real-World Example
+
+### Data Processing Utility → API
+
+**Original Utility:**
+```python
+# analytics.py

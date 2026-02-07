@@ -1,0 +1,200 @@
+<!-- Chunk 870: bytes 3126125-3133015, type=class -->
+class SkillCreationProgram(dspy.Module):
+    """Complete 4-phase skill creation orchestrator with integrated HITL."""
+
+    def __init__(self, quality_assured: bool = True, hitl_enabled: bool = True):
+        super().__init__()
+        self.phase0 = GatherExamplesModule()  # Example gathering
+        self.phase1 = Phase1UnderstandingModule()
+        self.phase2 = Phase2GenerationModule(quality_assured=quality_assured)
+        self.phase3 = Phase3ValidationModule()
+        # ... HITL modules
+```
+
+See [Programs Documentation](programs.md) for all programs.
+
+## Async Support
+
+All modules support async execution via `aforward()`:
+
+```python
+# Async execution (preferred for API/CLI)
+result = await module.aforward(input="...")
+
+# Sync wrapper (for scripting)
+result = module.forward(input="...")
+```
+
+`★ Insight ─────────────────────────────────────`
+Async support is critical for the CLI and API servers. The `aforward()` methods use `asyncio.to_thread()` to run synchronous DSPy operations in thread pools, enabling concurrent requests without blocking the event loop.
+`─────────────────────────────────────────────────`
+
+## Evaluation & Optimization
+
+Skills Fleet includes comprehensive evaluation and optimization capabilities:
+
+### Evaluation
+
+Quality metrics calibrated against golden skills from [Obra/superpowers](https://github.com/obra/superpowers):
+
+- **Multi-dimensional scoring**: Pattern count, code quality, structure completeness
+- **Obra quality indicators**: Core principle, strong guidance, good/bad contrast
+- **Penalty multipliers**: Stricter scoring for missing critical elements
+- **API-first**: Available via `/api/v2/evaluation` endpoints
+
+See [Evaluation Documentation](evaluation.md) for details.
+
+### Optimization
+
+DSPy provides built-in optimizers:
+
+- **MIPROv2**: Multi-step instruction optimization with profiling
+- **BootstrapFewShot**: Simple few-shot learning with bootstrapping
+- **Caching**: Automatic caching of LM responses
+- **API-first**: Available via `/api/v2/optimization` endpoints
+
+See [Optimization Documentation](optimization.md) for details.
+
+## Usage Examples
+
+### Basic Skill Creation
+
+```python
+from skill_fleet.llm.dspy_config import configure_dspy
+from skill_fleet.core.programs.skill_creator import SkillCreationProgram
+
+# Configure DSPy once
+configure_dspy()
+
+# Create the program
+program = SkillCreationProgram()
+
+# Run skill creation
+result = await program.aforward(
+    task_description="Create a Python async programming skill",
+    user_context={"user_id": "user_123"},
+    taxonomy_structure="{...}",
+    existing_skills="[...]",
+)
+```
+
+### Task-Specific LMs
+
+```python
+from skill_fleet.llm.dspy_config import get_task_lm
+import dspy
+
+# Get task-specific LM
+edit_lm = get_task_lm("skill_edit")
+
+# Use temporarily
+with dspy.context(lm=edit_lm):
+    result = await module.aforward(...)
+```
+
+## MLflow Integration
+
+Skills Fleet includes automatic MLflow tracking for DSPy 3.1.2+ workflows using `mlflow.dspy.autolog()`.
+
+### Quick Setup
+
+```bash
+# Start MLflow UI (port 5001 to avoid AirPlay conflict)
+./scripts/start-mlflow-public.sh
+
+# Open UI at http://localhost:5001
+```
+
+### Usage
+
+```python
+from skill_fleet.services.monitoring import setup_dspy_autologging, MLflowContext
+
+# Enable DSPy autologging
+setup_dspy_autologging(experiment_name="skill-creation")
+
+# Track a workflow run
+with MLflowContext(run_name="my-skill-creation"):
+    result = await program.aforward(...)
+```
+
+### What Gets Tracked
+
+- **Module calls**: Every DSPy module invocation
+- **Signatures**: Input/output for each signature
+- **LM calls**: Language model requests and responses
+- **Parameters**: Model settings, temperature, max_tokens
+- **Metrics**: Performance metrics and evaluation scores
+- **Optimization**: MIPROv2, GEPA iterations
+
+**See [MLflow Setup Guide](../MLFLOW_SETUP.md)** for complete documentation.
+
+## Next Steps
+
+- **[Signatures Documentation](signatures.md)** - All DSPy signatures
+- **[Modules Documentation](modules.md)** - All DSPy modules
+- **[Programs Documentation](programs.md)** - Orchestrator programs
+- **[Evaluation Documentation](evaluation.md)** - Quality metrics and assessment
+- **[Optimization Documentation](optimization.md)** - MIPROv2, BootstrapFewShot, caching
+
+## Related Documentation
+
+- **[LLM Configuration](../llm/dspy-config.md)** - Centralized DSPy configuration
+- **[HITL System](../hitl/)** - Human-in-the-Loop interactions
+- **[API Endpoints](../api/endpoints.md)** - REST API usage (includes evaluation & optimization)
+- **[MLflow Setup Guide](../MLFLOW_SETUP.md)** - DSPy autologging and tracking
+
+## External DSPy Resources
+
+For comprehensive DSPy knowledge beyond Skills Fleet integration:
+
+- **[Official DSPy Documentation](https://dspy.ai)** - Complete DSPy framework documentation
+- **[DSPy GitHub Repository](https://github.com/stanford-nlp/dspy)** - Source code and examples
+- **[DSPy Research Papers](https://dspy.ai/publications/)** - MIPRO, GEPA, and other research
+
+**Note**: Skills Fleet provides a focused DSPy integration for skill creation workflows. For general DSPy usage and advanced patterns beyond skill creation, refer to the official DSPy documentation.
+
+
+============================================================
+END FILE: docs/dspy/index.md
+============================================================
+
+============================================================
+FILE: docs/dspy/modules.md
+============================================================
+
+# DSPy Modules Reference
+
+**Last Updated**: 2026-01-15
+**Location**: `src/skill_fleet/core/dspy/modules/`
+
+## Overview
+
+DSPy modules implement the **logic** that processes inputs according to signature contracts. Each module wraps a signature with a DSPy module type (`Predict`, `ChainOfThought`, etc.) and provides both sync and async execution.
+
+`★ Insight ─────────────────────────────────────`
+Modules encapsulate the "how" of processing. While signatures define the contract, modules determine the implementation strategy—whether to use chain-of-thought reasoning, direct prediction, or other DSPy patterns.
+`─────────────────────────────────────────────────`
+
+## Module Types
+
+DSPy provides several module types, each with different characteristics:
+
+| Module Type | Use Case | Reasoning | Cost |
+|-------------|----------|-----------|------|
+| **`dspy.Predict`** | Direct transformations | None | Lowest |
+| **`dspy.ChainOfThought`** | Complex reasoning | Explicit CoT | Medium |
+| **`dspy.Refine`** | Iterative improvement | Comparison-based | Medium |
+| **`dspy.BestOfN`** | Quality maximization | N generations + selection | High |
+
+## Phase 1 Modules
+
+**File**: `src/skill_fleet/core/modules/phase1_understanding.py`
+
+Phase 1 performs parallel analysis of user intent, taxonomy placement, and dependencies.
+
+### RequirementsGathererModule
+
+Initial requirements gathering from task description.
+
+```python

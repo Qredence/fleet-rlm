@@ -1,0 +1,34 @@
+<!-- Chunk 194: bytes 294637-295277, type=function -->
+def process_large_file(filepath: str):
+    with open(filepath) as f:
+        lines = f.readlines()  # Loads entire file into memory
+        return [process_line(line) for line in lines]
+```
+
+### Batch Database Operations
+
+**Good:**
+```python
+# Bulk insert
+users = [User(name=name) for name in names]
+session.bulk_save_objects(users)
+session.commit()
+```
+
+**Bad:**
+```python
+# Individual inserts
+for name in names:
+    user = User(name=name)
+    session.add(user)
+    session.commit()  # Commits for each user!
+```
+
+## Security
+
+### Never Trust User Input
+
+```python
+# Always validate and sanitize
+from pydantic import BaseModel, validator
+

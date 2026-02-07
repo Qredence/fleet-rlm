@@ -1,0 +1,6 @@
+<!-- Chunk 74: bytes 25592-25725, type=h2 -->
+## Phase 1: Design Export (Figma MCP)
+1. Export design assets from Figma
+2. Generate design specifications
+3. Create asset manifest
+

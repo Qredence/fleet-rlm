@@ -1,0 +1,24 @@
+<!-- Chunk 777: bytes 2645327-2645776, type=class -->
+class ValidateFrontmatterRequest(BaseModel):
+    content: str = Field(
+        ...,
+        description="Full SKILL.md content including frontmatter"
+    )
+```
+
+**Example:**
+```json
+{
+    "content": "---\nname: python-decorators\ndescription: Ability to design and implement Python decorators\n---\n\n# Python Decorators\n..."
+}
+```
+
+---
+
+### HITLResponseRequest
+
+Request schema for submitting HITL responses.
+
+```python
+from typing import Literal
+

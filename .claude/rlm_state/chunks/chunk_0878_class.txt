@@ -1,0 +1,33 @@
+<!-- Chunk 878: bytes 3139694-3140243, type=class -->
+class FeedbackIncorporatorModule(dspy.Module):
+    """Apply user feedback and change requests to draft content."""
+```
+
+**Implementation**: `dspy.ChainOfThought(IncorporateFeedback)`
+
+**Input:**
+```python
+current_content: str
+user_feedback: str
+change_requests: str
+skill_metadata: Any
+```
+
+**Output:**
+```python
+{
+    "refined_content": str,
+    "changes_made": list[str],
+    "unaddressed_feedback": list[str],
+    "improvement_score": float,
+    "rationale": str,
+}
+```
+
+---
+
+### Phase2GenerationModule
+
+The main Phase 2 orchestrator.
+
+```python

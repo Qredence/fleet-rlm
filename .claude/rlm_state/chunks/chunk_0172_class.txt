@@ -1,0 +1,5 @@
+<!-- Chunk 172: bytes 285756-285848, type=class -->
+class PaymentProcessor(ABC):
+    @abstractmethod
+    def process(self, amount: float): ...
+

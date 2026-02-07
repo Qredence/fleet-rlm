@@ -1,0 +1,13 @@
+<!-- Chunk 416: bytes 589562-590002, type=class -->
+class TypedSignature(dspy.Signature):
+    """Signature with type hints."""
+
+    from typing import List, Optional
+
+    text = dspy.InputField(desc="Text to analyze")
+    keywords: List[str] = dspy.OutputField(desc="List of keywords")
+    sentiment: str = dspy.OutputField(desc="Sentiment classification")
+    confidence: float = dspy.OutputField(desc="Confidence score")
+    notes: Optional[str] = dspy.OutputField(desc="Optional notes")
+
+

@@ -1,0 +1,82 @@
+<!-- Chunk 1178: bytes 4478052-4480346, type=class -->
+class QuickSkillProgram(dspy.Module):
+    """Streamlined program for rapid skill generation.
+    
+    Optimized for speed with minimal validation, useful for
+    bootstrap and development scenarios.
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.understand = UnderstandModule()
+        self.plan = PlanModule()
+        self.edit = EditModule()
+    
+    def forward(
+        self,
+        task_description: str,
+        existing_skills: list,
+        taxonomy_structure: dict,
+        parent_skills_getter: callable
+    ) -> Dict:
+        """Quick skill generation (Steps 1-2-4 only).
+        
+        Skips initialization and packaging for speed.
+        """
+        
+        # Step 1: UNDERSTAND
+        understanding = self.understand(
+            task_description=task_description,
+            existing_skills=existing_skills,
+            taxonomy_structure=taxonomy_structure
+        )
+        
+        # Step 2: PLAN
+        parent_skills = parent_skills_getter(understanding['taxonomy_path'])
+        plan = self.plan(
+            task_intent=understanding['task_intent'],
+            taxonomy_path=understanding['taxonomy_path'],
+            parent_skills=parent_skills,
+            dependency_analysis=understanding['dependency_analysis']
+        )
+        
+        # Step 4: EDIT (skip initialization)
+        skeleton = {
+            'skill_skeleton': {
+                'root_path': f"skills/{understanding['taxonomy_path']}/",
+                'files': [],
+                'directories': ['capabilities/', 'examples/', 'tests/', 'resources/']
+            }
+        }
+        
+        content = self.edit(
+            skill_skeleton=skeleton['skill_skeleton'],
+            parent_skills=understanding['parent_skills'],
+            composition_strategy=plan['composition_strategy']
+        )
+        
+        return {
+            'understanding': understanding,
+            'plan': plan,
+            'content': content
+        }
+```
+
+---
+
+## File 3: `src/workflow/feedback.py`
+
+**Human-in-the-loop feedback handlers**
+
+```python
+"""Human feedback handlers for skill approval workflow."""
+
+import json
+from typing import Dict, Optional
+from datetime import datetime
+from abc import ABC, abstractmethod
+import logging
+
+logger = logging.getLogger(__name__)
+
+

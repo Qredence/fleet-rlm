@@ -1,0 +1,73 @@
+<!-- Chunk 1398: bytes 5127566-5128918, type=class -->
+class UserUpdate(BaseModel):
+    name: Optional[str] = None  # Optional!
+```
+
+---
+
+## PUT vs PATCH
+
+### PUT (Complete Replacement)
+```json
+PUT /users/1
+{
+  "name": "John",
+  "email": "john@example.com",  // Must include ALL fields
+  "age": 30
+}
+```
+
+### PATCH (Partial Update)
+```json
+PATCH /users/1
+{
+  "name": "John"    // Only changed fields
+}
+```
+
+---
+
+## File Locations
+
+All files in:
+```
+/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/skills/technical_skills/programming/web_frameworks/python/fastapi/examples/
+```
+
+- `patch_endpoint_example.py` - Complete working example
+- `test_patch_endpoint.py` - Test suite
+- `visual_guide.py` - Visual explanation
+- `PATCH_ENDPOINT_README.md` - Full documentation
+- `IMPLEMENTATION_SUMMARY.md` - Detailed summary
+- `QUICK_REFERENCE.md` - This file
+
+---
+
+## Run It
+
+```bash
+# Navigate to the examples directory from the repository root
+cd skills/technical_skills/programming/web_frameworks/python/fastapi/examples
+
+# Run server
+uv run python patch_endpoint_example.py
+
+# Run tests
+uv run python test_patch_endpoint.py
+
+# View visual guide
+uv run python visual_guide.py
+```
+
+---
+
+## The Pattern (Copy & Paste)
+
+```python
+from typing import Optional
+from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+# Update model

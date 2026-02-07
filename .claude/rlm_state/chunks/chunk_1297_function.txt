@@ -1,0 +1,43 @@
+<!-- Chunk 1297: bytes 4766714-4768005, type=function -->
+def test_jobs():
+    """Test jobs repository."""
+    print("\n" + "=" * 60)
+    print("Testing Jobs Repository")
+    print("=" * 60)
+
+    engine = create_engine(DATABASE_URL)
+    with Session(engine) as session:
+        repo = JobRepository(session)
+
+        # Create a test job
+        print("\n➕ Creating test job...")
+        job_data = {
+            "user_id": "test_user",
+            "task_description": "Create a test skill for validation",
+            "status": job_status_enum.pending,
+        }
+
+        job = repo.create(job_data)
+        print(f"  ✓ Created job: {job.job_id}")
+        print(f"     Status: {job.status}")
+        print(f"     Description: {job.task_description}")
+
+        # Update job status
+        print("\n📝 Updating job status...")
+        updated = repo.update_status(
+            job.job_id, job_status_enum.completed, result={"success": True}
+        )
+        print(f"  ✓ Job status: {updated.status}")
+
+        # Get pending jobs
+        print("\n📋 Getting pending jobs...")
+        pending = repo.get_pending_jobs(limit=5)
+        for p in pending:
+            print(f"  → {p.job_id} (created: {p.created_at})")
+
+        # Clean up
+        print("\n🗑️  Cleaning up test job...")
+        repo.delete(job.job_id)
+        print("  ✓ Test job deleted")
+
+

@@ -1,0 +1,8 @@
+<!-- Chunk 844: bytes 3004756-3004952, type=function -->
+def migrate_skill_to_agentskills_format(
+    skill_dir: Path,
+    dry_run: bool = False,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Migrate a single skill to agentskills.io format."""
+

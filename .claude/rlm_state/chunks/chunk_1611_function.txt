@@ -1,0 +1,335 @@
+<!-- Chunk 1611: bytes 6615759-6629060, type=function -->
+def _question_options(question: object) -> tuple[list[tuple[str, str]], bool]:
+    """
+    Extract options from a StructuredQuestion dict.
+
+    Server returns StructuredQuestion with 'options' (list of QuestionOption)
+    and 'allows_multiple' fields.
+    """
+    if not isinstance(question, dict):
+        return ([], False)
+
+    q_dict = cast("dict[str, Any]", question)
+    raw_options = q_dict.get("options")
+    if not isinstance(raw_options, list) or not raw_options:
+        return ([], False)
+
+    choices: list[tuple[str, str]] = []
+    for opt in raw_options:
+        if isinstance(opt, dict):
+            # QuestionOption has 'id', 'label', 'description' fields
+            opt_dict = cast("dict[str, Any]", opt)
+            opt_id = str(opt_dict.get("id") or opt_dict.get("value") or "")
+            label = str(opt_dict.get("label") or opt_dict.get("text") or opt_id)
+            desc = opt_dict.get("description")
+            if desc:
+                label = f"{label} — {desc}"
+            if opt_id:
+                choices.append((opt_id, label))
+        else:
+            choices.append((str(opt), str(opt)))
+
+    allows_multiple = bool(q_dict.get("allows_multiple", False))
+    return (choices, allows_multiple)
+
+
+async def run_hitl_job(
+    *,
+    console: Console,
+    client: Any,
+    job_id: str,
+    auto_approve: bool = False,
+    ui: PromptUI | None = None,
+    show_thinking: bool = True,
+    force_plain_text: bool = False,
+    poll_interval: float = HITL_POLL_INTERVAL,
+) -> dict[str, Any]:
+    """
+    Poll and satisfy HITL prompts until the job reaches a terminal state.
+
+    Returns the final prompt payload from the API (status + result fields).
+    """
+    ui = ui or get_default_ui(force_plain_text=force_plain_text)
+
+    spinner: Status | None = None
+    current_interval = float(poll_interval)
+
+    while True:
+        prompt_data = await client.get_hitl_prompt(job_id)
+        status = prompt_data.get("status")
+
+        if status in {"completed", "failed", "cancelled"}:
+            if spinner is not None:
+                spinner.stop()
+            return prompt_data
+
+        if status not in {"pending_hitl", "pending_user_input"}:
+            # Build progress message from API response
+            current_phase = prompt_data.get("current_phase", "")
+            progress_message = prompt_data.get("progress_message", "")
+
+            if progress_message:
+                phase_label = f"[cyan]{current_phase}[/cyan]: " if current_phase else ""
+                message = f"[dim]{phase_label}{progress_message}[/dim]"
+            else:
+                message = f"[dim]Workflow running… ({status})[/dim]"
+
+            if spinner is None:
+                spinner = console.status(message, spinner="dots")
+                spinner.start()
+            else:
+                spinner.update(message)
+            await asyncio.sleep(current_interval)
+            # Only increase interval for slow polling mode
+            if poll_interval >= 1.0:
+                current_interval = min(max(poll_interval, 0.5) * 5.0, current_interval * 1.25)
+            continue
+
+        if spinner is not None:
+            spinner.stop()
+            spinner = None
+        current_interval = float(poll_interval)
+
+        interaction_type = prompt_data.get("type")
+
+        if auto_approve:
+            if interaction_type == "clarify":
+                await client.post_hitl_response(job_id, {"answers": {"response": ""}})
+            else:
+                await client.post_hitl_response(job_id, {"action": "proceed"})
+            continue
+
+        # Check if there's a registered handler for this interaction type
+        # (new types: deep_understanding, tdd_red, tdd_green, tdd_refactor)
+        handler = get_handler(interaction_type, console, ui)
+        if handler:
+            await handler.handle(job_id, prompt_data, client)
+            continue
+
+        # Existing inline handlers for: clarify, confirm, preview, validate
+        if interaction_type == "clarify":
+            rationale = prompt_data.get("rationale", "")
+            if show_thinking and rationale:
+                console.print(
+                    Panel(
+                        Markdown(rationale) if "**" in rationale else rationale,
+                        title="[dim]Why I'm asking[/dim]",
+                        border_style="dim",
+                    )
+                )
+
+            questions_list = _normalize_questions(prompt_data.get("questions"))
+            if not questions_list:
+                rendered = _render_questions(prompt_data.get("questions"))
+                console.print(
+                    Panel(
+                        Markdown(rendered) if rendered else "No questions available.",
+                        title="[bold yellow]🤔 Clarification Needed[/bold yellow]",
+                        border_style="yellow",
+                    )
+                )
+                answers = await ui.ask_text("Your answers (or /cancel)", default="")
+                if answers.strip().lower() in {"/cancel", "/exit", "/quit"}:
+                    await client.post_hitl_response(job_id, {"action": "cancel"})
+                else:
+                    await client.post_hitl_response(job_id, {"answers": {"response": answers}})
+                continue
+
+            console.print(
+                Panel(
+                    "Answer the following question(s) one at a time.",
+                    title="[bold yellow]🤔 Clarification Needed[/bold yellow]",
+                    border_style="yellow",
+                )
+            )
+
+            answer_blocks: list[str] = []
+            for idx, question in enumerate(questions_list, 1):
+                q_text = _question_text(question)
+                choices, allows_multiple = _question_options(question)
+
+                # Display question content cleanly (don't cram a full markdown list into the input prompt).
+                console.print(
+                    Panel(
+                        Markdown(q_text)
+                        if any(tok in q_text for tok in ("**", "`", "\n"))
+                        else q_text,
+                        title=f"[bold yellow]Question {idx}/{len(questions_list)}[/bold yellow]",
+                        border_style="yellow",
+                    )
+                )
+
+                if choices:
+                    if allows_multiple:
+                        selected_ids, free_text = await choose_many_with_other(
+                            ui,
+                            "Select option(s)",
+                            choices,
+                        )
+                    else:
+                        selected_ids, free_text = await choose_one_with_other(
+                            ui,
+                            "Select one option",
+                            choices,
+                        )
+                    selected_labels = [label for opt_id, label in choices if opt_id in selected_ids]
+                    answer = ", ".join(selected_labels)
+                    if free_text.strip():
+                        answer = f"{answer}\nOther: {free_text}" if answer else free_text
+                else:
+                    answer = await ui.ask_text("Your answer (or /cancel)", default="")
+                    if answer.strip().lower() in {"/cancel", "/exit", "/quit"}:
+                        await client.post_hitl_response(job_id, {"action": "cancel"})
+                        answer_blocks = []
+                        break
+
+                answer_blocks.append(f"Q{idx}: {q_text}\nA{idx}: {answer}")
+
+            if not answer_blocks:
+                continue
+
+            combined = "\n\n".join(answer_blocks).strip()
+            await client.post_hitl_response(job_id, {"answers": {"response": combined}})
+            continue
+
+        if interaction_type == "confirm":
+            rationale = prompt_data.get("rationale", "")
+            if show_thinking and rationale:
+                console.print(
+                    Panel(
+                        Markdown(rationale) if "**" in rationale else rationale,
+                        title="[dim]💭 Reasoning[/dim]",
+                        border_style="dim",
+                    )
+                )
+
+            summary = prompt_data.get("summary", "")
+            path = prompt_data.get("path", "")
+            key_assumptions = prompt_data.get("key_assumptions", [])
+            console.print(
+                Panel(
+                    Markdown(summary) if summary else "No summary available.",
+                    title="[bold cyan]📋 Understanding Summary[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
+            if path:
+                console.print(f"[dim]Proposed path: {path}[/dim]")
+            if key_assumptions:
+                console.print("[dim]Key assumptions:[/dim]")
+                for assumption in key_assumptions:
+                    console.print(f"  • {assumption}")
+            action = await ui.choose_one(
+                "Proceed?",
+                [("proceed", "Proceed"), ("revise", "Revise"), ("cancel", "Cancel")],
+                default_id="proceed",
+            )
+            payload: dict[str, object] = {"action": action}
+            if action == "revise":
+                payload["feedback"] = await ui.ask_text("What should change?", default="")
+            await client.post_hitl_response(job_id, payload)
+            continue
+
+        if interaction_type == "preview":
+            rationale = prompt_data.get("rationale", "")
+            if show_thinking and rationale:
+                console.print(
+                    Panel(
+                        Markdown(rationale) if "**" in rationale else rationale,
+                        title="[dim]💭 Generation Reasoning[/dim]",
+                        border_style="dim",
+                    )
+                )
+
+            content = prompt_data.get("content", "")
+            highlights = prompt_data.get("highlights", [])
+            console.print(
+                Panel(
+                    Markdown(content) if content else "No preview available.",
+                    title="[bold blue]📝 Content Preview[/bold blue]",
+                    border_style="blue",
+                )
+            )
+            if highlights:
+                console.print("[dim]Highlights:[/dim]")
+                for h in highlights:
+                    console.print(f"  • {h}")
+            action = await ui.choose_one(
+                "Looks good?",
+                [("proceed", "Proceed"), ("refine", "Refine"), ("cancel", "Cancel")],
+                default_id="proceed",
+            )
+            payload = {"action": action}
+            if action == "refine":
+                payload["feedback"] = await ui.ask_text("What should be improved?", default="")
+            await client.post_hitl_response(job_id, payload)
+            continue
+
+        if interaction_type == "validate":
+            report = prompt_data.get("report", "")
+            passed = prompt_data.get("passed", False)
+            title_style = "green" if passed else "red"
+            title_icon = "✅" if passed else "⚠️"
+            console.print(
+                Panel(
+                    Markdown(report) if report else "No report available.",
+                    title=f"[bold {title_style}]{title_icon} Validation Report[/bold {title_style}]",
+                    border_style=title_style,
+                )
+            )
+            action = await ui.choose_one(
+                "Accept?",
+                [("proceed", "Proceed"), ("refine", "Refine"), ("cancel", "Cancel")],
+                default_id="proceed",
+            )
+            payload = {"action": action}
+            if action == "refine":
+                payload["feedback"] = await ui.ask_text("What should be improved?", default="")
+            await client.post_hitl_response(job_id, payload)
+            continue
+
+        # Unknown HITL type - show raw data and allow generic response
+        console.print(
+            Panel(
+                f"Unknown interaction type: {interaction_type}\nData: {prompt_data}",
+                title="[bold yellow]⚠️ Unknown HITL[/bold yellow]",
+                border_style="yellow",
+            )
+        )
+        action = await ui.choose_one(
+            "Action",
+            [("proceed", "Proceed"), ("cancel", "Cancel")],
+            default_id="proceed",
+        )
+        await client.post_hitl_response(job_id, {"action": action})
+
+
+============================================================
+END FILE: src/skill_fleet/cli/hitl/runner.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/main.py
+============================================================
+
+"""
+Compatibility CLI entrypoints used by tests and scripts.
+
+Provides simple, programmatic `create_skill(args)` and `validate_skill(args)`
+functions that wrap existing library components. The implementations are
+intentionally small and easy to patch in unit tests.
+
+.. deprecated::
+    These entrypoints are temporarily unavailable during migration to
+    new workflow architecture.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any
+
+from ..validators.skill_validator import SkillValidator
+
+

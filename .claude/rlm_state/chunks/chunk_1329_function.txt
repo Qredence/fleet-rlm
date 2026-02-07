@@ -1,0 +1,329 @@
+<!-- Chunk 1329: bytes 4972499-4985357, type=function -->
+def function_name(param1: type, param2: type) -> return_type:
+    """Description of the function."""
+```
+
+**Parameters:**
+- `param1`: Description
+- `param2`: Description
+
+**Returns:** Description of return value
+
+**Example:**
+```python
+# Usage example
+```
+
+## Classes
+
+### ClassName
+
+Description of the class.
+
+#### Methods
+
+- `method_name()`: Description
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/references/api-reference.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/references/common-patterns.md
+============================================================
+
+# Common Patterns
+
+Frequently used patterns with `shadcn-custom-registry`.
+
+## Pattern 1: Basic Usage
+
+Description of the pattern.
+
+```python
+# Example code
+```
+
+## Pattern 2: Advanced Usage
+
+Description of the pattern.
+
+```python
+# Example code
+```
+
+## Anti-Patterns
+
+Things to avoid when using this skill.
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/references/common-patterns.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/references/quick-start.md
+============================================================
+
+# Quick Start Guide
+
+Get started with `shadcn-custom-registry` in minutes.
+
+## Prerequisites
+
+- List prerequisites here
+
+## Installation
+
+```bash
+# Installation steps
+```
+
+## Basic Usage
+
+```python
+# Basic usage example
+```
+
+## Next Steps
+
+- See [Common Patterns](common-patterns.md) for more examples
+- Check [API Reference](api-reference.md) for detailed documentation
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/references/quick-start.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/references/troubleshooting.md
+============================================================
+
+# Troubleshooting
+
+Common issues and solutions for `shadcn-custom-registry`.
+
+## Common Issues
+
+### Issue 1: Description
+
+**Symptoms:** What you might see
+
+**Cause:** Why this happens
+
+**Solution:** How to fix it
+
+```python
+# Fix example
+```
+
+### Issue 2: Description
+
+**Symptoms:** What you might see
+
+**Cause:** Why this happens
+
+**Solution:** How to fix it
+
+## Getting Help
+
+If you encounter issues not covered here:
+1. Check the [API Reference](api-reference.md)
+2. Review [Common Patterns](common-patterns.md)
+3. Search existing issues
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/references/troubleshooting.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/resources/README.md
+============================================================
+
+# Resources
+
+Resource files for `shadcn-custom-registry`.
+
+Includes configuration files, data files, and other resources needed by the skill.
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/resources/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/scripts/README.md
+============================================================
+
+# Scripts
+
+Utility scripts for `shadcn-custom-registry`.
+
+These scripts help with setup, maintenance, or automation tasks.
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/scripts/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/README.md
+============================================================
+
+# Tests
+
+Integration tests for `shadcn-custom-registry`.
+
+These tests verify the skill's capabilities work as expected.
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/README.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/test_1.json
+============================================================
+
+{
+  "name": "Registry JSON Validity",
+  "description": "Verify that the generated registry.json matches the shadcn schema (items, files, types).",
+  "input_data": "Generated index.json file",
+  "expected_result": "File must be an array of objects where each object has 'name', 'type', and 'files' (an array with 'path' and 'content')."
+}
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/test_1.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/test_2.json
+============================================================
+
+{
+  "name": "Path Resolution",
+  "description": "Verify that a component in the registry correctly imports its registryDependencies using relative or aliased paths.",
+  "input_data": "Component file content: import { Button } from '@/components/ui/button'",
+  "expected_result": "The registryDependency 'button' must be listed in the JSON so the CLI can resolve the path."
+}
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/test_2.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/test_3.json
+============================================================
+
+{
+  "name": "Remote Fetch Test",
+  "description": "Simulate a CLI request to ensure the hosted JSON is accessible and correctly formatted.",
+  "input_data": "curl https://[YOUR_URL]/r/button.json",
+  "expected_result": "HTTP 200 with a valid JSON body containing the component source code."
+}
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/software_development/frontend/design_systems/shadcn-custom-registry/tests/test_3.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/taxonomy_meta.json
+============================================================
+
+{
+  "total_skills": 1,
+  "generation_count": 1,
+  "statistics": {
+    "by_type": {
+      "specialization": 1
+    },
+    "by_weight": {
+      "medium": 1
+    },
+    "by_priority": {
+      "task_specific": 1
+    }
+  },
+  "last_updated": "2026-01-15T08:46:55.566887+00:00"
+}
+
+
+============================================================
+END FILE: skills/_drafts/f1d7b1a8-b4fd-4ecf-bf01-de283f470d5f/taxonomy_meta.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/recur/llm-inference/recursive-language-models/SKILL.md
+============================================================
+
+---
+name: recursive-language-models
+description: Use when standard LLM generation fails on complex logic, math, or coding tasks due to 'one-pass' limitations. This skill provides the framework for implementing iterative reasoning loops, process-based verification (PRMs), and path optimization strategies like MCTS to scale inference-time compute for high-reasoning accuracy.
+metadata:
+  skill_id: llm-inference/recursive-language-models
+  version: 1.0.0
+  type: technical
+  weight: heavyweight
+---
+
+# Recursive Language Models (RLM)
+
+## Overview
+
+Recursive Language Models represent a shift from "System 1" (intuitive, one-pass) to "System 2" (deliberate, iterative) inference. Instead of generating a single token stream and stopping, RLMs treat reasoning as a search problem over a state-space of "thoughts." This skill provides the architectural blueprints for building agents that can verify their own steps, backtrack from dead ends, and spend additional compute at inference time to achieve higher accuracy.
+
+**Core principle:** Inference-time compute scales reasoning. Accuracy is a function of the number of reasoning paths explored and the granularity of the verification applied to those paths.
+
+## Capabilities
+
+- **Recursive Step Generation**: Decomposing problems into discrete reasoning steps with explicit state transitions.
+- **Process-Based Verification (PRM)**: Implementing "verifiers" that score intermediate reasoning steps rather than just final outcomes.
+- **Inference-time Search (MCTS/Beam)**: Navigating a tree of possible reasoning paths to identify the most probable correct solution.
+- **Dynamic Compute Budgeting**: Adjusting the depth and breadth of search based on task complexity and confidence thresholds.
+- **Self-Correction & Pruning**: Detecting logic errors within a branch and terminating or backtracking to a prior valid state.
+
+## Dependencies
+
+- `_core/reasoning` — Required for fundamental step decomposition logic.
+- `_core/state_management` — Essential for handling branching "thought" states and history snapshots.
+- `search-algorithms/tree-search` (Recommended) — For complex path optimization using Monte Carlo Tree Search.
+
+## When to Use
+
+**Use when:**
+- The task requires multiple steps where an error in step 2 invalidates all subsequent steps (e.g., formal logic, math).
+- The model consistently hallucinates mid-way through long-form generation.
+- The "correctness" of intermediate steps can be verified (e.g., code execution, symbolic math).
+- You are building high-stakes agents where accuracy is more critical than latency.
+
+**When NOT to use:**
+- Creative writing or open-ended chat where there is no objective "correct" path.
+- Low-latency applications where sub-second response times are required.
+- Simple retrieval-augmented generation (RAG) tasks where the answer is directly present in the context.
+
+## Quick Reference
+
+| Problem | Solution | Keywords |
+| ------- | -------- | -------- |
+| Infinite Loop | Implement Entropy-based Termination | Loop Pruning, Max Depth |
+| Hallucination in Logic | Step-wise PRM Verification | Process-Reward, Verifier |
+| Sub-optimal Pathing | Monte Carlo Tree Search (MCTS) | UCT, Tree Search, Rollouts |
+| State Corruption | Immutable State Snapshots | Checkpointing, Backtracking |
+
+## Core Patterns
+
+### The Verify-and-Branch Loop
+
+**The problem:** Standard LLMs often commit to a wrong logical path early and "hallucinate" justifications to maintain consistency with the initial error.
+
+**❌ Common mistake (Linear Generation):**
+```python
+# One-pass generation: Model goes off the rails at Step 2 and never recovers.
+response = llm.generate("Solve this complex 10-step math problem.")
+# Result: Error at Step 2, entire 1000-token output is useless.
+```
+
+**✅ Production pattern (Recursive Loop):**
+```python

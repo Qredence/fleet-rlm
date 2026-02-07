@@ -1,0 +1,19 @@
+<!-- Chunk 1377: bytes 5102401-5102925, type=function -->
+def process_payment(user_id: int, amount: float, card: dict) -> dict:
+    # Blocking database call
+    result = db.execute(f"SELECT * FROM users WHERE id = {user_id}")
+
+    # Business logic
+    if result['balance'] < amount:
+        raise ValueError("Insufficient funds")
+
+    # Process payment
+    transaction_id = payment_gateway.charge(card, amount)
+    return {"status": "success", "transaction_id": transaction_id}
+```
+
+**2. Add Pydantic Models**
+```python
+# models.py
+from pydantic import BaseModel, Field, validator
+

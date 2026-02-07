@@ -1,0 +1,15 @@
+<!-- Chunk 1066: bytes 3814603-3815081, type=function -->
+def test_skill_exists_check(temp_taxonomy):
+    """Test skill existence checking."""
+    manager = TaxonomyManager(temp_taxonomy)
+    
+    assert not manager.skill_exists("technical_skills/programming/python")
+    
+    # Create a skill manually
+    skill_dir = temp_taxonomy / "technical_skills/programming/python"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "metadata.json").write_text("{}")
+    
+    assert manager.skill_exists("technical_skills/programming/python")
+
+

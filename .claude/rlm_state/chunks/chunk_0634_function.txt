@@ -1,0 +1,409 @@
+<!-- Chunk 634: bytes 977832-991415, type=function -->
+def main():
+    parser = argparse.ArgumentParser(description="Validate DSPy signatures")
+    parser.add_argument("--signature", required=True, help="Name of the signature class")
+    parser.add_argument(
+        "--module",
+        default="agentic_fleet.dspy_modules.signatures",
+        help="Module path",
+    )
+    parser.add_argument("--strict", action="store_true", help="Enable strict validation")
+
+    args = parser.parse_args()
+
+    # Import the module
+    try:
+        module = importlib.import_module(args.module)
+    except ImportError as e:
+        print(f"Error importing module: {e}")
+        sys.exit(1)
+
+    # Get the signature class
+    if not hasattr(module, args.signature):
+        print(f"Error: Signature '{args.signature}' not found in module")
+        print(f"Available signatures: {[name for name in dir(module) if not name.startswith('_')]}")
+        sys.exit(1)
+
+    signature_class = getattr(module, args.signature)
+
+    # Validate
+    success = validate_signature(signature_class, args.strict)
+    sys.exit(0 if success else 1)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: .fleet/skills/dspy-optimization/scripts/test-signature.py
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-optimization-workflow/SKILL.md
+============================================================
+
+---
+name: DSPy Optimization Workflow for Skills-Fleet
+description: Use when optimizing DSPy programs in skills-fleet, implementing quality improvements, using optimization API endpoints, or troubleshooting DSPy issues. Complete 3-phase implementation guide (signatures → training → monitoring → metrics → ensemble → versioning → caching).
+---
+
+# DSPy Optimization Workflow for Skills-Fleet
+
+## When to Use
+
+Load this skill when you need to:
+
+- **Optimize DSPy programs** in skills-fleet for better quality
+- **Implement production patterns** (monitoring, error handling, ensemble methods)
+- **Use the optimization API endpoints** (`/optimization/start`, `/optimization/status`)
+- **Design effective DSPy signatures** with Literal types and constraints
+- **Create or expand training datasets** for robust optimization
+- **Troubleshoot optimization issues** (low scores, API failures, type errors)
+- **Implement advanced patterns** (versioning, A/B testing, caching)
+
+This skill documents the complete 3-phase DSPy quality improvement workflow successfully implemented in January 2026.
+
+## Quick Start
+
+### Run Optimization (Simplest)
+
+```bash
+# Using the quick optimization script
+uv run python scripts/run_optimization.py
+
+# Expected: Runs GEPA optimization with trainset_v4.json (50 examples)
+# Saves to: config/optimized/skill_program_gepa_v1.pkl
+```
+
+### Run Optimization via API
+
+```bash
+# 1. Start server
+uv run skill-fleet serve
+
+# 2. Trigger optimization
+curl -X POST http://localhost:8000/api/v1/optimization/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "optimizer": "miprov2",
+    "trainset_file": "config/training/trainset_v4.json",
+    "auto": "medium"
+  }'
+
+# 3. Check status (use job_id from response)
+curl http://localhost:8000/api/v1/optimization/status/{job_id}
+```
+
+### Test Your Implementation
+
+```bash
+# Run comprehensive validation
+uv run python scripts/test_phase_implementation.py
+
+# Expected: 10/10 tests pass
+```
+
+## 3-Phase Implementation Guide
+
+### Phase 1: Foundation (Week 1)
+
+**Goal**: Enhance signatures, expand training data, add monitoring
+
+**Tasks**:
+1. **Enhance Signatures** → See [references/phase1-implementation.md](references/phase1-implementation.md#signature-enhancements)
+   - Add Literal types for constrained outputs
+   - Specific OutputField constraints with quality indicators
+   - Concise, actionable docstrings
+   
+2. **Expand Training Data** → See [references/phase1-implementation.md](references/phase1-implementation.md#training-data-expansion)
+   - Target: 50-100 examples (DSPy recommendation)
+   - Extract from existing skills
+   - Generate synthetic examples for diversity
+   - Use `scripts/expand_training_data.py` and `scripts/generate_synthetic_examples.py`
+
+3. **Add Monitoring** → See [references/phase1-implementation.md](references/phase1-implementation.md#monitoring-infrastructure)
+   - ModuleMonitor: Wrap modules for tracking
+   - ExecutionTracer: Collect detailed traces
+   - MLflowLogger: Optional experiment tracking
+
+**Example**: [examples/example_signature.py](examples/example_signature.py)
+
+### Phase 2: Optimization (Week 2)
+
+**Goal**: Run optimization, implement custom metrics, add error handling
+
+**Tasks**:
+1. **Run Optimization** → See [references/phase2-optimization.md](references/phase2-optimization.md#optimization-cycle)
+   - Use MIPROv2 with `auto="medium"` for balanced cost/quality
+   - Or GEPA for faster, reflection-based optimization
+   - Configure via API or CLI
+
+2. **Enhanced Metrics** → See [references/phase2-optimization.md](references/phase2-optimization.md#evaluation-metrics)
+   - taxonomy_accuracy_metric
+   - metadata_quality_metric
+   - skill_style_alignment_metric
+   - comprehensive_metric (weighted combination)
+
+3. **Error Handling** → See [references/phase2-optimization.md](references/phase2-optimization.md#error-handling)
+   - RobustModule: Retry with exponential backoff
+   - ValidatedModule: Output validation
+   - Phase-specific fallbacks
+
+**Example**: [examples/example_metric.py](examples/example_metric.py)
+
+### Phase 3: Advanced Patterns (Week 3)
+
+**Goal**: Implement ensemble, versioning, caching for production
+
+**Tasks**:
+1. **Ensemble Methods** → See [references/phase3-advanced.md](references/phase3-advanced.md#ensemble-methods)
+   - EnsembleModule: Multiple models, best selection
+   - BestOfN: Generate N, pick highest quality
+   - MajorityVote: Classification consensus
+
+2. **Versioning** → See [references/phase3-advanced.md](references/phase3-advanced.md#versioning)
+   - ProgramRegistry: Manage multiple versions
+   - ABTestRouter: Gradual rollout, A/B testing
+
+3. **Caching** → See [references/phase3-advanced.md](references/phase3-advanced.md#caching)
+   - CachedModule: Multi-level caching (memory + disk)
+   - Significant performance gains (30-50% faster)
+
+**Example**: [examples/example_ensemble.py](examples/example_ensemble.py)
+
+## API Usage Patterns
+
+**Complete reference**: [references/api-reference.md](references/api-reference.md)
+
+### Key Endpoints
+
+**POST `/api/v1/optimization/start`**
+- Trigger background optimization job
+- Supports MIPROv2, GEPA, BootstrapFewShot
+- Uses trainset JSON files or skill paths
+
+**GET `/api/v1/optimization/status/{job_id}`**
+- Check optimization progress
+- Returns: status, progress (0-1), result, error
+
+**GET `/api/v1/optimization/optimizers`**
+- List available optimizers with parameters
+- Useful for discovering configuration options
+
+### Integration Example
+
+```python
+# Start optimization programmatically
+import httpx
+
+async with httpx.AsyncClient() as client:
+    response = await client.post(
+        "http://localhost:8000/api/v1/optimization/start",
+        json={
+            "optimizer": "miprov2",
+            "trainset_file": "config/training/trainset_v4.json",
+            "auto": "medium",
+        }
+    )
+    job_id = response.json()["job_id"]
+    
+    # Poll for completion
+    while True:
+        status = await client.get(
+            f"http://localhost:8000/api/v1/optimization/status/{job_id}"
+        )
+        data = status.json()
+        
+        if data["status"] == "completed":
+            print(f"Quality score: {data['result']['quality_score']}")
+            break
+        
+        await asyncio.sleep(5)
+```
+
+## Best Practices & Patterns
+
+**Complete guide**: [references/best-practices.md](references/best-practices.md)
+
+### DSPy Signature Design
+
+✅ **DO**:
+- Use Literal types for enums/categories
+- Add specific constraints to OutputField descriptions
+- Include quality indicators ("quality >0.80", "3-5 examples")
+- Keep docstrings concise and actionable
+
+❌ **DON'T**:
+- Use generic `str` types when Literal would work
+- Write verbose explanations in docstrings
+- Skip OutputField descriptions
+- Use underscores or spaces in field names
+
+### Training Data
+
+✅ **DO**:
+- Aim for 50-100 diverse examples
+- Include all skill styles (comprehensive, navigation_hub, minimal)
+- Cover all major categories
+- Use both golden and synthetic examples
+
+❌ **DON'T**:
+- Rely on <20 examples (insufficient for robust optimization)
+- Duplicate examples (reduces effective dataset size)
+- Skip validation of JSON structure
+- Ignore category distribution
+
+### Optimization Strategy
+
+✅ **DO**:
+- Start with GEPA for quick iteration (fast, cheap)
+- Use MIPROv2 `auto="medium"` for production (balanced)
+- Monitor costs and quality during optimization
+- Evaluate on separate test set
+
+❌ **DON'T**:
+- Jump straight to `auto="heavy"` (expensive, often unnecessary)
+- Optimize on entire dataset without train/test split
+- Ignore baseline evaluation
+- Skip monitoring/logging during long runs
+
+## Troubleshooting
+
+**Complete guide**: [references/troubleshooting.md](references/troubleshooting.md)
+
+### Common Issues
+
+**Low Quality Scores (<0.70)**
+- ✓ Check training data diversity (need 50+ examples)
+- ✓ Verify signature constraints are specific
+- ✓ Review metric function (might be too strict)
+- ✓ Try MIPROv2 instead of BootstrapFewShot
+
+**API Optimization Job Fails**
+- ✓ Check trainset JSON structure
+- ✓ Verify GOOGLE_API_KEY is set
+- ✓ Check server logs for specific error
+- ✓ Ensure enough memory (optimization is CPU/memory intensive)
+
+**Type Errors in Signatures**
+- ✓ Add `from __future__ import annotations`
+- ✓ Import types from `typing` (Literal, etc.)
+- ✓ Run `uv run ty check src/` to validate
+- ✓ Check for unresolved references
+
+**Slow Optimization**
+- ✓ Use GEPA instead of MIPROv2 for faster iteration
+- ✓ Reduce `num_candidate_programs` (default 16 → 8)
+- ✓ Lower `max_bootstrapped_demos` (4 → 2)
+- ✓ Use `auto="light"` instead of "medium"
+
+## Utilities & Scripts
+
+### Quick Optimization Runner
+
+```bash
+# Run optimization with sensible defaults
+.skills/dspy-optimization-workflow/scripts/quick_optimize.py \
+  --trainset config/training/trainset_v4.json \
+  --optimizer gepa
+```
+
+### Test Custom Metrics
+
+```bash
+# Test metric against examples
+.skills/dspy-optimization-workflow/scripts/test_metrics.py \
+  --metric comprehensive_metric \
+  --examples 10
+```
+
+### Compare Program Versions
+
+```bash
+# Compare two optimized versions
+.skills/dspy-optimization-workflow/scripts/compare_versions.py \
+  --v1 config/optimized/program_v1.pkl \
+  --v2 config/optimized/program_v2.pkl
+```
+
+### Export Monitoring Traces
+
+```bash
+# Export traces for analysis
+.skills/dspy-optimization-workflow/scripts/export_traces.py \
+  --output traces_analysis.json
+```
+
+## Key Files Reference
+
+### Configuration
+- `config/training/trainset_v4.json` - 50 training examples (ready to use)
+- `config/config.yaml` - LLM configuration (roles, models)
+
+### Core Implementation
+- `src/skill_fleet/core/dspy/signatures/` - Enhanced signature definitions
+- `src/skill_fleet/core/dspy/metrics/enhanced_metrics.py` - Evaluation metrics
+- `src/skill_fleet/core/dspy/monitoring/` - Monitoring infrastructure
+- `src/skill_fleet/core/dspy/modules/error_handling.py` - Error handling wrappers
+- `src/skill_fleet/core/dspy/modules/ensemble.py` - Ensemble methods
+- `src/skill_fleet/core/dspy/versioning.py` - Version management
+- `src/skill_fleet/core/dspy/caching.py` - Caching strategies
+
+### API
+- `src/skill_fleet/api/routes/optimization.py` - Optimization endpoints
+
+### Scripts
+- `scripts/run_optimization.py` - Main optimization runner
+- `scripts/test_phase_implementation.py` - Comprehensive tests
+- `scripts/expand_training_data.py` - Training data extraction
+- `scripts/generate_synthetic_examples.py` - Synthetic example generation
+
+## Expected Results
+
+With complete Phase 1-3 implementation:
+
+- **Quality Score**: 0.70-0.75 → **0.85-0.90** (+15-20%)
+- **Obra Compliance**: ~60% → **~85%** (+25%)
+- **Consistency**: Much improved with Literal type constraints
+- **Performance**: 30-50% faster with strategic caching
+- **Reliability**: Improved with retry logic and fallbacks
+- **Observability**: Full monitoring and tracing in production
+
+## Next Steps
+
+After loading this skill:
+
+1. **For new optimization**: Start with Phase 1 (signatures + training data)
+2. **For existing setup**: Jump to [Quick Start](#quick-start) and run optimization
+3. **For troubleshooting**: Check [references/troubleshooting.md](references/troubleshooting.md)
+4. **For API integration**: See [references/api-reference.md](references/api-reference.md)
+5. **For advanced patterns**: Review [references/phase3-advanced.md](references/phase3-advanced.md)
+
+---
+
+**Implementation Status**: ✅ All phases complete (Jan 19, 2026)  
+**Test Results**: 10/10 tests passing  
+**Type Checks**: ✅ Passing (11 expected MLflow warnings)  
+**Ready for Production**: Yes
+
+
+============================================================
+END FILE: .fleet/skills/dspy-optimization-workflow/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-optimization-workflow/examples/example_metric.py
+============================================================
+
+"""Example custom evaluation metric for DSPy optimization.
+
+This demonstrates how to create effective metrics for optimizing
+skill generation quality.
+"""
+
+from __future__ import annotations
+
+import dspy
+
+

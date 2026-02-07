@@ -1,0 +1,49 @@
+<!-- Chunk 997: bytes 3484324-3486700, type=class -->
+class ValidatePrompt(BaseModel):
+    type: Literal["validate"] = "validate"
+    report: str
+    passed: bool
+
+HITLPrompt = Union[ClarifyPrompt, ConfirmPrompt, PreviewPrompt, ValidatePrompt]
+```
+
+---
+
+## Phase 2: Thin Client Refactoring
+
+**Duration:** 2-3 weeks  
+**Priority:** High  
+**Status:** 🔄 In Progress (Core server-side normalization complete)
+
+### Objectives
+
+1. Move interaction logic from CLI to server
+2. Make CLI a pure API consumer
+3. Align UI to use API directly (not spawn CLI)
+
+### Tasks
+
+| Task | File(s)                                        | Description                                                                            | Status |
+|------|------------------------------------------------|----------------------------------------------------------------------------------------|--------|
+| 2.1  | `src/skill_fleet/cli/hitl/runner.py`           | Remove `_normalize_questions()` - server should return pre-structured question objects | ✅ Done |
+| 2.1a | `src/skill_fleet/api/schemas/hitl.py`          | Created `StructuredQuestion`, `QuestionOption` models and `normalize_questions()`      | ✅ Done |
+| 2.1b | `src/skill_fleet/api/routes/hitl.py`           | Server-side normalization in `get_prompt()` endpoint                                   | ✅ Done |
+| 2.2  | `src/skill_fleet/api/routes/hitl.py`           | Add `response_model=HITLPrompt` to `GET /{job_id}/prompt`                              | ✅ Done |
+| 2.3  | `src/skill_fleet/cli/client.py`                | Add Pydantic validation for API responses using shared schemas                         | ⏳ Todo |
+| 2.4  | `src/skill_fleet/ui/src/services/cliBridge.ts` | Refactor to call FastAPI endpoints directly instead of spawning CLI                    | ⏳ Todo |
+| 2.5  | `src/skill_fleet/ui/src/services/apiClient.ts` | Create new TypeScript API client using `fetch()`                                       | ⏳ Todo |
+
+### Success Criteria
+
+- [x] `runner.py` contains no data transformation logic (only rendering)
+- [ ] CLI validates all API responses against Pydantic models
+- [ ] UI makes direct HTTP calls to `http://localhost:8000/api/v2/*`
+- [ ] `cliBridge.ts` is deprecated or removed
+- [ ] Integration tests verify CLI↔API contract
+
+### Code Example: Thin Client Pattern
+
+```python
+# src/skill_fleet/cli/client.py (updated)
+from skill_fleet.api.schemas.hitl import HITLPrompt
+

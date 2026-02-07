@@ -1,0 +1,6 @@
+<!-- Chunk 2127: bytes 8049652-8049837, type=function -->
+def test_safe_json_loads_parses_valid_json_string() -> None:
+    assert safe_json_loads('{"a": 1}', default={}) == {"a": 1}
+    assert safe_json_loads("[1, 2]", default=[]) == [1, 2]
+
+

@@ -1,0 +1,40 @@
+<!-- Chunk 1602: bytes 6600524-6601602, type=class -->
+class InteractionHandler:
+    """
+    Base class for HITL interaction handlers.
+
+    All handlers must implement the handle() method which takes
+    the prompt data from the API and posts a response back.
+    """
+
+    def __init__(self, console: Console, ui: PromptUI | None = None) -> None:
+        """
+        Initialize the handler.
+
+        Args:
+            console: Rich console for rendering output
+            ui: PromptUI for user input (uses default if None)
+        """
+        self.console = console
+        self.ui = ui or get_default_ui()
+
+    async def handle(
+        self,
+        job_id: str,
+        prompt_data: dict[str, Any],
+        client: Any,
+    ) -> None:
+        """
+        Handle the interaction and post response to API.
+
+        Args:
+            job_id: The job ID for this interaction
+            prompt_data: The prompt data from GET /hitl/{job_id}/prompt
+            client: The API client for posting responses
+
+        Raises:
+            NotImplementedError: Subclasses must implement this
+        """
+        raise NotImplementedError
+
+

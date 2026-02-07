@@ -1,0 +1,76 @@
+<!-- Chunk 1606: bytes 6609226-6611862, type=class -->
+class TDDRefactorHandler(InteractionHandler):
+    """
+    Handler for tdd_refactor interaction type.
+
+    TDD Refactor Phase: User cleans up code while keeping tests passing.
+    Shows refactor opportunities, code smells, and coverage report.
+
+    User Actions:
+    - proceed: Code refactored successfully
+    - skip: Skip refactoring step
+    - revise: Still working on refactoring
+    - cancel: Cancel skill creation
+    """
+
+    async def handle(
+        self,
+        job_id: str,
+        prompt_data: dict[str, Any],
+        client: Any,
+    ) -> None:
+        """Handle TDD refactor phase interaction and post response to API."""
+        opportunities = prompt_data.get("refactor_opportunities", [])
+        code_smells = prompt_data.get("code_smells", [])
+        coverage = prompt_data.get("coverage_report", "")
+
+        content_parts = []
+        if coverage:
+            content_parts.append(f"[bold]Coverage:[/bold] {coverage}")
+        if opportunities:
+            content_parts.append("[bold]Refactor opportunities:[/bold]")
+            content_parts.extend(f"  • {op}" for op in opportunities)
+        if code_smells:
+            if opportunities:
+                content_parts.append("")  # blank line
+            content_parts.append("[yellow]Code smells:[/yellow]")
+            content_parts.extend(f"  ⚠️  {smell}" for smell in code_smells)
+
+        self.console.print(
+            Panel(
+                "\n".join(str(p) for p in content_parts) if content_parts else "Ready to refactor.",
+                title="[bold blue]🔵 TDD Refactor Phase: Clean Up Code[/bold blue]",
+                border_style="blue",
+            )
+        )
+
+        action = await self.ui.choose_one(
+            "Refactoring complete?",
+            [
+                ("proceed", "Yes, code refactored"),
+                ("skip", "Skip refactoring"),
+                ("revise", "Need more work"),
+                ("cancel", "Cancel"),
+            ],
+            default_id="proceed",
+        )
+
+        # Map skip to proceed (user chose to skip refactoring step)
+        if action == "skip":
+            action = "proceed"
+
+        payload: dict[str, object] = {"action": action}
+        if action == "revise":
+            payload["feedback"] = await self.ui.ask_text("What still needs work?", default="")
+        await client.post_hitl_response(job_id, payload)
+
+
+# Handler registry - maps interaction types to handler classes
+HANDLERS: dict[str, type[InteractionHandler]] = {
+    "deep_understanding": DeepUnderstandingHandler,
+    "tdd_red": TDDRedHandler,
+    "tdd_green": TDDGreenHandler,
+    "tdd_refactor": TDDRefactorHandler,
+}
+
+

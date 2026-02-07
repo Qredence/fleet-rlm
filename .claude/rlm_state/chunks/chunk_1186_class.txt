@@ -1,0 +1,34 @@
+<!-- Chunk 1186: bytes 4499289-4500330, type=class -->
+class UnderstandTaskForSkill(dspy.Signature):
+    """Step 1: Extract task requirements and map to taxonomy position."""
+    
+    task_description = dspy.InputField(
+        desc="User's task or capability requirement"
+    )
+    existing_skills = dspy.InputField(
+        desc="Currently mounted skills in taxonomy"
+    )
+    taxonomy_structure = dspy.InputField(
+        desc="Relevant portion of hierarchical taxonomy"
+    )
+    
+    # Outputs
+    task_intent = dspy.OutputField(
+        desc="Core intent and requirements"
+    )
+    taxonomy_path = dspy.OutputField(
+        desc="Proposed path in taxonomy (e.g., 'technical_skills/programming/python/async')"
+    )
+    parent_skills = dspy.OutputField(
+        desc="Parent and sibling skills in taxonomy for context"
+    )
+    dependency_analysis = dspy.OutputField(
+        desc="Required dependency skills not yet mounted"
+    )
+```
+
+**Why:** This ensures every generated skill knows its taxonomy position from the start.
+
+### 2. **Enhance PLAN with Dependency Resolution**
+
+```python

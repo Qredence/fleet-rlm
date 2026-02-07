@@ -1,0 +1,58 @@
+<!-- Chunk 175: bytes 286109-287449, type=class -->
+class OrderService:
+    def __init__(self, payment_processor: PaymentProcessor):
+        self.payment = payment_processor  # Depends on abstraction
+
+# Can inject any processor
+service = OrderService(StripeProcessor())
+```
+
+## Code Organization
+
+### Module Structure
+
+```
+backend/
+├── api/              # API endpoints
+│   ├── routes/       # Route handlers
+│   └── dependencies/ # FastAPI/Flask dependencies
+├── services/         # Business logic
+├── repositories/     # Data access
+├── models/           # Data models
+├── schemas/          # Validation schemas (Pydantic)
+├── utils/            # Shared utilities
+│   ├── validation/
+│   ├── formatting/
+│   └── helpers/
+└── config/           # Configuration
+```
+
+### Import Guidelines
+
+1. **Group imports:** Standard library, third-party, local
+2. **Use absolute imports:** `from myapp.utils import helper`
+3. **Avoid wildcards:** Never `from module import *`
+4. **Import what you need:** `from module import specific_function`
+
+**Good:**
+```python
+# Standard library
+import json
+import logging
+from typing import Any
+
+# Third-party
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+# Local
+from myapp.services import UserService
+from myapp.utils import validate_email
+```
+
+## Type Hints
+
+Always use type hints for function signatures and complex variables.
+
+**Good:**
+```python

@@ -1,0 +1,425 @@
+<!-- Chunk 1044: bytes 3747887-3763790, type=function -->
+def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+    """Initialize client."""
+    self.base_url = base_url.rstrip("/")
+    self.client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
+```
+
+Add CLI argument in `app.py` or `main.py`:
+```python
+typer.Option("--timeout", default=30.0, help="API request timeout in seconds")
+```
+
+### 5. Document External Dependencies
+Add `docs/dependencies.md` with:
+- Purpose of each dependency
+- Why specific version constraints exist
+- Transitive dependencies to be aware of
+- Security implications of each dependency
+
+## Summary
+
+### Critical Issues
+- None identified
+
+### High Priority Issues
+1. Unused import in `commands/chat.py:10`
+2. Hardcoded timeout in `client.py:19`
+
+### Medium Priority Issues
+1. Rich console duplication (13 instances)
+2. No centralized configuration for theming
+
+### Low Priority Issues
+1. Mixed async/sync patterns (appropriate for CLI design)
+
+### No Issues Found
+- No circular dependencies
+- No deprecated API usage
+- All dependencies compatible
+- Python 3.12+ features used correctly
+
+
+============================================================
+END FILE: docs/internal/plans/archive/cli-dependencies-review.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/cli-documentation-review.md
+============================================================
+
+# CLI Documentation Review
+
+## Missing Docstrings
+
+### main.py
+- `create_skill()` - No docstring explaining workflow phases
+- `validate_skill()` - Brief docstring, missing examples
+- `optimize_workflow_cli()` - No docstring for complex optimization logic
+
+### interactive_cli.py
+- `InteractiveSkillCLI._display_multi_skill_queue()` - Missing docstring
+- `InteractiveSkillCLI._show_history()` - No docstring
+- `InteractiveSkillCLI._respond_with_streaming()` - Complex function, needs detailed docs
+
+### commands/chat.py
+- `chat_command()` - 191 lines, no docstring
+- `create_dashboard_layout()` - No docstring for layout creation
+- Missing Args/Returns sections in most functions
+
+## Docstring Quality Issues
+
+### Inconsistent Format
+- Some use Google style (Args:, Returns:)
+- Some use Sphinx style (:param, :type, :returns:)
+- Mix of styles across files
+
+### Missing Examples
+- No docstrings include usage examples
+- Complex CLI flows (create-skill, interactive) need examples
+- Missing descriptions of expected output formats
+
+### Missing Return Type Hints
+- Several functions return `int` exit codes but not documented
+- Async functions don't specify return types in docstrings
+- Callback functions not documented
+
+## Recommendations
+1. Adopt Google-style docstrings consistently (match skill-fleet convention)
+2. Add Args, Returns, Raises sections to all public functions
+3. Include usage examples for complex commands
+4. Document exit codes (0=success, 1=error, 2=config error)
+5. Add type hints to function signatures where missing
+
+
+============================================================
+END FILE: docs/internal/plans/archive/cli-documentation-review.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/cli-error-handling-review.md
+============================================================
+
+# CLI Error Handling Review
+
+## Issues Found
+
+### Bare Except Clauses
+- `interactive_cli.py:76` - Generic `except Exception:` catches all errors
+- `interactive_cli.py:487` - Generic `except Exception:` catches all errors
+- `interactive_cli.py:93` - Generic `except Exception:` catches all errors
+- `interactive_cli.py:123` - Generic `except Exception:` catches all errors
+- `interactive_typer.py:138` - Generic `except Exception:` catches all errors
+- `interactive_typer.py:243` - Generic `except Exception:` catches all errors
+- `main.py:344` - Empty except clause (bare except)
+- `chat.py:96` - Generic `except Exception:` catches all errors
+- `create.py:88` - Generic `except Exception:` catches all errors
+- `list_skills.py:18` - Generic `except Exception:` catches all errors
+
+### Missing Specific Exceptions
+- FleetConfigError handling exists but other config errors not caught
+- HTTP errors from httpx not differentiated (timeouts vs connection errors)
+- File I/O errors not explicitly handled (session save/load)
+- JSON parsing errors not specifically caught
+- JSON serialization errors not specifically caught
+- Task loading errors not differentiated
+
+### Inconsistent Error Reporting
+- Some use `print(..., file=sys.stderr)` (main.py:316, 375, 379)
+- Some use `console.print("[red]Error: ...[/red]")` (multiple files)
+- Mix of Rich formatting and plain text for errors
+- Some errors use logger.exception() (interactive_cli.py:263)
+- Some use logger.warning() (interactive_cli.py:493)
+- Inconsistent capitalization: "Error:", "Config error:", "❌ Job failed"
+
+### Missing User-Facing Messages
+- "Config error" doesn't explain what to fix (interactive_typer.py:93)
+- "Error during optimization" gives no actionable guidance (main.py:379)
+- HTTP errors don't show retry options
+- Generic "Error: {e}" messages don't provide context or next steps
+- JSON load errors don't explain what format is expected
+- Session save/load errors don't suggest recovery options
+
+### Resource Cleanup
+- Finally blocks present in all try blocks (good practice)
+- HTTP client cleanup consistent across async commands
+- Session files may not be saved on crashes
+- Main.py line 180 has bare except with finally (client.py:180)
+- Some async functions properly close connections in finally blocks
+
+### Exit Code Inconsistency
+- main.py returns 1 for optimization errors
+- main.py returns 2 for config errors and missing files
+- Other commands may use different exit codes
+- No standardized exit code scheme documented
+
+## Recommendations
+
+1. **Replace bare `except Exception` with specific exception types**
+   - Catch specific errors: ValueError, TypeError, KeyError, etc.
+   - Keep Exception only as fallback for truly unexpected errors
+   - Log full stack trace for unexpected exceptions
+
+2. **Create consistent error message format using Rich**
+   - Standardize on `console.print("[red]Error: ...[/red]")` pattern
+   - Use `[yellow]` for warnings
+   - Add context and actionable suggestions to all error messages
+   - Include file paths and line numbers where appropriate
+
+3. **Add error recovery suggestions**
+   - "Run with --help" for command usage errors
+   - "Check configuration file at {path}" for config errors
+   - "Retry with --verbose for more details"
+   - "See documentation at URL" for complex errors
+
+4. **Ensure all async functions have proper cleanup in finally blocks**
+   - Close HTTP connections in finally
+   - Save state/session data on error when possible
+   - Clean up temporary files
+   - Ensure database connections are closed
+
+5. **Log full stack traces for debugging**
+   - Use `logger.exception()` for unexpected errors
+   - Add `LOG_LEVEL` env var to control verbosity
+   - Keep detailed logs separate from user-facing messages
+   - Include timestamps and request IDs
+
+6. **Define custom CLI error classes for better handling**
+   - `CLIConfigError` for configuration issues
+   - `CLINetworkError` for HTTP/connection errors
+   - `CLIValidationError` for input validation
+   - `CLIStateError` for session/state management errors
+
+7. **Standardize exit codes**
+   - 0: Success
+   - 1: General error
+   - 2: Configuration error
+   - 3: Network/connectivity error
+   - 4: Validation error
+   - 5: Permission error
+   - Document exit code scheme in CLI reference
+
+8. **Add HTTP error differentiation**
+   - Catch specific httpx exceptions: Timeout, ConnectError, HTTPStatusError
+   - Retry for transient errors (timeouts, connection errors)
+   - Show status code and response body for HTTP errors
+   - Suggest retry strategies based on error type
+
+9. **Improve session error handling**
+   - Catch JSONDecodeError for malformed session files
+   - Catch PermissionError for read/write permission issues
+   - Create backup before overwriting session files
+   - Suggest recovery steps when session loading fails
+
+10. **Add validation error details**
+    - Show which field failed validation
+    - Provide example of valid input
+    - Link to documentation for complex validation rules
+    - Show line number if validating a file
+
+
+============================================================
+END FILE: docs/internal/plans/archive/cli-error-handling-review.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/cli-review-architecture.md
+============================================================
+
+# CLI Architecture Analysis
+
+## Two CLI Implementations Identified
+
+### main.py (argparse-based)
+- Entry point: `cli_entrypoint()`
+- Commands: create-skill, validate-skill, onboard, analytics, migrate, generate-xml, optimize, interactive
+- Lines: 676
+
+### app.py (Typer-based)
+- Entry point: `app()` (not currently registered in pyproject.toml)
+- Commands: create, list, serve, chat
+- Lines: 65
+
+## Issues to Address
+1. Dual CLI implementations create confusion
+2. Different command naming conventions (kebab-case vs lowercase)
+3. app.py commands duplicate main.py functionality
+4. No migration plan from argparse to Typer documented
+
+---
+
+## Code Quality Issues
+
+### Long Functions (>50 lines)
+
+**interactive_cli.py (5 long functions)**
+- `run()` - 164 lines: Complex interaction loop with state management
+- `__init__()` - 61 lines: Large initialization logic
+- `_handle_command()` - 54 lines: Command parsing and routing
+- `_display_checklist_status()` - 95 lines: UI rendering logic
+- `_respond_with_streaming()` - 56 lines: Streaming response handling
+- `_display_multi_choice_question()` - 55 lines: Question formatting
+
+**main.py (4 long functions)**
+- `create_skill()` - 141 lines: Skill creation workflow orchestration
+- `optimize_workflow_cli()` - 84 lines: Optimization logic with MIPROv2/GEPA
+- `show_analytics()` - 54 lines: Analytics display
+- `build_parser()` - 207 lines: Argument parser configuration
+
+**interactive_typer.py (3 long functions)**
+- `interactive_chat()` - 65 lines: Chat interface
+- `test_dynamic_questions()` - 105 lines: Question testing
+- `test_deep_understanding()` - 130 lines: Understanding verification
+
+**onboarding_cli.py (1 long function)**
+- `collect_onboarding_responses()` - 98 lines: User data collection
+
+**commands/chat.py (2 long functions)**
+- `chat_command()` - 99 lines: Chat dashboard orchestration
+- `create_dashboard_layout()` - 69 lines: Rich layout creation
+
+**commands/create.py (1 long function)**
+- `create_command()` - 79 lines: Command execution wrapper
+
+### Code Duplication
+
+**Console() Instantiations (5 total)**
+- `main.py`: 3 instances
+- `app.py`: 1 instance
+- `interactive_cli.py`: 1 instance
+- **Impact**: Inconsistent styling, multiple Rich console objects created
+- **Recommendation**: Create singleton console manager in shared utility
+
+**Async Wrapper Patterns**
+- `client.py`: 7 async functions with similar patterns
+- `commands/create.py`, `commands/chat.py`: Repeated async wrappers with `try/except/finally` and `client.close()`
+- **Impact**: Duplicated error handling and cleanup logic
+- **Recommendation**: Extract shared async wrapper with context manager
+
+**Error Handling Patterns**
+- `main.py`: 5 try/except blocks
+- `interactive_cli.py`: 5 try blocks, 9 except blocks
+- Mix of `print(..., file=sys.stderr)` and `console.print("[red]Error...[/red]")`
+- **Impact**: Inconsistent error reporting across CLI
+- **Recommendation**: Create unified error display utility
+
+### Hardcoded Values
+
+**Timeouts and Delays**
+- `client.py:19`: `timeout=30.0` - httpx client timeout (30 seconds)
+- `interactive_cli.py:529`: `refresh_per_second=10` - UI refresh rate
+- `commands/chat.py:183`: `await asyncio.sleep(2)` - 2-second delay
+- `commands/create.py:87`: `await asyncio.sleep(2)` - 2-second delay
+
+**Magic Numbers (analysis)**
+- `main.py`: 30 magic numbers (excluding 0,1,2,10)
+- `interactive_cli.py`: 7 magic numbers
+- `client.py`: 2 magic numbers (8000, 30)
+- `onboarding_cli.py`: 6 magic numbers
+- Sample: 100, 70, 60, 8, 20, 200, 150, 8000, 30
+
+**Long String Literals**
+- `main.py`: 86 long strings (>50 characters)
+- `interactive_cli.py`: 119 long strings
+- `client.py`: 12 long strings
+- `app.py`: 6 long strings
+- `onboarding_cli.py`: 17 long strings
+- **Impact**: UI messages and help text embedded in code
+- **Recommendation**: Extract to constants or external message files
+
+### Recommendations
+
+1. **Extract Shared Patterns**
+   - Create `src/skill_fleet/cli/utils/console.py` with singleton Console manager
+   - Create `src/skill_fleet/cli/utils/async_wrapper.py` for consistent async handling
+   - Create `src/skill_fleet/cli/utils/errors.py` for unified error display
+
+2. **Break Down Long Functions**
+   - `interactive_cli.py:run()` → Extract UI update loop, command handler, state manager
+   - `main.py:create_skill()` → Extract workflow steps to separate functions
+   - `main.py:build_parser()` → Extract subparser builders to functions
+   - `commands/chat.py:chat_command()` → Extract dashboard setup, event loop
+
+3. **Define Constants**
+   - Create `src/skill_fleet/cli/constants.py` for:
+     - HTTP timeouts
+     - UI refresh rates
+     - Sleep delays
+     - Exit codes
+     - Color schemes
+   - Replace all magic numbers with named constants
+
+4. **Refactor Code Duplication**
+   - Consolidate Console() to single instance
+   - Create async context manager for httpx client lifecycle
+   - Standardize error message format with Rich Panel
+
+
+============================================================
+END FILE: docs/internal/plans/archive/cli-review-architecture.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/cli-security-review.md
+============================================================
+
+# CLI Security Review
+
+## Executive Summary
+
+This security review identifies potential vulnerabilities in the skill-fleet CLI related to path handling, input validation, and secrets management. While no critical vulnerabilities were found, several medium-risk issues should be addressed to improve security posture.
+
+**Review Date:** 2026-01-12
+**Scope:** `src/skill_fleet/cli/main.py`, `app.py`, `client.py`, `onboarding_cli.py`
+**Severity Breakdown:**
+- Critical: 0
+- High: 0
+- Medium: 4
+- Low: 3
+
+---
+
+## Path Traversal Risks
+
+### Issue 1: Unvalidated User-Provided Paths (Medium Severity)
+
+**Location:** `main.py:55, 94, 105, 232, 262, 284, 385`
+
+**Problem:**
+User-provided paths via command-line arguments are used directly without validation:
+
+```python
+# main.py:55
+taxonomy = TaxonomyManager(Path(args.skills_root))
+
+# main.py:94
+config = load_fleet_config(Path(args.config))
+
+# main.py:235
+skill_path = Path(args.skill_path)
+
+# main.py:288
+Path(args.output).write_text(xml_content, encoding="utf-8")
+
+# interactive_cli.py:646, 649
+config = load_fleet_config(Path(args.config))
+taxonomy = TaxonomyManager(Path(args.skills_root))
+```
+
+**Vulnerability:**
+While `Path.resolve()` normalizes paths (e.g., `../` gets expanded to absolute path), there is no validation that the resolved path stays within allowed directories. An attacker could potentially:
+
+- Read files outside the intended directory (if they control skill paths)
+- Write to unintended locations via `--output` flag
+- Access sensitive files if they know the filesystem structure
+
+**Test Results:**
+```python
+# Path resolution test
+Path('../../etc/passwd').resolve()
+# Returns: /Volumes/.../agent-framework/v0.5/_WORLD/skills-fleet/etc/passwd
+# This escapes the intended skills root directory
+```
+
+**Mitigation Required:**
+```python

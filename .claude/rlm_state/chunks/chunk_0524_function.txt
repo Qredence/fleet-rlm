@@ -1,0 +1,26 @@
+<!-- Chunk 524: bytes 864912-865529, type=function -->
+def validated_calculate(expression: str) -> float:
+    """Calculate with input validation."""
+    # Validate input
+    if not isinstance(expression, str):
+        raise TypeError("Expression must be a string")
+
+    if len(expression) > 100:
+        raise ValueError("Expression too long")
+
+    # Process input
+    result = calculate(expression)
+
+    # Validate output
+    if isinstance(result, float) and not (result != result):  # Check for NaN
+        return result
+    else:
+        raise ValueError("Invalid calculation result")
+```
+
+## Best Practices
+
+### 1. Clear Tool Names
+
+```python
+# Good: Descriptive name

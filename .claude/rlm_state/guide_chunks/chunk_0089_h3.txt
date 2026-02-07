@@ -1,0 +1,7 @@
+<!-- Chunk 89: bytes 27743-27907, type=h3 -->
+### Pattern 5: Domain-specific intelligence
+
+**Use when:** Your skill adds specialized knowledge beyond tool access.
+
+**Example: Financial compliance**
+```markdown

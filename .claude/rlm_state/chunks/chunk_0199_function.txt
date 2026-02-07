@@ -1,0 +1,8 @@
+<!-- Chunk 199: bytes 297557-297744, type=function -->
+def validate_email(email: str) -> None:
+    if not email or "@" not in email:
+        raise ValueError("Invalid email")
+
+# file1.py, file2.py
+from utils.validation import validate_email
+

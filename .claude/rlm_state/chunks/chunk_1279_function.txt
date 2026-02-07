@@ -1,0 +1,83 @@
+<!-- Chunk 1279: bytes 4728683-4731560, type=function -->
+def run_optimization(
+    trainset: list[dspy.Example],
+    program: dspy.Module,
+    optimizer_type: str = "miprov2",
+    auto_level: str = "medium",
+) -> dspy.Module:
+    """
+    Run DSPy optimization.
+
+    Args:
+        trainset: Training examples
+        program: DSPy program to optimize
+        optimizer_type: 'miprov2' or 'gepa'
+        auto_level: 'light', 'medium', or 'heavy' (for MIPROv2)
+
+    Returns:
+        Optimized program
+
+    """
+    logger.info(f"Starting {optimizer_type} optimization with auto='{auto_level}'")
+    logger.info(f"Training set size: {len(trainset)} examples")
+
+    # Create optimizer
+    if optimizer_type == "miprov2":
+        # MIPROv2 with medium auto level - balanced speed/quality
+        optimizer = dspy.MIPROv2(
+            metric=simple_metric,
+            auto=auto_level,
+            num_threads=8,  # Parallel optimization
+        )
+
+        # Compile with reasonable demo counts
+        logger.info("Running MIPROv2 optimization (this may take 5-15 minutes)...")
+        optimized = optimizer.compile(
+            program,
+            trainset=trainset,
+            max_bootstrapped_demos=2,  # Conservative for speed
+            max_labeled_demos=2,
+            num_candidate_programs=8,  # Reduced from default 16 for speed
+        )
+
+    elif optimizer_type == "bootstrap":
+        # BootstrapFewShot for fastest, simplest optimization
+        optimizer = dspy.BootstrapFewShot(
+            metric=simple_metric,
+            max_bootstrapped_demos=2,
+            max_labeled_demos=1,
+        )
+
+        logger.info("Running BootstrapFewShot optimization (fastest)...")
+        optimized = optimizer.compile(program, trainset=trainset)
+
+    elif optimizer_type == "gepa":
+        # GEPA for faster, reflection-based optimization
+        # Requires reflection_lm for the optimization process
+        from skill_fleet.core.optimization.optimizer import get_lm
+
+        reflection_lm = get_lm("gemini-3-flash-preview", temperature=1.0)
+
+        # Wrap metric to match GEPA's signature: (gold, pred, trace, pred_name, pred_trace)
+        def gepa_metric(gold, pred, trace=None, pred_name=None, pred_trace=None):
+            """GEPA-compatible metric function."""
+            score = simple_metric(gold, pred, trace)
+            # Return dict with score and optional feedback for GEPA
+            return {"score": score, "feedback": f"Score: {score:.2f}"}
+
+        optimizer = dspy.GEPA(
+            metric=gepa_metric,
+            reflection_lm=reflection_lm,
+            auto="light",  # Budget: light (fastest), medium, heavy
+        )
+
+        logger.info("Running GEPA optimization (reflection-based, faster)...")
+        optimized = optimizer.compile(program, trainset=trainset)
+
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_type}")
+
+    logger.info("✅ Optimization complete!")
+    return optimized
+
+

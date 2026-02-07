@@ -1,0 +1,19 @@
+<!-- Chunk 244: bytes 310501-310888, type=function -->
+def process_order(order):
+    if order is None:
+        return None
+    if not order.is_valid():
+        return None
+    if order.total <= 0:
+        return None
+    if not order.customer.is_active:
+        return None
+
+    # Process order (20 lines) - now at top level
+    return process_valid_order(order)
+```
+
+### Pattern: Replace Conditional with Polymorphism
+
+**Before:**
+```python

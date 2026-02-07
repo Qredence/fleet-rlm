@@ -1,0 +1,13 @@
+<!-- Chunk 1635: bytes 6671261-6671527, type=class -->
+class TaxonomyValidationError(TaxonomyError):
+    """
+    Raised when taxonomy structure is invalid.
+
+    This can occur when:
+    - Circular dependencies are detected
+    - Invalid skill path format
+    - Duplicate skill IDs
+    - Invalid hierarchy depth
+    """
+
+

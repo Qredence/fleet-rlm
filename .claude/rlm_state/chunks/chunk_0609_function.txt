@@ -1,0 +1,191 @@
+<!-- Chunk 609: bytes 943685-949661, type=function -->
+def main():
+    parser = argparse.ArgumentParser(description="Compile DSPy modules")
+    parser.add_argument("--module", required=True, help="Name of the DSPy module to compile")
+    parser.add_argument("--teleprompter", required=True, help="Name of the teleprompter")
+    parser.add_argument("--cache-dir", default=".var/cache/dspy", help="Cache directory")
+    parser.add_argument("--output", help="Output file path")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+
+    args = parser.parse_args()
+
+    cache_dir = Path(args.cache_dir)
+    output = Path(args.output) if args.output else Path(f".var/logs/compiled_{args.module}.pkl")
+
+    compile_module(args.module, args.teleprompter, cache_dir, output, args.verbose)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: .fleet/skills/dspy-configuration/scripts/compile-dspy.py
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-optimization/SKILL.md
+============================================================
+
+---
+name: dspy-optimization
+description: DSPy optimizers (teleprompters), evaluation metrics, and optimization workflows. Use when compiling programs with BootstrapFewShot, KNNFewShot, MIPROv2, GEPA, or defining custom metrics.
+---
+
+# DSPy Optimization
+
+DSPy optimizers, evaluation metrics, and optimization workflows.
+
+## Quick Start
+
+### Compile with BootstrapFewShot
+```python
+import dspy
+
+# Define program
+program = dspy.ChainOfThought("question -> answer")
+
+# Define teleprompter
+teleprompter = dspy.BootstrapFewShot(max_labeled_demos=5)
+
+# Compile with training data
+trainset = [
+    dspy.Example(question="What is 2+2?", answer="4"),
+    dspy.Example(question="What is 3+3?", answer="6"),
+]
+
+compiled = teleprompter.compile(program, trainset=trainset)
+
+# Use compiled program
+result = compiled(question="What is 4+4?")
+print(result.answer)
+```
+
+### Optimize with MIPROv2
+```python
+# Initialize optimizer
+teleprompter = dspy.MIPROv2(
+    metric=accuracy_metric,
+    auto="medium",  # light, medium, or heavy
+)
+
+# Optimize
+compiled = teleprompter.compile(
+    program,
+    trainset=trainset
+)
+```
+
+### Use GEPA optimizer
+```python
+# Initialize GEPA with reflection LM
+gepa = dspy.GEPA(
+    metric=accuracy_metric,
+    auto="medium",
+    reflection_lm=dspy.LM("openai/gpt-4", temperature=1.0),
+)
+
+# Optimize with reflective prompt evolution
+compiled = gepa.compile(program, trainset=trainset)
+```
+
+## When to Use This Skill
+
+Use this skill when:
+- Compiling DSPy programs with teleprompters
+- Choosing the right optimizer (BootstrapFewShot, KNNFewShot, MIPROv2, GEPA)
+- Defining evaluation metrics (exact match, semantic similarity, custom)
+- Running optimization workflows and evaluation
+- Tuning optimizer parameters for better performance
+
+## Core Concepts
+
+### Teleprompters
+Teleprompters automatically optimize DSPy programs by finding the best prompts and demonstrations.
+
+**Available optimizers:**
+- **BootstrapFewShot**: Few-shot learning with automatic demonstration generation
+- **KNNFewShot**: Context-aware example selection using k-nearest neighbors
+- **LabeledFewShot**: Uses only provided demonstrations
+- **MIPROv2**: Advanced prompt tuning with multi-stage optimization
+- **GEPA**: Reflective prompt evolution with LM-driven feedback
+
+**See:** [references/optimizers.md](references/optimizers.md) for:
+- Detailed optimizer descriptions and parameters
+- Comparison table of when to use each optimizer
+- Best practices and configuration examples
+
+### Metrics
+Metrics evaluate how well your DSPy program performs on test data.
+
+**Common metrics:**
+- **exact_match**: Exact string matching
+- **SemanticF1**: Semantic overlap with decompositional mode
+- **Custom metrics**: Domain-specific evaluation functions
+
+**See:** [references/metrics.md](references/metrics.md) for:
+- Metric implementation patterns
+- Semantic similarity evaluation
+- Multi-criteria metrics
+
+### Optimization Workflow
+
+The optimization process:
+1. **Define program**: Create your DSPy program
+2. **Define metric**: Specify evaluation criteria
+3. **Choose optimizer**: Select appropriate teleprompter
+4. **Compile**: Run optimization on training data
+5. **Evaluate**: Test on development set
+6. **Iterate**: Tune parameters based on results
+
+**See:** [references/optimizers.md](references/optimizers.md) for optimization strategies.
+
+## Scripts
+
+The `scripts/` directory provides reusable tools for optimization:
+
+- **optimize-dspy.py**: Run optimization with custom metrics
+- **test-signature.py**: Validate signature structure
+
+## Progressive Disclosure
+
+This skill uses progressive disclosure:
+
+1. **SKILL.md** (this file): Quick reference and navigation
+2. **references/**: Detailed technical docs loaded as needed
+
+## Related Skills
+
+- **dspy-basics**: Signature design, basic modules, program composition
+- **dspy-advanced**: ReAct agents, tool calling, output refinement
+- **dspy-configuration**: LM setup, caching, and version management
+
+
+============================================================
+END FILE: .fleet/skills/dspy-optimization/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-optimization/references/metrics.md
+============================================================
+
+# DSPy Metrics
+
+Metrics evaluate how well your DSPy program performs on test data. This guide covers common metrics and custom metric patterns.
+
+## Table of Contents
+
+- [Defining Metrics](#defining-metrics)
+- [Common Metrics](#common-metrics)
+- [Semantic Metrics](#semantic-metrics)
+- [Custom Metrics](#custom-metrics)
+- [Multi-Criteria Metrics](#multi-criteria-metrics)
+- [Best Practices](#best-practices)
+
+## Defining Metrics
+
+### Metric Function Signature
+
+A metric function evaluates program performance:
+
+```python

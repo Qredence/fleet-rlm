@@ -1,0 +1,9 @@
+<!-- Chunk 1433: bytes 5523617-5523800, type=function -->
+def my_decorator(func):
+    def wrapper():
+        print("Before calling the function.")
+        func()
+        print("After calling the function.")
+    return wrapper
+
+@my_decorator

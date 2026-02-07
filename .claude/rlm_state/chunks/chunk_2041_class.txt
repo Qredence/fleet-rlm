@@ -1,0 +1,118 @@
+<!-- Chunk 2041: bytes 7937440-7941830, type=class -->
+class TestJobPersistenceLifecycle:
+    """Test complete job lifecycle with dual-layer persistence."""
+
+    @patch("skill_fleet.api.services.job_manager.JobRepository")
+    @patch("skill_fleet.api.services.job_manager.transactional_session")
+    def test_create_job_stores_in_memory_and_db(self, mock_session, mock_repo_cls):
+        """Test that created job is stored in both memory and DB."""
+        # Setup mocks
+        mock_db = Mock()
+        mock_session.return_value.__enter__.return_value = mock_db
+        mock_repo_instance = mock_repo_cls.return_value
+        
+        manager = JobManager()
+        manager.enable_persistence()
+
+        job_id = str(uuid4())
+        job = JobState(job_id=job_id, status="pending")
+        manager.create_job(job)
+
+        # Verify in memory
+        in_memory = manager.memory.get(job_id)
+        assert in_memory is not None
+        assert in_memory.status == "pending"
+        
+        # DB create should be attempted
+        # We check if JobRepository was instantiated and create was called
+        assert mock_repo_cls.call_count > 0
+        assert mock_repo_instance.create.called or mock_repo_instance.update.called
+
+    def test_retrieve_job_from_memory_first(self):
+        """Test that manager retrieves from memory first."""
+        manager = JobManager()
+        job_id = "memory-first"
+        job = JobState(job_id=job_id, status="running")
+
+        manager.memory.set(job_id, job)
+        retrieved = manager.get_job(job_id)
+
+        assert retrieved is not None
+        assert retrieved.job_id == job_id
+        assert retrieved.status == "running"
+
+    @patch("skill_fleet.api.services.job_manager.JobRepository")
+    @patch("skill_fleet.api.services.job_manager.transactional_session")
+    def test_fallback_to_database_on_memory_miss(self, mock_session, mock_repo_cls):
+        """Test that manager falls back to DB on memory miss."""
+        mock_db_job = Mock()
+        mock_db_job.job_id = uuid4()
+        mock_db_job.status = "completed"
+        mock_db_job.result = {"score": 0.9}
+        mock_db_job.error = None
+        mock_db_job.updated_at = datetime.now(UTC)
+
+        # Setup mock repo return
+        mock_repo_instance = mock_repo_cls.return_value
+        mock_repo_instance.get_by_id.return_value = mock_db_job
+        
+        mock_db = Mock()
+        mock_session.return_value.__enter__.return_value = mock_db
+
+        manager = JobManager()
+        manager.enable_persistence()
+
+        job_uuid = str(mock_db_job.job_id)
+        retrieved = manager.get_job(job_uuid)
+
+        assert retrieved is not None
+        assert retrieved.status == "completed"
+        assert mock_repo_instance.get_by_id.called
+
+    def test_update_job_updates_both_layers(self):
+        """Test that job updates persist to both memory and DB."""
+        # This test relies on "memory only" path if persistence not enabled
+        manager = JobManager()  # No persistence enabled
+        
+        job_id = "update-1"
+        job = JobState(job_id=job_id, status="pending")
+        manager.create_job(job)
+
+        # Update job
+        manager.update_job(job_id, {"status": "completed", "progress_message": "100%"})
+
+        # Verify in memory
+        in_memory = manager.memory.get(job_id)
+        assert in_memory is not None
+        assert in_memory.status == "completed"
+        assert in_memory.progress_message == "100%"
+
+    def test_full_job_lifecycle(self):
+        """Test complete lifecycle: pending → running → completed."""
+        manager = JobManager()  # Test memory-only path
+
+        job_id = "lifecycle-1"
+
+        # Step 1: Create (pending)
+        job = JobState(job_id=job_id, status="pending")
+        manager.create_job(job)
+
+        # Step 2: Start (running)
+        manager.update_job(job_id, {"status": "running"})
+        in_memory = manager.memory.get(job_id)
+        assert in_memory is not None
+        assert in_memory.status == "running"
+
+        # Step 3: Progress
+        manager.update_job(job_id, {"progress_message": "50%"})
+        in_memory = manager.memory.get(job_id)
+        assert in_memory is not None
+        assert in_memory.progress_message == "50%"
+
+        # Step 4: Complete
+        manager.update_job(job_id, {"status": "completed", "result": {"score": 0.85}})
+        final = manager.memory.get(job_id)
+        assert final is not None
+        assert final.status == "completed"
+
+

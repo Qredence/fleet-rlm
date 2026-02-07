@@ -1,0 +1,14 @@
+<!-- Chunk 59: bytes 19604-20010, type=h3 -->
+### Current distribution model (January 2026)
+
+**How individual users get skills:**
+1.  Download the skill folder
+2.  Zip the folder (if needed)
+3.  Upload to Claude.ai via **Settings > Capabilities > Skills**
+4.  Or place in Claude Code skills directory
+
+**Organization-level skills:**
+•  Admins can deploy skills workspace-wide (shipped December 18, 2025)
+•  Automatic updates
+•  Centralized management
+

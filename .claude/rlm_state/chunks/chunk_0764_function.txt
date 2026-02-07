@@ -1,0 +1,36 @@
+<!-- Chunk 764: bytes 2598138-2599220, type=function -->
+def validate_all_skills(skills_root: Path) -> int:
+    """Validate all skills, return 0 if all pass, 1 otherwise."""
+    validator = SkillValidator(skills_root)
+    failed = []
+    
+    for metadata_path in skills_root.rglob("metadata.json"):
+        skill_dir = metadata_path.parent
+        
+        # Skip template/special directories
+        if any(part.startswith("_") for part in skill_dir.relative_to(skills_root).parts):
+            continue
+        
+        result = validator.validate_skill(skill_dir)
+        if result['status'] != 'pass':
+            failed.append(skill_dir)
+            print(f"❌ {skill_dir.name}: {len(result['errors'])} errors")
+    
+    if failed:
+        print(f"\n{len(failed)} skills failed validation")
+        return 1
+    else:
+        print(f"\n✅ All skills passed validation")
+        return 0
+
+if __name__ == "__main__":
+    skills_root = Path("skills")
+    sys.exit(validate_all_skills(skills_root))
+```
+
+### Custom Migration Script
+
+```python
+from pathlib import Path
+from skill_fleet.migration import migrate_skill_to_agentskills_format
+

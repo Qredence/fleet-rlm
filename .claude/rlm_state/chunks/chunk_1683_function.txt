@@ -1,0 +1,54 @@
+<!-- Chunk 1683: bytes 6709048-6710972, type=function -->
+def create_streaming_module(
+    module: dspy.Module,
+    reasoning_field: str = "reasoning",
+    async_mode: bool = False,
+) -> Any:
+    """
+    Wrap a DSPy module with streaming for reasoning field.
+
+    Args:
+        module: DSPy module to wrap (e.g., ChainOfThought module)
+        reasoning_field: Field name to stream (default: "reasoning" from ChainOfThought)
+        async_mode: If True, use async streaming; if False, use sync (for CLI)
+
+    Returns:
+        Streamified DSPy module that yields StreamResponse, StatusMessage, and Prediction
+
+    Example:
+        >>> # For CLI usage (sync)
+        >>> stream_module = create_streaming_module(
+        ...     dspy.ChainOfThought("question->answer"),
+        ...     reasoning_field="reasoning",
+        ...     async_mode=False
+        ... )
+        >>> for chunk in stream_module(question="What is 2+2?"):
+        ...     if isinstance(chunk, dspy.streaming.StreamResponse):
+        ...         print(chunk.chunk, end="")  # Stream reasoning tokens
+        >>> # For FastAPI (async)
+        >>> stream_module = create_streaming_module(
+        ...     dspy.ChainOfThought("question->answer"),
+        ...     reasoning_field="reasoning",
+        ...     async_mode=True
+        ... )
+        >>> async for chunk in stream_module(question="What is 2+2?"):
+        ...     # Handle async streaming
+
+    """
+    stream_listeners: list[StreamListener] = []
+    if reasoning_field and _program_has_output_field(module, reasoning_field):
+        stream_listeners.append(StreamListener(signature_field_name=reasoning_field))
+    else:
+        logger.debug(
+            "Skipping streaming listener: field '%s' not found in program outputs",
+            reasoning_field,
+        )
+
+    return dspy.streamify(
+        module,
+        stream_listeners=stream_listeners,
+        status_message_provider=SkillFleetStatusProvider(),
+        async_streaming=async_mode,
+    )
+
+

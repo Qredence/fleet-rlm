@@ -1,0 +1,76 @@
+<!-- Chunk 1772: bytes 7415449-7417274, type=function -->
+def taxonomy_path_metric(
+    gold: dspy.Example,
+    pred: dspy.Prediction,
+    trace: Any = None,
+) -> float:
+    """
+    Evaluate taxonomy path accuracy.
+
+    Scoring:
+    - Exact match: 1.0
+    - Same root category: 0.5
+    - Same first two levels: 0.7
+    - No match: 0.0
+
+    Args:
+        gold: Example with expected_taxonomy_path
+        pred: Prediction with understanding.taxonomy_path
+        trace: Optional trace information
+
+    Returns:
+        Score between 0.0 and 1.0
+
+    """
+    expected_path = getattr(gold, "expected_taxonomy_path", "")
+
+    # Extract predicted path
+    if isinstance(pred, dict):
+        understanding = pred.get("understanding")
+    else:
+        understanding = getattr(pred, "understanding", None)
+
+    if understanding is None:
+        return 0.0
+
+    if isinstance(understanding, dict):
+        pred_path = understanding.get("taxonomy_path", "")
+    else:
+        pred_path = getattr(understanding, "taxonomy_path", "")
+
+    if not expected_path or not pred_path:
+        return 0.0
+
+    # Normalize paths
+    expected_path = expected_path.strip().lower()
+    pred_path = pred_path.strip().lower()
+
+    # Exact match
+    if pred_path == expected_path:
+        return 1.0
+
+    # Split into parts
+    expected_parts = expected_path.split("/")
+    pred_parts = pred_path.split("/")
+
+    # Same root category
+    if expected_parts[0] == pred_parts[0]:
+        # Check depth of match
+        matching_parts = 0
+        for e, p in zip(expected_parts, pred_parts, strict=False):
+            if e == p:
+                matching_parts += 1
+            else:
+                break
+
+        # Score based on matching depth
+        if matching_parts >= 3:
+            return 0.8
+        elif matching_parts >= 2:
+            return 0.6
+        else:
+            return 0.4
+
+    return 0.0
+
+

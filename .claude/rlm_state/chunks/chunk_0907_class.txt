@@ -1,0 +1,40 @@
+<!-- Chunk 907: bytes 3190683-3192126, type=class -->
+class AssessSkillQuality(dspy.Signature):
+    """Assess overall quality of skill content beyond validation."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill_content` | `str` | Complete skill content |
+| `skill_metadata` | `SkillMetadata` | Skill metadata |
+| `target_level` | `str` | Target level: beginner/intermediate/advanced |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `quality_score` | `float` | 0-1. >0.8 excellent, 0.6-0.8 good, <0.6 needs improvement |
+| `strengths` | `list[str]` | What's good about this skill (3-5 points) |
+| `weaknesses` | `list[str]` | What could be improved (3-5 points) |
+| `recommendations` | `list[str]` | Specific recommendations for improvement |
+| `audience_alignment` | `float` | How well content matches target level 0-1 |
+
+**Used by**: `QualityAssessorModule` with `dspy.ChainOfThought`
+
+---
+
+## Chat Signatures (DEPRECATED)
+
+> **Note**: The `chat.py` signatures and `GuidedCreatorProgram` have been replaced by the
+> `ConversationalOrchestrator` in `src/skill_fleet/workflows/conversational_interface/`.
+> See the `conversational_interface` signatures for current implementations.
+
+~~**File**: `src/skill_fleet/core/signatures/chat.py`~~
+
+Signatures for the interactive chat mode skill creation.
+
+### GuidedResponseSignature (DEPRECATED)
+
+Generate the next agent response in a guided skill creation conversation.
+
+```python

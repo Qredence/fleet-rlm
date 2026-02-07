@@ -1,0 +1,17 @@
+<!-- Chunk 2090: bytes 8013800-8014286, type=function -->
+def test_get_default_ui_force_plain_text():
+    ui = get_default_ui(force_plain_text=True)
+    assert isinstance(ui, RichFallbackUI)
+
+
+============================================================
+END FILE: tests/unit/test_cli_prompt_ui.py
+============================================================
+
+============================================================
+FILE: tests/unit/test_dependency_versions.py
+============================================================
+
+import pathlib
+
+

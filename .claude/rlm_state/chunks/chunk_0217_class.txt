@@ -1,0 +1,10 @@
+<!-- Chunk 217: bytes 301008-301198, type=class -->
+class AuthService:
+    def generate_token(self, user: User): ...
+    def verify_token(self, token: str): ...
+```
+
+### God Function
+
+**Anti-pattern:** One function doing everything
+```python

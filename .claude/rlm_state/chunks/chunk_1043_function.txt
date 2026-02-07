@@ -1,0 +1,19 @@
+<!-- Chunk 1043: bytes 3747355-3747887, type=function -->
+def async_cli_command(func):
+    """Decorator for async CLI commands."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted by user[/yellow]")
+            return 1
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return 1
+    return wrapper
+```
+
+### 4. Add Timeout Configuration
+Update `client.py` to accept timeout parameter:
+```python

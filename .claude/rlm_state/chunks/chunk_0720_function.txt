@@ -1,0 +1,1646 @@
+<!-- Chunk 720: bytes 2215915-2314859, type=function -->
+def fire_and_forget(coro):
+    task = asyncio.create_task(coro)
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+```
+
+### 4. Bridging Synchronous Code
+If you MUST use a library that doesn't support async (e.g., `requests`, `boto3`, `scikit-learn`), run it in a separate thread to avoid blocking the loop.
+
+❌ **Anti-Pattern: Blocking the Loop**
+```python
+async def handler():
+    # This blocks EVERY other user while the request waits
+    resp = requests.get("https://slow-api.com") 
+```
+
+✅ **Production Pattern: `to_thread`**
+```python
+async def handler():
+    # Offloads to a separate thread; loop stays free
+    resp = await asyncio.to_thread(requests.get, "https://slow-api.com")
+```
+
+---
+
+## The "Iron Laws" of Performance
+
+### Iron Law #1: Never use `time.sleep()`
+`time.sleep()` blocks the entire thread. In `asyncio`, this means your whole server stops.
+- ❌ `time.sleep(5)`
+- ✅ `await asyncio.sleep(5)`
+
+### Iron Law #2: Use Async-Native Libraries
+Ensure your drivers and clients are async-aware. 
+- ❌ `requests`, `psycopg2`, `urllib`
+- ✅ `httpx`, `aiohttp`, `motor` (MongoDB), `asyncpg` (Postgres)
+
+---
+
+## Real-World Impact
+In a standard sequential Python script, making 100 API calls with 500ms latency each takes **50 seconds**. 
+With `asyncio`, those same 100 calls execute in roughly **0.6 seconds** (the latency of the slowest call + minimal loop overhead).
+
+**Throughput Comparison:**
+| Approach | Concurrent Requests | Resource Usage |
+| :--- | :--- | :--- |
+| Sequential | 1 | Low CPU/RAM |
+| Threading | 10s - 100s | High RAM (Stack overhead) |
+| **Asyncio** | **1,000s - 10,000s** | **Very Low RAM** |
+
+---
+
+## Validation & Debugging
+
+### Enable Debug Mode
+If your code is slow, the loop can tell you why. Set `PYTHONASYNCIODEBUG=1` to see warnings about tasks blocking for too long.
+
+### Validation Commands
+```bash
+# Check if your code uses blocking sleep calls
+grep -r "time.sleep" .
+
+# Profile async execution (requires 'yappi' or 'py-spy')
+py-spy record -o profile.svg --subprocesses -- python main.py
+```
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2ebd630de0414022a714c7d015ef856d/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2ebd630de0414022a714c7d015ef856d/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='python/async-concurrency' name='async-concurrency' description='Use when Python applications experience I/O-bound performance bottlenecks, such as slow network requests, database latency, or UI freezing. Apply these patterns when you need to handle thousands of concurrent connections or execute multiple independent tasks without waiting for each to finish sequentially.' version='1.0.0' type='technical' weight='medium' load_priority='task_specific' dependencies=['python/core-syntax', 'python/concurrency-concepts'] capabilities=[] category='python' keywords=[] scope='Covers async/await syntax, task management (gather/create_task), and bridging sync/async code. Does not cover multiprocessing for CPU-bound tasks or internal C-loop implementations.' see_also=['python/testing/pytest-asyncio'] tags=['python', 'asyncio', 'concurrency', 'non-blocking-io', 'async-await'] taxonomy_path='python/async-concurrency' allowed_tools=None skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2ebd630de0414022a714c7d015ef856d/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2ebd630de0414022a714c7d015ef856d/artifacts/validation_report.json
+============================================================
+
+"passed=True status='passed' score=0.95 errors=[] warnings=[\"Missing 'import concurrent.futures' in Pattern 4 code block.\", 'Keywords field in metadata is empty.'] checks_performed=['spec-compliance', 'plan-alignment', 'pattern-contrast', 'tech-accuracy', 'metadata-consistency'] checks=[ValidationCheckItem(id='spec-compliance', check='Spec compliance: Frontmatter and naming', passed=True, message=\"Frontmatter is present and skill name 'async-concurrency' follows kebab-case convention.\", severity='info', required=True), ValidationCheckItem(id='plan-alignment', check='Content Plan Alignment', passed=True, message='All sections from the content plan (Mindset, Syntax, Tasks, Anti-patterns, Bridging, Timeouts, Impact) are present and well-developed.', severity='info', required=True), ValidationCheckItem(id='pattern-contrast', check='Quality Patterns: \u274c/\u2705 Contrast', passed=True, message='At least 5 distinct patterns use the required \u274c/\u2705 contrast format.', severity='info', required=True), ValidationCheckItem(id='tech-accuracy', check='Technical Accuracy: Python 3.11+', passed=True, message='Uses modern Python 3.11+ features like asyncio.TaskGroup and asyncio.run().', severity='info', required=True), ValidationCheckItem(id='metadata-consistency', check='Metadata Consistency', passed=True, message='Metadata in content matches the provided skill_metadata object.', severity='info', required=True)] feedback='The skill is excellently structured and exceeds basic quality requirements. It provides high-utility patterns for production Python development. Minor missing imports in code snippets and empty metadata keywords are the only areas for improvement.'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2ebd630de0414022a714c7d015ef856d/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2ebd630de0414022a714c7d015ef856d/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/2ebd630de0414022a714c7d015ef856d/artifacts
+end_time: 1769543068170
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 2ebd630de0414022a714c7d015ef856d
+run_name: I need a skill for async technique guideline in python
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769542895253
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2ebd630de0414022a714c7d015ef856d/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.92,
+  "strengths": [
+    "Clear multi-tier variable architecture (Primitive/Semantic/Component) with specific naming examples.",
+    "Strong implementation of the 'Slot' component pattern which solves for complex layout flexibility.",
+    "Highly actionable 'Validation & Quality Audit' checklist that enforces system integrity.",
+    "Excellent use of \u274c/\u2705 contrasts to discourage legacy workflows like 'Variant Bloat'.",
+    "Strong architectural advice on multi-file library strategies to prevent file performance degradation."
+  ],
+  "weaknesses": [
+    "The 'CLI/Tooling Audit' section is slightly vague, as Figma lacks a native CLI and relies on 3rd party API integrations or plugins.",
+    "Typography tokens are mentioned in the Foundations section but omitted from the naming convention table.",
+    "Lacks mention of Figma 'Modes' which is the primary mechanism for switching between the Semantic variables mentioned."
+  ],
+  "recommendations": [
+    "Add a section on 'Variable Modes' to explain how to practically implement the Light/Dark mode mentioned in the 'When to Use' section.",
+    "Expand the Variable Architecture table to include a Typography row (e.g., 'font-size/16' to 'text/body-md').",
+    "Add an accessibility check to the Validation section, specifically regarding contrast ratios for Semantic color pairings.",
+    "Include a brief naming convention guide for Auto Layout layers to ensure the 'Layer Naming' audit point is actionable."
+  ],
+  "audience_alignment": 0.95,
+  "rationale": "The skill content is exceptionally high quality, adhering to the \"Iron Law\" of documentation by providing definitive, authoritative guidance (using \"MUST\" and \"NEVER\"). It moves beyond basic tool usage into architectural theory suitable for an intermediate audience. The inclusion of the \"Slot\" pattern and a multi-tier token strategy demonstrates a deep understanding of production-grade design systems. The use of \u274c/\u2705 contrasts effectively highlights common pitfalls (Variant Bloat, Hardcoded hexes). The quality score is high because it includes a practical validation checklist and addresses developer handoff\u2014a critical aspect of design systems. Minor improvements could be made in detailing typography tokens and explaining Variable \"Modes\" for theme switching.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.6304347826086955,
+    "pattern_count": 4,
+    "has_core_principle": true,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 1,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Good pattern coverage (4 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Has clear core principle statement",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "Adequate description quality"
+    ]
+  },
+  "calibrated_score": 0.6304347826086955
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/skill_content.md
+============================================================
+
+---
+name: figma-design-systems
+description: Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.
+---
+
+# Figma Design Systems Architecture
+
+Design systems in Figma are not merely "UI Kits"—they are technical products that serve as the single source of truth for design and code. You MUST treat your Figma files as logic-driven frameworks, utilizing multi-tier variables and optimized component properties to ensure scalability and developer alignment.
+
+## The Core Principle: Systems Over Assets
+A design system is a language of logic, not a collection of parts. Every element must be governed by a **Token-First** philosophy. If a value (color, spacing, radius) exists in the UI, it MUST be tied to a semantic variable. Fragmented, hardcoded values are technical debt.
+
+## When to Use
+- **Scaling Product Teams:** Multiple designers working on different features requiring a shared language.
+- **Multi-Brand/Multi-Platform:** Rebranding or supporting Light/Dark modes via a single component library.
+- **Handoff Friction:** Developers are guessing spacing, hex codes, or component behavior during implementation.
+- **Library Performance Issues:** Large Figma files are lagging due to excessive variants (Variant Bloat).
+
+## Quick Start: The Systemic Setup
+
+1.  **Initialize Variables:** Open Local Variables. Create a `Primitives` collection (e.g., `blue-500`) and a `Semantic` collection (e.g., `color-action-primary-default`). Map Primitives to Semantics.
+2.  **Define Layout:** Set a grid and spacing scale (e.g., 4px or 8px base). Create variables for `spacing-xs`, `spacing-sm`, etc.
+3.  **Construct Base Components:** Build an atom (e.g., a button label) using Auto Layout (`Shift + A`).
+4.  **Apply Component Properties:** Add Text and Boolean properties to the component to handle logic without creating extra variants.
+5.  **Publish:** Move the component to a dedicated "Components" library file and publish to the Team Library.
+
+---
+
+## Core Patterns
+
+### 1. Multi-tier Variable Architecture (Tokens)
+Variables provide the logic for themes (Light/Dark) and brands. ALWAYS use a three-tier system to decouple technical values from design intent.
+
+| Tier | Purpose | Example Naming |
+| :--- | :--- | :--- |
+| **Primitive** | Global raw values (Do not use in UI) | `color/blue/500`, `size/16` |
+| **Semantic** | Intent-based aliases (Primary use in UI) | `bg/surface-primary`, `spacing/gap-md` |
+| **Component** | Specific overrides (Used for overrides) | `button/bg-hover`, `header/height-fixed` |
+
+**The Contrast:**
+- ❌ **Legacy:** Selecting `#007BFF` directly or using a Style named "Blue 500."
+- ✅ **Systematic:** Assigning the `action-primary-default` variable, which points to `blue-500`.
+
+### 2. Component Construction: The Property-First Method
+Variants create file bloat and performance lag. You MUST use Component Properties to manage state and content wherever possible.
+
+**The Contrast:**
+- ❌ **Anti-pattern:** Creating 24 variants of a button just to toggle an icon on/off or change text.
+- ✅ **Production Pattern:** Use one variant with a **Boolean Property** for the icon visibility and a **Text Property** for the label. Use **Instance Swap** properties to allow icon changes without detaching.
+
+### 3. The 'Slot' Component Pattern
+For complex organisms (Modals, Sidebars, Cards), use "Slots" to maintain system integrity while allowing content flexibility.
+
+- **Mechanism:** Create a placeholder component called `_internal/slot`. Inside your Modal component, place an instance of this slot. 
+- **Usage:** In the consumer file, use the **Instance Swap** property to replace the slot with a specific content local component.
+
+### 4. Library Architecture (Multi-file Strategy)
+NEVER put foundations (colors, grids) and complex components (tables, modals) in the same file for large-scale systems.
+
+- **Foundations File:** Primitives, Semantic Variables, Icons, Typography.
+- **Components File:** Atoms and Molecules that consume the Foundations library.
+- **Prototyping File:** Page-level layouts that consume the Components library.
+
+---
+
+## Real-World Impact: Design Ops Metrics
+Implementing a Figma Design System creates measurable ROI:
+- **Handoff Efficiency:** Reduction in "red-lining" time. Developers use Figma Dev Mode to see variable names that match CSS variables/Tailwind config.
+- **Maintenance Speed:** Global updates (e.g., changing a brand color) take minutes instead of weeks across 100+ files.
+- **Consistency:** Component adoption tracking (via Figma Analytics) ensures >90% of UI is built using system-owned components.
+
+---
+
+## Validation & Quality Audit
+
+Before publishing any component or library update, run this checklist:
+
+1.  **Variable Linkage:** Is every color, spacing, and radius value linked to a Semantic Variable? (Use the "Selection Colors" panel to check for "raw" hex codes).
+2.  **Auto Layout:** Does the component respond correctly when the container is resized? (Test "Hug," "Fill," and "Fixed" settings).
+3.  **Layer Naming:** Are layers named semantically (e.g., `Container` vs `Frame 5132`)?
+4.  **Property Logic:** Are Boolean and Instance Swap properties used to reduce variant count by at least 50%?
+5.  **Documentation:** Does the component have a description and a link to the functional spec (Jira/Storybook)?
+
+**CLI/Tooling Audit (Advanced):**
+If using a plugin like `Design Lint` or `Instance Health`:
+```bash
+# Conceptually: Validate Figma tokens against code
+npx style-dictionary build --config config.json
+# Ensure no 'orphaned' values exist in the JSON export
+```
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='design/figma-design-systems' name='figma-design-systems' description='Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.' version='1.0.0' type='specialization' weight='medium' load_priority='task_specific' dependencies=[] capabilities=[] category='design' keywords=['figma', 'design-systems', 'design-tokens', 'ui-ux', 'component-library', 'auto-layout', 'variables'] scope='Covers Figma architecture, variable (token) mapping, component property optimization, and library publishing. Excludes brand strategy and frontend coding.' see_also=['_core/communication'] tags=['design-ops', 'product-design', 'figma-expert', 'system-thinking'] taxonomy_path='design/figma-design-systems' allowed_tools=['browser', 'write_file'] skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/validation_report.json
+============================================================
+
+"passed=True status='warnings' score=0.85 errors=[] warnings=['Pattern count (4) is below the plan requirement (5+).', \"Missing dedicated 'Organization & Searchability' section.\", \"Content length is significantly shorter than the 'comprehensive' target (>1000 lines) suggested in the success criteria.\"] checks_performed=['frontmatter_validation', 'naming_convention_check', 'metadata_consistency', 'content_plan_alignment', 'pattern_count_verification', 'contrast_pattern_check', 'technical_accuracy_check'] checks=[ValidationCheckItem(id='SPEC_01', check='Frontmatter matches Metadata', passed=True, message='Frontmatter name and description align with skill_metadata.', severity='info', required=True), ValidationCheckItem(id='SPEC_02', check='Kebab-case name', passed=True, message=\"Name 'figma-design-systems' is correct.\", severity='critical', required=True), ValidationCheckItem(id='PLAN_01', check='Core Patterns Count', passed=False, message='The content plan requested 5+ patterns, but only 4 are explicitly documented and numbered.', severity='warning', required=True), ValidationCheckItem(id='PLAN_02', check='Organization & Searchability Section', passed=False, message=\"The specific section for 'Organization & Searchability' mentioned in the plan is merged into the audit checklist rather than being a distinct section.\", severity='warning', required=False), ValidationCheckItem(id='QUAL_01', check='Contrast Pattern (Legacy vs Systematic)', passed=True, message='The skill consistently uses \u274c/\u2705 contrasts as required.', severity='info', required=True)] feedback=\"The skill is technically sound and follows the agentskills.io spec. However, it falls short of the ambitious content plan in terms of pattern count and section depth. Specifically, the 'Publication' and 'Organization' aspects from the plan were condensed into the audit section.\""
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/artifacts
+end_time: 1769513450607
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 2fffe9175f8e42e2b938b93baa3c5d6d
+run_name: a skill for figma design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513450504
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/2fffe9175f8e42e2b938b93baa3c5d6d/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.88,
+  "strengths": [
+    "Excellent \u274c/\u2705 contrast patterns that specifically address dangerous practices like 'sudo pip'.",
+    "Clear distinction between version management (pyenv) and dependency management (venv).",
+    "Comprehensive 'Validation' section providing command-line checks to verify the state.",
+    "Strong core principle statement regarding System vs. Project Python isolation.",
+    "Practical integration guidance for VS Code, bridge the gap between terminal and editor."
+  ],
+  "weaknesses": [
+    "Does not cover the modern 'pyproject.toml' standard in depth, which is increasingly relevant for intermediate Python development.",
+    "Assumes 'pyenv' is already installed without providing a reference for its non-trivial installation process.",
+    "Lacks guidance on 'locking' dependencies beyond a basic 'pip freeze', such as using 'pip-compile' or 'uv' for reproducible builds.",
+    "Missing advice on handling environment variables (.env files), which usually accompanies environment setup in professional workflows."
+  ],
+  "recommendations": [
+    "Add a section explaining 'pyproject.toml' as the modern successor to 'requirements.txt' for project metadata and dependencies.",
+    "Include a 'Troubleshooting' subsection for common 'venv' activation issues on Windows (e.g., Execution Policy errors).",
+    "Briefly mention 'uv' as a high-performance alternative to 'pip' and 'venv' for intermediate users looking for speed.",
+    "Expand the '.gitignore' section to include a standardized snippet for Python projects."
+  ],
+  "audience_alignment": 0.85,
+  "rationale": "The content is of high quality, following a structured approach that moves from core principles to practical implementation and validation. It successfully identifies the 'why' behind environment isolation, which is crucial for intermediate developers. The use of the 'Gold Standard Workflow' and the clear \u274c/\u2705 contrast patterns provides strong, opinionated guidance that prevents common professional pitfalls. The inclusion of IDE-specific steps and a validation section ensures the skill is actionable and verifiable.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.7065217391304347,
+    "pattern_count": 7,
+    "has_core_principle": true,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 4,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Excellent pattern coverage (7 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Has code examples (4 blocks)",
+      "Has clear core principle statement",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "Adequate description quality"
+    ]
+  },
+  "calibrated_score": 0.7065217391304347
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/skill_content.md
+============================================================
+
+---
+name: environment-setup
+description: Use when starting a new Python project to prevent 'ModuleNotFoundError' and dependency conflicts. Triggered by the need to isolate project requirements from system Python, manage multiple Python versions (e.g., 3.9 vs 3.12) on one machine, or fix 'it works on my machine' deployment issues.
+---
+
+# Python Environment Setup
+
+The goal of professional Python environment management is **Reproducible Isolation**. You must ensure that every project has exactly the version of Python and the specific library versions it needs, independent of the operating system's global configuration.
+
+## Core Principle: The Isolated Environment Pattern
+
+**Your System Python is for your OS; your Project Python is for your code.**
+
+On Linux and macOS, the operating system uses Python for critical system tasks (like package management or UI components). Modifying the system's global Python environment by running `pip install` as an administrator can break your OS. Conversely, different projects often require conflicting versions of the same library (e.g., Project A needs `Pydantic v1`, Project B needs `Pydantic v2`).
+
+**The Gold Standard Workflow:**
+1. Use `pyenv` to manage and switch between Python **versions** (e.g., 3.10 vs 3.12).
+2. Use `venv` to manage project-specific **dependencies** (e.g., `requests`, `pandas`).
+3. Use `.gitignore` to ensure environment artifacts never enter version control.
+
+---
+
+## When to Use This Skill
+
+- **New Project Initialization:** ALWAYS run these steps before writing a single line of logic.
+- **Onboarding:** When cloning a repository and seeing `ModuleNotFoundError`.
+- **System Migration:** When moving code from a local machine to a server or Docker container.
+- **Version Conflict:** When a library update in one project breaks another project.
+
+---
+
+## Quick Start (macOS/Linux)
+
+```bash
+# 1. Install the specific Python version needed
+pyenv install 3.12.1
+pyenv local 3.12.1
+
+# 2. Create the virtual environment in the project root
+python -m venv .venv
+
+# 3. Activate the environment
+source .venv/bin/activate
+
+# 4. Update the core package manager
+pip install --upgrade pip
+
+# 5. Verify the location
+which python # Should point to your project folder, NOT /usr/bin/python
+```
+
+---
+
+## Core Patterns
+
+### 1. Python Versioning with `pyenv`
+`pyenv` allows you to install multiple versions of Python in your home directory, avoiding the need for `sudo`.
+
+*   **Install a version:** `pyenv install 3.11.5`
+*   **Set project version:** `pyenv local 3.11.5` (Creates a `.python-version` file).
+*   **Why:** This ensures that every developer on the project uses the exact same minor version of Python.
+
+### 2. Dependency Isolation with `venv`
+`venv` creates a folder (usually named `.venv`) that contains a copy of the Python executable and a private `site-packages` folder.
+
+*   **Creation:** `python -m venv .venv`
+*   **Activation (Unix):** `source .venv/bin/activate`
+*   **Activation (Windows PS):** `.\.venv\Scripts\Activate.ps1`
+*   **Deactivation:** Type `deactivate` in your terminal.
+
+### 3. Captured Dependencies
+Always record your dependencies so others can recreate your environment.
+
+*   **Export:** `pip freeze > requirements.txt`
+*   **Import:** `pip install -r requirements.txt`
+
+---
+
+## ❌ Anti-Patterns vs. ✅ Production Patterns
+
+### Package Installation
+❌ **NEVER** use `sudo pip install <package>`. This can corrupt your operating system's tools.
+✅ **ALWAYS** use `pip install <package>` inside an **activated** virtual environment.
+
+### Version Control
+❌ **NEVER** commit your `.venv` folder to Git. It is machine-specific and huge.
+✅ **ALWAYS** add `.venv/` to your `.gitignore` and commit `requirements.txt` or `pyproject.toml`.
+
+### Python Invocation
+❌ **NEVER** assume `python` refers to your project environment without checking.
+✅ **ALWAYS** verify with `which python` (Unix) or `where python` (Windows) before running scripts.
+
+### Dependency Management
+❌ **NEVER** install packages one-by-one on a production server.
+✅ **ALWAYS** use a requirements file (`pip install -r requirements.txt`) to ensure parity between Dev and Prod.
+
+---
+
+## IDE Integration (VS Code)
+
+To ensure your editor provides correct linting and autocompletion:
+1. Open the **Command Palette** (`Cmd/Ctrl + Shift + P`).
+2. Type **"Python: Select Interpreter"**.
+3. Choose the one labeled **"(' .venv': venv)"**.
+4. If it's not visible, click "Enter interpreter path..." and point to `./.venv/bin/python`.
+
+---
+
+## Real-World Impact
+
+- **Zero-Day Onboarding:** A new developer can run `git clone` followed by a setup script and be productive in 2 minutes.
+- **Dependency Integrity:** Prevents "Phantom Bugs" where code behaves differently on a server because a different version of a library was pre-installed globally.
+- **OS Stability:** Removes the risk of `pip` overwriting a library that the OS's desktop environment or package manager (like `apt` or `dnf`) depends on.
+
+---
+
+## Validation: Is your environment set up correctly?
+
+Run these commands to verify your setup:
+
+1. **Check Path Isolation:**
+   ```bash
+   # Unix
+   which python
+   # Result MUST be inside your project directory (e.g., .../my-project/.venv/bin/python)
+   ```
+
+2. **Check Version Compliance:**
+   ```bash
+   python --version
+   # Result MUST match the version specified in your project's .python-version or README.
+   ```
+
+3. **Check Clean Slate:**
+   ```bash
+   pip list
+   # Result SHOULD only show pip and setuptools (if new) or only the project requirements.
+   # If you see hundreds of global packages, your venv is NOT active.
+   ```
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='python/environment-setup' name='environment-setup' description=\"Use when starting a new Python project to prevent 'ModuleNotFoundError' and dependency conflicts. Triggered by the need to isolate project requirements from system Python, manage multiple Python versions (e.g., 3.9 vs 3.12) on one machine, or fix 'it works on my machine' deployment issues.\" version='1.0.0' type='technical' weight='medium' load_priority='task_specific' dependencies=[] capabilities=[] category='python' keywords=['python', 'venv', 'pyenv', 'virtual-environment', 'dependency-management', 'pip'] scope='Covers Python version management (pyenv), virtual environment creation (venv), and IDE interpreter configuration. Does not cover Poetry, Conda, Docker, or Python language syntax.' see_also=['_core/reasoning'] tags=['python-dev', 'devops-basics', 'backend-foundations'] taxonomy_path='python/environment-setup' allowed_tools=None skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/validation_report.json
+============================================================
+
+"passed=True status='warnings' score=0.82 errors=[] warnings=['Only 4 contrast patterns found (5+ required).', 'Missing specific shell configuration (PATH setup) for pyenv.'] checks_performed=['frontmatter_format', 'metadata_match', 'section_completeness', 'contrast_pattern_count', 'trigger_description_check'] checks=[ValidationCheckItem(id='spec-frontmatter', check='Frontmatter Validation', passed=True, message=\"Frontmatter is present and contains required 'name' and 'description' fields.\", severity='info', required=True), ValidationCheckItem(id='meta-consistency', check='Metadata Consistency', passed=True, message=\"The name 'environment-setup' matches the metadata and the taxonomy leaf.\", severity='info', required=True), ValidationCheckItem(id='content-anti-patterns', check='Anti-Pattern Count', passed=False, message='Found 4 contrast blocks; success criteria requested 5+.', severity='warning', required=True), ValidationCheckItem(id='content-shell-config', check='Shell Configuration Details', passed=False, message='Content plan requested shell configuration (PATH setup) for pyenv, which is missing.', severity='warning', required=True), ValidationCheckItem(id='struct-markdown', check='Structure and Formatting', passed=True, message='Markdown structure is clean with appropriate headers and code blocks.', severity='info', required=True)] feedback=\"The skill is high quality and follows the agentskills.io format well. It provides clear, actionable advice. To reach 1.0, it needs one more contrast pattern to meet the '5+' requirement in the success criteria and the specific shell PATH setup instructions for pyenv mentioned in the content plan.\""
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/3149b162cee0437e93b62ba56650a3ab/artifacts
+end_time: 1769548214025
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 3149b162cee0437e93b62ba56650a3ab
+run_name: Create a skill for python programming
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769548037014
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3149b162cee0437e93b62ba56650a3ab/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/31bf3956df1240be8e3bfd29e1365ef1/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/31bf3956df1240be8e3bfd29e1365ef1/artifacts
+end_time: 1769536868333
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 31bf3956df1240be8e3bfd29e1365ef1
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769536823804
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/31bf3956df1240be8e3bfd29e1365ef1/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/34d0008028f5486181dd3f3acf1785b6/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/34d0008028f5486181dd3f3acf1785b6/artifacts
+end_time: 1769513528664
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 34d0008028f5486181dd3f3acf1785b6
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513528633
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/34d0008028f5486181dd3f3acf1785b6/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.92,
+  "strengths": [
+    "Clear multi-tier variable architecture (Primitive/Semantic/Component) with specific naming examples.",
+    "Strong implementation of the 'Slot' component pattern which solves for complex layout flexibility.",
+    "Highly actionable 'Validation & Quality Audit' checklist that enforces system integrity.",
+    "Excellent use of \u274c/\u2705 contrasts to discourage legacy workflows like 'Variant Bloat'.",
+    "Strong architectural advice on multi-file library strategies to prevent file performance degradation."
+  ],
+  "weaknesses": [
+    "The 'CLI/Tooling Audit' section is slightly vague, as Figma lacks a native CLI and relies on 3rd party API integrations or plugins.",
+    "Typography tokens are mentioned in the Foundations section but omitted from the naming convention table.",
+    "Lacks mention of Figma 'Modes' which is the primary mechanism for switching between the Semantic variables mentioned."
+  ],
+  "recommendations": [
+    "Add a section on 'Variable Modes' to explain how to practically implement the Light/Dark mode mentioned in the 'When to Use' section.",
+    "Expand the Variable Architecture table to include a Typography row (e.g., 'font-size/16' to 'text/body-md').",
+    "Add an accessibility check to the Validation section, specifically regarding contrast ratios for Semantic color pairings.",
+    "Include a brief naming convention guide for Auto Layout layers to ensure the 'Layer Naming' audit point is actionable."
+  ],
+  "audience_alignment": 0.95,
+  "rationale": "The skill content is exceptionally high quality, adhering to the \"Iron Law\" of documentation by providing definitive, authoritative guidance (using \"MUST\" and \"NEVER\"). It moves beyond basic tool usage into architectural theory suitable for an intermediate audience. The inclusion of the \"Slot\" pattern and a multi-tier token strategy demonstrates a deep understanding of production-grade design systems. The use of \u274c/\u2705 contrasts effectively highlights common pitfalls (Variant Bloat, Hardcoded hexes). The quality score is high because it includes a practical validation checklist and addresses developer handoff\u2014a critical aspect of design systems. Minor improvements could be made in detailing typography tokens and explaining Variable \"Modes\" for theme switching.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.6304347826086955,
+    "pattern_count": 4,
+    "has_core_principle": true,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 1,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Good pattern coverage (4 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Has clear core principle statement",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "Adequate description quality"
+    ]
+  },
+  "calibrated_score": 0.6304347826086955
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/skill_content.md
+============================================================
+
+---
+name: figma-design-systems
+description: Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.
+---
+
+# Figma Design Systems Architecture
+
+Design systems in Figma are not merely "UI Kits"—they are technical products that serve as the single source of truth for design and code. You MUST treat your Figma files as logic-driven frameworks, utilizing multi-tier variables and optimized component properties to ensure scalability and developer alignment.
+
+## The Core Principle: Systems Over Assets
+A design system is a language of logic, not a collection of parts. Every element must be governed by a **Token-First** philosophy. If a value (color, spacing, radius) exists in the UI, it MUST be tied to a semantic variable. Fragmented, hardcoded values are technical debt.
+
+## When to Use
+- **Scaling Product Teams:** Multiple designers working on different features requiring a shared language.
+- **Multi-Brand/Multi-Platform:** Rebranding or supporting Light/Dark modes via a single component library.
+- **Handoff Friction:** Developers are guessing spacing, hex codes, or component behavior during implementation.
+- **Library Performance Issues:** Large Figma files are lagging due to excessive variants (Variant Bloat).
+
+## Quick Start: The Systemic Setup
+
+1.  **Initialize Variables:** Open Local Variables. Create a `Primitives` collection (e.g., `blue-500`) and a `Semantic` collection (e.g., `color-action-primary-default`). Map Primitives to Semantics.
+2.  **Define Layout:** Set a grid and spacing scale (e.g., 4px or 8px base). Create variables for `spacing-xs`, `spacing-sm`, etc.
+3.  **Construct Base Components:** Build an atom (e.g., a button label) using Auto Layout (`Shift + A`).
+4.  **Apply Component Properties:** Add Text and Boolean properties to the component to handle logic without creating extra variants.
+5.  **Publish:** Move the component to a dedicated "Components" library file and publish to the Team Library.
+
+---
+
+## Core Patterns
+
+### 1. Multi-tier Variable Architecture (Tokens)
+Variables provide the logic for themes (Light/Dark) and brands. ALWAYS use a three-tier system to decouple technical values from design intent.
+
+| Tier | Purpose | Example Naming |
+| :--- | :--- | :--- |
+| **Primitive** | Global raw values (Do not use in UI) | `color/blue/500`, `size/16` |
+| **Semantic** | Intent-based aliases (Primary use in UI) | `bg/surface-primary`, `spacing/gap-md` |
+| **Component** | Specific overrides (Used for overrides) | `button/bg-hover`, `header/height-fixed` |
+
+**The Contrast:**
+- ❌ **Legacy:** Selecting `#007BFF` directly or using a Style named "Blue 500."
+- ✅ **Systematic:** Assigning the `action-primary-default` variable, which points to `blue-500`.
+
+### 2. Component Construction: The Property-First Method
+Variants create file bloat and performance lag. You MUST use Component Properties to manage state and content wherever possible.
+
+**The Contrast:**
+- ❌ **Anti-pattern:** Creating 24 variants of a button just to toggle an icon on/off or change text.
+- ✅ **Production Pattern:** Use one variant with a **Boolean Property** for the icon visibility and a **Text Property** for the label. Use **Instance Swap** properties to allow icon changes without detaching.
+
+### 3. The 'Slot' Component Pattern
+For complex organisms (Modals, Sidebars, Cards), use "Slots" to maintain system integrity while allowing content flexibility.
+
+- **Mechanism:** Create a placeholder component called `_internal/slot`. Inside your Modal component, place an instance of this slot. 
+- **Usage:** In the consumer file, use the **Instance Swap** property to replace the slot with a specific content local component.
+
+### 4. Library Architecture (Multi-file Strategy)
+NEVER put foundations (colors, grids) and complex components (tables, modals) in the same file for large-scale systems.
+
+- **Foundations File:** Primitives, Semantic Variables, Icons, Typography.
+- **Components File:** Atoms and Molecules that consume the Foundations library.
+- **Prototyping File:** Page-level layouts that consume the Components library.
+
+---
+
+## Real-World Impact: Design Ops Metrics
+Implementing a Figma Design System creates measurable ROI:
+- **Handoff Efficiency:** Reduction in "red-lining" time. Developers use Figma Dev Mode to see variable names that match CSS variables/Tailwind config.
+- **Maintenance Speed:** Global updates (e.g., changing a brand color) take minutes instead of weeks across 100+ files.
+- **Consistency:** Component adoption tracking (via Figma Analytics) ensures >90% of UI is built using system-owned components.
+
+---
+
+## Validation & Quality Audit
+
+Before publishing any component or library update, run this checklist:
+
+1.  **Variable Linkage:** Is every color, spacing, and radius value linked to a Semantic Variable? (Use the "Selection Colors" panel to check for "raw" hex codes).
+2.  **Auto Layout:** Does the component respond correctly when the container is resized? (Test "Hug," "Fill," and "Fixed" settings).
+3.  **Layer Naming:** Are layers named semantically (e.g., `Container` vs `Frame 5132`)?
+4.  **Property Logic:** Are Boolean and Instance Swap properties used to reduce variant count by at least 50%?
+5.  **Documentation:** Does the component have a description and a link to the functional spec (Jira/Storybook)?
+
+**CLI/Tooling Audit (Advanced):**
+If using a plugin like `Design Lint` or `Instance Health`:
+```bash
+# Conceptually: Validate Figma tokens against code
+npx style-dictionary build --config config.json
+# Ensure no 'orphaned' values exist in the JSON export
+```
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='design/figma-design-systems' name='figma-design-systems' description='Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.' version='1.0.0' type='specialization' weight='medium' load_priority='task_specific' dependencies=[] capabilities=[] category='design' keywords=['figma', 'design-systems', 'design-tokens', 'ui-ux', 'component-library', 'auto-layout', 'variables'] scope='Covers Figma architecture, variable (token) mapping, component property optimization, and library publishing. Excludes brand strategy and frontend coding.' see_also=['_core/communication'] tags=['design-ops', 'product-design', 'figma-expert', 'system-thinking'] taxonomy_path='design/figma-design-systems' allowed_tools=['browser', 'write_file'] skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/validation_report.json
+============================================================
+
+"passed=True status='warnings' score=0.85 errors=[] warnings=['Pattern count (4) is below the plan requirement (5+).', \"Missing dedicated 'Organization & Searchability' section.\", \"Content length is significantly shorter than the 'comprehensive' target (>1000 lines) suggested in the success criteria.\"] checks_performed=['frontmatter_validation', 'naming_convention_check', 'metadata_consistency', 'content_plan_alignment', 'pattern_count_verification', 'contrast_pattern_check', 'technical_accuracy_check'] checks=[ValidationCheckItem(id='SPEC_01', check='Frontmatter matches Metadata', passed=True, message='Frontmatter name and description align with skill_metadata.', severity='info', required=True), ValidationCheckItem(id='SPEC_02', check='Kebab-case name', passed=True, message=\"Name 'figma-design-systems' is correct.\", severity='critical', required=True), ValidationCheckItem(id='PLAN_01', check='Core Patterns Count', passed=False, message='The content plan requested 5+ patterns, but only 4 are explicitly documented and numbered.', severity='warning', required=True), ValidationCheckItem(id='PLAN_02', check='Organization & Searchability Section', passed=False, message=\"The specific section for 'Organization & Searchability' mentioned in the plan is merged into the audit checklist rather than being a distinct section.\", severity='warning', required=False), ValidationCheckItem(id='QUAL_01', check='Contrast Pattern (Legacy vs Systematic)', passed=True, message='The skill consistently uses \u274c/\u2705 contrasts as required.', severity='info', required=True)] feedback=\"The skill is technically sound and follows the agentskills.io spec. However, it falls short of the ambitious content plan in terms of pattern count and section depth. Specifically, the 'Publication' and 'Organization' aspects from the plan were condensed into the audit section.\""
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/38399001713a412ea8b4c76638ca663e/artifacts
+end_time: 1769513910401
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 38399001713a412ea8b4c76638ca663e
+run_name: a skill for figma design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513910293
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/38399001713a412ea8b4c76638ca663e/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3a39c67661e5422aaf6527cab4321b49/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/3a39c67661e5422aaf6527cab4321b49/artifacts
+end_time: 1769543969998
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 3a39c67661e5422aaf6527cab4321b49
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769543923005
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3a39c67661e5422aaf6527cab4321b49/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3af738b73ff14066b1d4e59c32a15aec/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/3af738b73ff14066b1d4e59c32a15aec/artifacts
+end_time: 1769513910351
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 3af738b73ff14066b1d4e59c32a15aec
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513910309
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3af738b73ff14066b1d4e59c32a15aec/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.92,
+  "strengths": [
+    "Clear multi-tier variable architecture (Primitive/Semantic/Component) with specific naming examples.",
+    "Strong implementation of the 'Slot' component pattern which solves for complex layout flexibility.",
+    "Highly actionable 'Validation & Quality Audit' checklist that enforces system integrity.",
+    "Excellent use of \u274c/\u2705 contrasts to discourage legacy workflows like 'Variant Bloat'.",
+    "Strong architectural advice on multi-file library strategies to prevent file performance degradation."
+  ],
+  "weaknesses": [
+    "The 'CLI/Tooling Audit' section is slightly vague, as Figma lacks a native CLI and relies on 3rd party API integrations or plugins.",
+    "Typography tokens are mentioned in the Foundations section but omitted from the naming convention table.",
+    "Lacks mention of Figma 'Modes' which is the primary mechanism for switching between the Semantic variables mentioned."
+  ],
+  "recommendations": [
+    "Add a section on 'Variable Modes' to explain how to practically implement the Light/Dark mode mentioned in the 'When to Use' section.",
+    "Expand the Variable Architecture table to include a Typography row (e.g., 'font-size/16' to 'text/body-md').",
+    "Add an accessibility check to the Validation section, specifically regarding contrast ratios for Semantic color pairings.",
+    "Include a brief naming convention guide for Auto Layout layers to ensure the 'Layer Naming' audit point is actionable."
+  ],
+  "audience_alignment": 0.95,
+  "rationale": "The skill content is exceptionally high quality, adhering to the \"Iron Law\" of documentation by providing definitive, authoritative guidance (using \"MUST\" and \"NEVER\"). It moves beyond basic tool usage into architectural theory suitable for an intermediate audience. The inclusion of the \"Slot\" pattern and a multi-tier token strategy demonstrates a deep understanding of production-grade design systems. The use of \u274c/\u2705 contrasts effectively highlights common pitfalls (Variant Bloat, Hardcoded hexes). The quality score is high because it includes a practical validation checklist and addresses developer handoff\u2014a critical aspect of design systems. Minor improvements could be made in detailing typography tokens and explaining Variable \"Modes\" for theme switching.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.6304347826086955,
+    "pattern_count": 4,
+    "has_core_principle": true,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 1,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Good pattern coverage (4 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Has clear core principle statement",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "Adequate description quality"
+    ]
+  },
+  "calibrated_score": 0.6304347826086955
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/skill_content.md
+============================================================
+
+---
+name: figma-design-systems
+description: Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.
+---
+
+# Figma Design Systems Architecture
+
+Design systems in Figma are not merely "UI Kits"—they are technical products that serve as the single source of truth for design and code. You MUST treat your Figma files as logic-driven frameworks, utilizing multi-tier variables and optimized component properties to ensure scalability and developer alignment.
+
+## The Core Principle: Systems Over Assets
+A design system is a language of logic, not a collection of parts. Every element must be governed by a **Token-First** philosophy. If a value (color, spacing, radius) exists in the UI, it MUST be tied to a semantic variable. Fragmented, hardcoded values are technical debt.
+
+## When to Use
+- **Scaling Product Teams:** Multiple designers working on different features requiring a shared language.
+- **Multi-Brand/Multi-Platform:** Rebranding or supporting Light/Dark modes via a single component library.
+- **Handoff Friction:** Developers are guessing spacing, hex codes, or component behavior during implementation.
+- **Library Performance Issues:** Large Figma files are lagging due to excessive variants (Variant Bloat).
+
+## Quick Start: The Systemic Setup
+
+1.  **Initialize Variables:** Open Local Variables. Create a `Primitives` collection (e.g., `blue-500`) and a `Semantic` collection (e.g., `color-action-primary-default`). Map Primitives to Semantics.
+2.  **Define Layout:** Set a grid and spacing scale (e.g., 4px or 8px base). Create variables for `spacing-xs`, `spacing-sm`, etc.
+3.  **Construct Base Components:** Build an atom (e.g., a button label) using Auto Layout (`Shift + A`).
+4.  **Apply Component Properties:** Add Text and Boolean properties to the component to handle logic without creating extra variants.
+5.  **Publish:** Move the component to a dedicated "Components" library file and publish to the Team Library.
+
+---
+
+## Core Patterns
+
+### 1. Multi-tier Variable Architecture (Tokens)
+Variables provide the logic for themes (Light/Dark) and brands. ALWAYS use a three-tier system to decouple technical values from design intent.
+
+| Tier | Purpose | Example Naming |
+| :--- | :--- | :--- |
+| **Primitive** | Global raw values (Do not use in UI) | `color/blue/500`, `size/16` |
+| **Semantic** | Intent-based aliases (Primary use in UI) | `bg/surface-primary`, `spacing/gap-md` |
+| **Component** | Specific overrides (Used for overrides) | `button/bg-hover`, `header/height-fixed` |
+
+**The Contrast:**
+- ❌ **Legacy:** Selecting `#007BFF` directly or using a Style named "Blue 500."
+- ✅ **Systematic:** Assigning the `action-primary-default` variable, which points to `blue-500`.
+
+### 2. Component Construction: The Property-First Method
+Variants create file bloat and performance lag. You MUST use Component Properties to manage state and content wherever possible.
+
+**The Contrast:**
+- ❌ **Anti-pattern:** Creating 24 variants of a button just to toggle an icon on/off or change text.
+- ✅ **Production Pattern:** Use one variant with a **Boolean Property** for the icon visibility and a **Text Property** for the label. Use **Instance Swap** properties to allow icon changes without detaching.
+
+### 3. The 'Slot' Component Pattern
+For complex organisms (Modals, Sidebars, Cards), use "Slots" to maintain system integrity while allowing content flexibility.
+
+- **Mechanism:** Create a placeholder component called `_internal/slot`. Inside your Modal component, place an instance of this slot. 
+- **Usage:** In the consumer file, use the **Instance Swap** property to replace the slot with a specific content local component.
+
+### 4. Library Architecture (Multi-file Strategy)
+NEVER put foundations (colors, grids) and complex components (tables, modals) in the same file for large-scale systems.
+
+- **Foundations File:** Primitives, Semantic Variables, Icons, Typography.
+- **Components File:** Atoms and Molecules that consume the Foundations library.
+- **Prototyping File:** Page-level layouts that consume the Components library.
+
+---
+
+## Real-World Impact: Design Ops Metrics
+Implementing a Figma Design System creates measurable ROI:
+- **Handoff Efficiency:** Reduction in "red-lining" time. Developers use Figma Dev Mode to see variable names that match CSS variables/Tailwind config.
+- **Maintenance Speed:** Global updates (e.g., changing a brand color) take minutes instead of weeks across 100+ files.
+- **Consistency:** Component adoption tracking (via Figma Analytics) ensures >90% of UI is built using system-owned components.
+
+---
+
+## Validation & Quality Audit
+
+Before publishing any component or library update, run this checklist:
+
+1.  **Variable Linkage:** Is every color, spacing, and radius value linked to a Semantic Variable? (Use the "Selection Colors" panel to check for "raw" hex codes).
+2.  **Auto Layout:** Does the component respond correctly when the container is resized? (Test "Hug," "Fill," and "Fixed" settings).
+3.  **Layer Naming:** Are layers named semantically (e.g., `Container` vs `Frame 5132`)?
+4.  **Property Logic:** Are Boolean and Instance Swap properties used to reduce variant count by at least 50%?
+5.  **Documentation:** Does the component have a description and a link to the functional spec (Jira/Storybook)?
+
+**CLI/Tooling Audit (Advanced):**
+If using a plugin like `Design Lint` or `Instance Health`:
+```bash
+# Conceptually: Validate Figma tokens against code
+npx style-dictionary build --config config.json
+# Ensure no 'orphaned' values exist in the JSON export
+```
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='design/figma-design-systems' name='figma-design-systems' description='Use when UI components are fragmented across files, styles lack semantic meaning, or developer handoff causes friction due to 1:1 implementation gaps. This skill provides the architectural framework for building scalable libraries using variables, component properties, and auto-layout to ensure a single source of truth.' version='1.0.0' type='specialization' weight='medium' load_priority='task_specific' dependencies=[] capabilities=[] category='design' keywords=['figma', 'design-systems', 'design-tokens', 'ui-ux', 'component-library', 'auto-layout', 'variables'] scope='Covers Figma architecture, variable (token) mapping, component property optimization, and library publishing. Excludes brand strategy and frontend coding.' see_also=['_core/communication'] tags=['design-ops', 'product-design', 'figma-expert', 'system-thinking'] taxonomy_path='design/figma-design-systems' allowed_tools=['browser', 'write_file'] skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/validation_report.json
+============================================================
+
+"passed=True status='warnings' score=0.85 errors=[] warnings=['Pattern count (4) is below the plan requirement (5+).', \"Missing dedicated 'Organization & Searchability' section.\", \"Content length is significantly shorter than the 'comprehensive' target (>1000 lines) suggested in the success criteria.\"] checks_performed=['frontmatter_validation', 'naming_convention_check', 'metadata_consistency', 'content_plan_alignment', 'pattern_count_verification', 'contrast_pattern_check', 'technical_accuracy_check'] checks=[ValidationCheckItem(id='SPEC_01', check='Frontmatter matches Metadata', passed=True, message='Frontmatter name and description align with skill_metadata.', severity='info', required=True), ValidationCheckItem(id='SPEC_02', check='Kebab-case name', passed=True, message=\"Name 'figma-design-systems' is correct.\", severity='critical', required=True), ValidationCheckItem(id='PLAN_01', check='Core Patterns Count', passed=False, message='The content plan requested 5+ patterns, but only 4 are explicitly documented and numbered.', severity='warning', required=True), ValidationCheckItem(id='PLAN_02', check='Organization & Searchability Section', passed=False, message=\"The specific section for 'Organization & Searchability' mentioned in the plan is merged into the audit checklist rather than being a distinct section.\", severity='warning', required=False), ValidationCheckItem(id='QUAL_01', check='Contrast Pattern (Legacy vs Systematic)', passed=True, message='The skill consistently uses \u274c/\u2705 contrasts as required.', severity='info', required=True)] feedback=\"The skill is technically sound and follows the agentskills.io spec. However, it falls short of the ambitious content plan in terms of pattern count and section depth. Specifically, the 'Publication' and 'Organization' aspects from the plan were condensed into the audit section.\""
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/artifacts
+end_time: 1769513529160
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 3c1c5f7f21a84524bcb59f4c32612f69
+run_name: a skill for figma design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513528609
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/3c1c5f7f21a84524bcb59f4c32612f69/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/427866874afa46c5a9a6fc2d7d7b1c7f/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/427866874afa46c5a9a6fc2d7d7b1c7f/artifacts
+end_time: 1769516092438
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 427866874afa46c5a9a6fc2d7d7b1c7f
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769516042093
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/427866874afa46c5a9a6fc2d7d7b1c7f/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/462e15c345bd43bb85462ab648f28aa2/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/462e15c345bd43bb85462ab648f28aa2/artifacts
+end_time: 1769530836055
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 462e15c345bd43bb85462ab648f28aa2
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769530810382
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/462e15c345bd43bb85462ab648f28aa2/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4d0030cbccab4ba1ab8b9951f6937e3d/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/4d0030cbccab4ba1ab8b9951f6937e3d/artifacts
+end_time: 1769343153061
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 4d0030cbccab4ba1ab8b9951f6937e3d
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769343106248
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4d0030cbccab4ba1ab8b9951f6937e3d/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4dac8f0054214dd08083da1ae4ae6d48/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/4dac8f0054214dd08083da1ae4ae6d48/artifacts
+end_time: 1769536451068
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 4dac8f0054214dd08083da1ae4ae6d48
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769536407049
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4dac8f0054214dd08083da1ae4ae6d48/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4dc79eeb82f7408890a2807c158e2ccc/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/4dc79eeb82f7408890a2807c158e2ccc/artifacts
+end_time: 1769513528789
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 4dc79eeb82f7408890a2807c158e2ccc
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513528684
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4dc79eeb82f7408890a2807c158e2ccc/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4e1a3243ed934905af40ee91fd333f3e/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/4e1a3243ed934905af40ee91fd333f3e/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 4e1a3243ed934905af40ee91fd333f3e
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769513143379
+status: 1
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4e1a3243ed934905af40ee91fd333f3e/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.92,
+  "strengths": [
+    "Excellent \u274c/\u2705 contrast patterns that clearly distinguish between quick-fix anti-patterns and production-grade solutions.",
+    "Strong prescriptive guidance with phrases like 'You MUST systematically isolate' and 'ALWAYS start by capturing'.",
+    "High-utility code examples, specifically the curl command using timing variables to diagnose network latency versus server processing time.",
+    "Comprehensive coverage of the 'Three-Layer Isolation Workflow' which provides a structured approach to debugging."
+  ],
+  "weaknesses": [
+    "Lacks a concrete code example for 'Schema Drift' validation, which is mentioned in the triggers but not shown in practice.",
+    "The 'Log Correlation' section is slightly abstract; it mentions X-Request-ID but doesn't show how to find or grep for it in a standard log format.",
+    "The 'Network & Infrastructure' layer lacks a diagnostic command equivalent to the curl script in Step 1 (e.g., a traceroute or dig example)."
+  ],
+  "recommendations": [
+    "Add a short code snippet in the 'Payload & Contract Validation' section showing a basic JSON schema check using a tool like ajv or a python jsonschema library.",
+    "Include a specific log-grepping example in Layer 3 to demonstrate how to follow an X-Request-ID across multiple service logs.",
+    "In the 'Environment Isolation' section, provide a specific example of a healthcheck endpoint implementation that returns configuration status.",
+    "Add a note on tools for MTU/Proxy debugging, such as 'ping -s' or 'tracepath', to support the Layer 2 recommendations."
+  ],
+  "audience_alignment": 0.95,
+  "rationale": "The skill content is exceptionally well-structured and follows the core principles of high-quality technical documentation. It establishes a strong 'Iron Law' principle (Isolation before Remediation) and provides immediate actionable value through the curl triage script. The use of contrast patterns (\u274c/\u2705) is consistent and effective for the intermediate target audience. The three-layer isolation workflow provides a logical mental model for troubleshooting that transcends specific tools.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.5596739130434781,
+    "pattern_count": 11,
+    "has_core_principle": false,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 3,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns",
+      "Missing core principle statement (add '**Core principle:**')"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Uses progressive disclosure pattern with subdirectories",
+      "Excellent pattern coverage (11 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Has code examples (3 blocks)",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "High-quality description with specific triggers"
+    ]
+  },
+  "calibrated_score": 0.5596739130434781
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/skill_content.md
+============================================================
+
+---
+name: endpoint-testing
+description: Use when API test endpoints are failing, returning error codes (401, 403, 404, 500+), or exhibiting intermittent timeouts in CI/CD. It is triggered by broken integration tests, schema drift between services, or configuration mismatches in test environments.
+---
+
+# API Endpoint Testing & Troubleshooting
+
+The core principle of endpoint testing is **Isolation before Remediation**. You MUST systematically isolate whether a failure originates in the Client Request, the Network Layer, or the Server Logic before attempting a code fix.
+
+## When to Use
+
+- **CI/CD Pipeline Failures:** Integration tests are failing with 4xx or 5xx errors.
+- **Intermittent Timeouts:** Requests succeed locally but time out in staging/test environments.
+- **Schema Drift:** A producer service updated its response format, breaking downstream consumers.
+- **Environment Mismatches:** "Works on my machine" syndrome due to missing `.env` vars or incorrect headers.
+- **Dependency Failures:** The endpoint is healthy, but a downstream database or microservice is unreachable.
+
+## Quick Start: Initial Triage
+
+ALWAYS start by capturing the raw HTTP exchange. Do not rely on high-level application logs alone.
+
+### Step 1: Capture Raw Headers and Timing
+```bash
+# -v for verbose, -w for timing metrics, -S for error visibility
+curl -v -o /dev/null -s -w "\
+Code: %{http_code}\n\
+DNS: %{time_namelookup}s\n\
+Connect: %{time_connect}s\n\
+TTFB: %{time_starttransfer}s\n\
+Total: %{time_total}s\n" \
+-H "Authorization: Bearer <TOKEN>" \
+-H "Content-Type: application/json" \
+-d '{"key": "value"}' \
+https://api.example.com/v1/resource
+```
+
+### Step 2: Map Status Codes to Domains
+- **401/403:** Client/Auth Layer (Check Tokens/Scopes)
+- **404:** Infrastructure/Routing (Check URL/Path/Proxy)
+- **400/422:** Application/Contract (Check Payload Schema)
+- **500/502/503:** Server/Downstream (Check Server Logs/DB)
+- **504:** Network/Infrastructure (Check Load Balancer Timeouts)
+
+---
+
+## The Three-Layer Isolation Workflow
+
+### Layer 1: Client-Side Validation
+Validate the request structure. 80% of integration test failures are due to malformed requests.
+- **URL Check:** Verify path parameters (e.g., `/user//profile` vs `/user/123/profile`).
+- **Method Check:** Ensure `POST` is used for creation, `PUT/PATCH` for updates.
+- **Headers:** Check `Content-Type: application/json` and `Accept`.
+
+### Layer 2: Network & Infrastructure
+Verify the pipe between the client and the server.
+- **DNS Resolution:** Can the test runner resolve the endpoint hostname?
+- **MTU/Proxy issues:** Large payloads may fail through certain proxies if not configured correctly.
+- **Timeout Alignment:** Ensure Client Timeout < Load Balancer Timeout < Server Timeout.
+
+### Layer 3: Server-Side & State
+Verify logic and data availability.
+- **Log Correlation:** Use `X-Request-ID` to find the specific trace in server logs.
+- **Downstream Health:** Check if the API is waiting on a dead database or 3rd party service.
+- **State Pollution:** Ensure previous tests didn't leave the database in an invalid state.
+
+---
+
+## Core Patterns & Diagnostic Scenarios
+
+### 1. Authentication Lifecycle
+❌ **Anti-Pattern:** Using long-lived "Golden Tokens" hardcoded in test suites.
+✅ **Production Pattern:** Implement a "Pre-flight Auth" step that exchanges client credentials for a fresh JWT before the test suite begins.
+
+### 2. Payload & Contract Validation
+❌ **Anti-Pattern:** Sending blind JSON blobs and hoping the 400 error provides a descriptive message.
+✅ **Production Pattern:** ALWAYS validate payloads against a JSON Schema or OpenAPI spec locally before transmission to identify drift instantly.
+
+### 3. Environment Isolation
+❌ **Anti-Pattern:** Relying on `.env` files that are not synchronized across dev and CI environments.
+✅ **Production Pattern:** Inject configuration via Environment Variables in the CI runner and use a `healthcheck` endpoint to verify config load on startup.
+
+### 4. Handling 500 Internal Server Errors
+❌ **Anti-Pattern:** Assuming a 500 error is a code bug and diving into the source immediately.
+✅ **Production Pattern:** Check logs for "Dependency Unavailable." Often, a 500 is actually a masked 503 (database connection pool exhausted).
+
+### 5. Managing Intermittent Timeouts (504/408)
+❌ **Anti-Pattern:** Increasing client timeouts indefinitely to "fix" the problem.
+✅ **Production Pattern:** Implement Circuit Breakers and verify the Server's "Keep-Alive" settings match the Load Balancer's idle timeout.
+
+### 6. Database State & Idempotency
+❌ **Anti-Pattern:** Assuming the test database is empty at the start of every request.
+✅ **Production Pattern:** Use unique identifiers (UUIDs) for every test resource and implement a `DELETE` cleanup or a transaction rollback in the test teardown.
+
+---
+
+## Real-World Impact
+
+- **Reduced MTTR:** Systematic isolation cuts debugging time from hours to minutes.
+- **CI/CD Reliability:** Prevents "flaky tests" by distinguishing between network blips and logic bugs.
+- **Schema Stability:** Catching drift early prevents breaking production deployments.
+
+## Validation Section
+
+After applying a fix, you MUST verify using these steps:
+
+1. **Direct CLI Verification:**
+   ```bash
+   # Confirm the specific fix (e.g., a header change)
+   curl -I -X GET https://api.example.com/health -H "X-Expected-Header: true"
+   ```
+2. **Regression Script:**
+   Run a focused test targeting only the failing endpoint before running the full suite.
+   ```bash
+   pytest tests/api/test_users.py::test_create_user_success
+   ```
+3. **Log Check:**
+   Verify that the server-side stack trace is no longer appearing in the logs for the new `Request-ID`.
+
+---
+
+## Progressive Disclosure
+
+For detailed implementation details, see the following:
+- [references/status-code-map.md](references/status-code-map.md): Comprehensive guide to HTTP codes.
+- [guides/troubleshooting-workflow.md](guides/troubleshooting-workflow.md): Step-by-step checklist for CI failures.
+- [templates/test-endpoint-boilerplate.py](templates/test-endpoint-boilerplate.py): Python template for robust endpoint testing.
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/skill_metadata.json
+============================================================
+
+"skill_id='api/endpoint-testing' name='endpoint-testing' description='Use when API test endpoints are failing, returning error codes (401, 403, 404, 500+), or exhibiting intermittent timeouts in CI/CD. It is triggered by broken integration tests, schema drift between services, or configuration mismatches in test environments.' version='1.0.0' type='specialization' weight='medium' load_priority='on_demand' dependencies=[] capabilities=[] category='' keywords=['api-debugging', 'endpoint-fix', 'http-errors', 'rest-api-testing', 'troubleshooting', 'integration-testing'] scope='Covers diagnostic frameworks for 4xx/5xx errors, authentication failures, and payload validation. Does not cover new API design, performance benchmarking, or infrastructure provisioning.' see_also=[] tags=['api', 'testing', 'troubleshooting', 'devops', 'qa'] taxonomy_path='api/endpoint-testing' allowed_tools=['bash', 'read_file', 'write_to_file', 'edit_file'] skill_style='comprehensive'"
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/validation_report.json
+============================================================
+
+"passed=True status='passed' score=0.9 errors=[] warnings=['Plan required 4 executable snippets; 3 were provided.', \"The 'Hardcoded IP' pattern from the content plan was not included.\"] checks_performed=['spec-compliance-name', 'content-quality-description', 'content-patterns-count', 'content-workflow-isolation', 'content-code-snippets', 'metadata-consistency'] checks=[ValidationCheckItem(id='spec-compliance-name', check='Frontmatter name is kebab-case and matches metadata', passed=True, message=\"Name 'endpoint-testing' is valid kebab-case and matches metadata.\", severity='critical', required=True), ValidationCheckItem(id='content-quality-description', check='Description is CSO-optimized (symptoms/triggers)', passed=True, message='Description correctly focuses on failing endpoints, error codes, and CI/CD timeouts.', severity='critical', required=True), ValidationCheckItem(id='content-patterns-count', check='Contains 5+ troubleshooting patterns with \u274c/\u2705 contrasts', passed=True, message='Found 6 distinct patterns with \u274c/\u2705 contrasts.', severity='critical', required=True), ValidationCheckItem(id='content-workflow-isolation', check='Includes Three-Layer Isolation Workflow', passed=True, message='Isolation workflow (Client, Network, Server) is clearly defined.', severity='critical', required=True), ValidationCheckItem(id='content-code-snippets', check='Provides 4+ executable code snippets', passed=False, message='Only 3 distinct executable code blocks were found (Triage Curl, Validation Curl, Pytest). The plan required 4.', severity='warning', required=True), ValidationCheckItem(id='metadata-consistency', check='Metadata consistency check', passed=True, message=\"Metadata matches content, though 'category' field is empty.\", severity='info', required=True)] feedback=\"The skill is high quality and follows the 'Isolation before Remediation' principle well. It misses one required code snippet (found 3/4) and omitted the 'Hardcoded IP' pattern from the plan in favor of 'Intermittent Timeouts'.\""
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/artifacts
+end_time: 1769516140905
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 4efd04928ee7432187cba7e7ffa4dfdc
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769516092446
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4efd04928ee7432187cba7e7ffa4dfdc/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/4f71671bba444e2a99f0f0d1825d23b9/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/4f71671bba444e2a99f0f0d1825d23b9/artifacts
+end_time: 1769532036356
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 4f71671bba444e2a99f0f0d1825d23b9
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769532036326
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/4f71671bba444e2a99f0f0d1825d23b9/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/54f5f562fb6349d9a75c3a3c1f9bb626/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/54f5f562fb6349d9a75c3a3c1f9bb626/artifacts
+end_time: 1769548121502
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 54f5f562fb6349d9a75c3a3c1f9bb626
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769548037167
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/54f5f562fb6349d9a75c3a3c1f9bb626/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/550961de4d9a48129dae969c8990c8d0/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/330001648406427495/550961de4d9a48129dae969c8990c8d0/artifacts
+end_time: 1769542949450
+entry_point_name: ''
+experiment_id: '330001648406427495'
+lifecycle_stage: active
+run_id: 550961de4d9a48129dae969c8990c8d0
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769542895308
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/550961de4d9a48129dae969c8990c8d0/meta.yaml
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/588b0917aa5849249db1962d913f4877/artifacts/quality_assessment.json
+============================================================
+
+{
+  "quality_score": 0.94,
+  "strengths": [
+    "Excellent use of the 'Control Variable Philosophy' to provide conceptual depth to a simple tool.",
+    "Strong \u274c/\u2705 contrast patterns in both the Core Patterns and the comparison table.",
+    "Comprehensive 'When NOT to Use' section that prevents the common pitfall of scope creep in diagnostic tools.",
+    "Practical CLI-based validation steps that allow for immediate verification of the skill's utility.",
+    "Clear 'Iron Law' style constraints (e.g., 'PREDICTABILITY > COMPLEXITY')."
+  ],
+  "weaknesses": [
+    "The Quick Start code examples are slightly abstract, assuming an initialized 'test_skill' object without showing the necessary imports or setup.",
+    "Troubleshooting step 2 (Manifest Integrity) mentions validating against a schema but does not provide or link to that schema.",
+    "Lacks specific examples of structured log outputs which are mentioned as a 'Production Pattern' but not explicitly demonstrated."
+  ],
+  "recommendations": [
+    "Add a sample 'metadata.json' or YAML snippet in the Troubleshooting section to show a 'known-good' configuration (Section: Troubleshooting).",
+    "Expand the 'Explicit Handshake' section with a concrete JSON response example to illustrate the 'Structured Message' pattern.",
+    "Provide a brief code snippet showing how the skill is actually registered or imported before calling .run() in the Quick Start section.",
+    "Include a 'Log Pattern' section detailing exactly what a monitoring system should look for in the standard output."
+  ],
+  "audience_alignment": 0.95,
+  "rationale": "The skill content is of exceptional quality, adhering to the 'Iron Law' style of clear, authoritative guidance. It successfully transforms a simple diagnostic tool into a critical architectural component through the 'Control Variable Philosophy.' The use of contrast patterns (\u274c/\u2705) is effective and provides immediate clarity on best practices. The target level alignment is high, as it uses professional terminology (MTTR, CI/CD, Deterministic) suitable for intermediate developers without being overly academic. The document is well-structured, moving from high-level philosophy to concrete implementation and troubleshooting.",
+  "deterministic_metrics": {
+    "deterministic_score": 0.6499999999999999,
+    "pattern_count": 7,
+    "has_core_principle": true,
+    "has_strong_guidance": true,
+    "has_good_bad_contrast": true,
+    "code_examples_count": 3,
+    "deterministic_issues": [
+      "Missing Overview section",
+      "Missing key insights after patterns"
+    ],
+    "deterministic_strengths": [
+      "Has skill name",
+      "Description follows 'Use when...' pattern",
+      "Has When to Use section",
+      "Has Core Patterns section",
+      "Has Quick Start section",
+      "Includes real-world impact/benefits",
+      "Has Quick Start section (v2 recommended)",
+      "Excellent pattern coverage (7 patterns)",
+      "Shows both anti-patterns (\u274c) and production patterns (\u2705)",
+      "All code blocks have language specification",
+      "Code examples are complete (no placeholders)",
+      "Code examples are substantial",
+      "Has code examples (3 blocks)",
+      "Has clear core principle statement",
+      "Has strong imperative guidance (Iron Law style)",
+      "Has Good/Bad contrast examples",
+      "High-quality description with specific triggers"
+    ]
+  },
+  "calibrated_score": 0.6499999999999999
+}
+
+============================================================
+END FILE: data/mlflow/runs/330001648406427495/588b0917aa5849249db1962d913f4877/artifacts/quality_assessment.json
+============================================================
+
+============================================================
+FILE: data/mlflow/runs/330001648406427495/588b0917aa5849249db1962d913f4877/artifacts/skill_content.md
+============================================================
+
+---
+name: test-skill
+description: Use when you need to verify the skill loading pipeline, perform a system health check, or confirm that the agent can retrieve and execute basic instructions. This skill is a diagnostic tool for when skill execution is failing or when first-time environment setup needs validation.
+---
+
+# Test Skill: System Verification & Diagnostics
+
+The `test-skill` serves as the baseline "Control Variable" for agentic systems. Its purpose is to isolate the execution environment from business logic, providing a deterministic path to verify that the agent can load, parse, and execute skills correctly.
+
+## Core Principle: The Control Variable Philosophy
+System reliability depends on the ability to isolate variables. When an agent fails, you MUST determine if the failure is in the **Logic** (the specific task) or the **Infrastructure** (the skill loading pipeline). The `test-skill` removes all logic complexity, leaving only the infrastructure to be tested. 
+
+**PREDICTABILITY > COMPLEXITY.**
+
+## When to Use
+
+### Triggering Conditions
+- **Initial Setup**: Immediately after installing a new environment or agent runtime.
+- **Pipeline Failures**: When other skills fail to load or execute with "Skill Not Found" or "Internal Server Error."
+- **CI/CD Validation**: As a prerequisite step in deployment pipelines to ensure the runtime is healthy.
+- **Dependency Isolation**: To confirm that a failure in another skill is due to its dependencies (e.g., a database or API) and not the agent's core capability.
+
+### When NOT to Use
+- NEVER use this skill for production data processing.
+- NEVER add external API calls or network-dependent logic to this skill.
+- NEVER use this for complex reasoning or multi-step workflows.
+
+## Quick Start
+
+### Basic Verification
+To verify the system is alive, execute the test skill with no arguments.
+
+```python
+# Expected Result: A clear "TEST_SUCCESSFUL" message.

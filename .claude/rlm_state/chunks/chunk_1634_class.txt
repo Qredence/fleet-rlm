@@ -1,0 +1,5 @@
+<!-- Chunk 1634: bytes 6671166-6671261, type=class -->
+class TaxonomyError(SkillsFleetError):
+    """Base exception for taxonomy-related errors."""
+
+

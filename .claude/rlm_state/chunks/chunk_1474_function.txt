@@ -1,0 +1,16 @@
+<!-- Chunk 1474: bytes 6320957-6321301, type=function -->
+def get_drafts_root(skills_root: Annotated[Path, Depends(get_skills_root)]) -> Path:
+    """
+    Get the drafts root directory.
+
+    Args:
+        skills_root: The skills root directory (injected)
+
+    Returns:
+        Path to the drafts directory (_drafts under skills root)
+
+    """
+    return skills_root / "_drafts"
+
+
+@lru_cache(maxsize=1)

@@ -1,0 +1,3031 @@
+<!-- Chunk 1138: bytes 4251555-4360257, type=function -->
+def test_gepa_class_exists():
+    assert hasattr(dspy, "GEPA")
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/unit/test_gepa_smoke.py -v`
+Expected: FAIL on older DSPy
+
+**Step 3: Minimal implementation**
+
+This should pass after Task 1.
+
+**Step 4: Run test to verify it passes**
+
+Run: `uv run pytest tests/unit/test_gepa_smoke.py -v`
+Expected: PASS
+
+---
+
+### Task 8: RLMs / RL modules (optional, gated)
+
+**Goal:** Prepare for DSPy’s RL ecosystem (“RLMs module”) without forcing new heavy dependencies.
+
+**Approach:**
+- Add an optional dependency group `rl` (e.g., `arbor`) only if we commit to supporting RL optimizers.
+- Add a feature flag in config (e.g., `optimization.enable_rl: true|false`).
+- If enabled and deps available, expose new optimizer option in CLI/API; otherwise hide.
+
+**Files:**
+- Modify: `pyproject.toml` (optional-dependencies `rl = [...]`)
+- Modify: `src/skill_fleet/core/dspy/optimization/selector.py` (add capability detection)
+- Docs: `docs/llm/dspy-rl.md`
+
+**Testing:**
+- Unit test should verify the feature flag defaults to off and RL code is not imported unless enabled.
+
+---
+
+## Final Verification
+
+Run:
+
+- `uv run pytest tests/unit -v`
+- `uv run skill-fleet serve` and verify `/api/v1/chat/stream` still streams reasoning
+- `uv run skill-fleet chat "Create a skill for ..."` and verify it progresses through Deep Understanding -> Confirmation -> Creation
+
+
+============================================================
+END FILE: docs/plans/2026-01-22-dspy-3-1-reasoning-adapters-rlms.md
+============================================================
+
+============================================================
+FILE: docs/reference/llm-config.md
+============================================================
+
+# LLM & DSPy Configuration (reference)
+
+Last updated: 2026-01-27
+
+This reference collects the canonical places to configure language models and DSPy for Skills Fleet.
+
+Key locations:
+
+- Code: `src/skill_fleet/llm/dspy_config.py` (use `configure_dspy()` and `get_task_lm()`)
+- Default config: `config/config.yaml`
+- Provider-specific settings: `docs/llm/providers.md`
+- Task-model mappings: `docs/llm/task-models.md`
+
+Core guidance:
+
+- Call `configure_dspy()` once at application startup. For temporary overrides, use `get_task_lm()` or `dspy.context()`.
+- Use `DSPY_CACHEDIR` and `DSPY_TEMPERATURE` environment variables for deployment overrides.
+- Prefer task-specific LMs for different phases (analysis/generation/validation) to improve cost/quality tradeoffs.
+
+Example (startup):
+
+```python
+from skill_fleet.llm.dspy_config import configure_dspy
+
+# Configure global DSPy LM
+configure_dspy()
+```
+
+See `docs/llm/dspy-config.md` for the full reference and usage examples.
+
+
+============================================================
+END FILE: docs/reference/llm-config.md
+============================================================
+
+============================================================
+FILE: docs/reference/schemas.md
+============================================================
+
+# API Schemas (reference)
+
+Last updated: 2026-01-27
+
+This file points to the canonical schema definitions used by the API.
+
+Primary locations:
+
+- Auto-generated OpenAPI / Pydantic models: `src/skill_fleet/api/schemas/`
+- Human-readable schema reference: `docs/api/V2_SCHEMAS.md`
+
+If you need to modify request/response models, edit the Pydantic models under `src/skill_fleet/api/schemas/` and run the tests.
+
+
+============================================================
+END FILE: docs/reference/schemas.md
+============================================================
+
+============================================================
+FILE: mlruns/0/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/0
+creation_time: 1769622124132
+experiment_id: '0'
+last_update_time: 1769622124132
+lifecycle_stage: active
+name: Default
+
+
+============================================================
+END FILE: mlruns/0/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/0361d471c8e740d2ad4a977bac967d5c/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/0361d471c8e740d2ad4a977bac967d5c/artifacts
+end_time: 1769651535986
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 0361d471c8e740d2ad4a977bac967d5c
+run_name: help me build something
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651466130
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/0361d471c8e740d2ad4a977bac967d5c/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/11c8de42fee54bc0ad2f1015f03a67cb/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/11c8de42fee54bc0ad2f1015f03a67cb/artifacts
+end_time: 1769818711964
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 11c8de42fee54bc0ad2f1015f03a67cb
+run_name: Ambiguous task
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818711920
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/11c8de42fee54bc0ad2f1015f03a67cb/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/137c97c712bc4fbdaae31676ab96dd12/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/137c97c712bc4fbdaae31676ab96dd12/artifacts
+end_time: 1769666963204
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 137c97c712bc4fbdaae31676ab96dd12
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769666963182
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/137c97c712bc4fbdaae31676ab96dd12/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/13d3f0be08394c39bdc2dde05bf96ba4/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/13d3f0be08394c39bdc2dde05bf96ba4/artifacts
+end_time: 1769636201216
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 13d3f0be08394c39bdc2dde05bf96ba4
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769636186712
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/13d3f0be08394c39bdc2dde05bf96ba4/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/175405a682d749f2a00663007288dd25/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/175405a682d749f2a00663007288dd25/artifacts
+end_time: 1769744876137
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 175405a682d749f2a00663007288dd25
+run_name: Create a comprehensive Python decorators skill covering function and class
+  decorators
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769744869805
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/175405a682d749f2a00663007288dd25/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/1cb4f065d2924025b11e788ec42669a0/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/1cb4f065d2924025b11e788ec42669a0/artifacts
+end_time: 1769636201244
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 1cb4f065d2924025b11e788ec42669a0
+run_name: a figma design system skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769636186700
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/1cb4f065d2924025b11e788ec42669a0/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/1d1661ce2261441fb83f72274168c268/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/1d1661ce2261441fb83f72274168c268/artifacts
+end_time: 1769746464483
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 1d1661ce2261441fb83f72274168c268
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769746457974
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/1d1661ce2261441fb83f72274168c268/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/1ee725d2a8454fb0ad4361ac7ccefcea/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/1ee725d2a8454fb0ad4361ac7ccefcea/artifacts
+end_time: 1769668670186
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 1ee725d2a8454fb0ad4361ac7ccefcea
+run_name: a figma design system skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769668670147
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/1ee725d2a8454fb0ad4361ac7ccefcea/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/1f8f67b1236544f6a5bccf4b49993ba8/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/1f8f67b1236544f6a5bccf4b49993ba8/artifacts
+end_time: 1769818711961
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 1f8f67b1236544f6a5bccf4b49993ba8
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818711952
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/1f8f67b1236544f6a5bccf4b49993ba8/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/2347a89362574d81a926e1fdadce028a/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/2347a89362574d81a926e1fdadce028a/artifacts
+end_time: 1769652031953
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 2347a89362574d81a926e1fdadce028a
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651970021
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/2347a89362574d81a926e1fdadce028a/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/240cc1038bed45d29e3b4a7d0dcfec54/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/240cc1038bed45d29e3b4a7d0dcfec54/artifacts
+end_time: 1769651744606
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 240cc1038bed45d29e3b4a7d0dcfec54
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651744578
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/240cc1038bed45d29e3b4a7d0dcfec54/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/2a75242df55f49e794ac054abc763739/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/2a75242df55f49e794ac054abc763739/artifacts
+end_time: 1769626316203
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 2a75242df55f49e794ac054abc763739
+run_name: Create a skill for testing purposes
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769626316161
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/2a75242df55f49e794ac054abc763739/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/2bee14cfd3f54fcd81b9e23d83eb70c4/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/2bee14cfd3f54fcd81b9e23d83eb70c4/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 2bee14cfd3f54fcd81b9e23d83eb70c4
+run_name: a skill for design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769650399435
+status: 1
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/2bee14cfd3f54fcd81b9e23d83eb70c4/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/338badb3ce634250a6ed7b9b50ec0ad3/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/338badb3ce634250a6ed7b9b50ec0ad3/artifacts
+end_time: 1769818711944
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 338badb3ce634250a6ed7b9b50ec0ad3
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818711930
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/338badb3ce634250a6ed7b9b50ec0ad3/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/3970fc01649e4d0f911e1c3370effb9c/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/3970fc01649e4d0f911e1c3370effb9c/artifacts
+end_time: 1769651744615
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 3970fc01649e4d0f911e1c3370effb9c
+run_name: help me build a design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651744566
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/3970fc01649e4d0f911e1c3370effb9c/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/3c16d1175d38466bbc27e9424ec53812/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/3c16d1175d38466bbc27e9424ec53812/artifacts
+end_time: 1769651170025
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 3c16d1175d38466bbc27e9424ec53812
+run_name: help me with something
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651099687
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/3c16d1175d38466bbc27e9424ec53812/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/3cd64409c54f40a7a0da7934c8a1a0b9/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/3cd64409c54f40a7a0da7934c8a1a0b9/artifacts
+end_time: 1769665893750
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 3cd64409c54f40a7a0da7934c8a1a0b9
+run_name: a skill for grep
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769665820474
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/3cd64409c54f40a7a0da7934c8a1a0b9/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/3dd7187b27bb43d58abc9188d1aae434/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/3dd7187b27bb43d58abc9188d1aae434/artifacts
+end_time: 1769818711950
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 3dd7187b27bb43d58abc9188d1aae434
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818711946
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/3dd7187b27bb43d58abc9188d1aae434/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/407b8a8d6845497d8f91f4150f480e0d/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/407b8a8d6845497d8f91f4150f480e0d/artifacts
+end_time: 1769650592659
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 407b8a8d6845497d8f91f4150f480e0d
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769650562075
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/407b8a8d6845497d8f91f4150f480e0d/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/41493923ff054d0c866f1b1cb6fed42c/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/41493923ff054d0c866f1b1cb6fed42c/artifacts
+end_time: 1769622338087
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 41493923ff054d0c866f1b1cb6fed42c
+run_name: Create a skill for testing purposes
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769622338052
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/41493923ff054d0c866f1b1cb6fed42c/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/43046943934349a8b358be439bbb4115/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/43046943934349a8b358be439bbb4115/artifacts
+end_time: 1769652042203
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 43046943934349a8b358be439bbb4115
+run_name: write a skill for vite react
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651969998
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/43046943934349a8b358be439bbb4115/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/4412a725da7d4d47bb0867ca2b570e89/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/4412a725da7d4d47bb0867ca2b570e89/artifacts
+end_time: 1769670667112
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 4412a725da7d4d47bb0867ca2b570e89
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769670660722
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/4412a725da7d4d47bb0867ca2b570e89/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/44587a5269bf4a4db6b4861be0c938cb/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/44587a5269bf4a4db6b4861be0c938cb/artifacts
+end_time: 1769818691400
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 44587a5269bf4a4db6b4861be0c938cb
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818691382
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/44587a5269bf4a4db6b4861be0c938cb/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/4a9d6123025a4c84b7d9384a320aa3d6/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/4a9d6123025a4c84b7d9384a320aa3d6/artifacts
+end_time: 1769651867617
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 4a9d6123025a4c84b7d9384a320aa3d6
+run_name: help me build a design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651819445
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/4a9d6123025a4c84b7d9384a320aa3d6/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/4d24c61f1a0945df8fb4051a2b5ea05f/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/4d24c61f1a0945df8fb4051a2b5ea05f/artifacts
+end_time: 1769746213340
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 4d24c61f1a0945df8fb4051a2b5ea05f
+run_name: Create a Python decorators skill with practical examples
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769746207125
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/4d24c61f1a0945df8fb4051a2b5ea05f/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/5373599bf9514e19a51d3df1b36ba9d8/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/5373599bf9514e19a51d3df1b36ba9d8/artifacts
+end_time: 1769622188795
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 5373599bf9514e19a51d3df1b36ba9d8
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769622124306
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/5373599bf9514e19a51d3df1b36ba9d8/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/5a2366972eef4029932ae623f53a13e7/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/5a2366972eef4029932ae623f53a13e7/artifacts
+end_time: 1769652179045
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 5a2366972eef4029932ae623f53a13e7
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769652179029
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/5a2366972eef4029932ae623f53a13e7/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/5e73ba8a4ffe45159a0fa98321ea038a/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/5e73ba8a4ffe45159a0fa98321ea038a/artifacts
+end_time: 1769665607918
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 5e73ba8a4ffe45159a0fa98321ea038a
+run_name: a figma design system skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769665563758
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/5e73ba8a4ffe45159a0fa98321ea038a/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/647f350bfa8045aebe71a539e7315988/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/647f350bfa8045aebe71a539e7315988/artifacts
+end_time: 1769625213517
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 647f350bfa8045aebe71a539e7315988
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769625144882
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/647f350bfa8045aebe71a539e7315988/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/6b6fcd9f417a4bb1bb3ec4c6bf4d5d66/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/6b6fcd9f417a4bb1bb3ec4c6bf4d5d66/artifacts
+end_time: 1769634964391
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 6b6fcd9f417a4bb1bb3ec4c6bf4d5d66
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769634941725
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/6b6fcd9f417a4bb1bb3ec4c6bf4d5d66/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/6c2d9809ab7c4d7c8fda3a361dcdf7d3/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/6c2d9809ab7c4d7c8fda3a361dcdf7d3/artifacts
+end_time: 1769745585569
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 6c2d9809ab7c4d7c8fda3a361dcdf7d3
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769745576340
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/6c2d9809ab7c4d7c8fda3a361dcdf7d3/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/70ac0116a21a4674aa65550e544122e5/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/70ac0116a21a4674aa65550e544122e5/artifacts
+end_time: 1769622271698
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 70ac0116a21a4674aa65550e544122e5
+run_name: Create a skill for testing purposes
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769622271666
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/70ac0116a21a4674aa65550e544122e5/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/71a3cd44e1534c04b061699402b44cb0/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/71a3cd44e1534c04b061699402b44cb0/artifacts
+end_time: 1769818691416
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 71a3cd44e1534c04b061699402b44cb0
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818691411
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/71a3cd44e1534c04b061699402b44cb0/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/727a5f6b4523476f9f3cfa9a9916919e/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/727a5f6b4523476f9f3cfa9a9916919e/artifacts
+end_time: 1769634155413
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 727a5f6b4523476f9f3cfa9a9916919e
+run_name: a figma design system skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769634066194
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/727a5f6b4523476f9f3cfa9a9916919e/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/7527d479e9604e1b90c3717ed8cfff3f/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/7527d479e9604e1b90c3717ed8cfff3f/artifacts
+end_time: 1769651525785
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 7527d479e9604e1b90c3717ed8cfff3f
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651466165
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/7527d479e9604e1b90c3717ed8cfff3f/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/75c36ce65f004500a3ce39831b700ab7/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/75c36ce65f004500a3ce39831b700ab7/artifacts
+end_time: 1769625223345
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 75c36ce65f004500a3ce39831b700ab7
+run_name: a skill about morph api
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769625144872
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/75c36ce65f004500a3ce39831b700ab7/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/766873cdc4d4417d9239cddaaf381674/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/766873cdc4d4417d9239cddaaf381674/artifacts
+end_time: 1769664819178
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 766873cdc4d4417d9239cddaaf381674
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769664765261
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/766873cdc4d4417d9239cddaaf381674/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/7d6bce4bc2fc483782aa65c360435987/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/7d6bce4bc2fc483782aa65c360435987/artifacts
+end_time: 1769744759126
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 7d6bce4bc2fc483782aa65c360435987
+run_name: Create a Python decorators skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769744752731
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/7d6bce4bc2fc483782aa65c360435987/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/8066a076807b47a08c794d881287fa46/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/8066a076807b47a08c794d881287fa46/artifacts
+end_time: 1769622271692
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 8066a076807b47a08c794d881287fa46
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769622271673
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/8066a076807b47a08c794d881287fa46/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/80a09c5c16814248853e2706aba93d18/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/80a09c5c16814248853e2706aba93d18/artifacts
+end_time: 1769665881694
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 80a09c5c16814248853e2706aba93d18
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769665820505
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/80a09c5c16814248853e2706aba93d18/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/811e737cc5ab444f8ac14741486ae923/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/811e737cc5ab444f8ac14741486ae923/artifacts
+end_time: 1769665607895
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 811e737cc5ab444f8ac14741486ae923
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769665563793
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/811e737cc5ab444f8ac14741486ae923/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/829085a8c19242909029ee7d2cfcaa3c/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/829085a8c19242909029ee7d2cfcaa3c/artifacts
+end_time: 1769668861200
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 829085a8c19242909029ee7d2cfcaa3c
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769668854922
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/829085a8c19242909029ee7d2cfcaa3c/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/82d353a98fc44beab8d0c8efad52519c/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/82d353a98fc44beab8d0c8efad52519c/artifacts
+end_time: 1769745585571
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 82d353a98fc44beab8d0c8efad52519c
+run_name: Create a data visualization skill for Python matplotlib and seaborn
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769745576319
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/82d353a98fc44beab8d0c8efad52519c/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/86f650baf41042c28a18c238d015b6eb/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/86f650baf41042c28a18c238d015b6eb/artifacts
+end_time: 1769622338082
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 86f650baf41042c28a18c238d015b6eb
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769622338068
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/86f650baf41042c28a18c238d015b6eb/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/88b5291d7a52477eb0da07ddd88fecea/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/88b5291d7a52477eb0da07ddd88fecea/artifacts
+end_time: 1769666963214
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 88b5291d7a52477eb0da07ddd88fecea
+run_name: a figma design system skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769666963158
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/88b5291d7a52477eb0da07ddd88fecea/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/8d94978bad614fe59aa8104cf184f6fb/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/8d94978bad614fe59aa8104cf184f6fb/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 8d94978bad614fe59aa8104cf184f6fb
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769650399457
+status: 1
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/8d94978bad614fe59aa8104cf184f6fb/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/8f7b4e5f92514a68941066b9e08852bd/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/8f7b4e5f92514a68941066b9e08852bd/artifacts
+end_time: 1769625028395
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 8f7b4e5f92514a68941066b9e08852bd
+run_name: a skill for dspy
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769624957375
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/8f7b4e5f92514a68941066b9e08852bd/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/94e1cd13d2ec4219ad486384e513ca1f/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/94e1cd13d2ec4219ad486384e513ca1f/artifacts
+end_time: 1769746213336
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 94e1cd13d2ec4219ad486384e513ca1f
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769746207186
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/94e1cd13d2ec4219ad486384e513ca1f/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/9706856c53bc4dd79df2fd176c0675a0/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/9706856c53bc4dd79df2fd176c0675a0/artifacts
+end_time: 1769745131512
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 9706856c53bc4dd79df2fd176c0675a0
+run_name: Create a Python decorators skill with practical examples
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769745125276
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/9706856c53bc4dd79df2fd176c0675a0/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/97af31c7085f4a3e89126ab33d63bcf9/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/97af31c7085f4a3e89126ab33d63bcf9/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 97af31c7085f4a3e89126ab33d63bcf9
+run_name: a figma skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769633681277
+status: 1
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/97af31c7085f4a3e89126ab33d63bcf9/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/98dbe0ee4d994320b5dfa1963602b4b5/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/98dbe0ee4d994320b5dfa1963602b4b5/artifacts
+end_time: 1769634142752
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 98dbe0ee4d994320b5dfa1963602b4b5
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769634066209
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/98dbe0ee4d994320b5dfa1963602b4b5/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/9bcb6d126e6f400bad6137727ff7dddc/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/9bcb6d126e6f400bad6137727ff7dddc/artifacts
+end_time: 1769818764387
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 9bcb6d126e6f400bad6137727ff7dddc
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818764380
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/9bcb6d126e6f400bad6137727ff7dddc/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/9d21734918c845c9adf99b2a89f4e240/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/9d21734918c845c9adf99b2a89f4e240/artifacts
+end_time: 1769651302371
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 9d21734918c845c9adf99b2a89f4e240
+run_name: help me build a design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651234170
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/9d21734918c845c9adf99b2a89f4e240/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/9e0bea556d4e4dedb53d9f9ebb2b3318/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/9e0bea556d4e4dedb53d9f9ebb2b3318/artifacts
+end_time: 1769626316195
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 9e0bea556d4e4dedb53d9f9ebb2b3318
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769626316177
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/9e0bea556d4e4dedb53d9f9ebb2b3318/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/9eb561facf4f4df7946df177befa84d8/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/9eb561facf4f4df7946df177befa84d8/artifacts
+end_time: 1769668670179
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: 9eb561facf4f4df7946df177befa84d8
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769668670155
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/9eb561facf4f4df7946df177befa84d8/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/a19658ba58d74526aa582ad85652cf32/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/a19658ba58d74526aa582ad85652cf32/artifacts
+end_time: 1769746464486
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: a19658ba58d74526aa582ad85652cf32
+run_name: Create a comprehensive Python decorators skill covering logging, caching,
+  and authentication example
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769746457961
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/a19658ba58d74526aa582ad85652cf32/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/a1d24142616c4c51974909cdfe80ff62/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/a1d24142616c4c51974909cdfe80ff62/artifacts
+end_time: 1769818764394
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: a1d24142616c4c51974909cdfe80ff62
+run_name: phase3_quality_assurance
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818764389
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/a1d24142616c4c51974909cdfe80ff62/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/a1e79feff0204684bcb49e4cb4740b83/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/a1e79feff0204684bcb49e4cb4740b83/artifacts
+end_time: 1769744988344
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: a1e79feff0204684bcb49e4cb4740b83
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769744982211
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/a1e79feff0204684bcb49e4cb4740b83/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/a8bc71450c53466798944b91e483aee9/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/a8bc71450c53466798944b91e483aee9/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: a8bc71450c53466798944b91e483aee9
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769633681301
+status: 1
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/a8bc71450c53466798944b91e483aee9/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/af94a94cb14b49638b65e482aa869a4e/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/af94a94cb14b49638b65e482aa869a4e/artifacts
+end_time: 1769818764378
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: af94a94cb14b49638b65e482aa869a4e
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818764354
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/af94a94cb14b49638b65e482aa869a4e/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/b007bfc7e2814c34af71e565613feeba/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/b007bfc7e2814c34af71e565613feeba/artifacts
+end_time: 1769625017036
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: b007bfc7e2814c34af71e565613feeba
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769624957388
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/b007bfc7e2814c34af71e565613feeba/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/b13b2d1193814512915ce474c6b69324/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/b13b2d1193814512915ce474c6b69324/artifacts
+end_time: 1769650605753
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: b13b2d1193814512915ce474c6b69324
+run_name: a skill for design system
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769650562051
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/b13b2d1193814512915ce474c6b69324/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/b2e87eb649604c5d9789c484cb660d5a/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/b2e87eb649604c5d9789c484cb660d5a/artifacts
+end_time: 1769651078168
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: b2e87eb649604c5d9789c484cb660d5a
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651017668
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/b2e87eb649604c5d9789c484cb660d5a/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/b3d97e141e1b48ac804bdc42856ae2c1/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/b3d97e141e1b48ac804bdc42856ae2c1/artifacts
+end_time: 1769668861201
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: b3d97e141e1b48ac804bdc42856ae2c1
+run_name: write a skill for grep tool
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769668854911
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/b3d97e141e1b48ac804bdc42856ae2c1/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/b3e389463e35479c84a6494964410186/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/b3e389463e35479c84a6494964410186/artifacts
+end_time: 1769817436510
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: b3e389463e35479c84a6494964410186
+run_name: Create a skill for testing purposes
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769817430052
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/b3e389463e35479c84a6494964410186/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/bf53cc4382134ae58465382ee191e816/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/bf53cc4382134ae58465382ee191e816/artifacts
+end_time: 1769652252478
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: bf53cc4382134ae58465382ee191e816
+run_name: a figma skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769652252425
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/bf53cc4382134ae58465382ee191e816/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/c1a64b3ab5c846fe85292615b4548455/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/c1a64b3ab5c846fe85292615b4548455/artifacts
+end_time: 1769651088665
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: c1a64b3ab5c846fe85292615b4548455
+run_name: a skill for backend API design
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651017631
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/c1a64b3ab5c846fe85292615b4548455/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/c3f6c1a55aec4fc88ecdba161a1996fb/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/c3f6c1a55aec4fc88ecdba161a1996fb/artifacts
+end_time: 1769670667114
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: c3f6c1a55aec4fc88ecdba161a1996fb
+run_name: Create a skill for testing purposes
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769670660712
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/c3f6c1a55aec4fc88ecdba161a1996fb/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/c964946e1bbd4e7ba123c1ba343a8386/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/c964946e1bbd4e7ba123c1ba343a8386/artifacts
+end_time: 1769744988356
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: c964946e1bbd4e7ba123c1ba343a8386
+run_name: Create a Python decorators skill with practical examples for logging and
+  caching
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769744982196
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/c964946e1bbd4e7ba123c1ba343a8386/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/d1a8b8699bef430dbe4f5611abaede23/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/d1a8b8699bef430dbe4f5611abaede23/artifacts
+end_time: 1769818691417
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: d1a8b8699bef430dbe4f5611abaede23
+run_name: Ambiguous task
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818691361
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/d1a8b8699bef430dbe4f5611abaede23/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/d23c91b86803477caf98241698bc12f2/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/d23c91b86803477caf98241698bc12f2/artifacts
+end_time: 1769622198504
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: d23c91b86803477caf98241698bc12f2
+run_name: Create a skill for testing purposes
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769622124299
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/d23c91b86803477caf98241698bc12f2/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/d77c14f3e986475fb1b8a545640502e2/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/d77c14f3e986475fb1b8a545640502e2/artifacts
+end_time: 1769651867578
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: d77c14f3e986475fb1b8a545640502e2
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651819455
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/d77c14f3e986475fb1b8a545640502e2/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/d879311b893a460b8365d0309be99e5c/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/d879311b893a460b8365d0309be99e5c/artifacts
+end_time: 1769631223517
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: d879311b893a460b8365d0309be99e5c
+run_name: figma skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769631143955
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/d879311b893a460b8365d0309be99e5c/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/d9d1565654b6428196c0be4ec8aa52de/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/d9d1565654b6428196c0be4ec8aa52de/artifacts
+end_time: 1769636740133
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: d9d1565654b6428196c0be4ec8aa52de
+run_name: a figma skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769636674516
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/d9d1565654b6428196c0be4ec8aa52de/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/dc6aa81739ba4e8d93f001c4ded9225b/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/dc6aa81739ba4e8d93f001c4ded9225b/artifacts
+end_time: 1769651291290
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: dc6aa81739ba4e8d93f001c4ded9225b
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651234178
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/dc6aa81739ba4e8d93f001c4ded9225b/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e178f17fd2d140f198cdeab770ce6109/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/e178f17fd2d140f198cdeab770ce6109/artifacts
+end_time: 1769668593344
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: e178f17fd2d140f198cdeab770ce6109
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769668527707
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/e178f17fd2d140f198cdeab770ce6109/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/artifacts/skill_content.md
+============================================================
+
+# Web Dev Skill
+
+============================================================
+END FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/artifacts/skill_content.md
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/artifacts/skill_metadata.json
+============================================================
+
+{
+  "skill_id": "web/basics/my-skill",
+  "name": "my-skill",
+  "description": "A description",
+  "type": "technical",
+  "weight": "lightweight"
+}
+
+============================================================
+END FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/artifacts/skill_metadata.json
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/artifacts/validation_report.json
+============================================================
+
+{
+  "passed": true
+}
+
+============================================================
+END FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/artifacts/validation_report.json
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/artifacts
+end_time: 1769818764404
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: e2b22fc163a8452f97480531ca6fe72b
+run_name: Ambiguous task
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818764337
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/e2b22fc163a8452f97480531ca6fe72b/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e36feee5ca9a4d85a0c211364a3f5f8b/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/e36feee5ca9a4d85a0c211364a3f5f8b/artifacts
+end_time: 1769652179052
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: e36feee5ca9a4d85a0c211364a3f5f8b
+run_name: write a skill for vite react
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769652179017
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/e36feee5ca9a4d85a0c211364a3f5f8b/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e39fa0ea479445baaec4209376972f3f/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/e39fa0ea479445baaec4209376972f3f/artifacts
+end_time: 1769745131510
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: e39fa0ea479445baaec4209376972f3f
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769745125295
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/e39fa0ea479445baaec4209376972f3f/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e4bddda008ee4b6f8599a86c9c2b15ec/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/e4bddda008ee4b6f8599a86c9c2b15ec/artifacts
+end_time: 1769664830804
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: e4bddda008ee4b6f8599a86c9c2b15ec
+run_name: a skill about grep
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769664765239
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/e4bddda008ee4b6f8599a86c9c2b15ec/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/e94c24482a67412c95398d67464d525a/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/e94c24482a67412c95398d67464d525a/artifacts
+end_time: 1769652252471
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: e94c24482a67412c95398d67464d525a
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769652252445
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/e94c24482a67412c95398d67464d525a/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/ebfce8ad5ea04302b3ad14fa7542585f/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/ebfce8ad5ea04302b3ad14fa7542585f/artifacts
+end_time: 1769636729413
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: ebfce8ad5ea04302b3ad14fa7542585f
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769636674537
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/ebfce8ad5ea04302b3ad14fa7542585f/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/ec3f9b67892d4b0ab8c9708614a4e185/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/ec3f9b67892d4b0ab8c9708614a4e185/artifacts
+end_time: 1769634964408
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: ec3f9b67892d4b0ab8c9708614a4e185
+run_name: a figma design system skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769634941702
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/ec3f9b67892d4b0ab8c9708614a4e185/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/ed01c21e40014b42955b2796fcf45148/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/ed01c21e40014b42955b2796fcf45148/artifacts
+end_time: 1769817436508
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: ed01c21e40014b42955b2796fcf45148
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769817430063
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/ed01c21e40014b42955b2796fcf45148/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/f07d503d09504d2b955c7cd5775ce369/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/f07d503d09504d2b955c7cd5775ce369/artifacts
+end_time: 1769631210621
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: f07d503d09504d2b955c7cd5775ce369
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769631143977
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/f07d503d09504d2b955c7cd5775ce369/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/f2f31cf10b6444ada78486192bbfea80/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/f2f31cf10b6444ada78486192bbfea80/artifacts
+end_time: 1769744876135
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: f2f31cf10b6444ada78486192bbfea80
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769744869826
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/f2f31cf10b6444ada78486192bbfea80/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/f6989ad0c41a4a4a9148f948153fdd5d/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/f6989ad0c41a4a4a9148f948153fdd5d/artifacts
+end_time: 1769744759124
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: f6989ad0c41a4a4a9148f948153fdd5d
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769744752757
+status: 4
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/f6989ad0c41a4a4a9148f948153fdd5d/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/f7c7dcd78c3744479efe44b75476374a/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/f7c7dcd78c3744479efe44b75476374a/artifacts
+end_time: 1769818691409
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: f7c7dcd78c3744479efe44b75476374a
+run_name: phase2_content_generation
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769818691404
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/f7c7dcd78c3744479efe44b75476374a/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/f91a22a4326c4d97b6fb148acce4195b/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/f91a22a4326c4d97b6fb148acce4195b/artifacts
+end_time: 1769651162157
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: f91a22a4326c4d97b6fb148acce4195b
+run_name: phase1_task_analysis
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769651099768
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/f91a22a4326c4d97b6fb148acce4195b/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/fd614ddb6be246b298129544697042c9/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467/fd614ddb6be246b298129544697042c9/artifacts
+end_time: 1769668604887
+entry_point_name: ''
+experiment_id: '114527314223329467'
+lifecycle_stage: active
+run_id: fd614ddb6be246b298129544697042c9
+run_name: I want a grep skill
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769668527690
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/114527314223329467/fd614ddb6be246b298129544697042c9/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/114527314223329467/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/114527314223329467
+creation_time: 1769622124139
+experiment_id: '114527314223329467'
+last_update_time: 1769622124139
+lifecycle_stage: active
+name: skill-creation
+
+
+============================================================
+END FILE: mlruns/114527314223329467/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/236410989681272600/meta.yaml
+============================================================
+
+artifact_location: file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/236410989681272600
+creation_time: 1769624746673
+experiment_id: '236410989681272600'
+last_update_time: 1769624746673
+lifecycle_stage: active
+name: skill-fleet
+
+
+============================================================
+END FILE: mlruns/236410989681272600/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/588993684212531221/600f1ab1e1d549a29f72ff3d525b7538/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/588993684212531221/600f1ab1e1d549a29f72ff3d525b7538/artifacts
+end_time: 1769649871059
+entry_point_name: ''
+experiment_id: '588993684212531221'
+lifecycle_stage: active
+run_id: 600f1ab1e1d549a29f72ff3d525b7538
+run_name: polite-gnu-334
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769649871042
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/588993684212531221/600f1ab1e1d549a29f72ff3d525b7538/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/588993684212531221/abea05c1b82e44609a61b7b2934ccfc0/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/588993684212531221/abea05c1b82e44609a61b7b2934ccfc0/artifacts
+end_time: 1769667185827
+entry_point_name: ''
+experiment_id: '588993684212531221'
+lifecycle_stage: active
+run_id: abea05c1b82e44609a61b7b2934ccfc0
+run_name: silent-duck-301
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769667185816
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/588993684212531221/abea05c1b82e44609a61b7b2934ccfc0/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/588993684212531221/e5882021ab5047eab3b066b5d027e458/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/588993684212531221/e5882021ab5047eab3b066b5d027e458/artifacts
+end_time: 1769667141411
+entry_point_name: ''
+experiment_id: '588993684212531221'
+lifecycle_stage: active
+run_id: e5882021ab5047eab3b066b5d027e458
+run_name: peaceful-stoat-409
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769667141104
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/588993684212531221/e5882021ab5047eab3b066b5d027e458/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/588993684212531221/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/588993684212531221
+creation_time: 1769649871039
+experiment_id: '588993684212531221'
+last_update_time: 1769649871039
+lifecycle_stage: active
+name: conversatorial-confirm-understanding
+
+
+============================================================
+END FILE: mlruns/588993684212531221/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/5cfd5b7a3f754c169d11d71af48beaf7/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316/5cfd5b7a3f754c169d11d71af48beaf7/artifacts
+end_time: 1769649857385
+entry_point_name: ''
+experiment_id: '599562626900610316'
+lifecycle_stage: active
+run_id: 5cfd5b7a3f754c169d11d71af48beaf7
+run_name: treasured-hound-864
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769649849437
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/599562626900610316/5cfd5b7a3f754c169d11d71af48beaf7/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/7aca7a3bba9b4f539bd32f90ad3c3d05/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316/7aca7a3bba9b4f539bd32f90ad3c3d05/artifacts
+end_time: 1769640573300
+entry_point_name: ''
+experiment_id: '599562626900610316'
+lifecycle_stage: active
+run_id: 7aca7a3bba9b4f539bd32f90ad3c3d05
+run_name: traveling-crab-915
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769640566105
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/599562626900610316/7aca7a3bba9b4f539bd32f90ad3c3d05/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/812c6276fe234e35a4f1fb575e16ac6b/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316/812c6276fe234e35a4f1fb575e16ac6b/artifacts
+end_time: 1769667325237
+entry_point_name: ''
+experiment_id: '599562626900610316'
+lifecycle_stage: active
+run_id: 812c6276fe234e35a4f1fb575e16ac6b
+run_name: able-bug-510
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769667318524
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/599562626900610316/812c6276fe234e35a4f1fb575e16ac6b/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/98e7f579873749f3a3b8c58979b1c0f6/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316/98e7f579873749f3a3b8c58979b1c0f6/artifacts
+end_time: 1769649903368
+entry_point_name: ''
+experiment_id: '599562626900610316'
+lifecycle_stage: active
+run_id: 98e7f579873749f3a3b8c58979b1c0f6
+run_name: nosy-foal-418
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769649892415
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/599562626900610316/98e7f579873749f3a3b8c58979b1c0f6/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/c2760d7b840649f09b2100fbbe41bb9e/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316/c2760d7b840649f09b2100fbbe41bb9e/artifacts
+end_time: 1769667167967
+entry_point_name: ''
+experiment_id: '599562626900610316'
+lifecycle_stage: active
+run_id: c2760d7b840649f09b2100fbbe41bb9e
+run_name: illustrious-cub-172
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769667162895
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/599562626900610316/c2760d7b840649f09b2100fbbe41bb9e/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/d14f1e275ef04f96812f3eae201884d6/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316/d14f1e275ef04f96812f3eae201884d6/artifacts
+end_time: 1769625876912
+entry_point_name: ''
+experiment_id: '599562626900610316'
+lifecycle_stage: active
+run_id: d14f1e275ef04f96812f3eae201884d6
+run_name: masked-sheep-278
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769625869636
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/599562626900610316/d14f1e275ef04f96812f3eae201884d6/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/f2259033a8b74f32b3ac13d75b1a4979/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316/f2259033a8b74f32b3ac13d75b1a4979/artifacts
+end_time: 1769667128712
+entry_point_name: ''
+experiment_id: '599562626900610316'
+lifecycle_stage: active
+run_id: f2259033a8b74f32b3ac13d75b1a4979
+run_name: sneaky-ram-904
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769667122004
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/599562626900610316/f2259033a8b74f32b3ac13d75b1a4979/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/599562626900610316/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/599562626900610316
+creation_time: 1769625869514
+experiment_id: '599562626900610316'
+last_update_time: 1769625869514
+lifecycle_stage: active
+name: conversational-interpret-intent
+
+
+============================================================
+END FILE: mlruns/599562626900610316/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/767036402189202102/177664f6e14347919ed7fe8262677cf9/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/767036402189202102/177664f6e14347919ed7fe8262677cf9/artifacts
+end_time: 1769667185805
+entry_point_name: ''
+experiment_id: '767036402189202102'
+lifecycle_stage: active
+run_id: 177664f6e14347919ed7fe8262677cf9
+run_name: monumental-hawk-173
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769667167971
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/767036402189202102/177664f6e14347919ed7fe8262677cf9/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/767036402189202102/8658d6d00c5a473e8790c59c6cd5862b/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/767036402189202102/8658d6d00c5a473e8790c59c6cd5862b/artifacts
+end_time: 1769667140682
+entry_point_name: ''
+experiment_id: '767036402189202102'
+lifecycle_stage: active
+run_id: 8658d6d00c5a473e8790c59c6cd5862b
+run_name: adaptable-zebra-97
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769667128718
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/767036402189202102/8658d6d00c5a473e8790c59c6cd5862b/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/767036402189202102/c202c6ad275b4e3e9649649ec7737aab/meta.yaml
+============================================================
+
+artifact_uri: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/767036402189202102/c202c6ad275b4e3e9649649ec7737aab/artifacts
+end_time: 1769649871025
+entry_point_name: ''
+experiment_id: '767036402189202102'
+lifecycle_stage: active
+run_id: c202c6ad275b4e3e9649649ec7737aab
+run_name: clumsy-gnu-583
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769649857420
+status: 3
+tags: []
+user_id: zocho
+
+
+============================================================
+END FILE: mlruns/767036402189202102/c202c6ad275b4e3e9649649ec7737aab/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/767036402189202102/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/767036402189202102
+creation_time: 1769649857416
+experiment_id: '767036402189202102'
+last_update_time: 1769649857416
+lifecycle_stage: active
+name: conversatorial-deep-understanding
+
+
+============================================================
+END FILE: mlruns/767036402189202102/meta.yaml
+============================================================
+
+============================================================
+FILE: mlruns/934727245261588910/meta.yaml
+============================================================
+
+artifact_location: /Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/skills-fleet/mlruns/934727245261588910
+creation_time: 1769622188800
+experiment_id: '934727245261588910'
+last_update_time: 1769622188800
+lifecycle_stage: active
+name: hitl-clarifying-questions
+
+
+============================================================
+END FILE: mlruns/934727245261588910/meta.yaml
+============================================================
+
+============================================================
+FILE: plans/README.md
+============================================================
+
+# Plans Directory
+
+This directory contains planning documents for the Skills Fleet project.
+
+**Note:** This directory is excluded from git (see .gitignore) to keep planning documentation local-only.
+
+## Directory Structure
+
+```
+plans/
+├── README.md                           # This file
+├── archive/                            # Completed/legacy plans
+├── future/                             # Future exploration plans
+└── [active plans]                      # Current work-in-progress plans
+```
+
+## Active Plans
+
+| File                                          | Description                                           | Status              |
+|-----------------------------------------------|-------------------------------------------------------|---------------------|
+| `plan-main-restructure-latest.md`             | Main restructure plan (task-based DSPy organization)  | Active ✅           |
+| `EXEC-0.2-optimizer-auto-selection.md`        | DSPy optimizer auto-selection strategy                 | Reference           |
+| `technical-debt-audit.md`                     | Technical debt inventory and prioritization            | Reference           |
+| `cleanup-and-optimization-plan.md`            | Code deduplication and optimization                    | Partially Complete  |
+
+## Recent Progress (2026-01-23)
+
+### Completed Tasks ✅
+
+**Phase 1: Restructure DSPy Signatures by Task**
+- ✅ Renamed signature directories from phase-based to task-based
+- ✅ Created task-based subdirectories:
+  - `task_analysis_planning/` (Phase 1)
+  - `content_generation/` (Phase 2)
+  - `quality_assurance/` (Phase 3)
+  - `signature_optimization/` (Signature tuning)
+- ✅ Renamed signature files:
+  - `chat.py` → `conversational_interface.py`
+  - `hitl.py` → `human_in_the_loop.py`
+
+**Phase 2: Create Workflows Layer**
+- ✅ Created `src/skill_fleet/workflows/` package
+- ✅ Built 6 workflow orchestrators:
+  - `TaskAnalysisOrchestrator` - Phase 1 understanding & planning
+  - `ContentGenerationOrchestrator` - Phase 2 skill content creation
+  - `QualityAssuranceOrchestrator` - Phase 3 validation & refinement
+  - `HITLCheckpointManager` - HITL checkpoint management
+  - `ConversationalOrchestrator` - Multi-turn conversation workflow
+  - `SignatureTuningOrchestrator` - Signature optimization workflow
+
+**Cleanup: Remove Duplicate Facade Layer**
+- ✅ Removed `src/skill_fleet/dspy/` facade directory
+- ✅ Removed `src/skill_fleet/compat/` compatibility layer
+- ✅ Updated test imports to use new paths
+- ✅ Fixed `test_core_rework.py` and `test_signature_reasoning_types.py`
+
+**MLflow Integration Verification**
+- ✅ Fixed `log_parameter()` function to support both 2-arg and 3-arg forms
+- ✅ Verified all 6 workflow orchestrators have proper MLflow integration
+- ✅ Tested MLflow logging with dual-form parameter support
+
+**Configuration Files Review**
+- ✅ Reviewed `config/config.yaml` - clean with proper task-model mapping
+- ✅ Reviewed training data - properly versioned v2, v3, v4
+- ✅ Reviewed `SKILL_md_template.md` - comprehensive agentskills.io compliant template
+
+**Documentation Revamp**
+- ✅ Archived outdated docs (PHASE_0_FOUNDATION.md, UPDATE_SUMMARY.md)
+- ✅ Moved PHASE_1_OPTIMIZATION.md to docs/dspy/
+- ✅ Reorganized top-level docs into proper categories:
+  - ADAPTIVE_METRIC_WEIGHTING.md → docs/dspy/
+  - BACKGROUND_JOBS.md → docs/architecture/
+  - CLI_SYNC_COMMANDS.md → docs/cli/
+  - DATABASE_SYNC.md → docs/architecture/
+  - JOB_PERSISTENCE.md → docs/architecture/
+  - OPTIMIZER_SELECTION.md → docs/dspy/optimization.md
+  - STREAMING_ARCHITECTURE.md → docs/architecture/
+  - STREAMING_QUICKSTART.md → docs/getting-started/
+  - MLFLOW_SETUP.md → docs/getting-started/
+- ✅ Created comprehensive `docs/workflows/` documentation for all 6 orchestrators
+- ✅ Updated `docs/index.md` with new structure and recent changes
+
+### In Progress 🔄
+
+*No tasks currently in progress - all immediate cleanup tasks completed*
+
+### Pending ⏳
+
+See task list for full pending items:
+- Phase 3: Separate Domain Logic (depends on workflows)
+- Phase 4: Implement DSPy 3.1.2 Best Practices
+- Phase 5: Wire FastAPI to Workflows
+- Phase 6: Restructure CLI
+- Update tests for new structure
+- MLflow integration for skill creation
+
+## Archived Plans
+
+Plans in `./archive/` represent completed phases or legacy documentation:
+
+| Category                | Examples                                      |
+|-------------------------|-----------------------------------------------|
+| Implementation phases  | `implementation-phase-*.md` (completed)      |
+| CLI reviews            | `cli-*.md` (merged to codebase)               |
+| Feature plans           | `skills-taxonomy-*.md` (implemented)          |
+| Old restructure plans   | `plan-main-restructure.md` (superseded)       |
+
+## Plan Naming Convention
+
+- **Date-prefixed**: `YYYY-MM-DD-description.md` for time-sensitive plans
+- **Feature-based**: `feature-name-plan.md` for ongoing features
+- **Versioned**: `plan-name-version.md` for evolving plans (e.g., `latest`)
+
+---
+*Last updated: 2026-01-23*
+
+
+============================================================
+END FILE: plans/README.md
+============================================================
+
+============================================================
+FILE: plans/archive/implementation-phase-1.md
+============================================================
+
+# Complete Chronological Implementation Strategy
+
+## 🎯 Overview Timeline
+- **Phase 1**: Foundation (Week 1-2) - 2 weeks
+- **Phase 2**: Core Workflow (Week 3-4) - 2 weeks  
+- **Phase 3**: Onboarding System (Week 5-6) - 2 weeks
+- **Phase 4**: Dynamic Generation (Week 7-9) - 3 weeks
+- **Phase 5**: Intelligence Layer (Week 10-12) - 3 weeks
+- **Phase 6**: Production Hardening (Week 13-14) - 2 weeks
+
+**Total: 14 weeks to production-ready system**
+
+---
+
+# PHASE 1: Foundation (Week 1-2)
+
+## Week 1: Taxonomy Structure & Core Infrastructure
+
+### Day 1-2: Repository Setup
+```bash
+# Create project structure
+mkdir -p agentic-skills-system/{skills,src,tests,docs,config}
+cd agentic-skills-system
+
+# Initialize Git
+git init
+git checkout -b main
+
+# Create taxonomy structure
+mkdir -p skills/{_core,_templates,cognitive_skills,technical_skills,domain_knowledge,tool_proficiency,mcp_capabilities,specializations,task_focus_areas,memory_blocks}
+
+# Technical skills subdirectories
+mkdir -p skills/technical_skills/{programming,data_engineering,infrastructure,security,apis_integration}
+mkdir -p skills/technical_skills/programming/{languages,paradigms,practices}
+
+# Add .gitkeep to empty directories
+find skills -type d -empty -exec touch {}/.gitkeep \;
+
+# Create essential directories
+mkdir -p src/{taxonomy,workflow,generators,validators,analytics}
+mkdir -p tests/{unit,integration,e2e}
+mkdir -p config/{profiles,templates}
+mkdir -p docs/{architecture,api,guides}
+```
+
+### Day 3-4: Core Taxonomy Files
+
+**File: skills/taxonomy_meta.json**
+```json
+{
+  "version": "0.1.0",
+  "created_at": "2026-01-06",
+  "last_updated": "2026-01-06",
+  "schema_version": "1.0.0",
+  "total_skills": 0,
+  "generation_count": 0,
+  "statistics": {
+    "by_type": {},
+    "by_weight": {},
+    "by_priority": {}
+  },
+  "bootstrap_profiles": [
+    "web_developer",
+    "data_scientist",
+    "devops_engineer",
+    "ml_engineer",
+    "general_purpose"
+  ],
+  "metadata_schema": {
+    "skill_id": "string (required, unique)",
+    "version": "string (required, semver)",
+    "type": "enum (cognitive|technical|domain|tool|mcp|specialization|task_focus|memory)",
+    "weight": "enum (lightweight|medium|heavyweight)",
+    "load_priority": "enum (always|task_specific|on_demand|dormant)",
+    "dependencies": "array of skill_ids",
+    "capabilities": "array of strings",
+    "created_at": "ISO 8601 datetime",
+    "last_modified": "ISO 8601 datetime",
+    "generation_reason": "string",
+    "usage_count": "integer",
+    "success_rate": "float 0-1"
+  }
+}
+```
+
+**File: skills/_core/reasoning.json**
+```json
+{
+  "skill_id": "core.reasoning",
+  "version": "1.0.0",
+  "type": "cognitive",
+  "weight": "lightweight",
+  "load_priority": "always",
+  "always_loaded": true,
+  "dependencies": [],
+  "capabilities": [
+    "logical_inference",
+    "problem_decomposition",
+    "constraint_satisfaction",
+    "causal_reasoning"
+  ],
+  "description": "Core reasoning capabilities always available to agents",
+  "created_at": "2026-01-06T00:00:00Z",
+  "last_modified": "2026-01-06T00:00:00Z"
+}
+```
+
+**File: skills/_core/communication.json**
+```json
+{
+  "skill_id": "core.communication",
+  "version": "1.0.0",
+  "type": "cognitive",
+  "weight": "lightweight",
+  "load_priority": "always",
+  "always_loaded": true,
+  "dependencies": [],
+  "capabilities": [
+    "natural_language_understanding",
+    "intent_extraction",
+    "response_generation",
+    "context_tracking"
+  ],
+  "description": "Core communication and language understanding",
+  "created_at": "2026-01-06T00:00:00Z",
+  "last_modified": "2026-01-06T00:00:00Z"
+}
+```
+
+**File: skills/_core/state_management.json**
+```json
+{
+  "skill_id": "core.state_management",
+  "version": "1.0.0",
+  "type": "mcp",
+  "weight": "lightweight",
+  "load_priority": "always",
+  "always_loaded": true,
+  "dependencies": [],
+  "capabilities": [
+    "session_persistence",
+    "context_serialization",
+    "state_recovery",
+    "history_tracking"
+  ],
+  "description": "Core stateful interaction management",
+  "created_at": "2026-01-06T00:00:00Z",
+  "last_modified": "2026-01-06T00:00:00Z"
+}
+```
+
+### Day 5: Taxonomy Manager Implementation
+
+**File: src/taxonomy/manager.py**
+```python
+"""Taxonomy management system."""
+import json
+from pathlib import Path
+from typing import Dict, List, Optional, Set
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass

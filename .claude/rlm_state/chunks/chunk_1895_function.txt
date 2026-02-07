@@ -1,0 +1,6 @@
+<!-- Chunk 1895: bytes 7704358-7704491, type=function -->
+def get_skill_repository(db: Session) -> SkillRepository:
+    """Get a SkillRepository instance."""
+    return SkillRepository(db)
+
+

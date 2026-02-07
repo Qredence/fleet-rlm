@@ -1,0 +1,32 @@
+<!-- Chunk 1333: bytes 4991977-4993202, type=class -->
+class Reasoner:
+    def __init__(self, model, verifier):
+        self.model = model
+        self.verifier = verifier
+
+    def solve(self, task: str):
+        context = f"Task: {task}\nReasoning steps:"
+        for i in range(5):
+            # Generate 3 candidate next steps
+            candidates = self.model.generate_candidates(context, n=3)
+            # Verifier (PRM) ranks them
+            scores = [self.verifier.score(context, c) for c in candidates]
+            
+            best_idx = scores.index(max(scores))
+            if scores[best_idx] < 0.5:
+                return "Failed to find valid reasoning path."
+            
+            context += f"\n{i+1}. {candidates[best_idx]}"
+            if "Final Answer:" in candidates[best_idx]:
+                break
+        return context
+
+
+============================================================
+END FILE: skills/_drafts/recur/llm-inference/recursive-language-models/examples/example_1.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/recur/llm-inference/recursive-language-models/examples/example_2.py
+============================================================
+

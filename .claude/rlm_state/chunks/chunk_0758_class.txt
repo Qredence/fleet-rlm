@@ -1,0 +1,40 @@
+<!-- Chunk 758: bytes 2591438-2592243, type=class -->
+class ValidationResult:
+    passed: bool              # Overall pass/fail
+    errors: list[str]        # Critical errors
+    warnings: list[str]      # Non-critical issues
+```
+
+**Example:**
+```python
+result = validator.validate_frontmatter(Path("path/to/SKILL.md"))
+
+if result.passed:
+    print("✅ Validation passed")
+else:
+    print("❌ Validation failed")
+    
+for error in result.errors:
+    print(f"Error: {error}")
+    
+for warning in result.warnings:
+    print(f"Warning: {warning}")
+```
+
+---
+
+### Common Utilities
+
+Utility functions for safe type conversions used across the skill_fleet codebase.
+
+**Import:**
+```python
+from skill_fleet.common.utils import safe_json_loads, safe_float
+```
+
+#### `safe_json_loads()`
+
+Safely parse JSON string with fallback to default value.
+
+**Signature:**
+```python

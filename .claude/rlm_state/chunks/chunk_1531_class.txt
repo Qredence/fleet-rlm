@@ -1,0 +1,9 @@
+<!-- Chunk 1531: bytes 6373235-6373539, type=class -->
+class RefineSkillRequest(BaseModel):
+    """Request body for refining a skill."""
+
+    skill_id: str = Field(..., description="Skill ID to refine")
+    feedback: str = Field(..., description="User feedback for refinement")
+    user_id: str = Field(default="default", description="User ID for context")
+
+

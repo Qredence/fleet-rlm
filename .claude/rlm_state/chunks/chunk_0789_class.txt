@@ -1,0 +1,32 @@
+<!-- Chunk 789: bytes 2650899-2651364, type=class -->
+class AnalyzeIntentResponse(BaseModel):
+    task_intent: TaskIntent
+```
+
+---
+
+## Schema Validation
+
+Schemas are validated automatically by FastAPI. Invalid requests return:
+
+```json
+{
+    "detail": [
+        {
+            "loc": ["body", "task_description"],
+            "msg": "field required",
+            "type": "value_error.missing"
+        }
+    ]
+}
+```
+
+---
+
+## Custom Validators
+
+Add custom validation to schemas:
+
+```python
+from pydantic import validator
+

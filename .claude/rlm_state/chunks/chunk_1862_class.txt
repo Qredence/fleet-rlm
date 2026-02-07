@@ -1,0 +1,18 @@
+<!-- Chunk 1862: bytes 7639291-7639693, type=class -->
+class FileTypeEnum:
+    """Attached file classification type."""
+
+    REFERENCE = "reference"
+    GUIDE = "guide"
+    TEMPLATE = "template"
+    SCRIPT = "script"
+    EXAMPLE = "example"
+    ASSET = "asset"
+    TEST = "test"
+
+
+# =============================================================================
+# CORE TABLES
+# =============================================================================
+
+

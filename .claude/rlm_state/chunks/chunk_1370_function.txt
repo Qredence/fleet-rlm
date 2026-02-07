@@ -1,0 +1,217 @@
+<!-- Chunk 1370: bytes 5075823-5082390, type=function -->
+def task_with_retry(task_id: str, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            result = do_work()
+            return result
+        except RetryableError as e:
+            if attempt == max_retries - 1:
+                # Final attempt failed
+                task_store[task_id]["status"] = "failed"
+                task_store[task_id]["error"] = str(e)
+            else:
+                # Retry with backoff
+                time.sleep(2 ** attempt)
+        except FatalError as e:
+            # Don't retry fatal errors
+            task_store[task_id]["status"] = "failed"
+            task_store[task_id]["error"] = str(e)
+            break
+```
+
+## Testing Background Tasks
+
+```python
+import pytest
+
+@pytest.mark.asyncio
+async def test_background_task():
+    # Start task
+    response = await client.post("/process")
+    task_id = response.json()["task_id"]
+
+    # Wait for completion
+    await asyncio.sleep(2)
+
+    # Check status
+    response = await client.get(f"/tasks/{task_id}")
+    assert response.json()["status"] == "completed"
+```
+
+## Common Mistakes
+
+| Mistake | Impact | Fix |
+|---------|--------|-----|
+| Not storing task results | Users can't get results | Use persistent storage |
+| No error handling | Silent failures | Try/except with status updates |
+| Using sync tasks | Blocks event loop | Use async/await |
+| Losing tasks on restart | Data loss | Use Celery or DB persistence |
+| No timeouts | Tasks hang forever | Add task timeouts |
+
+## Production Checklist
+
+- [ ] Use Celery for distributed execution
+- [ ] Store task results in database/Redis
+- [ ] Implement retry logic for transient failures
+- [ ] Add task timeouts to prevent hanging
+- [ ] Monitor task queue (Celery Flower)
+- [ ] Set up task result expiration
+- [ ] Handle worker crashes gracefully
+- [ ] Log all task executions
+
+## See Also
+- [File Upload Handling](file-upload-handling.md)
+- [Async Testing](async-testing.md)
+
+
+============================================================
+END FILE: skills/python/fastapi-production/capabilities/background-tasks.md
+============================================================
+
+============================================================
+FILE: skills/python/fastapi-production/capabilities/database-lifecycle-management.md
+============================================================
+
+# Database Lifecycle Management
+
+## Overview
+Proper management of database engine lifecycle to prevent connection leaks and pool exhaustion in production FastAPI applications.
+
+## Problem Statement
+**Silent failures that kill production:**
+- Engines created at import time never close connections
+- Missing shutdown handlers cause connection leaks
+- Unconfigured connection pools exhaust under load
+- "Too many connections" errors under concurrent load
+
+## Pattern
+
+### ❌ Broken (Baseline Failure)
+```python
+# database.py - Created at import time!
+engine = create_async_engine(DATABASE_URL)
+
+# main.py - Deprecated pattern
+@app.on_event("startup")
+async def startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+# NO shutdown handler - connections leak forever!
+```
+
+### ✅ Production Pattern
+```python
+from contextlib import asynccontextmanager
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup - create engine HERE, not at import
+    engine = create_async_engine(
+        DATABASE_URL,
+        pool_size=10,           # Critical for multi-worker deployments
+        max_overflow=20,        # Allow bursting above pool_size
+        pool_recycle=3600,      # Recycle connections after 1 hour
+    )
+    app.state.db_engine = engine
+
+    # Create tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield
+
+    # Shutdown - CRITICAL: close connections
+    await engine.dispose()
+
+app = FastAPI(lifespan=lifespan)
+
+async def get_db() -> AsyncSession:
+    async with AsyncSession(app.state.db_engine) as session:
+        yield session
+```
+
+## Key Parameters
+
+| Parameter | Purpose | Typical Value |
+|-----------|---------|---------------|
+| `pool_size` | Base connection pool size | 10-20 |
+| `max_overflow` | Additional connections under load | 20-40 |
+| `pool_recycle` | Prevents DB closing idle connections | 3600 (1 hour) |
+| `pool_pre_ping` | Test connections before use | `True` |
+
+## Symptoms of Misconfiguration
+
+| Symptom | Root Cause | Fix |
+|---------|------------|-----|
+| "Too many connections" DB error | Missing shutdown handler | Add `engine.dispose()` |
+| Connection timeout under load | Pool too small or missing `max_overflow` | Increase pool parameters |
+| "Server closed the connection" unexpectedly | DB closing idle connections | Set `pool_recycle` |
+| Workers start slowly | All workers creating pools simultaneously | Stagger worker startup |
+
+## Testing
+
+```python
+# Test that connections are properly closed
+@pytest.mark.asyncio
+async def test_database_lifecycle():
+    from test_app import app, lifespan
+    from sqlalchemy import text
+
+    async with lifespan(app):
+        # Verify engine exists
+        assert hasattr(app.state, 'db_engine')
+
+    # After context exit, verify cleanup
+    # Engine should be disposed
+```
+
+## See Also
+- [Async Testing Capability](async-testing.md)
+- [Dependency Injection Capability](dependency-injection.md)
+
+
+============================================================
+END FILE: skills/python/fastapi-production/capabilities/database-lifecycle-management.md
+============================================================
+
+============================================================
+FILE: skills/python/fastapi-production/capabilities/dependency-injection.md
+============================================================
+
+# Dependency Injection
+
+## Overview
+FastAPI's dependency injection system for managing shared resources, test doubles, and complex dependency graphs.
+
+## Core Concepts
+
+**Dependency injection (DI)** provides:
+- Automatic dependency resolution
+- Shared resource management
+- Testability through overrides
+- Clean separation of concerns
+
+## Patterns
+
+### 1. Basic Dependency
+
+```python
+from fastapi import Depends
+
+async def get_db():
+    async with AsyncSession(engine) as session:
+        yield session
+
+@app.get("/users")
+async def get_users(db: AsyncSession = Depends(get_db)):
+    users = await db.execute(select(User))
+    return users.scalars().all()
+```
+
+### 2. Cached Dependencies
+
+```python
+from functools import lru_cache
+
+@lru_cache()

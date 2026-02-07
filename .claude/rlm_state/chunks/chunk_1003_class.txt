@@ -1,0 +1,100 @@
+<!-- Chunk 1003: bytes 3543054-3545717, type=class -->
+class TuneSignature(dspy.Signature):
+    """Improve a signature based on evaluation failures.
+    
+    Analyze what went wrong and generate better field descriptions.
+    Focus on clarity, constraints, and examples.
+    """
+    current_signature: str = dspy.InputField(desc="Current signature YAML")
+    failure_analysis: str = dspy.InputField(desc="Why did metric scores drop?")
+    improved_signature: str = dspy.OutputField(
+        desc="Improved signature with better descriptions"
+    )
+    improvement_reasoning: str = dspy.OutputField(desc="Why is this better?")
+```
+
+**Version Storage**:
+```json
+{
+  "skill_id": "python-async",
+  "signature_history": [
+    {
+      "version": 1,
+      "created_at": "2026-01-19",
+      "metric_score": 0.72,
+      "tuned": false,
+      "reason": "Initial creation"
+    },
+    {
+      "version": 2,
+      "created_at": "2026-01-20T14:30:00Z",
+      "metric_score": 0.81,
+      "tuned": true,
+      "tuning_reason": "Field descriptions clarified, constraints added",
+      "improvement": "+9%"
+    }
+  ]
+}
+```
+
+**API Integration**:
+```
+POST /api/v1/signatures/tune
+Request: {
+  "skill_path": "skills/python/async",
+  "force": false  # Only tune if metric < 0.75, unless force=true
+}
+Response: {
+  "job_id": "job_123",
+  "status": "queued",
+  "estimated_time": "5 min"
+}
+
+GET /api/v1/signatures/tune/{job_id}
+Response: {
+  "status": "completed",
+  "result": {
+    "tuned": true,
+    "old_score": 0.72,
+    "new_score": 0.81,
+    "improvement": "+9%",
+    "signature_version": 2,
+    "changes": [
+      "Field 'answer': added constraint 'concise, 1-5 words'",
+      "Field 'context': clarified 'relevant facts from knowledge base'"
+    ]
+  }
+}
+```
+
+**CLI Integration**:
+```bash
+uv run skill-fleet tune-signature skills/python/async
+# Analyzes current signature, suggests improvements
+```
+
+**Files to Create**:
+1. `src/skill_fleet/core/dspy/modules/signature_tuner.py` (~300 lines)
+2. Update `src/skill_fleet/core/dspy/signatures/phase3_validation.py` with TuneSignature
+3. Update `src/skill_fleet/api/routes/signatures.py` (new route)
+4. Update skill model to track signature versions
+
+**Timeline**: 2-3 days | **Impact**: Closes feedback loop; continuous signature improvement
+
+---
+
+### TIER 2: API/Persistence & Job Management
+
+#### **2A: Persistent Job Storage** 💾
+
+**Problem**: In-memory jobs lost on API restart. Production killer.
+
+**Solution**: SQLite-backed job persistence with resume capability. **Local-only: No Redis option.**
+
+**Implementation**:
+- New module: `src/skill_fleet/db/jobs.py`
+  - SQLAlchemy models: `Job`, `JobProgress`
+  - Migrations: Alembic scripts (simplified for local)
+
+**Schema**:
+```python

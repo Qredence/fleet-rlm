@@ -1,0 +1,8 @@
+<!-- Chunk 892: bytes 3160449-3160599, type=class -->
+class SkillCreationProgram(dspy.Module):
+    """Complete 4-phase skill creation orchestrator with integrated HITL."""
+```
+
+### Constructor
+
+```python

@@ -1,0 +1,49 @@
+<!-- Chunk 1478: bytes 6322452-6323844, type=function -->
+def get_skill_service(
+    skills_root: Annotated[Path, Depends(get_skills_root)],
+    drafts_root: Annotated[Path, Depends(get_drafts_root)],
+) -> SkillService:
+    """Get a SkillService instance."""
+    return SkillService(skills_root=skills_root, drafts_root=drafts_root)
+
+
+# Type aliases for cleaner route signatures
+SkillsRoot = Annotated[Path, Depends(get_skills_root)]
+DraftsRoot = Annotated[Path, Depends(get_drafts_root)]
+TaxonomyManagerDep = Annotated[TaxonomyManager, Depends(get_taxonomy_manager)]
+SkillServiceDep = Annotated[SkillService, Depends(get_skill_service)]
+
+
+__all__ = [
+    "get_skills_root",
+    "get_drafts_root",
+    "get_taxonomy_manager",
+    "clear_taxonomy_manager_cache",
+    "get_skill_service",
+    "SkillsRoot",
+    "DraftsRoot",
+    "TaxonomyManagerDep",
+    "SkillServiceDep",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/api/dependencies.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/exceptions.py
+============================================================
+
+"""
+Custom exceptions for Skill Fleet API.
+
+This module defines custom exception classes that can be caught by
+global exception handlers to provide consistent error responses.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+

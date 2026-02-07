@@ -1,0 +1,5 @@
+<!-- Chunk 453: bytes 650421-650528, type=function -->
+def accuracy_metric(example, pred, trace=None):
+    return example.output == pred.output
+
+# For generation

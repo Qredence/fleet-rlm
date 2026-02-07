@@ -1,0 +1,25 @@
+<!-- Chunk 1684: bytes 6710972-6711663, type=function -->
+def _program_has_output_field(program: Any, field_name: str) -> bool:
+    """
+    Check whether a program has a predictor output field for streaming.
+
+    If we cannot reliably inspect predictors, default to True to preserve
+    streaming behavior.
+    """
+    try:
+        predictors = list(program.named_predictors())
+    except Exception:
+        return True
+
+    if not predictors:
+        return True
+
+    for _name, predictor in predictors:
+        signature = getattr(predictor, "signature", None)
+        output_fields = getattr(signature, "output_fields", None)
+        if isinstance(output_fields, dict) and field_name in output_fields:
+            return True
+
+    return False
+
+

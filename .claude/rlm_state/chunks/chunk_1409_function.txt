@@ -1,0 +1,25 @@
+<!-- Chunk 1409: bytes 5143028-5143644, type=function -->
+def test_partial_update_age_only():
+    """
+    Test updating only the age field.
+
+    Expected: Only age is updated, name and email remain unchanged.
+    """
+    response = client.patch(
+        "/users/2",
+        json={"age": 26}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Only age should be updated
+    assert data["name"] == "Jane Smith"  # Unchanged
+    assert data["email"] == "jane@example.com"  # Unchanged
+    assert data["age"] == 26  # Updated
+    assert data["id"] == 2
+
+    print("✓ Test 2 passed: Partial update (age only)")
+    print(f"  Updated user: {data}")
+
+

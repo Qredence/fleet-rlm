@@ -1,0 +1,8 @@
+<!-- Chunk 1970: bytes 7882066-7882185, type=function -->
+def mock_taxonomy():
+    """Mock taxonomy manager."""
+    taxonomy = MagicMock()
+    return taxonomy
+
+
+@pytest.fixture

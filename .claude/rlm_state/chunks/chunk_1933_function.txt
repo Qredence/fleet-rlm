@@ -1,0 +1,35 @@
+<!-- Chunk 1933: bytes 7770212-7771051, type=function -->
+def get_skill_for_prompt(
+    skill_id: str,
+    metadata_cache: dict[str, SkillMetadata],
+) -> str | None:
+    """
+    Get the full SKILL.md content for loading into an agent's context.
+
+    This is the 'activation' step in the agentskills.io integration flow.
+
+    Args:
+        skill_id: The skill identifier
+        metadata_cache: Dictionary mapping skill IDs to SkillMetadata
+
+    Returns:
+        Full SKILL.md content or None if not found
+
+    """
+    meta = metadata_cache.get(skill_id)
+    if meta is None:
+        return None
+
+    # Determine SKILL.md path
+    if meta.path.name == "metadata.json":
+        skill_md_path = meta.path.parent / "SKILL.md"
+    else:
+        # Single-file JSON skill
+        return None
+
+    if not skill_md_path.exists():
+        return None
+
+    return skill_md_path.read_text(encoding="utf-8")
+
+

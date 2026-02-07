@@ -1,0 +1,17 @@
+<!-- Chunk 1698: bytes 7233214-7234080, type=class -->
+class ExampleMetadata(BaseModel):
+    """Metadata for a training example."""
+
+    example_id: str = Field(..., description="Unique ID for the example")
+    task_description: str = Field(..., description="Original user task")
+    category: str = Field(..., description="Skill category (e.g., technical, domain)")
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    quality_score: float = Field(0.0, description="Automated quality score (0-1)")
+    human_rating: float | None = Field(None, description="Human rating (0-1)")
+    success_rate: float = Field(0.0, description="Pass rate in optimization runs")
+    usage_count: int = Field(0, description="Number of times used in optimization")
+    last_used: str | None = Field(None, description="Timestamp of last usage")
+    tags: list[str] = Field(default_factory=list)
+
+
+@dataclass

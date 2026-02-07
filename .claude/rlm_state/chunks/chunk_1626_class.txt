@@ -1,0 +1,13 @@
+<!-- Chunk 1626: bytes 6665116-6665337, type=class -->
+class APICredentials(TypedDict, total=False):
+    """
+    Resolved API credential bundle.
+
+    Keys are present only when available (TypedDict `total=False`).
+    """
+
+    api_key: str
+    base_url: str
+    source: str
+
+

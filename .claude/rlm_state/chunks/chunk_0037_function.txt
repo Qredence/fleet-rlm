@@ -1,0 +1,13 @@
+<!-- Chunk 37: bytes 116525-116875, type=function -->
+def keyword_reward(args, pred: dspy.Prediction) -> float:
+    """Reward based on keyword presence."""
+    required_keywords = args.keywords
+    answer = pred.answer.lower()
+
+    keyword_count = sum(1 for kw in required_keywords if kw.lower() in answer)
+    return keyword_count / len(required_keywords)
+```
+
+### Factual Correctness Reward
+
+```python

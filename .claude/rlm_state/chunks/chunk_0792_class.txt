@@ -1,0 +1,54 @@
+<!-- Chunk 792: bytes 2658455-2660000, type=class -->
+class SkillJobWorker:
+    """Background worker that processes skill creation jobs."""
+
+    def __init__(self, db_url: str):
+        self.engine = create_engine(db_url)
+
+    def poll_for_jobs(self):
+        """Continuously poll for pending jobs."""
+        while True:
+            with Session(self.engine) as session:
+                repo = JobRepository(session)
+
+                # Get next pending job
+                job = repo.get_next_pending_job()
+
+                if job:
+                    print(f"Processing job: {job.job_id}")
+                    self.process_job(job, session)
+
+            time.sleep(1)  # Polling interval
+
+    def process_job(self, job, session):
+        """Process a single job through all phases."""
+        try:
+            # Update status to running
+            job = repo.update_status(job.job_id, job_status_enum.running)
+
+            # Phase 1: Task Refinement
+            self.phase_refine_task(job, session)
+
+            # Phase 2: Deep Understanding (HITL)
+            self.phase_deep_understanding(job, session)
+
+            # Phase 3: TDD Workflow
+            self.phase_tdd_workflow(job, session)
+
+            # Phase 4: Validation
+            self.phase_validate(job, session)
+
+            # Complete job
+            repo.update_status(job.job_id, job_status_enum.completed)
+
+        except Exception as e:
+            repo.update_status(
+                job.job_id,
+                job_status_enum.failed,
+                error=str(e)
+            )
+```
+
+### HITL (Human-in-the-Loop) Flow
+
+```python

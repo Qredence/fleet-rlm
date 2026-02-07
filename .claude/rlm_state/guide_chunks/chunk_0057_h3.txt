@@ -1,0 +1,25 @@
+<!-- Chunk 57: bytes 18712-19391, type=h3 -->
+### Iteration based on feedback
+
+Skills are living documents. Plan to iterate based on:
+
+**Undertriggering signals:**
+•  Skill doesn't load when it should
+•  Users manually enabling it
+•  Support questions about when to use it
+**Solution:** Add more description and nuance to the description - this may include keywords particularly for technical terms
+
+**Overtriggering signals:**
+•  Skill loads for irrelevant queries
+•  Users disabling it
+•  Confusion about purpose
+**Solution:** Add negative triggers, be more specific
+
+**Execution issues:**
+•  Inconsistent results
+•  API call failures
+•  User corrections needed
+**Solution:** Improve instructions, add error handling
+
+---
+

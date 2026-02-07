@@ -1,0 +1,46 @@
+<!-- Chunk 1508: bytes 6358292-6359807, type=function -->
+def normalize_questions(questions: Any) -> list[StructuredQuestion]:
+    """
+    Normalize raw questions into a list of StructuredQuestion objects.
+
+    This function handles the various formats that questions may arrive in:
+    - None -> empty list
+    - Single string -> split numbered lists, create StructuredQuestion for each
+    - List of strings -> normalize each string
+    - List of dicts -> convert to StructuredQuestion
+    - Already StructuredQuestion -> pass through
+
+    This logic was previously in the CLI (runner.py::_normalize_questions).
+    Moving it server-side ensures consistent API responses.
+
+    Args:
+        questions: Raw questions in any supported format
+
+    Returns:
+        List of StructuredQuestion objects
+
+    """
+    if questions is None:
+        return []
+
+    if isinstance(questions, str):
+        return _normalize_string_questions(questions)
+
+    if isinstance(questions, list):
+        result: list[StructuredQuestion] = []
+        for q in questions:
+            if isinstance(q, StructuredQuestion):
+                result.append(q)
+            elif isinstance(q, str):
+                result.extend(_normalize_string_questions(q))
+            elif isinstance(q, dict):
+                result.append(_dict_to_structured_question(q))
+            else:
+                # Unknown type, convert to string
+                result.append(StructuredQuestion(text=str(q)))
+        return result
+
+    # Single unknown object
+    return [StructuredQuestion(text=str(questions))]
+
+

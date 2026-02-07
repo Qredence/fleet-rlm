@@ -1,0 +1,8 @@
+<!-- Chunk 2112: bytes 8042458-8042704, type=function -->
+def test_skill_exists_check_for_file_skills(temp_taxonomy: Path) -> None:
+    manager = TaxonomyManager(temp_taxonomy)
+
+    assert manager.skill_exists("_core/reasoning") is True
+    assert manager.skill_exists("_core/does_not_exist") is False
+
+

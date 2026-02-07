@@ -1,0 +1,157 @@
+<!-- Chunk 1351: bytes 5041855-5048276, type=function -->
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        return int(args.func(args))
+    except RlmReplError as e:
+        sys.stderr.write(f"ERROR: {e}\n")
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
+
+
+============================================================
+END FILE: skills/practices/rlm/scripts/rlm_repl.py
+============================================================
+
+============================================================
+FILE: skills/python/fastapi-production/SKILL.md
+============================================================
+
+---
+name: fastapi-production-patterns
+description: Use when building FastAPI apps with async database operations, complex dependency injection, partial update endpoints, async testing, or converting Python utilities to API endpoints
+license: MIT
+compatibility: Requires Python 3.8+, FastAPI 0.128.0+, SQLAlchemy 2.0+
+metadata:
+  skill_id: technical/programming/web-frameworks/python/fastapi
+  version: 1.0.0
+  type: technical
+  weight: medium
+  load_priority: task_specific
+---
+
+# FastAPI Production Patterns
+
+## Overview
+Proven patterns for building production-ready FastAPI applications that avoid common silent failures: connection pool exhaustion, blocking async operations, partial update bugs, and test isolation issues.
+
+**Core principle:** Code that works in development but fails under load is NOT production-ready. Database engines MUST be created in lifespan, connections MUST be disposed on shutdown, and async operations MUST NOT block.
+
+## When to Use
+**When to use:**
+
+```dot
+digraph when_to_use {
+    "Building FastAPI app?" [shape=diamond];
+    "Async DB operations?" [shape=diamond];
+    "Need to test async endpoints?" [shape=diamond];
+    "Converting Python utilities to APIs?" [shape=diamond];
+    "PATCH with partial updates?" [shape=diamond];
+    "Use this skill" [shape=box];
+
+    "Building FastAPI app?" -> "Async DB operations?" [label="yes"];
+    "Async DB operations?" -> "Use this skill" [label="yes"];
+    "Building FastAPI app?" -> "Need to test async endpoints?" [label="yes"];
+    "Need to test async endpoints?" -> "Use this skill" [label="yes"];
+    "Building FastAPI app?" -> "Converting Python utilities to APIs?" [label="yes"];
+    "Converting Python utilities to APIs?" -> "Use this skill" [label="yes"];
+    "Building FastAPI app?" -> "PATCH with partial updates?" [label="yes"];
+    "PATCH with partial updates?" -> "Use this skill" [label="yes"];
+}
+```
+
+**When NOT to use:**
+- Simple synchronous APIs without database operations
+- Learning basic FastAPI routing (use official docs instead)
+- Trivial CRUD with no production requirements
+
+## Quick Reference
+
+| Problem                                   | Solution                                                   | Keywords                                               |
+|-------------------------------------------|------------------------------------------------------------|--------------------------------------------------------|
+| DB connections not closing on shutdown    | Use `lifespan` context manager with `engine.dispose()`     | connection leak, too many connections, pool exhaustion |
+| Pool exhaustion under load                | Set `pool_size`, `max_overflow`, create engine in lifespan | connection timeout, concurrent requests, workers       |
+| Tests pass isolation but fail in parallel | Use async fixtures with proper isolation                   | flaky tests, test bleeding, async test                 |
+| PATCH partial updates not validating      | Use `Optional` fields with `exclude_unset=True`            | partial updates, None overwriting, PATCH               |
+| Converting sync utilities to async        | Replace blocking libraries with async equivalents          | blocking, async conversion, requests to httpx          |
+| Long operations timeout HTTP              | Use `BackgroundTasks` or Celery                            | timeout, long running, background                      |
+
+## Core Patterns
+
+### 1. Database Lifecycle Management
+
+**The problem:** Engines created at import time never close connections. Deprecated `@app.on_event` handlers miss proper cleanup. Missing pool parameters cause exhaustion under load.
+
+**❌ Common but broken (baseline failure):**
+```python
+# database.py - Created at import time!
+engine = create_async_engine(DATABASE_URL)
+
+# main.py - Deprecated pattern
+@app.on_event("startup")
+async def startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+# NO shutdown handler - connections leak forever!
+```
+
+**✅ Production pattern:**
+```python
+from contextlib import asynccontextmanager
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup - create engine HERE, not at import
+    engine = create_async_engine(
+        DATABASE_URL,
+        pool_size=10,           # Critical for multi-worker deployments
+        max_overflow=20,        # Allow bursting above pool_size
+        pool_recycle=3600,      # Recycle connections after 1 hour
+    )
+    app.state.db_engine = engine
+
+    # Create tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield
+
+    # Shutdown - CRITICAL: close connections
+    await engine.dispose()
+
+app = FastAPI(lifespan=lifespan)
+
+async def get_db() -> AsyncSession:
+    async with AsyncSession(app.state.db_engine) as session:
+        yield session
+```
+
+**Key insight:** Engine creation in lifespan + dispose in shutdown = no connection leaks. Pool parameters prevent exhaustion when multiple workers start simultaneously.
+
+### 2. Pydantic Partial Updates
+
+**The problem:** PATCH endpoints should only update provided fields, but naive implementations overwrite everything with `None`.
+
+**❌ Common mistake (None overwrites):**
+```python
+@app.patch("/users/{user_id}")
+async def update_user(user_id: int, update: UserUpdate, db: AsyncSession = Depends(get_db)):
+    user = await db.get(User, user_id)
+    # ❌ This sets unprovided fields to None!
+    user.name = update.name  # None if not provided
+    user.email = update.email  # None if not provided
+    await db.commit()
+    return user
+```
+
+**✅ Production pattern:**
+```python
+from pydantic import BaseModel, Optional
+from typing import Optional
+

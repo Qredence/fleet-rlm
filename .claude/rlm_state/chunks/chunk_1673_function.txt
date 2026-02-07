@@ -1,0 +1,54 @@
+<!-- Chunk 1673: bytes 6692478-6694014, type=function -->
+def sanitize_taxonomy_path(path: str) -> str | None:
+    """
+    Sanitize a taxonomy path to prevent traversal attacks.
+
+    Validates and normalizes a taxonomy-relative path to ensure it:
+    - Is not empty
+    - Does not start with `/` (absolute path)
+    - Does not contain `..` (parent directory traversal)
+    - Contains only alphanumeric characters, hyphens, and underscores in each segment
+
+    Args:
+        path: The raw taxonomy path from user input or workflow output
+
+    Returns:
+        Sanitized path as a POSIX-style string, or None if invalid
+
+    Examples:
+        >>> sanitize_taxonomy_path("technical_skills/programming/python")
+        'technical_skills/programming/python'
+        >>> sanitize_taxonomy_path("/absolute/path")
+        None
+        >>> sanitize_taxonomy_path("../traversal")
+        None
+        >>> sanitize_taxonomy_path("path/with spaces")
+        None
+
+    """
+    if not path:
+        return None
+
+    # Reject absolute paths and parent-directory traversal
+    if path.startswith("/") or ".." in path or "\\" in path:
+        return None
+
+    # Filter and validate segments
+    segments = []
+    for segment in path.split("/"):
+        s = segment.strip()
+        if not s or s == ".":
+            continue
+        if s == "..":
+            return None
+        # Allow letters, numbers, hyphen, underscore only
+        if not all(c.isalnum() or c in "-_" for c in s):
+            return None
+        segments.append(s)
+
+    if not segments:
+        return None
+
+    return "/".join(segments)
+
+

@@ -1,0 +1,9 @@
+<!-- Chunk 696: bytes 1366515-1366816, type=function -->
+def _save_state(state: Dict[str, Any], state_path: Path) -> None:
+    _ensure_parent_dir(state_path)
+    tmp_path = state_path.with_suffix(state_path.suffix + ".tmp")
+    with tmp_path.open("wb") as f:
+        pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp_path.replace(state_path)
+
+

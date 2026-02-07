@@ -1,0 +1,13 @@
+<!-- Chunk 70: bytes 136664-136943, type=class -->
+class TextSummarizer(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.summarize = dspy.Predict(SummarizeText)
+
+    def forward(self, document: str):
+        return self.summarize(document=document)
+```
+
+### Module with Multiple Signatures
+
+```python

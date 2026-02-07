@@ -1,0 +1,4 @@
+<!-- Chunk 215: bytes 300831-300902, type=class -->
+class UserNotifier:
+    def send_welcome_email(self, user: User): ...
+

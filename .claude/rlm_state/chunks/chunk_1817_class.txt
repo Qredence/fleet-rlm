@@ -1,0 +1,32 @@
+<!-- Chunk 1817: bytes 7560990-7562222, type=class -->
+class GenerateSkillContent(dspy.Signature):
+    """
+    Generate complete SKILL.md content with YAML frontmatter.
+
+    Create production-ready skill documentation following agentskills.io spec.
+    Content should be practical, actionable, and include working examples.
+    """
+
+    # Inputs
+    plan: str = dspy.InputField(
+        desc="JSON plan with: skill_name, skill_description, content_outline, generation_guidance"
+    )
+    understanding: str = dspy.InputField(
+        desc="JSON understanding: requirements, intent, taxonomy, dependencies"
+    )
+    skill_style: str = dspy.InputField(
+        desc="Style: 'comprehensive' (detailed), 'minimal' (concise), or 'navigation_hub' (short + subdirs)",
+        default="comprehensive",
+    )
+
+    # Outputs
+    skill_content: str = dspy.OutputField(
+        desc="Complete SKILL.md content with YAML frontmatter (--- name: ... description: ... ---) followed by markdown"
+    )
+    sections_generated: list[str] = dspy.OutputField(
+        desc="List of section titles actually generated"
+    )
+    code_examples_count: int = dspy.OutputField(desc="Number of code examples included")
+    estimated_reading_time: int = dspy.OutputField(desc="Estimated reading time in minutes")
+
+

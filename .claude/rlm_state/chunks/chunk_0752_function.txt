@@ -1,0 +1,56 @@
+<!-- Chunk 752: bytes 2585634-2586751, type=function -->
+def validate_skill(self, skill_path: Path) -> dict[str, Any]
+```
+
+**Parameters:**
+- `skill_path` (Path): Path to skill directory
+
+**Returns:**
+- `dict`: Validation results with checks, errors, and warnings
+
+**Validates:**
+- Directory structure
+- Metadata completeness
+- Frontmatter compliance
+- Dependencies validity
+- Examples presence
+- Tests presence
+- Resources structure
+
+**Example:**
+```python
+result = validator.validate_skill(Path("path/to/skill"))
+
+print(f"Status: {result['status']}")
+print(f"Errors: {len(result['errors'])}")
+print(f"Warnings: {len(result['warnings'])}")
+
+for check in result['checks']:
+    status_icon = "✅" if check['status'] == 'pass' else "❌"
+    print(f"{status_icon} {check['name']}")
+```
+
+---
+
+### Migration Functions
+
+Functions for migrating skills to agentskills.io format.
+
+**Import:**
+```python
+from pathlib import Path
+from skill_fleet.migration import (
+    migrate_skill_to_agentskills_format,
+    migrate_all_skills,
+    validate_migration,
+)
+```
+
+---
+
+#### `migrate_skill_to_agentskills_format()`
+
+Migrate a single skill to agentskills.io format.
+
+**Signature:**
+```python

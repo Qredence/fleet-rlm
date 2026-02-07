@@ -1,0 +1,74 @@
+<!-- Chunk 1796: bytes 7473830-7475783, type=function -->
+def validation_report_reward(args, pred: dspy.Prediction) -> float:
+    """
+    Score validation report quality.
+
+    Checks:
+    - Has clear pass/fail status
+    - Lists any errors/warnings found
+    - Quality score is reasonable
+
+    Returns:
+        float: Score between 0.0 and 1.0
+
+    """
+    score = 0.0
+
+    try:
+        report = getattr(pred, "validation_report", None)
+        if isinstance(report, str):
+            try:
+                report = json.loads(report)
+            except json.JSONDecodeError:
+                return 0.0
+
+        if report is None:
+            return 0.0
+
+        # Get fields
+        def get_field(obj, field, default=None):
+            """
+            Get field value from object or dict with fallback.
+
+            Args:
+                obj: Object or dict to get field from
+                field: Field name to retrieve
+                default: Default value if field not found
+
+            Returns:
+                Field value or default if not found
+
+            """
+            if hasattr(obj, field):
+                return getattr(obj, field)
+            if isinstance(obj, dict):
+                return obj.get(field, default)
+            return default
+
+        # Has status field
+        status = get_field(report, "status", "")
+        if status in ["passed", "failed", "warnings"]:
+            score += 0.3
+
+        # Has passed boolean
+        passed = get_field(report, "passed", None)
+        if isinstance(passed, bool):
+            score += 0.2
+
+        # Has errors list (even if empty)
+        errors = get_field(report, "errors", None)
+        if isinstance(errors, list):
+            score += 0.25
+
+        # Has warnings list
+        warnings = get_field(report, "warnings", None)
+        if isinstance(warnings, list):
+            score += 0.25
+
+    except Exception as e:
+        logger.warning(f"Error in validation_report_reward: {e}")
+        return 0.0
+
+    return min(score, 1.0)
+
+

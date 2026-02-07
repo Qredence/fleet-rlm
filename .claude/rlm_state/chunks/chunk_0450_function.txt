@@ -1,0 +1,14 @@
+<!-- Chunk 450: bytes 640198-640507, type=function -->
+def robust_metric(example, pred, trace=None):
+    """Handle missing attributes gracefully."""
+    # Check if attribute exists
+    if hasattr(pred, 'quality_score'):
+        return pred.quality_score > 0.8
+
+    # Fallback metric
+    return example.output == pred.output
+```
+
+### 4. Document Metrics
+
+```python

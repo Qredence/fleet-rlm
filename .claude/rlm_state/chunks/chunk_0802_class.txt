@@ -1,0 +1,71 @@
+<!-- Chunk 802: bytes 2707137-2708961, type=class -->
+class SkillHasMinimumCapability(SkillSpecification):
+    """Specification for skills with required capability."""
+
+    def __init__(self, capability: str):
+        self.capability = capability
+
+    def _is_satisfied_by(self, skill: Skill) -> bool:
+        return skill.has_capability(self.capability)
+
+# Use it
+spec = SkillHasMinimumCapability("code-generation")
+if spec.is_satisfied_by(skill):
+    print("Skill can generate code")
+```
+
+## Domain Services
+
+Domain services contain business logic that doesn't naturally fit within a single entity.
+
+```python
+from skill_fleet.domain import (
+    SkillDomainService,
+    JobDomainService,
+    TaxonomyDomainService,
+)
+
+# Skill Domain Service
+skill_service = SkillDomainService(skill_repository)
+can_publish = skill_service.can_publish(skill)
+overlap_score = skill_service.calculate_overlap(skill1, skill2)
+
+# Job Domain Service
+job_service = JobDomainService(job_repository)
+can_start = job_service.can_start(job)
+
+# Taxonomy Domain Service
+taxonomy_service = TaxonomyDomainService(taxonomy_repository)
+path_exists = taxonomy_service.path_exists(taxonomy_path)
+```
+
+## Domain Events
+
+Domain events represent something that happened in the domain that other parts of the system may need to react to.
+
+```python
+from skill_fleet.domain import SkillCreatedEvent, JobCompletedEvent
+from datetime import datetime, UTC
+
+# Skill created event
+event = SkillCreatedEvent(
+    event_id="evt-123",
+    occurred_at=datetime.now(UTC),
+    skill_id="python-async",
+    taxonomy_path="python/async",
+    user_id="user-456",
+)
+
+# Job completed event
+event = JobCompletedEvent(
+    event_id="evt-456",
+    occurred_at=datetime.now(UTC),
+    job_id="job-abc",
+    status=JobStatus.COMPLETED,
+    result=skill_result,
+)
+```
+
+**Usage Pattern** (future enhancement):
+```python
+# In domain service

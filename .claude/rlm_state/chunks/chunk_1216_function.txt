@@ -1,0 +1,31 @@
+<!-- Chunk 1216: bytes 4577774-4578744, type=function -->
+def detect_skill_style(skill_content: str, skill_path: Path) -> str:
+    """Detect skill style based on content characteristics."""
+    body_length = len(skill_content)
+
+    # Check for subdirectory references
+    subdirectory_refs = len(
+        re.findall(
+            r"(?:references|guides|templates|scripts|examples)/", skill_content, re.IGNORECASE
+        )
+    )
+    has_many_refs = subdirectory_refs >= 3
+
+    # Check for detailed sections
+    section_count = len(re.findall(r"^##\s+", skill_content, re.MULTILINE))
+    has_detailed_sections = section_count >= 5
+
+    # Check actual subdirectories
+    has_subdirs = any(
+        (skill_path.parent / subdir).exists()
+        for subdir in ["references", "guides", "templates", "scripts"]
+    )
+
+    if body_length < 6000 and (has_many_refs or has_subdirs):
+        return "navigation_hub"
+    elif body_length > 10000 or has_detailed_sections:
+        return "comprehensive"
+    else:
+        return "minimal"
+
+

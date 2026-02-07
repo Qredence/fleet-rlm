@@ -1,0 +1,10 @@
+<!-- Chunk 25: bytes 8831-9330, type=h4 -->
+#### Qualitative metrics:
+
+•  **Users don't need to prompt Claude about next steps**
+    – *How to assess:* During testing, note how often you need to redirect or clarify. Ask beta users for feedback.
+•  **Workflows complete without user correction**
+    – *How to assess:* Run the same request 3-5 times. Compare outputs for structural consistency and quality.
+•  **Consistent results across sessions**
+    – *How to assess:* Can a new user accomplish the task on first try with minimal guidance?
+

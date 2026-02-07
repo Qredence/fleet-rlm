@@ -1,0 +1,32 @@
+<!-- Chunk 1292: bytes 4749771-4750692, type=function -->
+def check_environment():
+    """Check if environment is properly configured."""
+    print("\n" + "=" * 60)
+    print("Environment Check")
+    print("=" * 60)
+
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        print("❌ DATABASE_URL not set")
+        print("\nPlease set DATABASE_URL in .env or export it:")
+        print("export DATABASE_URL='postgresql://...'")
+        return False
+
+    print("✅ DATABASE_URL is set")
+    print(f"   Database: {db_url.split('@')[1] if '@' in db_url else 'unknown'}")
+
+    # Check if .skills directory exists
+    skills_dir = Path(".skills").resolve()
+    if not skills_dir.exists():
+        print(f"❌ Skills directory not found: {skills_dir}")
+        return False
+
+    print(f"✅ Skills directory exists: {skills_dir}")
+
+    # Count skill files
+    skill_files = list(skills_dir.rglob("SKILL.md"))
+    print(f"   Found {len(skill_files)} skill files")
+
+    return True
+
+

@@ -1,0 +1,21 @@
+<!-- Chunk 203: bytes 298092-298602, type=function -->
+def retry_request(url, max_attempts=3):
+    for i in range(max_attempts):
+        try:
+            return requests.get(url)
+        except Exception:
+            if i == max_attempts - 1:
+                raise
+            time.sleep(2 ** i)
+```
+
+**Solution:** Use existing libraries
+```python
+import orjson  # or json
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+# Use library directly
+data = orjson.loads(text)
+
+# Use decorator
+@retry(stop=stop_after_attempt(3), wait=wait_exponential())

@@ -1,0 +1,105 @@
+<!-- Chunk 1593: bytes 6559245-6562536, type=function -->
+def serve_command(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to run the API server on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind the server to"),
+    reload: bool = typer.Option(
+        False, "--reload", "-r", help="Enable auto-reload on file changes (dev mode)"
+    ),
+    auto_accept: bool = typer.Option(
+        False,
+        "--auto-accept",
+        help="Skip interactive prompts and use provided options (or defaults)",
+    ),
+    force_plain_text: bool = typer.Option(
+        False,
+        "--force-plain-text",
+        help="Disable arrow-key dialogs and use plain-text prompts",
+    ),
+    skip_db_init: bool = typer.Option(
+        False,
+        "--skip-db-init",
+        help="Skip database initialization (assumes DB already initialized)",
+    ),
+):
+    """
+    Start the Skill Fleet API server.
+
+    Interactively asks for configuration (port, host, reload mode) unless
+    --auto-accept is specified.
+
+    Automatically initializes the database on startup unless --skip-db-init
+    is specified.
+    """
+    import uvicorn
+
+    from skill_fleet.infrastructure.db.database import init_db
+
+    # Initialize database unless skipped
+    if not skip_db_init:
+        try:
+            console.print("[dim]Initializing database...[/dim]")
+            init_db()
+            console.print("[dim]✅ Database initialized[/dim]")
+        except Exception as e:
+            console.print(f"[red]❌ Database initialization failed: {e}[/red]")
+            raise typer.Exit(1) from e
+
+    # Ask for configuration
+    final_port, final_host, final_reload = asyncio.run(
+        _ask_server_config(port, host, reload, auto_accept, force_plain_text)
+    )
+
+    if final_reload:
+        console.print("[bold yellow]⚠️  Development mode with auto-reload enabled[/bold yellow]")
+        console.print("[dim]Job state now persists across server restarts (via SQLite)[/dim]")
+
+    console.print(
+        f"[bold green]🔥 Starting Skill Fleet API on {final_host}:{final_port}...[/bold green]"
+    )
+    console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+    uvicorn.run("skill_fleet.api.main:app", host=final_host, port=final_port, reload=final_reload)
+
+
+============================================================
+END FILE: src/skill_fleet/cli/commands/serve.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/commands/stream_chat.py
+============================================================
+
+"""
+Real-time streaming CLI chat for skill creation.
+
+This module provides an enhanced chat experience with:
+- Real-time streaming output (no polling delays)
+- Live thinking/reasoning display
+- Arrow key navigation for multi-choice questions
+- Immediate response to user input
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+import httpx
+from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.spinner import Spinner
+from rich.text import Text
+
+from ..ui.prompts import (
+    PromptUI,
+    choose_many_with_other,
+    choose_one_with_other,
+    get_default_ui,
+)
+
+console = Console()
+logger = logging.getLogger(__name__)
+
+

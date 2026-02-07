@@ -1,0 +1,27 @@
+<!-- Chunk 2080: bytes 7992145-7992918, type=class -->
+class TestAnalyzeIntent:
+    """Test AnalyzeIntent signature."""
+
+    def test_signature_structure(self):
+        """Should have correct input/output structure."""
+        assert "AnalyzeIntent" in AnalyzeIntent.__name__
+
+        inputs = ["task_description", "requirements"]
+        for inp in inputs:
+            assert inp in AnalyzeIntent.fields
+
+    def test_outputs_include_intent_components(self):
+        """Should output intent analysis components."""
+        outputs = [
+            "purpose",
+            "problem_statement",
+            "target_audience",
+            "value_proposition",
+            "skill_type",
+            "scope",
+            "success_criteria",
+        ]
+        for output in outputs:
+            assert output in AnalyzeIntent.fields
+
+

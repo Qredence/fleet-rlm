@@ -1,0 +1,30 @@
+<!-- Chunk 748: bytes 2582843-2583468, type=function -->
+def load_skill(self, skill_id: str) -> SkillMetadata
+```
+
+**Parameters:**
+- `skill_id` (str): Path-style skill identifier (e.g., `technical_skills/programming/languages/python`)
+
+**Returns:**
+- `SkillMetadata`: Skill metadata object
+
+**Raises:**
+- `FileNotFoundError`: If skill doesn't exist
+
+**Example:**
+```python
+metadata = manager.load_skill("technical_skills/programming/languages/python/decorators")
+
+print(f"Name: {metadata.name}")
+print(f"Version: {metadata.version}")
+print(f"Capabilities: {metadata.capabilities}")
+```
+
+---
+
+##### `get_skill_path()`
+
+Get the file system path for a skill.
+
+**Signature:**
+```python

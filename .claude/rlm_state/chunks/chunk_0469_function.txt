@@ -1,0 +1,5 @@
+<!-- Chunk 469: bytes 820698-820795, type=function -->
+def _ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+

@@ -1,0 +1,15 @@
+<!-- Chunk 1109: bytes 3955217-3955600, type=function -->
+def get_taxonomy_context(path: str) -> Dict:
+    """Cache taxonomy lookups to speed up generation."""
+    pass
+```
+
+### 2. **Implement Skill Templates**
+```python
+SKILL_TEMPLATES = {
+    "programming_language": "templates/programming_language.md",
+    "tool_integration": "templates/tool_integration.md",
+    "cognitive_capability": "templates/cognitive_capability.md",
+    # ...
+}
+

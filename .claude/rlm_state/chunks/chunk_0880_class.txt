@@ -1,0 +1,33 @@
+<!-- Chunk 880: bytes 3141207-3141796, type=class -->
+class SkillValidatorModule(dspy.Module):
+    """Validate a draft skill against quality and compliance rules."""
+```
+
+**Implementation**: `dspy.Predict(ValidateSkill)`
+
+**Input:**
+```python
+skill_content: str
+skill_metadata: Any
+content_plan: str
+validation_rules: str
+```
+
+**Output:**
+```python
+{
+    "validation_report": ValidationReport,
+    "critical_issues": list[ValidationCheckItem],
+    "warnings": list[ValidationCheckItem],
+    "suggestions": list[str],
+    "overall_score": float,
+}
+```
+
+---
+
+### SkillRefinerModule
+
+Refine a draft skill based on validation feedback.
+
+```python

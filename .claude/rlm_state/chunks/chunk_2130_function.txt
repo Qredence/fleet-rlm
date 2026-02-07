@@ -1,0 +1,20 @@
+<!-- Chunk 2130: bytes 8050684-8051300, type=function -->
+def test_safe_float_handles_common_inputs() -> None:
+    assert safe_float(1) == 1.0
+    assert safe_float(1.5) == 1.5
+    assert safe_float("2.25") == 2.25
+    assert safe_float("nope", default=0.75) == 0.75
+    assert safe_float(None, default=0.5) == 0.5
+
+
+============================================================
+END FILE: tests/unit/test_workflow_modules_utils.py
+============================================================
+
+============================================================
+FILE: tests/unit/test_workflow_optimize.py
+============================================================
+
+import pytest
+
+

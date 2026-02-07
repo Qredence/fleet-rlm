@@ -1,0 +1,71 @@
+<!-- Chunk 1361: bytes 5052667-5054491, type=function -->
+def test_update_user():
+    async def override_get_db():
+        return test_session  # Use test DB
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        response = client.patch("/users/1", json={"name": "Test"})
+    finally:
+        app.dependency_overrides.clear()  # Always clean up
+```
+
+**Yield dependencies for cleanup:**
+```python
+async def get_db():
+    async with AsyncSession(engine) as session:
+        yield session
+        # Automatic cleanup after response
+```
+
+### 6. Async Testing
+
+**The problem:** Using sync `TestClient` with async endpoints causes hangs. Tests pass in isolation but fail together due to database bleeding.
+
+**✅ Production pattern:**
+```python
+import pytest
+from httpx import AsyncClient
+
+@pytest.fixture
+async def async_client():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
+
+@pytest.fixture
+async def db_session():
+    engine = create_async_engine(TEST_DATABASE_URL)
+    async with AsyncSession(engine) as session:
+        yield session
+        await session.rollback()  # Clean up after test
+
+@pytest.mark.asyncio
+async def test_create_user(async_client: AsyncClient):
+    response = await async_client.post("/users", json={
+        "name": "Alice",
+        "email": "alice@example.com"
+    })
+    assert response.status_code == 200
+```
+
+### 7. File Upload Handling
+
+**Stream, don't load entirely:**
+```python
+from fastapi import UploadFile
+import pandas as pd
+
+@app.post("/upload-csv")
+async def upload_csv(file: UploadFile):
+    # Stream the file - don't load entirely into memory
+    df = pd.read_csv(file.file)
+    results = process_data_frame(df)
+    return {"uploaded": len(results), "data": results}
+```
+
+### 8. Background Tasks
+
+**For operations longer than HTTP timeout:**
+```python
+from fastapi import BackgroundTasks
+

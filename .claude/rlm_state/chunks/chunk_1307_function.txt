@@ -1,0 +1,47 @@
+<!-- Chunk 1307: bytes 4774393-4775851, type=function -->
+def run_migration(check: bool = False):
+    """Run database migration."""
+    if not DATABASE_URL:
+        print("❌ DATABASE_URL not set")
+        sys.exit(1)
+
+    print(f"Connecting to {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 'db'}...")
+    engine = create_engine(DATABASE_URL)
+
+    if check:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            print("✅ Database connection successful")
+            return
+        except Exception as e:
+            print(f"❌ Connection failed: {e}")
+            sys.exit(1)
+
+    migration_path = get_migration_script_path()
+    if not os.path.exists(migration_path):
+        print(f"❌ Migration file not found: {migration_path}")
+        sys.exit(1)
+
+    with open(migration_path) as f:
+        sql = f.read()
+
+    statements = split_sql_script(sql)
+    print(f"Applying {len(statements)} statements...")
+
+    with engine.begin() as conn:
+        for stmt in statements:
+            if not stmt.strip() or stmt.strip().startswith("--"):
+                continue
+            try:
+                conn.execute(text(stmt))
+            except Exception as e:
+                print(f"❌ Error executing statement:\n{stmt[:100]}...\nError: {e}")
+                if "already exists" in str(e):
+                    print("   (Ignored 'already exists' error)")
+                    continue
+                sys.exit(1)
+
+    print("✅ Migration complete")
+
+

@@ -1,0 +1,24 @@
+<!-- Chunk 390: bytes 572141-572939, type=class -->
+class QualityAssessment(dspy.Signature):
+    output = dspy.InputField(desc="The output to assess")
+    criteria = dspy.InputField(desc="Assessment criteria (e.g., accuracy, completeness)")
+    score = dspy.OutputField(desc="Quality score from 0 to 1")
+    feedback = dspy.OutputField(desc="Specific feedback on strengths and weaknesses")
+```
+
+### Best Practices for Descriptions
+
+✓ **Be specific**: "User's query about the task" vs "query"
+✓ **Include constraints**: "Summary in 3-5 sentences" vs "Summary"
+✓ **Explain purpose**: "Agent ID for task routing" vs "agent_id"
+
+❌ **Avoid vague descriptions**: "Some data"
+❌ **Don't duplicate field names**: "task_description: The task description"
+
+## Design Patterns
+
+### 1. Task Decomposition
+
+Break complex tasks into multiple signatures:
+
+```python

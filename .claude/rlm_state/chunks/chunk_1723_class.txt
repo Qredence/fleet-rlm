@@ -1,0 +1,14 @@
+<!-- Chunk 1723: bytes 7326866-7327370, type=class -->
+class HITLRound(BaseModel):
+    """A single round of HITL interaction."""
+
+    round_number: int = Field(ge=1, le=4, description="Round number (1-4)")
+    questions: list[ClarifyingQuestion] = Field(description="Questions asked in this round")
+    answers: list[QuestionAnswer] = Field(
+        default_factory=list, description="User's answers to the questions"
+    )
+    refinements_made: list[str] = Field(
+        default_factory=list, description="List of refinements made based on answers"
+    )
+
+

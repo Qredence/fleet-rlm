@@ -1,0 +1,219 @@
+<!-- Chunk 1069: bytes 3815888-3821241, type=function -->
+def test_full_skill_creation_workflow(temp_taxonomy):
+    """Test complete skill creation from task to registration."""
+    manager = TaxonomyManager(temp_taxonomy)
+    creator = TaxonomySkillCreator(taxonomy_manager=manager)
+    
+    # Note: This test requires LLM access via DSPy
+    # For CI/CD, mock the LLM responses or use cached completions
+    
+    task = "Create a Python async programming skill"
+    user_context = {"user_id": "test_user"}
+    
+    result = creator.forward(
+        task_description=task,
+        user_context=user_context,
+        auto_approve=True  # Skip HITL for testing
+    )
+    
+    assert result['status'] == 'approved'
+    assert 'skill_id' in result
+    assert 'path' in result
+    
+    # Verify skill was registered
+    assert manager.skill_exists(result['path'])
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+```
+
+**File: docs/architecture/skill-creation-workflow.md**
+```markdown
+# Skill Creation Workflow Architecture
+
+## Overview
+
+The skill creation workflow implements a 6-step process for generating skills dynamically based on user tasks, inspired by Anthropic's skill-creator pattern.
+
+## Workflow Steps
+
+### 1. UNDERSTAND
+**Purpose**: Extract task context and map to taxonomy position
+
+**Inputs**:
+- Task description
+- Currently mounted skills
+- Relevant taxonomy branches
+
+**Outputs**:
+- Task intent analysis
+- Proposed taxonomy path
+- Parent/sibling skills for context
+- Dependency analysis
+- Confidence score
+
+**Implementation**: `UnderstandTaskForSkill` DSPy signature
+
+### 2. PLAN
+**Purpose**: Design skill structure with taxonomy integration
+
+**Inputs**:
+- Task intent
+- Taxonomy path
+- Parent skills
+- Dependency analysis
+
+**Outputs**:
+- Skill metadata (conforming to schema)
+- Resolved dependencies
+- Capability definitions
+- Resource requirements
+- Compatibility constraints
+- Composition strategy
+
+**Implementation**: `PlanSkillStructure` DSPy signature
+
+### 3. INITIALIZE
+**Purpose**: Create skill skeleton matching taxonomy standards
+
+**Inputs**:
+- Skill metadata
+- Capabilities
+- Taxonomy path
+
+**Outputs**:
+- Complete directory structure
+- File placeholders
+- Validation checklist
+
+**Implementation**: `InitializeSkillSkeleton` DSPy signature
+
+### 4. EDIT
+**Purpose**: Generate comprehensive skill content
+
+**Inputs**:
+- Skill skeleton
+- Parent skills (for consistency)
+- Composition strategy
+
+**Outputs**:
+- Full SKILL.md content
+- Capability implementations
+- Usage examples
+- Best practices
+- Integration guide
+
+**Implementation**: `EditSkillContent` DSPy signature
+
+### 5. PACKAGE
+**Purpose**: Validate and prepare for approval
+
+**Inputs**:
+- Skill content
+- Skill metadata
+- Taxonomy path
+- Capability implementations
+
+**Outputs**:
+- Validation report
+- Integration tests
+- Packaging manifest
+- Quality score
+
+**Implementation**: `PackageSkillForApproval` DSPy signature
+
+### 6. ITERATE
+**Purpose**: HITL approval and evolution tracking
+
+**Inputs**:
+- Packaged skill
+- Validation report
+- Human feedback
+- Usage analytics (optional)
+
+**Outputs**:
+- Approval status
+- Revision plan (if needed)
+- Evolution metadata
+- Next steps
+
+**Implementation**: `IterateSkillWithFeedback` DSPy signature
+
+## Design Principles
+
+### Progressive Disclosure
+Skills are organized in layers of increasing detail:
+1. **Metadata** (lightweight, always loaded)
+2. **SKILL.md body** (loaded on demand)
+3. **Resources** (lazy loaded only when needed)
+
+### Degrees of Freedom
+Content organization from high to low specificity:
+- **High**: Natural language descriptions
+- **Medium**: Pseudocode and algorithms
+- **Low**: Executable scripts and code
+
+### Conciseness
+Every piece of information is challenged:
+- Is this necessary?
+- Can it be inferred from context?
+- Does it add unique value?
+
+## Integration with Taxonomy
+
+The workflow ensures tight integration with the taxonomy:
+
+1. **Path Validation**: Every skill knows its position
+2. **Dependency Resolution**: All dependencies are verified
+3. **Circular Detection**: Prevents dependency cycles
+4. **Composition Patterns**: Skills understand their relationships
+5. **Version Management**: Tracks evolution over time
+
+## Quality Assurance
+
+Multiple validation layers ensure quality:
+
+- **Schema Conformance**: Metadata matches expected structure
+- **Path Validity**: Taxonomy path is valid and unique
+- **Dependency Check**: All dependencies resolvable
+- **Documentation**: Complete and well-structured
+- **Examples**: Executable and meaningful
+- **Tests**: Comprehensive validation suite
+
+## Extension Points
+
+The workflow is designed for extensibility:
+
+- Custom DSPy signatures for domain-specific skills
+- Pluggable validation rules
+- Alternative storage backends
+- Different HITL interfaces
+- Analytics integration
+
+## Performance Considerations
+
+- **Caching**: Taxonomy lookups are cached
+- **Parallel Generation**: Multiple skills can be generated concurrently
+- **Lazy Loading**: Resources loaded only when needed
+- **Incremental Updates**: Only changed components regenerated
+```
+
+---
+
+# PHASE 2: Core Workflow (Week 3-4)
+
+## Week 3: Workflow Optimization & Validation
+
+### Day 15-16: Skill Validation System
+
+**File: src/validators/skill_validator.py**
+```python
+"""Comprehensive skill validation system."""
+import json
+import jsonschema
+from pathlib import Path
+from typing import Dict, List, Tuple
+from datetime import datetime
+
+

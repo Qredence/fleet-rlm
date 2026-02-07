@@ -1,0 +1,38 @@
+<!-- Chunk 1801: bytes 7480291-7481313, type=class -->
+class ServiceError(Exception):
+    """Base exception for service errors."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        service_name: str | None = None,
+        operation: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Initialize service error.
+
+        Args:
+            message: Error message
+            service_name: Name of the service that raised the error
+            operation: Operation that failed
+            details: Additional error details
+
+        """
+        super().__init__(message)
+        self.message = message
+        self.service_name = service_name
+        self.operation = operation
+        self.details = details or {}
+
+    def __str__(self) -> str:
+        """Format error message."""
+        parts = [self.message]
+        if self.service_name:
+            parts.insert(0, f"[{self.service_name}]")
+        if self.operation:
+            parts.insert(1, f"({self.operation})")
+        return " ".join(parts)
+
+

@@ -1,0 +1,28 @@
+<!-- Chunk 1731: bytes 7332826-7333878, type=class -->
+class DependencyAnalysis(BaseModel):
+    """
+    Complete analysis of required skill dependencies.
+
+    Merged from workflow (flat lists) and core (structured refs).
+    """
+
+    # From core (structured dependencies)
+    required: list[DependencyRef] = Field(
+        default_factory=list, description="Skills user must know first (hard prerequisites)"
+    )
+    recommended: list[DependencyRef] = Field(
+        default_factory=list, description="Skills that complement this one (soft recommendations)"
+    )
+    conflicts: list[str] = Field(
+        default_factory=list, description="Skills that might conflict with this one"
+    )
+    # From workflow (flat lists for backward compatibility)
+    missing_skills: list[str] = Field(
+        default_factory=list, description="Skills required but not mounted"
+    )
+    optional_skills: list[str] = Field(
+        default_factory=list, description="Skills that would enhance but aren't required"
+    )
+    integration_notes: str = Field(default="", description="Notes on how dependencies integrate")
+
+

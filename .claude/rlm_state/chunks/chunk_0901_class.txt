@@ -1,0 +1,37 @@
+<!-- Chunk 901: bytes 3183231-3184573, type=class -->
+class SynthesizePlan(dspy.Signature):
+    """Synthesize all Phase 1 analyses into a coherent skill creation plan."""
+```
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `intent_analysis` | `str` | JSON TaskIntent from AnalyzeIntent |
+| `taxonomy_analysis` | `str` | JSON taxonomy path and rationale |
+| `dependency_analysis` | `str` | JSON DependencyAnalysis |
+| `user_confirmation` | `str` | User's confirmation or feedback from HITL (may be empty) |
+
+**Outputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill_metadata` | `SkillMetadata` | Complete skill metadata: name, description, taxonomy_path, tags |
+| `content_plan` | `str` | Outline of skill content: sections, topics, example count |
+| `generation_instructions` | `str` | Specific instructions for Phase 2 generation |
+| `success_criteria` | `list[str]` | How to evaluate if generated content is successful |
+| `estimated_length` | `str` | 'short' (<500 lines), 'medium' (500-1500), 'long' (>1500) |
+
+**Used by**: `PlanSynthesizerModule` with `dspy.ChainOfThought`
+
+---
+
+## Phase 2 Signatures
+
+**File**: `src/skill_fleet/core/signatures/phase2_generation.py`
+
+Phase 2 generates the actual skill content based on the plan from Phase 1.
+
+### GenerateSkillContent
+
+Generate complete SKILL.md content based on the plan.
+
+```python

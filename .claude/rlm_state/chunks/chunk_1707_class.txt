@@ -1,0 +1,23 @@
+<!-- Chunk 1707: bytes 7278923-7279679, type=class -->
+class RolesConfig(BaseModel):
+    """Configuration for all roles."""
+
+    router: RoleConfig | None = None
+    planner: RoleConfig | None = None
+    worker: RoleConfig | None = None
+    judge: RoleConfig | None = None
+
+    # Allow additional roles dynamically
+    extra_roles: dict[str, RoleConfig] = Field(default_factory=dict, alias="**")
+
+    def get_role(self, role_name: str) -> RoleConfig | None:
+        """Get a role configuration by name."""
+        if role_name in ["router", "planner", "worker", "judge"]:
+            return getattr(self, role_name)
+        return self.extra_roles.get(role_name)
+
+    def __getitem__(self, key: str) -> RoleConfig | None:
+        """Allow dictionary-like access to roles."""
+        return self.get_role(key)
+
+

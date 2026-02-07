@@ -1,0 +1,311 @@
+<!-- Chunk 708: bytes 1377108-1385893, type=function -->
+def main(argv: List[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        return int(args.func(args))
+    except RlmReplError as e:
+        sys.stderr.write(f"ERROR: {e}\n")
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
+
+
+============================================================
+END FILE: .letta/rlm/scripts/rlm_repl.py
+============================================================
+
+============================================================
+FILE: .letta/settings.json
+============================================================
+
+{
+  "permissions": {
+    "allow": [
+      "Edit(src/skill_fleet/infrastructure/db/**)",
+      "Write(**)",
+      "Bash(uv run pytest)",
+      "Bash(uv run pytest tests/integration/test_job_persistence_phase_0_1.py)",
+      "Edit(tests/integration/**)",
+      "Bash(uv run pytest tests/integration/test_understanding_workflow.py)",
+      "Bash(uv run pytest tests/integration/test_hitl_workflows.py)"
+    ]
+  }
+}
+
+============================================================
+END FILE: .letta/settings.json
+============================================================
+
+============================================================
+FILE: .letta/settings.local.json
+============================================================
+
+{
+  "lastAgent": "agent-69a17aaa-0c6c-41cc-963e-e5a1c6686910",
+  "sessionsByServer": {
+    "api.letta.com": {
+      "agentId": "agent-69a17aaa-0c6c-41cc-963e-e5a1c6686910",
+      "conversationId": "default"
+    }
+  },
+  "lastSession": {
+    "agentId": "agent-69a17aaa-0c6c-41cc-963e-e5a1c6686910",
+    "conversationId": "default"
+  }
+}
+
+============================================================
+END FILE: .letta/settings.local.json
+============================================================
+
+============================================================
+FILE: .letta/skills-hash.json
+============================================================
+
+{
+  "hash": "e8575c9836d8c207",
+  "timestamp": "2026-01-30T23:16:50.091Z"
+}
+
+============================================================
+END FILE: .letta/skills-hash.json
+============================================================
+
+============================================================
+FILE: .opencode/package.json
+============================================================
+
+{
+  "dependencies": {
+    "@opencode-ai/plugin": "1.1.47"
+  }
+}
+
+============================================================
+END FILE: .opencode/package.json
+============================================================
+
+============================================================
+FILE: .pre-commit-config.yaml
+============================================================
+
+# pre-commit hooks configuration for Skills Fleet
+# See https://pre-commit.com for more information
+
+repos:
+  # Ruff - Fast Python linter and formatter (replaces flake8, black, isort)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      # Run the linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi, jupyter]
+      # Run the formatter
+      - id: ruff-format
+        types_or: [python, pyi, jupyter]
+
+  # General pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Check for files that contain merge conflict markers
+      - id: check-merge-conflict
+      # Check for files with names that conflict on case-insensitive filesystems
+      - id: check-case-conflict
+      # Ensure that a file is either empty, or ends with one newline
+      - id: end-of-file-fixer
+      # Remove trailing whitespace from lines
+      - id: trailing-whitespace
+      # Check YAML files for valid syntax
+      - id: check-yaml
+        args: [--unsafe]
+      # Check TOML files for valid syntax
+      - id: check-toml
+      # Check JSON files for valid syntax
+      - id: check-json
+      # Detect the presence of private keys
+      - id: detect-private-key
+      # Prevent committing to the main / master branch
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master]
+
+  # Security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: [-r, src/skill_fleet, -c, pyproject.toml]
+        additional_dependencies: ["bandit[toml]"]
+
+  # Custom hooks using uv
+  - repo: local
+    hooks:
+      # Type check with ty (src only - faster than checking tests too)
+      - id: ty
+        name: ty type checker
+        entry: uv run ty check src/
+        language: system
+        types_or: [python, pyi]
+
+      # Skill validation (optional - comment out if slowing down commits)
+      # - id: skill-validation
+      #   name: skill validation
+      #   entry: uv run skill-fleet validate skills/
+      #   language: system
+      #   pass_filenames: false
+      #   always_run: false
+
+# Global configuration
+default_stages: [pre-commit]
+fail_fast: false
+
+# Exclude certain files/directories from pre-commit hooks
+exclude: |
+  (?x)^(
+      \.vscode/|
+      \.idea/|
+      \.venv/|
+      __pycache__/|
+      \.pyc$
+  )
+
+
+============================================================
+END FILE: .pre-commit-config.yaml
+============================================================
+
+============================================================
+FILE: .vscode/extensions.json
+============================================================
+
+{
+  // Recommended extensions for this workspace
+  "recommendations": ["charliermarsh.ruff", "astral-sh.ty"]
+}
+
+
+============================================================
+END FILE: .vscode/extensions.json
+============================================================
+
+============================================================
+FILE: .vscode/launch.json
+============================================================
+
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "type": "browse-lite",
+            "name": "Browse Lite: Attach",
+            "request": "attach"
+        },
+        {
+            "type": "browse-lite",
+            "request": "launch",
+            "name": "Browse Lite: Launch",
+            "url": "http://localhost:3000"
+        }
+    ]
+}
+
+============================================================
+END FILE: .vscode/launch.json
+============================================================
+
+============================================================
+FILE: .vscode/settings.json
+============================================================
+
+{
+  "python-envs.defaultEnvManager": "ms-python.python:venv",
+  "python-envs.defaultPackageManager": "ms-python.python:pip",
+  "python-envs.pythonProjects": [],
+  "python.languageServer": "None",
+  "markdown.validate.enabled": true
+}
+
+============================================================
+END FILE: .vscode/settings.json
+============================================================
+
+============================================================
+FILE: AGENTS.md
+============================================================
+
+# skill-fleet – Agent Working Guide
+
+## Build, Lint, Test Commands
+
+**Prerequisites:** uv package manager (pre-installed), Python 3.12+
+
+```bash
+# Install dependencies (run after pyproject.toml changes)
+uv sync --group dev
+
+# Linting (run before commits)
+uv run ruff check .
+uv run ruff check --fix .
+uv run ruff format .
+
+# Testing
+uv run pytest
+uv run pytest -v
+uv run pytest tests/unit/
+uv run pytest tests/integration/
+uv run pytest --cov=src/skill_fleet
+uv run pytest tests/unit/test_skill_validator.py
+uv run pytest tests/unit/test_skill_validator.py::test_validate_directory_skill
+uv run pytest -m "not slow"
+```
+
+**Always use `uv run` prefix** for Python commands.
+
+## Code Style Guidelines
+
+### Python & Formatting
+
+- Python 3.12+ required, use ruff (replaces flake8, black, isort)
+- Line length: 100 chars, double quotes, 4-space indentation
+
+### Import Ordering
+
+```python
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import yaml
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+from skill_fleet.common.utils import safe_json_loads
+```
+
+### Type Hints
+
+Use modern hints: `list[str]`, `dict[str, int]`, `str | None`, `Annotated` for FastAPI
+
+### Naming
+
+- Functions/variables: snake_case
+- Classes: PascalCase
+- Constants: UPPER_SNAKE_CASE
+- Private: _prefix
+- Exceptions: suffix with Error/Exception
+- Dataclasses: `@dataclass(frozen=True, slots=True)`
+
+### Docstrings
+
+Google-style required for public modules, classes, functions:
+```python

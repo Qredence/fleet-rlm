@@ -1,0 +1,8 @@
+<!-- Chunk 959: bytes 3417321-3417579, type=class -->
+class ValidationError(CLIError):
+    """Input validation errors."""
+
+    def __init__(self, message: str, suggestion: str = "Run with --help for usage information"):
+        super().__init__(message, exit_code=EXIT_VALIDATION_ERROR, suggestion=suggestion)
+
+

@@ -1,0 +1,6 @@
+<!-- Chunk 1979: bytes 7886182-7886284, type=function -->
+def test_max_poll_attempts():
+    """Test max poll attempts."""
+    assert MAX_POLL_ATTEMPTS == 100
+
+

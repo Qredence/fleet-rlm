@@ -1,0 +1,90 @@
+<!-- Chunk 167: bytes 282258-284754, type=function -->
+def validate_email(email: str) -> None:
+    if not email or "@" not in email:
+        raise ValueError("Invalid email")
+
+# Import everywhere
+from utils.validation import validate_email
+```
+
+### Example 2: Recreated Retry Logic
+
+**User request:** "Check if we're recreating utility functions"
+
+**Analysis:**
+```bash
+uv run python scripts/analyze_imports.py services/
+```
+
+**Finding:** Custom retry logic in 3 services
+
+**Recommendation:**
+```python
+# Replace with tenacity
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential())
+async def fetch_data(url: str):
+    return await client.get(url)
+```
+
+### Example 3: Complex Function
+
+**User request:** "This function is hard to understand"
+
+**Analysis:**
+```bash
+uv run python scripts/complexity_analyzer.py utils/processor.py
+```
+
+**Finding:** Complexity 23, nesting depth 6
+
+**Recommendation:** Extract nested logic into helper functions (see [refactoring_patterns.md](references/refactoring_patterns.md#pattern-extract-nested-logic))
+
+## When NOT to Refactor
+
+⚠️ Avoid refactoring when:
+- No tests exist and can't be added
+- Close to deadline
+- Code won't be modified again
+- Would break public APIs without migration path
+
+## Output Format
+
+When reviewing code, structure feedback as:
+
+1. **Summary**: Brief overview of findings
+2. **Critical Issues**: Must-fix problems (duplicates, security)
+3. **Important Issues**: Should-fix problems (complexity, utilities)
+4. **Suggestions**: Nice-to-have improvements
+5. **Code Examples**: Specific before/after for each issue
+6. **Next Steps**: Recommended action plan
+
+Always include:
+- Exact file paths and line numbers
+- Severity level for each issue
+- Concrete code examples
+- References to patterns/practices when applicable
+
+
+============================================================
+END FILE: .fleet/factory/skills/python-backend-reviewer/SKILL.md
+============================================================
+
+============================================================
+FILE: .fleet/factory/skills/python-backend-reviewer/references/best_practices.md
+============================================================
+
+# Python Backend Best Practices
+
+Fundamental principles and practices for writing maintainable Python backend code.
+
+## Core Principles
+
+### DRY (Don't Repeat Yourself)
+
+Avoid duplicating code. If you write the same logic twice, extract it into a function or class.
+
+**Good:**
+```python
+# utils/validation.py

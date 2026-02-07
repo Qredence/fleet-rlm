@@ -1,0 +1,107 @@
+<!-- Chunk 1315: bytes 4827801-4834138, type=function -->
+def process_data(items: list[str]) -> list[str]:
+    return [i.upper() for i in items]
+```
+
+## Common Mistakes
+
+| Mistake | Why It's Wrong | Fix |
+| ------- | -------------- | --- |
+| Overusing `# type: ignore` | Masks bugs rather than defining types. | Use `Any` explicitly or fix the underlying type logic. |
+| Global `strict = true` on legacy | Causes immediate pipeline failure on unrelated code. | Use `include`/`exclude` or directory-specific overrides. |
+| Not using `uv run` | Can lead to "Module Not Found" errors if `ty` uses a different Python env. | Always prefix execution with `uv run`. |
+| Ignoring `pyproject.toml` | Default settings might be too loose for production safety. | Explicitly define `python_version` and `target` in config. |
+
+## Strong Guidance
+
+- **NO NEW UNTYPED CODE** — Every new file added to the project MUST be included in a `strict` override.
+- **ALWAYS USE UV** — Ensure `ty` version consistency across the team by managing it via `uv` lockfiles.
+- **NEVER DISABLE IMPORT-CHECKING GLOBALLY** — Disabling import checks makes the type checker "blind" to external API changes.
+- **FIX > IGNORE** — A `# type: ignore` is a technical debt check that should require a comment explaining *why* it is necessary.
+
+## Red Flags
+
+- The `pyproject.toml` has no `[tool.ty]` section (using defaults is rarely correct for teams).
+- Developers are complaining that `ty` is "getting in the way" (indicates rules are too strict for the current codebase maturity).
+- The CI step for `ty` takes longer than 30 seconds for a medium-sized project (check for recursive directory issues or symlinks).
+
+---
+
+## Validation
+
+```bash
+# Validate the pyproject.toml schema
+uv run ty --show-config
+
+# Run checks on the current directory
+uv run ty .
+```
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/SKILL.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/best_practices.md
+============================================================
+
+[{'title': 'Start with "Basic", Evolve to "Strict"', 'description': 'When migrating a large project, start with the basic type checking mode to catch obvious bugs, then use overrides to enable strict mode for high-risk modules (e.g., payment processing, core auth).', 'example': '[[tool.ty.overrides]]\ninclude = ["src/auth/**"]\nstrict = true'}, {'title': 'Use Type-Safe Bubbles', 'description': 'Instead of fixing the whole project, define specific directories as "type-safe". Ensure any new code in these directories passes strict checks.', 'example': 'include = ["src/v2_api"] # Only check the new API'}, {'title': 'Leverage UV Caching in CI', 'description': 'To get the sub-second performance ty is known for, use setup-uv with caching to avoid re-installing dependencies on every run.', 'example': '- uses: astral-sh/setup-uv@v1\n  with:\n    enable-cache: true'}, {'title': 'Prefer Explicit Any over Type Ignore', 'description': 'If you must opt-out of typing, use `typing.Any` or `typing.Unpack`. This makes the lack of safety explicit and searchable, unlike `# type: ignore` which can hide multiple different errors.', 'example': 'def legacy_call(data: Any) -> Any:\n    ...'}, {'title': 'Synchronize Python Versions', 'description': 'Always specify the target Python version in your ty config to ensure the checker uses the correct syntax rules (e.g., allowing `|` for unions in 3.10+).', 'example': '[tool.ty]\npython_version = "3.12"'}]
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/best_practices.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_1.py
+============================================================
+
+# Add ty as a development dependency
+uv add --dev ty
+
+# Run ty on the current directory
+uv run ty .
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_1.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_2.py
+============================================================
+
+[tool.ty]
+python_version = "3.10"
+exclude = ["src/legacy_code/"]
+
+[[tool.ty.overrides]]
+include = ["src/features/new_payment_engine/"]
+strict = true
+disallow_any_generics = true
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_2.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_2.toml
+============================================================
+
+# pyproject.toml
+[tool.ty]
+python_version = "3.11"
+type_checking_mode = "basic"
+
+[[tool.ty.overrides]]
+include = ["src/app/core/**"]
+type_checking_mode = "strict"
+
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_2.toml
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_3.py
+============================================================
+
+# Before (reported as error under strict mode)

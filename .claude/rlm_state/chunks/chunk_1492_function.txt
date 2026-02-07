@@ -1,0 +1,18 @@
+<!-- Chunk 1492: bytes 6332042-6332692, type=function -->
+def _configure_logging() -> None:
+    """Configure application logging based on settings."""
+    # Patch logging settings to handle MagicMock in tests
+    log_level_attr = getattr(settings, "log_level", "INFO")
+    if not isinstance(log_level_attr, str):
+        log_level_attr = "INFO"
+
+    log_level = getattr(logging, log_level_attr.upper(), logging.INFO)
+    logging.basicConfig(level=log_level)
+
+    # In production with JSON logging, use structured format
+    log_format = getattr(settings, "log_format", "text")
+    if isinstance(log_format, str) and log_format == "json":
+        # Could integrate structlog here in the future
+        pass
+
+

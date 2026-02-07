@@ -1,0 +1,10 @@
+<!-- Chunk 2004: bytes 7892583-7892903, type=function -->
+def test_validate_path_within_root_rejects_traversal():
+    """Test path validation rejects ../ traversal."""
+    root = Path("/tmp/skills")
+    user_path = Path("/tmp/skills/../etc/passwd")
+
+    with pytest.raises(ValueError, match="must be within"):
+        validate_path_within_root(user_path, root, "Skills root")
+
+

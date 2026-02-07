@@ -1,0 +1,63 @@
+<!-- Chunk 1776: bytes 7423150-7424830, type=function -->
+def evaluate_program(
+    program: dspy.Module,
+    examples: list[dspy.Example],
+    metric: Callable[..., Any] = skill_creation_metric,
+    **program_kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Run evaluation on a set of examples.
+
+    Args:
+        program: DSPy program to evaluate
+        examples: List of examples to evaluate on
+        metric: Metric function to use
+        **program_kwargs: Additional kwargs for program execution
+
+    Returns:
+        Dict with scores, mean, std, and individual results
+
+    """
+    import numpy as np
+
+    scores = []
+    results = []
+
+    for example in examples:
+        try:
+            pred = program(
+                task_description=example.task_description,
+                **program_kwargs,
+            )
+            score = metric(example, pred)
+            scores.append(score)
+            results.append(
+                {
+                    "example": example.task_description[:50],
+                    "score": score,
+                    "success": True,
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Evaluation error: {e}")
+            scores.append(0.0)
+            results.append(
+                {
+                    "example": example.task_description[:50],
+                    "score": 0.0,
+                    "success": False,
+                    "error": str(e),
+                }
+            )
+
+    return {
+        "scores": scores,
+        "mean": float(np.mean(scores)),
+        "std": float(np.std(scores)),
+        "min": float(np.min(scores)),
+        "max": float(np.max(scores)),
+        "n_examples": len(examples),
+        "results": results,
+    }
+
+

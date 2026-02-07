@@ -1,0 +1,14 @@
+<!-- Chunk 220: bytes 302115-302481, type=function -->
+def process_data(items):
+    if items:
+        for item in items:
+            if item.is_valid:
+                if item.category == "A":
+                    if item.price > 100:
+                        if item.in_stock:
+                            # Actually do something
+                            pass
+```
+
+**Solution:** Early returns and guard clauses
+```python

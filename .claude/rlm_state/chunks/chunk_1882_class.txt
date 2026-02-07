@@ -1,0 +1,30 @@
+<!-- Chunk 1882: bytes 7668726-7669994, type=class -->
+class TDDWorkflowState(Base):
+    """Test-driven development workflow tracking."""
+
+    __tablename__ = "tdd_workflow_state"
+
+    state_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[UUID] = mapped_column(
+        ForeignKey("jobs.job_id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    baseline_tests_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    compliance_tests_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rationalizations_identified: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True
+    )
+    checklist_state: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+# =============================================================================
+# VALIDATION & QUALITY
+# =============================================================================
+
+

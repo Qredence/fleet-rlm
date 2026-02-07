@@ -1,0 +1,22 @@
+<!-- Chunk 1827: bytes 7581938-7582918, type=class -->
+class ValidateCompliance(dspy.Signature):
+    """
+    Validate agentskills.io compliance of skill content.
+
+    Check YAML frontmatter, file structure, naming conventions,
+    and required sections.
+    """
+
+    # Inputs
+    skill_content: str = dspy.InputField(desc="Complete SKILL.md content to validate")
+    taxonomy_path: str = dspy.InputField(desc="Expected taxonomy path (e.g., 'python/async')")
+
+    # Outputs
+    passed: bool = dspy.OutputField(desc="Whether skill passes all compliance checks")
+    compliance_score: float = dspy.OutputField(desc="Score 0.0-1.0 of compliance level")
+    issues: list[str] = dspy.OutputField(desc="List of compliance issues found (empty if passed)")
+    critical_issues: list[str] = dspy.OutputField(desc="Issues that MUST be fixed (blocking)")
+    warnings: list[str] = dspy.OutputField(desc="Non-blocking issues that should be addressed")
+    auto_fixable: list[str] = dspy.OutputField(desc="Issues that can be automatically fixed")
+
+

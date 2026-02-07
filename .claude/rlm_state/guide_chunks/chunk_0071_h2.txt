@@ -1,0 +1,5 @@
+<!-- Chunk 71: bytes 25094-25210, type=h2 -->
+## Step 3: Create Subscription
+Call MCP tool: `create_subscription`
+Parameters: plan_id, customer_id (from Step 1)
+

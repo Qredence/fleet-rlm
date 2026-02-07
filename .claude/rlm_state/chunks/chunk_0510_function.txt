@@ -1,0 +1,53 @@
+<!-- Chunk 510: bytes 855494-856561, type=function -->
+def vague_reward(args, pred: dspy.Prediction) -> float:
+    """Reward good answers."""
+    return 1.0 if "good" in pred.answer else 0.0
+```
+
+### 2. Use Appropriate Thresholds
+
+```python
+# Good: Appropriate threshold based on task
+refine = dspy.Refine(
+    module=module,
+    N=3,
+    reward_fn=factuality_reward,
+    threshold=1.0  # Require factual correctness
+)
+
+# Bad: Too low threshold
+refine = dspy.Refine(
+    module=module,
+    N=3,
+    reward_fn=factuality_reward,
+    threshold=0.1  # Too lenient
+)
+```
+
+### 3. Set Reasonable N Values
+
+```python
+# Good: Appropriate N for task complexity
+best_of_3 = dspy.BestOfN(module=module, N=3, reward_fn=reward_fn)
+
+# Bad: Too high N (wasteful)
+best_of_10 = dspy.BestOfN(module=module, N=10, reward_fn=reward_fn)
+```
+
+### 4. Use fail_count for Refine
+
+```python
+# Good: Stop after first error
+refine = dspy.Refine(
+    module=module,
+    N=3,
+    reward_fn=reward_fn,
+    threshold=1.0,
+    fail_count=1  # Stop after first error
+)
+```
+
+### 5. Test Reward Functions
+
+```python
+# Good: Test reward function before using

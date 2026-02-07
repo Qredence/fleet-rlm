@@ -1,0 +1,96 @@
+<!-- Chunk 1007: bytes 3549621-3552833, type=class -->
+class StreamingAggregator:
+    def __init__(self, emit_interval_ms=100):
+        self.buffer = {}
+        self.last_emit = time.time()
+        self.emit_interval = emit_interval_ms / 1000
+        
+    async def add_event(self, step: str, progress: float, **kwargs):
+        # Add event to buffer (don't emit immediately)
+        self.buffer = {
+            "step": step,
+            "progress": progress,
+            "timestamp": datetime.utcnow(),
+            **kwargs
+        }
+        
+        # Check if time to emit
+        if time.time() - self.last_emit > self.emit_interval:
+            await self.emit()
+            
+    async def emit(self):
+        # Send buffered state to all subscribers
+        # If slow client: skip old updates, send latest only (backpressure)
+        for client in self.subscribers:
+            if client.ready():
+                await client.send(json.dumps(self.buffer))
+            else:
+                # Client slow; drop buffered state, retry next interval
+                pass
+```
+
+**New SSE Endpoint**:
+```
+GET /api/v1/optimization/{job_id}/stream
+Response (Server-Sent Events):
+  data: {"progress": 0.15, "step": "collecting_traces", "cost": "$0.20"}
+  data: {"progress": 0.35, "step": "proposing_instructions", "cost": "$0.85"}
+  data: {"progress": 0.75, "step": "searching_optimal_params", "cost": "$1.85"}
+  data: {"progress": 1.00, "step": "completed", "cost": "$2.30", "metric": 0.84}
+```
+
+**CLI Streaming (in `commands/optimize.py`)**:
+```bash
+uv run skill-fleet optimize --watch
+# Polls `/stream` endpoint, prints real-time updates
+
+Example output:
+  [15%] Collecting traces...
+  [35%] Proposing instructions... ($0.85)
+  [75%] Searching params... ($1.85)
+  [100%] Done! Final metric: 0.84 (Cost: $2.30)
+```
+
+**Backpressure Handling**:
+- If client slow: emit latest state only (don't queue)
+- If connection drops: Auto-reconnect with exponential backoff
+- If client disconnects cleanly: Graceful cleanup
+
+**Files to Create**:
+1. `src/skill_fleet/common/streaming/aggregator.py` (~200 lines)
+2. Update `src/skill_fleet/api/routes/optimization.py` with /stream endpoint
+3. Update `src/skill_fleet/cli/commands/optimize.py` with --watch flag
+4. Tests: Slow client, disconnect, reconnect scenarios
+
+**Timeline**: 0.5-1 day (local-only, simplified backpressure) | **Impact**: Smooth real-time feedback during long operations
+
+---
+
+#### **2C: CLI ↔ API Result Caching** 📦
+
+**Problem**: CLI re-fetches same job results repeatedly; API recalculates. Poor UX, wasted CPU.
+
+**Solution**: Filesystem-based caching (CLI + API smart invalidation). **Local-only: No Redis, filesystem cache only.**
+
+**Implementation**:
+- **API-side caching**:
+  - Cache GET endpoints (300s TTL by default)
+  - Cache invalidation: On job completion/error
+  - Cache key: `job_id:version:timestamp`
+  - Store: Memory (no Redis option for local)
+
+- **CLI-side caching**:
+  - Local cache: `~/.skill_fleet/cache/jobs/`
+  - Sync strategy: ETag-based (check remote hash vs local)
+  - Fallback: Network if mismatch
+
+**New Response Headers**:
+```
+Cache-Control: max-age=300
+ETag: "job_123:v1:abc123hash"
+Last-Modified: 2026-01-20T14:30:00Z
+X-Cache: HIT from API
+```
+
+**CLI Cache Management**:
+```python

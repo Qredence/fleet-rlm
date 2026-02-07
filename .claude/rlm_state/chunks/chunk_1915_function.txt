@@ -1,0 +1,35 @@
+<!-- Chunk 1915: bytes 7733540-7734508, type=function -->
+def log_decision_tree(
+    phase: str,
+    decision_path: list[str],
+    final_decision: str,
+) -> None:
+    """
+    Log decision tree traversal to MLflow.
+
+    Args:
+        phase: Phase identifier (e.g., "phase1", "phase2")
+        decision_path: List of decision steps in order
+        final_decision: Final decision reached
+
+    Examples:
+        >>> log_decision_tree(
+        ...     "phase1",
+        ...     ["is_new_skill=True", "skill_type=technical"],
+        ...     "technical"
+        ... )
+
+    """
+    try:
+        import mlflow
+
+        mlflow.log_text(  # type: ignore[attr-defined]
+            "\n".join(decision_path),
+            artifact_file=f"{phase}_decision_tree.txt",
+        )
+        mlflow.log_param(f"{phase}_final_decision", final_decision)  # type: ignore[attr-defined]
+        logger.debug(f"Logged decision tree for {phase}: {final_decision}")
+    except Exception as e:
+        logger.warning(f"Failed to log decision tree: {e}")
+
+

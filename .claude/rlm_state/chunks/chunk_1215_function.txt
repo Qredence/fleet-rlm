@@ -1,0 +1,16 @@
+<!-- Chunk 1215: bytes 4577400-4577774, type=function -->
+def parse_skill_frontmatter(skill_content: str) -> dict[str, Any]:
+    """Extract YAML frontmatter from SKILL.md content."""
+    if not skill_content.startswith("---"):
+        return {}
+
+    parts = skill_content.split("---", 2)
+    if len(parts) < 3:
+        return {}
+
+    try:
+        return yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        return {}
+
+

@@ -1,0 +1,75 @@
+<!-- Chunk 1232: bytes 4625518-4627883, type=function -->
+def main():
+    """
+    Migrate skill directories to their new canonical paths based on taxonomy_index.json.
+
+    Reads the taxonomy index to determine source and destination paths,
+    moves skill directories accordingly, and cleans up empty directories.
+    """
+    root = Path(__file__).parents[1]
+    skills_root = root / "skills"
+    index_path = skills_root / "taxonomy_index.json"
+
+    if not index_path.exists():
+        print("Error: taxonomy_index.json not found")
+        return
+
+    print("Loading taxonomy index...")
+    with open(index_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    skills_map = data.get("skills", {})
+    print(f"Found {len(skills_map)} skills to migrate")
+
+    migrated_count = 0
+    errors = []
+
+    for skill_id, entry in skills_map.items():
+        canonical_path = entry["canonical_path"]
+        aliases = entry["aliases"]
+
+        if not aliases:
+            print(f"Skipping {skill_id}: No aliases (source path) defined")
+            continue
+
+        # Use the first alias as the source path
+        # The alias in JSON is relative to 'skills/'
+        source_rel_path = aliases[0]
+
+        source_path = skills_root / source_rel_path
+        dest_path = skills_root / canonical_path
+
+        if dest_path.exists():
+            print(f"Skipping {skill_id}: Destination already exists ({canonical_path})")
+            continue
+
+        if not source_path.exists():
+            print(f"Warning: Source path not found for {skill_id}: {source_rel_path}")
+            errors.append(f"{skill_id}: Source not found")
+            continue
+
+        print(f"Migrating {skill_id}...")
+        print(f"  From: {source_rel_path}")
+        print(f"  To:   {canonical_path}")
+
+        # Create destination parent directories
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            shutil.move(str(source_path), str(dest_path))
+            migrated_count += 1
+        except (shutil.Error, OSError) as e:
+            logging.error("ERROR moving %s: %s", skill_id, e)
+            errors.append(f"{skill_id}: {e}")
+
+    print(f"\nMigration complete. Moved {migrated_count} skills.")
+    if errors:
+        print("Errors:")
+        for e in errors:
+            print(f"  - {e}")
+
+    # Cleanup empty directories
+    print("\nCleaning up empty directories...")
+    remove_empty_dirs(skills_root)
+
+

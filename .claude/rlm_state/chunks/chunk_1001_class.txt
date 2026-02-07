@@ -1,0 +1,75 @@
+<!-- Chunk 1001: bytes 3537229-3539600, type=class -->
+class AdjustMetricWeights(dspy.Signature):
+    """Adjust metric weights based on skill style.
+    
+    Navigation hub skills prioritize clarity.
+    Comprehensive skills are balanced.
+    Minimal skills prioritize correctness.
+    """
+    skill_style: Literal["navigation_hub", "comprehensive", "minimal"] = dspy.InputField()
+    current_scores: dict[str, float] = dspy.InputField()
+    adjusted_weights: dict[str, float] = dspy.OutputField(
+        desc="Weights for [skill_quality, semantic_f1, entity_f1, readability, coverage]"
+    )
+```
+
+**API Endpoint**:
+```
+POST /api/v1/evaluation/adaptive-weights
+Request: {
+  "skill_style": "navigation_hub",
+  "current_scores": {"semantic_f1": 0.8, "readability": 0.7},
+  "context": {...}
+}
+Response: {
+  "adjusted_weights": {...},
+  "reasoning": "Navigation hubs emphasize clarity...",
+  "expected_improvement": "15% on readability metric"
+}
+```
+
+**Integration Points**:
+1. Phase 3 validation: Detect style → adjust weights
+2. Optimization pipeline: Use adjusted weights in metric function
+3. Evaluation: Report both original and adjusted scores
+
+**Files to Create**:
+1. `src/skill_fleet/core/dspy/metrics/adaptive_weighting.py` (~200 lines)
+2. Update `src/skill_fleet/core/dspy/signatures/phase3_validation.py`
+3. Update `src/skill_fleet/api/routes/evaluation.py` with endpoint
+
+**Timeline**: 1-2 days | **Impact**: 10-15% quality improvement per style category
+
+---
+
+#### **1C: Continuous Training Data Refinement** 📊
+
+**Problem**: Fixed 50 examples; no feedback on which examples help optimizer. Low-quality examples limit optimization potential.
+
+**Solution**: Track example effectiveness, intelligently sample for training.
+
+**Implementation**:
+- New module: `src/skill_fleet/config/training/manager.py`
+  - Class: `TrainingDataManager`
+  - Tracks: Which examples used in which optimizations, success rates
+  - Methods: `score_examples()`, `filter_trainset()`, `identify_gaps()`
+
+**Metadata Schema** (in `config/training/example_metadata.json`):
+```json
+{
+  "example_id": "ex_001",
+  "category": "python",
+  "style": "comprehensive",
+  "created_at": "2026-01-19",
+  "usage_count": 15,
+  "optimization_success_count": 12,
+  "success_rate": 0.80,
+  "avg_improvement": "+8%",
+  "last_used": "2026-01-20T10:30:00Z",
+  "quality_score": 0.88,
+  "tags": ["example-gathering", "real-world"]
+}
+```
+
+**Manager Methods**:
+```python

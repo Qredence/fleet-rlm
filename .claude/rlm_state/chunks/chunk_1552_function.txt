@@ -1,0 +1,38 @@
+<!-- Chunk 1552: bytes 6412216-6413360, type=function -->
+def notify_hitl_response(job_id: str, response: dict[str, Any]) -> None:
+    """
+    Notify the in-flight HITL waiter that a response arrived.
+
+    This is race-safe: the event is set before storing the response,
+    ensuring that any waiters will see the new response.
+    """
+    from .job_manager import get_job_manager
+
+    manager = get_job_manager()
+    job = manager.get_job(job_id)
+    if job is None:
+        return
+
+    # Ensure event is initialized
+    if job.hitl_event is None:
+        job.hitl_event = asyncio.Event()
+
+    # Store response first (atomic with event set)
+    job.hitl_response = response
+    job.hitl_event.set()  # Notify any waiting coroutines
+    job.updated_at = datetime.now(UTC)
+
+    # Update both memory and database
+    manager.update_job(job_id, {"updated_at": job.updated_at, "hitl_response": response})
+
+
+# =============================================================================
+# Session Persistence
+# =============================================================================
+
+
+# Session directory for persistence
+SESSION_DIR = Path(".skill_fleet_sessions")
+SESSION_DIR.mkdir(exist_ok=True)
+
+

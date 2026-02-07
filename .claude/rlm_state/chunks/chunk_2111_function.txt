@@ -1,0 +1,9 @@
+<!-- Chunk 2111: bytes 8042163-8042458, type=function -->
+def test_taxonomy_manager_initialization(temp_taxonomy: Path) -> None:
+    manager = TaxonomyManager(temp_taxonomy)
+
+    assert manager.meta["version"] == "0.1.0"
+    assert "_core/reasoning" in manager.metadata_cache
+    assert manager.metadata_cache["_core/reasoning"].always_loaded is True
+
+

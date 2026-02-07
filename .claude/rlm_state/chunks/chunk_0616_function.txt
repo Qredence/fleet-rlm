@@ -1,0 +1,22 @@
+<!-- Chunk 616: bytes 952114-952577, type=function -->
+def structured_metric(example, pred, trace=None):
+    """Multi-field structured evaluation."""
+    score = 0
+
+    # Check required fields
+    if hasattr(pred, 'summary') and pred.summary:
+        score += 0.3
+
+    if hasattr(pred, 'keywords') and pred.keywords:
+        score += 0.3
+
+    # Check quality
+    if hasattr(pred, 'confidence') and pred.confidence > 0.7:
+        score += 0.4
+
+    return score >= 0.7  # Threshold
+```
+
+### Format Validation
+
+```python

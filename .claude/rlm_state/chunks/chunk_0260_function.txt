@@ -1,0 +1,36 @@
+<!-- Chunk 260: bytes 321799-323273, type=function -->
+def detect_utility_reimplementation(analyzer: ImportAnalyzer) -> list[dict[str, Any]]:
+    """Detect functions that look like reimplemented utilities."""
+    issues = []
+
+    # Common patterns that suggest utility reimplementation
+    utility_patterns = {
+        "serialize": ["serialize", "to_json", "to_dict", "dump"],
+        "deserialize": ["deserialize", "from_json", "from_dict", "load"],
+        "validate": ["validate", "check", "verify", "ensure"],
+        "retry": ["retry", "attempt", "with_retry"],
+        "log": ["log_", "logger", "write_log"],
+        "parse": ["parse_", "extract_", "get_from"],
+        "format": ["format_", "pretty", "stringify"],
+    }
+
+    for func in analyzer.functions:
+        func_name_lower = func["name"].lower()
+
+        for category, patterns in utility_patterns.items():
+            if any(pattern in func_name_lower for pattern in patterns):
+                issues.append({
+                    "type": "potential_utility_reimplementation",
+                    "severity": "info",
+                    "line": func["lineno"],
+                    "category": category,
+                    "function": func["name"],
+                    "message": (
+                        f"Function '{func['name']}' may be reimplementing a common utility. "
+                        f"Consider using existing libraries: {', '.join(COMMON_UTILS.get(category, ['standard library']))}"
+                    ),
+                })
+
+    return issues
+
+

@@ -1,0 +1,54 @@
+<!-- Chunk 1945: bytes 7798243-7799952, type=function -->
+def get_parent_skills(
+    taxonomy_path: str,
+    skills_root: Path,
+) -> list[dict[str, Any]]:
+    """
+    Get parent and sibling skills for context.
+
+    Walks up the taxonomy tree, searching for metadata.json or single-file JSON skills.
+
+    Args:
+        taxonomy_path: The taxonomy path to get parents for
+        skills_root: Root directory of the taxonomy
+
+    Returns:
+        List of parent skill metadata dictionaries with 'path' and 'metadata' keys
+
+    """
+    import json
+
+    from ..common.security import resolve_path_within_root, sanitize_taxonomy_path
+
+    safe_taxonomy_path = sanitize_taxonomy_path(taxonomy_path)
+    if safe_taxonomy_path is None:
+        return []
+
+    path_parts = safe_taxonomy_path.split("/")
+    parent_skills: list[dict[str, Any]] = []
+
+    # Walk up the tree, searching for metadata.json or single-file JSON skills.
+    for i in range(len(path_parts) - 1, 0, -1):
+        parent_path = "/".join(path_parts[:i])
+        parent_dir = resolve_path_within_root(skills_root, parent_path)
+        parent_meta_path = parent_dir / "metadata.json"
+        parent_file_path = resolve_path_within_root(skills_root, f"{parent_path}.json")
+
+        if parent_meta_path.exists():
+            parent_skills.append(
+                {
+                    "path": parent_path,
+                    "metadata": json.loads(parent_meta_path.read_text(encoding="utf-8")),
+                }
+            )
+        elif parent_file_path.exists():
+            parent_skills.append(
+                {
+                    "path": parent_path,
+                    "metadata": json.loads(parent_file_path.read_text(encoding="utf-8")),
+                }
+            )
+
+    return parent_skills
+
+

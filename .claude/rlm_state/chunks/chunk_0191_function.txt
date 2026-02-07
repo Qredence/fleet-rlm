@@ -1,0 +1,35 @@
+<!-- Chunk 191: bytes 293290-294056, type=function -->
+def calc_usr_scr(u):  # Unclear abbreviations
+    ms = 100
+    return min(u.pts, ms)
+```
+
+## When to Abstract vs. When to Duplicate
+
+### When to Abstract
+
+✅ Same logic used in 3+ places
+✅ Complex logic that benefits from naming
+✅ Logic that changes frequently across the codebase
+✅ Cross-cutting concerns (logging, validation, auth)
+
+### When to Duplicate
+
+✅ Simple logic (1-2 lines) that's easier to read inline
+✅ Context-specific behavior that might diverge
+✅ Temporary code that will change soon
+✅ Tests (each test should be independent)
+
+**Example - OK to duplicate:**
+```python
+# Simple checks can be duplicated
+if not user:
+    return None
+
+if not product:
+    return None
+```
+
+**Example - Should abstract:**
+```python
+# Complex validation should be extracted

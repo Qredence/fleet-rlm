@@ -1,0 +1,95 @@
+<!-- Chunk 1843: bytes 7627155-7630591, type=function -->
+def _with_postgres_driver(url: str, driver: str, *, override: bool = False) -> str:
+    """Ensure Postgres URLs include a DBAPI driver when appropriate."""
+    if url.startswith("postgresql+"):
+        if not override:
+            return url
+        _, rest = url.split("://", 1)
+        return f"postgresql+{driver}://{rest}"
+    if url.startswith("postgresql://"):
+        return f"postgresql+{driver}://{url[len('postgresql://') :]}"
+    if url.startswith("postgres://"):
+        return f"postgresql+{driver}://{url[len('postgres://') :]}"
+    return url
+
+
+# Database URL from environment
+# In production: DATABASE_URL is required
+# In development/test: falls back to SQLite for convenience
+RAW_DATABASE_URL = os.getenv("DATABASE_URL")
+_ENV = os.getenv("SKILL_FLEET_ENV", "production")
+
+if not RAW_DATABASE_URL:
+    if _ENV in ("development", "test", "testing"):
+        # Use SQLite for development/testing if no DATABASE_URL is provided
+        RAW_DATABASE_URL = "sqlite:///./skill_fleet_dev.db"
+    else:
+        raise ValueError(
+            "DATABASE_URL environment variable is required in production. "
+            "Set it to a PostgreSQL connection string, e.g.: "
+            "postgresql://user:pass@host/dbname?sslmode=require"
+        )
+
+# Use psycopg (v3) for sync engine when driver isn't specified.
+# SQLite URLs pass through unchanged.
+DATABASE_URL = _with_postgres_driver(RAW_DATABASE_URL, "psycopg")
+
+# Async database URL (derive from DATABASE_URL unless explicitly set).
+# For SQLite, use aiosqlite driver for async support.
+ASYNC_DATABASE_URL = os.getenv("ASYNC_DATABASE_URL")
+if not ASYNC_DATABASE_URL:
+    if RAW_DATABASE_URL.startswith("sqlite"):
+        # SQLite async uses aiosqlite driver
+        ASYNC_DATABASE_URL = RAW_DATABASE_URL.replace("sqlite:", "sqlite+aiosqlite:")
+    else:
+        ASYNC_DATABASE_URL = _with_postgres_driver(RAW_DATABASE_URL, "asyncpg", override=True)
+
+# Check if we're using SQLite (different engine configuration)
+_IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+# Synchronous engine
+# SQLite doesn't support connection pooling like PostgreSQL
+connect_args = {"check_same_thread": False} if _IS_SQLITE else {}
+if not _IS_SQLITE:
+    connect_args.update({
+        "connect_timeout": 10,
+        "options": "-c idle_in_transaction_session_timeout=60000"  # 60s timeout
+    })
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=bool(not _IS_SQLITE),
+    pool_size=20 if not _IS_SQLITE else 0,  # Increased from 10
+    max_overflow=30 if not _IS_SQLITE else 0,  # Increased from 20
+    pool_recycle=300 if not _IS_SQLITE else -1,  # Recycle connections every 5 min
+    pool_timeout=30,  # Wait up to 30s for connection
+    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+    connect_args=connect_args,
+)
+
+# Synchronous session factory
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+)
+
+# Async engine
+# SQLite async doesn't support connection pooling
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    pool_pre_ping=bool(not _IS_SQLITE),
+    pool_size=10 if not _IS_SQLITE else 0,
+    max_overflow=20 if not _IS_SQLITE else 0,
+    pool_recycle=300 if not _IS_SQLITE else -1,  # Recycle connections every 5 min
+    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+)
+
+# Async session factory
+AsyncSessionLocal = async_sessionmaker(
+    async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+

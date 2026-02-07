@@ -1,0 +1,17 @@
+<!-- Chunk 1483: bytes 6325900-6326307, type=class -->
+class ForbiddenException(SkillFleetAPIError):
+    """Forbidden exception for valid authentication but insufficient permissions."""
+
+    status_code: int = 403
+
+    def __init__(self, detail: str = "Insufficient permissions") -> None:
+        """
+        Initialize forbidden exception.
+
+        Args:
+            detail: Error message
+
+        """
+        super().__init__(detail=detail, status_code=403)
+
+

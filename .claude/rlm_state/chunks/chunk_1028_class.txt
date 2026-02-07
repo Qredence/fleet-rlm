@@ -1,0 +1,700 @@
+<!-- Chunk 1028: bytes 3636115-3657405, type=class -->
+class TestOptimizationRecommendEndpoint:
+    """Test POST /api/v1/optimization/recommend."""
+
+    @pytest.mark.asyncio
+    async def test_recommend_returns_valid_response(self, client: AsyncClient):
+        """Should return valid recommendation."""
+        response = await client.post(
+            "/api/v1/optimization/recommend",
+            json={
+                "trainset_size": 50,
+                "budget_dollars": 10.0,
+                "quality_target": 0.85,
+                "domain": "testing",
+            },
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert "recommended" in data
+        assert "config" in data
+        assert "estimated_cost" in data
+        assert "estimated_time_minutes" in data
+        assert "confidence" in data
+        assert "reasoning" in data
+        assert "alternatives" in data
+
+    @pytest.mark.asyncio
+    async def test_recommend_respects_budget_constraint(self, client: AsyncClient):
+        """Low budget should recommend cheap optimizer."""
+        response = await client.post(
+            "/api/v1/optimization/recommend",
+            json={
+                "trainset_size": 100,
+                "budget_dollars": 0.50,
+            },
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Should recommend cheapest option
+        assert data["recommended"] == "reflection_metrics"
+
+    @pytest.mark.asyncio
+    async def test_recommend_with_time_constraint(self, client: AsyncClient):
+        """Tight time constraint should recommend fast optimizer."""
+        response = await client.post(
+            "/api/v1/optimization/recommend",
+            json={
+                "trainset_size": 500,
+                "budget_dollars": 100.0,
+                "time_constraint_minutes": 1,
+            },
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Should recommend fastest option despite budget
+        assert data["recommended"] == "reflection_metrics"
+
+    @pytest.mark.asyncio
+    async def test_recommend_validation_error(self, client: AsyncClient):
+        """Invalid input should return 422."""
+        response = await client.post(
+            "/api/v1/optimization/recommend",
+            json={
+                "trainset_size": -1,  # Invalid
+            },
+        )
+        
+        assert response.status_code == 422
+```
+
+**Run Tests**:
+```bash
+uv run pytest tests/integration/test_optimizer_selection_api.py -v
+```
+
+---
+
+### Task 0.2.7: Documentation (~0.5 days)
+
+**File**: `docs/OPTIMIZER_SELECTION.md`
+
+```markdown
+# Optimizer Auto-Selection Guide
+
+The Optimizer Auto-Selection Engine intelligently recommends the best DSPy optimizer based on your task characteristics, budget, and quality goals.
+
+## Quick Start
+
+### CLI Usage
+
+```bash
+# Auto-select optimizer based on trainset and budget
+uv run skill-fleet optimize --auto-select --budget 10.0 --quality-target 0.85
+
+# With time constraint
+uv run skill-fleet optimize --auto-select --time-limit 5 --budget 20.0
+```
+
+### API Usage
+
+```bash
+curl -X POST http://localhost:8000/api/v1/optimization/recommend \
+  -H "Content-Type: application/json" \
+  -d '{
+    "trainset_size": 50,
+    "budget_dollars": 10.0,
+    "quality_target": 0.85,
+    "domain": "testing"
+  }'
+```
+
+## Decision Rules
+
+| Condition | Recommended Optimizer | Why |
+|-----------|----------------------|-----|
+| time < 2 min | Reflection Metrics | Fastest (<1 sec) |
+| budget < $1 | Reflection Metrics | Cheapest ($0.01-0.05) |
+| trainset < 100 AND budget < $5 | GEPA | Fast + cheap for small data |
+| trainset < 500 AND budget < $20 | MIPROv2 (light) | Good balance |
+| trainset >= 500 AND budget >= $20 | MIPROv2 (medium) | Best quality |
+| budget >= $100 | MIPROv2 (heavy) | Maximum quality |
+| budget >= $100 AND quality >= 0.95 | BootstrapFinetune | Weight tuning |
+
+## Cost Estimates
+
+| Optimizer | Cost per 100 examples | Time per 100 examples |
+|-----------|----------------------|----------------------|
+| Reflection Metrics | $0.05 | 30 sec |
+| BootstrapFewShot | $0.10 | 1 min |
+| GEPA | $0.50 | 5 min |
+| MIPROv2 (light) | $1.25 | 7 min |
+| MIPROv2 (medium) | $2.50 | 15 min |
+| MIPROv2 (heavy) | $6.25 | 40 min |
+| BootstrapFinetune | $20.00 | 60 min |
+
+## Metrics Tracking
+
+Results are automatically recorded to `config/selector_metrics.jsonl` for future learning. The system uses historical data to improve confidence in recommendations.
+
+## API Response Example
+
+```json
+{
+  "recommended": "miprov2",
+  "config": {
+    "auto": "light",
+    "max_bootstrapped_demos": 2,
+    "max_labeled_demos": 2,
+    "num_threads": 8
+  },
+  "estimated_cost": 1.25,
+  "estimated_time_minutes": 7,
+  "confidence": 0.82,
+  "reasoning": "Medium trainset (50) + moderate budget ($10.00). MIPROv2 'light' provides good quality/cost balance.",
+  "alternatives": [
+    {
+      "optimizer": "reflection_metrics",
+      "cost": "$0.03",
+      "time": "< 1 min",
+      "quality_risk": 0.15,
+      "note": "Fastest option, may sacrifice some quality"
+    },
+    {
+      "optimizer": "bootstrap_fewshot",
+      "cost": "$0.05",
+      "time": "1 min",
+      "quality_risk": 0.10,
+      "note": "Safe fallback, always works"
+    }
+  ]
+}
+```
+```
+
+---
+
+## ✅ Completion Checklist
+
+- [ ] **0.2.1**: Create `selector.py` with OptimizerSelector class
+- [ ] **0.2.2**: Implement all decision rules (7 rules + fallback)
+- [ ] **0.2.3**: Add `POST /api/v1/optimization/recommend` endpoint
+- [ ] **0.2.4**: Add `--auto-select` CLI flag with confirmation flow
+- [ ] **0.2.5**: Add metrics tracking to `selector_metrics.jsonl`
+- [ ] **0.2.6**: Write unit + integration tests (15+ tests)
+- [ ] **0.2.7**: Create `OPTIMIZER_SELECTION.md` documentation
+
+---
+
+## 🧪 Verification Commands
+
+```bash
+# 1. Type check new module
+uv run ty check src/skill_fleet/core/dspy/optimization/selector.py
+
+# 2. Run unit tests
+uv run pytest tests/unit/test_optimizer_selector.py -v
+
+# 3. Start server and test API
+uv run skill-fleet serve --reload &
+sleep 3
+curl -X POST http://localhost:8000/api/v1/optimization/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"trainset_size": 50, "budget_dollars": 10.0}'
+
+# 4. Test CLI auto-select
+uv run skill-fleet optimize --auto-select --help
+
+# 5. Run integration tests
+uv run pytest tests/integration/test_optimizer_selection_api.py -v
+
+# 6. Full test suite
+uv run pytest -v
+```
+
+---
+
+## 📊 Success Metrics
+
+| Metric | Target | How to Measure |
+|--------|--------|----------------|
+| Selection accuracy | > 80% | Compare recommended vs actual best |
+| Cost estimate accuracy | ±20% | Compare estimated vs actual cost |
+| Auto-select adoption | > 50% | Track CLI usage stats |
+| Quality improvement | +10% | Compare auto vs manual selection |
+
+---
+
+## 🔗 Dependencies & Blocks
+
+**Depends On**:
+- 0.1 (Job Storage) ✅ COMPLETE
+
+**Blocks**:
+- 1.1 (MIPROv2 Enhancement)
+- 1.4 (Optimization Pipeline)
+- Phase 1 E2E Tests
+
+
+============================================================
+END FILE: docs/internal/plans/archive/EXEC-0.2-optimizer-auto-selection.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/IMPLEMENTATION_REVIEW.md
+============================================================
+
+# Implementation Review: Interactive Chat CLI & Auto-Save
+
+**Date**: January 12, 2026  
+**Version**: v2.0.0  
+**Status**: ✅ Complete and Tested
+
+---
+
+## Overview
+
+This document reviews the implementation of interactive chat CLI for skill creation with automatic save-to-disk functionality. The system enables users to create AI skills through a guided conversation interface powered by DSPy.
+
+---
+
+## Architecture Changes
+
+### 1. **API Server Enhancements**
+
+#### File: `src/skill_fleet/api/routes/skills.py`
+
+**New Function**: `_save_skill_to_taxonomy(result)`
+
+- Automatically saves completed skills to the taxonomy directory
+- Uses `TaxonomyManager.register_skill()` for disk persistence
+- Saves both `SKILL.md` (with YAML frontmatter) and `metadata.json`
+- **Parameters**: `SkillCreationResult` from the workflow
+- **Returns**: Path where skill was saved, or `None` on failure
+- **Environment Variable**: `SKILL_FLEET_SKILLS_ROOT` (defaults to `skills/`)
+
+**Auto-Save Integration**:
+
+- Triggered when skill creation reaches `completed` status
+- Stores `saved_path` in `JobState` for client retrieval
+- Logs successes and failures for debugging
+
+#### File: `src/skill_fleet/api/jobs.py`
+
+**Job State Enhancement**:
+
+- Added `saved_path: str | None` field to track where skills are saved
+- Allows clients to see the final location of created skills
+
+#### File: `src/skill_fleet/api/routes/hitl.py`
+
+**Response Enhancement**:
+
+- Added `saved_path` field to HITL prompt response
+- Clients can now check where a completed skill was saved
+
+---
+
+### 2. **CLI Client Improvements**
+
+#### File: `src/skill_fleet/cli/client.py`
+
+**Error Handling**:
+
+- Added specific 404 handling for `get_hitl_prompt()`
+- Returns helpful error message when job is lost (server restart)
+- Error: `"Job {job_id} not found. The server may have restarted and lost the job state."`
+
+#### File: `src/skill_fleet/cli/commands/chat.py`
+
+**New HITL Handlers**: All 4 Phase 1 & 2 & 3 interactions now supported:
+
+1. **Clarification (`clarify`)**
+
+   - Displays questions in yellow panel
+   - Prompts user for answers
+   - Sends responses back to server
+
+2. **Confirmation (`confirm`)**
+
+   - Shows understanding summary in cyan panel
+   - Displays proposed taxonomy path
+   - Allows proceed/revise/cancel
+
+3. **Preview (`preview`)**
+
+   - Shows content preview in blue panel
+   - Displays highlights
+   - Allows proceed/refine
+
+4. **Validation (`validate`)**
+   - Shows validation report in green/red panel
+   - Indicates pass/fail status
+   - Allows proceed/refine
+
+**Better Error Handling**:
+
+- Specific handlers for `httpx.HTTPStatusError`
+- Catches `ValueError` for job not found scenarios
+- Generic exception handler with type name
+- Fallback for unknown HITL types
+
+#### File: `src/skill_fleet/cli/commands/create.py`
+
+**Similar Improvements**:
+
+- All HITL handlers added
+- Better error messaging
+- Displays `saved_path` on completion
+
+#### File: `src/skill_fleet/cli/commands/serve.py`
+
+**Server Configuration**:
+
+- Changed `reload` from hardcoded `True` to opt-in flag (`--reload`/`-r`)
+- Production mode (default): Stable, no auto-reload
+- Development mode (with `--reload`): Auto-reload with warnings
+- Warning message about in-memory job state loss during reload
+
+---
+
+## Data Flow
+
+### Skill Creation Journey
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     USER (CLI)                               │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                    (chat session)
+                         │
+         ┌───────────────┴──────────────────┐
+         │                                   │
+    ┌────▼─────────────────────────────┐   │
+    │  GATHERING → PROPOSING           │   │
+    │  (GuidedCreatorProgram)          │   │
+    │  ✓ Questions answered            │   │
+    │  ✓ Taxonomy path proposed        │   │
+    └────┬──────────────────────────────┘   │
+         │                                   │
+         │ (job_id returned)                │
+         │                                   │
+    ┌────▼──────────────────────────────────────┐
+    │  GENERATING (SkillCreationProgram)       │
+    │  Phase 1: Understanding & Planning        │
+    │  ├─ Clarification Questions (HITL)       │
+    │  ├─ Understanding Confirmation (HITL)    │
+    │  │                                        │
+    │  Phase 2: Content Generation              │
+    │  ├─ Generate Content                      │
+    │  ├─ Content Preview (HITL)                │
+    │  │                                        │
+    │  Phase 3: Validation & Refinement         │
+    │  ├─ Validate Content                      │
+    │  ├─ Validation Report (HITL)              │
+    │  │                                        │
+    │  ✓ Content Generated & Validated          │
+    └────┬─────────────────────────────────────┘
+         │
+    ┌────▼────────────────────────────┐
+    │  AUTO-SAVE TO TAXONOMY          │
+    │  ├─ Create skill directory       │
+    │  ├─ Save SKILL.md (with YAML FM) │
+    │  ├─ Save metadata.json           │
+    │  ├─ Create subdirectories        │
+    │  └─ Store saved_path in JobState │
+    └────┬─────────────────────────────┘
+         │
+    ┌────▼──────────────────────────────┐
+    │  COMPLETED                         │
+    │  ├─ Return skill_content           │
+    │  ├─ Return saved_path              │
+    │  └─ Display "📁 Skill saved to..." │
+    └────────────────────────────────────┘
+```
+
+---
+
+## HITL Workflow Phases
+
+### Phase 1: Understanding & Planning
+
+**Clarification HITL**
+
+- **Display**: Yellow panel with numbered questions
+- **Input**: Markdown-formatted questions from LLM
+- **Response**: User answers as string
+- **Next**: Understanding confirmation
+
+**Confirmation HITL**
+
+- **Display**: Cyan panel with summary and taxonomy path
+- **Input**: Markdown-formatted summary from LLM
+- **Response**: `proceed`/`revise`/`cancel`
+- **Next**: Content generation (if proceeded)
+
+### Phase 2: Content Generation
+
+**Preview HITL**
+
+- **Display**: Blue panel with content preview
+- **Input**: Generated skill content (Markdown)
+- **Input**: Highlights array (key points)
+- **Response**: `proceed`/`refine`
+- **Next**: Validation (if proceeded)
+
+### Phase 3: Validation & Refinement
+
+**Validation HITL**
+
+- **Display**: Green/red panel based on pass/fail
+- **Input**: Validation report (Markdown)
+- **Input**: `passed` boolean
+- **Response**: `proceed`/`refine`
+- **Next**: Completion (if proceeded)
+
+---
+
+## Testing Results
+
+### Successful Test Run
+
+**Scenario**: Create pytest foundations skill
+
+```
+✓ Phase 1: GATHERING
+  - Asked user about pytest topics
+  - User clarified: "foundational best practices like test discovery"
+  - Confidence: 95%
+
+✓ Phase 1: PROPOSING
+  - Proposed path: technical_skills/software_testing/python_testing/pytest
+  - Proposed name: pytest-foundations-best-practices
+  - User confirmed: "Yes"
+
+✓ Skill Job Started: a7ae667d-0ade-4d9b-b6b4-c4a423e32c72
+
+✓ Phase 1: Clarification HITL
+  - Presented 4 clarifying questions
+  - User answered about directory structure, pyproject.toml, parametrize, package manager
+  - Status: pending_hitl → running → pending_hitl
+
+✓ Phase 1: Confirmation HITL
+  - Presented understanding summary
+  - User proceeded
+  - Status: running
+
+✓ Phase 2: Content Generation
+  - Generated pytest skill content (~5KB)
+  - Status: pending_hitl
+
+✓ Phase 2: Preview HITL
+  - Displayed content preview
+  - Showed highlights
+  - User proceeded
+  - Status: running → pending_hitl
+
+✓ Phase 3: Validation HITL
+  - Displayed validation report
+  - Score: 0.92 (PASS)
+  - User proceeded
+  - Status: running → pending_hitl
+
+✓ Completion
+  - Status: completed
+  - Saved Path: skills/technical_skills/testing/python/pytest
+  - Skill saved to disk ✅
+```
+
+---
+
+## Error Handling
+
+### Graceful Degradation
+
+| Error                     | Handling           | User Message                                       |
+| ------------------------- | ------------------ | -------------------------------------------------- |
+| Server connection lost    | Check connectivity | "Could not connect to API server at {url}"         |
+| Job lost (server restart) | Inform user        | "Job {id} not found. Server may have restarted..." |
+| HTTP 4xx/5xx errors       | Display error code | "HTTP Error: {status} - {text}"                    |
+| Unknown HITL type         | Show fallback      | "Unknown interaction type: {type}"                 |
+| Skill save failure        | Log error          | "Job completed but skill could not be saved"       |
+
+### Production Mode Features
+
+**Server Mode Options**:
+
+- **Production** (default): `uv run python -m skill_fleet.cli.app serve`
+
+  - No auto-reload
+  - Stable job state
+  - Recommended for production
+
+- **Development** (`--reload`): `uv run python -m skill_fleet.cli.app serve --reload`
+  - Auto-reload on code changes
+  - Warning: "Server restarts will lose in-memory job state"
+
+---
+
+## Known Limitations
+
+### Current Implementation
+
+1. **In-Memory Job Store**
+
+   - Jobs lost on server restart
+   - Suitable for single-session use
+   - Production should use persistent storage (Redis)
+
+2. **Skill Directory Generation**
+
+   - Creates basic structure (SKILL.md, metadata.json, subdirectories)
+   - Future: Generate more comprehensive examples and tests
+   - Tracked as follow-up improvement
+
+3. **HITL Response Format**
+   - Answers stored as generic strings
+   - Future: Structured parsing per interaction type
+   - Current: Works reliably for all phases
+
+---
+
+## Code Quality
+
+### Linting & Formatting ✅
+
+- **Ruff**: All checks passed
+- **Format**: Applied to all files
+- **Imports**: Properly sorted and optimized
+
+### Test Coverage
+
+- **Unit Tests**: 143+ tests passing
+- **Integration Tests**: Chat and serve commands tested
+- **Manual Testing**: Full end-to-end workflow verified
+
+---
+
+## Files Modified
+
+| File                                     | Changes                            | Status |
+| ---------------------------------------- | ---------------------------------- | ------ |
+| `src/skill_fleet/api/routes/skills.py`   | Added `_save_skill_to_taxonomy()`  | ✅     |
+| `src/skill_fleet/api/routes/hitl.py`     | Added `saved_path` to response     | ✅     |
+| `src/skill_fleet/api/jobs.py`            | Added `saved_path` field           | ✅     |
+| `src/skill_fleet/cli/client.py`          | Better error handling              | ✅     |
+| `src/skill_fleet/cli/commands/chat.py`   | All HITL handlers + error handling | ✅     |
+| `src/skill_fleet/cli/commands/create.py` | All HITL handlers + error handling | ✅     |
+| `src/skill_fleet/cli/commands/serve.py`  | Optional `--reload` flag           | ✅     |
+
+---
+
+## Usage Guide
+
+### Start Server (Production)
+
+```bash
+uv run python -m skill_fleet.cli.app serve
+```
+
+### Start Chat (Create Skill)
+
+```bash
+uv run python -m skill_fleet.cli.app chat
+```
+
+### Expected User Flow
+
+```
+Agent: Hello! What kind of capability would you like to build today?
+You: Create a skill for pytest best practices
+
+Agent: [Asks clarifying questions in GATHERING phase]
+You: [Answer questions]
+
+Agent: [Proposes taxonomy path in PROPOSING phase]
+You: Yes
+
+🚀 Skill creation job started: {job_id}
+
+Agent: [Presents clarification questions in HITL]
+You: [Answer questions]
+
+Agent: [Shows understanding summary in HITL]
+You: proceed
+
+Agent: [Displays content preview in HITL]
+You: proceed
+
+Agent: [Shows validation report in HITL]
+You: proceed
+
+✨ Skill Creation Completed!
+📁 Skill saved to: skills/technical_skills/testing/python/pytest
+```
+
+---
+
+## Next Steps (Future Improvements)
+
+1. **Persistent Job Store**: Implement Redis/database backing
+2. **Enhanced Skill Generation**: More comprehensive examples and tests
+3. **Structured HITL Responses**: Parse and validate user inputs per type
+4. **Progress Tracking**: Save partial state for interrupted sessions
+5. **Batch Skill Creation**: Support creating multiple skills from templates
+
+---
+
+## Conclusion
+
+The implementation successfully integrates interactive chat CLI with automatic skill persistence. The system is ready for use with understanding of current limitations and a clear roadmap for future enhancements.
+
+✅ **Status**: Ready for Production (with noted limitations)
+
+
+============================================================
+END FILE: docs/internal/plans/archive/IMPLEMENTATION_REVIEW.md
+============================================================
+
+============================================================
+FILE: docs/internal/plans/archive/IMPLEMENTATION_REVIEW_1_1.md
+============================================================
+
+# Phase 1.1: Adaptive Metric Weighting - Implementation Review
+
+**Date**: January 21, 2026  
+**Status**: ✅ **PRODUCTION-READY**  
+**Tests**: 26/26 passing | Linting: ✅ Clean | Type Safety: ✅ Full
+
+---
+
+## Executive Summary
+
+**Phase 1.1 successfully implements adaptive metric weighting** - a system that adjusts DSPy evaluation metrics based on skill style (navigation_hub, comprehensive, minimal). This enables the optimizer to prioritize metrics appropriate to each skill type, expected to improve quality scores by 10-15%.
+
+**Key Achievement**: Complete end-to-end integration from DSPy signatures → weights calculation → API endpoint → comprehensive tests.
+
+---
+
+## Architecture Review
+
+### 1. Core Module (`adaptive_weighting.py`)
+
+**Strengths**:
+- ✅ **Clean separation of concerns**: Enums, dataclasses, signatures, modules, and utilities are distinct
+- ✅ **Type-safe throughout**: Uses `StrEnum`, `Literal`, type hints, Pydantic models
+- ✅ **DSPy best practices**: Proper signature definition with `InputField`/`OutputField`
+- ✅ **Modular design**: `SkillStyle` enum → `MetricWeights` dataclass → `AdaptiveMetricWeighting` class
+- ✅ **Defensive programming**: Fallback to comprehensive style on invalid input
+
+**Design Patterns**:
+
+```python
+# Pattern 1: StrEnum for type-safe style tracking

@@ -1,0 +1,39 @@
+<!-- Chunk 1926: bytes 7745565-7746772, type=function -->
+def log_quality_metrics(quality_data: dict[str, Any], prefix: str = "quality") -> None:
+    """
+    Log quality assessment metrics to MLflow.
+
+    Logs validation scores, issue counts, and other quality indicators
+    that can be tracked over time in the MLflow UI.
+
+    Args:
+        quality_data: Dictionary with quality assessment data
+        prefix: Prefix for metric names (default: "quality")
+
+    Examples:
+        >>> log_quality_metrics({
+        ...     "score": 0.95,
+        ...     "issues_count": 2,
+        ...     "warnings_count": 1,
+        ...     "refinements_made": 3
+        ... })
+        # Logs: quality_score, quality_issues_count, quality_warnings_count, quality_refinements_made
+
+    """
+    try:
+        import mlflow
+
+        metrics: dict[str, float] = {}
+
+        # Extract common quality metrics
+        for key, value in quality_data.items():
+            if isinstance(value, (int, float, bool)):
+                metrics[f"{prefix}_{key}"] = float(value)
+
+        mlflow.log_metrics(metrics)  # type: ignore[attr-defined]
+        logger.debug(f"Logged quality metrics: {metrics}")
+
+    except Exception as e:
+        logger.warning(f"Failed to log quality metrics: {e}")
+
+

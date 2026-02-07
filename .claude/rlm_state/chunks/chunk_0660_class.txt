@@ -1,0 +1,5 @@
+<!-- Chunk 660: bytes 1269022-1269067, type=class -->
+class RlmReplError(RuntimeError):
+    pass
+
+

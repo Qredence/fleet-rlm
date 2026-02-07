@@ -1,0 +1,18 @@
+<!-- Chunk 1373: bytes 5083593-5084054, type=function -->
+def test_update_user():
+    # Override dependency for test
+    async def override_get_db():
+        return test_session  # Use test DB
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        client = TestClient(app)
+        response = client.patch("/users/1", json={"name": "Test"})
+        assert response.status_code == 200
+    finally:
+        app.dependency_overrides.clear()  # Always clean up!
+```
+
+## Class-Based Dependencies
+
+```python

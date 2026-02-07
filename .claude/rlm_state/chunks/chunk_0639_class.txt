@@ -1,0 +1,62 @@
+<!-- Chunk 639: bytes 999064-1000872, type=class -->
+class GatherRequirementsSignature(dspy.Signature):
+    """Gather and analyze requirements for skill creation.
+    
+    Extract user intent, determine taxonomy placement, and identify
+    related skills and dependencies.
+    """
+    
+    # INPUT FIELDS
+    task_description: str = dspy.InputField(
+        desc="User's task description for skill creation"
+    )
+    
+    # OUTPUT FIELDS
+    domain: Literal[
+        "python",
+        "web",
+        "devops",
+        "testing",
+        "api",
+        "database",
+        "architecture",
+        "practices",
+        "domain",
+        "memory",
+    ] = dspy.OutputField(
+        desc="Primary domain category for this skill"
+    )
+    
+    category: str = dspy.OutputField(
+        desc="Specific category within domain (e.g., 'async', 'authentication')"
+    )
+    
+    target_level: Literal["beginner", "intermediate", "advanced"] = dspy.OutputField(
+        desc="Skill complexity level"
+    )
+    
+    skill_type: Literal["guide", "reference", "workflow", "troubleshooting"] = dspy.OutputField(
+        desc="Type of skill content to generate"
+    )
+    
+    topics: list[str] = dspy.OutputField(
+        desc="3-7 specific topics this skill should cover"
+    )
+    
+    parent_skills: list[str] = dspy.OutputField(
+        desc="Prerequisite skills user should know (e.g., ['python/basics', 'testing/pytest'])"
+    )
+    
+    related_skills: list[str] = dspy.OutputField(
+        desc="Related skills for cross-referencing"
+    )
+    
+    estimated_length: Literal["short", "medium", "long"] = dspy.OutputField(
+        desc="Estimated skill length: short (<500 words), medium (500-2000), long (>2000)"
+    )
+    
+    key_insights: list[str] = dspy.OutputField(
+        desc="2-4 key insights or principles this skill teaches, quality score >0.75"
+    )
+
+

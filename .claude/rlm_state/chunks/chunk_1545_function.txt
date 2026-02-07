@@ -1,0 +1,46 @@
+<!-- Chunk 1545: bytes 6404447-6405729, type=function -->
+def initialize_job_manager(db_repo: Any = None) -> JobManager:
+    """
+    Initialize job manager with database persistence (call at API startup).
+
+    Args:
+        db_repo: Ignored (kept for compatibility), persistence is enabled via transactional sessions.
+
+    Returns:
+        Initialized JobManager instance
+
+    """
+    global _job_manager
+    _job_manager = JobManager()
+    _job_manager.enable_persistence()
+    logger.info("JobManager initialized with database persistence")
+    return _job_manager
+
+
+============================================================
+END FILE: src/skill_fleet/api/services/job_manager.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/services/jobs.py
+============================================================
+
+"""Job management for async skill creation and HITL tracking."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from ...common.security import resolve_path_within_root
+from ..schemas.models import DeepUnderstandingState, JobState, TDDWorkflowState
+
+logger = logging.getLogger(__name__)
+
+

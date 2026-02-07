@@ -1,0 +1,9 @@
+<!-- Chunk 1744: bytes 7344749-7345033, type=class -->
+class BestPractice(BaseModel):
+    """A best practice recommendation."""
+
+    title: str = Field(description="Best practice title")
+    description: str = Field(description="What to do and why")
+    example: str = Field(default="", description="Example demonstrating the practice")
+
+

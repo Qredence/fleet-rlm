@@ -1,0 +1,9 @@
+<!-- Chunk 1854: bytes 7637417-7637582, type=class -->
+class SkillStyleEnum:
+    """Skill structural style pattern."""
+
+    NAVIGATION_HUB = "navigation_hub"
+    COMPREHENSIVE = "comprehensive"
+    MINIMAL = "minimal"
+
+

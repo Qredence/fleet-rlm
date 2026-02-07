@@ -1,0 +1,16 @@
+<!-- Chunk 242: bytes 309771-310077, type=class -->
+class ProductProcessor(BaseProcessor):
+    def process(self, product):
+        self.sanitize(product)
+        self.validate(product)
+        self.transform_product(product)
+
+    def transform_product(self, product): ...
+```
+
+## Simplify Conditional Logic
+
+### Pattern: Guard Clauses
+
+**Before:**
+```python

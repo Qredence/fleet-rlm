@@ -1,0 +1,4 @@
+<!-- Chunk 36: bytes 12424-12666, type=h1 -->
+# Good - includes trigger phrases
+description: Manages Linear project workflows including sprint planning, task creation, and status tracking. Use when user mentions "sprint", "Linear tasks", "project planning", or asks to "create tickets".
+

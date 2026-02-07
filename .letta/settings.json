@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(src/skill_fleet/infrastructure/db/**)",
+      "Write(**)",
+      "Bash(uv run pytest)",
+      "Bash(uv run pytest tests/integration/test_job_persistence_phase_0_1.py)",
+      "Edit(tests/integration/**)",
+      "Bash(uv run pytest tests/integration/test_understanding_workflow.py)",
+      "Bash(uv run pytest tests/integration/test_hitl_workflows.py)",
+      "ShellCommand",
+      "Bash(wc:*)",
+      "TodoWrite",
+      "Read(.skills/dspy-programming/references/**)",
+      "Shell",
+      "Bash(python -c \"import os,re\nroot='.skills'\npatterns=[r'dspy\\\\.OpenAI\\\\b', r'dspy\\\\.settings\\\\.configure\\\\b']\nfor pat in patterns:\n  rx=re.compile(pat)\n  print('\\n==',pat,'==')\n  for dirpath,_,filenames in os.walk(root):\n    for fn in filenames:\n      if not fn.endswith('.md'): continue\n      path=os.path.join(dirpath,fn)\n      try:\n        txt=open(path,'r',encoding='utf-8').read()\n      except Exception:\n        continue\n      if rx.search(txt):\n        # show line numbers\n        for i,line in enumerate(txt.splitlines(),1):\n          if rx.search(line):\n            print(f'{path}:{i}:{line.strip()}')\n\")",
+      "Bash(python - <<'PY'\nimport os,re\nroot='.skills'\n# validate SKILL.md frontmatter name matches directory\nimport yaml\nfrom pathlib import Path\n\ndef parse_frontmatter(text:str):\n  if not text.startswith('---'):\n    return None\n  parts=text.split('---',2)\n  if len(parts)<3:\n    return None\n  fm=parts[1]\n  return yaml.safe_load(fm)\n\nbad=[]\nfor p in Path(root).glob('*/SKILL.md'):\n  txt=p.read_text('utf-8')\n  fm=parse_frontmatter(txt)\n  if not isinstance(fm,dict):\n    bad.append((str(p),'missing/invalid frontmatter'))\n    continue\n  name=fm.get('name')\n  dirname=p.parent.name\n  if name!=dirname:\n    bad.append((str(p),f'name {name!r} != dir {dirname!r}'))\n  # agentskills name constraints\n  if not isinstance(name,str):\n    continue\n  if len(name)<1 or len(name)>64:\n    bad.append((str(p),f'name length {len(name)}'))\n  if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', name):\n    bad.append((str(p),f'name violates pattern: {name}'))\n\nauth=[]\nfor item in bad:\n  print('BAD:',item[0],'->',item[1])\nprint('Total bad:',len(bad))\nPY)",
+      "Bash(python - <<'PY'\nimport os,re\nroot='.skills'\npatterns={\n  'dspy.OpenAI': re.compile(r'dspy\\.OpenAI\\b'),\n  'dspy.settings.configure': re.compile(r'dspy\\.settings\\.configure\\b'),\n  'attr .rationale': re.compile(r'\\.rationale\\b'),\n  'dspy.Parallel ctor': re.compile(r'dspy\\.Parallel\\s*\\('),\n  'dspy.Parallel kwarg': re.compile(r'dspy\\.Parallel\\s*\\([^)]*='),\n}\nfor label,rx in patterns.items():\n  hits=[]\n  for dirpath,_,filenames in os.walk(root):\n    for fn in filenames:\n      if not fn.endswith('.md'): continue\n      path=os.path.join(dirpath,fn)\n      try:\n        txt=open(path,'r',encoding='utf-8').read().splitlines()\n      except Exception:\n        continue\n      for i,line in enumerate(txt,1):\n        if rx.search(line):\n          hits.append((path,i,line.strip()))\n  print('\\n==',label,'==')\n  if not hits:\n    print('  (none)')\n    continue\n  for path,i,line in hits[:80]:\n    print(f'{path}:{i}: {line}')\n  if len(hits)>80:\n    print(f'  ... {len(hits)-80} more')\nPY)",
+      "Bash(python - <<'PY'\nimport os,re\nroot='.skills'\nrx=re.compile(r'dspy\\.Parallel\\s*\\(\\s*\\w+\\s*=')\nprint('Scanning for dspy.Parallel called with keyword tasks (likely wrong)...')\nfor dirpath,_,filenames in os.walk(root):\n  for fn in filenames:\n    if not fn.endswith('.md'): continue\n    path=os.path.join(dirpath,fn)\n    try:\n      lines=open(path,'r',encoding='utf-8').read().splitlines()\n    except Exception:\n      continue\n    for i,line in enumerate(lines,1):\n      if rx.search(line):\n        print(f'{path}:{i}:{line.strip()}')\nPY)",
+      "Read(.skills/dspy-basics/**)",
+      "Bash(python - <<'PY'\nimport os\nroot='src/skill_fleet'\npy=0\nfor dp,_,fns in os.walk(root):\n  for fn in fns:\n    if fn.endswith('.py'): py+=1\nprint('python_files',py)\nPY)",
+      "Bash(ls:*)",
+      "Bash(python - <<'PY'\nimport os,re\nroot='src/skill_fleet'\nrx=re.compile(r'\\bdspy\\.(settings\\.|OpenAI\\b|configure\\(|configure_cache\\(|context\\(|LM\\()')\nhits=[]\nfor dirpath,_,fns in os.walk(root):\n  for fn in fns:\n    if not fn.endswith('.py'): continue\n    path=os.path.join(dirpath,fn)\n    txt=open(path,'r',encoding='utf-8').read().splitlines()\n    for i,line in enumerate(txt,1):\n      if rx.search(line):\n        hits.append((path,i,line.strip()))\nprint('DSPy hits:',len(hits))\nfor h in hits[:80]:\n  print(f'{h[0]}:{h[1]}:{h[2]}')\nPY)",
+      "Bash(python - <<'PY'\nimport os,re\nroot='src/skill_fleet/core/workflows'\nrx=re.compile(r'class\\s+\\w*Workflow\\b')\nhits=[]\nfor dirpath,_,fns in os.walk(root):\n  for fn in fns:\n    if not fn.endswith('.py'): continue\n    path=os.path.join(dirpath,fn)\n    txt=open(path,'r',encoding='utf-8').read().splitlines()\n    for i,line in enumerate(txt,1):\n      if rx.search(line):\n        hits.append((path,i,line.strip()))\nprint('Workflow classes:',len(hits))\nfor h in hits:\n  print(f'{h[0]}:{h[1]}:{h[2]}')\nPY)",
+      "Bash(python - <<'PY'\nimport os,re\nroot='src/skill_fleet'\n# Quick map of top-level packages to a count of .py files\npkg_counts={}\nfor dirpath,_,fns in os.walk(root):\n  for fn in fns:\n    if not fn.endswith('.py'): continue\n    rel=os.path.relpath(dirpath,root)\n    top=rel.split(os.sep,1)[0]\n    pkg_counts[top]=pkg_counts.get(top,0)+1\nprint('Top-level py file counts:')\nfor k in sorted(pkg_counts):\n  print(f'{k}: {pkg_counts[k]}')\nPY)"
+    ]
+  }
+}

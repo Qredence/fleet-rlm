@@ -1,0 +1,70 @@
+<!-- Chunk 1304: bytes 4771167-4773146, type=function -->
+def main():
+    parser = argparse.ArgumentParser(description="Skill Fleet Training Data Manager")
+    parser.add_argument(
+        "command", choices=["extract", "synthetic", "prepare"], help="Action to perform"
+    )
+    parser.add_argument("--output", type=Path, default=Path("config/training/trainset_v4.json"))
+    parser.add_argument("--skills-dir", type=Path, default=Path(".skills"))
+    parser.add_argument("--repo-skills", type=Path, default=Path("skills"))
+
+    args = parser.parse_args()
+
+    all_examples = []
+
+    if args.command in ["extract", "prepare"]:
+        all_examples += run_extract([args.skills_dir, args.repo_skills])
+
+    if args.command in ["synthetic", "prepare"]:
+        all_examples += run_synthetic()
+
+    # Deduplicate
+    unique_examples = deduplicate(all_examples)
+    print(f"Total unique examples: {len(unique_examples)}")
+
+    save_dataset(unique_examples, args.output)
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/manage_data.py
+============================================================
+
+============================================================
+FILE: scripts/manage_db.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Unified Database Management Script for Skill Fleet.
+
+Handles migrations, seeding, and verification.
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+
+# Import existing utilities if available
+try:
+    from scripts.internal.db.seed_taxonomy import seed_taxonomy
+except ImportError:
+    seed_taxonomy = None
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+if DATABASE_URL and not DATABASE_URL.startswith("postgresql+"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
+
+

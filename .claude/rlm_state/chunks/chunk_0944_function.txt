@@ -1,0 +1,29 @@
+<!-- Chunk 944: bytes 3409149-3409852, type=function -->
+def test_validate_api_url_rejects_invalid_protocol():
+    """Test API URL validation rejects invalid protocols."""
+    with pytest.raises(ValueError, match="must use http:// or https://"):
+        validate_api_url("ftp://localhost:8000")
+```
+
+**Step 2: Run test to verify it fails**
+
+```bash
+uv run pytest tests/cli/test_security_utils.py -v
+```
+
+Expected: FAIL with "ModuleNotFoundError: No module named 'skill_fleet.cli.utils.security'"
+
+**Step 3: Write security utilities module**
+
+Create `src/skill_fleet/cli/utils/security.py`:
+
+```python
+"""Security utilities for CLI input validation."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from urllib.parse import urlparse
+
+

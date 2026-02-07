@@ -1,0 +1,8 @@
+<!-- Chunk 1755: bytes 7352867-7353018, type=class -->
+class SkillRevisionResult(BaseModel):
+    """Result from skill revision workflow (Steps 4-5)."""
+
+    content: EditResult
+    package: PackageResult
+
+

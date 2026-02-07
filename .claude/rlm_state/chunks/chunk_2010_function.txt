@@ -1,0 +1,7 @@
+<!-- Chunk 2010: bytes 7894119-7894313, type=function -->
+def test_sanitize_user_id_rejects_empty():
+    """Test user ID sanitization rejects empty strings."""
+    with pytest.raises(ValueError, match="cannot be empty"):
+        sanitize_user_id("")
+
+

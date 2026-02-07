@@ -1,0 +1,11 @@
+<!-- Chunk 239: bytes 309233-309484, type=class -->
+class ProductProcessor:
+    def process(self, product):
+        # Sanitize (10 lines) - same as above
+        # Validate (15 lines) - same as above
+        # Transform (20 lines) - different
+        pass
+```
+
+**After:** Extract common logic
+```python

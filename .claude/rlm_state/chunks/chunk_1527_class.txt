@@ -1,0 +1,8 @@
+<!-- Chunk 1527: bytes 6372347-6372596, type=class -->
+class CreateSkillResponse(BaseModel):
+    """Response model for skill creation."""
+
+    job_id: str = Field(..., description="Unique identifier for the background job")
+    status: str = Field(default="accepted", description="Initial job status")
+
+

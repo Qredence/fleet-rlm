@@ -1,0 +1,6 @@
+<!-- Chunk 1439: bytes 5526896-5527008, type=function -->
+def my_class_decorator(cls):
+    cls.extra_attribute = "Added by decorator"
+    return cls
+
+@my_class_decorator

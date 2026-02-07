@@ -1,0 +1,5 @@
+<!-- Chunk 69: bytes 24899-24992, type=h2 -->
+## Step 1: Create Account
+Call MCP tool: `create_customer`
+Parameters: name, email, company
+

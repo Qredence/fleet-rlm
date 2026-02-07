@@ -1,0 +1,13 @@
+<!-- Chunk 83: bytes 26817-27034, type=h2 -->
+## Finalization
+1. Apply final formatting
+2. Generate summary
+3. Save final version
+```
+
+**Key techniques:**
+•  Explicit quality criteria
+•  Iterative improvement
+•  Validation scripts
+•  Know when to stop iterating
+

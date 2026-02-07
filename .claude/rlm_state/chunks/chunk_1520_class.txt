@@ -1,0 +1,15 @@
+<!-- Chunk 1520: bytes 6369607-6370071, type=class -->
+class ValidateRequest(BaseModel):
+    """Request body for validating a skill or content."""
+
+    skill_id: str | None = Field(
+        default=None, description="Skill ID (optional if content provided)"
+    )
+    content: str | None = Field(
+        default=None, description="Content to validate (optional if skill_id provided)"
+    )
+    validation_type: str = Field(
+        default="skill", description="Type of validation: skill, content, or section"
+    )
+
+

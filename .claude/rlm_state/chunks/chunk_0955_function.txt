@@ -1,0 +1,46 @@
+<!-- Chunk 955: bytes 3414661-3415657, type=function -->
+def test_error_display_with_rich():
+    """Test errors can be displayed with Rich."""
+    console = Console()
+    error = ConfigError("Bad config", suggestion="Check config.yaml")
+    # Should not raise when rendering
+    error.display(console)
+```
+
+**Step 2: Run test to verify it fails**
+
+```bash
+uv run pytest tests/cli/test_exceptions.py -v
+```
+
+Expected: FAIL with "ModuleNotFoundError: No module named 'skill_fleet.cli.exceptions'"
+
+**Step 3: Write custom exceptions module**
+
+Create `src/skill_fleet/cli/exceptions.py`:
+
+```python
+"""Custom exceptions for CLI error handling.
+
+Provides consistent error handling across CLI commands with:
+- Standardized exit codes
+- Rich-formatted error display
+- Actionable suggestions for users
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+
+# Standard exit codes
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+EXIT_CONFIG_ERROR = 2
+EXIT_VALIDATION_ERROR = 3
+EXIT_NETWORK_ERROR = 4
+
+

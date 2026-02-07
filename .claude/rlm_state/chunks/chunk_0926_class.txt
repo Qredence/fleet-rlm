@@ -1,0 +1,44 @@
+<!-- Chunk 926: bytes 3349614-3351175, type=class -->
+class PaymentResponse(BaseModel):
+    status: str
+    transaction_id: str
+
+# main.py - Async endpoint with proper structure
+from fastapi import FastAPI, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+@app.post("/payment", response_model=PaymentResponse)
+async def payment_endpoint(
+    request: PaymentRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    # Async database call
+    user = await db.get(User, request.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.balance < request.amount:
+        raise HTTPException(status_code=400, detail="Insufficient funds")
+
+    # Process payment (await if async)
+    transaction_id = await process_payment_async(request, db)
+
+    return PaymentResponse(status="success", transaction_id=transaction_id)
+```
+
+**Key transformation steps:**
+1. **Add Pydantic models** for request/response (input validation becomes automatic)
+2. **Make functions async** if they do I/O (database, HTTP calls)
+3. **Replace exceptions** with `HTTPException` for proper HTTP status codes
+4. **Add `response_model`** for output validation and automatic documentation
+5. **Use `Depends`** for shared resources (database, auth) instead of globals
+
+### 6. Sync to Async Conversion
+
+**The Problem:** You have existing synchronous Python code (blocking database calls, synchronous HTTP requests, file I/O). You can't just add `async`/`await` - the underlying libraries need async alternatives.
+
+**Pattern:**
+
+**Before - Blocking code:**
+```python
+# Old sync code

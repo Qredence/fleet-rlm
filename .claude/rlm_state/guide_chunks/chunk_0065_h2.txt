@@ -1,0 +1,5 @@
+<!-- Chunk 65: bytes 23714-23923, type=h2 -->
+## Chapter 5: Patterns and troubleshooting
+
+These patterns emerged from skills created by early adopters and internal teams. They represent common approaches we've seen work well, not prescriptive templates.
+

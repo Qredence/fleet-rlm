@@ -1,0 +1,6 @@
+<!-- Chunk 1911: bytes 7728650-7728803, type=function -->
+def get_phase4_lm() -> dspy.LM:
+    """Get LM for Phase 4: Edit task (worker role, thinking_level: high)."""
+    return get_reasoning_lm("skill_edit")
+
+

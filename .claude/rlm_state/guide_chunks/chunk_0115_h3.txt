@@ -1,0 +1,10 @@
+<!-- Chunk 115: bytes 33871-34119, type=h3 -->
+### Getting Support
+
+**For Technical Questions:**
+•  General questions: Community forums at the Claude Developers Discord
+
+**For Bug Reports:**
+•  GitHub Issues: `anthropics/skills/issues`
+•  Include: Skill name, error message, steps to reproduce
+

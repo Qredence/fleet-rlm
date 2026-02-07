@@ -1,0 +1,7 @@
+<!-- Chunk 233: bytes 308208-308356, type=function -->
+def create_user(data):
+    if not data.get("email") or "@" not in data["email"]:
+        raise ValueError("Invalid email")
+    # ...
+
+# api/auth.py

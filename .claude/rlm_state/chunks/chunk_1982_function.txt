@@ -1,0 +1,10 @@
+<!-- Chunk 1982: bytes 7886705-7886922, type=function -->
+def test_status_icons():
+    """Test status icon constants."""
+    assert ICON_SUCCESS == "✓"
+    assert ICON_WARNING == "⚠️"
+    assert ICON_ERROR == "❌"
+    assert ICON_INFO == "ℹ️"
+    assert ICON_WORKING == "⏳"
+
+

@@ -1,0 +1,11 @@
+<!-- Chunk 559: bytes 885246-885575, type=class -->
+class DocumentSummarization(dspy.Signature):
+    document = dspy.InputField(desc="The document to summarize")
+    summary = dspy.OutputField(desc="Concise summary of the document")
+    key_points = dspy.OutputField(desc="List of key points from the document")
+```
+
+### Common Patterns
+
+**Single input, single output**:
+```python

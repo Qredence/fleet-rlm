@@ -1,0 +1,66 @@
+<!-- Chunk 1795: bytes 7472133-7473830, type=function -->
+def usage_examples_reward(args, pred: dspy.Prediction) -> float:
+    """
+    Score usage examples quality.
+
+    Checks:
+    - Has multiple examples (2-5)
+    - Each example has code
+    - Examples have descriptions
+
+    Returns:
+        float: Score between 0.0 and 1.0
+
+    """
+    score = 0.0
+
+    try:
+        examples = getattr(pred, "usage_examples", None)
+        if isinstance(examples, str):
+            try:
+                examples = json.loads(examples)
+            except json.JSONDecodeError:
+                return 0.0
+
+        if not isinstance(examples, list):
+            return 0.0
+
+        # Number of examples
+        count = len(examples)
+        if 2 <= count <= 5:
+            score += 0.4
+        elif count >= 1:
+            score += 0.2
+
+        # Check each example
+        valid_examples = 0
+        for ex in examples:
+            if isinstance(ex, dict):
+                code = ex.get("code", "")
+                desc = ex.get("description", "")
+            elif hasattr(ex, "code"):
+                code = ex.code
+                desc = getattr(ex, "description", "")
+            else:
+                continue
+
+            if len(code) > 20:
+                valid_examples += 0.5
+            if len(desc) > 10:
+                valid_examples += 0.5
+
+        if count > 0:
+            score += (valid_examples / count) * 0.6
+
+    except Exception as e:
+        logger.warning(f"Error in usage_examples_reward: {e}")
+        return 0.0
+
+    return min(score, 1.0)
+
+
+# =============================================================================
+# Step 5: Package - Validation Quality
+# =============================================================================
+
+

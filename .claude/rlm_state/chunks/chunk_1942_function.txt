@@ -1,0 +1,10 @@
+<!-- Chunk 1942: bytes 7793853-7794098, type=function -->
+def name_to_skill_id(name: str, taxonomy_path: str) -> str:
+    """
+    Convert kebab-case name back to skill_id given taxonomy context.
+
+    The taxonomy_path is the canonical source of truth for the full ID.
+    """
+    return taxonomy_path
+
+

@@ -1,0 +1,99 @@
+<!-- Chunk 654: bytes 1035225-1037073, type=function -->
+def my_function() -> Callable:
+    pass
+```
+
+**3. Check with Type Checker**
+```bash
+# Run type checker
+uv run ty check src/skill_fleet/core/dspy/ --quiet
+
+# Fix errors before running optimization
+```
+
+## Optimization Too Slow
+
+### Symptom
+MIPROv2 optimization takes >30 minutes
+
+### Solutions
+
+**1. Use GEPA Instead**
+```python
+# GEPA is 5-10x faster than MIPROv2
+optimizer = dspy.GEPA(metric=metric, num_candidates=5, num_iters=2)
+optimized = optimizer.compile(program, trainset=trainset)
+```
+
+**2. Reduce MIPROv2 Search Space**
+```python
+optimizer = dspy.MIPROv2(
+    metric=metric,
+    auto="light",  # Instead of "medium" or "heavy"
+)
+
+optimized = optimizer.compile(
+    program,
+    trainset=trainset,
+    max_bootstrapped_demos=2,  # Reduce from 4
+    num_candidate_programs=8,  # Reduce from 16
+)
+```
+
+**3. Use Smaller Training Set**
+```python
+# Use subset for initial experiments
+trainset_small = trainset[:20]
+
+# Optimize
+optimized = optimizer.compile(program, trainset=trainset_small)
+
+# Once working, scale up to full 50-100 examples
+```
+
+## Import Errors
+
+### Symptom
+```
+ModuleNotFoundError: No module named 'skill_fleet.core.dspy.monitoring'
+ImportError: cannot import name 'ModuleMonitor'
+```
+
+### Solutions
+
+**1. Check Module Exists**
+```bash
+# Verify file exists
+ls -la src/skill_fleet/core/dspy/monitoring/
+
+# Check __init__.py has exports
+cat src/skill_fleet/core/dspy/monitoring/__init__.py
+```
+
+**2. Reinstall Package**
+```bash
+# Sync dependencies
+uv sync
+
+# Install in editable mode
+uv pip install -e .
+```
+
+**3. Check Python Path**
+```python
+import sys
+print(sys.path)
+
+# Should include project root
+```
+
+## Optimization Score Doesn't Improve
+
+### Symptom
+Optimized score ≈ baseline score (no meaningful improvement)
+
+### Possible Causes & Solutions
+
+**1. Metric Returns Same Score for All Outputs**
+```python
+# Debug metric

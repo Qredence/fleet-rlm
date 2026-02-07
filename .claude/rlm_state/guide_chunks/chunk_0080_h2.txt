@@ -1,0 +1,6 @@
+<!-- Chunk 80: bytes 26413-26510, type=h2 -->
+## Initial Draft
+1. Fetch data via MCP
+2. Generate first draft report
+3. Save to temporary file
+

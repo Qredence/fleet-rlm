@@ -1,0 +1,9 @@
+<!-- Chunk 1861: bytes 7639154-7639291, type=class -->
+class SeverityEnum:
+    """Issue or diagnostic severity level."""
+
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+
+

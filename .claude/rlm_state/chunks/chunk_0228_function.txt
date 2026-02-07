@@ -1,0 +1,9 @@
+<!-- Chunk 228: bytes 305687-305947, type=function -->
+def process_large_list(items):
+    new_items = items.copy()  # Unnecessary copy
+    filtered = [x for x in new_items if x.is_valid]  # Another copy
+    return sorted(filtered)  # Yet another copy
+```
+
+**Solution:** Process in-place or use generators
+```python

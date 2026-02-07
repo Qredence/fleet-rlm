@@ -1,0 +1,24 @@
+<!-- Chunk 577: bytes 892203-892829, type=class -->
+class AnalyzeSentiment(dspy.Signature):
+    text = dspy.InputField(desc="Text")
+    sentiment = dspy.OutputField(desc="Sentiment")
+```
+
+
+============================================================
+END FILE: .fleet/skills/dspy-basics/references/signatures.md
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-basics/templates/program-template.py
+============================================================
+
+"""
+Template for creating new DSPy programs/modules.
+
+Copy this file and customize for your program.
+"""
+
+import dspy
+
+

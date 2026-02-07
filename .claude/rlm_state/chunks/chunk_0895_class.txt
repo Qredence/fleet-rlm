@@ -1,0 +1,128 @@
+<!-- Chunk 895: bytes 3172885-3176771, type=class -->
+class ChatSessionState(BaseModel):
+    """Internal state for a guided chat session."""
+
+    session_id: str
+    history: list[dict[str, str]] = []
+    current_phase: Literal["GATHERING", "PROPOSING", "GENERATING", "COMPLETED"] = "GATHERING"
+    refined_intent: str = ""
+    understanding_summary: str = ""
+    confidence: float = 0.0
+    question_count: int = 0
+    metadata: SkillMetadata | None = None
+    job_id: str | None = None
+```
+
+### Phases
+
+| Phase          | Description                                   | Entry Condition                       |
+| -------------- | --------------------------------------------- | ------------------------------------- |
+| **GATHERING**  | Collect requirements via clarifying questions | Start                                 |
+| **PROPOSING**  | Present taxonomy path and name for approval   | Confidence > 0.9 OR 6 questions asked |
+| **GENERATING** | Execute SkillCreationProgram                  | User approves proposal                |
+| **COMPLETED**  | Skill created successfully                    | Generation finishes                   |
+
+### Main Entry Point
+
+```python
+async def aforward(
+    self,
+    user_input: str,
+    state: ChatSessionState
+) -> dict[str, Any]:
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `user_input` | `str` | Latest message from the user |
+| `state` | `ChatSessionState` | Current conversation state |
+
+**Returns:**
+
+```python
+{
+    "agent_message": str,
+    "action_required": "ask_clarification" | "propose_plan" | "start_generation" | "none",
+    "updated_state": ChatSessionState,
+    "rationale": str,
+}
+```
+
+### Conversation Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> GATHERING
+    GATHERING --> GATHERING: Ask clarifying question
+    GATHERING --> PROPOSING: Confidence > 0.9 OR max questions
+    PROPOSING --> GATHERING: User says no
+    PROPOSING --> GENERATING: User says yes
+    GENERATING --> COMPLETED: Generation successful
+    COMPLETED --> [*]
+```
+
+### Usage Example
+
+```python
+from skill_fleet.core.programs.conversational import (
+    GuidedCreatorProgram,
+    ChatSessionState
+)
+
+program = GuidedCreatorProgram()
+state = ChatSessionState(session_id="chat_123")
+
+# Simulate conversation
+while state.current_phase != "COMPLETED":
+    user_input = input("You: ")
+
+    result = await program.aforward(
+        user_input=user_input,
+        state=state
+    )
+
+    state = result["updated_state"]
+    print(f"Agent: {result['agent_message']}")
+    print(f"Action: {result['action_required']}")
+```
+
+### Transition Logic
+
+**GATHERING → PROPOSING:**
+
+```python
+if action == "propose_plan":
+    if state.current_phase == "GATHERING":
+        state.current_phase = "PROPOSING"
+        proposal = await self.generate_proposal.acall(...)
+        agent_message = f"Proposed path: {proposal.proposed_taxonomy_path}\n..."
+```
+
+**PROPOSING → GENERATING:**
+
+```python
+elif action == "start_generation":
+    if state.current_phase == "PROPOSING":
+        state.current_phase = "GENERATING"
+        # Launch background SkillCreationProgram job
+```
+
+---
+
+## Program Selection Guide
+
+| Program                | Use Case              | HITL         | Interaction Style |
+| ---------------------- | --------------------- | ------------ | ----------------- |
+| `SkillCreationProgram` | Direct skill creation | Configurable | Checkpoint-based  |
+| `GuidedCreatorProgram` | Chat-based creation   | Always       | Conversational    |
+
+`★ Insight ─────────────────────────────────────`
+The `GuidedCreatorProgram` uses a simplified HITL model—continuous conversation with fewer formal checkpoints. This lowers friction for users who prefer a more natural chat interface while still gathering all necessary requirements.
+`─────────────────────────────────────────────────`
+
+## Error Handling
+
+All programs return a `SkillCreationResult` with status:
+
+```python

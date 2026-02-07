@@ -1,0 +1,12 @@
+<!-- Chunk 101: bytes 151717-152011, type=class -->
+class Refinement(dspy.Signature):
+    draft = dspy.InputField(desc="Draft to refine")
+    criteria = dspy.InputField(desc="Refinement criteria")
+    refined = dspy.OutputField(desc="Refined version")
+```
+
+### 3. Classification + Explanation
+
+Combine classification with explanation:
+
+```python

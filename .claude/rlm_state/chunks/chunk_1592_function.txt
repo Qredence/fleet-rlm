@@ -1,0 +1,136 @@
+<!-- Chunk 1592: bytes 6555182-6559245, type=function -->
+def promote_command(
+    ctx: typer.Context,
+    job_id: str = typer.Argument(..., help="Job ID to promote"),
+    overwrite: bool = typer.Option(
+        True,
+        "--overwrite/--no-overwrite",
+        help="Overwrite the existing skill at the intended taxonomy path",
+    ),
+    delete_draft: bool = typer.Option(
+        False,
+        "--delete-draft",
+        help="Delete the draft directory after successful promotion",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Promote even if workflow validation failed",
+    ),
+):
+    """Promote a completed job's draft into the taxonomy."""
+    config = ctx.obj
+
+    async def _run():
+        try:
+            console.print(Panel.fit(f"[bold cyan]Promoting draft for job[/bold cyan]\n{job_id}"))
+            result = await config.client.promote_draft(
+                job_id, overwrite=overwrite, delete_draft=delete_draft, force=force
+            )
+            final_path = result.get("final_path")
+            if final_path:
+                console.print(f"[bold green]✓ Promoted to:[/bold green] {final_path}")
+            else:
+                console.print(f"[yellow]Promotion completed:[/yellow] {result}")
+        except httpx.HTTPStatusError as e:
+            error_text = ""
+            try:
+                error_text = e.response.text
+            except Exception:
+                error_text = "(unable to read response)"
+            console.print(Text(f"HTTP Error: {e.response.status_code} - {error_text}", style="red"))
+        except ValueError as e:
+            console.print(Text(f"Error: {e}", style="red"))
+        except Exception as e:
+            console.print(Text(f"Unexpected error: {type(e).__name__}: {e}", style="red"))
+        finally:
+            await config.client.close()
+
+    asyncio.run(_run())
+
+
+============================================================
+END FILE: src/skill_fleet/cli/commands/promote.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/commands/serve.py
+============================================================
+
+"""CLI command for starting the API server."""
+
+from __future__ import annotations
+
+import asyncio
+
+import typer
+from rich.console import Console
+from rich.panel import Panel
+
+from ..ui.prompts import get_default_ui
+
+console = Console()
+
+
+async def _ask_server_config(
+    port: int,
+    host: str,
+    reload: bool,
+    auto_accept: bool,
+    force_plain_text: bool,
+) -> tuple[int, str, bool]:
+    """
+    Ask clarifying questions about server configuration.
+
+    Returns:
+        (port, host, reload)
+    """
+    if auto_accept:
+        return (port, host, reload)
+
+    console.print(
+        Panel.fit(
+            "[bold cyan]Skill Fleet API Server[/bold cyan]\n"
+            "Configure your server settings (or press Enter for defaults)",
+            border_style="cyan",
+        )
+    )
+
+    ui = get_default_ui(force_plain_text=force_plain_text)
+
+    # Ask about port
+    port_input = await ui.ask_text(
+        f"[bold]Port[/bold] (default: {port})",
+        default=str(port),
+    )
+    try:
+        port = int(port_input)
+    except ValueError:
+        console.print(f"[yellow]Invalid port '{port_input}', using default {port}[/yellow]")
+
+    # Ask about host
+    host = await ui.ask_text(
+        f"[bold]Host[/bold] (default: {host})",
+        default=host,
+    )
+
+    # Ask about reload mode
+    reload_choice = await ui.choose_one(
+        "[bold]Development mode[/bold] (auto-reload on file changes)?",
+        choices=[
+            ("no", "❌ No (production)"),
+            ("yes", "🔄 Yes (development)"),
+        ],
+        default_id="no" if not reload else "yes",
+    )
+    reload = reload_choice == "yes"
+
+    # Summary
+    console.print("\n[dim]Configuration:[/dim]")
+    console.print(f"  Host: [cyan]{host}[/cyan]")
+    console.print(f"  Port: [cyan]{port}[/cyan]")
+    console.print(f"  Reload: [cyan]{'Yes' if reload else 'No'}[/cyan]\n")
+
+    return (port, host, reload)
+
+

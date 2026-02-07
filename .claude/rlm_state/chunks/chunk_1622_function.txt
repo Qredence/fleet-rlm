@@ -1,0 +1,31 @@
+<!-- Chunk 1622: bytes 6657738-6658563, type=function -->
+def validate_api_url(url: str) -> str:
+    """
+    Validate API URL to ensure it uses secure protocols.
+
+    Args:
+        url: The URL to validate
+
+    Returns:
+        The validated URL
+
+    Raises:
+        ValueError: If the URL uses an invalid protocol
+    """
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"API URL must use http:// or https:// protocol. Got: {parsed.scheme}")
+
+    # Warn if using HTTP with non-localhost
+    if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1"):
+        warnings.warn(
+            f"Using HTTP (non-secure) protocol with non-localhost host: {parsed.hostname}. "
+            "Consider using HTTPS for secure communication.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    return url
+
+

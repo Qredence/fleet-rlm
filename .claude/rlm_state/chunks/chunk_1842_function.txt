@@ -1,0 +1,131 @@
+<!-- Chunk 1842: bytes 7623894-7627155, type=function -->
+def get_task_lm(task: str) -> dspy.LM:
+    """
+    Get LM optimized for specific task.
+
+    Args:
+        task: Task type (understanding, generation, validation, hitl)
+
+    Returns:
+        Task-optimized LM
+
+    """
+    return build_lm_for_task(task)
+
+
+# Export main functions
+__all__ = ["configure_dspy", "get_task_lm", "build_lm_for_task", "load_fleet_config"]
+
+
+============================================================
+END FILE: src/skill_fleet/dspy/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/infrastructure/__init__.py
+============================================================
+
+"""
+Infrastructure layer for skill-fleet.
+
+This package contains technical infrastructure:
+- db/: Database layer with models and repositories
+- monitoring/: MLflow integration and monitoring
+- tracing/: Distributed tracing and telemetry
+
+Note: LLM configuration has moved to skill_fleet.dspy
+"""
+
+
+============================================================
+END FILE: src/skill_fleet/infrastructure/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/infrastructure/db/__init__.py
+============================================================
+
+"""
+Skills-Fleet Database Module.
+
+This module provides database models, connection management,
+and repositories for the skills fleet system.
+"""
+
+from .database import (
+    AsyncSessionLocal,
+    SessionLocal,
+    async_engine,
+    engine,
+    get_async_db,
+    get_db,
+    get_db_context,
+    init_db,
+)
+from .repositories import (
+    JobRepository,
+    SkillRepository,
+    TaxonomyRepository,
+    UsageRepository,
+    ValidationRepository,
+    get_job_repository,
+    get_skill_repository,
+    get_taxonomy_repository,
+    get_usage_repository,
+    get_validation_repository,
+)
+
+__all__ = [
+    # Database connection
+    "engine",
+    "async_engine",
+    "SessionLocal",
+    "AsyncSessionLocal",
+    "get_db",
+    "get_async_db",
+    "get_db_context",
+    "init_db",
+    # Repositories
+    "SkillRepository",
+    "JobRepository",
+    "TaxonomyRepository",
+    "ValidationRepository",
+    "UsageRepository",
+    "get_skill_repository",
+    "get_job_repository",
+    "get_taxonomy_repository",
+    "get_validation_repository",
+    "get_usage_repository",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/infrastructure/db/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/infrastructure/db/database.py
+============================================================
+
+"""
+Skills-Fleet Database Connection.
+
+Database connection and session management for the skills fleet database.
+"""
+
+import os
+from collections.abc import AsyncGenerator
+from collections.abc import Generator as SyncGenerator
+from contextlib import contextmanager
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import Session, sessionmaker
+
+from .models import Base
+
+

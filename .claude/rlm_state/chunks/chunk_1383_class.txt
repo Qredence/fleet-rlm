@@ -1,0 +1,5 @@
+<!-- Chunk 1383: bytes 5105938-5106002, type=class -->
+class UserCreate(BaseModel):
+    name: str
+    email: EmailStr
+

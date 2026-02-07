@@ -1,0 +1,8 @@
+<!-- Chunk 1200: bytes 4546449-4546732, type=function -->
+def get_migration_script_path() -> str:
+    """Get the path to the migration SQL file."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    return os.path.join(project_root, "migrations", "001_init_skills_schema.sql")
+
+

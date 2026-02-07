@@ -1,0 +1,7 @@
+<!-- Chunk 2009: bytes 7893874-7894119, type=function -->
+def test_validate_api_url_warns_on_http_non_localhost():
+    """Test API URL validation warns on HTTP with non-localhost."""
+    with pytest.warns(UserWarning, match="Using HTTP.*non-localhost"):
+        validate_api_url("http://example.com")
+
+

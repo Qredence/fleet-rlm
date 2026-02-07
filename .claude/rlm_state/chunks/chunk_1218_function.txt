@@ -1,0 +1,25 @@
+<!-- Chunk 1218: bytes 4579253-4580091, type=function -->
+def extract_keywords_from_description(description: str, name: str) -> list[str]:
+    """Extract keywords from description and name."""
+    # Start with words from name
+    keywords = [word for word in name.split("-") if len(word) > 2]
+
+    # Add important words from description
+    description_lower = description.lower()
+    important_words = set()
+
+    # Technology keywords
+    tech_patterns = [
+        r"\b(python|javascript|typescript|react|fastapi|dspy|neon|drizzle)\b",
+        r"\b(async|auth|database|api|cli|frontend|backend)\b",
+        r"\b(testing|optimization|configuration|deployment)\b",
+    ]
+
+    for pattern in tech_patterns:
+        matches = re.findall(pattern, description_lower)
+        important_words.update(matches)
+
+    keywords.extend(sorted(important_words)[:5])
+    return keywords[:7]  # Max 7 keywords
+
+

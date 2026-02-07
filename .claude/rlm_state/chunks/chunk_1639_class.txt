@@ -1,0 +1,13 @@
+<!-- Chunk 1639: bytes 6672301-6672539, type=class -->
+class DSPyExecutionError(DSPyWorkflowError):
+    """
+    Raised when DSPy program execution fails.
+
+    This can occur when:
+    - LLM API calls fail
+    - Timeout exceeded
+    - Invalid response format
+    - Optimization fails
+    """
+
+

@@ -1,0 +1,197 @@
+<!-- Chunk 1757: bytes 7353392-7360709, type=class -->
+class ChecklistState(BaseModel):
+    """
+    Tracks TDD checklist completion state for writing-skills TDD enforcement.
+
+    This model enforces the mandatory TDD checklist from writing-skills skill.
+    All phases must be complete before saving any skill.
+    """
+
+    # RED Phase - Write Failing Test
+    red_scenarios_created: bool = Field(
+        default=False,
+        description="Pressure scenarios created (3+ combined pressures for discipline skills)",
+    )
+    baseline_tests_run: bool = Field(
+        default=False, description="Baseline tests run WITHOUT skill present"
+    )
+    baseline_behavior_documented: bool = Field(
+        default=False, description="Baseline behavior documented verbatim"
+    )
+    rationalization_patterns_identified: bool = Field(
+        default=False, description="Patterns in rationalizations/failures identified"
+    )
+
+    # GREEN Phase - Verify Skill Works
+    green_tests_run: bool = Field(default=False, description="Tests run WITH skill present")
+    compliance_verified: bool = Field(
+        default=False, description="Agents now comply with skill verified"
+    )
+    baseline_failures_addressed: bool = Field(
+        default=False, description="Skill addresses specific baseline failures"
+    )
+
+    # REFACTOR Phase - Close Loopholes
+    new_rationalizations_identified: bool = Field(
+        default=False, description="NEW rationalizations from testing identified"
+    )
+    explicit_counters_added: bool = Field(
+        default=False, description="Explicit counters added to skill (if discipline skill)"
+    )
+    retested_until_bulletproof: bool = Field(
+        default=False, description="Re-tested until bulletproof against rationalizations"
+    )
+    rationalization_table_built: bool = Field(
+        default=False, description="Rationalization table built from all test iterations"
+    )
+
+    # Quality Checks
+    flowchart_present: bool = Field(
+        default=False, description="Flowchart present (optional, only if decision non-obvious)"
+    )
+    quick_reference_included: bool = Field(
+        default=False, description="Quick reference table included"
+    )
+    common_mistakes_included: bool = Field(
+        default=False, description="Common mistakes section included"
+    )
+    no_narrative_storytelling: bool = Field(
+        default=False, description="No narrative storytelling (checked and confirmed)"
+    )
+    supporting_files_appropriate: bool = Field(
+        default=False,
+        description="Supporting files only for tools or heavy reference (checked and confirmed)",
+    )
+
+    def is_complete(self) -> bool:
+        """
+        Check if all required items are complete.
+
+        Returns:
+            True if all mandatory checklist items are complete, False otherwise.
+            flowchart_present is optional (only required if decision is non-obvious).
+
+        """
+        # All RED items required
+        red_complete = (
+            self.red_scenarios_created
+            and self.baseline_tests_run
+            and self.baseline_behavior_documented
+            and self.rationalization_patterns_identified
+        )
+
+        # All GREEN items required
+        green_complete = (
+            self.green_tests_run and self.compliance_verified and self.baseline_failures_addressed
+        )
+
+        # All REFACTOR items required
+        refactor_complete = (
+            self.new_rationalizations_identified
+            and self.explicit_counters_added
+            and self.retested_until_bulletproof
+            and self.rationalization_table_built
+        )
+
+        # All quality checks required (flowchart_present is optional)
+        quality_complete = (
+            self.quick_reference_included
+            and self.common_mistakes_included
+            and self.no_narrative_storytelling
+            and self.supporting_files_appropriate
+        )
+
+        return red_complete and green_complete and refactor_complete and quality_complete
+
+    def get_missing_items(self) -> list[str]:
+        """
+        Get list of incomplete checklist items.
+
+        Returns:
+            List of missing item descriptions for user presentation.
+
+        """
+        missing = []
+
+        # RED Phase
+        if not self.red_scenarios_created:
+            missing.append("RED: Create pressure scenarios")
+        if not self.baseline_tests_run:
+            missing.append("RED: Run baseline tests without skill")
+        if not self.baseline_behavior_documented:
+            missing.append("RED: Document baseline behavior verbatim")
+        if not self.rationalization_patterns_identified:
+            missing.append("RED: Identify rationalization patterns")
+
+        # GREEN Phase
+        if not self.green_tests_run:
+            missing.append("GREEN: Run tests with skill")
+        if not self.compliance_verified:
+            missing.append("GREEN: Verify agents comply with skill")
+        if not self.baseline_failures_addressed:
+            missing.append("GREEN: Verify skill addresses baseline failures")
+
+        # REFACTOR Phase
+        if not self.new_rationalizations_identified:
+            missing.append("REFACTOR: Identify new rationalizations")
+        if not self.explicit_counters_added:
+            missing.append("REFACTOR: Add explicit counters (if discipline skill)")
+        if not self.retested_until_bulletproof:
+            missing.append("REFACTOR: Re-test until bulletproof")
+        if not self.rationalization_table_built:
+            missing.append("REFACTOR: Build rationalization table")
+
+        # Quality Checks
+        if not self.quick_reference_included:
+            missing.append("Quality: Include quick reference table")
+        if not self.common_mistakes_included:
+            missing.append("Quality: Include common mistakes section")
+        if not self.no_narrative_storytelling:
+            missing.append("Quality: Remove narrative storytelling")
+        if not self.supporting_files_appropriate:
+            missing.append("Quality: Ensure supporting files appropriate")
+
+        return missing
+
+
+============================================================
+END FILE: src/skill_fleet/core/models.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/modules/__init__.py
+============================================================
+
+"""
+DSPy modules for skill creation workflows.
+
+This package contains reusable DSPy module implementations organized by workflow phase:
+- understanding/: Modules for requirements gathering and analysis
+- generation/: Modules for content generation
+- validation/: Modules for compliance and quality validation
+- hitl/: Modules for human-in-the-loop interactions
+"""
+
+
+============================================================
+END FILE: src/skill_fleet/core/modules/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/modules/base.py
+============================================================
+
+"""
+Base module for all DSPy modules in skill-fleet.
+
+Provides common functionality for error handling, logging, and result validation.
+"""
+
+import logging
+from typing import Any
+
+import dspy
+
+logger = logging.getLogger(__name__)
+
+

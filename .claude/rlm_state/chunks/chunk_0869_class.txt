@@ -1,0 +1,31 @@
+<!-- Chunk 869: bytes 3125165-3126125, type=class -->
+class IntentAnalyzerModule(dspy.Module):
+    """Module for analyzing user intent."""
+
+    def __init__(self):
+        super().__init__()
+        self.analyze = dspy.ChainOfThought(AnalyzeIntent)
+
+    def forward(self, task_description: str, user_context: str) -> dict[str, Any]:
+        """Analyze intent."""
+        result = self.analyze(task_description=task_description, user_context=user_context)
+        return {
+            "task_intent": result.task_intent,
+            "skill_type": result.skill_type,
+            "rationale": getattr(result, "rationale", ""),
+        }
+```
+
+DSPy provides several module types:
+- **`dspy.Predict`**: Direct input→output transformation
+- **`dspy.ChainOfThought`**: Adds reasoning before output
+- **`dspy.Refine`**: Iterative improvement
+- **`dspy.BestOfN`**: Generate N candidates, pick best
+
+See [Modules Documentation](modules.md) for all modules.
+
+### Programs
+
+Programs **orchestrate** multiple modules:
+
+```python

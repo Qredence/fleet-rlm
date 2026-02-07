@@ -1,0 +1,20 @@
+<!-- Chunk 52: bytes 126370-126763, type=function -->
+def check_calendar(user: str) -> str:
+    """Check user's calendar for today."""
+    return f"{user} has 3 meetings today"
+
+react = dspy.ReAct(
+    "user -> status",
+    tools=[check_email, check_calendar],
+    max_iters=5
+)
+
+result = react(user="Alice")
+# ReAct will reason about which tool(s) to call
+```
+
+### Tool Output as Input
+
+Tools can use outputs from previous tool calls:
+
+```python

@@ -1,0 +1,18 @@
+<!-- Chunk 106: bytes 31082-31548, type=h4 -->
+#### Instructions not followed
+
+**Symptom:** Skill loads but Claude doesn't follow instructions
+
+*Common causes:*
+**1.  Instructions too verbose**
+    – Keep instructions concise
+    – Use bullet points and numbered lists
+    – Move detailed reference to separate files
+
+**2.  Instructions buried**
+    – Put critical instructions at the top
+    – Use `## Important` or `## Critical` headers
+    – Repeat key points if needed
+
+**3.  Ambiguous language**
+```markdown

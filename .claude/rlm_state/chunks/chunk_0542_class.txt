@@ -1,0 +1,24 @@
+<!-- Chunk 542: bytes 875871-876510, type=class -->
+class ConditionalRouter(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.classify = dspy.Predict(ClassifyInput)
+        self.process_a = dspy.Predict(ProcessTypeA)
+        self.process_b = dspy.Predict(ProcessTypeB)
+
+    def forward(self, input_data: str):
+        classification = self.classify(input=input_data)
+
+        if classification.type == "A":
+            result = self.process_a(input=input_data)
+        else:
+            result = self.process_b(input=input_data)
+
+        return dspy.Prediction(output=result.output)
+```
+
+### Parallel Composition
+
+Execute multiple modules in parallel:
+
+```python

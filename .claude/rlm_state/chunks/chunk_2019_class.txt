@@ -1,0 +1,32 @@
+<!-- Chunk 2019: bytes 7900682-7901902, type=class -->
+class TestDefaultConfigPath:
+    """Tests for default_config_path function."""
+
+    def test_returns_config_from_repo_root(self, tmp_path: Path):
+        """Test returning config path from repo root."""
+        (tmp_path / ".git").mkdir()
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_file = config_dir / "config.yaml"
+        config_file.touch()
+
+        with patch("skill_fleet.common.paths.Path.cwd", return_value=tmp_path):
+            result = default_config_path()
+
+        assert result == config_file
+
+    def test_returns_fallback_when_no_config_exists(self, tmp_path: Path):
+        """Test returning fallback path when config doesn't exist."""
+        # Create a directory with no config
+        isolated = tmp_path / "isolated"
+        isolated.mkdir()
+
+        with patch("skill_fleet.common.paths.Path.cwd", return_value=isolated):
+            with patch("skill_fleet.common.paths.find_repo_root", return_value=None):
+                with patch("skill_fleet.common.paths._package_root", return_value=isolated):
+                    result = default_config_path()
+
+        # Should return cwd-based fallback
+        assert result == isolated / "config" / "config.yaml"
+
+

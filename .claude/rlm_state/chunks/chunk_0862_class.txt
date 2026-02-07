@@ -1,0 +1,10 @@
+<!-- Chunk 862: bytes 3061029-3061433, type=class -->
+class SkillService(BaseService):
+    async def publish_skill(self, skill_id: str) -> Skill:
+        skill = await self.skill_repository.get(skill_id)
+        # Domain logic in domain layer
+        if not SkillIsReadyForPublication().is_satisfied_by(skill):
+            raise ValidationError("Not ready")
+        return await self.skill_domain_service.publish(skill)
+
+# ❌ Avoid: Business logic in service

@@ -1,0 +1,53 @@
+<!-- Chunk 427: bytes 611057-612105, type=function -->
+def setup_dspy():
+    """Configure DSPy with default LM."""
+    lm = dspy.LM(
+        'openai/gpt-4o-mini',
+        temperature=0.7,
+        max_tokens=1000
+    )
+    dspy.configure(lm=lm)
+
+# Call at application startup
+setup_dspy()
+```
+
+### 3. Use Context Manager for Task-Specific LMs
+
+```python
+# Good: Use context managers for task-specific LMs
+with dspy.context(lm=fast_lm):
+    result = classify(text="Test")
+
+with dspy.context(lm=quality_lm):
+    result = reason(task="Test")
+
+# Bad: Don't reconfigure globally for task-specific LMs
+dspy.configure(lm=fast_lm)
+result = classify(text="Test")
+dspy.configure(lm=quality_lm)
+result = reason(task="Test")
+```
+
+### 4. Document LM Configuration
+
+```python
+"""
+DSPy Configuration Documentation
+
+Default LM: openai/gpt-4o-mini
+- Temperature: 0.7
+- Max Tokens: 1000
+
+Task-Specific LMs:
+- Fast LM: openai/gpt-3.5-turbo (for simple classification)
+- Quality LM: openai/gpt-4o (for complex reasoning)
+"""
+```
+
+### 5. Test LM Configuration
+
+```python
+# Good: Test LM configuration before use
+import dspy
+

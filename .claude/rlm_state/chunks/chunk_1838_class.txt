@@ -1,0 +1,197 @@
+<!-- Chunk 1838: bytes 7613123-7619314, type=class -->
+class ValidationWorkflow:
+    """
+    Phase 3: Validation & Quality Assurance Workflow.
+
+    Validates skill content:
+    1. Check agentskills.io compliance
+    2. Assess overall quality
+    3. Refine if below threshold
+    4. Return validation report
+
+    Example:
+        workflow = ValidationWorkflow()
+        result = await workflow.execute(
+            skill_content="# Skill\n...",
+            plan={"success_criteria": [...]},
+            taxonomy_path="technical/python"
+        )
+
+    """
+
+    def __init__(self):
+        self.compliance = ValidateComplianceModule()
+        self.quality = AssessQualityModule()
+        self.refinement = RefineSkillModule()
+
+    async def execute(
+        self,
+        skill_content: str,
+        plan: dict,
+        taxonomy_path: str,
+        enable_hitl_review: bool = False,
+        quality_threshold: float = 0.75,
+    ) -> dict[str, Any]:
+        """
+        Execute validation workflow.
+
+        Args:
+            skill_content: Generated SKILL.md content
+            plan: Original plan with success criteria
+            taxonomy_path: Expected taxonomy path
+            enable_hitl_review: Whether to show for human review
+            quality_threshold: Minimum quality score
+
+        Returns:
+            Validation results
+
+        """
+        logger.info("Starting validation workflow")
+
+        # Step 1: Validate compliance
+        logger.debug("Checking compliance")
+        compliance_result = await self.compliance.aforward(
+            skill_content=skill_content, taxonomy_path=taxonomy_path
+        )
+
+        # Step 2: Assess quality
+        logger.debug("Assessing quality")
+        quality_result = await self.quality.aforward(
+            skill_content=skill_content,
+            plan=plan,
+            success_criteria=plan.get("success_criteria", []),
+        )
+
+        # Check if HITL review requested
+        if enable_hitl_review:
+            return self._create_review_checkpoint(
+                skill_content=skill_content, compliance=compliance_result, quality=quality_result
+            )
+
+        # Step 3: Refine if needed
+        final_content = skill_content
+        refinements_made = []
+
+        if quality_result["overall_score"] < quality_threshold:
+            logger.info(
+                f"Quality {quality_result['overall_score']:.2f} below threshold {quality_threshold}"
+            )
+
+            if quality_result.get("weaknesses"):
+                refine_result = await self.refinement.aforward(
+                    current_content=skill_content,
+                    weaknesses=quality_result["weaknesses"],
+                    target_score=quality_threshold,
+                )
+
+                final_content = refine_result.get("refined_content", skill_content)
+                refinements_made = refine_result.get("improvements_made", [])
+
+        # Determine final status
+        passed = (
+            compliance_result.get("passed", False)
+            and quality_result.get("overall_score", 0.0) >= quality_threshold
+        )
+
+        logger.info(f"Validation completed: passed={passed}")
+
+        # Build validation report matching ValidationReport model
+        errors = (
+            compliance_result.get("issues", [])
+            if not compliance_result.get("passed", False)
+            else []
+        )
+        warnings = quality_result.get("weaknesses", [])[:5]  # Top 5 weaknesses as warnings
+
+        return {
+            "status": "completed" if passed else "needs_improvement",
+            "passed": passed,
+            "skill_content": final_content,
+            "validation_report": {
+                "passed": passed,
+                "status": "passed" if passed else "failed",
+                "score": quality_result.get("overall_score", 0.0),
+                "errors": errors,
+                "warnings": warnings,
+                "checks_performed": [
+                    "agentskills.io_compliance",
+                    "quality_assessment",
+                    "content_refinement",
+                ],
+                "checks": [],
+                "feedback": quality_result.get("feedback", ""),
+            },
+        }
+
+    def _create_review_checkpoint(
+        self, skill_content: str, compliance: dict, quality: dict
+    ) -> dict[str, Any]:
+        """
+        Create HITL review checkpoint.
+
+        Args:
+            skill_content: Content to review
+            compliance: Compliance results
+            quality: Quality results
+
+        Returns:
+            Review checkpoint
+
+        """
+        logger.info("Creating review checkpoint")
+
+        return {
+            "status": "pending_hitl",
+            "hitl_type": "review",
+            "hitl_data": {
+                "skill_content_preview": skill_content[:2000] + "..."
+                if len(skill_content) > 2000
+                else skill_content,
+                "compliance_score": compliance.get("compliance_score", 0.0),
+                "quality_score": quality.get("overall_score", 0.0),
+                "strengths": quality.get("strengths", [])[:3],
+                "weaknesses": quality.get("weaknesses", [])[:3],
+                "issues": compliance.get("issues", []),
+            },
+            "context": {
+                "full_content": skill_content,
+                "compliance": compliance,
+                "quality": quality,
+            },
+        }
+
+
+============================================================
+END FILE: src/skill_fleet/core/workflows/skill_creation/validation.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/dspy/__init__.py
+============================================================
+
+"""
+Centralized DSPy configuration for skill-fleet.
+
+This module provides DSPy LM configuration and management.
+All DSPy setup should go through this module.
+
+Usage:
+    from skill_fleet.dspy import configure_dspy, get_task_lm
+
+    # Configure at startup
+    configure_dspy()
+
+    # Get LM for specific task
+    lm = get_task_lm("understanding")
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+import dspy
+import yaml
+
+

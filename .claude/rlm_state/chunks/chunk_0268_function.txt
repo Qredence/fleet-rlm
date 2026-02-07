@@ -1,0 +1,11 @@
+<!-- Chunk 268: bytes 334575-334851, type=function -->
+def collect_python_files(path: Path) -> list[Path]:
+    """Recursively collect all Python files from a path."""
+    if path.is_file() and path.suffix == ".py":
+        return [path]
+    elif path.is_dir():
+        return list(path.rglob("*.py"))
+    else:
+        return []
+
+

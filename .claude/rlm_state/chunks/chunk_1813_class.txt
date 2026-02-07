@@ -1,0 +1,9 @@
+<!-- Chunk 1813: bytes 7553652-7553801, type=class -->
+class MessageRole(StrEnum):
+    """Role of message sender in conversation."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+

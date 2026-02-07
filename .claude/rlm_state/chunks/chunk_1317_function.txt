@@ -1,0 +1,229 @@
+<!-- Chunk 1317: bytes 4834264-4844085, type=function -->
+def process_data(items: list[str]) -> list[str]:
+    return [i.upper() for i in items]
+
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/examples/example_3.py
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/metadata.json
+============================================================
+
+{
+  "skill_id": "technical_skills/python/type_checking/astral-ty-integration",
+  "name": "astral-ty-integration",
+  "description": "Standardized workflow for integrating Astral's 'ty' type checker into existing Python projects, focusing on incremental adoption and high-performance CI/CD pipelines.",
+  "version": "1.0.0",
+  "type": "technical",
+  "weight": "medium",
+  "load_priority": "task_specific",
+  "dependencies": [
+    "technical_skills/python/type_hints",
+    "technical_skills/python/package_management/uv"
+  ],
+  "capabilities": [
+    "configure-ty-pyproject",
+    "incremental-typing-adoption",
+    "ci-cd-type-enforcement",
+    "astral-ecosystem-integration"
+  ],
+  "category": "technical_skills/python/type_checking",
+  "keywords": [
+    "astral",
+    "ty",
+    "type-checking",
+    "static-analysis",
+    "uv",
+    "ruff",
+    "python-typing",
+    "legacy-code"
+  ],
+  "scope": "Covers configuration, incremental adoption strategies, and CI/CD integration for 'ty'. Does not cover Python type hint syntax (PEP 484) or in-depth comparisons with MyPy/Pyright.",
+  "see_also": [
+    "technical_skills/python/linting/ruff",
+    "technical_skills/devops/ci_cd_integration"
+  ],
+  "tags": [],
+  "created_at": "2026-01-18T07:36:04.109358+00:00",
+  "last_modified": "2026-01-18T07:36:04.109358+00:00",
+  "evolution": {
+    "created_by": "skill-fleet-api",
+    "workflow": "SkillCreationProgram",
+    "validation_score": 0.95
+  }
+}
+
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/metadata.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/tests/test_1.json
+============================================================
+
+{
+  "name": "Configuration Validation",
+  "description": "Verify that ty correctly reads the pyproject.toml configuration and respects exclusions.",
+  "input_data": "A pyproject.toml with an \"exclude\" rule for a folder containing type errors.",
+  "expected_result": "Running `uv run ty .` should exit with code 0 (success) because the error-prone folder is excluded."
+}
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/tests/test_1.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/tests/test_2.json
+============================================================
+
+{
+  "name": "Strict Mode Override",
+  "description": "Ensure that strict mode is enforced on a specific subdirectory even if the global setting is basic.",
+  "input_data": "A file in a \"strict\" override path missing a return type hint.",
+  "expected_result": "ty should report a failure for the missing return type hint in that specific directory."
+}
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/tests/test_2.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/tests/test_3.json
+============================================================
+
+{
+  "name": "UV Integration Check",
+  "description": "Verify ty can resolve third-party types managed by uv.",
+  "input_data": "Code importing a typed library (e.g., Pydantic) and using it incorrectly.",
+  "expected_result": "ty should correctly identify the type mismatch using the library types found in the uv-managed site-packages."
+}
+
+============================================================
+END FILE: skills/_drafts/26f10af6-4566-4ac3-90a2-33cbf5174c4b/technical_skills/python/type_checking/astral-ty-integration/tests/test_3.json
+============================================================
+
+============================================================
+FILE: skills/_drafts/2c7046b4-1f5d-4574-828a-f92f0ec6db6e/python/ty-type-checker/SKILL.md
+============================================================
+
+---
+name: ty-type-checker
+description: Use when type checking is slow, migrating from Mypy/Pyright, or integrating with the Ruff/UV ecosystem without complex plugin dependencies.
+---
+
+# ty-type-checker
+
+## Overview
+
+`ty` is the high-performance, Rust-powered static type checker designed for the modern Python ecosystem. Developed as part of the Astral toolchain (alongside Ruff and UV), `ty` focuses on extreme execution speed, parity with PEP 484/526/612, and a "zero-config" philosophy that scales to multi-million line monorepos.
+
+**Core principle:** Zero-latency type feedback — Type checking must be fast enough to run on every file save without a background daemon.
+
+## Capabilities
+
+- Execute full-project type checks in milliseconds (zero-daemon overhead)
+- Integrate seamlessly with Ruff and UV for unified Astral stack configuration
+- Apply strict-by-default type safety with granular per-directory overrides
+- Run incremental checks across only modified files and dependencies
+- Support modern PEP typing standards (484, 613, 646) without legacy plugins
+
+## Dependencies
+
+- **python/type-hinting** — Essential for understanding the syntax `ty` validates.
+- **python/uv** — Recommended for managing the execution environment and `ty` installation.
+- **python/ruff** — Complements `ty` by handling linting and formatting.
+
+## When to Use
+
+**Use when:**
+
+- You are building high-performance Python applications where developer velocity is hindered by slow Mypy/Pyright runs.
+- You are already utilizing the Astral stack (`ruff`, `uv`) and want a unified configuration experience.
+- You are managing a large monorepo that requires fast CI/CD validation without complex caching logic.
+- You want a type checker that behaves consistently across local environments and CI.
+
+**When NOT to use:**
+
+- Your project relies heavily on legacy Mypy plugins (e.g., complex SQLAlchemy or Pydantic v1 custom logic) not yet supported by `ty`.
+- You are targeting Python versions older than 3.8.
+- You require specific "Type Narrowing" behaviors that are unique to Pyright's proprietary engine and not yet mirrored in `ty`.
+
+## Quick Reference
+
+| Problem               | Solution                                                                       |
+| --------------------- | ------------------------------------------------------------------------------ |
+| Slow Type Checks      | Replace `mypy` with `ty` for instant cold-start analysis.                      |
+| Complex Config        | Use `[tool.ty]` in `pyproject.toml` for unified settings.                      |
+| Dependency Resolution | Run `ty` through `uv run` to ensure correct `site-packages` discovery.         |
+| CI Bottlenecks        | Remove Mypy cache-restore steps; `ty` is often faster than the cache overhead. |
+
+## Core Patterns
+
+### 1. Configuration Strategy (Unified Config)
+
+**The problem:** Managing disparate configuration files for linting and typing leads to drift and complexity.
+**❌ Legacy approach (Mypy):** Separate `mypy.ini`.
+**✅ Production pattern (ty):** Unified `pyproject.toml`.
+
+```toml
+[tool.ty]
+target-version = "py38"  # Match your runtime minimum
+level = "strict"
+exclude = ["tests/data"]
+```
+
+### 2. Migration: Handling Type Ignores
+
+**The problem:** Migrating thousands of Mypy-specific `# type: ignore` comments.
+**✅ Automated Migration:** Use `ty`'s compatibility mode to honor legacy ignores while identifying redundant ones.
+
+```toml
+[tool.ty.migration]
+honor-legacy-ignores = true
+show-redundant-ignores = true
+```
+
+### 3. Progressive Adoption (Relaxed Directories)
+
+**The problem:** You cannot fix a legacy directory overnight, but want strict checking elsewhere.
+**✅ Pattern:** Use overrides to downgrade levels for specific paths.
+
+```toml
+[[tool.ty.overrides]]
+paths = ["legacy_code/**", "ext_scripts/"]
+level = "basic"  # Downgrade from global strict
+```
+
+### 4. Third-Party Library Stubs
+
+**The problem:** Libraries without type hints (`py.typed`) trigger missing import errors.
+**✅ Pattern:** Point `ty` to custom stubs or `typeshed` equivalents.
+
+```toml
+[tool.ty]
+stub-path = "typings"
+# Place .pyi files in ./typings/library_name/
+```
+
+### 5. Managing Import Mappings
+
+**The problem:** Using `src` layouts or namespace packages that `ty` might not resolve automatically.
+**✅ Pattern:** Define explicit path mappings.
+
+```toml
+[tool.ty]
+paths = ["src"]
+extra-paths = ["vendor/lib"]
+```
+
+### 6. Generic Protocol Implementation
+
+**The problem:** Ensuring runtime classes adhere to complex interfaces without inheritance.
+**✅ Pattern:** Use `typing.Protocol` which `ty` validates with zero-overhead structural subtyping.
+
+```python
+from typing import Protocol
+

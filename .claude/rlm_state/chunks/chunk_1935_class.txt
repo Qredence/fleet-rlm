@@ -1,0 +1,56 @@
+<!-- Chunk 1935: bytes 7773080-7774621, type=class -->
+class TaxonomyPath:
+    """
+    Value object representing a taxonomy path.
+
+    Provides validation and safe string representation.
+    """
+
+    path: str
+
+    def __post_init__(self) -> None:
+        """
+        Validate and sanitize the taxonomy path after initialization.
+
+        Raises:
+            ValueError: If the path is empty or contains invalid characters.
+
+        """
+        # Validate path format
+        if not self.path:
+            raise ValueError("Taxonomy path cannot be empty")
+
+        # Sanitize to prevent traversal attacks
+        safe = sanitize_taxonomy_path(self.path)
+        if not safe:
+            raise ValueError(f"Invalid taxonomy path: {self.path}")
+
+        # Update with safe value (frozen dataclass workaround)
+        object.__setattr__(self, "path", safe)
+
+    def __str__(self) -> str:
+        """
+        Return the string representation of the taxonomy path.
+
+        Returns:
+            The taxonomy path as a string.
+
+        """
+        return self.path
+
+    def parent(self) -> TaxonomyPath | None:
+        """Get the parent taxonomy path, or None if at root."""
+        parts = self.path.split("/")
+        if len(parts) <= 1:
+            return None
+        return TaxonomyPath("/".join(parts[:-1]))
+
+    def child(self, segment: str) -> TaxonomyPath:
+        """Create a child taxonomy path."""
+        return TaxonomyPath(f"{self.path}/{segment}")
+
+    def depth(self) -> int:
+        """Return the depth of this path in the taxonomy tree."""
+        return len(self.path.split("/"))
+
+

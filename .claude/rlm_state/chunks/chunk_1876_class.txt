@@ -1,0 +1,19 @@
+<!-- Chunk 1876: bytes 7658423-7659062, type=class -->
+class TagStats(Base):
+    """Tag popularity tracking."""
+
+    __tablename__ = "tag_stats"
+
+    tag: Mapped[str] = mapped_column(String(64), primary_key=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+# =============================================================================
+# SKILL FILES & ASSETS
+# =============================================================================
+
+

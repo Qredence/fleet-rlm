@@ -1,0 +1,14 @@
+<!-- Chunk 1430: bytes 5515085-5515526, type=function -->
+def greet(name):
+    print(f"Hello, {name}!")
+
+greet("Alice")
+```
+
+In this example, `repeat` is a decorator factory that takes the number of repetitions as an argument and returns a decorator that repeats the decorated function that many times.
+
+# Class-Based Decorators
+
+Decorators can also be implemented using classes. This can be useful when you need to maintain state or perform more complex operations within the decorator.
+
+```python

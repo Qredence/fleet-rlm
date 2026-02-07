@@ -1,0 +1,5 @@
+<!-- Chunk 1241: bytes 4650633-4650733, type=function -->
+def _iter_files(root: Path) -> list[Path]:
+    return [p for p in root.rglob("*") if p.is_file()]
+
+

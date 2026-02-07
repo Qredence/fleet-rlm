@@ -1,0 +1,28 @@
+<!-- Chunk 2078: bytes 7989655-7990854, type=class -->
+class TestHITLSignatureConsistency:
+    """Test HITL signatures follow conventions."""
+
+    def test_hitl_signatures_focus_on_interaction(self):
+        """HITL signatures should focus on user interaction."""
+        # This test ensures we're creating the right type of signatures
+        sig = GenerateClarifyingQuestions
+        desc = sig.__doc__.lower()
+        assert any(word in desc for word in ["question", "clarify", "user", "interaction"])
+
+
+============================================================
+END FILE: tests/unit/core/signatures/hitl/test_questions.py
+============================================================
+
+============================================================
+FILE: tests/unit/core/signatures/understanding/test_requirements.py
+============================================================
+
+"""Tests for understanding signatures."""
+
+from skill_fleet.core.signatures.understanding.dependencies import AnalyzeDependencies
+from skill_fleet.core.signatures.understanding.intent import AnalyzeIntent
+from skill_fleet.core.signatures.understanding.requirements import GatherRequirements
+from skill_fleet.core.signatures.understanding.taxonomy import FindTaxonomyPath
+
+

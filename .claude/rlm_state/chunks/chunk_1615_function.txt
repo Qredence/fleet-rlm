@@ -1,0 +1,111 @@
+<!-- Chunk 1615: bytes 6636596-6639461, type=function -->
+def spawn_tui(
+    api_url: str = "http://localhost:8000",
+    user_id: str = "default",
+    force_no_tui: bool = False,
+) -> int:
+    """
+    Spawn the Ink TUI if available, otherwise return 0 to continue with fallback.
+
+    Args:
+        api_url: FastAPI backend URL
+        user_id: Current user ID
+        force_no_tui: If True, skip TUI and return 0
+
+    Returns:
+        int: Exit code (0 = no TUI, 1 = error, other = TUI exit code)
+    """
+    if force_no_tui:
+        logger.debug("TUI disabled via --no-tui flag")
+        return 0
+
+    spawner = TUISpawner(api_url=api_url, user_id=user_id)
+
+    if not spawner.is_available():
+        logger.debug("TUI not available, falling back to simple chat")
+        return 0
+
+    try:
+        return spawner.run()
+    except Exception as e:
+        logger.warning(f"TUI failed, falling back to simple chat: {e}")
+        return 0
+
+
+============================================================
+END FILE: src/skill_fleet/cli/tui_spawner.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/ui/__init__.py
+============================================================
+
+"""
+CLI UI helpers.
+
+This package contains small, testable UI abstractions used by Typer commands.
+The primary goal is to support richer terminal UX (arrow-key selection) while
+retaining a safe fallback for non-interactive environments.
+"""
+
+from .prompts import (
+    OTHER_OPTION_ID,
+    PromptToolkitUI,
+    PromptUI,
+    RichFallbackUI,
+    choose_many_with_other,
+    choose_one_with_other,
+    get_default_ui,
+)
+
+__all__ = [
+    "OTHER_OPTION_ID",
+    "PromptUI",
+    "PromptToolkitUI",
+    "RichFallbackUI",
+    "choose_many_with_other",
+    "choose_one_with_other",
+    "get_default_ui",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/cli/ui/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/cli/ui/prompts.py
+============================================================
+
+"""
+Prompt UI abstraction for Typer CLI commands.
+
+`skill-fleet chat` needs a better UX than typed `Prompt.ask(...)` choices.
+This module provides:
+- A small PromptUI protocol
+- A prompt-toolkit implementation for arrow-key selection
+- A Rich fallback for non-interactive terminals
+
+The abstraction is intentionally minimal so it can be unit tested without
+requiring a real TTY.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Protocol, TypeVar
+
+from rich.prompt import Prompt as RichPrompt
+
+_T = TypeVar("_T")
+
+logger = logging.getLogger(__name__)
+
+OTHER_OPTION_ID = "__other__"
+
+

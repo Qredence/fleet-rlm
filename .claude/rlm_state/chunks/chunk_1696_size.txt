@@ -1,0 +1,1149 @@
+<!-- Chunk 1696: bytes 7022516-7172516, type=size -->
+cy_overrides[get_db] = override_get_db\n    try:\n        response = client.patch(\"/users/1\", json={\"name\": \"Test\"})\n    finally:\n        app.dependency_overrides.clear()  # Always clean up\n```\n\n**Yield dependencies for cleanup:**\n```python\nasync def get_db():\n    async with AsyncSession(engine) as session:\n        yield session\n        # Automatic cleanup after response\n```\n\n### 6. Async Testing\n\n**The problem:** Using sync `TestClient` with async endpoints causes hangs. Tests pass in isolation but fail together due to database bleeding.\n\n**✅ Production pattern:**\n```python\nimport pytest\nfrom httpx import AsyncClient\n\n@pytest.fixture\nasync def async_client():\n    async with AsyncClient(app=app, base_url=\"http://test\") as ac:\n        yield ac\n\n@pytest.fixture\nasync def db_session():\n    engine = create_async_engine(TEST_DATABASE_URL)\n    async with AsyncSession(engine) as session:\n        yield session\n        await session.rollback()  # Clean up after test\n\n@pytest.mark.asyncio\nasync def test_create_user(async_client: AsyncClient):\n    response = await async_client.post(\"/users\", json={\n        \"name\": \"Alice\",\n        \"email\": \"alice@example.com\"\n    })\n    assert response.status_code == 200\n```\n\n### 7. File Upload Handling\n\n**Stream, don't load entirely:**\n```python\nfrom fastapi import UploadFile\nimport pandas as pd\n\n@app.post(\"/upload-csv\")\nasync def upload_csv(file: UploadFile):\n    # Stream the file - don't load entirely into memory\n    df = pd.read_csv(file.file)\n    results = process_data_frame(df)\n    return {\"uploaded\": len(results), \"data\": results}\n```\n\n### 8. Background Tasks\n\n**For operations longer than HTTP timeout:**\n```python\nfrom fastapi import BackgroundTasks\n\ndef long_running_task(task_id: str):\n    result = process_heavy_computation()\n    mark_task_complete(task_id, result)\n\n@app.post(\"/process\")\nasync def start_process(background_tasks: BackgroundTasks):\n    task_id = generate_task_id()\n    background_tasks.add_task(long_running_task, task_id)\n    return {\"task_id\": task_id, \"status\": \"processing\"}\n\n# For production: Use Celery for retries and distributed execution\n```\n\n### 9. FastAPI CLI (New in 0.128.0)\n\n**The problem:** Running FastAPI apps required manual uvicorn commands. Developers had to remember different commands for development vs production.\n\n**❌ Old approach (still works but not recommended):**\n```bash\n# Development with auto-reload\nuvicorn main:app --reload\n\n# Production\nuvicorn main:app --host 0.0.0.0 --port 8000\n```\n\n**✅ Modern approach with FastAPI CLI:**\n```bash\n# Installation (includes CLI + all standard dependencies)\npip install \"fastapi[standard]\"\n\n# Development with auto-reload\nfastapi dev main.py\n\n# Production\nfastapi run main.py --workers 4\n```\n\n**CLI Command Reference:**\n\n| Command                           | Purpose            | Auto-reload |\n|-----------------------------------|--------------------|-------------|\n| `fastapi dev main.py`             | Development server | ✅ Yes       |\n| `fastapi run main.py`             | Production server  | ❌ No        |\n| `fastapi dev main.py --port 8080` | Custom port        | ✅ Yes       |\n| `fastapi run main.py --workers 4` | Multiple workers   | ❌ No        |\n\n**Key benefits:**\n- Unified CLI for development and production\n- Auto-reload by default in dev mode\n- Includes all standard dependencies (uvicorn, httpx, jinja2, python-multipart)\n- Better error messages and output formatting\n\n> **For comprehensive CLI documentation**, see the [FastAPI CLI capability](capabilities/fastapi-cli.md)\n\n**Installation with all standard dependencies:**\n```bash\npip install \"fastapi[standard]\"\n```\n\nThis installs:\n- `fastapi` - Core framework\n- `uvicorn[standard]` - ASGI server with high-performance dependencies\n- `fastapi-cli[standard]` - CLI tool (includes deployment tools)\n- `httpx` - For testing\n- `jinja2` - For templates\n- `python-multipart` - For form data\n\n**Optional: FastAPI Cloud deployment:**\n```bash\nfastapi login\nfastapi deploy\n```\n\n> **Note:** FastAPI Cloud is optional. You can deploy to any cloud provider (AWS, GCP, Azure, Railway, etc.) using traditional deployment methods.\n\n## Common Mistakes\n\n| Mistake                             | Why It's Wrong                                    | Fix                                            |\n|-------------------------------------|---------------------------------------------------|------------------------------------------------|\n| Creating DB engine at import time   | Connections never close, workers leak connections | Create in `lifespan`, dispose in shutdown      |\n| Using `requests` in async endpoints | Blocks entire event loop                          | Use `httpx.AsyncClient`                        |\n| Forgetting `exclude_unset=True`     | Optional fields become `None` and overwrite data  | Use `exclude_unset=True` for PATCH             |\n| Sync fixtures with async tests      | Tests hang or fail mysteriously                   | Use `@pytest.mark.asyncio` with async fixtures |\n| Global state for dependencies       | Can't test, hard to manage lifecycle              | Use `Depends()` with yield                     |\n| Not setting `pool_recycle`          | Database closes idle connections, causing errors  | Set `pool_recycle=3600` or similar             |\n| Using `run_in_executor` as band-aid | Still blocks threads, doesn't scale               | Proper async conversion                        |\n| Missing `max_overflow` parameter    | Pool can't burst under load, requests queue       | Set `max_overflow=20` or similar               |\n\n## Real-World Impact\n\n- **Connection pool exhaustion** fixed with proper lifecycle management → 50 concurrent requests without errors\n- **Test execution time** reduced 80% with proper async fixtures\n- **API response validation** caught 15% of frontend bugs before deployment\n- **Memory usage** reduced 60% by streaming file uploads instead of loading into memory\n- **\"Too many connections\" DB errors** eliminated with proper shutdown handling\n\n## Red Flags - STOP and Reconsider\n\n- Code that \"works locally\" but you haven't load tested\n- Creating database connections at module level\n- Using `@app.on_event(\"startup\")` (deprecated)\n- Missing shutdown handlers\n- No pool parameters on engine creation\n- Using `requests` library in async functions\n- Tests that only pass when run individually\n- `run_in_executor` as primary async strategy\n\n**All of these mean: Revisit your architecture. Production will break.**\n"
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/decorators",
+        "skill_content": "---\nname: python-decorators\ndescription: Ability to design, implement, and apply higher-order functions to extend\n  or modify the behavior of functions and classes in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/decorators\n  version: 1.0.0\n---\n\n# Python Decorators: Functional and Metaprogramming Patterns\n\n## Overview\nPython decorators are a powerful form of metaprogramming used to modify or enhance the behavior of functions or classes without permanently modifying their source code. They rely on Python's first-class function support and closure mechanics.\n\n## Core Concepts\n- **Closures**: Functions that \"remember\" the environment in which they were created.\n- **First-Class Citizens**: The ability to pass functions as arguments, return them from other functions, and assign them to variables.\n- **Syntactic Sugar**: The `@decorator` syntax is equivalent to `func = decorator(func)`.\n\n## Modules\n\n### 1. Basic Function Decorators\nFocuses on the standard wrapper pattern.\n- **Simple Logger**: Intercepting calls to log arguments and return values.\n- **Metadata Preservation**: Critical use of `functools.wraps` to prevent losing the original function's identity (`__name__`, `__doc__`).\n\n### 2. Parameterized Decorators (Decorator Factories)\nMoving beyond simple wrappers to \"factories\" that return decorators.\n- Implementation of the triple-nested function structure: `outer_params(actual_decorator(wrapped_func))`.\n- Use cases: `@retry(times=3)`, `@access_level(\"admin\")`.\n\n### 3. Class-Based Decorators\nUtilizing the `__call__` dunder method to treat an object instance as a decorator.\n- Maintaining state within instance attributes rather than closures.\n\n### 4. Stateful & Memoization\nAdvanced patterns for performance and tracking.\n- **Call Counting**: Monitoring execution frequency.\n- **Memoization**: Caching expensive computation results based on input arguments (e.g., implementing a custom LRU cache).\n\n### 5. Composition and Order\nUnderstanding the \"Onion\" model of execution.\n- Order of application: Bottom-to-top.\n- Order of execution: Top-to-bottom."
+      }
+    ],
+    "signature": {
+      "instructions": "Summarize understanding of user intent for confirmation.\n\nCreate a clear, concise summary of what we understood from the task\nand user's clarifying answers. This is shown to user for confirmation\nbefore proceeding to expensive generation phase.\n\nFormat as bullet points for easy scanning.",
+      "fields": [
+        {
+          "prefix": "Task Description:",
+          "description": "Original task description"
+        },
+        {
+          "prefix": "User Clarifications:",
+          "description": "JSON string of user's answers to clarifying questions"
+        },
+        {
+          "prefix": "Intent Analysis:",
+          "description": "Analyzed intent from Phase 1 parallel analysis"
+        },
+        {
+          "prefix": "Taxonomy Path:",
+          "description": "Determined taxonomy path (e.g., technical_skills/programming/python)"
+        },
+        {
+          "prefix": "Dependencies:",
+          "description": "List of skill dependencies"
+        },
+        {
+          "prefix": "Summary:",
+          "description": "Concise bullet-point summary of understanding (3-5 bullets)"
+        },
+        {
+          "prefix": "Key Assumptions:",
+          "description": "Key assumptions being made (user should verify these)"
+        },
+        {
+          "prefix": "Confidence:",
+          "description": "Confidence score 0-1. >0.8 means high confidence, proceed. <0.8 means may need more clarification"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "preview_generator.generate_preview": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/decorators",
+        "skill_content": "---\nname: python-decorators\ndescription: Ability to design, implement, and apply higher-order functions to extend\n  or modify the behavior of functions and classes in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/decorators\n  version: 1.0.0\n---\n\n# Python Decorators: Functional and Metaprogramming Patterns\n\n## Overview\nPython decorators are a powerful form of metaprogramming used to modify or enhance the behavior of functions or classes without permanently modifying their source code. They rely on Python's first-class function support and closure mechanics.\n\n## Core Concepts\n- **Closures**: Functions that \"remember\" the environment in which they were created.\n- **First-Class Citizens**: The ability to pass functions as arguments, return them from other functions, and assign them to variables.\n- **Syntactic Sugar**: The `@decorator` syntax is equivalent to `func = decorator(func)`.\n\n## Modules\n\n### 1. Basic Function Decorators\nFocuses on the standard wrapper pattern.\n- **Simple Logger**: Intercepting calls to log arguments and return values.\n- **Metadata Preservation**: Critical use of `functools.wraps` to prevent losing the original function's identity (`__name__`, `__doc__`).\n\n### 2. Parameterized Decorators (Decorator Factories)\nMoving beyond simple wrappers to \"factories\" that return decorators.\n- Implementation of the triple-nested function structure: `outer_params(actual_decorator(wrapped_func))`.\n- Use cases: `@retry(times=3)`, `@access_level(\"admin\")`.\n\n### 3. Class-Based Decorators\nUtilizing the `__call__` dunder method to treat an object instance as a decorator.\n- Maintaining state within instance attributes rather than closures.\n\n### 4. Stateful & Memoization\nAdvanced patterns for performance and tracking.\n- **Call Counting**: Monitoring execution frequency.\n- **Memoization**: Caching expensive computation results based on input arguments (e.g., implementing a custom LRU cache).\n\n### 5. Composition and Order\nUnderstanding the \"Onion\" model of execution.\n- Order of application: Bottom-to-top.\n- Order of execution: Top-to-bottom."
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/web_frameworks/python/fastapi",
+        "skill_content": "---\nname: fastapi-production-patterns\ndescription: Use when building FastAPI apps with async database operations, complex dependency injection, partial update endpoints, async testing, or converting Python utilities to API endpoints\nlicense: MIT\ncompatibility: Requires Python 3.8+, FastAPI 0.128.0+, SQLAlchemy 2.0+\nmetadata:\n  skill_id: technical/programming/web-frameworks/python/fastapi\n  version: 1.0.0\n  type: technical\n  weight: medium\n  load_priority: task_specific\n---\n\n# FastAPI Production Patterns\n\n## Overview\nProven patterns for building production-ready FastAPI applications that avoid common silent failures: connection pool exhaustion, blocking async operations, partial update bugs, and test isolation issues.\n\n**Core principle:** Code that works in development but fails under load is NOT production-ready. Database engines MUST be created in lifespan, connections MUST be disposed on shutdown, and async operations MUST NOT block.\n\n## When to Use\n**When to use:**\n\n```dot\ndigraph when_to_use {\n    \"Building FastAPI app?\" [shape=diamond];\n    \"Async DB operations?\" [shape=diamond];\n    \"Need to test async endpoints?\" [shape=diamond];\n    \"Converting Python utilities to APIs?\" [shape=diamond];\n    \"PATCH with partial updates?\" [shape=diamond];\n    \"Use this skill\" [shape=box];\n\n    \"Building FastAPI app?\" -> \"Async DB operations?\" [label=\"yes\"];\n    \"Async DB operations?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Need to test async endpoints?\" [label=\"yes\"];\n    \"Need to test async endpoints?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Converting Python utilities to APIs?\" [label=\"yes\"];\n    \"Converting Python utilities to APIs?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"PATCH with partial updates?\" [label=\"yes\"];\n    \"PATCH with partial updates?\" -> \"Use this skill\" [label=\"yes\"];\n}\n```\n\n**When NOT to use:**\n- Simple synchronous APIs without database operations\n- Learning basic FastAPI routing (use official docs instead)\n- Trivial CRUD with no production requirements\n\n## Quick Reference\n\n| Problem                                   | Solution                                                   | Keywords                                               |\n|-------------------------------------------|------------------------------------------------------------|--------------------------------------------------------|\n| DB connections not closing on shutdown    | Use `lifespan` context manager with `engine.dispose()`     | connection leak, too many connections, pool exhaustion |\n| Pool exhaustion under load                | Set `pool_size`, `max_overflow`, create engine in lifespan | connection timeout, concurrent requests, workers       |\n| Tests pass isolation but fail in parallel | Use async fixtures with proper isolation                   | flaky tests, test bleeding, async test                 |\n| PATCH partial updates not validating      | Use `Optional` fields with `exclude_unset=True`            | partial updates, None overwriting, PATCH               |\n| Converting sync utilities to async        | Replace blocking libraries with async equivalents          | blocking, async conversion, requests to httpx          |\n| Long operations timeout HTTP              | Use `BackgroundTasks` or Celery                            | timeout, long running, background                      |\n\n## Core Patterns\n\n### 1. Database Lifecycle Management\n\n**The problem:** Engines created at import time never close connections. Deprecated `@app.on_event` handlers miss proper cleanup. Missing pool parameters cause exhaustion under load.\n\n**❌ Common but broken (baseline failure):**\n```python\n# database.py - Created at import time!\nengine = create_async_engine(DATABASE_URL)\n\n# main.py - Deprecated pattern\n@app.on_event(\"startup\")\nasync def startup():\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n# NO shutdown handler - connections leak forever!\n```\n\n**✅ Production pattern:**\n```python\nfrom contextlib import asynccontextmanager\nfrom sqlalchemy.ext.asyncio import create_async_engine, AsyncSession\n\n@asynccontextmanager\nasync def lifespan(app: FastAPI):\n    # Startup - create engine HERE, not at import\n    engine = create_async_engine(\n        DATABASE_URL,\n        pool_size=10,           # Critical for multi-worker deployments\n        max_overflow=20,        # Allow bursting above pool_size\n        pool_recycle=3600,      # Recycle connections after 1 hour\n    )\n    app.state.db_engine = engine\n\n    # Create tables\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n\n    yield\n\n    # Shutdown - CRITICAL: close connections\n    await engine.dispose()\n\napp = FastAPI(lifespan=lifespan)\n\nasync def get_db() -> AsyncSession:\n    async with AsyncSession(app.state.db_engine) as session:\n        yield session\n```\n\n**Key insight:** Engine creation in lifespan + dispose in shutdown = no connection leaks. Pool parameters prevent exhaustion when multiple workers start simultaneously.\n\n### 2. Pydantic Partial Updates\n\n**The problem:** PATCH endpoints should only update provided fields, but naive implementations overwrite everything with `None`.\n\n**❌ Common mistake (None overwrites):**\n```python\n@app.patch(\"/users/{user_id}\")\nasync def update_user(user_id: int, update: UserUpdate, db: AsyncSession = Depends(get_db)):\n    user = await db.get(User, user_id)\n    # ❌ This sets unprovided fields to None!\n    user.name = update.name  # None if not provided\n    user.email = update.email  # None if not provided\n    await db.commit()\n    return user\n```\n\n**✅ Production pattern:**\n```python\nfrom pydantic import BaseModel, Optional\nfrom typing import Optional\n\nclass UserUpdate(BaseModel):\n    name: Optional[str] = None\n    email: Optional[str] = None\n    age: Optional[int] = None\n\n@app.patch(\"/users/{user_id}\")\nasync def update_user(\n    user_id: int,\n    update: UserUpdate,\n    db: AsyncSession = Depends(get_db)\n):\n    user = await db.get(User, user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    # CRITICAL: Only update provided fields\n    update_data = update.model_dump(exclude_unset=True)\n    for field, value in update_data.items():\n        setattr(user, field, value)\n\n    await db.commit()\n    await db.refresh(user)\n    return user\n```\n\n**Key insight:** `exclude_unset=True` only includes fields actually provided in the request, preventing `None` overwrites.\n\n### 3. Converting Python Functions to Endpoints\n\n**The problem:** Existing Python code needs API exposure. Common mistakes: blocking operations, missing validation, no error handling, wrong return types.\n\n**Transformation steps:**\n1. Add Pydantic models for request/response\n2. Make functions async if they do I/O\n3. Replace exceptions with `HTTPException`\n4. Add `response_model` for validation\n5. Use `Depends` for shared resources\n\n**Before - Blocking utility:**\n```python\ndef process_payment(user_id: int, amount: float, card: dict) -> dict:\n    result = db.execute(f\"SELECT * FROM users WHERE id = {user_id}\")  # Blocking!\n    if result['balance'] < amount:\n        raise ValueError(\"Insufficient funds\")  # 500 error!\n    return {\"status\": \"success\"}\n\n# Naive wrapper\n@app.post(\"/payment\")\ndef payment_endpoint(user_id: int, amount: float, card: dict):\n    return process_payment(user_id, amount, card)  # No validation!\n```\n\n**After - Production endpoint:**\n```python\nfrom pydantic import BaseModel, Field, validator\nfrom fastapi import HTTPException\n\nclass CreditCard(BaseModel):\n    number: str = Field(..., min_length=13, max_length=19)\n    expiry: str\n    cvv: str = Field(..., min_length=3, max_length=4)\n\n    @validator('number')\n    def luhn_check(cls, v):\n        if not luhn_valid(v):\n            raise ValueError('Invalid card number')\n        return v\n\nclass PaymentRequest(BaseModel):\n    user_id: int\n    amount: float = Field(..., gt=0)  # Must be positive\n    card: CreditCard\n\nclass PaymentResponse(BaseModel):\n    status: str\n    transaction_id: str\n\n@app.post(\"/payment\", response_model=PaymentResponse)\nasync def payment_endpoint(\n    request: PaymentRequest,\n    db: AsyncSession = Depends(get_db)\n):\n    # Async database call\n    user = await db.get(User, request.user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    if user.balance < request.amount:\n        raise HTTPException(status_code=400, detail=\"Insufficient funds\")\n\n    transaction_id = await process_payment_async(request, db)\n    return PaymentResponse(status=\"success\", transaction_id=transaction_id)\n```\n\n### 4. Sync to Async Conversion\n\n**Sync → Async library mapping:**\n\n| Sync Library   | Async Replacement           |\n|----------------|-----------------------------|\n| `requests`     | `httpx.AsyncClient`         |\n| `sqlalchemy`   | `sqlalchemy.ext.asyncio`    |\n| `time.sleep()` | `asyncio.sleep()`           |\n| `open()`       | `aiofiles`                  |\n| `subprocess`   | `asyncio.create_subprocess` |\n| `redis`        | `aioredis`                  |\n\n**Pattern:**\n```python\n# Before - blocking\ndef get_user_data(user_id: int) -> dict:\n    user = db.session.query(User).filter(User.id == user_id).first()\n    response = requests.get(f\"https://api.external.com/user/{user_id}\")\n    return {\"user\": user, \"external\": response.json()}\n\n# After - async\nasync def get_user_data(user_id: int, db: AsyncSession) -> dict:\n    result = await db.execute(select(User).where(User.id == user_id))\n    user = result.scalar_one_or_none()\n\n    async with httpx.AsyncClient() as client:\n        response = await client.get(f\"https://api.external.com/user/{user_id}\")\n\n    return {\"user\": user, \"external\": response.json()}\n```\n\n### 5. Dependency Injection Patterns\n\n**Caching dependencies:**\n```python\nfrom functools import lru_cache\n\n@lru_cache()\ndef get_settings():\n    return Settings()  # Singleton, created once\n\n@lru_cache()\ndef get_redis_client():\n    return redis.Redis(host=settings.REDIS_HOST)\n```\n\n**Testing with overrides:**\n```python\nfrom fastapi.testclient import TestClient\n\ndef test_update_user():\n    async def override_get_db():\n        return test_session  # Use test DB\n\n    app.dependency_overrides[get_db] = override_get_db\n    try:\n        response = client.patch(\"/users/1\", json={\"name\": \"Test\"})\n    finally:\n        app.dependency_overrides.clear()  # Always clean up\n```\n\n**Yield dependencies for cleanup:**\n```python\nasync def get_db():\n    async with AsyncSession(engine) as session:\n        yield session\n        # Automatic cleanup after response\n```\n\n### 6. Async Testing\n\n**The problem:** Using sync `TestClient` with async endpoints causes hangs. Tests pass in isolation but fail together due to database bleeding.\n\n**✅ Production pattern:**\n```python\nimport pytest\nfrom httpx import AsyncClient\n\n@pytest.fixture\nasync def async_client():\n    async with AsyncClient(app=app, base_url=\"http://test\") as ac:\n        yield ac\n\n@pytest.fixture\nasync def db_session():\n    engine = create_async_engine(TEST_DATABASE_URL)\n    async with AsyncSession(engine) as session:\n        yield session\n        await session.rollback()  # Clean up after test\n\n@pytest.mark.asyncio\nasync def test_create_user(async_client: AsyncClient):\n    response = await async_client.post(\"/users\", json={\n        \"name\": \"Alice\",\n        \"email\": \"alice@example.com\"\n    })\n    assert response.status_code == 200\n```\n\n### 7. File Upload Handling\n\n**Stream, don't load entirely:**\n```python\nfrom fastapi import UploadFile\nimport pandas as pd\n\n@app.post(\"/upload-csv\")\nasync def upload_csv(file: UploadFile):\n    # Stream the file - don't load entirely into memory\n    df = pd.read_csv(file.file)\n    results = process_data_frame(df)\n    return {\"uploaded\": len(results), \"data\": results}\n```\n\n### 8. Background Tasks\n\n**For operations longer than HTTP timeout:**\n```python\nfrom fastapi import BackgroundTasks\n\ndef long_running_task(task_id: str):\n    result = process_heavy_computation()\n    mark_task_complete(task_id, result)\n\n@app.post(\"/process\")\nasync def start_process(background_tasks: BackgroundTasks):\n    task_id = generate_task_id()\n    background_tasks.add_task(long_running_task, task_id)\n    return {\"task_id\": task_id, \"status\": \"processing\"}\n\n# For production: Use Celery for retries and distributed execution\n```\n\n### 9. FastAPI CLI (New in 0.128.0)\n\n**The problem:** Running FastAPI apps required manual uvicorn commands. Developers had to remember different commands for development vs production.\n\n**❌ Old approach (still works but not recommended):**\n```bash\n# Development with auto-reload\nuvicorn main:app --reload\n\n# Production\nuvicorn main:app --host 0.0.0.0 --port 8000\n```\n\n**✅ Modern approach with FastAPI CLI:**\n```bash\n# Installation (includes CLI + all standard dependencies)\npip install \"fastapi[standard]\"\n\n# Development with auto-reload\nfastapi dev main.py\n\n# Production\nfastapi run main.py --workers 4\n```\n\n**CLI Command Reference:**\n\n| Command                           | Purpose            | Auto-reload |\n|-----------------------------------|--------------------|-------------|\n| `fastapi dev main.py`             | Development server | ✅ Yes       |\n| `fastapi run main.py`             | Production server  | ❌ No        |\n| `fastapi dev main.py --port 8080` | Custom port        | ✅ Yes       |\n| `fastapi run main.py --workers 4` | Multiple workers   | ❌ No        |\n\n**Key benefits:**\n- Unified CLI for development and production\n- Auto-reload by default in dev mode\n- Includes all standard dependencies (uvicorn, httpx, jinja2, python-multipart)\n- Better error messages and output formatting\n\n> **For comprehensive CLI documentation**, see the [FastAPI CLI capability](capabilities/fastapi-cli.md)\n\n**Installation with all standard dependencies:**\n```bash\npip install \"fastapi[standard]\"\n```\n\nThis installs:\n- `fastapi` - Core framework\n- `uvicorn[standard]` - ASGI server with high-performance dependencies\n- `fastapi-cli[standard]` - CLI tool (includes deployment tools)\n- `httpx` - For testing\n- `jinja2` - For templates\n- `python-multipart` - For form data\n\n**Optional: FastAPI Cloud deployment:**\n```bash\nfastapi login\nfastapi deploy\n```\n\n> **Note:** FastAPI Cloud is optional. You can deploy to any cloud provider (AWS, GCP, Azure, Railway, etc.) using traditional deployment methods.\n\n## Common Mistakes\n\n| Mistake                             | Why It's Wrong                                    | Fix                                            |\n|-------------------------------------|---------------------------------------------------|------------------------------------------------|\n| Creating DB engine at import time   | Connections never close, workers leak connections | Create in `lifespan`, dispose in shutdown      |\n| Using `requests` in async endpoints | Blocks entire event loop                          | Use `httpx.AsyncClient`                        |\n| Forgetting `exclude_unset=True`     | Optional fields become `None` and overwrite data  | Use `exclude_unset=True` for PATCH             |\n| Sync fixtures with async tests      | Tests hang or fail mysteriously                   | Use `@pytest.mark.asyncio` with async fixtures |\n| Global state for dependencies       | Can't test, hard to manage lifecycle              | Use `Depends()` with yield                     |\n| Not setting `pool_recycle`          | Database closes idle connections, causing errors  | Set `pool_recycle=3600` or similar             |\n| Using `run_in_executor` as band-aid | Still blocks threads, doesn't scale               | Proper async conversion                        |\n| Missing `max_overflow` parameter    | Pool can't burst under load, requests queue       | Set `max_overflow=20` or similar               |\n\n## Real-World Impact\n\n- **Connection pool exhaustion** fixed with proper lifecycle management → 50 concurrent requests without errors\n- **Test execution time** reduced 80% with proper async fixtures\n- **API response validation** caught 15% of frontend bugs before deployment\n- **Memory usage** reduced 60% by streaming file uploads instead of loading into memory\n- **\"Too many connections\" DB errors** eliminated with proper shutdown handling\n\n## Red Flags - STOP and Reconsider\n\n- Code that \"works locally\" but you haven't load tested\n- Creating database connections at module level\n- Using `@app.on_event(\"startup\")` (deprecated)\n- Missing shutdown handlers\n- No pool parameters on engine creation\n- Using `requests` library in async functions\n- Tests that only pass when run individually\n- `run_in_executor` as primary async strategy\n\n**All of these mean: Revisit your architecture. Production will break.**\n"
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/asynchronous_programming",
+        "skill_content": "---\nname: python-asynchronous-programming\ndescription: Implementation and management of non-blocking code using asyncio, event\n  loops, and concurrent execution patterns in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/asynchronous_programming\n  version: 1.0.0\n---\n\n# Python Asynchronous Programming (asyncio)\n\n## Overview\nAsynchronous programming in Python, powered by the `asyncio` library, enables high-performance concurrent execution using a single-threaded event loop. This skill covers the transition from traditional blocking code to non-blocking, cooperative multitasking, allowing for thousands of simultaneous connections without the overhead of heavy threading.\n\n## Core Concepts\n- **Coroutines**: Functions defined with `async def` that can be paused and resumed.\n- **Event Loop**: The central scheduler that manages and executes asynchronous tasks.\n- **Awaitables**: Objects that can be used in an `await` expression (Coroutines, Tasks, Futures).\n- **Non-blocking I/O**: Performing input/output operations without stalling the execution of other tasks.\n\n## Key Components\n- **Task Management**: Using `asyncio.create_task` for concurrent execution and `asyncio.gather` for aggregating results.\n- **Error Handling**: Managing `asyncio.CancelledError` and timeouts to ensure system resilience.\n- **Synchronization**: Using async-aware `Locks`, `Semaphores`, and `Queues` to coordinate state between coroutines.\n- **Blocking Interop**: Offloading CPU-bound or legacy blocking I/O to threads or processes via `run_in_executor`."
+      }
+    ],
+    "signature": {
+      "instructions": "Generate a preview of skill content for user review.\n\nCreate a concise preview showing:\n- Skill structure (sections/headings)\n- Key points covered in each section\n- Example count\n- Estimated length\n\nThis helps user verify scope and style before full generation.",
+      "fields": [
+        {
+          "prefix": "Skill Content:",
+          "description": "Full generated skill content (SKILL.md)"
+        },
+        {
+          "prefix": "Metadata:",
+          "description": "JSON skill metadata (name, description, capabilities)"
+        },
+        {
+          "prefix": "Preview:",
+          "description": "Concise preview with: 1) Table of contents, 2) Key points per section, 3) Stats (examples, length)"
+        },
+        {
+          "prefix": "Highlights:",
+          "description": "3-5 highlights of what makes this skill valuable"
+        },
+        {
+          "prefix": "Potential Issues:",
+          "description": "Potential issues user might want to address (e.g., 'No error handling examples')"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "feedback_analyzer.analyze.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/asynchronous_programming",
+        "skill_content": "---\nname: python-asynchronous-programming\ndescription: Implementation and management of non-blocking code using asyncio, event\n  loops, and concurrent execution patterns in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/asynchronous_programming\n  version: 1.0.0\n---\n\n# Python Asynchronous Programming (asyncio)\n\n## Overview\nAsynchronous programming in Python, powered by the `asyncio` library, enables high-performance concurrent execution using a single-threaded event loop. This skill covers the transition from traditional blocking code to non-blocking, cooperative multitasking, allowing for thousands of simultaneous connections without the overhead of heavy threading.\n\n## Core Concepts\n- **Coroutines**: Functions defined with `async def` that can be paused and resumed.\n- **Event Loop**: The central scheduler that manages and executes asynchronous tasks.\n- **Awaitables**: Objects that can be used in an `await` expression (Coroutines, Tasks, Futures).\n- **Non-blocking I/O**: Performing input/output operations without stalling the execution of other tasks.\n\n## Key Components\n- **Task Management**: Using `asyncio.create_task` for concurrent execution and `asyncio.gather` for aggregating results.\n- **Error Handling**: Managing `asyncio.CancelledError` and timeouts to ensure system resilience.\n- **Synchronization**: Using async-aware `Locks`, `Semaphores`, and `Queues` to coordinate state between coroutines.\n- **Blocking Interop**: Offloading CPU-bound or legacy blocking I/O to threads or processes via `run_in_executor`."
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/web_frameworks/python/fastapi",
+        "skill_content": "---\nname: fastapi-production-patterns\ndescription: Use when building FastAPI apps with async database operations, complex dependency injection, partial update endpoints, async testing, or converting Python utilities to API endpoints\nlicense: MIT\ncompatibility: Requires Python 3.8+, FastAPI 0.128.0+, SQLAlchemy 2.0+\nmetadata:\n  skill_id: technical/programming/web-frameworks/python/fastapi\n  version: 1.0.0\n  type: technical\n  weight: medium\n  load_priority: task_specific\n---\n\n# FastAPI Production Patterns\n\n## Overview\nProven patterns for building production-ready FastAPI applications that avoid common silent failures: connection pool exhaustion, blocking async operations, partial update bugs, and test isolation issues.\n\n**Core principle:** Code that works in development but fails under load is NOT production-ready. Database engines MUST be created in lifespan, connections MUST be disposed on shutdown, and async operations MUST NOT block.\n\n## When to Use\n**When to use:**\n\n```dot\ndigraph when_to_use {\n    \"Building FastAPI app?\" [shape=diamond];\n    \"Async DB operations?\" [shape=diamond];\n    \"Need to test async endpoints?\" [shape=diamond];\n    \"Converting Python utilities to APIs?\" [shape=diamond];\n    \"PATCH with partial updates?\" [shape=diamond];\n    \"Use this skill\" [shape=box];\n\n    \"Building FastAPI app?\" -> \"Async DB operations?\" [label=\"yes\"];\n    \"Async DB operations?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Need to test async endpoints?\" [label=\"yes\"];\n    \"Need to test async endpoints?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Converting Python utilities to APIs?\" [label=\"yes\"];\n    \"Converting Python utilities to APIs?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"PATCH with partial updates?\" [label=\"yes\"];\n    \"PATCH with partial updates?\" -> \"Use this skill\" [label=\"yes\"];\n}\n```\n\n**When NOT to use:**\n- Simple synchronous APIs without database operations\n- Learning basic FastAPI routing (use official docs instead)\n- Trivial CRUD with no production requirements\n\n## Quick Reference\n\n| Problem                                   | Solution                                                   | Keywords                                               |\n|-------------------------------------------|------------------------------------------------------------|--------------------------------------------------------|\n| DB connections not closing on shutdown    | Use `lifespan` context manager with `engine.dispose()`     | connection leak, too many connections, pool exhaustion |\n| Pool exhaustion under load                | Set `pool_size`, `max_overflow`, create engine in lifespan | connection timeout, concurrent requests, workers       |\n| Tests pass isolation but fail in parallel | Use async fixtures with proper isolation                   | flaky tests, test bleeding, async test                 |\n| PATCH partial updates not validating      | Use `Optional` fields with `exclude_unset=True`            | partial updates, None overwriting, PATCH               |\n| Converting sync utilities to async        | Replace blocking libraries with async equivalents          | blocking, async conversion, requests to httpx          |\n| Long operations timeout HTTP              | Use `BackgroundTasks` or Celery                            | timeout, long running, background                      |\n\n## Core Patterns\n\n### 1. Database Lifecycle Management\n\n**The problem:** Engines created at import time never close connections. Deprecated `@app.on_event` handlers miss proper cleanup. Missing pool parameters cause exhaustion under load.\n\n**❌ Common but broken (baseline failure):**\n```python\n# database.py - Created at import time!\nengine = create_async_engine(DATABASE_URL)\n\n# main.py - Deprecated pattern\n@app.on_event(\"startup\")\nasync def startup():\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n# NO shutdown handler - connections leak forever!\n```\n\n**✅ Production pattern:**\n```python\nfrom contextlib import asynccontextmanager\nfrom sqlalchemy.ext.asyncio import create_async_engine, AsyncSession\n\n@asynccontextmanager\nasync def lifespan(app: FastAPI):\n    # Startup - create engine HERE, not at import\n    engine = create_async_engine(\n        DATABASE_URL,\n        pool_size=10,           # Critical for multi-worker deployments\n        max_overflow=20,        # Allow bursting above pool_size\n        pool_recycle=3600,      # Recycle connections after 1 hour\n    )\n    app.state.db_engine = engine\n\n    # Create tables\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n\n    yield\n\n    # Shutdown - CRITICAL: close connections\n    await engine.dispose()\n\napp = FastAPI(lifespan=lifespan)\n\nasync def get_db() -> AsyncSession:\n    async with AsyncSession(app.state.db_engine) as session:\n        yield session\n```\n\n**Key insight:** Engine creation in lifespan + dispose in shutdown = no connection leaks. Pool parameters prevent exhaustion when multiple workers start simultaneously.\n\n### 2. Pydantic Partial Updates\n\n**The problem:** PATCH endpoints should only update provided fields, but naive implementations overwrite everything with `None`.\n\n**❌ Common mistake (None overwrites):**\n```python\n@app.patch(\"/users/{user_id}\")\nasync def update_user(user_id: int, update: UserUpdate, db: AsyncSession = Depends(get_db)):\n    user = await db.get(User, user_id)\n    # ❌ This sets unprovided fields to None!\n    user.name = update.name  # None if not provided\n    user.email = update.email  # None if not provided\n    await db.commit()\n    return user\n```\n\n**✅ Production pattern:**\n```python\nfrom pydantic import BaseModel, Optional\nfrom typing import Optional\n\nclass UserUpdate(BaseModel):\n    name: Optional[str] = None\n    email: Optional[str] = None\n    age: Optional[int] = None\n\n@app.patch(\"/users/{user_id}\")\nasync def update_user(\n    user_id: int,\n    update: UserUpdate,\n    db: AsyncSession = Depends(get_db)\n):\n    user = await db.get(User, user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    # CRITICAL: Only update provided fields\n    update_data = update.model_dump(exclude_unset=True)\n    for field, value in update_data.items():\n        setattr(user, field, value)\n\n    await db.commit()\n    await db.refresh(user)\n    return user\n```\n\n**Key insight:** `exclude_unset=True` only includes fields actually provided in the request, preventing `None` overwrites.\n\n### 3. Converting Python Functions to Endpoints\n\n**The problem:** Existing Python code needs API exposure. Common mistakes: blocking operations, missing validation, no error handling, wrong return types.\n\n**Transformation steps:**\n1. Add Pydantic models for request/response\n2. Make functions async if they do I/O\n3. Replace exceptions with `HTTPException`\n4. Add `response_model` for validation\n5. Use `Depends` for shared resources\n\n**Before - Blocking utility:**\n```python\ndef process_payment(user_id: int, amount: float, card: dict) -> dict:\n    result = db.execute(f\"SELECT * FROM users WHERE id = {user_id}\")  # Blocking!\n    if result['balance'] < amount:\n        raise ValueError(\"Insufficient funds\")  # 500 error!\n    return {\"status\": \"success\"}\n\n# Naive wrapper\n@app.post(\"/payment\")\ndef payment_endpoint(user_id: int, amount: float, card: dict):\n    return process_payment(user_id, amount, card)  # No validation!\n```\n\n**After - Production endpoint:**\n```python\nfrom pydantic import BaseModel, Field, validator\nfrom fastapi import HTTPException\n\nclass CreditCard(BaseModel):\n    number: str = Field(..., min_length=13, max_length=19)\n    expiry: str\n    cvv: str = Field(..., min_length=3, max_length=4)\n\n    @validator('number')\n    def luhn_check(cls, v):\n        if not luhn_valid(v):\n            raise ValueError('Invalid card number')\n        return v\n\nclass PaymentRequest(BaseModel):\n    user_id: int\n    amount: float = Field(..., gt=0)  # Must be positive\n    card: CreditCard\n\nclass PaymentResponse(BaseModel):\n    status: str\n    transaction_id: str\n\n@app.post(\"/payment\", response_model=PaymentResponse)\nasync def payment_endpoint(\n    request: PaymentRequest,\n    db: AsyncSession = Depends(get_db)\n):\n    # Async database call\n    user = await db.get(User, request.user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    if user.balance < request.amount:\n        raise HTTPException(status_code=400, detail=\"Insufficient funds\")\n\n    transaction_id = await process_payment_async(request, db)\n    return PaymentResponse(status=\"success\", transaction_id=transaction_id)\n```\n\n### 4. Sync to Async Conversion\n\n**Sync → Async library mapping:**\n\n| Sync Library   | Async Replacement           |\n|----------------|-----------------------------|\n| `requests`     | `httpx.AsyncClient`         |\n| `sqlalchemy`   | `sqlalchemy.ext.asyncio`    |\n| `time.sleep()` | `asyncio.sleep()`           |\n| `open()`       | `aiofiles`                  |\n| `subprocess`   | `asyncio.create_subprocess` |\n| `redis`        | `aioredis`                  |\n\n**Pattern:**\n```python\n# Before - blocking\ndef get_user_data(user_id: int) -> dict:\n    user = db.session.query(User).filter(User.id == user_id).first()\n    response = requests.get(f\"https://api.external.com/user/{user_id}\")\n    return {\"user\": user, \"external\": response.json()}\n\n# After - async\nasync def get_user_data(user_id: int, db: AsyncSession) -> dict:\n    result = await db.execute(select(User).where(User.id == user_id))\n    user = result.scalar_one_or_none()\n\n    async with httpx.AsyncClient() as client:\n        response = await client.get(f\"https://api.external.com/user/{user_id}\")\n\n    return {\"user\": user, \"external\": response.json()}\n```\n\n### 5. Dependency Injection Patterns\n\n**Caching dependencies:**\n```python\nfrom functools import lru_cache\n\n@lru_cache()\ndef get_settings():\n    return Settings()  # Singleton, created once\n\n@lru_cache()\ndef get_redis_client():\n    return redis.Redis(host=settings.REDIS_HOST)\n```\n\n**Testing with overrides:**\n```python\nfrom fastapi.testclient import TestClient\n\ndef test_update_user():\n    async def override_get_db():\n        return test_session  # Use test DB\n\n    app.dependency_overrides[get_db] = override_get_db\n    try:\n        response = client.patch(\"/users/1\", json={\"name\": \"Test\"})\n    finally:\n        app.dependency_overrides.clear()  # Always clean up\n```\n\n**Yield dependencies for cleanup:**\n```python\nasync def get_db():\n    async with AsyncSession(engine) as session:\n        yield session\n        # Automatic cleanup after response\n```\n\n### 6. Async Testing\n\n**The problem:** Using sync `TestClient` with async endpoints causes hangs. Tests pass in isolation but fail together due to database bleeding.\n\n**✅ Production pattern:**\n```python\nimport pytest\nfrom httpx import AsyncClient\n\n@pytest.fixture\nasync def async_client():\n    async with AsyncClient(app=app, base_url=\"http://test\") as ac:\n        yield ac\n\n@pytest.fixture\nasync def db_session():\n    engine = create_async_engine(TEST_DATABASE_URL)\n    async with AsyncSession(engine) as session:\n        yield session\n        await session.rollback()  # Clean up after test\n\n@pytest.mark.asyncio\nasync def test_create_user(async_client: AsyncClient):\n    response = await async_client.post(\"/users\", json={\n        \"name\": \"Alice\",\n        \"email\": \"alice@example.com\"\n    })\n    assert response.status_code == 200\n```\n\n### 7. File Upload Handling\n\n**Stream, don't load entirely:**\n```python\nfrom fastapi import UploadFile\nimport pandas as pd\n\n@app.post(\"/upload-csv\")\nasync def upload_csv(file: UploadFile):\n    # Stream the file - don't load entirely into memory\n    df = pd.read_csv(file.file)\n    results = process_data_frame(df)\n    return {\"uploaded\": len(results), \"data\": results}\n```\n\n### 8. Background Tasks\n\n**For operations longer than HTTP timeout:**\n```python\nfrom fastapi import BackgroundTasks\n\ndef long_running_task(task_id: str):\n    result = process_heavy_computation()\n    mark_task_complete(task_id, result)\n\n@app.post(\"/process\")\nasync def start_process(background_tasks: BackgroundTasks):\n    task_id = generate_task_id()\n    background_tasks.add_task(long_running_task, task_id)\n    return {\"task_id\": task_id, \"status\": \"processing\"}\n\n# For production: Use Celery for retries and distributed execution\n```\n\n### 9. FastAPI CLI (New in 0.128.0)\n\n**The problem:** Running FastAPI apps required manual uvicorn commands. Developers had to remember different commands for development vs production.\n\n**❌ Old approach (still works but not recommended):**\n```bash\n# Development with auto-reload\nuvicorn main:app --reload\n\n# Production\nuvicorn main:app --host 0.0.0.0 --port 8000\n```\n\n**✅ Modern approach with FastAPI CLI:**\n```bash\n# Installation (includes CLI + all standard dependencies)\npip install \"fastapi[standard]\"\n\n# Development with auto-reload\nfastapi dev main.py\n\n# Production\nfastapi run main.py --workers 4\n```\n\n**CLI Command Reference:**\n\n| Command                           | Purpose            | Auto-reload |\n|-----------------------------------|--------------------|-------------|\n| `fastapi dev main.py`             | Development server | ✅ Yes       |\n| `fastapi run main.py`             | Production server  | ❌ No        |\n| `fastapi dev main.py --port 8080` | Custom port        | ✅ Yes       |\n| `fastapi run main.py --workers 4` | Multiple workers   | ❌ No        |\n\n**Key benefits:**\n- Unified CLI for development and production\n- Auto-reload by default in dev mode\n- Includes all standard dependencies (uvicorn, httpx, jinja2, python-multipart)\n- Better error messages and output formatting\n\n> **For comprehensive CLI documentation**, see the [FastAPI CLI capability](capabilities/fastapi-cli.md)\n\n**Installation with all standard dependencies:**\n```bash\npip install \"fastapi[standard]\"\n```\n\nThis installs:\n- `fastapi` - Core framework\n- `uvicorn[standard]` - ASGI server with high-performance dependencies\n- `fastapi-cli[standard]` - CLI tool (includes deployment tools)\n- `httpx` - For testing\n- `jinja2` - For templates\n- `python-multipart` - For form data\n\n**Optional: FastAPI Cloud deployment:**\n```bash\nfastapi login\nfastapi deploy\n```\n\n> **Note:** FastAPI Cloud is optional. You can deploy to any cloud provider (AWS, GCP, Azure, Railway, etc.) using traditional deployment methods.\n\n## Common Mistakes\n\n| Mistake                             | Why It's Wrong                                    | Fix                                            |\n|-------------------------------------|---------------------------------------------------|------------------------------------------------|\n| Creating DB engine at import time   | Connections never close, workers leak connections | Create in `lifespan`, dispose in shutdown      |\n| Using `requests` in async endpoints | Blocks entire event loop                          | Use `httpx.AsyncClient`                        |\n| Forgetting `exclude_unset=True`     | Optional fields become `None` and overwrite data  | Use `exclude_unset=True` for PATCH             |\n| Sync fixtures with async tests      | Tests hang or fail mysteriously                   | Use `@pytest.mark.asyncio` with async fixtures |\n| Global state for dependencies       | Can't test, hard to manage lifecycle              | Use `Depends()` with yield                     |\n| Not setting `pool_recycle`          | Database closes idle connections, causing errors  | Set `pool_recycle=3600` or similar             |\n| Using `run_in_executor` as band-aid | Still blocks threads, doesn't scale               | Proper async conversion                        |\n| Missing `max_overflow` parameter    | Pool can't burst under load, requests queue       | Set `max_overflow=20` or similar               |\n\n## Real-World Impact\n\n- **Connection pool exhaustion** fixed with proper lifecycle management → 50 concurrent requests without errors\n- **Test execution time** reduced 80% with proper async fixtures\n- **API response validation** caught 15% of frontend bugs before deployment\n- **Memory usage** reduced 60% by streaming file uploads instead of loading into memory\n- **\"Too many connections\" DB errors** eliminated with proper shutdown handling\n\n## Red Flags - STOP and Reconsider\n\n- Code that \"works locally\" but you haven't load tested\n- Creating database connections at module level\n- Using `@app.on_event(\"startup\")` (deprecated)\n- Missing shutdown handlers\n- No pool parameters on engine creation\n- Using `requests` library in async functions\n- Tests that only pass when run individually\n- `run_in_executor` as primary async strategy\n\n**All of these mean: Revisit your architecture. Production will break.**\n"
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/decorators",
+        "skill_content": "---\nname: python-decorators\ndescription: Ability to design, implement, and apply higher-order functions to extend\n  or modify the behavior of functions and classes in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/decorators\n  version: 1.0.0\n---\n\n# Python Decorators: Functional and Metaprogramming Patterns\n\n## Overview\nPython decorators are a powerful form of metaprogramming used to modify or enhance the behavior of functions or classes without permanently modifying their source code. They rely on Python's first-class function support and closure mechanics.\n\n## Core Concepts\n- **Closures**: Functions that \"remember\" the environment in which they were created.\n- **First-Class Citizens**: The ability to pass functions as arguments, return them from other functions, and assign them to variables.\n- **Syntactic Sugar**: The `@decorator` syntax is equivalent to `func = decorator(func)`.\n\n## Modules\n\n### 1. Basic Function Decorators\nFocuses on the standard wrapper pattern.\n- **Simple Logger**: Intercepting calls to log arguments and return values.\n- **Metadata Preservation**: Critical use of `functools.wraps` to prevent losing the original function's identity (`__name__`, `__doc__`).\n\n### 2. Parameterized Decorators (Decorator Factories)\nMoving beyond simple wrappers to \"factories\" that return decorators.\n- Implementation of the triple-nested function structure: `outer_params(actual_decorator(wrapped_func))`.\n- Use cases: `@retry(times=3)`, `@access_level(\"admin\")`.\n\n### 3. Class-Based Decorators\nUtilizing the `__call__` dunder method to treat an object instance as a decorator.\n- Maintaining state within instance attributes rather than closures.\n\n### 4. Stateful & Memoization\nAdvanced patterns for performance and tracking.\n- **Call Counting**: Monitoring execution frequency.\n- **Memoization**: Caching expensive computation results based on input arguments (e.g., implementing a custom LRU cache).\n\n### 5. Composition and Order\nUnderstanding the \"Onion\" model of execution.\n- Order of application: Bottom-to-top.\n- Order of execution: Top-to-bottom."
+      }
+    ],
+    "signature": {
+      "instructions": "Analyze user feedback and determine what changes to make.\n\nParse user's free-form feedback and convert it into structured\nchange requests that can be used to refine the skill content.",
+      "fields": [
+        {
+          "prefix": "User Feedback:",
+          "description": "User's feedback on the preview (free-form text)"
+        },
+        {
+          "prefix": "Current Content:",
+          "description": "Current skill content"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Change Requests:",
+          "description": "Structured change requests: [{type: 'add/remove/modify', section: '...', details: '...'}]"
+        },
+        {
+          "prefix": "Scope Change:",
+          "description": "True if feedback requires major scope change (may need to restart)"
+        },
+        {
+          "prefix": "Estimated Effort:",
+          "description": "Estimated effort: 'minor' (quick fix), 'moderate' (refinement), 'major' (regeneration)"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "validation_formatter.format_results": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/asynchronous_programming",
+        "skill_content": "---\nname: python-asynchronous-programming\ndescription: Implementation and management of non-blocking code using asyncio, event\n  loops, and concurrent execution patterns in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/asynchronous_programming\n  version: 1.0.0\n---\n\n# Python Asynchronous Programming (asyncio)\n\n## Overview\nAsynchronous programming in Python, powered by the `asyncio` library, enables high-performance concurrent execution using a single-threaded event loop. This skill covers the transition from traditional blocking code to non-blocking, cooperative multitasking, allowing for thousands of simultaneous connections without the overhead of heavy threading.\n\n## Core Concepts\n- **Coroutines**: Functions defined with `async def` that can be paused and resumed.\n- **Event Loop**: The central scheduler that manages and executes asynchronous tasks.\n- **Awaitables**: Objects that can be used in an `await` expression (Coroutines, Tasks, Futures).\n- **Non-blocking I/O**: Performing input/output operations without stalling the execution of other tasks.\n\n## Key Components\n- **Task Management**: Using `asyncio.create_task` for concurrent execution and `asyncio.gather` for aggregating results.\n- **Error Handling**: Managing `asyncio.CancelledError` and timeouts to ensure system resilience.\n- **Synchronization**: Using async-aware `Locks`, `Semaphores`, and `Queues` to coordinate state between coroutines.\n- **Blocking Interop**: Offloading CPU-bound or legacy blocking I/O to threads or processes via `run_in_executor`."
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/web_frameworks/python/fastapi",
+        "skill_content": "---\nname: fastapi-production-patterns\ndescription: Use when building FastAPI apps with async database operations, complex dependency injection, partial update endpoints, async testing, or converting Python utilities to API endpoints\nlicense: MIT\ncompatibility: Requires Python 3.8+, FastAPI 0.128.0+, SQLAlchemy 2.0+\nmetadata:\n  skill_id: technical/programming/web-frameworks/python/fastapi\n  version: 1.0.0\n  type: technical\n  weight: medium\n  load_priority: task_specific\n---\n\n# FastAPI Production Patterns\n\n## Overview\nProven patterns for building production-ready FastAPI applications that avoid common silent failures: connection pool exhaustion, blocking async operations, partial update bugs, and test isolation issues.\n\n**Core principle:** Code that works in development but fails under load is NOT production-ready. Database engines MUST be created in lifespan, connections MUST be disposed on shutdown, and async operations MUST NOT block.\n\n## When to Use\n**When to use:**\n\n```dot\ndigraph when_to_use {\n    \"Building FastAPI app?\" [shape=diamond];\n    \"Async DB operations?\" [shape=diamond];\n    \"Need to test async endpoints?\" [shape=diamond];\n    \"Converting Python utilities to APIs?\" [shape=diamond];\n    \"PATCH with partial updates?\" [shape=diamond];\n    \"Use this skill\" [shape=box];\n\n    \"Building FastAPI app?\" -> \"Async DB operations?\" [label=\"yes\"];\n    \"Async DB operations?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Need to test async endpoints?\" [label=\"yes\"];\n    \"Need to test async endpoints?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Converting Python utilities to APIs?\" [label=\"yes\"];\n    \"Converting Python utilities to APIs?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"PATCH with partial updates?\" [label=\"yes\"];\n    \"PATCH with partial updates?\" -> \"Use this skill\" [label=\"yes\"];\n}\n```\n\n**When NOT to use:**\n- Simple synchronous APIs without database operations\n- Learning basic FastAPI routing (use official docs instead)\n- Trivial CRUD with no production requirements\n\n## Quick Reference\n\n| Problem                                   | Solution                                                   | Keywords                                               |\n|-------------------------------------------|------------------------------------------------------------|--------------------------------------------------------|\n| DB connections not closing on shutdown    | Use `lifespan` context manager with `engine.dispose()`     | connection leak, too many connections, pool exhaustion |\n| Pool exhaustion under load                | Set `pool_size`, `max_overflow`, create engine in lifespan | connection timeout, concurrent requests, workers       |\n| Tests pass isolation but fail in parallel | Use async fixtures with proper isolation                   | flaky tests, test bleeding, async test                 |\n| PATCH partial updates not validating      | Use `Optional` fields with `exclude_unset=True`            | partial updates, None overwriting, PATCH               |\n| Converting sync utilities to async        | Replace blocking libraries with async equivalents          | blocking, async conversion, requests to httpx          |\n| Long operations timeout HTTP              | Use `BackgroundTasks` or Celery                            | timeout, long running, background                      |\n\n## Core Patterns\n\n### 1. Database Lifecycle Management\n\n**The problem:** Engines created at import time never close connections. Deprecated `@app.on_event` handlers miss proper cleanup. Missing pool parameters cause exhaustion under load.\n\n**❌ Common but broken (baseline failure):**\n```python\n# database.py - Created at import time!\nengine = create_async_engine(DATABASE_URL)\n\n# main.py - Deprecated pattern\n@app.on_event(\"startup\")\nasync def startup():\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n# NO shutdown handler - connections leak forever!\n```\n\n**✅ Production pattern:**\n```python\nfrom contextlib import asynccontextmanager\nfrom sqlalchemy.ext.asyncio import create_async_engine, AsyncSession\n\n@asynccontextmanager\nasync def lifespan(app: FastAPI):\n    # Startup - create engine HERE, not at import\n    engine = create_async_engine(\n        DATABASE_URL,\n        pool_size=10,           # Critical for multi-worker deployments\n        max_overflow=20,        # Allow bursting above pool_size\n        pool_recycle=3600,      # Recycle connections after 1 hour\n    )\n    app.state.db_engine = engine\n\n    # Create tables\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n\n    yield\n\n    # Shutdown - CRITICAL: close connections\n    await engine.dispose()\n\napp = FastAPI(lifespan=lifespan)\n\nasync def get_db() -> AsyncSession:\n    async with AsyncSession(app.state.db_engine) as session:\n        yield session\n```\n\n**Key insight:** Engine creation in lifespan + dispose in shutdown = no connection leaks. Pool parameters prevent exhaustion when multiple workers start simultaneously.\n\n### 2. Pydantic Partial Updates\n\n**The problem:** PATCH endpoints should only update provided fields, but naive implementations overwrite everything with `None`.\n\n**❌ Common mistake (None overwrites):**\n```python\n@app.patch(\"/users/{user_id}\")\nasync def update_user(user_id: int, update: UserUpdate, db: AsyncSession = Depends(get_db)):\n    user = await db.get(User, user_id)\n    # ❌ This sets unprovided fields to None!\n    user.name = update.name  # None if not provided\n    user.email = update.email  # None if not provided\n    await db.commit()\n    return user\n```\n\n**✅ Production pattern:**\n```python\nfrom pydantic import BaseModel, Optional\nfrom typing import Optional\n\nclass UserUpdate(BaseModel):\n    name: Optional[str] = None\n    email: Optional[str] = None\n    age: Optional[int] = None\n\n@app.patch(\"/users/{user_id}\")\nasync def update_user(\n    user_id: int,\n    update: UserUpdate,\n    db: AsyncSession = Depends(get_db)\n):\n    user = await db.get(User, user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    # CRITICAL: Only update provided fields\n    update_data = update.model_dump(exclude_unset=True)\n    for field, value in update_data.items():\n        setattr(user, field, value)\n\n    await db.commit()\n    await db.refresh(user)\n    return user\n```\n\n**Key insight:** `exclude_unset=True` only includes fields actually provided in the request, preventing `None` overwrites.\n\n### 3. Converting Python Functions to Endpoints\n\n**The problem:** Existing Python code needs API exposure. Common mistakes: blocking operations, missing validation, no error handling, wrong return types.\n\n**Transformation steps:**\n1. Add Pydantic models for request/response\n2. Make functions async if they do I/O\n3. Replace exceptions with `HTTPException`\n4. Add `response_model` for validation\n5. Use `Depends` for shared resources\n\n**Before - Blocking utility:**\n```python\ndef process_payment(user_id: int, amount: float, card: dict) -> dict:\n    result = db.execute(f\"SELECT * FROM users WHERE id = {user_id}\")  # Blocking!\n    if result['balance'] < amount:\n        raise ValueError(\"Insufficient funds\")  # 500 error!\n    return {\"status\": \"success\"}\n\n# Naive wrapper\n@app.post(\"/payment\")\ndef payment_endpoint(user_id: int, amount: float, card: dict):\n    return process_payment(user_id, amount, card)  # No validation!\n```\n\n**After - Production endpoint:**\n```python\nfrom pydantic import BaseModel, Field, validator\nfrom fastapi import HTTPException\n\nclass CreditCard(BaseModel):\n    number: str = Field(..., min_length=13, max_length=19)\n    expiry: str\n    cvv: str = Field(..., min_length=3, max_length=4)\n\n    @validator('number')\n    def luhn_check(cls, v):\n        if not luhn_valid(v):\n            raise ValueError('Invalid card number')\n        return v\n\nclass PaymentRequest(BaseModel):\n    user_id: int\n    amount: float = Field(..., gt=0)  # Must be positive\n    card: CreditCard\n\nclass PaymentResponse(BaseModel):\n    status: str\n    transaction_id: str\n\n@app.post(\"/payment\", response_model=PaymentResponse)\nasync def payment_endpoint(\n    request: PaymentRequest,\n    db: AsyncSession = Depends(get_db)\n):\n    # Async database call\n    user = await db.get(User, request.user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    if user.balance < request.amount:\n        raise HTTPException(status_code=400, detail=\"Insufficient funds\")\n\n    transaction_id = await process_payment_async(request, db)\n    return PaymentResponse(status=\"success\", transaction_id=transaction_id)\n```\n\n### 4. Sync to Async Conversion\n\n**Sync → Async library mapping:**\n\n| Sync Library   | Async Replacement           |\n|----------------|-----------------------------|\n| `requests`     | `httpx.AsyncClient`         |\n| `sqlalchemy`   | `sqlalchemy.ext.asyncio`    |\n| `time.sleep()` | `asyncio.sleep()`           |\n| `open()`       | `aiofiles`                  |\n| `subprocess`   | `asyncio.create_subprocess` |\n| `redis`        | `aioredis`                  |\n\n**Pattern:**\n```python\n# Before - blocking\ndef get_user_data(user_id: int) -> dict:\n    user = db.session.query(User).filter(User.id == user_id).first()\n    response = requests.get(f\"https://api.external.com/user/{user_id}\")\n    return {\"user\": user, \"external\": response.json()}\n\n# After - async\nasync def get_user_data(user_id: int, db: AsyncSession) -> dict:\n    result = await db.execute(select(User).where(User.id == user_id))\n    user = result.scalar_one_or_none()\n\n    async with httpx.AsyncClient() as client:\n        response = await client.get(f\"https://api.external.com/user/{user_id}\")\n\n    return {\"user\": user, \"external\": response.json()}\n```\n\n### 5. Dependency Injection Patterns\n\n**Caching dependencies:**\n```python\nfrom functools import lru_cache\n\n@lru_cache()\ndef get_settings():\n    return Settings()  # Singleton, created once\n\n@lru_cache()\ndef get_redis_client():\n    return redis.Redis(host=settings.REDIS_HOST)\n```\n\n**Testing with overrides:**\n```python\nfrom fastapi.testclient import TestClient\n\ndef test_update_user():\n    async def override_get_db():\n        return test_session  # Use test DB\n\n    app.dependency_overrides[get_db] = override_get_db\n    try:\n        response = client.patch(\"/users/1\", json={\"name\": \"Test\"})\n    finally:\n        app.dependency_overrides.clear()  # Always clean up\n```\n\n**Yield dependencies for cleanup:**\n```python\nasync def get_db():\n    async with AsyncSession(engine) as session:\n        yield session\n        # Automatic cleanup after response\n```\n\n### 6. Async Testing\n\n**The problem:** Using sync `TestClient` with async endpoints causes hangs. Tests pass in isolation but fail together due to database bleeding.\n\n**✅ Production pattern:**\n```python\nimport pytest\nfrom httpx import AsyncClient\n\n@pytest.fixture\nasync def async_client():\n    async with AsyncClient(app=app, base_url=\"http://test\") as ac:\n        yield ac\n\n@pytest.fixture\nasync def db_session():\n    engine = create_async_engine(TEST_DATABASE_URL)\n    async with AsyncSession(engine) as session:\n        yield session\n        await session.rollback()  # Clean up after test\n\n@pytest.mark.asyncio\nasync def test_create_user(async_client: AsyncClient):\n    response = await async_client.post(\"/users\", json={\n        \"name\": \"Alice\",\n        \"email\": \"alice@example.com\"\n    })\n    assert response.status_code == 200\n```\n\n### 7. File Upload Handling\n\n**Stream, don't load entirely:**\n```python\nfrom fastapi import UploadFile\nimport pandas as pd\n\n@app.post(\"/upload-csv\")\nasync def upload_csv(file: UploadFile):\n    # Stream the file - don't load entirely into memory\n    df = pd.read_csv(file.file)\n    results = process_data_frame(df)\n    return {\"uploaded\": len(results), \"data\": results}\n```\n\n### 8. Background Tasks\n\n**For operations longer than HTTP timeout:**\n```python\nfrom fastapi import BackgroundTasks\n\ndef long_running_task(task_id: str):\n    result = process_heavy_computation()\n    mark_task_complete(task_id, result)\n\n@app.post(\"/process\")\nasync def start_process(background_tasks: BackgroundTasks):\n    task_id = generate_task_id()\n    background_tasks.add_task(long_running_task, task_id)\n    return {\"task_id\": task_id, \"status\": \"processing\"}\n\n# For production: Use Celery for retries and distributed execution\n```\n\n### 9. FastAPI CLI (New in 0.128.0)\n\n**The problem:** Running FastAPI apps required manual uvicorn commands. Developers had to remember different commands for development vs production.\n\n**❌ Old approach (still works but not recommended):**\n```bash\n# Development with auto-reload\nuvicorn main:app --reload\n\n# Production\nuvicorn main:app --host 0.0.0.0 --port 8000\n```\n\n**✅ Modern approach with FastAPI CLI:**\n```bash\n# Installation (includes CLI + all standard dependencies)\npip install \"fastapi[standard]\"\n\n# Development with auto-reload\nfastapi dev main.py\n\n# Production\nfastapi run main.py --workers 4\n```\n\n**CLI Command Reference:**\n\n| Command                           | Purpose            | Auto-reload |\n|-----------------------------------|--------------------|-------------|\n| `fastapi dev main.py`             | Development server | ✅ Yes       |\n| `fastapi run main.py`             | Production server  | ❌ No        |\n| `fastapi dev main.py --port 8080` | Custom port        | ✅ Yes       |\n| `fastapi run main.py --workers 4` | Multiple workers   | ❌ No        |\n\n**Key benefits:**\n- Unified CLI for development and production\n- Auto-reload by default in dev mode\n- Includes all standard dependencies (uvicorn, httpx, jinja2, python-multipart)\n- Better error messages and output formatting\n\n> **For comprehensive CLI documentation**, see the [FastAPI CLI capability](capabilities/fastapi-cli.md)\n\n**Installation with all standard dependencies:**\n```bash\npip install \"fastapi[standard]\"\n```\n\nThis installs:\n- `fastapi` - Core framework\n- `uvicorn[standard]` - ASGI server with high-performance dependencies\n- `fastapi-cli[standard]` - CLI tool (includes deployment tools)\n- `httpx` - For testing\n- `jinja2` - For templates\n- `python-multipart` - For form data\n\n**Optional: FastAPI Cloud deployment:**\n```bash\nfastapi login\nfastapi deploy\n```\n\n> **Note:** FastAPI Cloud is optional. You can deploy to any cloud provider (AWS, GCP, Azure, Railway, etc.) using traditional deployment methods.\n\n## Common Mistakes\n\n| Mistake                             | Why It's Wrong                                    | Fix                                            |\n|-------------------------------------|---------------------------------------------------|------------------------------------------------|\n| Creating DB engine at import time   | Connections never close, workers leak connections | Create in `lifespan`, dispose in shutdown      |\n| Using `requests` in async endpoints | Blocks entire event loop                          | Use `httpx.AsyncClient`                        |\n| Forgetting `exclude_unset=True`     | Optional fields become `None` and overwrite data  | Use `exclude_unset=True` for PATCH             |\n| Sync fixtures with async tests      | Tests hang or fail mysteriously                   | Use `@pytest.mark.asyncio` with async fixtures |\n| Global state for dependencies       | Can't test, hard to manage lifecycle              | Use `Depends()` with yield                     |\n| Not setting `pool_recycle`          | Database closes idle connections, causing errors  | Set `pool_recycle=3600` or similar             |\n| Using `run_in_executor` as band-aid | Still blocks threads, doesn't scale               | Proper async conversion                        |\n| Missing `max_overflow` parameter    | Pool can't burst under load, requests queue       | Set `max_overflow=20` or similar               |\n\n## Real-World Impact\n\n- **Connection pool exhaustion** fixed with proper lifecycle management → 50 concurrent requests without errors\n- **Test execution time** reduced 80% with proper async fixtures\n- **API response validation** caught 15% of frontend bugs before deployment\n- **Memory usage** reduced 60% by streaming file uploads instead of loading into memory\n- **\"Too many connections\" DB errors** eliminated with proper shutdown handling\n\n## Red Flags - STOP and Reconsider\n\n- Code that \"works locally\" but you haven't load tested\n- Creating database connections at module level\n- Using `@app.on_event(\"startup\")` (deprecated)\n- Missing shutdown handlers\n- No pool parameters on engine creation\n- Using `requests` library in async functions\n- Tests that only pass when run individually\n- `run_in_executor` as primary async strategy\n\n**All of these mean: Revisit your architecture. Production will break.**\n"
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/decorators",
+        "skill_content": "---\nname: python-decorators\ndescription: Ability to design, implement, and apply higher-order functions to extend\n  or modify the behavior of functions and classes in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/decorators\n  version: 1.0.0\n---\n\n# Python Decorators: Functional and Metaprogramming Patterns\n\n## Overview\nPython decorators are a powerful form of metaprogramming used to modify or enhance the behavior of functions or classes without permanently modifying their source code. They rely on Python's first-class function support and closure mechanics.\n\n## Core Concepts\n- **Closures**: Functions that \"remember\" the environment in which they were created.\n- **First-Class Citizens**: The ability to pass functions as arguments, return them from other functions, and assign them to variables.\n- **Syntactic Sugar**: The `@decorator` syntax is equivalent to `func = decorator(func)`.\n\n## Modules\n\n### 1. Basic Function Decorators\nFocuses on the standard wrapper pattern.\n- **Simple Logger**: Intercepting calls to log arguments and return values.\n- **Metadata Preservation**: Critical use of `functools.wraps` to prevent losing the original function's identity (`__name__`, `__doc__`).\n\n### 2. Parameterized Decorators (Decorator Factories)\nMoving beyond simple wrappers to \"factories\" that return decorators.\n- Implementation of the triple-nested function structure: `outer_params(actual_decorator(wrapped_func))`.\n- Use cases: `@retry(times=3)`, `@access_level(\"admin\")`.\n\n### 3. Class-Based Decorators\nUtilizing the `__call__` dunder method to treat an object instance as a decorator.\n- Maintaining state within instance attributes rather than closures.\n\n### 4. Stateful & Memoization\nAdvanced patterns for performance and tracking.\n- **Call Counting**: Monitoring execution frequency.\n- **Memoization**: Caching expensive computation results based on input arguments (e.g., implementing a custom LRU cache).\n\n### 5. Composition and Order\nUnderstanding the \"Onion\" model of execution.\n- Order of application: Bottom-to-top.\n- Order of execution: Top-to-bottom."
+      }
+    ],
+    "signature": {
+      "instructions": "Format validation results for human-readable display.\n\nConvert technical validation output into clear, actionable\nfeedback for the user. Group issues by severity and provide\nsuggested fixes.",
+      "fields": [
+        {
+          "prefix": "Validation Report:",
+          "description": "JSON validation report with checks, failures, warnings"
+        },
+        {
+          "prefix": "Skill Content:",
+          "description": "The skill content that was validated"
+        },
+        {
+          "prefix": "Formatted Report:",
+          "description": "Human-readable report with: 1) Summary (pass/fail), 2) Issues by severity, 3) Suggested fixes"
+        },
+        {
+          "prefix": "Critical Issues:",
+          "description": "Critical issues that MUST be fixed before acceptance"
+        },
+        {
+          "prefix": "Warnings:",
+          "description": "Warnings that SHOULD be addressed but not blocking"
+        },
+        {
+          "prefix": "Auto Fixable:",
+          "description": "True if all issues can be auto-fixed without user input"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "refinement_planner.plan_refinement.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/asynchronous_programming",
+        "skill_content": "---\nname: python-asynchronous-programming\ndescription: Implementation and management of non-blocking code using asyncio, event\n  loops, and concurrent execution patterns in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/asynchronous_programming\n  version: 1.0.0\n---\n\n# Python Asynchronous Programming (asyncio)\n\n## Overview\nAsynchronous programming in Python, powered by the `asyncio` library, enables high-performance concurrent execution using a single-threaded event loop. This skill covers the transition from traditional blocking code to non-blocking, cooperative multitasking, allowing for thousands of simultaneous connections without the overhead of heavy threading.\n\n## Core Concepts\n- **Coroutines**: Functions defined with `async def` that can be paused and resumed.\n- **Event Loop**: The central scheduler that manages and executes asynchronous tasks.\n- **Awaitables**: Objects that can be used in an `await` expression (Coroutines, Tasks, Futures).\n- **Non-blocking I/O**: Performing input/output operations without stalling the execution of other tasks.\n\n## Key Components\n- **Task Management**: Using `asyncio.create_task` for concurrent execution and `asyncio.gather` for aggregating results.\n- **Error Handling**: Managing `asyncio.CancelledError` and timeouts to ensure system resilience.\n- **Synchronization**: Using async-aware `Locks`, `Semaphores`, and `Queues` to coordinate state between coroutines.\n- **Blocking Interop**: Offloading CPU-bound or legacy blocking I/O to threads or processes via `run_in_executor`."
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/languages/python/decorators",
+        "skill_content": "---\nname: python-decorators\ndescription: Ability to design, implement, and apply higher-order functions to extend\n  or modify the behavior of functions and classes in Python.\nmetadata:\n  skill_id: technical_skills/programming/languages/python/decorators\n  version: 1.0.0\n---\n\n# Python Decorators: Functional and Metaprogramming Patterns\n\n## Overview\nPython decorators are a powerful form of metaprogramming used to modify or enhance the behavior of functions or classes without permanently modifying their source code. They rely on Python's first-class function support and closure mechanics.\n\n## Core Concepts\n- **Closures**: Functions that \"remember\" the environment in which they were created.\n- **First-Class Citizens**: The ability to pass functions as arguments, return them from other functions, and assign them to variables.\n- **Syntactic Sugar**: The `@decorator` syntax is equivalent to `func = decorator(func)`.\n\n## Modules\n\n### 1. Basic Function Decorators\nFocuses on the standard wrapper pattern.\n- **Simple Logger**: Intercepting calls to log arguments and return values.\n- **Metadata Preservation**: Critical use of `functools.wraps` to prevent losing the original function's identity (`__name__`, `__doc__`).\n\n### 2. Parameterized Decorators (Decorator Factories)\nMoving beyond simple wrappers to \"factories\" that return decorators.\n- Implementation of the triple-nested function structure: `outer_params(actual_decorator(wrapped_func))`.\n- Use cases: `@retry(times=3)`, `@access_level(\"admin\")`.\n\n### 3. Class-Based Decorators\nUtilizing the `__call__` dunder method to treat an object instance as a decorator.\n- Maintaining state within instance attributes rather than closures.\n\n### 4. Stateful & Memoization\nAdvanced patterns for performance and tracking.\n- **Call Counting**: Monitoring execution frequency.\n- **Memoization**: Caching expensive computation results based on input arguments (e.g., implementing a custom LRU cache).\n\n### 5. Composition and Order\nUnderstanding the \"Onion\" model of execution.\n- Order of application: Bottom-to-top.\n- Order of execution: Top-to-bottom."
+      },
+      {
+        "task_description": "Create a skill based on: technical_skills/programming/web_frameworks/python/fastapi",
+        "skill_content": "---\nname: fastapi-production-patterns\ndescription: Use when building FastAPI apps with async database operations, complex dependency injection, partial update endpoints, async testing, or converting Python utilities to API endpoints\nlicense: MIT\ncompatibility: Requires Python 3.8+, FastAPI 0.128.0+, SQLAlchemy 2.0+\nmetadata:\n  skill_id: technical/programming/web-frameworks/python/fastapi\n  version: 1.0.0\n  type: technical\n  weight: medium\n  load_priority: task_specific\n---\n\n# FastAPI Production Patterns\n\n## Overview\nProven patterns for building production-ready FastAPI applications that avoid common silent failures: connection pool exhaustion, blocking async operations, partial update bugs, and test isolation issues.\n\n**Core principle:** Code that works in development but fails under load is NOT production-ready. Database engines MUST be created in lifespan, connections MUST be disposed on shutdown, and async operations MUST NOT block.\n\n## When to Use\n**When to use:**\n\n```dot\ndigraph when_to_use {\n    \"Building FastAPI app?\" [shape=diamond];\n    \"Async DB operations?\" [shape=diamond];\n    \"Need to test async endpoints?\" [shape=diamond];\n    \"Converting Python utilities to APIs?\" [shape=diamond];\n    \"PATCH with partial updates?\" [shape=diamond];\n    \"Use this skill\" [shape=box];\n\n    \"Building FastAPI app?\" -> \"Async DB operations?\" [label=\"yes\"];\n    \"Async DB operations?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Need to test async endpoints?\" [label=\"yes\"];\n    \"Need to test async endpoints?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"Converting Python utilities to APIs?\" [label=\"yes\"];\n    \"Converting Python utilities to APIs?\" -> \"Use this skill\" [label=\"yes\"];\n    \"Building FastAPI app?\" -> \"PATCH with partial updates?\" [label=\"yes\"];\n    \"PATCH with partial updates?\" -> \"Use this skill\" [label=\"yes\"];\n}\n```\n\n**When NOT to use:**\n- Simple synchronous APIs without database operations\n- Learning basic FastAPI routing (use official docs instead)\n- Trivial CRUD with no production requirements\n\n## Quick Reference\n\n| Problem                                   | Solution                                                   | Keywords                                               |\n|-------------------------------------------|------------------------------------------------------------|--------------------------------------------------------|\n| DB connections not closing on shutdown    | Use `lifespan` context manager with `engine.dispose()`     | connection leak, too many connections, pool exhaustion |\n| Pool exhaustion under load                | Set `pool_size`, `max_overflow`, create engine in lifespan | connection timeout, concurrent requests, workers       |\n| Tests pass isolation but fail in parallel | Use async fixtures with proper isolation                   | flaky tests, test bleeding, async test                 |\n| PATCH partial updates not validating      | Use `Optional` fields with `exclude_unset=True`            | partial updates, None overwriting, PATCH               |\n| Converting sync utilities to async        | Replace blocking libraries with async equivalents          | blocking, async conversion, requests to httpx          |\n| Long operations timeout HTTP              | Use `BackgroundTasks` or Celery                            | timeout, long running, background                      |\n\n## Core Patterns\n\n### 1. Database Lifecycle Management\n\n**The problem:** Engines created at import time never close connections. Deprecated `@app.on_event` handlers miss proper cleanup. Missing pool parameters cause exhaustion under load.\n\n**❌ Common but broken (baseline failure):**\n```python\n# database.py - Created at import time!\nengine = create_async_engine(DATABASE_URL)\n\n# main.py - Deprecated pattern\n@app.on_event(\"startup\")\nasync def startup():\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n# NO shutdown handler - connections leak forever!\n```\n\n**✅ Production pattern:**\n```python\nfrom contextlib import asynccontextmanager\nfrom sqlalchemy.ext.asyncio import create_async_engine, AsyncSession\n\n@asynccontextmanager\nasync def lifespan(app: FastAPI):\n    # Startup - create engine HERE, not at import\n    engine = create_async_engine(\n        DATABASE_URL,\n        pool_size=10,           # Critical for multi-worker deployments\n        max_overflow=20,        # Allow bursting above pool_size\n        pool_recycle=3600,      # Recycle connections after 1 hour\n    )\n    app.state.db_engine = engine\n\n    # Create tables\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n\n    yield\n\n    # Shutdown - CRITICAL: close connections\n    await engine.dispose()\n\napp = FastAPI(lifespan=lifespan)\n\nasync def get_db() -> AsyncSession:\n    async with AsyncSession(app.state.db_engine) as session:\n        yield session\n```\n\n**Key insight:** Engine creation in lifespan + dispose in shutdown = no connection leaks. Pool parameters prevent exhaustion when multiple workers start simultaneously.\n\n### 2. Pydantic Partial Updates\n\n**The problem:** PATCH endpoints should only update provided fields, but naive implementations overwrite everything with `None`.\n\n**❌ Common mistake (None overwrites):**\n```python\n@app.patch(\"/users/{user_id}\")\nasync def update_user(user_id: int, update: UserUpdate, db: AsyncSession = Depends(get_db)):\n    user = await db.get(User, user_id)\n    # ❌ This sets unprovided fields to None!\n    user.name = update.name  # None if not provided\n    user.email = update.email  # None if not provided\n    await db.commit()\n    return user\n```\n\n**✅ Production pattern:**\n```python\nfrom pydantic import BaseModel, Optional\nfrom typing import Optional\n\nclass UserUpdate(BaseModel):\n    name: Optional[str] = None\n    email: Optional[str] = None\n    age: Optional[int] = None\n\n@app.patch(\"/users/{user_id}\")\nasync def update_user(\n    user_id: int,\n    update: UserUpdate,\n    db: AsyncSession = Depends(get_db)\n):\n    user = await db.get(User, user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    # CRITICAL: Only update provided fields\n    update_data = update.model_dump(exclude_unset=True)\n    for field, value in update_data.items():\n        setattr(user, field, value)\n\n    await db.commit()\n    await db.refresh(user)\n    return user\n```\n\n**Key insight:** `exclude_unset=True` only includes fields actually provided in the request, preventing `None` overwrites.\n\n### 3. Converting Python Functions to Endpoints\n\n**The problem:** Existing Python code needs API exposure. Common mistakes: blocking operations, missing validation, no error handling, wrong return types.\n\n**Transformation steps:**\n1. Add Pydantic models for request/response\n2. Make functions async if they do I/O\n3. Replace exceptions with `HTTPException`\n4. Add `response_model` for validation\n5. Use `Depends` for shared resources\n\n**Before - Blocking utility:**\n```python\ndef process_payment(user_id: int, amount: float, card: dict) -> dict:\n    result = db.execute(f\"SELECT * FROM users WHERE id = {user_id}\")  # Blocking!\n    if result['balance'] < amount:\n        raise ValueError(\"Insufficient funds\")  # 500 error!\n    return {\"status\": \"success\"}\n\n# Naive wrapper\n@app.post(\"/payment\")\ndef payment_endpoint(user_id: int, amount: float, card: dict):\n    return process_payment(user_id, amount, card)  # No validation!\n```\n\n**After - Production endpoint:**\n```python\nfrom pydantic import BaseModel, Field, validator\nfrom fastapi import HTTPException\n\nclass CreditCard(BaseModel):\n    number: str = Field(..., min_length=13, max_length=19)\n    expiry: str\n    cvv: str = Field(..., min_length=3, max_length=4)\n\n    @validator('number')\n    def luhn_check(cls, v):\n        if not luhn_valid(v):\n            raise ValueError('Invalid card number')\n        return v\n\nclass PaymentRequest(BaseModel):\n    user_id: int\n    amount: float = Field(..., gt=0)  # Must be positive\n    card: CreditCard\n\nclass PaymentResponse(BaseModel):\n    status: str\n    transaction_id: str\n\n@app.post(\"/payment\", response_model=PaymentResponse)\nasync def payment_endpoint(\n    request: PaymentRequest,\n    db: AsyncSession = Depends(get_db)\n):\n    # Async database call\n    user = await db.get(User, request.user_id)\n    if not user:\n        raise HTTPException(status_code=404, detail=\"User not found\")\n\n    if user.balance < request.amount:\n        raise HTTPException(status_code=400, detail=\"Insufficient funds\")\n\n    transaction_id = await process_payment_async(request, db)\n    return PaymentResponse(status=\"success\", transaction_id=transaction_id)\n```\n\n### 4. Sync to Async Conversion\n\n**Sync → Async library mapping:**\n\n| Sync Library   | Async Replacement           |\n|----------------|-----------------------------|\n| `requests`     | `httpx.AsyncClient`         |\n| `sqlalchemy`   | `sqlalchemy.ext.asyncio`    |\n| `time.sleep()` | `asyncio.sleep()`           |\n| `open()`       | `aiofiles`                  |\n| `subprocess`   | `asyncio.create_subprocess` |\n| `redis`        | `aioredis`                  |\n\n**Pattern:**\n```python\n# Before - blocking\ndef get_user_data(user_id: int) -> dict:\n    user = db.session.query(User).filter(User.id == user_id).first()\n    response = requests.get(f\"https://api.external.com/user/{user_id}\")\n    return {\"user\": user, \"external\": response.json()}\n\n# After - async\nasync def get_user_data(user_id: int, db: AsyncSession) -> dict:\n    result = await db.execute(select(User).where(User.id == user_id))\n    user = result.scalar_one_or_none()\n\n    async with httpx.AsyncClient() as client:\n        response = await client.get(f\"https://api.external.com/user/{user_id}\")\n\n    return {\"user\": user, \"external\": response.json()}\n```\n\n### 5. Dependency Injection Patterns\n\n**Caching dependencies:**\n```python\nfrom functools import lru_cache\n\n@lru_cache()\ndef get_settings():\n    return Settings()  # Singleton, created once\n\n@lru_cache()\ndef get_redis_client():\n    return redis.Redis(host=settings.REDIS_HOST)\n```\n\n**Testing with overrides:**\n```python\nfrom fastapi.testclient import TestClient\n\ndef test_update_user():\n    async def override_get_db():\n        return test_session  # Use test DB\n\n    app.dependency_overrides[get_db] = override_get_db\n    try:\n        response = client.patch(\"/users/1\", json={\"name\": \"Test\"})\n    finally:\n        app.dependency_overrides.clear()  # Always clean up\n```\n\n**Yield dependencies for cleanup:**\n```python\nasync def get_db():\n    async with AsyncSession(engine) as session:\n        yield session\n        # Automatic cleanup after response\n```\n\n### 6. Async Testing\n\n**The problem:** Using sync `TestClient` with async endpoints causes hangs. Tests pass in isolation but fail together due to database bleeding.\n\n**✅ Production pattern:**\n```python\nimport pytest\nfrom httpx import AsyncClient\n\n@pytest.fixture\nasync def async_client():\n    async with AsyncClient(app=app, base_url=\"http://test\") as ac:\n        yield ac\n\n@pytest.fixture\nasync def db_session():\n    engine = create_async_engine(TEST_DATABASE_URL)\n    async with AsyncSession(engine) as session:\n        yield session\n        await session.rollback()  # Clean up after test\n\n@pytest.mark.asyncio\nasync def test_create_user(async_client: AsyncClient):\n    response = await async_client.post(\"/users\", json={\n        \"name\": \"Alice\",\n        \"email\": \"alice@example.com\"\n    })\n    assert response.status_code == 200\n```\n\n### 7. File Upload Handling\n\n**Stream, don't load entirely:**\n```python\nfrom fastapi import UploadFile\nimport pandas as pd\n\n@app.post(\"/upload-csv\")\nasync def upload_csv(file: UploadFile):\n    # Stream the file - don't load entirely into memory\n    df = pd.read_csv(file.file)\n    results = process_data_frame(df)\n    return {\"uploaded\": len(results), \"data\": results}\n```\n\n### 8. Background Tasks\n\n**For operations longer than HTTP timeout:**\n```python\nfrom fastapi import BackgroundTasks\n\ndef long_running_task(task_id: str):\n    result = process_heavy_computation()\n    mark_task_complete(task_id, result)\n\n@app.post(\"/process\")\nasync def start_process(background_tasks: BackgroundTasks):\n    task_id = generate_task_id()\n    background_tasks.add_task(long_running_task, task_id)\n    return {\"task_id\": task_id, \"status\": \"processing\"}\n\n# For production: Use Celery for retries and distributed execution\n```\n\n### 9. FastAPI CLI (New in 0.128.0)\n\n**The problem:** Running FastAPI apps required manual uvicorn commands. Developers had to remember different commands for development vs production.\n\n**❌ Old approach (still works but not recommended):**\n```bash\n# Development with auto-reload\nuvicorn main:app --reload\n\n# Production\nuvicorn main:app --host 0.0.0.0 --port 8000\n```\n\n**✅ Modern approach with FastAPI CLI:**\n```bash\n# Installation (includes CLI + all standard dependencies)\npip install \"fastapi[standard]\"\n\n# Development with auto-reload\nfastapi dev main.py\n\n# Production\nfastapi run main.py --workers 4\n```\n\n**CLI Command Reference:**\n\n| Command                           | Purpose            | Auto-reload |\n|-----------------------------------|--------------------|-------------|\n| `fastapi dev main.py`             | Development server | ✅ Yes       |\n| `fastapi run main.py`             | Production server  | ❌ No        |\n| `fastapi dev main.py --port 8080` | Custom port        | ✅ Yes       |\n| `fastapi run main.py --workers 4` | Multiple workers   | ❌ No        |\n\n**Key benefits:**\n- Unified CLI for development and production\n- Auto-reload by default in dev mode\n- Includes all standard dependencies (uvicorn, httpx, jinja2, python-multipart)\n- Better error messages and output formatting\n\n> **For comprehensive CLI documentation**, see the [FastAPI CLI capability](capabilities/fastapi-cli.md)\n\n**Installation with all standard dependencies:**\n```bash\npip install \"fastapi[standard]\"\n```\n\nThis installs:\n- `fastapi` - Core framework\n- `uvicorn[standard]` - ASGI server with high-performance dependencies\n- `fastapi-cli[standard]` - CLI tool (includes deployment tools)\n- `httpx` - For testing\n- `jinja2` - For templates\n- `python-multipart` - For form data\n\n**Optional: FastAPI Cloud deployment:**\n```bash\nfastapi login\nfastapi deploy\n```\n\n> **Note:** FastAPI Cloud is optional. You can deploy to any cloud provider (AWS, GCP, Azure, Railway, etc.) using traditional deployment methods.\n\n## Common Mistakes\n\n| Mistake                             | Why It's Wrong                                    | Fix                                            |\n|-------------------------------------|---------------------------------------------------|------------------------------------------------|\n| Creating DB engine at import time   | Connections never close, workers leak connections | Create in `lifespan`, dispose in shutdown      |\n| Using `requests` in async endpoints | Blocks entire event loop                          | Use `httpx.AsyncClient`                        |\n| Forgetting `exclude_unset=True`     | Optional fields become `None` and overwrite data  | Use `exclude_unset=True` for PATCH             |\n| Sync fixtures with async tests      | Tests hang or fail mysteriously                   | Use `@pytest.mark.asyncio` with async fixtures |\n| Global state for dependencies       | Can't test, hard to manage lifecycle              | Use `Depends()` with yield                     |\n| Not setting `pool_recycle`          | Database closes idle connections, causing errors  | Set `pool_recycle=3600` or similar             |\n| Using `run_in_executor` as band-aid | Still blocks threads, doesn't scale               | Proper async conversion                        |\n| Missing `max_overflow` parameter    | Pool can't burst under load, requests queue       | Set `max_overflow=20` or similar               |\n\n## Real-World Impact\n\n- **Connection pool exhaustion** fixed with proper lifecycle management → 50 concurrent requests without errors\n- **Test execution time** reduced 80% with proper async fixtures\n- **API response validation** caught 15% of frontend bugs before deployment\n- **Memory usage** reduced 60% by streaming file uploads instead of loading into memory\n- **\"Too many connections\" DB errors** eliminated with proper shutdown handling\n\n## Red Flags - STOP and Reconsider\n\n- Code that \"works locally\" but you haven't load tested\n- Creating database connections at module level\n- Using `@app.on_event(\"startup\")` (deprecated)\n- Missing shutdown handlers\n- No pool parameters on engine creation\n- Using `requests` library in async functions\n- Tests that only pass when run individually\n- `run_in_executor` as primary async strategy\n\n**All of these mean: Revisit your architecture. Production will break.**\n"
+      }
+    ],
+    "signature": {
+      "instructions": "Generate a refinement plan based on validation issues and user feedback.\n\nCreate a structured plan for how to refine the skill to address\nvalidation failures and incorporate user's feedback.",
+      "fields": [
+        {
+          "prefix": "Validation Issues:",
+          "description": "JSON list of validation issues"
+        },
+        {
+          "prefix": "User Feedback:",
+          "description": "User's feedback on how to address issues (may be empty for auto-fix)"
+        },
+        {
+          "prefix": "Current Skill:",
+          "description": "Current skill content"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Refinement Plan:",
+          "description": "Step-by-step plan for refining the skill"
+        },
+        {
+          "prefix": "Changes:",
+          "description": "Specific changes to make: [{section: '...', change_type: 'add/remove/modify', details: '...'}]"
+        },
+        {
+          "prefix": "Estimated Iterations:",
+          "description": "Estimated number of refinement iterations needed (1-3)"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.1.0",
+      "cloudpickle": "3.1"
+    }
+  }
+}
+
+
+============================================================
+END FILE: src/skill_fleet/config/optimized/skill_creator_bootstrap_v1.json
+============================================================
+
+============================================================
+FILE: src/skill_fleet/config/optimized/skill_creator_miprov2.json
+============================================================
+
+{
+  "gather.gather.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "task_description": "Create a skill for Docker containerization including Dockerfile writing, image optimization, and multi-stage builds",
+        "expected_taxonomy_path": "tool_proficiency/containerization/docker",
+        "expected_name": "docker-basics",
+        "expected_type": "tool",
+        "expected_weight": "medium",
+        "expected_capabilities": [
+          "dockerfile_creation",
+          "image_optimization",
+          "multi_stage_builds",
+          "volume_management",
+          "network_configuration",
+          "docker_compose"
+        ],
+        "expected_dependencies": [],
+        "expected_category": "tool_proficiency/containerization",
+        "expected_keywords": [
+          "docker",
+          "container",
+          "dockerfile",
+          "image",
+          "compose",
+          "devops",
+          "deployment"
+        ],
+        "expected_scope": "Covers Docker containerization including Dockerfile creation, image optimization, multi-stage builds, volumes, networks, and Docker Compose. Does NOT cover Kubernetes, Podman, or container orchestration.",
+        "expected_see_also": [
+          "tool_proficiency/containerization/kubernetes",
+          "tool_proficiency/containerization/podman"
+        ]
+      },
+      {
+        "task_description": "Create a Python async programming skill covering asyncio, event loops, coroutines, and concurrent execution patterns",
+        "expected_taxonomy_path": "technical_skills/programming/languages/python/asynchronous_programming",
+        "expected_name": "python-async",
+        "expected_type": "technical",
+        "expected_weight": "medium",
+        "expected_capabilities": [
+          "async_await_syntax",
+          "event_loop_management",
+          "concurrent_execution",
+          "task_creation",
+          "exception_handling"
+        ],
+        "expected_dependencies": [
+          "technical_skills/programming/languages/python"
+        ],
+        "expected_category": "technical_skills/programming/languages/python",
+        "expected_keywords": [
+          "asyncio",
+          "async",
+          "await",
+          "coroutines",
+          "event-loop",
+          "concurrent",
+          "python",
+          "asynchronous"
+        ],
+        "expected_scope": "Covers Python asyncio library, async/await syntax, event loops, and concurrent task execution. Does NOT cover threading, multiprocessing, or third-party async libraries like trio or anyio.",
+        "expected_see_also": [
+          "technical_skills/programming/languages/python/threading",
+          "technical_skills/programming/languages/python/multiprocessing"
+        ]
+      },
+      {
+        "task_description": "Create a skill for code review best practices including review checklists, feedback patterns, and common issues",
+        "expected_taxonomy_path": "task_focus_areas/code_quality/code_review",
+        "expected_name": "code-review",
+        "expected_type": "task_focus",
+        "expected_weight": "lightweight",
+        "expected_capabilities": [
+          "review_checklists",
+          "feedback_patterns",
+          "common_issues",
+          "security_review",
+          "performance_review"
+        ],
+        "expected_dependencies": [],
+        "expected_category": "task_focus_areas/code_quality",
+        "expected_keywords": [
+          "code-review",
+          "pull-request",
+          "feedback",
+          "quality",
+          "checklist",
+          "best-practices"
+        ],
+        "expected_scope": "Covers code review best practices including checklists, constructive feedback patterns, common issues to look for, security and performance review. Does NOT cover automated code analysis tools or CI/CD integration.",
+        "expected_see_also": [
+          "task_focus_areas/code_quality/static_analysis",
+          "task_focus_areas/code_quality/linting"
+        ]
+      },
+      {
+        "task_description": "Create a skill for AWS Lambda serverless functions including triggers, layers, and cold start optimization",
+        "expected_taxonomy_path": "technical_skills/infrastructure/cloud/aws/lambda",
+        "expected_name": "aws-lambda",
+        "expected_type": "technical",
+        "expected_weight": "medium",
+        "expected_capabilities": [
+          "function_creation",
+          "trigger_configuration",
+          "layer_management",
+          "environment_variables",
+          "cold_start_optimization",
+          "logging_monitoring"
+        ],
+        "expected_dependencies": [],
+        "expected_category": "technical_skills/infrastructure/cloud/aws",
+        "expected_keywords": [
+          "aws",
+          "lambda",
+          "serverless",
+          "faas",
+          "cloud"
+        ],
+        "expected_scope": "Covers AWS Lambda. Does NOT cover EC2 or ECS.",
+        "expected_see_also": [
+          "technical_skills/infrastructure/cloud/azure/functions"
+        ]
+      }
+    ],
+    "signature": {
+      "instructions": "Act as a Requirement Architect for a high-precision software engineering and DevOps skill taxonomy. Your goal is to lead a discovery session that transforms a vague \"Task Description\" into a concrete set of usage examples and definitions.\n\nFollow these logical steps to generate your output:\n1. **Analyze Coverage:** Evaluate the `task_description` and any `user_responses` against the provided `config`. Determine if you have at least `min_examples` that cover the \"Happy Path,\" \"Edge Cases,\" and \"Error Boundaries.\"\n2. **Extract & Refine:** \n   - Identify any new `UserExample` objects (input vs. expected output) from the latest user message.\n   - Extract \"Terminology Updates\" for any domain-specific jargon, internal tool names, or DevOps concepts mentioned.\n   - Update the `refined_task` to be more technically descriptive based on these new insights.\n3. **Question Strategically:** If the `readiness_score` is below the threshold, generate 1-3 highly specific questions. Focus on \"Trigger Phrases\" (what the user actually says to the AI), specific tool constraints (e.g., \"Which CI/CD provider?\"), and \"Definition of Done.\"\n4. **Evaluate Readiness:** Assign a `readiness_score` (0.0-1.0). A high score (0.8+) requires that the skill's boundaries (inclusions/exclusions) are now unmistakable and the capability requirements are grounded in the `collected_examples`.\n\n**Constraint:** Do not assume defaults. If the user mentions a specific DevOps tool (e.g., Terraform, Kubernetes, Jenkins), tailor your questions and examples to that specific ecosystem.",
+      "fields": [
+        {
+          "prefix": "Task Description:",
+          "description": "Initial task description from user"
+        },
+        {
+          "prefix": "User Responses:",
+          "description": "JSON list of user responses to previous clarifying questions (empty [] on first call)"
+        },
+        {
+          "prefix": "Collected Examples:",
+          "description": "JSON list of UserExample objects collected so far (empty [] on first call)"
+        },
+        {
+          "prefix": "Config:",
+          "description": "JSON ExampleGatheringConfig with min_examples, readiness_threshold, max_questions"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Clarifying Questions:",
+          "description": "1-3 focused questions to ask the user (fewer is better). Empty list if ready to proceed."
+        },
+        {
+          "prefix": "New Examples:",
+          "description": "New examples extracted from user responses (add to collected_examples)"
+        },
+        {
+          "prefix": "Terminology Updates:",
+          "description": "Key terms and definitions learned from this round"
+        },
+        {
+          "prefix": "Refined Task:",
+          "description": "Updated task description incorporating insights from examples"
+        },
+        {
+          "prefix": "Readiness Score:",
+          "description": "0.0-1.0 score. >= threshold means ready to proceed. Based on example coverage, clarity, and edge cases."
+        },
+        {
+          "prefix": "Readiness Reasoning:",
+          "description": "Brief explanation of readiness score (why ready or what's missing)"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "understand.understand.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "task_description": "Create a skill for React hooks including useState, useEffect, useContext, and custom hooks",
+        "existing_skills": "[]",
+        "taxonomy_structure": "{}",
+        "reasoning": "The task requires creating a comprehensive skill for React Hooks, which are fundamental to modern React development. Given the standard classification of web development skills, this belongs under technical skills, specifically within frontend development and the React framework. Since the user provided an empty taxonomy, I am proposing a standard hierarchical path that follows industry conventions (Technical Skills -> Web Development -> Frontend -> React). The skill covers both built-in hooks and the pattern for custom hooks.",
+        "task_intent": "The intent is to develop a specialized skill for implementing and managing state, side effects, and context in React applications using Hooks (useState, useEffect, useContext) and building reusable logic through custom hooks.",
+        "taxonomy_path": "technical_skills/web_development/frontend/react/hooks",
+        "parent_skills": [
+          {
+            "skill_id": "technical_skills/web_development/frontend/react",
+            "name": "react-fundamentals",
+            "relationship": "parent"
+          },
+          {
+            "skill_id": "technical_skills/web_development/languages/javascript",
+            "name": "javascript-es6",
+            "relationship": "dependency"
+          }
+        ],
+        "dependency_analysis": {
+          "required": [
+            {
+              "skill_id": "technical_skills/web_development/languages/javascript",
+              "justification": "Hooks rely heavily on JS closures, array destructuring, and functional programming concepts.",
+              "required": true
+            }
+          ],
+          "recommended": [
+            {
+              "skill_id": "technical_skills/web_development/frontend/react/fundamentals",
+              "justification": "Hooks are a feature of React; fundamental knowledge of components and JSX is necessary.",
+              "required": true
+            }
+          ],
+          "conflicts": [],
+          "missing_skills": [
+            "technical_skills/web_development/languages/javascript",
+            "technical_skills/web_development/frontend/react/fundamentals"
+          ],
+          "optional_skills": [
+            "technical_skills/web_development/frontend/state_management/redux"
+          ],
+          "integration_notes": "React Hooks require a solid understanding of JavaScript closures and ES6 syntax. Integration with state management libraries may be a follow-up."
+        },
+        "confidence_score": 0.95
+      },
+      {
+        "task_description": "Create a skill for building REST APIs with FastAPI framework including routing, validation, and dependency injection",
+        "expected_taxonomy_path": "technical_skills/programming/web_frameworks/python/fastapi",
+        "expected_name": "python-fastapi",
+        "expected_type": "technical",
+        "expected_weight": "medium",
+        "expected_capabilities": [
+          "route_definition",
+          "request_validation",
+          "response_models",
+          "dependency_injection",
+          "async_endpoints",
+          "openapi_documentation"
+        ],
+        "expected_dependencies": [
+          "technical_skills/programming/languages/python",
+          "technical_skills/programming/languages/python/asynchronous_programming"
+        ],
+        "expected_category": "technical_skills/programming/web_frameworks/python",
+        "expected_keywords": [
+          "fastapi",
+          "rest",
+          "api",
+          "web",
+          "python",
+          "pydantic",
+          "openapi",
+          "swagger",
+          "async"
+        ],
+        "expected_scope": "Covers FastAPI framework for building REST APIs including routing, validation with Pydantic, dependency injection, and OpenAPI documentation. Does NOT cover Flask, Django, or frontend development.",
+        "expected_see_also": [
+          "technical_skills/programming/web_frameworks/python/flask",
+          "technical_skills/programming/web_frameworks/python/django"
+        ]
+      },
+      {
+        "task_description": "Create a skill for Go error handling patterns including wrapping, sentinel errors, and custom error types",
+        "expected_taxonomy_path": "technical_skills/programming/languages/go/error_handling",
+        "expected_name": "go-errors",
+        "expected_type": "technical",
+        "expected_weight": "lightweight",
+        "expected_capabilities": [
+          "error_wrapping",
+          "sentinel_errors",
+          "custom_error_types",
+          "error_inspection",
+          "panic_recover",
+          "error_formatting"
+        ],
+        "expected_dependencies": [
+          "technical_skills/programming/languages/go"
+        ],
+        "expected_category": "technical_skills/programming/languages/go",
+        "expected_keywords": [
+          "go",
+          "golang",
+          "errors",
+          "error-handling",
+          "panic"
+        ],
+        "expected_scope": "Covers Go error handling. Does NOT cover logging frameworks.",
+        "expected_see_also": [
+          "technical_skills/programming/languages/go/concurrency"
+        ]
+      },
+      {
+        "task_description": "Create a skill for code review best practices including review checklists, feedback patterns, and common issues",
+        "expected_taxonomy_path": "task_focus_areas/code_quality/code_review",
+        "expected_name": "code-review",
+        "expected_type": "task_focus",
+        "expected_weight": "lightweight",
+        "expected_capabilities": [
+          "review_checklists",
+          "feedback_patterns",
+          "common_issues",
+          "security_review",
+          "performance_review"
+        ],
+        "expected_dependencies": [],
+        "expected_category": "task_focus_areas/code_quality",
+        "expected_keywords": [
+          "code-review",
+          "pull-request",
+          "feedback",
+          "quality",
+          "checklist",
+          "best-practices"
+        ],
+        "expected_scope": "Covers code review best practices including checklists, constructive feedback patterns, common issues to look for, security and performance review. Does NOT cover automated code analysis tools or CI/CD integration.",
+        "expected_see_also": [
+          "task_focus_areas/code_quality/static_analysis",
+          "task_focus_areas/code_quality/linting"
+        ]
+      }
+    ],
+    "signature": {
+      "instructions": "Extract task requirements and map to a taxonomy position.\n\nAnalyzes the user's task description and determines:\n- Core intent and requirements\n- Best taxonomy path for the skill\n- Related skills in the taxonomy\n- Missing dependencies",
+      "fields": [
+        {
+          "prefix": "Task Description:",
+          "description": "User task or capability requirement to create a skill for"
+        },
+        {
+          "prefix": "Existing Skills:",
+          "description": "JSON list of currently mounted skill_ids"
+        },
+        {
+          "prefix": "Taxonomy Structure:",
+          "description": "JSON object with relevant portions of the hierarchical taxonomy"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Task Intent:",
+          "description": "Core intent and requirements extracted from task (1-3 sentences)"
+        },
+        {
+          "prefix": "Taxonomy Path:",
+          "description": "Proposed taxonomy path using forward slashes (e.g., 'technical_skills/programming/languages/python')"
+        },
+        {
+          "prefix": "Parent Skills:",
+          "description": "List of related parent/sibling skills in taxonomy for context"
+        },
+        {
+          "prefix": "Dependency Analysis:",
+          "description": "Analysis of required dependency skills not yet mounted"
+        },
+        {
+          "prefix": "Confidence Score:",
+          "description": "Confidence in taxonomy placement (0.0-1.0)"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "plan.plan.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "As the technical architect for the `agentskills.io` ecosystem, your task is to design a robust, hierarchical skill structure based on the provided intent and taxonomy analysis. You must transform a conceptual skill into a concrete technical blueprint that adheres to strict modular standards.\n\n### Core Objectives:\n1.  **Standardized Metadata**: Generate a unique `skill_id` using lowercase kebab-case that reflects its position in the taxonomy. Assign a version (starting at `1.0.0`), a skill type (`technical`, `process`, or `domain`), and a load priority.\n2.  **Capability Decomposition**: Break the skill down into 3–7 discrete, testable \"capabilities.\" Each capability must have a clear name, a detailed description, and specific `test_criteria` that define a \"pass\" state for an automated validator.\n3.  **Strict Dependency Mapping**: Formalize the relationships identified in the dependency analysis. Distinguish between `required` dependencies (without which the skill cannot function) and `recommended` ones. Ensure all `skill_id` references are consistent with the taxonomy.\n4.  **Resource & Constraint Definition**: Specify the external environment required for execution, including APIs, CLI tools, and runtime version constraints (e.g., `python_version='>=3.12'`).\n5.  **Composition Strategy**: Write a 1-2 paragraph strategy explaining how this skill serves as a building block for others. Describe its role in the larger ecosystem—whether it acts as a base layer, a logic enhancer, or an integration bridge.\n\n### Formatting Guidelines:\n- **Kebab-case IDs**: All skill IDs and resource names must use `hyphen-separated-strings`.\n- **Granularity**: Capabilities should be specific enough to be unit-tested but broad enough to cover the skill's scope.\n- **Taxonomy Alignment**: Ensure the `taxonomy_path` uses forward slashes and matches the depth indicated in the input.",
+      "fields": [
+        {
+          "prefix": "Task Intent:",
+          "description": "Core intent from understand step"
+        },
+        {
+          "prefix": "Taxonomy Path:",
+          "description": "Proposed taxonomy path"
+        },
+        {
+          "prefix": "Parent Skills:",
+          "description": "JSON list of related skills"
+        },
+        {
+          "prefix": "Dependency Analysis:",
+          "description": "JSON dependency analysis"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Skill Metadata:",
+          "description": "Complete skill metadata following agentskills.io spec"
+        },
+        {
+          "prefix": "Dependencies:",
+          "description": "List of dependency skill_ids with justification"
+        },
+        {
+          "prefix": "Capabilities:",
+          "description": "List of discrete, testable capabilities (3-7 recommended)"
+        },
+        {
+          "prefix": "Resource Requirements:",
+          "description": "External resources (APIs, tools, files) needed"
+        },
+        {
+          "prefix": "Compatibility Constraints:",
+          "description": "Platform requirements and conflicts"
+        },
+        {
+          "prefix": "Composition Strategy:",
+          "description": "How this skill composes with other skills (1-2 paragraphs)"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "initialize.initialize.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "skill_metadata": "{\n  \"skill_id\": \"technical_skills/devops/ci_cd/github-actions\",\n  \"name\": \"github-actions-automation\",\n  \"description\": \"Design, implement, and optimize CI/CD pipelines using GitHub Actions, including workflow syntax, runners, matrix strategies, and secure secret handling.\",\n  \"version\": \"1.0.0\",\n  \"type\": \"technical\",\n  \"weight\": \"medium\",\n  \"load_priority\": \"task_specific\",\n  \"dependencies\": [],\n  \"capabilities\": [\n    \"workflow_design\",\n    \"matrix_optimization\",\n    \"secret_management\",\n    \"custom_action_integration\",\n    \"self_hosted_runner_config\"\n  ],\n  \"category\": \"technical_skills/devops\",\n  \"keywords\": [\n    \"github-actions\",\n    \"ci-cd\",\n    \"automation\",\n    \"yaml-pipelines\",\n    \"devops\",\n    \"workflow\"\n  ],\n  \"scope\": \"Covers workflow orchestration, event triggers, and action integration. Does not cover GitHub App development or general repository administration outside of automation contexts.\",\n  \"see_also\": [\n    \"technical_skills/version_control/git\",\n    \"technical_skills/devops/ci_cd/jenkins\"\n  ],\n  \"tags\": [],\n  \"taxonomy_path\": \"technical_skills/devops/ci_cd/github_actions\"\n}",
+        "capabilities": [
+          {
+            "name": "workflow_orchestration",
+            "description": "Define multi-job workflows with complex dependency graphs (needs) and conditional execution.",
+            "test_criteria": "Successfully create a .github/workflows/main.yml that executes jobs in a specific order based on previous job outcomes."
+          },
+          {
+            "name": "matrix_strategy_implementation",
+            "description": "Optimize testing and building across multiple OS versions and runtime environments using matrix strategies.",
+            "test_criteria": "Configure a workflow that runs a test suite across 3 different Node.js versions and 2 operating systems simultaneously."
+          },
+          {
+            "name": "secure_secrets_handling",
+            "description": "Implement repository and environment secrets to protect sensitive data like API keys.",
+            "test_criteria": "Reference a ${{ secrets.GITHUB_TOKEN }} or custom secret in a workflow step without printing it to the console."
+          },
+          {
+            "name": "artifact_management",
+            "description": "Persist data between jobs and upload build outputs for deployment.",
+            "test_criteria": "Use actions/upload-artifact and actions/download-artifact to pass a build folder from a build job to a deploy job."
+          },
+          {
+            "name": "event_trigger_configuration",
+            "description": "Configure fine-grained triggers including pull_request, push, schedule (cron), and workflow_dispatch.",
+            "test_criteria": "Set up a workflow that only triggers on pull requests targeting the 'main' branch that modify files in a specific directory."
+          }
+        ],
+        "taxonomy_path": "technical_skills/devops/ci_cd/github_actions",
+        "reasoning": "The skill `github-actions-automation` is a technical DevOps skill focused on CI/CD orchestration. The skeleton is designed to follow the standard agentskills.io structure, ensuring that each capability—from workflow orchestration to artifact management—has corresponding documentation and implementation patterns. The directory structure includes `capabilities/` for technical implementation details, `examples/` for YAML workflow templates, and `references/` for security and optimization patterns. This structure supports both the automation requirements and the security constraints (secret management) inherent in GitHub Actions.",
+        "skill_skeleton": {
+          "root_path": "technical_skills/devops/ci_cd/github_actions",
+          "files": [
+            {
+              "path": "metadata.json",
+              "content_type": "json",
+              "description": "Skill metadata including versioning, dependencies, and capability mappings."
+            },
+            {
+              "path": "SKILL.md",
+              "content_type": "markdown",
+              "description": "Main entry point for the GitHub Actions skill, outlining scope and core concepts."
+            },
+            {
+              "path": "references/README.md",
+              "content_type": "markdown",
+              "description": "Overview of technical capabilities: orchestration, matrices, secrets, and artifacts."
+            },
+            {
+              "path": "examples/basic-ci.yml",
+              "content_type": "yaml",
+              "description": "Example of a basic Continuous Integration workflow with push triggers."
+            },
+            {
+              "path": "examples/matrix-build.yml",
+              "content_type": "yaml",
+              "description": "Example demonstrating matrix strategies for multi-platform testing."
+            },
+            {
+              "path": "examples/deployment-with-secrets.yml",
+              "content_type": "yaml",
+              "description": "Example showing secure secret handling and environment-based deployments."
+            },
+            {
+              "path": "references/security-best-practices.md",
+              "content_type": "markdown",
+              "description": "Guide on OIDC, secret masking, and least-privilege GITHUB_TOKEN permissions."
+            },
+            {
+              "path": "references/optimization-patterns.md",
+              "content_type": "markdown",
+              "description": "Documentation on caching strategies and efficient runner usage."
+            },
+            {
+              "path": "tests/README.md",
+              "content_type": "markdown",
+              "description": "Instructions for validating workflow syntax and execution logic using action-lint or dry-runs."
+            }
+	          ],
+	          "directories": [
+	            "references",
+	            "guides",
+	            "templates",
+	            "scripts",
+	            "examples",
+	            "tests",
+	            "assets"
+	          ]
+	        },
+        "validation_checklist": [
+          {
+            "id": "tax_001",
+            "check": "Taxonomy path matches the provided input exactly.",
+            "passed": true,
+            "message": "",
+            "severity": "critical",
+            "required": true
+          },
+          {
+            "id": "cap_001",
+            "check": "All five capabilities from the input are addressed in the skeleton structure.",
+            "passed": true,
+            "message": "",
+            "severity": "critical",
+            "required": true
+          },
+          {
+            "id": "file_001",
+            "check": "Includes YAML examples for workflow syntax, as specified in the skill type.",
+            "passed": true,
+            "message": "",
+            "severity": "info",
+            "required": true
+          },
+          {
+            "id": "ref_001",
+            "check": "References directory contains specific documentation for secret management security.",
+            "passed": true,
+            "message": "",
+            "severity": "warning",
+            "required": true
+          },
+          {
+            "id": "meta_001",
+            "check": "Metadata file is present in the root directory.",
+            "passed": true,
+            "message": "",
+            "severity": "critical",
+            "required": true
+          }
+        ]
+      },
+      {
+        "augmented": true,
+        "skill_metadata": "{\n  \"skill_id\": \"technical_skills/cloud_computing/aws/serverless/lambda-development\",\n  \"name\": \"lambda-development\",\n  \"description\": \"Develop and optimize AWS Lambda functions, including event trigger configuration, Lambda Layer management, and performance tuning to mitigate cold starts.\",\n  \"version\": \"1.0.0\",\n  \"type\": \"technical\",\n  \"weight\": \"medium\",\n  \"load_priority\": \"task_specific\",\n  \"dependencies\": [],\n  \"capabilities\": [\n    \"function_configuration\",\n    \"trigger_management\",\n    \"layer_optimization\",\n    \"cold_start_mitigation\"\n  ],\n  \"category\": \"technical_skills/cloud_computing/aws\",\n  \"keywords\": [\n    \"aws\",\n    \"lambda\",\n    \"serverless\",\n    \"cold-start\",\n    \"lambda-layers\",\n    \"faas\"\n  ],\n  \"scope\": \"Covers function configuration, runtime optimization, and trigger integration. Does not cover high-level orchestration like Step Functions or specific API Gateway routing logic.\",\n  \"see_also\": [\n    \"technical_skills/cloud_computing/aws/iam\",\n    \"technical_skills/cloud_computing/aws/cloudwatch-monitoring\"\n  ],\n  \"tags\": [],\n  \"taxonomy_path\": \"technical_skills/cloud_computing/aws/serverless/lambda_development\"\n}",
+        "capabilities": [
+          {
+            "name": "event_trigger_integration",
+            "description": "Configure and manage event sources such as S3, DynamoDB Streams, and SQS for function invocation.",
+            "test_criteria": "Successfully trigger a function execution by uploading a file to an S3 bucket or sending a message to SQS."
+          },
+          {
+            "name": "lambda_layer_composition",
+            "description": "Create and attach Lambda Layers to share libraries and dependencies across multiple functions.",
+            "test_criteria": "Deploy a function that imports a library provided solely by an attached Layer without including it in the deployment package."
+          },
+          {
+            "name": "cold_start_optimization",
+            "description": "Implement Provisioned Concurrency and optimize initialization code to reduce latency.",
+            "test_criteria": "Measure and confirm a reduction in 'Init Duration' metrics in CloudWatch Logs after applying optimization strategies."
+          },
+          {
+            "name": "environment_variable_management",
+            "description": "Securely manage configuration and secrets using environment variables and integration with AWS Secrets Manager.",
+            "test_criteria": "Retrieve a configuration value from an environment variable within the function handler during execution."
+          }
+        ],
+        "taxonomy_path": "technical_skills/cloud_computing/aws/serverless/lambda_development",
+        "reasoning": "The skill `lambda-development` is a specialized technical skill within the AWS Serverless ecosystem. The skeleton is designed to follow the standard agentskills.io structure, ensuring that each capability (trigger integration, layers, cold start optimization, and environment management) has a dedicated implementation file. The directory structure includes `capabilities/` for logic, `examples/` for practical usage patterns (like S3 triggers or Layer packaging), and `tests/` for validating both configuration and performance (cold start metrics). The `references/` section is populated with specific guides for common serverless patterns and troubleshooting cold starts.",
+        "skill_skeleton": {
+          "root_path": "technical_skills/cloud_computing/aws/serverless/lambda_development",
+          "files": [
+            {
+              "path": "metadata.json",
+              "content_type": "json",
+              "description": "Skill metadata including version, capabilities, and dependencies."
+            },
+            {
+              "path": "SKILL.md",
+              "content_type": "markdown",
+              "description": "Main documentation for AWS Lambda development skill."
+            },
+            {
+              "path": "references/event_trigger_integration.py",
+              "content_type": "python",
+              "description": "Implementation for configuring S3, SQS, and DynamoDB triggers."
+            },
+            {
+              "path": "references/lambda_layer_composition.py",
+              "content_type": "python",
+              "description": "Logic for creating and managing Lambda Layers."
+            },
+            {
+              "path": "references/cold_start_optimization.py",
+              "content_type": "python",
+              "description": "Strategies for Provisioned Concurrency and init code optimization."
+            },
+            {
+              "path": "references/environment_variable_management.py",
+              "content_type": "python",
+              "description": "Handling environment variables and Secrets Manager integration."
+            },
+            {
+              "path": "examples/s3_trigger_setup.md",
+              "content_type": "markdown",
+              "description": "Example of automating S3 event notifications to Lambda."
+            },
+            {
+              "path": "examples/layer_packaging_guide.md",
+              "content_type": "markdown",
+              "description": "Step-by-step guide for packaging Python dependencies into Layers."
+            },
+            {
+              "path": "tests/test_performance_metrics.py",
+              "content_type": "python",
+              "description": "Integration tests to verify cold start reduction and execution time."
+            },
+            {
+              "path": "references/api-reference.md",
+              "content_type": "markdown",
+              "description": "Quick reference for Boto3 Lambda client methods."
+            },
+            {
+              "path": "references/troubleshooting.md",
+              "content_type": "markdown",
+              "description": "Common issues like VPC networking delays and permission errors."
+            }
+	          ],
+	          "directories": [
+	            "references",
+	            "guides",
+	            "templates",
+	            "scripts",
+	            "examples",
+	            "tests",
+	            "assets"
+	          ]
+	        },
+        "validation_checklist": [
+          {
+            "id": "tax-001",
+            "check": "Verify taxonomy path matches metadata category",
+            "passed": true,
+            "message": "The path 'technical_skills/cloud_computing/aws/serverless/lambda_development' aligns with the skill category.",
+            "severity": "info",
+            "required": true
+          },
+          {
+            "id": "cap-001",
+            "check": "Ensure all capabilities from metadata are represented in files",
+            "passed": true,
+            "message": "Each of the 4 defined capabilities has a corresponding Python file in the references/ directory.",
+            "severity": "critical",
+            "required": true
+          },
+          {
+            "id": "doc-001",
+            "check": "Check for cold start mitigation documentation",
+            "passed": true,
+            "message": "Specific documentation and test files for cold start optimization are included.",
+            "severity": "warning",
+            "required": true
+          },
+          {
+            "id": "struct-001",
+            "check": "Validate directory structure compliance",
+            "passed": true,
+            "message": "Structure follows the agentskills.io standard (capabilities, examples, tests, etc.).",
+            "severity": "critical",
+            "required": true
+          }
+        ]
+      },
+      {
+        "augmented": true,
+        "skill_metadata": "{\n  \"skill_id\": \"technical_skills/cloud_infrastructure/container_orchestration/kubernetes_management\",\n  \"name\": \"kubernetes-management\",\n  \"description\": \"Orchestrate containerized applications by managing Kubernetes workloads, networking, and configuration manifests.\",\n  \"version\": \"1.0.0\",\n  \"type\": \"technical\",\n  \"weight\": \"heavyweight\",\n  \"load_priority\": \"task_specific\",\n  \"dependencies\": [],\n  \"capabilities\": [\n    \"apply_manifests\",\n    \"manage_workloads\",\n    \"configure_networking\",\n    \"secret_management\",\n    \"cluster_observability\"\n  ],\n  \"category\": \"technical_skills/cloud_infrastructure\",\n  \"keywords\": [\n    \"kubernetes\",\n    \"k8s\",\n    \"kubectl\",\n    \"containers\",\n    \"orchestration\",\n    \"devops\"\n  ],\n  \"scope\": \"Covers CRUD operations for standard K8s objects (Pods, Deployments, Services, ConfigMaps, Secrets). Does not cover cluster provisioning (EKS/GKE creation) or advanced service mesh (Istio) logic.\",\n  \"see_also\": [\n    \"technical_skills/cloud_infrastructure/helm_package_management\"\n  ],\n  \"tags\": [],\n  \"taxonomy_path\": \"technical_skills/cloud_infrastructure/container_orchestration/kubernetes_management\"\n}",
+        "capabilities": [
+          {
+            "name": "apply_manifests",
+            "description": "Apply, update, or delete Kubernetes resources using declarative YAML files or standard input.",
+            "test_criteria": "Successfully run 'kubectl apply -f' on a valid deployment manifest and verify resource creation."
+          },
+          {
+            "name": "manage_workloads",
+            "description": "Monitor and manage the lifecycle of Pods, Deployments, and StatefulSets including scaling and rolling updates.",
+            "test_criteria": "Scale a deployment from 1 to 3 replicas and verify pod readiness."
+          },
+          {
+            "name": "configure_networking",
+            "description": "Expose applications using Services (ClusterIP, NodePort, LoadBalancer) and manage traffic via Ingress controllers.",
+            "test_criteria": "Create a Service for an existing deployment and verify endpoint registration."
+          },
+          {
+            "name": "secret_management",
+            "description": "Create and inject ConfigMaps and Secrets into container environments as volumes or environment variables.",
+            "test_criteria": "Retrieve a value from a ConfigMap inside a running container's environment."
+          },
+          {
+            "name": "cluster_observability",
+            "description": "Inspect cluster state using logs, describes, and events to troubleshoot deployment failures.",
+            "test_criteria": "Retrieve logs from a failing pod and identify the exit code or error message."
+          }
+        ],
+        "taxonomy_path": "technical_skills/cloud_infrastructure/container_orchestration/kubernetes_management",
+        "reasoning": "The skill `kubernetes-management` is a heavyweight technical skill focused on the operational lifecycle of containerized workloads. The skeleton is designed to support the five core capabilities: manifest application, workload management, networking, secrets, and observability. \n\nThe structure follows the standard agentskills.io layout:\n1. **Metadata & SKILL.md**: Define the core identity and scope (excluding cluster provisioning).\n2. **Capabilities**: Individual files for each defined capability to ensure modularity and ease of testing.\n3. **References**: Extensive documentation on common patterns (e.g., Sidecars, InitContainers) and troubleshooting steps, which are critical for K8s.\n4. **Examples**: Practical YAML manifests and CLI workflows for the most common use cases.\n5. **Tests**: Integration tests focused on `kubectl` interactions and state verification.\n\nThe taxonomy path `technical_skills/cloud_infrastructure/container_orchestration/kubernetes_management` is strictly adhered to for the root directory.",
+        "skill_skeleton": {
+          "root_path": "technical_skills/cloud_infrastructure/container_orchestration/kubernetes_management",
+          "files": [
+            {
+              "path": "metadata.json",
+              "content_type": "json",
+              "description": "Skill metadata including capabilities and dependencies."
+            },
+            {
+              "path": "SKILL.md",
+              "content_type": "markdown",
+              "description": "Main skill documentation and overview."
+            },
+            {
+              "path": "references/apply_manifests.py",
+              "content_type": "python",
+              "description": "Logic for applying and deleting declarative YAML manifests."
+            },
+            {
+              "path": "references/manage_workloads.py",
+              "content_type": "python",
+              "description": "Logic for scaling, updating, and monitoring Pods/Deployments."
+            },
+            {
+              "path": "references/configure_networking.py",
+              "content_type": "python",
+              "description": "Logic for Service and Ingress configuration."
+            },
+            {
+              "path": "references/secret_management.py",
+              "content_type": "python",
+              "description": "Logic for ConfigMap and Secret injection."
+            },
+            {
+              "path": "references/cluster_observability.py",
+              "content_type": "python",
+              "description": "Logic for logs, describes, and event inspection."
+            },
+            {
+              "path": "references/api-reference.md",
+              "content_type": "markdown",
+              "description": "Kubernetes API versioning and resource kind reference."
+            },
+            {
+              "path": "references/troubleshooting.md",
+              "content_type": "markdown",
+              "description": "Common failure modes (CrashLoopBackOff, ImagePullBackOff, etc.)."
+            },
+            {
+              "path": "examples/deployment.yaml",
+              "content_type": "yaml",
+              "description": "Standard deployment manifest example."
+            },
+            {
+              "path": "examples/service.yaml",
+              "content_type": "yaml",
+              "description": "ClusterIP and LoadBalancer service examples."
+            },
+            {
+              "path": "tests/test_workload_lifecycle.py",
+              "content_type": "python",
+              "description": "Integration tests for scaling and rollouts."
+            },
+            {
+              "path": "guides/standard-labels.json",
+              "content_type": "json",
+              "description": "Recommended labeling schema for Kubernetes resources."
+            }
+	          ],
+	          "directories": [
+	            "references",
+	            "guides",
+	            "templates",
+	            "scripts",
+	            "examples",
+	            "tests",
+	            "assets"
+	          ]
+	        },
+        "validation_checklist": [
+          {
+            "id": "val_001",
+            "check": "Validate taxonomy path matches metadata",
+            "passed": true,
+            "message": "The root_path matches the provided taxonomy_path.",
+            "severity": "critical",
+            "required": true
+          },
+          {
+            "id": "val_002",
+            "check": "Verify all capabilities are represented",
+            "passed": true,
+            "message": "All 5 capabilities from metadata have corresponding files in the references/ directory.",
+            "severity": "critical",
+            "required": true
+          },
+          {
+            "id": "val_003",
+            "check": "Check for mandatory documentation files",
+            "passed": true,
+            "message": "SKILL.md and metadata.json are included in the root.",
+            "severity": "critical",
+            "required": true
+          },
+          {
+            "id": "val_004",
+            "check": "Ensure troubleshooting reference exists",
+            "passed": true,
+            "message": "Troubleshooting.md is present, which is essential for the cluster_observability capability.",
+            "severity": "info",
+            "required": false
+          }
+        ]
+      },
+      {
+        "task_description": "Create a skill for JWT authentication including token creation, validation, and refresh token flows",
+        "expected_taxonomy_path": "technical_skills/security/authentication/jwt",
+        "expected_name": "jwt-auth",
+        "expected_type": "technical",
+        "expected_weight": "lightweight",
+        "expected_capabilities": [
+          "token_creation",
+          "token_validation",
+          "refresh_tokens",
+          "claims_management",
+          "security_practices",
+          "token_storage"
+        ],
+        "expected_dependencies": [],
+        "expected_category": "technical_skills/security/authentication",
+        "expected_keywords": [
+          "jwt",
+          "authentication",
+          "token",
+          "auth",
+          "security"
+        ],
+        "expected_scope": "Covers JWT authentication. Does NOT cover OAuth2 or SAML.",
+        "expected_see_also": [
+          "technical_skills/security/authentication/oauth2"
+        ]
+      }
+    ],
+    "signature": {
+      "instructions": "You are the Lead Systems Architect for a global DevOps automation initiative. A critical system failure has occurred because newly deployed skills lacked a standardized structure, leading to catastrophic dependency loops and unsearchable metadata. To prevent a total system shutdown, you must generate a precise, production-ready skill skeleton that strictly adheres to the `agentskills.io` specification. \n\nYour mission is to translate a skill's conceptual metadata and capabilities into a rigorous directory and file architecture. \n\n### Constraints:\n1. **Root Path Alignment:** The `root_path` MUST exactly match the provided `taxonomy_path`.\n2. **Mandatory Standard Layout:** You must include a `metadata.json` (for versioning/dependencies) and a `SKILL.md` (for documentation) in the root.\n3. **Directory Integrity:** You must define at minimum these directories: `capabilities/`, `examples/`, `tests/`, and `resources/`.\n4. **Capability Mapping:** Every discrete capability provided in the input MUST be mapped to a corresponding implementation file or documentation within the `capabilities/` directory.\n5. **Contextual Resources:** Include specific configuration files (YAML/JSON) in the `resources/` directory if the capabilities require checklists, rules, or external templates.\n6. **Validation Checklist:** Generate a suite of `ValidationCheckItem` objects. You must verify:\n   - Taxonomy path/Skill ID consistency.\n   - Presence of mandatory root files.\n   - 1:1 mapping of capabilities to skeleton files.\n   - Compliance with the `agentskills.io` standard directory structure.\n\nFailure to follow this standard will result in a deployment rejection and system-wide incompatibility. Think step-by-step to ensure every architectural requirement is satisfied before finalizing the skeleton.",
+      "fields": [
+        {
+          "prefix": "Skill Metadata:",
+          "description": "JSON skill metadata"
+        },
+        {
+          "prefix": "Capabilities:",
+          "description": "JSON array of capabilities"
+        },
+        {
+          "prefix": "Taxonomy Path:",
+          "description": "Taxonomy path for the skill"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Skill Skeleton:",
+          "description": "Directory and file structure for the skill"
+        },
+        {
+          "prefix": "Valid

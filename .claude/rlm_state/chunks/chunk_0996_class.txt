@@ -1,0 +1,6 @@
+<!-- Chunk 996: bytes 3484177-3484324, type=class -->
+class PreviewPrompt(BaseModel):
+    type: Literal["preview"] = "preview"
+    content: str
+    highlights: list[str] = Field(default_factory=list)
+

@@ -1,0 +1,40 @@
+<!-- Chunk 871: bytes 3133015-3134018, type=class -->
+class RequirementsGathererModule(dspy.Module):
+    """Module for gathering requirements from a task description."""
+```
+
+**Implementation**: `dspy.ChainOfThought(GatherRequirements)`
+
+**Input:**
+```python
+task_description: str
+```
+
+**Output:**
+```python
+{
+    "domain": str,           # Primary domain
+    "category": str,         # Category within domain
+    "target_level": str,     # beginner/intermediate/advanced/expert
+    "topics": list[str],     # 3-7 topics to cover
+    "constraints": list[str], # Any constraints
+    "ambiguities": list[str], # Ambiguities needing clarification
+    "rationale": str,        # Chain-of-thought reasoning
+}
+```
+
+**Usage:**
+```python
+from skill_fleet.core.modules.phase1_understanding import RequirementsGathererModule
+
+module = RequirementsGathererModule()
+result = await module.aforward(task_description="Create a Python async programming skill")
+```
+
+---
+
+### IntentAnalyzerModule
+
+Deep analysis of user intent to understand what skill is needed.
+
+```python

@@ -1,0 +1,22 @@
+<!-- Chunk 382: bytes 568948-569578, type=class -->
+class TaskAnalysis(dspy.Signature):
+    """Analyze a task and determine the best approach."""
+
+    task_description = dspy.InputField(desc="The task to analyze")
+    task_type = dspy.OutputField(desc="Type of task (e.g., coding, research, analysis)")
+```
+
+### Key Components
+
+1. **Class docstring**: High-level description of what the signature does
+2. **InputField**: Data provided to the program
+3. **OutputField**: Data the program produces
+4. **Descriptions**: Clear explanations of each field's purpose
+
+## InputField vs OutputField
+
+### InputField
+
+Use `dspy.InputField` for data that flows **into** the program:
+
+```python

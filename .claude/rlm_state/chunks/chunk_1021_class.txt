@@ -1,0 +1,12 @@
+<!-- Chunk 1021: bytes 3603301-3603612, type=class -->
+class OptimizerConfig:
+    """Configuration for a specific optimizer."""
+    auto: Literal["light", "medium", "heavy"] = "medium"
+    max_bootstrapped_demos: int = 4
+    max_labeled_demos: int = 4
+    num_threads: int = 8
+    num_candidates: int = 10  # For GEPA
+    num_iters: int = 3  # For GEPA
+
+
+@dataclass

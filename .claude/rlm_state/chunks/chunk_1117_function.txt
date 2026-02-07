@@ -1,0 +1,482 @@
+<!-- Chunk 1117: bytes 4138622-4161030, type=function -->
+def resolve_skill_location(skill_identifier: str) -> SkillLocation:
+    # 1. Check Index (O(1))
+    # Matches against canonical IDs and registered aliases
+    if index_entry := taxonomy_index.get(skill_identifier):
+        if skill_identifier in index_entry.aliases:
+            logger.warn(f"Deprecation: Accessing skill via alias '{skill_identifier}'. Use '{index_entry.canonical_id}' instead.")
+        return index_entry.path
+
+    # 2. Filesystem Fallback (Legacy Support)
+    # Checks strict path existence for un-indexed skills (e.g., drafts, manual creations)
+    if filesystem.exists(skill_identifier):
+        logger.warn(f"Unindexed Access: Skill '{skill_identifier}' found on disk but missing from Taxonomy Index.")
+        return skill_identifier
+
+    # 3. Not Found
+    raise SkillNotFoundError(skill_identifier)
+```
+
+## 2. Deprecation Policy
+
+To ensure smooth transition without breaking existing agent memories or dependent workflows:
+
+| Phase                      | Duration | Behavior                                                                                                                                   |
+| :------------------------- | :------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase A (Dual Support)** | v0.5.x   | Both canonical and legacy paths work. Aliases log warnings. Index is authoritative.                                                        |
+| **Phase B (Strict Mode)**  | v0.6.0   | Legacy paths still work but validation fails for _new_ skills using deep paths. Dependencies on aliases flag warnings in `validate-skill`. |
+| **Phase C (End of Life)**  | v0.7.0   | Legacy paths removed from aliases. Lookup fails.                                                                                           |
+
+## 3. Dependency Handling
+
+Skills often declare dependencies in `metadata.json`.
+
+- **Resolution**: `validate_dependencies()` will use the same resolution algorithm.
+- **Auto-Fix**: A CLI command `skill-fleet fix-deps` will be provided to rewrite `metadata.json` dependencies from Alias -> Canonical ID automatically.
+
+## 4. Validator Updates
+
+The `SkillValidator` will be updated to:
+
+1. Load the Taxonomy Index.
+2. Flag a **Review Warning** if `skill_id` matches an Alias instead of a Canonical ID.
+3. Flag a **Critical Error** if a new skill is created with a path depth > 3 (enforcing the new flat structure).
+
+## 5. API Compatibility
+
+- **`GET /skills/{path}`**:
+
+  - If `{path}` matches an alias, return 301 Moved Permanently (or transparent redirect w/ header).
+  - Response body will contain the _canonical_ `skill_id`.
+
+- **`GET /taxonomy`**:
+  - Returns the _Logical Tree_ from `taxonomy_tree` in the index, not the physical directory structure.
+
+
+============================================================
+END FILE: docs/internal/reports/resolution-plan.md
+============================================================
+
+============================================================
+FILE: docs/internal/reports/skill-learning-plan.md
+============================================================
+
+# Skill Learning Pipeline & Integration Plan
+
+**Date:** 2026-01-16
+**Status:** DRAFT (Phase 4 Output)
+
+This document outlines the architecture for the "Skill Learning" capability, which enables the system to synthesize new skills from agent execution trajectories and feedback.
+
+## 1. Pipeline Architecture
+
+The pipeline follows a **Trajectory-to-Spec** transformation flow.
+
+### Stages
+
+1.  **Capture (Trajectory)**
+
+    - **Trigger:** Agent task completion.
+    - **Data:** `messages[]` (User instructions, Agent Tools calls, Model outputs).
+    - **Storage:** `skills/_analytics/trajectories/{job_id}.jsonl`.
+
+2.  **Reflection (Extractor)**
+
+    - **Input:** Trajectory.
+    - **Process:** LLM analysis to identify reusable patterns, successful tool sequences, and "Aha!" moments.
+    - **Output:** `SkillCandidate` (Concept, Scope, Key Patterns).
+
+3.  **Synthesis (Creator)**
+
+    - **Input:** `SkillCandidate`.
+    - **Process:** Standard Skill Creation Workflow (Phase 2) initialized with extracted patterns.
+    - **Output:** Draft SKILL.md in `skills/_drafts/learned/{job_id}/`.
+
+4.  **Validation (Gatekeeper)**
+
+    - **Process:** Auto-run `validate-skill`.
+    - **Criteria:** Must pass syntax and "Production Pattern" calibration checks.
+
+5.  **Promotion (Integration)**
+    - **Process:** HITL review -> Add to `skills/taxonomy_index.json`.
+    - **Action:** Move folder from `_drafts` to `skills/{canonical_path}`.
+
+## 2. Baselines & Evaluation
+
+To measure the effectiveness of learned skills:
+
+| Baseline                      | Description                                    | Expected Outcome                                 |
+| :---------------------------- | :--------------------------------------------- | :----------------------------------------------- |
+| **B0: Zero-Shot**             | No relevant skills provided.                   | Lower success rate, higher tokens.               |
+| **B1: Trajectory Only**       | Skill synthesized purely from execution trace. | moderate improvement (captured "what happened"). |
+| **B2: Trajectory + Feedback** | Trace + explicit User Feedback (corrections).  | High quality (captured "what _should_ happen").  |
+
+_Evaluation Metric:_ Execute a holdout set of similar tasks using the Learned Skill and compare Success Rate vs B0.
+
+## 3. Data Flow Map
+
+```mermaid
+graph LR
+    A[Agent Execution] -->|Log| B(Trajectory Storage)
+    B -->|Analyze| C[Reflection Module]
+    C -->|Propose| D[Synthesis Module]
+    D -->|Write| E(Draft Storage)
+    E -->|Review| F[Taxonomy Index]
+    F -->|Deploy| G[Active Skills]
+```
+
+## 4. Integration with Index
+
+Learned skills are unique because they originate dynamically.
+
+- **Naming:** Defaults to `learned-{timestamp}-{concept}`.
+- **Path:** Initially `_drafts`.
+- **Index:** Not indexed until promoted.
+
+## 5. DSPy Modules
+
+New Modules required in `src/skill_fleet/core/dspy/modules/learning.py`:
+
+- `ExtractPatternFromTrajectory(trajectory) -> SkillCandidate`
+- `AssessPatternReusability(candidate) -> Score`
+
+
+============================================================
+END FILE: docs/internal/reports/skill-learning-plan.md
+============================================================
+
+============================================================
+FILE: docs/internal/reports/taxonomy-index-schema.md
+============================================================
+
+# Taxonomy Index Schema Specification
+
+**Date:** 2026-01-16
+**Status:** DRAFT (Phase 2 Output)
+
+This document defines the schema for the new `skills/taxonomy_index.json` file, which serves as the canonical source of truth for the skill taxonomy.
+
+## 1. File Location
+
+- **Path:** `skills/taxonomy_index.json`
+- **Format:** JSON (UTF-8)
+
+## 2. Schema Definition
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["version", "taxonomy_tree", "skills"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version (e.g., '1.0')"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time"
+    },
+
+    // THE LOGICAL TAXONOMY TREE (Categories)
+    // Defines the valid hierarchy completely decoupled from filesystem.
+    "taxonomy_tree": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z0-9_-]+$": {
+          "$ref": "#/definitions/CategoryNode"
+        }
+      }
+    },
+
+    // THE FLAT SKILL INVENTORY
+    // Maps unique skill_ids to their logical location and physical paths.
+    "skills": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z0-9-]+$": {
+          "$ref": "#/definitions/SkillEntry"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "CategoryNode": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "children": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-z0-9_-]+$": { "$ref": "#/definitions/CategoryNode" }
+          }
+        }
+      }
+    },
+    "SkillEntry": {
+      "type": "object",
+      "required": ["canonical_path"],
+      "properties": {
+        "canonical_path": {
+          "type": "string",
+          "description": "The current primary filesystem path relative to skills/ root"
+        },
+        "taxonomy_location": {
+          "type": "string",
+          "description": "Dot-notation path in the logical taxonomy tree (e.g. 'python.async')"
+        },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of legacy or alternative paths that resolve to this skill"
+        },
+        "facets": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Key-value tags for filtering (e.g., lang:python, type:pattern)"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "deprecated", "draft"],
+          "default": "active"
+        }
+      }
+    }
+  }
+}
+```
+
+## 3. Example Instance
+
+```json
+{
+  "version": "1.0",
+  "taxonomy_tree": {
+    "python": {
+      "description": "Python Ecosystem",
+      "children": {
+        "async": { "description": "Concurrency & AsyncIO" },
+        "web": { "description": "Web Frameworks" }
+      }
+    },
+    "devops": {
+      "description": "Deployment & Operations",
+      "children": {
+        "docker": { "description": "Containerization" }
+      }
+    }
+  },
+  "skills": {
+    "python-async-programming": {
+      "canonical_path": "python/async",
+      "taxonomy_location": "python.async",
+      "aliases": [
+        "technical_skills/programming/languages/python/asynchronous_programming"
+      ],
+      "facets": {
+        "lang": "python",
+        "topic": "concurrency"
+      }
+    }
+  }
+}
+```
+
+## 4. Operational Rules
+
+1. **Resolution Priority**:
+   - 1. Check `skills` keys (Exact Skill ID Match).
+   - 2. Check `canonical_path` values.
+   - 3. Check `aliases` list (Legacy Path Match).
+2. **Creation Logic**:
+
+   - New skills are added to `skills` map.
+   - Taxonomy tree nodes are created if they don't exist in `taxonomy_tree`.
+   - Filesystem directories are created at `skills/<canonical_path>`.
+
+3. **Validation**:
+   - On startup, `TaxonomyManager` loads this index.
+   - It optionally scans the filesystem to warn about "Orphan Skills" (directories not in index).
+
+
+============================================================
+END FILE: docs/internal/reports/taxonomy-index-schema.md
+============================================================
+
+============================================================
+FILE: docs/internal/reports/taxonomy-map.md
+============================================================
+
+# Taxonomy Canonical Map & Alias Inventory
+
+**Date:** 2026-01-16
+**Status:** DRAFT (Phase 1 Output)
+
+This document maps existing filesystem paths (Aliases) to proposed Canonical Paths for the new simplified taxonomy.
+
+## Proposed Strategy
+
+- **Flatten Depth**: Max 2-3 levels (e.g., `category/skill` or `category/subcategory/skill`).
+- **Group by Domain**: `python`, `devops`, `testing`, `web`, `tools`.
+- **Remove Redundant Segments**: "technical_skills", "programming", "languages" are implied or moved to facets.
+
+## Mapping Table
+
+| Skill ID (Proposed)        | Current Path (Clone/Symlink Source)                                                   | Proposed Canonical Path             | Facets (Tags)                               |
+| :------------------------- | :------------------------------------------------------------------------------------ | :---------------------------------- | :------------------------------------------ |
+| **python-async**           | `skills/technical_skills/programming/languages/python/asynchronous_programming`       | `skills/python/async`               | lang:python, topic:concurrency              |
+| **python-core**            | `skills/technical_skills/programming/languages/python/core_syntax`                    | `skills/python/core-syntax`         | lang:python, level:foundational             |
+| **python-decorators**      | `skills/technical_skills/programming/languages/python/decorators`                     | `skills/python/decorators`          | lang:python, pattern:structural             |
+| **python-dspy**            | `skills/technical_skills/programming/python/dspy-framework`                           | `skills/python/dspy`                | lang:python, lib:dspy                       |
+| **fastapi-production**     | `skills/technical_skills/programming/web_frameworks/python/fastapi`                   | `skills/python/fastapi-production`  | lang:python, lib:fastapi, type:pattern      |
+| **fastapi-clean-arch**     | `skills/technical_skills/programming/python/fastapi/backend_architecture`             | `skills/python/fastapi-clean-arch`  | lang:python, lib:fastapi, type:architecture |
+| **docker-core**            | `skills/technical_skills/devops/containerization/docker`                              | `skills/devops/docker`              | tool:docker, topic:containerization         |
+| **pytest-core**            | `skills/technical_skills/testing/python/pytest`                                       | `skills/python/pytest`              | lang:python, lib:pytest                     |
+| **react-vite-setup**       | `skills/technical_skills/web_development/frontend/react/react-vite-production-setup`  | `skills/web/react-vite`             | lang:javascript, lib:react, tool:vite       |
+| **vite-core**              | `skills/technical_skills/web_development/frontend/react/vite`                         | `skills/web/vite`                   | lang:javascript, tool:vite                  |
+| **design-patterns-python** | `skills/technical_skills/design_patterns/python`                                      | `skills/python/design-patterns`     | lang:python, topic:design-patterns          |
+| **concurrency-core**       | `skills/technical_skills/software_architecture/concurrency`                           | `skills/architecture/concurrency`   | topic:concurrency, type:concept             |
+| **openapi-cli**            | `skills/technical_skills/software_development/api_development/openapi/cli_management` | `skills/api/openapi-cli`            | topic:api, standard:openapi                 |
+| **code-quality**           | `skills/technical_skills/programming/practices/code_quality_analysis`                 | `skills/practices/code-quality`     | topic:quality, lang:python                  |
+| **knowledge-retrieval**    | `skills/domain_knowledge/knowledge_retrieval`                                         | `skills/domain/knowledge-retrieval` | type:domain                                 |
+| **testing-general**        | `skills/general/testing`                                                              | `skills/testing/general`            | type:general                                |
+| **memory-init**            | `skills/memory_blocks/initiate-memory`                                                | `skills/memory/initiate`            | type:memory                                 |
+| **memory-universal**       | `skills/memory_blocks/universal-memory`                                               | `skills/memory/universal`           | type:memory                                 |
+| **tavily-search**          | `skills/_drafts/51a31ca6.../tools/web_search/tavily`                                  | `skills/tools/tavily-search`        | tool:tavily, type:tool                      |
+| **python-concurrency**     | (N/A - merged from async?)                                                            | `skills/python/concurrency`         |                                             |
+
+## Special Handling Needed
+
+1. **FastAPI Duplication**: `fastapi-production-patterns` vs `fastapi-clean-architecture`.
+   - _Propose_: Keep both as distinct skills or merge into a `fastapi/` folder with multiple skill files if supported. For now, distinct paths.
+2. **Drafts**: Draft skills (like mermaid, context7) listed in `_drafts` should be moved to canonical paths upon "learning/promotion".
+
+## Action Items
+
+1. Verify this map covers all `SKILL.md` files (excluding `_templates`).
+2. Generate the `index.json` schema from this map.
+
+
+============================================================
+END FILE: docs/internal/reports/taxonomy-map.md
+============================================================
+
+============================================================
+FILE: docs/intro/introduction.md
+============================================================
+
+# Skill Fleet — Introduction
+
+## What You’re Looking At
+
+Skill Fleet is an **agentic capability platform** that keeps AI knowledge modular, discoverable, and compliant with agentskills.io. Instead of monolithic prompts, it dynamically mounts only the skills needed for the current task, then spins up DSPy-powered workflows to reason, draft, validate, and persist new capabilities via a FastAPI job + HITL loop.
+
+## Why It Matters
+
+1. **Efficiency** – The taxonomy keeps agents light by loading skill directories on demand.
+2. **Compliance** – Every skill comes with YAML frontmatter + `metadata.json` so other systems can consume it.
+3. **Automation** – The FastAPI backend orchestrates DSPy modules with human-in-the-loop checkpoints.
+4. **Observability** – CLI + documentation link logging, analytics, and templates to keep quality high.
+
+## How to Explore the System
+
+- **Getting started** → `docs/getting-started/index.md` covers install, CLI usage, templates, and validation/migration flows.
+- **Architectural overview** → `docs/overview.md` and the existing `docs/architecture/` tree explain how DSPy programs, modules, and taxonomy combine.
+- **Concept deep dives** → `docs/concepts/developer-reference.md` and future concept docs (Planning, HITL, Templates) go into workflow specifics.
+- **Living guide** → `AGENTS.md` is the working instructions for agents/developers.
+
+## Map of the Docs Tree
+
+```
+docs/
+├── index.md                    # Central documentation hub
+├── intro/
+│   └── introduction.md         # This page
+├── getting-started/
+│   └── index.md                # Installation, CLI/API, templates, validation
+├── dspy/                       # DSPy architecture & usage
+│   ├── index.md                 # DSPy overview
+│   ├── signatures.md            # All DSPy signatures
+│   ├── modules.md               # All DSPy modules
+│   ├── programs.md              # DSPy programs
+│   ├── evaluation.md            # Quality metrics
+│   └── optimization.md          # MIPROv2, GEPA, caching
+├── api/                        # FastAPI REST API
+│   ├── index.md                 # API overview
+│   ├── endpoints.md             # REST endpoint reference
+│   ├── schemas.md               # Request/response models
+│   ├── middleware.md            # CORS, error handling
+│   └── jobs.md                  # Background jobs
+├── cli/                        # CLI documentation
+│   ├── index.md                 # CLI overview
+│   ├── commands.md              # Command reference
+│   ├── interactive-chat.md      # Chat mode guide
+│   ├── dev-command.md         # Development command
+│   └── architecture.md          # CLI internals
+├── llm/                        # LLM configuration
+│   ├── index.md                 # Configuration overview
+│   ├── providers.md             # Provider setup
+│   ├── dspy-config.md           # Centralized config
+│   └── task-models.md           # Task-specific models
+├── hitl/                       # HITL system
+│   ├── index.md                 # HITL overview
+│   ├── callbacks.md             # Callback interface
+│   ├── interactions.md          # Interaction types
+│   └── runner.md                # HITL runner
+├── concepts/
+│   ├── concept-guide.md         # Concepts overview
+│   ├── developer-reference.md   # DSPy workflows, HITL, taxonomy concepts
+│   └── agentskills-compliance.md # Schema/validation
+├── overview.md                 # High-level architecture and taxonomy
+├── architecture/
+│   └── skill-creation-workflow.md # 3-phase workflow
+└── development/
+    ├── CONTRIBUTING.md         # Contribution guide
+    └── ARCHITECTURE_DECISIONS.md # Design decisions
+```
+
+## Next Steps
+
+1. **Getting Started**: Read [`docs/getting-started/index.md`](../getting-started/) for installation and basic usage
+2. **DSPy Deep Dive**: Explore [`docs/dspy/`](../dspy/) to understand the 3-phase workflow architecture
+3. **API Usage**: Check [`docs/api/`](../api/) for REST API integration
+4. **CLI Guide**: See [`docs/guides/cli.md`](../guides/cli.md) for command details
+5. **Advanced Topics**: Visit [`docs/reference/llm-config.md`](../reference/llm-config.md), [`docs/hitl/`](../hitl/) for configuration details
+
+**New Documentation** 📚:
+
+- [`docs/dspy/`](../dspy/) - Comprehensive DSPy guide (signatures, modules, programs, optimization)
+- [`docs/api/`](../api/) - Complete REST API documentation (endpoints, schemas, jobs)
+- [`docs/cli/`](../cli/) - CLI reference with interactive chat mode
+- [`docs/reference/llm-config.md`](../reference/llm-config.md) - LLM configuration and task-specific models (consolidated)
+- [`docs/hitl/`](../hitl/) - Human-in-the-Loop system documentation
+
+
+============================================================
+END FILE: docs/intro/introduction.md
+============================================================
+
+============================================================
+FILE: docs/llm/dspy-config.md
+============================================================
+
+# DSPy Configuration
+
+**Last Updated**: 2026-01-12
+**Location**: `src/skill_fleet/llm/dspy_config.py`
+
+## Overview
+
+The `dspy_config` module provides centralized DSPy configuration for Skills Fleet. It handles loading config files, building LLM instances, and setting up DSPy's global settings.
+
+`★ Insight ─────────────────────────────────────`
+This module is the **single source of truth** for DSPy configuration. All parts of the application should use `configure_dspy()` or `get_task_lm()` rather than instantiating LLMs directly. This ensures consistent configuration and makes model selection easy.
+`─────────────────────────────────────────────────`
+
+## API Reference
+
+### configure_dspy()
+
+Configure DSPy with fleet config and return default LM.
+
+`````python

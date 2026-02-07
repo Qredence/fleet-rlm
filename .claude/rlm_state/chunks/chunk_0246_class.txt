@@ -1,0 +1,6 @@
+<!-- Chunk 246: bytes 311374-311504, type=class -->
+class PricingStrategy(ABC):
+    @abstractmethod
+    def calculate(self, quantity: int, base_price: float) -> float:
+        pass
+

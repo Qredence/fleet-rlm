@@ -1,0 +1,15 @@
+<!-- Chunk 185: bytes 290716-290993, type=function -->
+def test_validate_email_invalid():
+    """Test that invalid emails raise ValueError."""
+    # Arrange
+    email = "invalid-email"
+
+    # Act & Assert
+    with pytest.raises(ValueError):
+        validate_email(email)
+```
+
+### Fixtures for Reusability
+
+```python
+@pytest.fixture

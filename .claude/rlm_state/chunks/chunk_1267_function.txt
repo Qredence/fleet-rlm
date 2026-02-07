@@ -1,0 +1,199 @@
+<!-- Chunk 1267: bytes 4703953-4709842, type=function -->
+def main() -> int:
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="DSPy evaluation and optimization tools for skill-fleet",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Evaluate command
+    eval_parser = subparsers.add_parser("evaluate", help="Evaluate existing skills")
+    eval_parser.add_argument(
+        "--skills-dir",
+        type=str,
+        default=None,
+        help="Path to skills directory (default: skills/)",
+    )
+    eval_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default=None,
+        help="Output file for JSON report",
+    )
+    eval_parser.add_argument(
+        "--exclude-drafts",
+        action="store_true",
+        help="Exclude _drafts directory from evaluation",
+    )
+    eval_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    eval_parser.set_defaults(func=cmd_evaluate)
+
+    # Evaluate file command
+    eval_file_parser = subparsers.add_parser("evaluate-file", help="Evaluate a single skill file")
+    eval_file_parser.add_argument(
+        "file",
+        type=str,
+        help="Path to SKILL.md file",
+    )
+    eval_file_parser.add_argument(
+        "--threshold",
+        "-t",
+        type=float,
+        default=0.6,
+        help="Quality threshold for pass/fail (default: 0.6)",
+    )
+    eval_file_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    eval_file_parser.set_defaults(func=cmd_evaluate_file)
+
+    # Optimize command
+    opt_parser = subparsers.add_parser(
+        "optimize", help="Run optimization on skill creation program"
+    )
+    opt_parser.add_argument(
+        "--optimizer",
+        type=str,
+        choices=["miprov2", "bootstrap_fewshot"],
+        default=None,
+        help="Optimizer type (default: from config)",
+    )
+    opt_parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="Name for saved optimized program",
+    )
+    opt_parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Don't save the optimized program",
+    )
+    opt_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    opt_parser.set_defaults(func=cmd_optimize)
+
+    # List programs command
+    list_parser = subparsers.add_parser("list-programs", help="List saved optimized programs")
+    list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    list_parser.set_defaults(func=cmd_list_programs)
+
+    # Compare command
+    compare_parser = subparsers.add_parser("compare", help="Compare baseline vs optimized program")
+    compare_parser.add_argument(
+        "program",
+        type=str,
+        help="Name of optimized program to compare",
+    )
+    compare_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    compare_parser.set_defaults(func=cmd_compare)
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        return 1
+
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+============================================================
+END FILE: scripts/internal/opt/run_dspy_tools.py
+============================================================
+
+============================================================
+FILE: scripts/internal/opt/run_gepa_optimization.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+GEPA Optimization Script - Reflection-Based Prompt Improvement.
+
+GEPA (Generalized Efficient Prompt Algorithm) is a fast, reflection-based optimizer:
+- Uses an LM to analyze failures and propose better instructions
+- Much cheaper than MIPROv2 ($0.50-5 vs $5-20)
+- Iterative improvement through self-reflection
+- Best for: Budget-conscious, quick iteration cycles
+
+Budget comparison:
+- BootstrapFewShot: Free (just runs program)
+- GEPA (light):      ~$1-2
+- GEPA (medium):     ~$2-5
+- MIPROv2 (light):   ~$5-10
+- MIPROv2 (medium):  ~$10-20
+
+Usage:
+    # Run with default settings (light auto, Gemini reflection)
+    uv run python scripts/run_gepa_optimization.py
+    
+    # Or with custom settings
+    GEPA_AUTO_LEVEL=medium GEPA_REFLECTION_MODEL=gpt-4o \\
+        uv run python scripts/run_gepa_optimization.py
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from pathlib import Path
+
+import dspy
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# Imports from skills-fleet
+from skill_fleet.core.dspy.metrics.gepa_reflection import (  # noqa: E402
+    gepa_composite_metric,
+    gepa_skill_quality_metric,
+)
+from skill_fleet.core.optimization.optimizer import get_lm  # noqa: E402
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# GEPA-specific configuration
+GEPA_CONFIG = {
+    "auto_level": os.getenv("GEPA_AUTO_LEVEL", "light"),  # light, medium, or heavy
+    "reflection_model": os.getenv("GEPA_REFLECTION_MODEL", "gemini-3-flash-preview"),
+    "metric_type": os.getenv("GEPA_METRIC_TYPE", "composite"),  # quality or composite
+    # Note: num_iterations is controlled by auto level (light→2-3, medium→4-5, heavy→6+)
+}
+
+logger.info(f"GEPA Configuration: {json.dumps(GEPA_CONFIG, indent=2)}")
+
+
+# ============================================================================
+# DATA LOADING
+# ============================================================================
+
+

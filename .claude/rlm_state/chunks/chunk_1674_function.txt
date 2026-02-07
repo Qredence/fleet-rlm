@@ -1,0 +1,39 @@
+<!-- Chunk 1674: bytes 6694014-6695095, type=function -->
+def sanitize_relative_file_path(path: str) -> str | None:
+    """
+    Sanitize a relative file path to prevent traversal attacks.
+
+    Validates and normalizes a relative path to ensure it:
+    - Is not empty
+    - Is not absolute
+    - Does not contain Windows-style separators
+    - Contains only safe path components (alphanumeric, hyphen, underscore)
+    - Does not contain "." or ".." components
+
+    This is intended for user-controlled paths that are later joined onto a fixed
+    server-side root directory.
+    """
+    if not path or "\0" in path:
+        return None
+
+    # Reject absolute paths and traversal to avoid ambiguities
+    if path.startswith("/") or "\\" in path or ".." in path:
+        return None
+
+    segments: list[str] = []
+    for segment in path.split("/"):
+        s = segment.strip()
+        if not s or s == ".":
+            continue
+        if s == "..":
+            return None
+        if not is_safe_path_component(s):
+            return None
+        segments.append(s)
+
+    if not segments:
+        return None
+
+    return "/".join(segments)
+
+

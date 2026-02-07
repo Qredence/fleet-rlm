@@ -1,0 +1,10 @@
+<!-- Chunk 92: bytes 28168-28354, type=h2 -->
+## Processing
+IF compliance passed:
+  - Call payment processing MCP tool
+  - Apply appropriate fraud checks
+  - Process transaction
+ELSE:
+  - Flag for review
+  - Create compliance case
+

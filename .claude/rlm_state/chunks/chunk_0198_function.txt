@@ -1,0 +1,10 @@
+<!-- Chunk 198: bytes 297361-297557, type=function -->
+def update_user(email: str):
+    if not email or "@" not in email:
+        raise ValueError("Invalid email")
+    # ...
+```
+
+**Solution:** Extract to shared utility
+```python
+# utils/validation.py

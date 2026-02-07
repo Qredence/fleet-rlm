@@ -1,0 +1,171 @@
+<!-- Chunk 430: bytes 618492-622625, type=function -->
+def load_program(filepath):
+    saved_version = get_saved_version(filepath)
+    current_version = dspy.__version__
+
+    if saved_version != current_version:
+        print("WARNING: Version mismatch!")
+        return None
+
+    return dspy.load(filepath)
+
+# Bad: Load without checking
+program = dspy.load("my_program.json")
+```
+
+### 3. Document Version Requirements
+
+```python
+"""
+My DSPy Program
+
+Version Requirements:
+- DSPy: 2.5.0 or higher
+- OpenAI: 1.0.0 or higher
+- Python: 3.10 or higher
+
+Created with DSPy 2.5.0
+Last updated: 2024-01-15
+"""
+```
+
+### 4. Use Version-Pinned Environments
+
+```python
+# requirements.txt
+dspy==2.5.0
+openai==1.0.0
+anthropic==0.18.0
+```
+
+### 5. Version Compatibility Matrix
+
+| DSPy Version | OpenAI SDK | Anthropic SDK | Notes |
+|--------------|-------------|----------------|--------|
+| 2.5.0 | 1.0.0+ | 0.18.0+ | Stable |
+| 2.6.0 | 1.0.0+ | 0.18.0+ | New features |
+
+## Compatibility
+
+### Minor Version Changes
+
+Minor version changes (e.g., 2.5.0 → 2.6.0) are generally compatible:
+
+```python
+# Saved with DSPy 2.5.0
+# Load with DSPy 2.6.0
+
+# Should work without issues
+program = dspy.load("my_program.json")
+```
+
+### Major Version Changes
+
+Major version changes (e.g., 2.5.0 → 3.0.0) may have breaking changes:
+
+```python
+# Saved with DSPy 2.5.0
+# Load with DSPy 3.0.0
+
+# May fail due to breaking changes
+program = dspy.load("my_program.json")
+```
+
+### Dependency Updates
+
+Update dependencies regularly for security and bug fixes:
+
+```python
+# Update all packages
+!pip install --upgrade dspy openai anthropic
+
+# Save program after update
+program = MyDSPyProgram()
+program.save("my_program_v2.json")
+```
+
+### Migration Path
+
+When upgrading DSPy versions, follow this path:
+
+1. **Test with old version**: Ensure program works correctly
+2. **Save with old version**: Capture baseline behavior
+3. **Upgrade DSPy**: `pip install --upgrade dspy`
+4. **Test with new version**: Check for issues
+5. **Save with new version**: Capture new behavior
+6. **Compare results**: Ensure outputs are consistent
+
+## Common Issues and Solutions
+
+### Issue: Version Mismatch on Load
+
+**Problem**: Program fails to load due to version mismatch
+
+**Solution**:
+1. Check DSPy version: `import dspy; print(dspy.__version__)`
+2. Reinstall correct version: `pip install dspy==2.5.0`
+3. Or upgrade and retrain program with new version
+4. Use version pinning in requirements.txt
+
+### Issue: Dependency Not Found
+
+**Problem**: Program fails because of missing dependency
+
+**Solution**:
+1. Install missing dependency: `pip install <package>`
+2. Check requirements.txt: Ensure all dependencies are listed
+3. Use version pinning: `pip install <package>==<version>`
+4. Update dependencies regularly
+
+### Issue: Inconsistent Behavior
+
+**Problem**: Program behaves differently across runs
+
+**Solution**:
+1. Check DSPy version is consistent
+2. Verify dependency versions are correct
+3. Check for environment variable changes
+4. Use version-pinned environments
+5. Set random seeds for reproducibility
+
+### Issue: Cannot Load Old Program
+
+**Problem**: Cannot load program saved with old DSPy version
+
+**Solution**:
+1. Reinstall old DSPy version: `pip install dspy==<old_version>`
+2. Load and test program
+3. Re-export or migrate to new version
+4. Document breaking changes
+
+
+============================================================
+END FILE: .fleet/letta/skills/dspy-configuration/references/versioning.md
+============================================================
+
+============================================================
+FILE: .fleet/letta/skills/dspy-configuration/scripts/clear-cache.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Clear DSPy cache and compiled artifacts safely.
+
+This script removes DSPy cache files and compiled artifacts.
+Use this after modifying DSPy modules to force recompilation.
+
+Usage:
+    python clear-cache.py
+    python clear-cache.py --cache-dir .var/cache/dspy --verbose
+
+Options:
+    --cache-dir: Cache directory (default: .var/cache/dspy)
+    --verbose: Show detailed output
+"""
+
+import argparse
+import shutil
+import sys
+from pathlib import Path
+
+

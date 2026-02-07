@@ -1,0 +1,49 @@
+<!-- Chunk 500: bytes 849468-850729, type=function -->
+def one_word_answer(args, pred: dspy.Prediction) -> float:
+    """Reward function: 1.0 for single word, 0.0 otherwise."""
+    return 1.0 if len(pred.answer.split()) == 1 else 0.0
+
+best_of_3 = dspy.BestOfN(
+    module=dspy.ChainOfThought("question -> answer"),
+    N=3,
+    reward_fn=one_word_answer,
+    threshold=1.0
+)
+
+result = best_of_3(question="What is the capital of Belgium?")
+print(result.answer)  # Brussels
+```
+
+### How BestOfN Works
+
+1. **Generate N candidates**: Run module N times with different rollout IDs
+2. **Score each candidate**: Apply reward function to each prediction
+3. **Select best**: Return first prediction that meets threshold or highest-scoring result
+
+### BestOfN Parameters
+
+- `module`: Base module to refine
+- `N`: Number of candidates to generate
+- `reward_fn`: Function to score predictions (returns float)
+- `threshold`: Minimum score to accept (optional)
+
+### BestOfN Without Threshold
+
+```python
+best_of_5 = dspy.BestOfN(
+    module=dspy.ChainOfThought("question -> answer"),
+    N=5,
+    reward_fn=accuracy_reward_fn
+)
+
+result = best_of_5(question="What is 2+2?")
+# Returns highest-scoring prediction, even if below 1.0
+```
+
+## Refine
+
+### Basic Refine
+
+Iteratively improve output with automatic feedback loop:
+
+```python

@@ -1,0 +1,7 @@
+<!-- Chunk 2001: bytes 7891193-7891336, type=function -->
+def test_cli_error_with_empty_message():
+    """Test CLIError with empty message."""
+    error = CLIError("")
+    assert error.message == ""
+
+

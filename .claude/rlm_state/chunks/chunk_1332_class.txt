@@ -1,0 +1,84 @@
+<!-- Chunk 1332: bytes 4986953-4991977, type=class -->
+class Reasoner:
+    def __init__(self, model, verifier):
+        self.model = model
+        self.verifier = verifier
+
+    def solve(self, task: str):
+        context = f"Task: {task}\nReasoning steps:"
+        for i in range(5):
+            # Generate 3 candidate next steps
+            candidates = self.model.generate_candidates(context, n=3)
+            # Verifier (PRM) ranks them
+            scores = [self.verifier.score(context, c) for c in candidates]
+            
+            best_idx = scores.index(max(scores))
+            if scores[best_idx] < 0.5:
+                return "Failed to find valid reasoning path."
+            
+            context += f"\n{i+1}. {candidates[best_idx]}"
+            if "Final Answer:" in candidates[best_idx]:
+                break
+        return context
+```
+
+## Common Mistakes
+
+| Mistake | Why It's Wrong | Fix |
+| ------- | -------------- | --- |
+| Outcome-only scoring | Does not penalize "right for the wrong reasons" logic. | Implement Step-wise PRM. |
+| No depth limit | Recursive loops can enter infinite "self-reflection" loops. | Enforce `max_depth` and `max_tokens`. |
+| Context bloat | Passing the entire search tree into every prompt exceeds context. | Pass only the current path and a summary of failed attempts. |
+| Soft verification | Using LLM prompts for verification without deterministic checks. | Use external tools (Python, Math solvers) as "hard" verifiers where possible. |
+
+## Real-World Impact
+
+- **Math Accuracy**: Can improve GSM8K performance by 20-30% compared to zero-shot COT.
+- **Code Quality**: Reduces logic bugs in complex algorithmic tasks by allowing the model to "test" its logic before final submission.
+- **Traceability**: Provides a full tree of "rejected" thoughts, making it easier for humans to debug why a model reached a specific conclusion.
+
+## Strong Guidance
+
+- **NEVER proceed to the next reasoning step if the current step score is below your safety threshold.**
+- **ALWAYS include a "Reflection" step where the model explicitly checks for contradictions in its own state.**
+- **ALWAYS use immutable state snapshots when branching reasoning paths to prevent context contamination.**
+- **MUST implement a hard token budget to prevent unbounded inference costs.**
+
+## Red Flags
+
+- The model repeats the same reasoning step more than twice (Loop detection failure).
+- The verification score remains flat despite multiple retries.
+- The context window is filled with "I'm thinking..." or "Wait, let me re-evaluate" without progress.
+
+---
+
+## Validation
+
+```bash
+# Validate the skill directory
+uv run skill-fleet validate skills/llm-inference/recursive-language-models
+
+# Ensure the search loop boilerplate is functional
+python -m pytest tests/test_reasoning_loops.py
+```
+
+============================================================
+END FILE: skills/_drafts/recur/llm-inference/recursive-language-models/SKILL.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/recur/llm-inference/recursive-language-models/best_practices.md
+============================================================
+
+[{'title': 'Granular Step Definition', 'description': 'Break reasoning into the smallest possible logical units. Large steps are harder to verify and more likely to contain hidden errors.', 'example': "Instead of 'Calculate the orbital trajectory', use 'Step 1: Identify the central mass. Step 2: Determine initial velocity...'"}, {'title': 'Deterministic Verification', 'description': "Whenever possible, use code execution or symbolic solvers as verifiers rather than another LLM to avoid 'double hallucination'.", 'example': 'If the model generates code, run it against test cases to verify the reasoning step.'}, {'title': 'State Checkpointing', 'description': 'Save the full context and model KV-cache (if possible) at each branching point to allow for instantaneous backtracking.', 'example': 'Use a dictionary to store {step_id: context_snapshot} for easy recovery.'}, {'title': 'Entropy-Based Pruning', 'description': "If the model's confidence in the next token is very low across multiple candidates, the reasoning branch is likely a dead end. Prune early.", 'example': 'If max(candidate_scores) < 0.2, discard the branch.'}, {'title': 'Diversity in Sampling', 'description': 'When generating candidates for search, use a higher temperature (e.g., 0.7-0.9) to ensure the search explores a broad space of thoughts.', 'example': 'Generate 5 paths at temp 0.8 rather than 5 paths at temp 0.1.'}]
+
+============================================================
+END FILE: skills/_drafts/recur/llm-inference/recursive-language-models/best_practices.md
+============================================================
+
+============================================================
+FILE: skills/_drafts/recur/llm-inference/recursive-language-models/examples/example_1.py
+============================================================
+
+from typing import List
+

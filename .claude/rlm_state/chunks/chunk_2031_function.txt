@@ -1,0 +1,12 @@
+<!-- Chunk 2031: bytes 7919215-7919667, type=function -->
+def mock_taxonomy_manager():
+    """Mock TaxonomyManager for testing."""
+    with patch("skill_fleet.api.dependencies.get_taxonomy_manager") as mock:
+        manager = MagicMock()
+        manager.get_global_taxonomy = MagicMock(return_value={"categories": [], "total_skills": 0})
+        manager.get_user_taxonomy = MagicMock(return_value={"categories": [], "adapted": True})
+        mock.return_value = manager
+        yield manager
+
+
+@pytest.fixture

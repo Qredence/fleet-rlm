@@ -1,0 +1,12 @@
+<!-- Chunk 1643: bytes 6673440-6673649, type=class -->
+class AgentExecutionError(AgentError):
+    """
+    Raised when agent execution fails.
+
+    This can occur when:
+    - Message processing fails
+    - Research phase errors
+    - Workflow interruption
+    """
+
+

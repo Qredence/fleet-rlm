@@ -1,0 +1,12 @@
+<!-- Chunk 2051: bytes 7954334-7955033, type=function -->
+def mock_intent_response():
+    """Mock response for intent analysis."""
+    return """purpose: Help developers build reusable React components
+problem_statement: Teams struggle with inconsistent UI and duplicated component code across projects
+target_audience: Frontend developers with basic React knowledge
+value_proposition: Provides production-ready, tested component patterns with TypeScript support
+skill_type: how_to
+scope: Covers component design, implementation, testing, and documentation. Does NOT cover backend integration or deployment.
+success_criteria: ["Can create reusable components", "Implements proper TypeScript types", "Writes component tests", "Documents component API"]"""
+
+

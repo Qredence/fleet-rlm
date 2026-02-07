@@ -1,0 +1,46 @@
+<!-- Chunk 771: bytes 2632687-2633739, type=class -->
+class Job(Base):
+    __tablename__ = "jobs"
+
+    job_id = Column(String, primary_key=True)
+    status = Column(String)
+    hitl_type = Column(String, nullable=True)
+    hitl_data = Column(JSON, nullable=True)
+    result = Column(JSON, nullable=True)
+    error = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+```
+
+---
+
+## Job Cleanup
+
+### Automatic Cleanup
+
+```python
+import asyncio
+from datetime import datetime, timedelta
+
+async def cleanup_old_jobs():
+    """Remove completed jobs older than 1 hour."""
+    cutoff = datetime.utcnow() - timedelta(hours=1)
+
+    for job_id, job in list(JOBS.items()):
+        if job.status in ["completed", "failed"]:
+            # Check last updated time
+            if job.last_updated < cutoff:
+                del JOBS[job_id]
+                logger.info(f"Cleaned up old job: {job_id}")
+
+# Run every 10 minutes
+asyncio.create_task(cleanup_old_jobs())
+```
+
+---
+
+## Monitoring Jobs
+
+### Job Statistics
+
+```python

@@ -1,0 +1,7 @@
+<!-- Chunk 2011: bytes 7894313-7894548, type=function -->
+def test_sanitize_user_id_rejects_too_long():
+    """Test user ID sanitization rejects IDs over 100 characters."""
+    with pytest.raises(ValueError, match="must be between 1 and 100 characters"):
+        sanitize_user_id("a" * 101)
+
+

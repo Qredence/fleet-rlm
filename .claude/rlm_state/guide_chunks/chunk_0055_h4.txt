@@ -1,0 +1,20 @@
+<!-- Chunk 55: bytes 17285-17762, type=h4 -->
+#### 3. Performance comparison
+
+**Goal:** Prove the skill improves results vs. baseline.
+Use the metrics from Define Success Criteria. Here's what a comparison might look like.
+
+**Baseline comparison:**
+
+**Without skill:**
+- User provides instructions each time
+- 15 back-and-forth messages
+- 3 failed API calls requiring retry
+- 12,000 tokens consumed
+
+**With skill:**
+- Automatic workflow execution
+- 2 clarifying questions only
+- 0 failed API calls
+- 6,000 tokens consumed
+

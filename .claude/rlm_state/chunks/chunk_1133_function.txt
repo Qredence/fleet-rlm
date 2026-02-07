@@ -1,0 +1,47 @@
+<!-- Chunk 1133: bytes 4245058-4246327, type=function -->
+def test_coerce_reasoning_text_handles_dspy_reasoning():
+    r = dspy.Reasoning(content=" hello ")
+    assert coerce_reasoning_text(r) == "hello"
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/unit/test_dspy_reasoning_compat.py -v`
+Expected: FAIL (module missing)
+
+**Step 3: Minimal implementation**
+
+Implement `coerce_reasoning_text(value) -> str`:
+- if value is `None` -> `""`
+- if value is `dspy.Reasoning` -> `value.content`
+- else -> `str(value)`
+- always `.strip()`
+
+**Step 4: Run test to verify it passes**
+
+Run: `uv run pytest tests/unit/test_dspy_reasoning_compat.py -v`
+Expected: PASS
+
+---
+
+### Task 3: Update signatures to use `dspy.Reasoning` where appropriate
+
+**Files:**
+- Modify: `src/skill_fleet/core/dspy/signatures/chat.py`
+- Modify: `src/skill_fleet/core/dspy/signatures/hitl.py`
+- Modify: `src/skill_fleet/core/dspy/signatures/signature_tuning.py`
+
+**Notes:**
+- Only fields that represent ChainOfThought reasoning streams should use `dspy.Reasoning`.
+- Fields like `readiness_reasoning` are NOT chain-of-thought; keep them as `str`.
+
+**Step 1: Write failing test**
+
+Create: `tests/unit/test_signature_reasoning_types.py`
+
+```python
+import dspy
+
+from skill_fleet.core.dspy.signatures.chat import DeepUnderstandingSignature
+
+

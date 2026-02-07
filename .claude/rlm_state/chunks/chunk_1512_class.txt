@@ -1,0 +1,14 @@
+<!-- Chunk 1512: bytes 6364094-6364570, type=class -->
+class DeepUnderstandingState(BaseModel):
+    """Deep understanding phase state."""
+
+    questions_asked: list[dict[str, Any]] = Field(default_factory=list)
+    answers: list[dict[str, Any]] = Field(default_factory=list)
+    research_performed: list[dict[str, Any]] = Field(default_factory=list)
+    understanding_summary: str = ""
+    user_problem: str = ""
+    user_goals: list[str] = Field(default_factory=list)
+    readiness_score: float = 0.0
+    complete: bool = False
+
+

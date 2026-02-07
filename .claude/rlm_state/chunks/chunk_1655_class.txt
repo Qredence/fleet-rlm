@@ -1,0 +1,17 @@
+<!-- Chunk 1655: bytes 6676724-6677249, type=class -->
+class LLMRateLimitError(LLMProviderError):
+    """
+    Raised when LLM provider rate limit is exceeded.
+
+    Attributes:
+        provider: The LLM provider (e.g., "openai", "gemini")
+        retry_after: Seconds to wait before retrying (if available)
+
+    """
+
+    def __init__(self, message: str, *, provider: str, retry_after: int | None = None) -> None:
+        super().__init__(message, details={"provider": provider, "retry_after": retry_after})
+        self.provider = provider
+        self.retry_after = retry_after
+
+

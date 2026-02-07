@@ -1,0 +1,13 @@
+<!-- Chunk 1381: bytes 5105528-5105842, type=function -->
+def get_user(user_id: int):
+    return session.query(User).filter(User.id == user_id).first()
+
+# After
+async def get_user(user_id: int, db: AsyncSession):
+    result = await db.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
+```
+
+### Dict → Pydantic Model
+```python
+# Before

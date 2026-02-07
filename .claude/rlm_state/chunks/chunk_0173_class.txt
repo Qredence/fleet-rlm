@@ -1,0 +1,4 @@
+<!-- Chunk 173: bytes 285848-285932, type=class -->
+class StripeProcessor(PaymentProcessor):
+    def process(self, amount: float): ...
+

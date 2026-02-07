@@ -1,0 +1,8 @@
+<!-- Chunk 1299: bytes 4769813-4769970, type=function -->
+def load_existing(path: Path) -> list:
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+

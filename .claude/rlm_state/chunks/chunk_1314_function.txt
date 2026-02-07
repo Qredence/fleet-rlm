@@ -1,0 +1,5 @@
+<!-- Chunk 1314: bytes 4827675-4827801, type=function -->
+def process_data(items): # Error: Function is missing type annotations
+    return [i.upper() for i in items]
+
+# After (Fixed)

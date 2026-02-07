@@ -1,0 +1,31 @@
+<!-- Chunk 339: bytes 544978-545811, type=function -->
+def search_wikipedia(query: str) -> str:
+    """Search Wikipedia for information."""
+    results = dspy.ColBERTv2(url='http://20.102.90.50:2017/wiki17_abstracts')(query, k=3)
+    return [x['text'] for x in results]
+
+# Create ReAct agent
+react = dspy.ReAct(
+    "question -> answer: float",
+    tools=[evaluate_math, search_wikipedia],
+    max_iters=5
+)
+
+# Use agent
+pred = react(question="What is 9362158 divided by the year of birth of David Gregory of Kinnairdy castle?")
+print(pred.answer)
+```
+
+## Tool Definition
+
+### Tool Function Requirements
+
+Tools are Python functions with:
+1. **Type hints**: Parameter and return types
+2. **Docstrings**: Clear description of what the tool does
+3. **Valid inputs**: Should accept the types hinted
+4. **Return values**: Should return the hinted type
+
+### Tool Example: Calculator
+
+```python

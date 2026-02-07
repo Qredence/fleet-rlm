@@ -1,0 +1,47 @@
+<!-- Chunk 586: bytes 901974-903290, type=function -->
+def example_usage():
+    """Example of how to use these modules."""
+
+    # Simple module
+    simple = SimpleModule()
+    result = simple.forward(input_data="test input")
+    print(f"Simple output: {result.output}")
+
+    # Multi-step module
+    multi = MultiStepModule()
+    result = multi.forward(input_data="test input")
+    print(f"Multi-step output: {result.final_output}")
+
+    # Chain of thought module
+    cot = ChainOfThoughtModule()
+    result = cot.forward(input_data="test input")
+    print(f"COT output: {result.output}")
+    print(f"Reasoning: {result.reasoning}")
+
+    # Configurable module
+    config = ConfigurableModule(max_length=500, temperature=0.5)
+    result = config.forward(input_data="test input")
+    print(f"Configurable output: {result.output}")
+
+
+if __name__ == "__main__":
+    example_usage()
+
+
+============================================================
+END FILE: .fleet/skills/dspy-basics/templates/program-template.py
+============================================================
+
+============================================================
+FILE: .fleet/skills/dspy-basics/templates/signature-template.py
+============================================================
+
+"""
+Template for creating new DSPy signatures.
+
+Copy this file and customize for your signature.
+"""
+
+import dspy
+
+

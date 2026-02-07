@@ -1,0 +1,6 @@
+<!-- Chunk 1897: bytes 7704616-7704761, type=function -->
+def get_taxonomy_repository(db: Session) -> TaxonomyRepository:
+    """Get a TaxonomyRepository instance."""
+    return TaxonomyRepository(db)
+
+

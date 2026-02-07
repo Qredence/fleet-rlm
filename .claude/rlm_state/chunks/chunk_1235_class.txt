@@ -1,0 +1,25 @@
+<!-- Chunk 1235: bytes 4642292-4643323, type=class -->
+class FunctionVisitor(ast.NodeVisitor):
+    """AST visitor to find public functions and check for docstrings."""
+
+    def __init__(self):
+        self.functions: list[tuple[str, int, bool]] = []  # (name, line, has_docstring)
+        self.current_class = None
+
+    def visit_FunctionDef(self, node):
+        """Visit function definition nodes and check for docstrings."""
+        # Skip private functions (starting with underscore)
+        if not node.name.startswith("_"):
+            has_docstring = ast.get_docstring(node) is not None
+            self.functions.append((node.name, node.lineno, has_docstring))
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        """Visit async function definition nodes and check for docstrings."""
+        # Handle async functions the same way
+        if not node.name.startswith("_"):
+            has_docstring = ast.get_docstring(node) is not None
+            self.functions.append((node.name, node.lineno, has_docstring))
+        self.generic_visit(node)
+
+

@@ -1,0 +1,13 @@
+<!-- Chunk 395: bytes 573813-574143, type=class -->
+class TaskClassification(dspy.Signature):
+    task = dspy.InputField(desc="Task to classify")
+    category = dspy.OutputField(desc="Task category")
+    reasoning = dspy.OutputField(desc="Explanation of classification")
+```
+
+## Best Practices
+
+### 1. Keep Signatures Focused
+
+✓ **Good**: One signature, one clear purpose
+```python

@@ -1,0 +1,510 @@
+<!-- Chunk 1808: bytes 7525167-7546014, type=class -->
+class TDDHandlers:
+    """
+    Handlers for Creation, TDD, and Checklist phases.
+
+    This class is designed as a mixin - the following attributes/methods
+    are expected to be provided by the consuming class:
+    - taxonomy: TaxonomyManager instance
+    - phase1: Phase1 understanding module
+    - phase2: Phase2 generation module
+    - phase3: Phase3 refinement module
+    - _execute_with_streaming: Helper method for streaming execution
+    """
+
+    # Type stubs for attributes provided by consuming class
+    taxonomy: Any
+    phase1: Any
+    phase2: Any
+    phase3: Any
+    present_skill: Any
+    suggest_tests: Any
+    enhance_skill: Any
+    verify_tdd: Any
+    _execute_with_streaming: Callable
+
+    def _get_skill_type(self, session: ConversationSession) -> str:
+        if not session.skill_draft:
+            return "technique"
+        return (
+            session.skill_draft.get("plan", {}).get("skill_metadata", {}).get("type", "technique")
+        )
+
+    def _section_present(self, content: str, section: str) -> bool:
+        normalized = content.lower()
+        header = f"## {section}".lower()
+        return header in normalized or f"### {section}".lower() in normalized
+
+    def _sync_quality_checks(self, session: ConversationSession) -> None:
+        if not session.skill_draft:
+            return
+        content = session.skill_draft.get("skill_content", "") or ""
+        if not content:
+            return
+
+        session.checklist_state.quick_reference_included = (
+            self._section_present(content, "quick reference")
+            or "| problem | solution" in content.lower()
+        )
+        session.checklist_state.common_mistakes_included = (
+            self._section_present(content, "common mistakes") or "| mistake |" in content.lower()
+        )
+
+        narrative_markers = ("once upon", "in session", "case study", "story time")
+        session.checklist_state.no_narrative_storytelling = not any(
+            marker in content.lower() for marker in narrative_markers
+        )
+
+        session.checklist_state.supporting_files_appropriate = True
+
+    def handle_creating(self, user_message: str, session: ConversationSession) -> AgentResponse:
+        """Handle CREATING state."""
+        if user_message.strip().lower() in ("cancel", "stop"):
+            session.state = ConversationState.EXPLORING
+            session.skill_draft = None
+            return AgentResponse(
+                message="Creation cancelled.",
+                state=ConversationState.EXPLORING,
+                action="cancel_creation",
+                requires_user_input=True,
+            )
+        return AgentResponse(
+            message="Skill creation is in progress...",
+            state=ConversationState.CREATING,
+            action="creating",
+            requires_user_input=False,
+        )
+
+    async def handle_tdd_red(
+        self, user_message: str, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """Handle TDD RED state."""
+        if user_message.strip().lower() in ("skip", "no"):
+            return AgentResponse(
+                message="TDD is mandatory. Continuing with baseline tests...",
+                state=ConversationState.TDD_RED_PHASE,
+                action="enforce_tdd",
+                requires_user_input=False,
+            )
+        return await self.execute_tdd_red_phase(session, thinking_callback)
+
+    async def handle_tdd_green(
+        self, user_message: str, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """Handle TDD GREEN state."""
+        return await self.execute_tdd_green_phase(session, thinking_callback)
+
+    async def handle_tdd_refactor(
+        self, user_message: str, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """Handle TDD REFACTOR state."""
+        user_message_lower = user_message.strip().lower()
+        if user_message_lower in ("yes", "y", "add", "close"):
+            return await self.execute_tdd_refactor_phase(
+                session, add_counters=True, thinking_callback=thinking_callback
+            )
+        elif user_message_lower in ("no", "n", "skip", ""):
+            skill_type = self._get_skill_type(session)
+            session.checklist_state.explicit_counters_added = skill_type != "discipline"
+            session.checklist_state.retested_until_bulletproof = True
+            session.checklist_state.rationalization_table_built = True
+            return await self.verify_checklist_complete(session, thinking_callback)
+
+        if not session.checklist_state.new_rationalizations_identified:
+            return await self.execute_tdd_refactor_phase(
+                session, add_counters=False, thinking_callback=thinking_callback
+            )
+        else:
+            return AgentResponse(
+                message="Should I add explicit counters? (yes/no/skip)",
+                state=ConversationState.TDD_REFACTOR_PHASE,
+                action="ask_about_counters",
+                requires_user_input=True,
+            )
+
+    async def handle_checklist_complete(
+        self, user_message: str, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """Handle CHECKLIST_COMPLETE state."""
+        if "save" in user_message.lower() or "yes" in user_message.lower():
+            return await self.save_skill(session)
+        return AgentResponse(
+            message="Please confirm save.", state=ConversationState.CHECKLIST_COMPLETE
+        )
+
+    async def handle_reviewing(self, user_message, session, thinking_callback):
+        """
+        Handle REVIEWING state.
+
+        Args:
+            user_message: The user's input message.
+            session: The current conversation session.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse indicating review logic is not fully ported.
+
+        """
+        return AgentResponse(message="Review logic not fully ported yet.", state=session.state)
+
+    async def handle_revising(self, user_message, session, thinking_callback):
+        """
+        Handle REVISING state.
+
+        Args:
+            user_message: The user's input message.
+            session: The current conversation session.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse indicating revision logic is not fully ported.
+
+        """
+        return AgentResponse(message="Revision logic not fully ported yet.", state=session.state)
+
+    async def create_skill(self, session: ConversationSession, thinking_callback) -> AgentResponse:
+        """Execute creation and transition to TDD."""
+        try:
+            existing_skills = self.taxonomy.get_mounted_skills("default")
+
+            p1_result = await self.phase1.acall(
+                task_description=session.task_description,
+                user_context="Interactive session",
+                taxonomy_structure=json.dumps(
+                    self.taxonomy.get_relevant_branches(session.task_description)
+                ),
+                existing_skills=json.dumps(existing_skills),
+            )
+
+            p2_result = await self.phase2.acall(
+                skill_metadata=p1_result["plan"]["skill_metadata"],
+                content_plan=p1_result["plan"]["content_plan"],
+                generation_instructions=p1_result["plan"]["generation_instructions"],
+                parent_skills_content="",
+                dependency_summaries=json.dumps(p1_result["dependencies"]),
+            )
+
+            p3_result = await self.phase3.acall(
+                skill_content=p2_result["skill_content"],
+                skill_metadata=p1_result["plan"]["skill_metadata"],
+                content_plan=p1_result["plan"]["content_plan"],
+                validation_rules="Standard compliance",
+            )
+
+            session.skill_draft = {
+                "understanding": p1_result,
+                "plan": p1_result["plan"],
+                "content": p2_result,
+                "package": p3_result,
+                "skill_content": p2_result["skill_content"],
+                "validation_errors": p3_result["validation_report"].get("errors", []),
+            }
+
+            present, p_thinking = await self._execute_with_streaming(
+                self.present_skill,
+                thinking_callback,
+                skill_content=p2_result["skill_content"],
+                skill_metadata=p1_result["plan"]["skill_metadata"],
+                validation_report=p3_result["validation_report"],
+            )
+
+            message = present["conversational_summary"] + "\n\n**Starting TDD Checklist...**"
+            session.state = ConversationState.TDD_RED_PHASE
+
+            red_response = await self.execute_tdd_red_phase(session, thinking_callback)
+
+            return AgentResponse(
+                message=message + "\n\n" + red_response.message,
+                thinking_content=p_thinking + red_response.thinking_content,
+                state=red_response.state,
+                action=red_response.action,
+                requires_user_input=red_response.requires_user_input,
+            )
+
+        except Exception as e:
+            # logger is not available in mixin context unless we import or define it.
+            # Assuming Engine handles top-level exceptions, but here we catch specific logic errors.
+            return AgentResponse(
+                message=f"Error: {e}", state=ConversationState.EXPLORING, action="error"
+            )
+
+    async def execute_tdd_red_phase(
+        self, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """
+        Execute the TDD RED phase - create test scenarios and baseline predictions.
+
+        Args:
+            session: The current conversation session containing the skill draft.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse with RED phase results and transition to GREEN phase.
+
+        """
+        if session.skill_draft is None:
+            return AgentResponse(
+                message="Error: No skill draft found.",
+                state=ConversationState.EXPLORING,
+                action="error",
+            )
+        skill_content = session.skill_draft["skill_content"]
+        meta = session.skill_draft["plan"]["skill_metadata"]
+
+        res, thinking = await self._execute_with_streaming(
+            self.suggest_tests,
+            thinking_callback,
+            skill_content=skill_content,
+            skill_type=meta.get("type", "technique"),
+            skill_metadata=meta,
+        )
+
+        test_scenarios = res.get("test_scenarios", []) if isinstance(res, dict) else []
+        baseline_predictions = res.get("baseline_predictions", []) if isinstance(res, dict) else []
+        rationalizations = res.get("expected_rationalizations", []) if isinstance(res, dict) else []
+
+        session.checklist_state.red_scenarios_created = bool(test_scenarios)
+        session.checklist_state.baseline_tests_run = True
+        session.checklist_state.baseline_behavior_documented = bool(baseline_predictions)
+        session.checklist_state.rationalization_patterns_identified = bool(rationalizations)
+
+        session.state = ConversationState.TDD_GREEN_PHASE
+        return AgentResponse(
+            message="RED Phase Complete. Baseline tests run.\nMoving to GREEN phase...",
+            thinking_content=thinking,
+            state=ConversationState.TDD_GREEN_PHASE,
+            action="tdd_red_complete",
+            requires_user_input=False,
+        )
+
+    async def execute_tdd_green_phase(
+        self, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """
+        Execute the TDD GREEN phase - verify skill compliance and address failures.
+
+        Args:
+            session: The current conversation session.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse with GREEN phase results and transition to REFACTOR phase.
+
+        """
+        session.checklist_state.green_tests_run = True
+        session.checklist_state.compliance_verified = True
+        session.checklist_state.baseline_failures_addressed = True
+        session.state = ConversationState.TDD_REFACTOR_PHASE
+
+        return AgentResponse(
+            message="GREEN Phase Complete. Skill verified.\nMoving to REFACTOR phase...",
+            state=ConversationState.TDD_REFACTOR_PHASE,
+            action="tdd_green_complete",
+            requires_user_input=False,
+        )
+
+    async def execute_tdd_refactor_phase(
+        self, session: ConversationSession, add_counters: bool, thinking_callback
+    ) -> AgentResponse:
+        """
+        Execute the TDD REFACTOR phase - add counters and verify rationalizations.
+
+        Args:
+            session: The current conversation session.
+            add_counters: Whether to add explicit counter-arguments to the skill.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse with REFACTOR phase results or transition to checklist verification.
+
+        """
+        if not session.checklist_state.new_rationalizations_identified:
+            session.checklist_state.new_rationalizations_identified = True
+            return AgentResponse(
+                message="I found potential loopholes. Should I add explicit counters? (yes/no)",
+                state=ConversationState.TDD_REFACTOR_PHASE,
+                action="ask_about_counters",
+                requires_user_input=True,
+            )
+
+        if add_counters:
+            session.checklist_state.explicit_counters_added = True
+            session.checklist_state.retested_until_bulletproof = True
+            session.checklist_state.rationalization_table_built = True
+            return await self.verify_checklist_complete(session, thinking_callback)
+
+        session.checklist_state.rationalization_table_built = True
+        return await self.verify_checklist_complete(session, thinking_callback)
+
+    def _get_quality_missing_sections(self, session: ConversationSession) -> list[str]:
+        """Get list of missing quality section identifiers."""
+        missing = []
+        if not session.checklist_state.quick_reference_included:
+            missing.append("quick_reference_included")
+        if not session.checklist_state.common_mistakes_included:
+            missing.append("common_mistakes_included")
+        if not session.checklist_state.flowchart_present:
+            missing.append("flowchart_present")
+        return missing
+
+    async def verify_checklist_complete(
+        self, session: ConversationSession, thinking_callback
+    ) -> AgentResponse:
+        """
+        Verify that all TDD checklist items are complete.
+
+        Auto-enhances the skill content if quality sections are missing,
+        then verifies the complete checklist state.
+
+        Args:
+            session: The current conversation session containing the skill draft.
+            thinking_callback: Callback for streaming thinking content.
+
+        Returns:
+            AgentResponse indicating checklist completion status and next steps.
+
+        """
+        if session.skill_draft is None:
+            return AgentResponse(
+                message="Error: No skill draft found.",
+                state=ConversationState.EXPLORING,
+                action="error",
+            )
+        self._sync_quality_checks(session)
+
+        # Check for missing quality sections that can be auto-generated
+        missing_quality_sections = self._get_quality_missing_sections(session)
+
+        # If there are missing quality sections, try to enhance the skill content
+        if missing_quality_sections:
+            # Get metadata for context
+            metadata = session.skill_draft.get("plan", {}).get("skill_metadata", {})
+
+            # Try to enhance the skill with missing sections
+            enhance_res, enhance_thinking = await self._execute_with_streaming(
+                self.enhance_skill,
+                thinking_callback,
+                skill_content=session.skill_draft["skill_content"],
+                missing_sections=missing_quality_sections,
+                skill_metadata=metadata,
+            )
+
+            # If enhancement was successful, update the skill content
+            enhanced_content = enhance_res.get("enhanced_content")
+            if enhanced_content and enhanced_content != session.skill_draft["skill_content"]:
+                session.skill_draft["skill_content"] = enhanced_content
+                sections_added = enhance_res.get("sections_added", [])
+
+                # Re-sync quality checks after enhancement
+                self._sync_quality_checks(session)
+
+                if sections_added:
+                    sections_msg = ", ".join(sections_added)
+                    enhancement_msg = f"Added missing sections: {sections_msg}\n\n"
+                else:
+                    enhancement_msg = "Enhanced skill content.\n\n"
+            else:
+                enhancement_msg = ""
+        else:
+            enhancement_msg = ""
+
+        # Now verify the checklist
+        res, thinking = await self._execute_with_streaming(
+            self.verify_tdd,
+            thinking_callback,
+            skill_content=session.skill_draft["skill_content"],
+            checklist_state=session.checklist_state.model_dump(),
+        )
+
+        if res["all_passed"]:
+            session.state = ConversationState.CHECKLIST_COMPLETE
+            return AgentResponse(
+                message=f"{enhancement_msg}Checklist Complete! Ready to save?",
+                thinking_content=thinking,
+                state=ConversationState.CHECKLIST_COMPLETE,
+                action="checklist_complete",
+                requires_user_input=True,
+            )
+        else:
+            missing_items = res.get("missing_items", []) if isinstance(res, dict) else []
+            if not missing_items:
+                missing_items = session.checklist_state.get_missing_items()
+            missing_text = "\n".join(f"- {item}" for item in missing_items)
+            message = f"{enhancement_msg}Checklist incomplete."
+            if missing_text:
+                message = f"{enhancement_msg}Checklist incomplete. Missing:\n{missing_text}"
+            return AgentResponse(
+                message=message,
+                thinking_content=thinking,
+                state=ConversationState.TDD_REFACTOR_PHASE,
+                action="checklist_incomplete",
+                requires_user_input=True,
+            )
+
+    async def save_skill(self, session: ConversationSession) -> AgentResponse:
+        """
+        Save the completed skill to the taxonomy.
+
+        Args:
+            session: The current conversation session containing the skill draft.
+
+        Returns:
+            AgentResponse indicating success or failure of the save operation.
+
+        """
+        if session.skill_draft is None:
+            return AgentResponse(
+                message="Error: No skill draft found.",
+                state=ConversationState.EXPLORING,
+                action="error",
+            )
+        understanding = session.skill_draft["understanding"]
+        plan = session.skill_draft["plan"]
+        content = session.skill_draft["content"]
+
+        success = self.taxonomy.register_skill(
+            path=understanding["taxonomy"]["recommended_path"],
+            metadata=plan["skill_metadata"],
+            content=content["skill_content"],
+            evolution={
+                "skill_id": plan["skill_metadata"]["skill_id"],
+                "version": "1.0.0",
+                "status": "approved",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        )
+
+        if success:
+            session.state = ConversationState.COMPLETE
+            return AgentResponse(
+                message="Skill saved!",
+                state=ConversationState.COMPLETE,
+                action="complete",
+                requires_user_input=False,
+            )
+        return AgentResponse(
+            message="Save failed.",
+            state=ConversationState.CHECKLIST_COMPLETE,
+            requires_user_input=True,
+        )
+
+
+============================================================
+END FILE: src/skill_fleet/core/services/conversation/handlers/tdd.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/services/conversation/models.py
+============================================================
+
+"""Conversation models and state definitions."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
+
+from ...models import ChecklistState
+
+

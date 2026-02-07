@@ -1,0 +1,23 @@
+<!-- Chunk 2068: bytes 7974256-7974929, type=function -->
+def test_cors_development_with_wildcard_works():
+    """Test that the app starts in development with wildcard CORS."""
+    with patch(
+        "skill_fleet.api.factory.settings",
+        MagicMock(
+            is_development=True,
+            cors_origins_list=["*"],
+        ),
+    ):
+        app = create_app()
+        client = TestClient(app)
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": "https://anydomain.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "*"
+
+

@@ -1,0 +1,109 @@
+<!-- Chunk 1002: bytes 3539600-3543054, type=class -->
+class TrainingDataManager:
+    def score_examples(self) -> dict[str, float]:
+        # Compute quality score for each example
+        # success_rate * frequency_weighting
+        
+    def filter_trainset(self, n=50, quality_threshold=0.75) -> list[Example]:
+        # Return top N examples by quality score
+        # Exclude below threshold
+        
+    def identify_gaps(self) -> dict[str, int]:
+        # Find underrepresented categories
+        # Return: {category: missing_count}
+        
+    def update_after_optimization(self, 
+        job_id: str, 
+        optimizer: str, 
+        examples_used: list[str],
+        final_score: float
+    ):
+        # Update metadata based on optimization result
+```
+
+**Workflow Integration**:
+1. Before optimization:
+   - `filtered_trainset = manager.filter_trainset(n=40, quality_threshold=0.75)`
+   - Use filtered set instead of full 50
+   - Potential 20% training time reduction
+
+2. After optimization:
+   - Update success_rate for used examples
+   - Recompute quality_score
+   - Identify patterns (e.g., "comprehensive examples have 95% success")
+
+3. Monthly refresh:
+   - Drop bottom 10% by quality
+   - Replace with new curated examples
+   - Track drift in category distribution
+
+**API Endpoint**:
+```
+GET /api/v1/training/analytics
+Response: {
+  "total_examples": 50,
+  "avg_success_rate": 0.82,
+  "quality_distribution": {
+    "high": 38,      # score > 0.80
+    "medium": 10,    # score 0.60-0.80
+    "low": 2         # score < 0.60
+  },
+  "top_performers": [
+    {"id": "ex_001", "category": "python", "success_rate": 0.95},
+    {"id": "ex_002", "category": "web", "success_rate": 0.93}
+  ],
+  "underrepresented": {
+    "devops": 2,      # only 2 examples
+    "memory": 1
+  },
+  "recommendations": [
+    "Replace ex_042 (success_rate=0.40) with new example",
+    "Add 3 more devops examples"
+  ]
+}
+```
+
+**Files to Create**:
+1. `src/skill_fleet/config/training/manager.py` (~300 lines)
+2. `config/training/example_metadata.json` (initial)
+3. Update optimization pipeline to use manager
+
+**Timeline**: 1-2 days | **Impact**: 5-10% faster convergence, better example selection
+
+---
+
+#### **1D: Metric-Driven Signature Tuning** 🔧
+
+**Problem**: Signatures are static; metric feedback not fed back to improve signatures. Bad signature → LM struggles → low scores.
+
+**Solution**: Close feedback loop: Evaluate → detect bad signature → improve → re-evaluate.
+
+**Implementation**:
+- New module: `src/skill_fleet/core/dspy/modules/signature_tuner.py`
+  - Class: `SignatureTuner` (extends dspy.Module)
+  - Input: Current signature, metric scores, failure examples
+  - Output: Improved signature (v2) with better field descriptions, constraints
+  - Uses: Phase 3 validation logic to critique and improve
+
+**Logic Flow**:
+```
+1. Evaluate current program
+2. IF metric_score < 0.75:
+   a. Collect failure cases (where metric dropped)
+   b. Analyze: What went wrong?
+      - Bad field description? (LM misunderstood task)
+      - Missing constraints? (LM ignored output format)
+      - Unclear examples? (demonstrations didn't help)
+   c. Use GenerationModule to generate improved field descriptions
+   d. Create new Signature v2 with improvements
+   e. Re-run evaluation on same test set
+   f. IF improvement >= 5%:
+      - Accept v2, create version record
+   ELSE:
+      - Keep v1, log analysis for manual review
+3. ELSE:
+   - Signature is fine, skip tuning
+```
+
+**New Signature in phase3_validation.py**:
+```python

@@ -1,0 +1,23 @@
+<!-- Chunk 1498: bytes 6345910-6346416, type=function -->
+def create_app() -> FastAPI:
+    """
+    Create and configure the FastAPI application.
+
+    This factory function creates the FastAPI app with all routes,
+    middleware, and configurations.
+
+    Returns:
+        FastAPI: The configured application instance.
+
+    Example:
+        >>> app = create_app()
+        >>> # Use with uvicorn
+        >>> import uvicorn
+        >>> uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    """
+    from .factory import create_app as _create_app
+
+    return _create_app()
+
+

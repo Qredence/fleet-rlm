@@ -1,0 +1,10 @@
+<!-- Chunk 1991: bytes 7888940-7889226, type=function -->
+def test_error_display_with_rich():
+    """Test errors can be displayed with Rich."""
+    console = Console()
+    error = ConfigError("Bad config", suggestion="Check config.yaml")
+    # Should not raise when rendering
+    error.display(console)
+
+
+# CLIError string representation tests

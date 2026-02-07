@@ -1,0 +1,49 @@
+<!-- Chunk 111: bytes 156549-157786, type=class -->
+class MultiStepModule(dspy.Module):
+    """
+    Multi-step DSPy module with sequential processing.
+
+    Use this template for tasks that require multiple steps
+    or intermediate transformations.
+    """
+
+    def __init__(self):
+        super().__init__()
+        # Initialize sub-modules
+        self.step1 = dspy.Predict(Step1Signature)
+        self.step2 = dspy.Predict(Step2Signature)
+        self.step3 = dspy.Predict(Step3Signature)
+
+    def forward(self, input_data: str) -> dspy.Prediction:
+        """
+        Process input through multiple steps.
+
+        Args:
+            input_data: Initial input
+
+        Returns:
+            dspy.Prediction with final output
+        """
+        # Step 1
+        result1 = self.step1(input=input_data)
+
+        # Step 2 (uses output from step 1)
+        result2 = self.step2(
+            intermediate=result1.output
+        )
+
+        # Step 3 (uses output from step 2)
+        result3 = self.step3(
+            intermediate=result2.output
+        )
+
+        # Return final result
+        return dspy.Prediction(
+            final_output=result3.output,
+            intermediate={
+                'step1': result1.output,
+                'step2': result2.output
+            }
+        )
+
+

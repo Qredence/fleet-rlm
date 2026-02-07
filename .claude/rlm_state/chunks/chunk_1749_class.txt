@@ -1,0 +1,11 @@
+<!-- Chunk 1749: bytes 7348429-7348735, type=class -->
+class PackagingManifest(BaseModel):
+    """Manifest describing the packaged skill."""
+
+    skill_id: str
+    name: str
+    version: str
+    files: list[str] = Field(default_factory=list, description="Files included")
+    checksum: str = Field(default="", description="Content checksum for verification")
+
+

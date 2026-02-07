@@ -1,0 +1,58 @@
+<!-- Chunk 1927: bytes 7746772-7748861, type=function -->
+def log_skill_artifacts(
+    content: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    validation_report: dict[str, Any] | None = None,
+    quality_assessment: dict[str, Any] | None = None,
+) -> None:
+    r"""
+    Log complete skill artifacts to MLflow.
+
+    This function logs the full skill content and metadata as artifacts
+    in the current MLflow run. Artifacts are stored as files that can
+    be viewed in the MLflow UI.
+
+    Args:
+        content: The generated skill content (e.g., SKILL.md content)
+        metadata: Skill metadata dictionary
+        validation_report: Validation report dictionary
+        quality_assessment: Quality assessment dictionary
+
+    Examples:
+        >>> log_skill_artifacts(
+        ...     content="# Python Decorators\\n...",
+        ...     metadata={"name": "python-decorators", "type": "guide"},
+        ...     validation_report={"passed": True, "score": 0.95}
+        ... )
+
+    """
+    try:
+        import json
+
+        import mlflow
+
+        # Log skill content if provided
+        if content:
+            mlflow.log_text(content, artifact_file="skill_content.md")  # type: ignore[attr-defined]
+
+        # Log metadata as JSON artifact
+        if metadata:
+            metadata_json = json.dumps(metadata, indent=2, default=str)
+            mlflow.log_text(metadata_json, artifact_file="skill_metadata.json")  # type: ignore[attr-defined]
+
+        # Log validation report if provided
+        if validation_report:
+            report_json = json.dumps(validation_report, indent=2, default=str)
+            mlflow.log_text(report_json, artifact_file="validation_report.json")  # type: ignore[attr-defined]
+
+        # Log quality assessment if provided
+        if quality_assessment:
+            assessment_json = json.dumps(quality_assessment, indent=2, default=str)
+            mlflow.log_text(assessment_json, artifact_file="quality_assessment.json")  # type: ignore[attr-defined]
+
+        logger.debug("Logged skill artifacts")
+
+    except Exception as e:
+        logger.warning(f"Failed to log skill artifacts: {e}")
+
+

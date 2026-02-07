@@ -1,0 +1,9 @@
+<!-- Chunk 287: bytes 361422-361598, type=function -->
+def _is_pickleable(value: Any) -> bool:
+    try:
+        pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+        return True
+    except Exception:
+        return False
+
+

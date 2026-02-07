@@ -1,0 +1,9 @@
+<!-- Chunk 2027: bytes 7917884-7918040, type=function -->
+def app():
+    """Create FastAPI app instance for testing."""
+    from skill_fleet.api.factory import create_app
+
+    return create_app()
+
+
+@pytest.fixture

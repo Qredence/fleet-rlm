@@ -1,0 +1,5 @@
+<!-- Chunk 11: bytes 3612-3841, type=h4 -->
+#### Portability
+
+Skills work identically across Claude.ai, Claude Code, and API. Create a skill once and it works across all surfaces without modification, provided the environment supports any dependencies the skill requires.
+

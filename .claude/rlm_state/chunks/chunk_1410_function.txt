@@ -1,0 +1,28 @@
+<!-- Chunk 1410: bytes 5143644-5144362, type=function -->
+def test_partial_update_multiple_fields():
+    """
+    Test updating multiple fields at once.
+
+    Expected: All provided fields are updated, unprovided fields remain unchanged.
+    """
+    response = client.patch(
+        "/users/3",
+        json={
+            "name": "Robert Johnson",
+            "email": "robert@example.com"
+        }
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Name and email should be updated
+    assert data["name"] == "Robert Johnson"
+    assert data["email"] == "robert@example.com"
+    assert data["age"] == 35  # Unchanged
+    assert data["id"] == 3
+
+    print("✓ Test 3 passed: Partial update (multiple fields)")
+    print(f"  Updated user: {data}")
+
+

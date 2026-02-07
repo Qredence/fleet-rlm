@@ -1,0 +1,76 @@
+<!-- Chunk 1255: bytes 4674813-4677124, type=function -->
+def print_comparison(results: list[dict]):
+    """Print comprehensive comparison table."""
+    print("\n" + "=" * 80)
+    print("📊 BENCHMARK RESULTS COMPARISON")
+    print("=" * 80)
+
+    # Sort by improvement
+    sorted_results = sorted(results, key=lambda x: -x["improvement"])
+
+    # Print table
+    print(f"\n{'Optimizer':<30} {'Baseline':<12} {'Optimized':<12} {'Improvement':<15}")
+    print("-" * 80)
+
+    for result in sorted_results:
+        optimizer = result["optimizer"]
+        baseline = f"{result['baseline']:.1%}"
+        optimized = f"{result['optimized']:.1%}"
+        improvement = f"{result['improvement']:+.1%} ({result['improvement_pct']:+.1f}%)"
+        print(f"{optimizer:<30} {baseline:<12} {optimized:<12} {improvement:<15}")
+
+    # Performance metrics
+    print("\n" + "-" * 80)
+    print(f"\n{'Optimizer':<30} {'Time':<12} {'Cost':<25}")
+    print("-" * 80)
+
+    for result in sorted_results:
+        optimizer = result["optimizer"]
+        time_str = f"{result['time_seconds']:.1f}s"
+        cost = result["cost_estimate"]
+        print(f"{optimizer:<30} {time_str:<12} {cost:<25}")
+
+    # Efficiency score (improvement per second)
+    print("\n" + "-" * 80)
+    print(f"\n{'Optimizer':<30} {'Efficiency (Δ/sec)':<20}")
+    print("-" * 80)
+
+    for result in sorted_results:
+        optimizer = result["optimizer"]
+        efficiency = result["improvement"] / max(result["time_seconds"], 0.1)
+        efficiency_str = f"{efficiency:.4f}"
+        print(f"{optimizer:<30} {efficiency_str:<20}")
+
+    # Overall recommendation
+    print("\n" + "=" * 80)
+    print("🎯 RECOMMENDATIONS")
+    print("=" * 80)
+
+    print("""
+BootstrapFewShot:
+  ✅ Fastest (< 1 second)
+  ✅ Free (no LLM calls)
+  ❌ Modest improvements (~1-2%)
+  👉 Best for: Quick baselines, tight budgets
+
+Reflection Metrics:
+  ✅ Fast (<1 second)
+  ✅ Cheap (~$0.01-0.05)
+  ✅ Better quality signals
+  👉 Best for: Iterative improvement, demo purposes
+
+MIPROv2 (Light):
+  ✅ Thorough optimization
+  ✅ Larger improvements (~5-15%)
+  ❌ Slower (~minutes)
+  ❌ Higher cost (~$5-10)
+  👉 Best for: Production quality, high-stakes tasks
+
+Strategy:
+  1️⃣  Start with BootstrapFewShot (quick baseline)
+  2️⃣  Use Reflection Metrics (iterative improvement)
+  3️⃣  Move to MIPROv2 (final polish)
+  4️⃣  Ensemble all three (best results)
+""")
+
+

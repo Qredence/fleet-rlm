@@ -1,0 +1,42 @@
+<!-- Chunk 753: bytes 2586751-2587695, type=function -->
+def migrate_skill_to_agentskills_format(
+    skill_dir: Path,
+    dry_run: bool = False,
+    verbose: bool = True,
+) -> dict[str, Any]
+```
+
+**Parameters:**
+- `skill_dir` (Path): Path to skill directory
+- `dry_run` (bool): If True, preview changes without writing
+- `verbose` (bool): If True, print progress
+
+**Returns:**
+- `dict`: Migration result with `success`, `skill_id`, `name`, `changes`, and `errors`
+
+**Example:**
+```python
+result = migrate_skill_to_agentskills_format(
+    Path("path/to/skill"),
+    dry_run=True,  # Preview first
+    verbose=True
+)
+
+if result['success']:
+    print(f"✅ Migrated: {result['skill_id']} -> {result['name']}")
+    for change in result['changes']:
+        print(f"  - {change}")
+else:
+    print(f"❌ Migration failed:")
+    for error in result['errors']:
+        print(f"  - {error}")
+```
+
+---
+
+#### `migrate_all_skills()`
+
+Migrate all skills in taxonomy to agentskills.io format.
+
+**Signature:**
+```python

@@ -1,0 +1,21 @@
+<!-- Chunk 1461: bytes 6304256-6304719, type=class -->
+class CacheEntry:
+    """A cached value with expiration."""
+
+    def __init__(self, value: Any, ttl: int):
+        """
+        Initialize a cache entry.
+
+        Args:
+            value: The cached value
+            ttl: Time to live in seconds
+
+        """
+        self.value = value
+        self.expires_at = time.time() + ttl
+
+    def is_expired(self) -> bool:
+        """Check if the cache entry has expired."""
+        return time.time() > self.expires_at
+
+

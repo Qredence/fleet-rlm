@@ -1,0 +1,17 @@
+<!-- Chunk 1481: bytes 6325128-6325501, type=class -->
+class BadRequestException(SkillFleetAPIError):
+    """Bad request exception for invalid input."""
+
+    status_code: int = 400
+
+    def __init__(self, detail: str) -> None:
+        """
+        Initialize bad request exception.
+
+        Args:
+            detail: Error message explaining what's invalid
+
+        """
+        super().__init__(detail=detail, status_code=400)
+
+

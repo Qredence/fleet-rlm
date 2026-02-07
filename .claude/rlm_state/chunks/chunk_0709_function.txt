@@ -1,0 +1,668 @@
+<!-- Chunk 709: bytes 1385893-1412576, type=function -->
+def validate_skill(skill_path: Path) -> ValidationResult:
+    """Validate a skill directory.
+
+    Args:
+        skill_path: Path to the skill directory.
+
+    Returns:
+        ValidationResult with validation status and errors.
+    """
+```
+
+### Error Handling
+
+- Use specific exceptions, not bare `except:`
+- Raise custom exceptions from `skill_fleet.api.exceptions` for API errors
+- Use logging (not `print`): `logger = logging.getLogger(__name__)`
+- Use `HTTPException(status_code=404, detail="Not found")` for FastAPI
+
+### Testing
+
+- pytest with `asyncio_mode = "auto"`
+- Mock external dependencies (LLMs, file I/O) in unit tests
+- Use `@pytest.mark.integration` for tests requiring API keys
+- Place tests in `tests/unit/` (fast) or `tests/integration/` (slow)
+
+### Path Security
+
+For all file operations:
+```python
+from skill_fleet.common.security import (
+    resolve_path_within_root,
+    sanitize_relative_file_path
+)
+```
+
+### DSPy Integration
+
+```python
+from skill_fleet.dspy import configure_dspy, get_task_lm
+
+lm = configure_dspy(default_task="skill_understand")
+edit_lm = get_task_lm("skill_edit")
+```
+
+**Note:** DSPy configuration moved from `skill_fleet.core.dspy` to `skill_fleet.dspy`. The old import path is no longer available.
+
+### FastAPI Patterns
+
+- Use dependency injection: `Depends(get_skill_service)`
+- Return Pydantic models from endpoints
+- Use `BackgroundTasks` for async work
+- Handle errors with `skill_fleet.api.exceptions`
+- **Return immediately with job_id for long-running operations** - Don't block until completion
+
+### Background Tasks & Job System
+
+For long-running operations like skill creation:
+
+```python
+from fastapi import BackgroundTasks
+
+@router.post("/skills/")
+async def create_skill(
+    request: CreateSkillRequest,
+    background_tasks: BackgroundTasks,
+) -> CreateSkillResponse:
+    # Create job and return immediately
+    job_id = create_job(...)
+    
+    # Run workflow in background
+    background_tasks.add_task(run_workflow, job_id, request)
+    
+    return CreateSkillResponse(job_id=job_id, status="pending")
+```
+
+- Jobs are tracked via `/api/v1/jobs/{job_id}` and HITL endpoints
+- CLI polls for status and HITL prompts
+- Job state is in-memory (restarts clear pending jobs)
+
+### agentskills.io Compliance
+
+Every `SKILL.md` must have YAML frontmatter at top:
+```markdown
+---
+name: skill-name-in-kebab-case
+description: A concise description (1-2 sentences)
+---
+
+# Skill Title
+```
+
+Frontmatter MUST be first, name must be kebab-case, description required.
+
+### Common Utilities
+
+Import from `skill_fleet.common.utils`: `safe_json_loads()`, `safe_float()`
+
+### Forbidden Patterns
+
+- No `import *`
+- No mutable default arguments (use `None` and initialize)
+- No `print` statements (use logging)
+- No `assert` for runtime checks
+- Avoid manual `isinstance` type checks (prefer `typing`)
+
+## Pre-Commit Checklist
+
+1. `uv run ruff check --fix .`
+2. `uv run ruff format .`
+3. `uv run pytest`
+4. `uv run skill-fleet validate` (if skills modified)
+5. Check `git status` for .venv/, .dspy_cache/, __pycache__/
+
+## Project Structure
+
+### Source Code (`src/skill_fleet/`)
+
+- **`api/`** - FastAPI application (restructured from `app/`)
+  - `v1/` - API version 1 routers (flattened structure)
+  - `schemas/` - Pydantic request/response models
+  - `services/` - Business logic layer
+  - `middleware/` - FastAPI middleware
+  - `dependencies.py` - Dependency injection
+  - `factory.py` - App factory
+  - `main.py` - Application entry point
+  
+- **`cli/`** - CLI commands (Typer)
+
+- **`common/`** - Shared utilities (top-level)
+  - `utils.py` - General utilities
+  - `security.py` - Path security functions
+  - `exceptions.py` - Shared exceptions
+  - `paths.py` - Path utilities
+  
+- **`core/`** - Domain logic + DSPy integration
+  - `modules/` - DSPy modules (understanding, generation, validation, hitl)
+  - `signatures/` - DSPy signature definitions
+  - `workflows/` - Workflow orchestration layer
+  - `models.py` - Domain models
+  - `hitl/` - Human-in-the-loop handlers
+  - `optimization/` - Optimization and evaluation
+
+- **`dspy/`** - Centralized DSPy configuration (new location)
+
+- **`infrastructure/`** - Technical infrastructure
+  - `db/` - Database layer (models, repositories)
+  - `monitoring/` - MLflow setup
+  - `tracing/` - Distributed tracing
+
+**Note:** `infrastructure/llm/` was removed. Use `skill_fleet.dspy` for LLM configuration.
+
+- **`taxonomy/`** - Taxonomy management
+
+- **`validators/`** - agentskills.io compliance
+
+### Other Directories
+
+- `skills/` - Skills taxonomy (excluded from linting)
+- `tests/` - Unit and integration tests
+  - `api/` - API-specific tests (v1, schemas, services)
+  - `common/` - Common utilities tests
+  - `unit/` - Unit tests
+  - `integration/` - Integration tests
+
+## Environment Variables
+
+Required: `GOOGLE_API_KEY`
+
+Optional: `DSPY_CACHEDIR`, `DSPY_TEMPERATURE`, `LOG_LEVEL`
+
+## Important Files
+
+- `pyproject.toml` - Dependencies, pytest config, ruff rules
+- `config/config.yaml` - LLM model settings
+- `.github/copilot-instructions.md` - Detailed project info
+
+## Key Gotchas
+
+1. `skills/` directory excluded from ruff linting
+2. CLI wraps API logic - implement in `core`/`api` first
+3. DSPy requires explicit configuration when used as library
+4. Use migration tools (`uv run skill-fleet migrate`) instead of manual skill edits
+5. Job state is in-memory - restart clears pending jobs
+6. Some integration tests fail without `GOOGLE_API_KEY` (expected: 2 failures)
+7. **API endpoints return immediately** - Long operations run in `BackgroundTasks`, client polls HITL endpoint
+8. **CLI chat uses fast polling (100ms)** - For real-time updates, use `uv run skill-fleet chat --fast`
+9. **Frontend is work-in-progress** - `src/frontend/` is in .gitignore, don't commit yet
+
+
+============================================================
+END FILE: AGENTS.md
+============================================================
+
+============================================================
+FILE: CHANGELOG.md
+============================================================
+
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [0.3.5] - 2026-01-29
+
+### Breaking Changes
+- **Architecture Restructure**: Complete FastAPI-centric directory restructure
+  - `src/skill_fleet/app/` → `src/skill_fleet/api/` (API layer flattening)
+  - `src/skill_fleet/db/` → `src/skill_fleet/infrastructure/db/`
+  - `src/skill_fleet/llm/` → `src/skill_fleet/dspy/` (centralized DSPy config)
+  - New `src/skill_fleet/common/` top-level module for shared utilities
+  - All imports converted from relative to absolute
+- **Removed deprecated modules**:
+  - `skill_fleet.core.creator` (use `api.services` instead)
+  - `skill_fleet.onboarding.bootstrap`
+  - `skill_fleet.agent` (entire agent package)
+  - Old DSPy phase-based organization
+
+### Added
+- **FastAPI v1 API**: New clean API structure
+  - Background task support for async skill creation
+  - HITL (Human-in-the-Loop) integration with question types
+  - Real-time streaming endpoints
+  - Job management with polling
+- **Workflow Architecture**: Task-based DSPy organization
+  - `core/workflows/skill_creation/` with orchestrators
+  - Understanding, Generation, and Validation workflows
+  - Hierarchical MLflow tracking (parent + child runs)
+- **Real-time CLI Chat** (`skill-fleet chat`):
+  - Streaming updates with 100ms polling
+  - Live thinking/reasoning display
+  - Arrow key navigation for multi-choice questions
+  - Immediate response to HITL prompts
+- **Taxonomy improvements**:
+  - `TaxonomyManager` with agentskills.io compliance
+  - YAML frontmatter parsing for SKILL.md
+  - Path resolution with alias support
+  - Dependency validation and circular detection
+- **Documentation**:
+  - API migration guide (`docs/api/MIGRATION_V1_TO_V2.md`)
+  - Import path guide (`docs/development/IMPORT_PATH_GUIDE.md`)
+  - Service extension guide (`docs/development/SERVICE_EXTENSION_GUIDE.md`)
+
+### Changed
+- **DSPy Configuration**: Moved to centralized `skill_fleet.dspy` module
+  - Task-specific LM instances via `get_task_lm()`
+  - Environment variable support for `DSPY_CACHEDIR`, `DSPY_TEMPERATURE`
+- **CLI improvements**:
+  - New `terminal` command for Python-only interface
+  - Fast polling for real-time updates (`--fast` flag)
+- **Testing**: Restructured test directory to match source structure
+  - `tests/api/` for API-specific tests
+  - `tests/unit/` and `tests/integration/` separation
+
+### Removed
+- **Obsolete files** (from root directory):
+  - `RE_STRUCTURE_SUMMARY.md`
+  - `IMPLEMENTATION_SUMMARY.md`
+  - `TASKLIST_PROGRESS.md`
+- **Deprecated code**:
+  - Legacy agent package (`src/skill_fleet/agent/`)
+  - Old CLI onboarding modules
+  - Outdated test files with broken imports
+
+### Fixed
+- All import paths updated to use absolute imports
+- Circular dependency issues resolved
+- Lifespan startup errors fixed
+- Monitoring module import issues resolved
+
+---
+
+## [0.2.0] - 2026-01-16
+
+### Breaking Changes
+- **Taxonomy Migration**: Simplified from 8-level to 2-level taxonomy
+  - Old paths: `skills/technical_skills/programming/languages/python/async`
+  - New paths: `skills/python/async`
+  - Legacy paths still resolve with deprecation warnings
+  - Use canonical paths in new code and documentation
+
+### Added
+- `src/skill_fleet/taxonomy/models.py`: Pydantic models for taxonomy index
+- `scripts/generate_taxonomy_index.py`: Generate index from mapping report
+- `scripts/migrate_skills_structure.py`: Migrate skills to canonical paths
+- `skills/taxonomy_index.json`: Canonical index for path resolution
+- Taxonomy alias support for backward compatibility
+
+### Changed
+- `TaxonomyManager`: Added index-based skill resolution with alias support
+- `SkillValidator`: Enhanced path traversal protection and alias detection
+- API routes: Updated to use canonical path resolution
+- Documentation: Updated for new taxonomy structure
+
+### Removed
+- Legacy taxonomy directories: `technical_skills/`, `domain_knowledge/`, `task_focus_areas`, etc.
+- Deprecated `src/skill_fleet/migration.py` (workflow consolidated into core/)
+- Placeholder directories: `miscellaneous/`
+
+### Fixed
+- Deprecated print statements in onboarding (replaced with logging)
+- Docstring formatting inconsistencies
+- Path resolution now supports both canonical IDs and legacy aliases
+- **Automatic Linting & Formatting** (January 16, 2026)
+  - Added `_lint_and_format_skill()` method to TaxonomyManager
+  - All newly generated skills are automatically linted and formatted
+  - Runs `ruff check` and `ruff format` on Python files in examples/ and scripts/
+  - Fixed existing linting issues in skills directory:
+    - Added docstring to `skills/devops/docker/examples/example_2.py`
+    - Sorted imports in `skills/memory/universal/examples/basic_usage.py`
+    - Removed f-string prefix from constant string
+  - Linting failures log warnings but don't block skill creation
+- **Migration Module Recreation** (January 16, 2026)
+  - Recreated `src/skill_fleet/common/migration.py` with `migrate_all_skills()` function
+  - Fixed broken import in `src/skill_fleet/cli/commands/migrate.py`
+  - Import now correctly points to `...common.migration` instead of deprecated `...migration`
+
+
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- **Interactive Chat CLI with Auto-Save** (January 12, 2026)
+  - Interactive chat interface for guided skill creation via `uv run python -m skill_fleet.cli.app chat`
+  - Full Phase 1, 2, and 3 HITL (Human-in-the-Loop) support in chat CLI
+    - Phase 1: Clarification questions and confirmation dialogs (yellow/cyan panels)
+    - Phase 2: Content preview with highlights (blue panel)
+    - Phase 3: Validation reports with pass/fail indicators (green/red panels)
+  - Automatic skill persistence to taxonomy directory after completion
+  - `_save_skill_to_taxonomy()` function integrates with `TaxonomyManager.register_skill()`
+  - Skills automatically saved to disk with proper directory structure:
+    - `skills/{taxonomy_path}/SKILL.md` (with YAML frontmatter)
+    - `skills/{taxonomy_path}/metadata.json` (extended metadata)
+    - Subdirectories: examples/, capabilities/, tests/, resources/, etc.
+  - Improved error handling in CLI client
+    - Specific 404 handling for lost jobs (server restarts)
+    - Helpful error messages for connection issues
+    - Better exception display (type name, message)
+  - Server mode options:
+    - Production mode (default): Stable, no auto-reload
+    - Development mode (`--reload`): Auto-reload with warnings
+  - Display saved skill path on completion: `📁 Skill saved to: {path}`
+- **FastAPI v2 server** with auto-discovery of DSPy programs/modules and routerized endpoints for skills, taxonomy, validation, chat, and HITL polling/response. Includes CORS defaults, `/health` probe, and shared DSPy configuration at startup.
+- **Modular Typer CLI** rebuilt around `skill_fleet.cli.app` with dedicated commands for `serve`, `chat`, `create`, `validate`, `migrate`, `generate-xml`, `optimize`, `analytics`, and `onboard`, backed by a new HTTP client for HITL polling and API calls.
+- **Expanded technical skill library** adding FastAPI backend architecture, DSPy framework usage, Python async/decorators/core syntax, pytest testing, code quality analysis, Docker containerization, design patterns, and concurrency skills under `skills/technical_skills/`.
+- **Documentation updates** including refreshed README (Skill Fleet branding, setup, env vars, and CLI examples) and new implementation/review plan documents under `docs/plans/`.
+- **Restructured documentation tree** with intro/getting-started/concepts folders + new guides (`docs/intro/introduction.md`, `docs/getting-started/index.md`, `docs/concepts/concept-guide.md`, `docs/concepts/developer-reference.md`) and updated cross-links from README, AGENTS.md, CLI/API references, and skill-creation guidelines to eliminate legacy quick-start pages.
+
+### Changed
+
+- CLI help and examples now use the new `skill-fleet` Typer entrypoint (`uv run python -m skill_fleet.cli.app ...`) instead of the removed single-file CLI.
+- API bootstrapping centralizes DSPy configuration and exposes v2 endpoints, replacing the previous monolithic application wiring.
+- Dependency versions for LLM stack and TUI stack bumped in README and lockfiles to reflect current environment.
+
+### Removed
+
+- Legacy CLI entrypoints (`src/skill_fleet/cli/main.py`, `interactive_typer.py`) and the old conversational reward pipeline were removed in favor of the new API + modular CLI flow.
+- Outdated planning documents under `plans/` were retired/archived to reduce noise and align with the new workflow documentation.
+
+---
+
+## [0.2.0] - 2026-01-11
+
+### Added
+
+- Conversational modules using DSPy MultiChainComparison and Predict ([7a36e76](https://github.com/Qredence/skill-fleet/commit/7a36e76))
+  - Modules for interpreting user intent, detecting multi-skill needs, generating clarifying questions
+  - Simple prediction modules for assessing readiness, confirming understanding, processing feedback
+  - Comprehensive unit tests for all new conversational modules
+- Interactive Typer CLI (`interactive_typer.py`) for enhanced user interaction ([7a36e76](https://github.com/Qredence/skill-fleet/commit/7a36e76))
+- MLflow database file for model tracking ([18a32ba](https://github.com/Qredence/skill-fleet/commit/18a32ba))
+- Comprehensive Copilot instructions and environment setup ([699c2e4](https://github.com/Qredence/skill-fleet/commit/699c2e4))
+  - `.github/copilot-instructions.md` with build/test workflows
+  - `copilot-setup-steps.yml` for environment configuration
+  - Network/firewall limitations documentation
+- Enhanced SKILL.md template with improved structure and detailed guidelines ([d57261d](https://github.com/Qredence/skill-fleet/commit/d57261d))
+- Metadata template (`config/templates/metadata_template.json`) for tooling support ([d57261d](https://github.com/Qredence/skill-fleet/commit/d57261d))
+- Python testing instructions (`.github/instructions/python-tests.instructions.md`) ([8ce71ef](https://github.com/Qredence/skill-fleet/commit/8ce71ef))
+- `datasets` dependency for improved data handling ([d57261d](https://github.com/Qredence/skill-fleet/commit/d57261d))
+- Centralized DSPy configuration via `skill_fleet.llm.dspy_config` module
+  - `configure_dspy()` function for one-time DSPy initialization
+  - `get_task_lm()` function for task-specific LM instances
+  - Environment variable support for `DSPY_CACHEDIR` and `DSPY_TEMPERATURE`
+- `revision_feedback` parameter to `EditSkillContent` signature for iterative refinement
+- Proper UTC timestamp generation for skill evolution metadata using `datetime.now(UTC).isoformat()`
+- Common utilities module `src/skill_fleet/common/utils.py`
+  - `safe_json_loads()` for robust JSON parsing with fallback
+  - `safe_float()` for safe float conversion
+- Documentation:
+  - API reference documentation for new modules
+  - DSPy configuration section in CLI reference
+  - Contributing guide (`docs/development/CONTRIBUTING.md`)
+  - Architecture Decision Records (`docs/development/ARCHITECTURE_DECISIONS.md`)
+
+### Changed
+
+- Upgraded LLM model version in web search and integration tests for improved performance ([7a36e76](https://github.com/Qredence/skill-fleet/commit/7a36e76))
+- Major refactoring of agent, CLI, and workflow modules for improved code quality ([699c2e4](https://github.com/Qredence/skill-fleet/commit/699c2e4))
+- Updated README.md with repository clone URL ([8ce71ef](https://github.com/Qredence/skill-fleet/commit/8ce71ef))
+- Evolution metadata now includes proper timestamps and change summaries
+  - `timestamp`: ISO 8601 UTC timestamp of creation/revision
+  - `change_summary`: Human-readable description of changes
+- CLI now calls `configure_dspy()` on startup for consistent DSPy settings
+- Improved revision feedback handling in skill editing workflow
+- Import ordering improvements for better code organization
+
+### Removed
+
+- Legacy signature classes `UnderstandTaskForSkillLegacy` and `PlanSkillStructureLegacy` from `workflow/signatures.py`
+- Legacy comment block from workflow/signatures.py
+- Duplicate utility functions from `workflow/modules.py` and `agent/modules.py` (now centralized in `common/utils.py`)
+- Unused imports: `gather_context` from agent/agent.py
+
+### Fixed
+
+- Hardcoded empty strings in evolution metadata replaced with proper values
+- TODO comments for `revision_feedback` incorporation addressed
+- Linting issues with import ordering in modified files
+- Model naming and temperature configuration issues ([7a36e76](https://github.com/Qredence/skill-fleet/commit/7a36e76))
+
+---
+
+## [0.1.1] - 2026-01-09
+
+### Fixed
+
+- Capability serialization now correctly handles lists of Pydantic models ([d5f8890](https://github.com/Qredence/skill-fleet/commit/d5f8890))
+- Dependency validation properly handles `DependencyRef` objects in `TaxonomySkillCreator._validate_plan` ([d5f8890](https://github.com/Qredence/skill-fleet/commit/d5f8890))
+- Added `aforward` methods to all DSPy modules to support async execution via `acall` ([d5f8890](https://github.com/Qredence/skill-fleet/commit/d5f8890))
+- Fixed `dspy.context` calls to fallback to `dspy.settings.lm` when no specific LM is provided ([d5f8890](https://github.com/Qredence/skill-fleet/commit/d5f8890))
+- Corrected typo 'fbr' in workflow modules that prevented test collection ([d5f8890](https://github.com/Qredence/skill-fleet/commit/d5f8890))
+
+### Changed
+
+- Renamed project from "skills-fleet" to "skill-fleet" across all documentation ([e888e9b](https://github.com/Qredence/skill-fleet/commit/e888e9b))
+- Updated `.gitignore` and removed obsolete custom memory skill files ([c7b7134](https://github.com/Qredence/skill-fleet/commit/c7b7134))
+
+## [0.1.0] - Initial Release
+
+### Added
+
+- Initial release of the Skills Fleet framework
+- Taxonomy-based skill management system
+- DSPy-powered skill creation workflow
+- CLI interface for skill operations
+- Memory block skills for agent memory management
+
+[Unreleased]: https://github.com/Qredence/skill-fleet/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/Qredence/skill-fleet/compare/v0.2.0...v0.3.5
+[0.2.0]: https://github.com/Qredence/skill-fleet/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/Qredence/skill-fleet/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Qredence/skill-fleet/releases/tag/v0.1.0
+
+
+============================================================
+END FILE: CHANGELOG.md
+============================================================
+
+============================================================
+FILE: PLANS.md
+============================================================
+
+# Skill Fleet - Test Plan: Full Skill Creation Flow with HITL
+
+## Goal
+Verify the complete end-to-end flow from initial skill creation through the understanding phase, including HITL (Human-in-the-Loop) interactions with clarifying questions and multi-choice options.
+
+---
+
+## Phase 1: Critical Fixes (Blocking Issues)
+
+### Frontend: Next.js 15+ Async Params
+**Status**: ✅ Fixed
+
+**Issue**: "undefined" jobId in API requests due to Next.js 15+ making `params` a Promise.
+
+**Root Cause**: Dynamic route parameters are now asynchronous in Next.js 15+.
+
+**File**: `src/frontend/fleetui/app/create/[jobId]/page.tsx`
+
+**Change**:
+```tsx
+// Before (broken)
+export default function Page({ params }: { params: { jobId: string } }) {
+  return <CreateSkillWorkflow jobId={params.jobId} />;
+}
+
+// After (fixed)
+export default async function Page({ params }: { params: Promise<{ jobId: string }> }) {
+  const { jobId } = await params;
+  return <CreateSkillWorkflow jobId={jobId} />;
+}
+```
+
+---
+
+### Backend: Validation Schema Mismatch
+**Status**: ✅ Fixed
+
+**Issue**: Job failed with schema validation error because `validation_report` structure didn't match Pydantic model.
+
+**Root Cause**: The validation workflow returned:
+```python
+{
+    "validation_report": {
+        "compliance": {...},
+        "quality": {...},
+        "refinements_made": [...]
+    }
+}
+```
+
+But the `ValidationReport` model expected:
+```python
+{
+    "passed": bool,
+    "status": str,
+    "score": float,
+    "errors": list,
+    "warnings": list,
+    ...
+}
+```
+
+**File**: `src/skill_fleet/core/workflows/skill_creation/validation.py`
+
+**Change**: Restructured return value to match model (lines 120-138)
+
+---
+
+### Backend/Frontend: Pending Review Status Handling
+**Status**: ✅ Fixed
+
+**Issue**: UI showed "Initializing..." indefinitely when job completed with `status: "pending_review"`.
+
+**Root Cause**: The backend returns `"pending_review"` when validation fails (see `skill_service.py:253`), but the frontend only stopped polling on `["completed", "failed", "cancelled"]`.
+
+**Files Modified**:
+
+| File | Change |
+|------|--------|
+| `src/frontend/fleetui/app/create/[jobId]/create-skill-workflow.tsx` | Added `"pending_review"` to terminal states (line 148); added UI state for review |
+| `src/frontend/fleetui/lib/api.ts` | Added `"pending_review"` to jobs polling helper (line 264) |
+| `src/frontend/fleetui/lib/api.ts` | Added `"pending_review"` to HITL polling helper (line 327) |
+
+**UI State Added**: "Skill Created - Pending Review" screen with actions to review the skill or return to dashboard.
+
+---
+
+## Phase 2: Configuration & Environment
+
+### Backend: LLM Provider Setup
+**Status**: ✅ Configured
+
+**Environment Variables**:
+```bash
+export GOOGLE_API_KEY="your-api-key"
+export DSPY_MODEL="gemini/gemini-2.0-flash"
+```
+
+**Note**: Backend started with these variables for LLM operations.
+
+---
+
+## Phase 3: Workflow Verification
+
+### Understanding Phase
+**Status**: ✅ Working
+- Job progresses from `pending` → `understanding`
+- HITL prompts generated with clarifying questions
+- Multi-choice options render correctly
+
+### Generation Phase
+**Status**: ✅ Working
+- Skill content generation completes
+- Draft SKILL.md created
+
+### Validation Phase
+**Status**: ✅ Working
+- Compliance checks execute
+- Quality assessment runs
+- Returns `pending_review` when issues found (expected behavior)
+
+---
+
+## Key Insights
+
+### 1. Backend/Frontend Status Mismatch
+The backend has multiple terminal states that the frontend must recognize:
+- `"completed"` - Skill created and validated successfully
+- `"failed"` - Error occurred during creation
+- `"cancelled"` - User or system cancelled
+- `"pending_review"` - Skill created but validation found issues
+
+### 2. Schema Contract Enforcement
+Pydantic models strictly enforce response shapes. Any mismatch between workflow outputs and API schemas causes 500 errors. Always verify:
+- Field names match exactly
+- Types are compatible
+- Required fields are present
+
+### 3. Polling Lifecycle
+The frontend polling mechanism must recognize all terminal states to:
+- Stop unnecessary API calls
+- Display appropriate UI states
+- Allow user action on completed jobs
+
+---
+
+## Remaining TODOs
+
+### Phase 4: Database Stability (Critical)
+
+**Issue**: Database connection timeouts (`IdleInTransactionSessionTimeout`) during long LLM operations (30s-2min per call).
+
+**Root Cause**: Synchronous SQLAlchemy sessions held open across entire workflow phases without proper connection management.
+
+**Evidence**:
+```
+IdleInTransactionSessionTimeout: terminating connection due to idle-in-transaction timeout
+```
+
+### 4.1 Root Cause Analysis
+
+**Current problematic pattern** (in workflows):
+```python
+# Current: Session held open for entire workflow phase
+db = get_db_session()
+job_repo = JobRepository(db)
+job = job_repo.get_by_id(job_id)  # Transaction starts
+# ... 30-120 seconds of LLM operations ...
+job_repo.update_status(job_id, "completed")  # Transaction finally commits
+```
+
+**Problem**: PostgreSQL `idle_in_transaction_session_timeout` (default 30s) kills connections when no database activity occurs during long LLM calls.
+
+### 4.2 Solution Strategy
+
+**Approach**: Implement **short-lived transactions** with explicit session boundaries around database operations only.
+
+**New pattern**:
+```python
+# Fetch job state (short transaction)
+with get_db_session() as db:
+    job = JobRepository(db).get_by_id(job_id)
+    state = extract_job_state(job)
+
+# Long-running LLM operations (no DB connection held)
+result = await llm_module.generate(state)
+
+# Update job state (short transaction)
+with get_db_session() as db:
+    JobRepository(db).update_status(job_id, result.status)
+```
+
+### 4.3 Implementation Plan
+
+#### Step 1: Create Session Context Manager (Day 1)
+
+**File**: `src/skill_fleet/infrastructure/db/session.py` (new)
+
+```python
+from contextlib import contextmanager
+from sqlalchemy.orm import Session
+
+@contextmanager

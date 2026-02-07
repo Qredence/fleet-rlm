@@ -1,0 +1,14 @@
+<!-- Chunk 1751: bytes 7349253-7349762, type=class -->
+class RevisionPlan(BaseModel):
+    """Plan for revising a skill based on feedback."""
+
+    changes: list[str] = Field(default_factory=list, description="Changes to make")
+    priority: Literal["high", "medium", "low"] = Field(
+        default="medium", description="Revision priority"
+    )
+    estimated_effort: Literal["quick", "medium", "extensive"] = Field(
+        default="medium", description="Estimated effort level"
+    )
+    notes: str = Field(default="", description="Additional revision notes")
+
+

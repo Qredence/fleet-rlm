@@ -1,0 +1,9 @@
+<!-- Chunk 1702: bytes 7276038-7276197, type=class -->
+class ReasoningEffort(StrEnum):
+    """Valid reasoning effort levels for models that support it."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+

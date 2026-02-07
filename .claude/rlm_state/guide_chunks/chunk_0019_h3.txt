@@ -1,0 +1,5 @@
+<!-- Chunk 19: bytes 6212-6304, type=h3 -->
+### Common skill use case categories
+
+At Anthropic, we’ve observed three common use cases:
+

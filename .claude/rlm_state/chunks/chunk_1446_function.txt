@@ -1,0 +1,28 @@
+<!-- Chunk 1446: bytes 5530531-5531065, type=function -->
+def say_hello(name):
+    print(f"Hello, {name}!")
+
+say_hello("Eve")
+say_hello("Fred")
+```
+
+**Explanation:**
+
+1.  We define a `count_calls` decorator.
+2.  Inside the decorator, we initialize `wrapper.num_calls` to 0. This variable will store the number of times the function has been called.
+3.  In the `wrapper` function, we increment `wrapper.num_calls` each time the function is called.
+
+**Output:**
+
+```
+Call 1 of say_hello
+Hello, Eve!
+Call 2 of say_hello
+Hello, Fred!
+```
+
+## Caching Function Results
+
+```python
+import functools
+

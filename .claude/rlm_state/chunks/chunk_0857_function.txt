@@ -1,0 +1,128 @@
+<!-- Chunk 857: bytes 3047905-3052233, type=function -->
+def create_skill(task: str):
+    """Create a skill via the API."""
+    client = SkillFleetClient()
+    
+    response = client.create_skill(task_description=task)
+    typer.echo(f"Job created: {response['job_id']}")
+    typer.echo(f"Status: {response['status']}")
+```
+
+## Migration Checklist
+
+If you have code using old import paths:
+
+### From `core/dspy/` (Deleted)
+
+- [ ] `from skill_fleet.core.dspy import configure_dspy` → `from skill_fleet.dspy import configure_dspy`
+- [ ] `from skill_fleet.core.dspy.modules import ...` → `from skill_fleet.core.modules import ...`
+- [ ] `from skill_fleet.core.dspy.signatures import ...` → `from skill_fleet.core.signatures import ...`
+- [ ] `from skill_fleet.core.dspy.modules.workflows import TaskAnalysisOrchestrator` → `from skill_fleet.core.workflows.skill_creation import UnderstandingWorkflow`
+
+### From `infrastructure/llm/` (Deleted)
+
+- [ ] `from skill_fleet.infrastructure.llm import configure_dspy` → `from skill_fleet.dspy import configure_dspy`
+- [ ] `from skill_fleet.infrastructure.llm.dspy_config import ...` → `from skill_fleet.dspy import ...`
+
+### From `core/creator.py` (Deleted)
+
+- [ ] `from skill_fleet.core.creator import TaxonomySkillCreator` → Use `SkillService` from `skill_fleet.api.services`
+
+### From `onboarding/` (Deleted)
+
+- [ ] `from skill_fleet.onboarding import SkillBootstrapper` → Feature removed, use API directly
+
+## Troubleshooting
+
+### Import Error: "No module named 'skill_fleet.core.dspy'"
+
+The `core/dspy/` directory was deleted in the migration. Update your imports:
+
+```python
+# ❌ Wrong (old)
+from skill_fleet.core.dspy import configure_dspy
+
+# ✅ Correct (new)
+from skill_fleet.dspy import configure_dspy
+```
+
+### Import Error: "No module named 'skill_fleet.infrastructure.llm'"
+
+The `infrastructure/llm/` directory was deleted. Use the new location:
+
+```python
+# ❌ Wrong (old)
+from skill_fleet.infrastructure.llm import configure_dspy
+
+# ✅ Correct (new)
+from skill_fleet.dspy import configure_dspy
+```
+
+### Import Error: "cannot import name 'TaskAnalysisOrchestrator'"
+
+Orchestrators were replaced with Workflow classes:
+
+```python
+# ❌ Wrong (old)
+from skill_fleet.core.dspy.modules.workflows import TaskAnalysisOrchestrator
+orchestrator = TaskAnalysisOrchestrator()
+
+# ✅ Correct (new)
+from skill_fleet.core.workflows.skill_creation import UnderstandingWorkflow
+workflow = UnderstandingWorkflow()
+```
+
+## Best Practices
+
+1. **Use `skill_fleet.dspy`** for DSPy configuration
+2. **Use workflows** for high-level operations
+3. **Use modules directly** only when you need fine-grained control
+4. **Use signatures** for type definitions, not business logic
+5. **Import specific classes** rather than using `from module import *`
+6. **Use type hints** with imported models
+
+## See Also
+
+- **[Architecture Status](../architecture/restructuring-status.md)** - Current architecture overview
+- **[AGENTS.md](../../AGENTS.md)** - Developer working guide
+- **[Contributing Guide](CONTRIBUTING.md)** - Development workflow
+
+
+============================================================
+END FILE: docs/development/IMPORT_PATH_GUIDE.md
+============================================================
+
+============================================================
+FILE: docs/development/SERVICE_EXTENSION_GUIDE.md
+============================================================
+
+# Service Extension Guide
+
+**Last Updated**: 2026-01-25
+
+## Overview
+
+This guide explains how to extend the Skills Fleet service layer with custom services, add new service methods, implement dependency injection patterns, and write tests for services.
+
+`★ Insight ─────────────────────────────────────`
+Services should be thin orchestrators that coordinate domain objects. Put business logic in domain entities, domain services, or specifications. Services are about workflow orchestration, not business rules.
+`─────────────────────────────────────────────────`
+
+## Table of Contents
+
+- [Service Architecture](#service-architecture)
+- [Creating a Custom Service](#creating-a-custom-service)
+- [Adding Service Methods](#adding-service-methods)
+- [Dependency Injection](#dependency-injection)
+- [Testing Services](#testing-services)
+- [Best Practices](#best-practices)
+
+---
+
+## Service Architecture
+
+### BaseService
+
+All services inherit from `BaseService`, which provides:
+
+```python

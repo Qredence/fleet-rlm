@@ -1,0 +1,7 @@
+<!-- Chunk 2033: bytes 7920069-7920258, type=function -->
+def valid_skill_request():
+    """Valid skill creation request data."""
+    return {"task_description": "Create a skill for testing purposes", "user_id": "test-user-123"}
+
+
+@pytest.fixture

@@ -1,0 +1,52 @@
+<!-- Chunk 820: bytes 2743450-2744958, type=class -->
+class StreamingAssistant(StreamingModule):
+    """Main assistant that streams full conversation."""
+    
+    async def forward_streaming(self, user_message: str, context: dict):
+        """Full thinking + response streaming."""
+        # Step 1: Parse intent (with thinking)
+        async for event in self.intent_parser.forward_streaming(user_message):
+            yield event
+        
+        # Step 2: Generate response (with thinking)
+        yield thinking_chunk_4  # "Generating response..."
+        # Stream response in chunks...
+        for chunk in response_chunks:
+            yield ResponseChunk(content=chunk)
+        
+        yield complete_event
+```
+
+### 2. FastAPI Streaming Endpoint
+
+**File**: `src/skill_fleet/api/routes/chat_streaming.py`
+
+```python
+@router.post("/chat/stream")
+async def chat_stream(request: ChatMessageRequest):
+    """
+    Stream real-time chat response with thinking process.
+    
+    Returns Server-Sent Events with:
+    - thinking: Intermediate reasoning steps
+    - response: Generated response chunks
+    - error: Any errors
+    - complete: Stream finished
+    """
+    assistant = StreamingAssistant()
+    
+    async def event_generator():
+        async for event in assistant.forward_streaming(
+            user_message=request.message,
+            context=request.context
+        ):
+            yield event
+    
+    return stream_events_to_sse(event_generator())
+```
+
+### 3. TypeScript Streaming Client
+
+**File**: `cli/tui/src/streaming-client.ts`
+
+```typescript

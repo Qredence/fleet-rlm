@@ -1,0 +1,66 @@
+<!-- Chunk 1396: bytes 5126122-5127441, type=class -->
+class UserUpdate(BaseModel):
+    name: Optional[str] = None      # ← Optional + None default
+    email: Optional[EmailStr] = None
+    age: Optional[int] = None
+```
+
+### 2. Extract Only Provided Fields
+```python
+update_data = user_update.model_dump(exclude_unset=True)
+# {"name": "John"} if only name provided
+# {} if nothing provided
+```
+
+### 3. Apply Partial Updates
+```python
+updated_user = existing_user.model_copy(update=update_data)
+# Only updates fields in update_data
+# Preserves all other fields
+```
+
+---
+
+## Request → Response Examples
+
+### Update Name Only
+**Request:** `{"name": "John"}`
+
+**Result:**
+- name: CHANGED
+- email: UNCHANGED
+- age: UNCHANGED
+
+### Update Multiple Fields
+**Request:** `{"name": "John", "age": 25}`
+
+**Result:**
+- name: CHANGED
+- email: UNCHANGED
+- age: CHANGED
+
+### Empty Request
+**Request:** `{}`
+
+**Result:** ALL UNCHANGED
+
+---
+
+## Common Mistakes
+
+### ❌ Wrong: Using model_dump() without exclude_unset
+```python
+update_data = user_update.model_dump()
+# Returns: {"name": "John", "email": None, "age": None}
+# Will overwrite email and age with None!
+```
+
+### ✅ Right: Using exclude_unset=True
+```python
+update_data = user_update.model_dump(exclude_unset=True)
+# Returns: {"name": "John"}
+# Only updates provided fields!
+```
+
+### ❌ Wrong: Required fields in update model
+```python

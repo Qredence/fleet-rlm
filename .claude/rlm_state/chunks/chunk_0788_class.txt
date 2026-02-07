@@ -1,0 +1,5 @@
+<!-- Chunk 788: bytes 2650811-2650899, type=class -->
+class AnalyzeIntentRequest(BaseModel):
+    task_description: str
+    user_context: str
+

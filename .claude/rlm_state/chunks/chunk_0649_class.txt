@@ -1,0 +1,8 @@
+<!-- Chunk 649: bytes 1025258-1025592, type=class -->
+class GenerateSkill(dspy.Signature):
+    """This signature is used to generate skill content for the skills-fleet platform.
+    The generated content should be comprehensive and include various sections such as
+    examples, best practices, common mistakes, and should follow the Obra/superpowers
+    quality standards..."""
+
+# After

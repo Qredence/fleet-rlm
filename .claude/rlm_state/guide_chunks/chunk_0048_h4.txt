@@ -1,0 +1,23 @@
+<!-- Chunk 48: bytes 14082-14835, type=h4 -->
+#### Best Practices for Instructions
+
+**Reference bundled resources clearly**
+Before writing queries, consult `references/api-patterns.md` for:
+- Rate limiting guidance
+- Pagination patterns
+- Error codes and handling
+
+**Use progressive disclosure**
+Keep `SKILL.md` focused on core instructions. Move detailed documentation to `references/` and link to it. (See Core Design Principles for how the three-level system works.)
+
+**Be Specific and Actionable**
+✅  **Good:**
+Run `python scripts/validate.py --input {filename}` to check data format.
+If validation fails, common issues include:
+- Missing required fields (add them to the CSV)
+- Invalid date formats (use YYYY-MM-DD)
+
+❌  **Bad:**
+Validate the data before proceeding.
+
+**Include error handling**

@@ -1,0 +1,142 @@
+<!-- Chunk 1905: bytes 7716601-7720447, type=class -->
+class MLflowContext:
+    """Context manager for MLflow runs with automatic cleanup."""
+
+    def __init__(
+        self,
+        run_name: str | None = None,
+        tags: dict | None = None,
+        description: str | None = None,
+    ):
+        """
+        Initialize MLflow context.
+
+        Args:
+            run_name: Name for the MLflow run
+            tags: Tags to add to the run
+            description: Run description
+
+        """
+        self.run_name = run_name
+        self.tags = tags or {}
+        self.description = description
+        self._run = None
+
+    def __enter__(self):
+        """Enter context manager and start MLflow run."""
+        self._run = mlflow.start_run(
+            run_name=self.run_name,
+            tags=self.tags,
+            description=self.description,
+        )
+        return self._run
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context manager and end MLflow run."""
+        if exc_type is not None:
+            mlflow.set_tag("status", "failed")  # type: ignore[attr-defined]
+            mlflow.set_tag("error", str(exc_val))  # type: ignore[attr-defined]
+        else:
+            mlflow.set_tag("status", "completed")  # type: ignore[attr-defined]
+
+        mlflow.end_run()  # type: ignore[attr-defined]
+        return False
+
+
+============================================================
+END FILE: src/skill_fleet/infrastructure/monitoring/mlflow_setup.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/infrastructure/tracing/__init__.py
+============================================================
+
+"""Tracing and observability utilities."""
+
+from .config import (
+    ConfigModelLoader,
+    get_phase1_lm,
+    get_phase2_lm,
+    get_phase3_lm,
+    get_phase4_lm,
+    get_phase5_lm,
+    get_reasoning_lm,
+)
+from .mlflow import (
+    end_mlflow_run,
+    get_mlflow_run_id,
+    log_checkpoint_result,
+    log_decision_tree,
+    log_parameter,
+    log_phase_artifact,
+    log_phase_metrics,
+    setup_mlflow_experiment,
+)
+from .tracer import (
+    ReasoningTrace,
+    ReasoningTracer,
+)
+
+__all__ = [
+    # Config/LM
+    "ConfigModelLoader",
+    "get_reasoning_lm",
+    "get_phase1_lm",
+    "get_phase2_lm",
+    "get_phase3_lm",
+    "get_phase4_lm",
+    "get_phase5_lm",
+    # MLflow
+    "setup_mlflow_experiment",
+    "log_phase_metrics",
+    "log_decision_tree",
+    "log_checkpoint_result",
+    "log_phase_artifact",
+    "log_parameter",
+    "get_mlflow_run_id",
+    "end_mlflow_run",
+    # Tracer
+    "ReasoningTrace",
+    "ReasoningTracer",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/infrastructure/tracing/__init__.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/infrastructure/tracing/config.py
+============================================================
+
+"""
+Reasoning model configuration for skill creation workflow.
+
+Uses the existing model registry from config.yaml:
+- Default: gemini:gemini-3-flash-preview (with thinking_level parameter support)
+- Role: planner (for Phase 1 and Phase 2 decision modules)
+- Tasks: skill_understand, skill_plan with their own thinking_level settings
+
+The existing config already provides reasoning support via the 'thinking_level' parameter.
+This module provides a ConfigModelLoader class that loads models from config.yaml
+and creates DSPy LM instances with proper configuration.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import TYPE_CHECKING
+
+import dspy
+import yaml
+
+from ...common.paths import default_config_path
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+

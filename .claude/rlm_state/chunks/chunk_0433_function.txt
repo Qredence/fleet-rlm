@@ -1,0 +1,67 @@
+<!-- Chunk 433: bytes 626263-628461, type=function -->
+def compile_module(module_name: str, teleprompter_name: str, cache_dir: Path, output: Path, verbose: bool):
+    """Compile a DSPy module with the specified teleprompter."""
+    print(f"Compiling module: {module_name}")
+    print(f"Teleprompter: {teleprompter_name}")
+    print(f"Cache directory: {cache_dir}")
+    print(f"Output file: {output}")
+
+    # Import the module dynamically
+    try:
+        if module_name == "reasoner":
+            from agentic_fleet.dspy_modules.reasoner import DSPyReasoner
+            module = DSPyReasoner()
+        elif module_name == "task_analyzer":
+            from agentic_fleet.dspy_modules.reasoner_modules import TaskAnalysisModule
+            module = TaskAnalysisModule()
+        else:
+            print(f"Error: Unknown module '{module_name}'")
+            print("Available modules: reasoner, task_analyzer")
+            sys.exit(1)
+    except ImportError as e:
+        print(f"Error importing module: {e}")
+        sys.exit(1)
+
+    # Select teleprompter
+    teleprompters = {
+        "bootstrap": dspy.BootstrapFewShot,
+        "cot": dspy.ChainOfThought,
+        "few_shot": dspy.FewShot,
+    }
+
+    if teleprompter_name not in teleprompters:
+        print(f"Error: Unknown teleprompter '{teleprompter_name}'")
+        print(f"Available teleprompters: {', '.join(teleprompters.keys())}")
+        sys.exit(1)
+
+    teleprompter_class = teleprompters[teleprompter_name]
+
+    # Create teleprompter instance
+    try:
+        teleprompter = teleprompter_class()
+    except Exception as e:
+        print(f"Error creating teleprompter: {e}")
+        sys.exit(1)
+
+    # Compile the module
+    try:
+        print("Compiling...")
+        compiled = teleprompter.compile(module)
+        print("Compilation successful!")
+    except Exception as e:
+        print(f"Compilation failed: {e}")
+        sys.exit(1)
+
+    # Ensure output directory exists
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save compiled module
+    try:
+        with open(output, "wb") as f:
+            pickle.dump(compiled, f)
+        print(f"Saved compiled module to: {output}")
+    except Exception as e:
+        print(f"Error saving compiled module: {e}")
+        sys.exit(1)
+
+

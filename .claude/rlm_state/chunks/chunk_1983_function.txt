@@ -1,0 +1,10 @@
+<!-- Chunk 1983: bytes 7886922-7887154, type=function -->
+def test_all_exit_codes():
+    """Test all exit code constants."""
+    assert EXIT_SUCCESS == 0
+    assert EXIT_ERROR == 1
+    assert EXIT_CONFIG_ERROR == 2
+    assert EXIT_VALIDATION_ERROR == 3
+    assert EXIT_NETWORK_ERROR == 4
+
+

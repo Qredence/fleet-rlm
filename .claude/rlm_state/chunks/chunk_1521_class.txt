@@ -1,0 +1,11 @@
+<!-- Chunk 1521: bytes 6370071-6370264, type=class -->
+class ValidateResponse(BaseModel):
+    """Response model for validation."""
+
+    passed: bool
+    status: str
+    score: float
+    issues: list[dict[str, Any]]
+    recommendations: list[str]
+
+

@@ -1,0 +1,34 @@
+<!-- Chunk 1273: bytes 4718117-4719030, type=function -->
+def create_comparison_results(
+    baseline_score: float,
+    gepa_score: float,
+    bootstrap_score: float | None = None,
+) -> dict:
+    """
+    Create comparison results showing GEPA vs other optimizers.
+
+    Args:
+        baseline_score: Score before any optimization
+        gepa_score: Score after GEPA
+        bootstrap_score: Score after BootstrapFewShot (optional)
+
+    Returns:
+        Comparison dictionary
+
+    """
+    return {
+        "baseline": baseline_score,
+        "gepa": gepa_score,
+        "bootstrap": bootstrap_score,
+        "gepa_improvement": gepa_score - baseline_score,
+        "gepa_improvement_pct": (gepa_score - baseline_score) / baseline_score * 100
+        if baseline_score > 0
+        else 0,
+    }
+
+
+# ============================================================================
+# MAIN WORKFLOW
+# ============================================================================
+
+

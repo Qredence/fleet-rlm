@@ -1,0 +1,5 @@
+<!-- Chunk 52: bytes 16130-16247, type=h3 -->
+### Recommended Testing Approach
+
+Based on early experience, effective skills testing typically covers three areas:
+

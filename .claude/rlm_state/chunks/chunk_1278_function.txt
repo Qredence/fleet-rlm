@@ -1,0 +1,33 @@
+<!-- Chunk 1278: bytes 4727631-4728683, type=function -->
+def simple_metric(example: dspy.Example, prediction: dspy.Prediction, trace=None) -> float:
+    """
+    Simple metric for quick optimization testing.
+
+    Checks if basic fields are present and reasonable.
+    """
+    score = 0.0
+
+    # Check if we got expected outputs
+    if hasattr(prediction, "domain") and prediction.domain:
+        score += 0.2
+
+    if hasattr(prediction, "category") and prediction.category:
+        score += 0.2
+
+    if hasattr(prediction, "target_level") and prediction.target_level:
+        score += 0.2
+
+    if hasattr(prediction, "topics") and len(prediction.topics) >= 3:
+        score += 0.2
+
+    # Check if category matches expected (if available)
+    if hasattr(example, "expected_taxonomy_path") and hasattr(prediction, "category"):
+        expected_category = (
+            example.expected_taxonomy_path.split("/")[0] if example.expected_taxonomy_path else ""
+        )
+        if expected_category and prediction.category.lower() in expected_category.lower():
+            score += 0.2
+
+    return min(score, 1.0)
+
+

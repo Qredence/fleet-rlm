@@ -1,0 +1,67 @@
+<!-- Chunk 1233: bytes 4627883-4629915, type=function -->
+def remove_empty_dirs(path):
+    """Recursively remove empty directories and .gitkeep files."""
+    if not path.is_dir():
+        return
+
+    # First pass: Remove all .gitkeep files
+    for p in path.rglob(".gitkeep"):
+        try:
+            p.unlink()
+            print(f"Removed: {p.relative_to(path.parent.parent)}")
+        except OSError as e:
+            print(f"Error removing {p}: {e}")
+
+    # Second pass: Remove empty directories bottom up
+    for p in list(path.rglob("*"))[::-1]:
+        if p.is_dir():
+            try:
+                # Don't delete metadata directories or the root itself
+                if p.name.startswith("_") or p == path:
+                    continue
+                # Check if empty
+                if not any(p.iterdir()):
+                    p.rmdir()
+                    print(f"Removed empty dir: {p.relative_to(path.parent.parent)}")
+            except OSError as e:
+                print(f"Error removing directory {p.relative_to(path.parent.parent)}: {e}")
+
+
+if __name__ == "__main__":
+    main()
+
+
+============================================================
+END FILE: scripts/internal/db/migrate_skills_structure.py
+============================================================
+
+============================================================
+FILE: scripts/internal/db/seed_taxonomy.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Skills-Fleet Taxonomy Seeder
+
+This script seeds the database with initial taxonomy categories
+and builds the closure table for efficient hierarchical queries.
+"""
+
+import os
+import sys
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import os as python_os
+
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+
+load_dotenv()
+DATABASE_URL = python_os.getenv("DATABASE_URL", "")
+
+if DATABASE_URL and not DATABASE_URL.startswith("postgresql+"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
+
+

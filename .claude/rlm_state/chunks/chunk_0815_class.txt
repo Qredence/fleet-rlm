@@ -1,0 +1,11 @@
+<!-- Chunk 815: bytes 2737427-2737742, type=class -->
+class SkillService(BaseService):
+    async def is_skill_valid(self, skill: Skill) -> bool:
+        # This belongs in domain specifications
+        return bool(skill.name and skill.description and len(skill.name) > 3)
+```
+
+### 2. Use Domain Services for Complex Logic
+
+```python
+# ✅ Good: Delegate to domain service

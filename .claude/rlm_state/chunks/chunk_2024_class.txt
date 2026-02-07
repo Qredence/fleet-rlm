@@ -1,0 +1,81 @@
+<!-- Chunk 2024: bytes 7909390-7912204, type=class -->
+class TestResolvePathWithinRoot:
+    """Tests for resolve_path_within_root function."""
+
+    def test_resolves_valid_path_within_root(self, tmp_path: Path):
+        """Test that valid paths within root are resolved correctly."""
+        root = tmp_path / "root"
+        root.mkdir()
+
+        # Create a subdirectory
+        subdir = root / "subdir"
+        subdir.mkdir()
+
+        result = resolve_path_within_root(root, "subdir")
+        assert result == subdir.resolve()
+
+    def test_rejects_path_escaping_root_via_parent_reference(self, tmp_path: Path):
+        """Test that paths escaping root via .. are rejected."""
+        root = tmp_path / "root"
+        root.mkdir()
+
+        with pytest.raises(ValueError, match="Invalid relative path"):
+            resolve_path_within_root(root, "../escape")
+
+    def test_rejects_absolute_path(self, tmp_path: Path):
+        """Test that absolute paths are rejected."""
+        root = tmp_path / "root"
+        root.mkdir()
+
+        with pytest.raises(ValueError, match="Invalid relative path"):
+            resolve_path_within_root(root, "/etc/passwd")
+
+    def test_handles_nested_paths(self, tmp_path: Path):
+        """Test that nested paths within root are handled correctly."""
+        root = tmp_path / "root"
+        root.mkdir()
+
+        # Create nested structure
+        nested = root / "a" / "b" / "c"
+        nested.mkdir(parents=True)
+
+        result = resolve_path_within_root(root, "a/b/c")
+        assert result == nested.resolve()
+
+    def test_rejects_symlink_escape(self, tmp_path: Path):
+        """Test that symlinks escaping root are detected."""
+        root = tmp_path / "root"
+        root.mkdir()
+
+        # Create directory outside root
+        outside = tmp_path / "outside"
+        outside.mkdir()
+
+        # Create symlink from inside root to outside
+        symlink = root / "symlink"
+        try:
+            symlink.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        # The symlink itself exists within root, but resolves outside
+        with pytest.raises(ValueError, match="Path escapes root"):
+            resolve_path_within_root(root, "symlink")
+
+    def test_rejects_empty_path(self, tmp_path: Path):
+        """Test that empty paths are rejected."""
+        root = tmp_path / "root"
+        root.mkdir()
+
+        with pytest.raises(ValueError, match="Invalid relative path"):
+            resolve_path_within_root(root, "")
+
+    def test_rejects_windows_separators(self, tmp_path: Path):
+        """Test that Windows separators are rejected."""
+        root = tmp_path / "root"
+        root.mkdir()
+
+        with pytest.raises(ValueError, match="Invalid relative path"):
+            resolve_path_within_root(root, "path\\to\\file")
+
+

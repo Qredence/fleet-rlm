@@ -1,0 +1,10 @@
+<!-- Chunk 321: bytes 530655-530926, type=class -->
+class StructuredModule(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.predict = dspy.Predict(
+            StructuredSignature,  # Has type hints
+            adapter=dspy.JSONAdapter()
+        )
+
+# Bad: Use ChatAdapter for structured output

@@ -1,0 +1,166 @@
+<!-- Chunk 1027: bytes 3630512-3636115, type=function -->
+def optimize_command(
+    optimizer: str = typer.Option(
+        "miprov2",
+        "--optimizer",
+        help="Optimizer algorithm (default: miprov2). Use --auto-select to auto-choose.",
+        click_type=click.Choice(["miprov2", "gepa", "bootstrap_fewshot", "reflection_metrics"]),
+    ),
+    # ... existing options ...
+    auto_select: bool = typer.Option(
+        False,
+        "--auto-select",
+        help="Automatically select best optimizer based on trainset size, budget, and task",
+    ),
+    budget: float = typer.Option(
+        10.0,
+        "--budget",
+        help="Budget in USD for optimization (used with --auto-select)",
+    ),
+    quality_target: float = typer.Option(
+        0.85,
+        "--quality-target",
+        help="Target quality score 0.0-1.0 (used with --auto-select)",
+    ),
+    time_limit: int = typer.Option(
+        None,
+        "--time-limit",
+        help="Maximum time in minutes (used with --auto-select)",
+    ),
+):
+    """Optimize the skill creation workflow using MIPROv2, GEPA, or auto-selected optimizer."""
+    
+    # Auto-selection logic
+    if auto_select:
+        import json
+        
+        # Load trainset to get size
+        trainset_path = Path(trainset)
+        if not trainset_path.exists():
+            print(f"Error: Trainset not found: {trainset}", file=sys.stderr)
+            raise typer.Exit(code=2)
+        
+        with open(trainset_path) as f:
+            trainset_data = json.load(f)
+            trainset_size = len(trainset_data.get("examples", trainset_data))
+        
+        # Create context
+        context = OptimizerContext(
+            trainset_size=trainset_size,
+            budget_dollars=budget,
+            quality_target=quality_target,
+            time_constraint_minutes=time_limit,
+        )
+        
+        # Get recommendation
+        selector = OptimizerSelector()
+        recommendation = selector.recommend(context)
+        
+        # Display recommendation
+        print(f"\n{'=' * 60}")
+        print("🤖 Optimizer Auto-Selection")
+        print(f"{'=' * 60}")
+        print(f"Trainset size: {trainset_size}")
+        print(f"Budget: ${budget:.2f}")
+        print(f"Quality target: {quality_target}")
+        print(f"\n✅ Recommended: {recommendation.recommended.value}")
+        print(f"   Config: auto={recommendation.config.auto}")
+        print(f"   Estimated cost: ${recommendation.estimated_cost:.2f}")
+        print(f"   Estimated time: {recommendation.estimated_time_minutes} minutes")
+        print(f"   Confidence: {recommendation.confidence:.0%}")
+        print(f"\n📝 Reasoning: {recommendation.reasoning}")
+        
+        if recommendation.alternatives:
+            print(f"\n🔄 Alternatives:")
+            for alt in recommendation.alternatives:
+                print(f"   - {alt['optimizer']}: {alt['cost']} | {alt['time']} | Risk: {alt.get('quality_risk', 'N/A')}")
+        
+        print(f"{'=' * 60}\n")
+        
+        # Ask for confirmation
+        confirm = typer.confirm("Proceed with recommended optimizer?", default=True)
+        if not confirm:
+            # Let user override
+            override = typer.prompt(
+                "Enter optimizer to use",
+                default=recommendation.recommended.value,
+            )
+            optimizer = override
+            # Parse auto setting from recommendation
+            auto = recommendation.config.auto
+        else:
+            optimizer = recommendation.recommended.value
+            auto = recommendation.config.auto
+        
+        print(f"Using optimizer: {optimizer} (auto={auto})")
+    
+    # ... rest of existing optimize logic ...
+```
+
+**Verification**:
+```bash
+# Test auto-select
+uv run skill-fleet optimize --auto-select --budget 5.0 --quality-target 0.85
+
+# Should show recommendation and ask for confirmation
+```
+
+---
+
+### Task 0.2.5: Metrics Tracking (~0.5 days)
+
+**File**: `config/selector_metrics.jsonl` (auto-created)
+
+The `record_result` method in `OptimizerSelector` handles this. Add integration in the optimization completion:
+
+**Update** `src/skill_fleet/api/routes/optimization.py` to record results:
+
+```python
+# In _run_optimization function, after successful completion:
+async def _run_optimization(...):
+    try:
+        # ... existing optimization code ...
+        
+        # Record result for future learning
+        if hasattr(result, 'quality_score'):
+            from ...core.dspy.optimization.selector import OptimizerSelector, OptimizerContext
+            
+            selector = OptimizerSelector(
+                metrics_path=str(_default_optimized_root().parent / "selector_metrics.jsonl")
+            )
+            context = OptimizerContext(
+                trainset_size=len(training_examples),
+                budget_dollars=10.0,  # Default, could be passed in request
+            )
+            selector.record_result(
+                context=context,
+                optimizer=OptimizerType(request.optimizer),
+                actual_cost=result.get('estimated_cost', 0.0),
+                actual_time_minutes=int(result.get('elapsed_time', 0) / 60),
+                quality_score=result.get('quality_score', 0.0),
+            )
+```
+
+---
+
+### Task 0.2.6: Integration Tests (~1 day)
+
+**File**: `tests/integration/test_optimizer_selection_api.py`
+
+```python
+"""Integration tests for optimizer selection API."""
+
+import pytest
+from httpx import AsyncClient
+
+from skill_fleet.api.app import create_app
+
+
+@pytest.fixture
+async def client():
+    """Create async test client."""
+    app = create_app()
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
+
+

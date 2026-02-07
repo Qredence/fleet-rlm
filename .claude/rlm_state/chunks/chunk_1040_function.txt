@@ -1,0 +1,25 @@
+<!-- Chunk 1040: bytes 3732155-3732759, type=function -->
+def main():
+    # Configure DSPy before any operations
+    configure_dspy()
+    # ... rest of main logic
+```
+
+---
+
+## Phase 5: Type Safety Improvements (Low Priority)
+
+### 5.1 Standardize Parameter Types
+
+**Problem**: Mix of `str | dict` and `str | list` parameters creates complexity.
+
+**Solution**: Standardize on single types with documented conversion:
+
+- Input parameters: Use `str` with JSON, document expected format
+- Internal processing: Parse immediately, work with typed objects
+- Output parameters: Use Pydantic models for structure
+
+**Example Refactoring**:
+
+```python
+# Before (ambiguous):

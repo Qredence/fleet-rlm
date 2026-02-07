@@ -1,0 +1,6 @@
+<!-- Chunk 1356: bytes 5050411-5050540, type=class -->
+class PaymentRequest(BaseModel):
+    user_id: int
+    amount: float = Field(..., gt=0)  # Must be positive
+    card: CreditCard
+

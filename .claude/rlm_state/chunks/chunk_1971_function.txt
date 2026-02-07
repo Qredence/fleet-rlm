@@ -1,0 +1,7 @@
+<!-- Chunk 1971: bytes 7882185-7882282, type=function -->
+def mock_creator():
+    """Mock skill creator."""
+    creator = MagicMock()
+    return creator
+
+

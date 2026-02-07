@@ -1,0 +1,13 @@
+<!-- Chunk 1493: bytes 6332692-6333070, type=function -->
+def _configure_middleware(app: FastAPI) -> None:
+    """
+    Register middleware in correct order.
+
+    Order matters:
+    1. ErrorHandlingMiddleware first (catches everything)
+    2. LoggingMiddleware second (has request ID)
+    """
+    app.add_middleware(ErrorHandlingMiddleware)  # type: ignore[arg-type]
+    app.add_middleware(LoggingMiddleware)  # type: ignore[arg-type]
+
+

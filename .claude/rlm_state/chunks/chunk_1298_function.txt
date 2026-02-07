@@ -1,0 +1,67 @@
+<!-- Chunk 1298: bytes 4768005-4769813, type=function -->
+def run_all_tests():
+    """Run all repository tests."""
+    print("\n" + "=" * 60)
+    print("Skills-Fleet Repository Layer Tests")
+    print("=" * 60)
+    print(f"Database: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 'unknown'}")
+
+    try:
+        # Test 1: Taxonomy
+        test_taxonomy()
+
+        # Test 2: Skills
+        test_skills()
+
+        # Test 3: Jobs
+        test_jobs()
+
+        print("\n" + "=" * 60)
+        print("✅ All repository tests passed!")
+        print("=" * 60)
+
+    except Exception as e:
+        print(f"\n❌ Test failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    run_all_tests()
+
+
+============================================================
+END FILE: scripts/internal/tests/test_repository.py
+============================================================
+
+============================================================
+FILE: scripts/manage_data.py
+============================================================
+
+#!/usr/bin/env python3
+"""
+Unified Training Data Manager for Skill Fleet.
+
+Orchestrates extraction, synthetic generation, and merging of training data.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+try:
+    from scripts.internal.data.expand_training_data import extract_training_example
+    from scripts.internal.data.generate_synthetic_examples import SYNTHETIC_EXAMPLES
+except ImportError:
+    # Fallback for when running from scripts/ directory directly
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from internal.data.expand_training_data import extract_training_example
+    from internal.data.generate_synthetic_examples import SYNTHETIC_EXAMPLES
+
+

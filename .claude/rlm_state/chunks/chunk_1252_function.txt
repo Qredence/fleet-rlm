@@ -1,0 +1,45 @@
+<!-- Chunk 1252: bytes 4670559-4671866, type=function -->
+def benchmark_bootstrap(
+    trainset: list[dspy.Example],
+    testset: list[dspy.Example],
+) -> dict:
+    """Benchmark BootstrapFewShot."""
+    print("\n" + "=" * 70)
+    print("🔷 BOOTSTRAPFEWSHOT - Fast Few-Shot Synthesis")
+    print("=" * 70)
+
+    start_time = time.time()
+
+    # Create program
+    program = SimpleSkillProgram()
+
+    # Baseline
+    baseline = evaluate_program(program, testset, simple_metric)
+    print(f"Baseline score: {baseline:.1%}")
+
+    # Optimize
+    logger.info("Running BootstrapFewShot optimization...")
+    optimizer = dspy.BootstrapFewShot(metric=simple_metric)
+    optimized = optimizer.compile(program, trainset=trainset)
+
+    # Test
+    optimized_score = evaluate_program(optimized, testset, simple_metric)
+
+    elapsed = time.time() - start_time
+    improvement = optimized_score - baseline
+
+    print(f"Optimized score: {optimized_score:.1%}")
+    print(f"Improvement: {improvement:+.1%}")
+    print(f"Time: {elapsed:.1f}s")
+
+    return {
+        "optimizer": "BootstrapFewShot",
+        "baseline": baseline,
+        "optimized": optimized_score,
+        "improvement": improvement,
+        "improvement_pct": improvement / baseline * 100 if baseline > 0 else 0,
+        "time_seconds": elapsed,
+        "cost_estimate": "$0.00 (free - uses existing traces)",
+    }
+
+

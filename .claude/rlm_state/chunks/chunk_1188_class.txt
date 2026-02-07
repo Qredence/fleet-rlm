@@ -1,0 +1,33 @@
+<!-- Chunk 1188: bytes 4501583-4502615, type=class -->
+class InitializeSkillSkeleton(dspy.Signature):
+    """Step 3: Create skill skeleton matching taxonomy standards."""
+    
+    skill_metadata = dspy.InputField()
+    capabilities = dspy.InputField()
+    
+    skill_skeleton = dspy.OutputField(
+        desc="""Complete skill structure:
+        
+        skill_id/
+        ├── metadata.json          # From PLAN step
+        ├── SKILL.md               # High-level description
+        ├── capabilities/          # One file per capability
+        │   ├── capability_1.md
+        │   └── capability_2.md
+        ├── examples/              # Usage examples
+        │   └── example_1.md
+        ├── tests/                 # Validation tests
+        │   └── test_suite.json
+        └── resources/             # Optional external deps
+            └── .gitkeep
+        
+        All paths relative to: skills/{taxonomy_path}/
+        """
+    )
+```
+
+**Why:** Standardized structure enables automated validation and consistent loading.
+
+### 4. **EDIT Should Support Skill Composition**
+
+```python

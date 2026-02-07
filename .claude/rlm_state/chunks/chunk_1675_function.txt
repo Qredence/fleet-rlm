@@ -1,0 +1,28 @@
+<!-- Chunk 1675: bytes 6695095-6696188, type=function -->
+def resolve_path_within_root(root: Path, relative_path: str) -> Path:
+    """
+    Resolve a sanitized relative path under a root directory.
+
+    Returns an absolute path and raises ValueError if the resolved path escapes
+    the given root directory (including via `..` segments or symlink traversal).
+    """
+    sanitized = sanitize_relative_file_path(relative_path)
+    if not sanitized:
+        raise ValueError("Invalid relative path")
+
+    # Security: resolve root and enforce containment before using candidate
+    root_resolved = root.resolve()
+    root_real = os.path.realpath(os.fspath(root_resolved))
+
+    candidate = root_resolved.joinpath(sanitized)
+    # Normalize candidate path (follow symlinks, collapse ".." etc.)
+    candidate_str = os.path.realpath(os.fspath(candidate))
+
+    # Verify that the normalized candidate is contained within the normalized root
+    if os.path.commonpath([root_real, candidate_str]) != root_real:
+        raise ValueError(f"Path escapes root: {candidate_str}")
+
+    # Now safe to use the normalized candidate path
+    return Path(candidate_str)
+
+

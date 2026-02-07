@@ -1,0 +1,60 @@
+<!-- Chunk 1471: bytes 6318859-6320372, type=function -->
+def get_settings() -> APISettings:
+    """
+    Get cached APISettings instance.
+
+    This ensures configuration is loaded once and reused, which is
+    important for performance and consistency.
+
+    Returns:
+        Cached APISettings instance
+
+    """
+    return APISettings()
+
+
+__all__ = [
+    "APISettings",
+    "get_settings",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/api/config.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/api/dependencies.py
+============================================================
+
+"""
+FastAPI dependency injection for shared resources.
+
+This module provides centralized dependency functions for FastAPI routes,
+ensuring consistent configuration and enabling easier testing through
+dependency overrides.
+
+Usage:
+    from fastapi import Depends
+    from skill_fleet.api.dependencies import get_taxonomy_manager, get_skills_root
+
+    @router.get("/skills")
+    async def list_skills(manager: TaxonomyManager = Depends(get_taxonomy_manager)) -> list:
+        return manager.list_skills()
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import Depends
+
+from skill_fleet.taxonomy.manager import TaxonomyManager
+
+from ..common.paths import ensure_skills_root_initialized
+from .services.skill_service import SkillService
+
+
+@lru_cache(maxsize=1)

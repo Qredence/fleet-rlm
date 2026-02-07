@@ -1,0 +1,7 @@
+<!-- Chunk 951: bytes 3413922-3414082, type=function -->
+def test_config_error_has_exit_code_2():
+    """Test ConfigError has exit code 2."""
+    error = ConfigError("Config failed")
+    assert error.exit_code == 2
+
+

@@ -1,0 +1,81 @@
+<!-- Chunk 1777: bytes 7424830-7427494, type=function -->
+def print_evaluation_report(eval_results: dict[str, Any]) -> None:
+    """
+    Print a formatted evaluation report.
+
+    Args:
+        eval_results: Results from evaluate_program
+
+    """
+    print("\n" + "=" * 60)
+    print("EVALUATION REPORT")
+    print("=" * 60)
+    print(f"Examples evaluated: {eval_results['n_examples']}")
+    print(f"Mean score: {eval_results['mean']:.3f}")
+    print(f"Std deviation: {eval_results['std']:.3f}")
+    print(f"Min score: {eval_results['min']:.3f}")
+    print(f"Max score: {eval_results['max']:.3f}")
+    print("-" * 60)
+    print("\nIndividual Results:")
+    for i, result in enumerate(eval_results["results"], 1):
+        status = "OK" if result["success"] else "FAIL"
+        print(f"  {i}. [{status}] {result['example']}... -> {result['score']:.2f}")
+        if not result["success"]:
+            print(f"      Error: {result.get('error', 'Unknown')}")
+    print("=" * 60 + "\n")
+
+
+============================================================
+END FILE: src/skill_fleet/core/optimization/evaluation.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/core/optimization/optimizer.py
+============================================================
+
+"""
+Optimization scripts for DSPy skill creation workflows.
+
+This module provides:
+- MIPROv2 optimization for prompt tuning
+- GEPA optimization for reflective prompt evolution
+- Save/load functionality for optimized programs
+- MLflow tracking integration (optional)
+
+Approved LLM Models:
+- gemini-3-flash-preview: Primary model for all workflow steps
+- gemini-3-pro-preview: For GEPA reflection (stronger reasoning)
+- deepseek-v3.2: Cost-effective alternative
+- Nemotron-3-Nano-30B-A3B: Lightweight/fast operations
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any, Literal
+
+import dspy
+
+# TODO: LegacySkillCreationProgram has been removed - update optimizer
+LegacySkillCreationProgram = Any
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Approved Models Configuration
+# =============================================================================
+
+APPROVED_MODELS = {
+    "gemini-3-flash-preview": "gemini/gemini-3-flash-preview",
+    "gemini-3-pro-preview": "gemini/gemini-3-pro-preview",
+    "deepseek-v3.2": "deepinfra/deepseek-v3.2",
+    "Nemotron-3-Nano-30B-A3B": "nvidia/Nemotron-3-Nano-30B-A3B",
+}
+
+DEFAULT_MODEL = "gemini-3-flash-preview"
+REFLECTION_MODEL = "gemini-3-pro-preview"  # For GEPA reflection
+STATE_FILENAME = "program_state.json"
+
+

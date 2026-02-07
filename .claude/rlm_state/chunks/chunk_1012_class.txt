@@ -1,0 +1,20 @@
+<!-- Chunk 1012: bytes 3558351-3558975, type=class -->
+class SignatureVersionManager:
+    def migrate(self, old_signature_dict: dict, from_version: str, to_version: str) -> dict:
+        # Apply all migrations in sequence
+        current = old_signature_dict
+        for v in versions_between(from_version, to_version):
+            current = self.apply_migration(current, v)
+        return current
+    
+    def get_latest_version(self, signature_name: str) -> str:
+        # Return current version of signature
+        pass
+    
+    def list_versions(self, signature_name: str) -> list[str]:
+        # Show all versions available
+        pass
+```
+
+**On Program Load**:
+```python

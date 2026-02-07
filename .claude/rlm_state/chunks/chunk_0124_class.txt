@@ -1,0 +1,10 @@
+<!-- Chunk 124: bytes 168208-168572, type=class -->
+class ClassificationSignature(dspy.Signature):
+    """Signature for classification tasks."""
+
+    input_data = dspy.InputField(desc="Data to classify")
+    category = dspy.OutputField(desc="Predicted category")
+    reasoning = dspy.OutputField(desc="Explanation of classification decision")
+    confidence = dspy.OutputField(desc="Confidence in classification")
+
+

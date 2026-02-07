@@ -1,0 +1,114 @@
+<!-- Chunk 652: bytes 1032527-1035146, type=function -->
+def test_metric():
+    from skill_fleet.core.dspy.metrics.enhanced_metrics import comprehensive_metric
+    import dspy
+    
+    # Load examples
+    examples = load_trainset("config/training/trainset_v4.json")
+    
+    # Test metric on first 10
+    for ex in examples[:10]:
+        # Create mock prediction matching example
+        pred = dspy.Prediction(
+            taxonomy_path=ex.expected_taxonomy_path,
+            skill_metadata=MockMetadata(),
+            skill_style=ex.expected_skill_style,
+        )
+        
+        score = comprehensive_metric(ex, pred)
+        print(f"Example score: {score:.3f}")
+```
+
+✅ **Solution**: Adjust metric weights or thresholds if too many examples score <0.5
+
+**4. Signature Constraints Conflicting**
+```python
+# Check if OutputField constraints are contradictory
+# Example: "concise, 1-2 words" AND "include detailed explanation"
+```
+
+✅ **Solution**: Review signature descriptions for consistency
+
+## API Optimization Job Fails
+
+### Symptom
+POST `/optimization/start` returns error or job status shows "failed"
+
+### Possible Causes & Solutions
+
+**1. Trainset File Not Found**
+```bash
+# Check file exists
+ls -la config/training/trainset_v4.json
+
+# Check path is relative to repo root
+pwd
+```
+
+✅ **Solution**: Use correct relative path from repo root
+
+**2. Invalid JSON Structure**
+```bash
+# Validate JSON
+jq . config/training/trainset_v4.json > /dev/null && echo "Valid JSON" || echo "Invalid JSON"
+
+# Check required fields
+jq '.[0] | keys' config/training/trainset_v4.json
+# Should include: task_description
+```
+
+✅ **Solution**: Fix JSON structure or regenerate trainset
+
+**3. API Server Not Running**
+```bash
+# Check if server is running
+curl http://localhost:8000/health
+
+# If not, start it
+uv run skill-fleet serve
+```
+
+**4. Missing API Key**
+```bash
+# Check environment variable
+echo $GOOGLE_API_KEY
+
+# If empty, set it
+export GOOGLE_API_KEY=your_api_key_here
+```
+
+✅ **Solution**: Set required environment variables in `.env`
+
+**5. Memory/CPU Limits**
+```bash
+# Check system resources
+top  # or htop
+
+# Optimization is memory-intensive (can use 4-8GB RAM)
+```
+
+✅ **Solution**: 
+- Close other applications
+- Reduce `num_candidate_programs` (16 → 8)
+- Use `auto="light"` instead of "medium"
+
+## Type Errors in Signatures
+
+### Symptom
+```
+error[invalid-type-form]: Function `callable` is not valid in a type expression
+error[unresolved-reference]: Name `Literal` used when not defined
+```
+
+### Solutions
+
+**1. Missing Import**
+```python
+# ✅ Add to imports
+from __future__ import annotations
+from typing import Literal, Callable
+```
+
+**2. Wrong Type Syntax**
+```python
+# ❌ Bad

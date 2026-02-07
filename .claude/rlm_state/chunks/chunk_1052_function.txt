@@ -1,0 +1,10 @@
+<!-- Chunk 1052: bytes 3773513-3773788, type=function -->
+def test_path_traversal_prevented():
+    """Test that path traversal attempts are blocked."""
+    with pytest.raises(ValueError):
+        validate_path_within_root(
+            Path("../../etc/passwd"),
+            Path.cwd() / "skills",
+            "Skills root"
+        )
+

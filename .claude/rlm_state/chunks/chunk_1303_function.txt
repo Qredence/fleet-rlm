@@ -1,0 +1,8 @@
+<!-- Chunk 1303: bytes 4770893-4771167, type=function -->
+def save_dataset(examples: list, output: Path):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w", encoding="utf-8") as f:
+        json.dump(examples, f, indent=2, ensure_ascii=False)
+    print(f"💾 Saved {len(examples)} examples to {output}")
+
+

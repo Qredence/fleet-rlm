@@ -1,0 +1,69 @@
+<!-- Chunk 1785: bytes 7443997-7445681, type=function -->
+def quick_evaluate(
+    program: LegacySkillCreationProgram,
+    trainset_path: str | Path = "config/training/trainset.json",
+    model: str = DEFAULT_MODEL,
+    n_examples: int | None = None,
+) -> dict:
+    """
+    Run a quick evaluation on the program.
+
+    Args:
+        program: Program to evaluate
+        trainset_path: Path to evaluation data
+        model: Model to use for evaluation
+        n_examples: Number of examples to evaluate (None = all)
+
+    Returns:
+        Evaluation results dict
+
+    """
+    from .evaluation import (
+        evaluate_program,
+        load_trainset,
+        print_evaluation_report,
+        skill_creation_metric,
+    )
+
+    # Configure model
+    lm = get_lm(model)
+    dspy.configure(lm=lm)
+
+    # Load examples
+    examples = load_trainset(trainset_path)
+    if n_examples:
+        examples = examples[:n_examples]
+
+    # Create minimal parent_skills_getter for evaluation
+    def dummy_parent_getter(path: str) -> list:
+        """
+        Dummy parent skill getter for evaluation context.
+
+        Args:
+            path: Path to get parent skills for (ignored)
+
+        Returns:
+            Empty list for evaluation purposes
+
+        """
+        return []
+
+    # Run evaluation
+    results = evaluate_program(
+        program,
+        examples,
+        metric=skill_creation_metric,
+        existing_skills=[],
+        taxonomy_structure={},
+        parent_skills_getter=dummy_parent_getter,
+    )
+
+    print_evaluation_report(results)
+    return results
+
+
+# =============================================================================
+# CLI Entry Point
+# =============================================================================
+
+

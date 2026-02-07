@@ -1,0 +1,778 @@
+<!-- Chunk 1118: bytes 4161030-4180748, type=function -->
+def configure_dspy(
+    config_path: Path | None = None,
+    default_task: str = "skill_understand",
+) -> dspy.LM:
+    """Configure DSPy with fleet config and return default LM.
+
+    Args:
+        config_path: Path to config/config.yaml (default: project root)
+        default_task: Default task to use for dspy.settings.lm
+
+    Returns:
+        The configured LM instance (also set as dspy.settings.lm)
+
+    Example:
+        >>> from skill_fleet.llm.dspy_config import configure_dspy
+        >>> lm = configure_dspy()
+        >>> # Now all DSPy modules use this LM by default
+    """
+````markdown
+# Moved: DSPy configuration (archived)
+
+This content has been consolidated into the canonical LLM reference: `docs/reference/llm-config.md`.
+
+An archived copy of the original detailed page is available at `docs/archive/legacy_llm/dspy-config.md`.
+
+If you are looking for programmatic usage (configure_dspy, get_task_lm) or the original deep-dive, see the archived file above or the consolidated reference.
+
+`````
+
+result = await module.aforward(...)
+
+
+============================================================
+END FILE: docs/llm/dspy-config.md
+============================================================
+
+============================================================
+FILE: docs/llm/index.md
+============================================================
+
+# LLM Configuration
+
+**Last Updated**: 2026-01-12
+**Location**: `src/skill_fleet/llm/`
+
+## Overview
+
+Skills Fleet supports multiple LLM providers through a centralized configuration system. Task-specific model selection allows different workflows to use optimized models for their specific needs.
+
+`★ Insight ─────────────────────────────────────`
+The **task-specific model mapping** is a key differentiator. Different phases of skill creation require different capabilities: understanding requires high reasoning, validation requires precision, and generation requires creativity. Each task uses an optimized model.
+`─────────────────────────────────────────────────`
+
+## Configuration File
+
+**Location**: `config/config.yaml`
+
+`````yaml
+# Default model
+models:
+  default: "gemini:gemini-3-flash-preview"
+
+  # Model registry
+  registry:
+    # Gemini (Google)
+    gemini:gemini-3-flash-preview:
+      model: "gemini-3-flash-preview"
+      model_type: "chat"
+      env: "GEMINI_API_KEY"
+      env_fallback: "GOOGLE_API_KEY"
+      parameters:
+        temperature: 1.0
+        max_tokens: 4096
+        thinking_level: "high"
+
+    gemini:gemini-2.5-pro:
+      model: "gemini-2.5-pro"
+      model_type: "chat"
+      env: "GEMINI_API_KEY"
+      parameters:
+        temperature: 1.0
+        max_tokens: 8192
+
+    # DeepInfra
+    deepinfra:meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo:
+      model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+      model_type: "chat"
+      env: "DEEPINFRA_API_KEY"
+      base_url_env: "DEEPINFRA_BASE_URL"
+      base_url_default: "https://api.deepinfra.com/v1/openai"
+      parameters:
+        temperature: 1.0
+        max_tokens: 4096
+
+    # ZAI (Claude)
+    zai:claude-sonnet-4-20250514:
+      model: "claude-sonnet-4-20250514"
+      model_type: "chat"
+      env: "ZAI_API_KEY"
+      base_url_env: "ZAI_BASE_URL"
+      parameters:
+        temperature: 1.0
+        max_tokens: 8192
+
+    # Vertex AI
+    vertex:claude-3-5-sonnet@20240620:
+      model: "claude-3-5-sonnet@20240620"
+      model_type: "chat"
+      parameters:
+        temperature: 1.0
+        max_tokens: 4096
+        vertex_project: "your-project-id"
+        vertex_location: "us-central1"
+
+# Task-specific models
+tasks:
+  skill_understand:
+    role: understanding
+    model: "gemini:gemini-3-flash-preview"
+    parameters:
+      temperature: 1.0
+
+  skill_plan:
+    role: planning
+    model: "gemini:gemini-3-flash-preview"
+    parameters:
+      temperature: 1.0
+
+  skill_initialize:
+    role: fast_operation
+    model: "gemini:gemini-3-flash-preview"
+    ````markdown
+    # Moved: LLM Configuration (archived)
+
+    This index was consolidated into the canonical LLM reference: `docs/reference/llm-config.md`.
+
+    An archived copy of the original index and deep-dive pages is available under `docs/archive/legacy_llm/`.
+
+    See: `docs/reference/llm-config.md` for the current, canonical guidance.
+
+    ````
+deepinfra:meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo:
+  model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+  env: "DEEPINFRA_API_KEY"
+  base_url_env: "DEEPINFRA_BASE_URL"
+  base_url_default: "https://api.deepinfra.com/v1/openai"
+  parameters:
+    temperature: 0.7
+    max_tokens: 4096
+`````
+
+**Setup:**
+
+```bash
+export DEEPINFRA_API_KEY="your-api-key"
+```
+
+**Features:**
+
+- OpenAI-compatible API
+- Open-source models
+- Cost-effective
+
+### ZAI (Claude)
+
+**Required**: `ZAI_API_KEY`
+
+```yaml
+zai:claude-sonnet-4-20250514:
+  model: "claude-sonnet-4-20250514"
+  env: "ZAI_API_KEY"
+  base_url_env: "ZAI_BASE_URL"
+  parameters:
+    temperature: 0.7
+    max_tokens: 8192
+```
+
+**Setup:**
+
+```bash
+export ZAI_API_KEY="your-api-key"
+```
+
+**Features:**
+
+- Anthropic Claude models
+- High-quality outputs
+- Long context windows
+
+### Vertex AI
+
+**Required**: Google Cloud credentials (ADC)
+
+```yaml
+vertex:claude-3-5-sonnet@20240620:
+  model: "claude-3-5-sonnet@20240620"
+  parameters:
+    temperature: 0.7
+    max_tokens: 4096
+    vertex_project: "your-project-id"
+    vertex_location: "us-central1"
+```
+
+**Setup:**
+
+```bash
+gcloud auth application-default login
+```
+
+**Features:**
+
+- Enterprise Google Cloud integration
+- Vertex AI model garden
+- Private deployments
+
+## Programmatic Usage
+
+### Configure DSPy
+
+```python
+from skill_fleet.llm.dspy_config import configure_dspy
+
+# Configure with default task
+lm = configure_dspy()
+
+# Now all DSPy modules use this LM
+```
+
+### Get Task-Specific LM
+
+```python
+from skill_fleet.llm.dspy_config import get_task_lm
+import dspy
+
+# Get LM for specific task
+edit_lm = get_task_lm("skill_edit")
+
+# Use temporarily
+with dspy.context(lm=edit_lm):
+    result = await module.aforward(...)
+```
+
+### Custom Config Path
+
+```python
+from pathlib import Path
+
+lm = configure_dspy(
+    config_path=Path("custom/config.yaml"),
+    default_task="skill_edit"
+)
+```
+
+## Next Steps
+
+- **[Providers Documentation](providers.md)** - Provider-specific setup
+- **[DSPy Config Documentation](dspy-config.md)** - Centralized configuration
+- **[Task Models Documentation](task-models.md)** - Task-specific mapping
+
+## Related Documentation
+
+- **[DSPy Overview](../dspy/)** - DSPy architecture and usage
+- **[API Documentation](../api/)** - REST API reference
+
+
+============================================================
+END FILE: docs/llm/index.md
+============================================================
+
+============================================================
+FILE: docs/llm/providers.md
+============================================================
+
+# LLM Providers Reference
+
+**Last Updated**: 2026-01-12
+
+## Overview
+
+Skills Fleet supports multiple LLM providers through a unified configuration system. All providers are accessible via the same API using LiteLLM-compatible model strings.
+
+Default model: gemini/gemini-3-flash-preview (see config/config.yaml)
+
+`★ Insight ─────────────────────────────────────`
+The provider abstraction allows you to switch between models without changing code. A task that uses `skill_understand` can be reconfigured to use Gemini, Claude, or Llama simply by changing the config file.
+`─────────────────────────────────────────────────`
+
+## Supported Providers
+
+| Provider      | Models             | Best For             |
+| ------------- | ------------------ | -------------------- |
+| **Gemini**    | 2.0 Flash, 2.5 Pro | Fast, cost-effective |
+| **DeepInfra** | Llama 3.1, Mixtral | Open-source options  |
+| **ZAI**       | Claude Sonnet 4    | High-quality outputs |
+
+```markdown
+# Moved: LLM Providers (archived)
+
+The detailed providers reference has been consolidated into the canonical reference: `docs/reference/llm-config.md`.
+
+An archived copy of the original detailed providers file is available at `docs/archive/legacy_llm/providers.md`.
+
+For quick guidance and recommended provider settings, see `docs/reference/llm-config.md`.
+```
+
+        max_tokens: 8192
+
+````
+
+### Setup
+
+```bash
+# Get API key from ZAI
+export ZAI_API_KEY="zai-..."
+
+# Optional: Custom base URL
+export ZAI_BASE_URL="https://api.zai.ai"
+````
+
+### Features
+
+- **High Quality**: Claude models are known for nuanced outputs
+- **Long Context**: Up to 200K tokens
+- **Anthropic-style**: Follows Anthropic's AI principles
+
+### Usage Example
+
+```python
+import dspy
+
+claude_lm = dspy.LM(
+    "anthropic/glm-4.7",
+    api_key="...",
+    api_base="https://api.zai.ai",
+)
+```
+
+---
+
+## Vertex AI
+
+### Overview
+
+Google Cloud's Vertex AI provides enterprise access to various models including Gemini and Claude.
+
+### Models
+
+| Model                 | Provider  | Context     | Features   |
+| --------------------- | --------- | ----------- | ---------- |
+| **Claude 3.5 Sonnet** | Anthropic | 200K tokens | Via Vertex |
+| **Gemini Pro**        | Google    | 2M tokens   | Via Vertex |
+
+### Configuration
+
+```yaml
+models:
+  registry:
+    vertex:deepseek/deepseek-v3.2:
+      model: "deepseek-v3.2"
+      model_type: "chat"
+      parameters:
+        temperature: 0.7
+        max_tokens: 4096
+        vertex_project: "your-project-id"
+        vertex_location: "us-central1"
+```
+
+### Setup
+
+```bash
+# Authenticate with Google Cloud
+gcloud auth application-default login
+
+# Set project
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+```
+
+### Features
+
+- **Enterprise**: Private deployments, VPC-SC
+- **Monitoring**: Cloud Logging integration
+- **Security**: IAM-based access control
+
+### Usage Example
+
+```python
+import dspy
+from google.cloud import aiplatform
+
+# Uses Application Default Credentials
+vertex_lm = dspy.LM(
+    "vertex_ai_deepseek_v3_2",
+    project="your-project-id",
+    location="us-central1",
+)
+```
+
+---
+
+## Provider Comparison
+
+| Provider      | Cost   | Speed  | Quality   | Open Source | Enterprise |
+| ------------- | ------ | ------ | --------- | ----------- | ---------- |
+| **Gemini**    | Low    | Fast   | High      | No          | Yes        |
+| **DeepInfra** | Low    | Fast   | Medium    | Yes         | No         |
+| **ZAI**       | High   | Medium | Very High | No          | No         |
+| **Vertex AI** | Medium | Medium | High      | No          | Yes        |
+
+---
+
+## Choosing a Provider
+
+### Use Gemini When:
+
+- You want fast, cost-effective inference
+- You need large context windows
+- You're just getting started
+
+### Use DeepInfra When:
+
+- You prefer open-source models
+- You want to minimize costs
+- You need specific model architectures
+
+### Use ZAI When:
+
+- You need highest quality outputs
+- You value nuanced language
+- Cost is less important
+
+### Use Vertex AI When:
+
+- You're an enterprise Google Cloud customer
+- You need private deployments
+- You want centralized billing
+
+---
+
+## Switching Providers
+
+To switch providers for a task:
+
+```yaml
+tasks:
+  skill_edit:
+    model: "gemini:gemini-2.5-pro" # Change to "zai:claude-sonnet-4" to use Claude
+```
+
+Or via environment variable:
+
+```bash
+export FLEET_MODEL_SKILL_EDIT="zai:claude-sonnet-4"
+```
+
+---
+
+## See Also
+
+- **[LLM Configuration Overview](index.md)** - Configuration system
+- **[DSPy Config Documentation](dspy-config.md)** - Programmatic usage
+- **[Task Models Documentation](task-models.md)** - Task-specific mapping
+
+
+============================================================
+END FILE: docs/llm/providers.md
+============================================================
+
+============================================================
+FILE: docs/llm/task-models.md
+============================================================
+
+# Task-Specific Model Mapping
+
+**Last Updated**: 2026-01-12
+
+## Overview
+
+Skills Fleet uses different LLM configurations for different phases of the skill creation workflow. This ensures each phase uses a model optimized for its specific requirements.
+
+`★ Insight ─────────────────────────────────────`
+The **one-size-fits-all** approach to LLM selection is inefficient. Understanding requires high reasoning (higher temperature), while validation requires precision (lower temperature). Task-specific models balance quality with cost.
+`─────────────────────────────────────────────────`
+
+## Task Mappings
+
+| Task                      | Phase   | Purpose            | Recommended Model      | Temperature | Reasoning                           |
+| ------------------------- | ------- | ------------------ | ---------------------- | ----------- | ----------------------------------- |
+| **skill_gather_examples** | Phase 0 | Example gathering  | Conversational model   | 0.4         | Focused questioning, conversational |
+| **skill_understand**      | Phase 1 | Task analysis      | High reasoning model   | 0.7         | Complex analysis needs creativity   |
+| **skill_plan**            | Phase 1 | Structure planning | Medium reasoning model | 0.5         | Structured planning needs precision |
+| **skill_initialize**      | Phase 2 | Directory setup    | Fast model             | 0.1         | Simple operation, deterministic     |
+| **skill_edit**            | Phase 2 | Content generation | Creative model         | 0.6         | Content creation needs creativity   |
+| **skill_package**         | Phase 3 | Validation         | Precise model          | 0.1         | Validation needs consistency        |
+| **skill_validate**        | Phase 3 | Compliance check   | Precise model          | 0.0         | Strict checking, no variance        |
+
+## Task Details
+
+### skill_gather_examples
+
+**Phase:** Phase 0 - Example Gathering
+**Purpose:** Collect concrete usage examples through focused questioning
+
+**Requirements:**
+
+- Conversational ability
+- Focused questioning
+- Example extraction
+
+**Model Characteristics:**
+
+- **Temperature:** 0.4 (conversational, focused)
+- **Max Tokens:** 2048
+- **Reasoning:** Low-Medium
+
+**Used by:**
+
+- `GatherExamplesModule`
+
+```markdown
+# Moved: Task-specific model mapping (archived)
+
+The detailed task-model mapping content has been consolidated into the canonical reference: `docs/reference/llm-config.md`.
+
+An archived copy of the original detailed page is available at `docs/archive/legacy_llm/task-models.md`.
+
+For recommended task-to-model mappings and configuration guidance, see `docs/reference/llm-config.md`.
+```
+
+**Phase:** Phase 2 - Content Generation
+**Purpose:** Generate skill content
+
+**Requirements:**
+
+- Creative writing
+- High quality
+- Engaging explanations
+
+**Model Characteristics:**
+
+- **Temperature:** 0.6 (higher for creativity)
+- **Max Tokens:** 8192
+- **Reasoning:** Medium-High
+
+**Used by:**
+
+- `ContentGeneratorModule`
+- `FeedbackIncorporatorModule`
+
+**Why High Temperature:**
+Content generation is the most creative phase. Higher temperature allows for varied examples, engaging explanations, and creative analogies.
+
+---
+
+### skill_package
+
+**Phase:** Phase 3 - Validation & Refinement
+**Purpose:** Package and format skill
+
+**Requirements:**
+
+- Consistent formatting
+- Accurate metadata
+- Reliable validation
+
+**Model Characteristics:**
+
+- **Temperature:** 0.1 (low for determinism)
+- **Max Tokens:** 2048
+- **Reasoning:** Low
+
+**Used by:**
+
+- Packaging operations
+- Final formatting
+
+**Why Low Temperature:**
+Packaging requires consistency and accuracy. Low temperature ensures the same input always produces the same formatted output.
+
+---
+
+### skill_validate
+
+**Phase:** Phase 3 - Validation & Refinement
+**Purpose:** Validate compliance and quality
+
+**Requirements:**
+
+- Strict validation
+- No variance
+- Precise checking
+
+**Model Characteristics:**
+
+- **Temperature:** 0.0 (no variance)
+- **Max Tokens:** 2048
+- **Reasoning:** Low
+
+**Used by:**
+
+- `SkillValidatorModule`
+- `QualityAssessorModule`
+
+**Why Zero Temperature:**
+Validation must be deterministic. The same skill should always produce the same validation result. Zero temperature eliminates variance entirely.
+
+---
+
+## Temperature vs Task Type
+
+```mermaid
+graph LR
+    subgraph Creative
+        U[skill_understand<br/>0.7]
+        E[skill_edit<br/>0.6]
+    end
+
+    subgraph Balanced
+        P[skill_plan<br/>0.5]
+        GE[skill_gather_examples<br/>0.4]
+    end
+
+    subgraph Deterministic
+        I[skill_initialize<br/>0.1]
+        V[skill_validate<br/>0.0]
+        PK[skill_package<br/>0.1]
+    end
+
+    Creative --> Balanced --> Deterministic
+```
+
+**Key Insight:**
+
+- **Creative tasks** (understanding, editing) → Higher temperature (0.6-0.7)
+- **Balanced tasks** (planning, example gathering) → Medium temperature (0.4-0.5)
+- **Deterministic tasks** (initialization, validation) → Low/zero temperature (0.0-0.1)
+
+---
+
+## Configuration
+
+### Default Config
+
+```yaml
+tasks:
+  skill_gather_examples:
+    role: example_gathering
+    model: "gemini/gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.4
+
+  skill_understand:
+    role: understanding
+    model: "gemini/gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.7
+
+  skill_plan:
+    role: planning
+    model: "gemini/gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.5
+
+  skill_initialize:
+    role: fast_operation
+    model: "gemini/gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.1
+
+  skill_edit:
+    role: creative_generation
+    model: "gemini/gemini-2.5-pro"
+    parameters:
+      temperature: 0.6
+
+  skill_package:
+    role: validation
+    model: "gemini/gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.1
+
+  skill_validate:
+    role: strict_validation
+    model: "gemini/gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.0
+```
+
+---
+
+## Overriding Task Models
+
+### Via Config File
+
+```yaml
+# Use Claude for all editing tasks
+tasks:
+  skill_edit:
+    model: "zai:claude-sonnet-4-20250514"
+```
+
+### Via Environment Variable
+
+```bash
+# Override specific task
+export FLEET_MODEL_SKILL_EDIT="zai:claude-sonnet-4-20250514"
+
+# Override all tasks to use same model
+export FLEET_MODEL_DEFAULT="deepinfra:meta-llama/Meta-Llama-3.1-70B"
+```
+
+### Programmatically
+
+```python
+from skill_fleet.llm.dspy_config import get_task_lm
+import dspy
+
+# Get task-specific LM
+edit_lm = get_task_lm("skill_edit")
+
+# Verify temperature
+assert edit_lm.kwargs["temperature"] == 0.6
+```
+
+---
+
+## Cost Optimization
+
+| Strategy                          | Description                          | Savings         |
+| --------------------------------- | ------------------------------------ | --------------- |
+| **Fast model for initialization** | Use flash models for simple tasks    | ~50%            |
+| **Zero temp for validation**      | No need for creativity in validation | More consistent |
+| **Cache enabled**                 | Enable `DSPY_CACHEDIR`               | Variable        |
+
+**Example Cost-Optimized Config:**
+
+```yaml
+tasks:
+  # Use fast/cheap model for initialization
+  skill_initialize:
+    model: "gemini:gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.1
+
+  # Use high-quality model only for content generation
+  skill_edit:
+    model: "gemini:gemini-2.5-pro"
+    parameters:
+      temperature: 0.6
+
+  # Use fast model for validation (deterministic anyway)
+  skill_validate:
+    model: "gemini:gemini-2.0-flash-exp"
+    parameters:
+      temperature: 0.0
+```
+
+---
+
+## Quality vs Speed Tradeoffs
+
+| Configuration  | Quality   | Speed  | Cost   |
+| -------------- | --------- | ------ | ------ |
+| **All Flash**  | Medium    | Fast   | Low    |
+| **Edit = Pro** | High      | Medium | Medium |
+| **All Pro**    | Very High | Slow   | High   |
+| **Mixed**      | High      | Medium | Medium |
+
+**Recommended:** Mixed configuration (default)
+
+---
+
+## Testing Task Models
+
+```python
+import pytest
+from skill_fleet.llm.dspy_config import get_task_lm
+

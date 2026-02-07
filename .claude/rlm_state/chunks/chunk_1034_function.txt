@@ -1,0 +1,53 @@
+<!-- Chunk 1034: bytes 3721486-3723024, type=function -->
+def safe_json_loads(
+    value: str | Any,
+    default: dict | list | None = None,
+    field_name: str = "unknown",
+) -> dict | list:
+    """Safely parse JSON string with fallback to default.
+
+    Handles:
+    - Already parsed objects (returns as-is)
+    - Valid JSON strings (parses and returns)
+    - Invalid JSON (returns default with warning)
+    - Pydantic models (extracts via model_dump())
+
+    Args:
+        value: String to parse or already-parsed object
+        default: Default value if parsing fails (dict or list)
+        field_name: Field name for logging
+
+    Returns:
+        Parsed JSON or default value (never None)
+    """
+    if default is None:
+        default = {}
+
+    # Already parsed (dict, list, or Pydantic model)
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return [item.model_dump() if hasattr(item, "model_dump") else item for item in value]
+    if hasattr(value, "model_dump"):  # Pydantic model
+        return value.model_dump()
+
+    # Empty or None
+    if not value:
+        return default
+
+    # Try to parse JSON string
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"Failed to parse JSON for field '{field_name}': {e}. "
+                f"Value preview: {value[:100]}..."
+            )
+            return default
+
+    # Unknown type
+    logger.warning(f"Unexpected type for field '{field_name}': {type(value)}")
+    return default
+
+

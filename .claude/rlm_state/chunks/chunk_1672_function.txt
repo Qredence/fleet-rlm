@@ -1,0 +1,107 @@
+<!-- Chunk 1672: bytes 6688708-6692478, type=function -->
+def ensure_skills_root_initialized(skills_root: Path) -> Path:
+    """
+    Ensure a skills_root exists and has the minimal required files.
+
+    This is primarily for first-run UX when installed from PyPI: users shouldn't
+    need to clone the repo just to get `taxonomy_meta.json`, `taxonomy_index.json`,
+    and the default `_templates/skill_template.json`.
+    """
+    root_path = Path(skills_root)
+    if root_path.exists():
+        if root_path.is_symlink():
+            raise ValueError("skills_root must not be a symlink")
+        resolved = root_path.resolve(strict=True)
+        if not resolved.is_dir():
+            raise ValueError("skills_root must be a directory")
+    else:
+        root_path.mkdir(parents=True, exist_ok=True)
+        resolved = root_path.resolve(strict=True)
+
+    seed_root = _seed_skills_root()
+
+    # taxonomy_meta.json (required by TaxonomyManager)
+    meta_path = resolved / "taxonomy_meta.json"
+    if not meta_path.exists():
+        if meta_path.is_symlink():
+            raise ValueError("taxonomy_meta.json must not be a symlink")
+        seed_meta = seed_root / "taxonomy_meta.json"
+        if seed_meta.exists():
+            copy2(seed_meta, meta_path)
+        else:
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "total_skills": 0,
+                        "generation_count": 0,
+                        "statistics": {"by_type": {}, "by_weight": {}, "by_priority": {}},
+                        "last_updated": "",
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+    # taxonomy_index.json (optional but expected by migration + alias resolution)
+    index_path = resolved / "taxonomy_index.json"
+    if not index_path.exists():
+        if index_path.is_symlink():
+            raise ValueError("taxonomy_index.json must not be a symlink")
+        seed_index = seed_root / "taxonomy_index.json"
+        if seed_index.exists():
+            copy2(seed_index, index_path)
+        else:
+            index_path.write_text(
+                json.dumps({"version": "0.1", "skills": {}}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+    # _templates/skill_template.json (optional, used by SkillValidator overrides)
+    template_path = resolved / "_templates" / "skill_template.json"
+    if not template_path.exists():
+        if template_path.is_symlink():
+            raise ValueError("skill_template.json must not be a symlink")
+        template_path.parent.mkdir(parents=True, exist_ok=True)
+        if template_path.parent.is_symlink():
+            raise ValueError("_templates must not be a symlink")
+        seed_template = seed_root / "_templates" / "skill_template.json"
+        if seed_template.exists():
+            copy2(seed_template, template_path)
+
+    return resolved
+
+
+__all__ = [
+    "find_repo_root",
+    "default_config_path",
+    "default_config_root",
+    "resolve_repo_relative_path",
+    "default_profiles_path",
+    "default_skills_root",
+    "ensure_skills_root_initialized",
+]
+
+
+============================================================
+END FILE: src/skill_fleet/common/paths.py
+============================================================
+
+============================================================
+FILE: src/skill_fleet/common/security.py
+============================================================
+
+"""
+Security utilities for path validation and sanitization.
+
+This module provides centralized security functions for validating and sanitizing
+user-provided paths to prevent path traversal attacks and ensure paths remain
+within expected boundaries.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+

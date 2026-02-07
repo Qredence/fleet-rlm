@@ -1,0 +1,41 @@
+<!-- Chunk 1282: bytes 4737956-4739355, type=function -->
+def configure_dspy_for_tracking() -> None:
+    """
+    Configure DSPy with comprehensive tracking enabled.
+
+    DSPy v3.1.0 supports:
+    - dspy.settings.configure(track_lm_calls=True)
+    - dspy.settings.configure(cache_dir="./.dspy_cache")
+    - dspy.settings.configure(experimental=True)  # Enable beta features
+    """
+    logger.info("Configuring DSPy for production tracking...")
+
+    # Enable LM call tracking
+    try:
+        dspy.settings.configure(track_lm_calls=True)
+        logger.info("✅ LM call tracking enabled")
+    except Exception as e:
+        logger.warning(f"Could not enable LM tracking: {e}")
+
+    # Configure cache directory
+    try:
+        from skill_fleet.common.paths import find_repo_root
+
+        repo_root = find_repo_root(Path.cwd()) or Path.cwd()
+        cache_dir = repo_root / ".dspy_cache"
+        cache_dir.mkdir(exist_ok=True)
+        dspy.settings.configure(cache_dir=str(cache_dir))
+        logger.info(f"✅ DSPy cache configured: {cache_dir}")
+    except Exception as e:
+        logger.warning(f"Could not configure cache: {e}")
+
+    # Enable experimental DSPy features (v3.1.0)
+    try:
+        dspy.settings.configure(experimental=True)
+        logger.info("✅ DSPy experimental features enabled")
+    except Exception as e:
+        logger.warning(f"Could not enable experimental features: {e}")
+
+    logger.info("✅ DSPy tracking configuration complete")
+
+

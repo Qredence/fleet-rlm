@@ -1,0 +1,26 @@
+<!-- Chunk 1693: bytes 6721913-6722516, type=function -->
+def safe_float(value: Any, default: float = 0.0) -> float:
+    """
+    Safely convert value to float.
+
+    Useful for parsing confidence scores, thresholds, and other numeric
+    values from LLM outputs that may be returned as strings, ints, or floats.
+
+    Args:
+        value: Value to convert
+        default: Default if conversion fails
+
+    Returns:
+        Float value
+
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+

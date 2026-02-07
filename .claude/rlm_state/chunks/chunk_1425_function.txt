@@ -1,0 +1,17 @@
+<!-- Chunk 1425: bytes 5513458-5513991, type=function -->
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+print(fibonacci(10))
+print(fibonacci(10)) # retrieves from cache
+```
+
+This decorator caches the results of the `fibonacci` function, so subsequent calls with the same argument will return the cached value instead of recomputing it. `functools.wraps` is used to preserve the original function's metadata (e.g., name, docstring).
+
+# Authentication with Decorators
+
+Decorators can be used to implement basic authentication checks.
+
+```python

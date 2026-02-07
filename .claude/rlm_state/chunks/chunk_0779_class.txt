@@ -1,0 +1,27 @@
+<!-- Chunk 779: bytes 2646486-2646941, type=class -->
+class CreateSkillResponse(BaseModel):
+    job_id: str = Field(
+        ...,
+        description="Unique job identifier for tracking"
+    )
+    status: Literal["accepted", "rejected"] = Field(
+        ...,
+        description="Whether the job was accepted"
+    )
+```
+
+**Example:**
+```json
+{
+    "job_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "status": "accepted"
+}
+```
+
+---
+
+### JobStatusResponse
+
+Response schema for job status queries.
+
+```python

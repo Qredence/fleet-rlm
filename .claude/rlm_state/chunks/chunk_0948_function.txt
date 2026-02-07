@@ -1,0 +1,67 @@
+<!-- Chunk 948: bytes 3412113-3413553, type=function -->
+def validate_timeout(seconds: float) -> float:
+    """Validate timeout is reasonable.
+
+    Args:
+        seconds: The timeout value in seconds.
+
+    Returns:
+        The validated timeout.
+
+    Raises:
+        ValueError: If timeout is out of reasonable bounds.
+    """
+    if not (0 < seconds <= 300):
+        raise ValueError("Timeout must be between 0 and 300 seconds")
+    return seconds
+```
+
+**Step 4: Run test to verify it passes**
+
+```bash
+uv run pytest tests/cli/test_security_utils.py -v
+```
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/skill_fleet/cli/utils/security.py tests/cli/test_security_utils.py
+git commit -m "feat(cli): add security utilities for input validation
+
+- Add validate_path_within_root to prevent path traversal
+- Add sanitize_user_id to prevent injection attacks
+- Add validate_api_url to enforce secure protocols
+- Add validate_timeout for configurable timeouts
+
+Fixes security issues identified in cli-security-review.md"
+```
+
+---
+
+## Task 2: Create Custom Exception Classes
+
+**Files:**
+- Create: `src/skill_fleet/cli/exceptions.py`
+- Create: `tests/cli/test_exceptions.py`
+
+**Step 1: Write the failing test for custom exceptions**
+
+Create `tests/cli/test_exceptions.py`:
+
+```python
+"""Tests for CLI custom exceptions."""
+
+import pytest
+from rich.console import Console
+
+from skill_fleet.cli.exceptions import (
+    CLIError,
+    ConfigError,
+    APIError,
+    ValidationError,
+    CLIExit,
+)
+
+

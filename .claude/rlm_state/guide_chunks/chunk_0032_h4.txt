@@ -1,0 +1,9 @@
+<!-- Chunk 32: bytes 11527-11776, type=h4 -->
+#### Security restrictions
+
+**Forbidden in frontmatter:**
+•  XML angle brackets (`< >`)
+•  Skills with "claude" or "anthropic" in name (reserved)
+
+**Why:** Frontmatter appears in Claude's system prompt. Malicious content could inject instructions.
+

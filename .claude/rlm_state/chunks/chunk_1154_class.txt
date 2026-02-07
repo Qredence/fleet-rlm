@@ -1,0 +1,293 @@
+<!-- Chunk 1154: bytes 4399739-4410329, type=class -->
+class SkillValidator:
+    """Validates skills against taxonomy standards."""
+    
+    def __init__(self, schema_path: Path):
+        self.schema_path = schema_path
+        self.metadata_schema = self._load_schema()
+    
+    def _load_schema(self) -> Dict:
+        """Load JSON schema for metadata validation."""
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": [
+                "skill_id",
+                "version",
+                "type",
+                "weight",
+                "load_priority",
+                "dependencies",
+                "capabilities"
+            ],
+            "properties": {
+                "skill_id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)*$"
+                },
+                "version": {
+                    "type": "string",
+                    "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "cognitive",
+                        "technical",
+                        "domain",
+                        "tool",
+                        "mcp",
+                        "specialization",
+                        "task_focus",
+                        "memory"
+                    ]
+                },
+                "weight": {
+                    "type": "string",
+                    "enum": ["lightweight", "medium", "heavyweight"]
+                },
+                "load_priority": {
+                    "type": "string",
+                    "enum": ["always", "task_specific", "on_demand", "dormant"]
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "created_at": {"type": "string", "format": "date-time"},
+                "last_modified": {"type": "string", "format": "date-time"}
+            }
+        }
+        return schema
+    
+    def validate_metadata(self, metadata: Dict) -> Tuple[bool, List[str]]:
+        """Validate skill metadata against schema."""
+        errors = []
+        
+        try:
+            jsonschema.validate(instance=metadata, schema=self.metadata_schema)
+        except jsonschema.exceptions.ValidationError as e:
+            errors.append(f"Schema validation failed: {e.message}")
+            return False, errors
+        
+        # Additional custom validations
+        
+        # Check skill_id format matches taxonomy path
+        skill_id = metadata['skill_id']
+        if not self._validate_skill_id_format(skill_id):
+            errors.append(f"Invalid skill_id format: {skill_id}")
+        
+        # Validate version format
+        if not self._validate_semver(metadata['version']):
+            errors.append(f"Invalid version format: {metadata['version']}")
+        
+        # Check weight matches capabilities
+        if not self._validate_weight_capabilities(
+            metadata['weight'],
+            metadata['capabilities']
+        ):
+            errors.append(
+                f"Weight '{metadata['weight']}' inconsistent with "
+                f"{len(metadata['capabilities'])} capabilities"
+            )
+        
+        return len(errors) == 0, errors
+    
+    def validate_structure(self, skill_path: Path) -> Tuple[bool, List[str]]:
+        """Validate skill directory structure."""
+        errors = []
+        
+        # Required files
+        required_files = ['metadata.json', 'SKILL.md']
+        for filename in required_files:
+            if not (skill_path / filename).exists():
+                errors.append(f"Missing required file: {filename}")
+        
+        # Required directories
+        required_dirs = ['capabilities', 'examples', 'tests', 'resources']
+        for dirname in required_dirs:
+            if not (skill_path / dirname).is_dir():
+                errors.append(f"Missing required directory: {dirname}")
+        
+        # Validate metadata.json is valid JSON
+        try:
+            with open(skill_path / 'metadata.json', 'r') as f:
+                json.load(f)
+        except json.JSONDecodeError as e:
+            errors.append(f"Invalid JSON in metadata.json: {e}")
+        except FileNotFoundError:
+            pass  # Already reported above
+        
+        return len(errors) == 0, errors
+    
+    def validate_documentation(self, skill_md_path: Path) -> Tuple[bool, List[str]]:
+        """Validate SKILL.md documentation completeness."""
+        errors = []
+        warnings = []
+        
+        if not skill_md_path.exists():
+            return False, ["SKILL.md not found"]
+        
+        content = skill_md_path.read_text()
+        
+        # Required sections
+        required_sections = [
+            "# ",  # Title
+            "## Overview",
+            "## Capabilities",
+            "## Dependencies",
+            "## Usage Examples",
+            "## Best Practices"
+        ]
+        
+        for section in required_sections:
+            if section not in content:
+                errors.append(f"Missing required section: {section}")
+        
+        # Check for code examples
+        if "```" not in content:
+            warnings.append("No code examples found")
+        
+        # Check length (should be substantial but not excessive)
+        if len(content) < 500:
+            warnings.append("Documentation seems very brief (< 500 chars)")
+        elif len(content) > 20000:
+            warnings.append("Documentation seems very long (> 20000 chars)")
+        
+        return len(errors) == 0, errors + warnings
+    
+    def validate_examples(self, examples_path: Path) -> Tuple[bool, List[str]]:
+        """Validate usage examples are present and well-formed."""
+        errors = []
+        
+        if not examples_path.is_dir():
+            return False, ["Examples directory not found"]
+        
+        example_files = list(examples_path.glob("*.md"))
+        if len(example_files) == 0:
+            errors.append("No example files found")
+        
+        for example_file in example_files:
+            content = example_file.read_text()
+            if "```" not in content:
+                errors.append(f"Example {example_file.name} contains no code blocks")
+        
+        return len(errors) == 0, errors
+    
+    def validate_naming_conventions(self, skill_id: str, path: str) -> Tuple[bool, List[str]]:
+        """Validate naming conventions are followed."""
+        errors = []
+        
+        # skill_id should match path structure
+        path_parts = path.replace('/', '.')
+        if not skill_id.startswith(path_parts.replace('_', '.')):
+            errors.append(
+                f"skill_id '{skill_id}' doesn't match path structure '{path}'"
+            )
+        
+        # Check for consistent naming (snake_case)
+        if not skill_id.replace('.', '_').replace('_', '').islower():
+            errors.append(f"skill_id '{skill_id}' should use lowercase and underscores")
+        
+        return len(errors) == 0, errors
+    
+    def validate_complete(self, skill_path: Path) -> Dict:
+        """Run complete validation suite on a skill."""
+        results = {
+            "passed": True,
+            "checks": [],
+            "warnings": [],
+            "errors": []
+        }
+        
+        # Load metadata
+        try:
+            with open(skill_path / 'metadata.json', 'r') as f:
+                metadata = json.load(f)
+        except Exception as e:
+            results["passed"] = False
+            results["errors"].append(f"Cannot load metadata: {e}")
+            return results
+        
+        # Run all validations
+        validations = [
+            ("metadata_schema", self.validate_metadata, metadata),
+            ("structure", self.validate_structure, skill_path),
+            ("documentation", self.validate_documentation, skill_path / "SKILL.md"),
+            ("examples", self.validate_examples, skill_path / "examples"),
+            ("naming", self.validate_naming_conventions, metadata['skill_id'], str(skill_path))
+        ]
+        
+        for check_name, validator, *args in validations:
+            try:
+                passed, messages = validator(*args)
+                results["checks"].append({
+                    "name": check_name,
+                    "status": "pass" if passed else "fail",
+                    "messages": messages
+                })
+                
+                if not passed:
+                    results["passed"] = False
+                    results["errors"].extend(messages)
+                elif messages:
+                    results["warnings"].extend(messages)
+                    
+            except Exception as e:
+                results["passed"] = False
+                results["checks"].append({
+                    "name": check_name,
+                    "status": "error",
+                    "messages": [str(e)]
+                })
+                results["errors"].append(f"{check_name}: {e}")
+        
+        return results
+    
+    def _validate_skill_id_format(self, skill_id: str) -> bool:
+        """Check skill_id follows dot-notation format."""
+        import re
+        pattern = r'^[a-z0-9_]+\.[a-z0-9_]+(\.[a-z0-9_]+)*$'
+        return bool(re.match(pattern, skill_id))
+    
+    def _validate_semver(self, version: str) -> bool:
+        """Validate semantic versioning format."""
+        import re
+        pattern = r'^\d+\.\d+\.\d+$'
+        return bool(re.match(pattern, version))
+    
+    def _validate_weight_capabilities(self, weight: str, capabilities: List[str]) -> bool:
+        """Validate weight classification matches capability count."""
+        cap_count = len(capabilities)
+        
+        if weight == "lightweight" and cap_count > 5:
+            return False
+        elif weight == "medium" and (cap_count < 3 or cap_count > 10):
+            return False
+        elif weight == "heavyweight" and cap_count < 8:
+            return False
+        
+        return True
+```
+
+### Day 17-18: DSPy Optimization
+
+**File: src/workflow/optimizer.py**
+```python
+"""DSPy workflow optimization and caching."""
+import dspy
+from typing import Dict, List, Optional
+import pickle
+from pathlib import Path
+import hashlib
+
+

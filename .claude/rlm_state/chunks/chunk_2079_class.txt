@@ -1,0 +1,37 @@
+<!-- Chunk 2079: bytes 7990854-7992145, type=class -->
+class TestGatherRequirements:
+    """Test GatherRequirements signature."""
+
+    def test_signature_has_correct_docstring(self):
+        """Signature should have descriptive docstring."""
+        assert GatherRequirements.__doc__ is not None
+        assert "requirements" in GatherRequirements.__doc__.lower()
+
+    def test_input_fields(self):
+        """Should have task_description and user_context inputs."""
+        fields = GatherRequirements.fields
+        assert "task_description" in fields
+        assert "user_context" in fields
+
+    def test_output_fields(self):
+        """Should have all required output fields."""
+        fields = GatherRequirements.fields
+        required_outputs = [
+            "domain",
+            "category",
+            "target_level",
+            "topics",
+            "constraints",
+            "ambiguities",
+        ]
+        for field in required_outputs:
+            assert field in fields, f"Missing field: {field}"
+
+    def test_domain_field_has_literal_type(self):
+        """Domain field should be constrained to valid values."""
+        field = GatherRequirements.fields["domain"]
+        # Should be a Literal type with specific values
+        assert "technical" in str(field.annotation)
+        assert "cognitive" in str(field.annotation)
+
+
