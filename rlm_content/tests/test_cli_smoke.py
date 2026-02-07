@@ -28,4 +28,7 @@ def test_cli_bad_docs_path_returns_error():
         ],
     )
     assert result.exit_code == 1
-    assert "Docs path does not exist" in result.stdout or "Docs path does not exist" in result.stderr
+    assert (
+        "Docs path does not exist" in result.stdout
+        or "Docs path does not exist" in result.stderr
+    )

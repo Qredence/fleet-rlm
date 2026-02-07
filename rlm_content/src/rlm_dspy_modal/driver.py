@@ -73,7 +73,9 @@ def sandbox_driver() -> None:
         try:
             command = json.loads(line)
         except json.JSONDecodeError as exc:
-            _send({"stdout": "", "stderr": f"[Error] Invalid JSON: {exc}", "final": None})
+            _send(
+                {"stdout": "", "stderr": f"[Error] Invalid JSON: {exc}", "final": None}
+            )
             continue
 
         code = command.get("code")
@@ -100,4 +102,10 @@ def sandbox_driver() -> None:
             except Exception as exc:  # pragma: no cover
                 print(f"[Error] {type(exc).__name__}: {exc}", file=sys.stderr)
 
-        _send({"stdout": stdout_io.getvalue(), "stderr": stderr_io.getvalue(), "final": final_obj})
+        _send(
+            {
+                "stdout": stdout_io.getvalue(),
+                "stderr": stderr_io.getvalue(),
+                "final": final_obj,
+            }
+        )

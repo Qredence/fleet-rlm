@@ -18,7 +18,7 @@ from .signatures import (
 from .tools import regex_extract
 
 
-DEFAULT_DOCS_PATH = Path("dspy-doc/dspy-doc.txt")
+DEFAULT_DOCS_PATH = Path("rlm_content/dspy-doc/dspy-doc.txt")
 
 
 def _require_planner_ready(env_file: Path | None = None) -> None:
@@ -36,7 +36,9 @@ def _read_docs(path: Path | str) -> str:
     return docs_path.read_text()
 
 
-def _interpreter(*, timeout: int = 600, secret_name: str = "LITELLM") -> ModalInterpreter:
+def _interpreter(
+    *, timeout: int = 600, secret_name: str = "LITELLM"
+) -> ModalInterpreter:
     return ModalInterpreter(timeout=timeout, secret_name=secret_name)
 
 
@@ -256,7 +258,7 @@ def check_secret_presence(*, secret_name: str = "LITELLM") -> dict[str, bool]:
     app = modal.App.lookup("dspy-rlm-secret-check", create_if_missing=True)
     sb = modal.Sandbox.create(app=app, secrets=[modal.Secret.from_name(secret_name)])
     try:
-        code = r'''
+        code = r"""
 import json, os
 keys = [
   "DSPY_LM_MODEL",
@@ -265,7 +267,7 @@ keys = [
   "DSPY_LM_MAX_TOKENS",
 ]
 print(json.dumps({k: bool(os.environ.get(k)) for k in keys}))
-'''
+"""
         proc = sb.exec("python", "-c", code, timeout=60)
         proc.wait()
         return json.loads(proc.stdout.read().strip())
@@ -273,7 +275,9 @@ print(json.dumps({k: bool(os.environ.get(k)) for k in keys}))
         sb.terminate()
 
 
-def check_secret_key(*, secret_name: str = "LITELLM", key: str = "DSPY_LLM_API_KEY") -> dict[str, Any]:
+def check_secret_key(
+    *, secret_name: str = "LITELLM", key: str = "DSPY_LLM_API_KEY"
+) -> dict[str, Any]:
     app = modal.App.lookup("dspy-rlm-secret-check", create_if_missing=True)
     sb = modal.Sandbox.create(app=app, secrets=[modal.Secret.from_name(secret_name)])
     try:

@@ -25,7 +25,9 @@ def _load_dotenv(path: Path) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip()
-        if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
+        if len(value) >= 2 and (
+            (value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")
+        ):
             value = value[1:-1]
 
         if key and key not in os.environ:
@@ -35,7 +37,9 @@ def _load_dotenv(path: Path) -> None:
 def _guard_modal_shadowing() -> None:
     shadow_py = Path.cwd() / "modal.py"
     shadow_pyc_dir = Path.cwd() / "__pycache__"
-    shadow_pycs = list(shadow_pyc_dir.glob("modal.*.pyc")) if shadow_pyc_dir.exists() else []
+    shadow_pycs = (
+        list(shadow_pyc_dir.glob("modal.*.pyc")) if shadow_pyc_dir.exists() else []
+    )
 
     if shadow_py.exists():
         raise RuntimeError(
