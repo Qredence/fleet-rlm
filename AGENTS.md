@@ -4,7 +4,7 @@
 
 This project demonstrates **DSPy's Recursive Language Model (RLM)** integrated with **Modal** for secure, cloud-based code execution. It provides both a comprehensive Jupyter notebook and an extracted Python package with a Typer CLI.
 
-**Project Location**: repository root with package source under `rlm_content/`
+**Project Location**: repository root with package source under `src/`
 **Package Name**: `fleet-rlm`
 **Version**: 0.1.0
 
@@ -49,13 +49,14 @@ fleet-rlm-dspy/
 ├── config/
 │   ├── config.yaml                   # LiteLLM proxy model config
 │   └── test_responses_endpoint.py    # /v1/responses validation script
+├── src/
+│   └── rlm_dspy_modal/               # Main Python package
 └── rlm_content/
     ├── README.md
     ├── AGENTS.md
     ├── dspy-knowledge/               # DSPy documentation text
     ├── rlm-knowledge/                # RLM research paper
     ├── skills-knowledge/             # Agent skills & tools knowledge
-    ├── src/rlm_dspy_modal/           # Main Python package
     └── tests/                        # Unit tests
 ```
 
@@ -147,11 +148,11 @@ uv run pytest
 make test
 
 # Run linting
-uv run ruff check rlm_content/src rlm_content/tests config/test_responses_endpoint.py
+uv run ruff check src rlm_content/tests config/test_responses_endpoint.py
 make lint
 
 # Format code
-uv run ruff format rlm_content/src rlm_content/tests config/test_responses_endpoint.py
+uv run ruff format src rlm_content/tests config/test_responses_endpoint.py
 make format
 
 # Install and run pre-commit hooks
