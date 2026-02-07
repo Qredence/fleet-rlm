@@ -1,8 +1,0 @@
-<!-- Chunk 92: bytes 148453-148657, type=class -->
-class TranslateText(dspy.Signature):
-    text = dspy.InputField(desc="Text to translate")
-    translated_text = dspy.OutputField(desc="Translated text")
-```
-
-**Multiple inputs, single output**:
-```python

@@ -1,9 +1,0 @@
-<!-- Chunk 1565: bytes 6451522-6451844, type=class -->
-class PromoteDraftResponse(BaseModel):
-    """Response model for draft promotion."""
-
-    job_id: str = Field(..., description="The job ID that was promoted")
-    status: str = Field(default="promoted", description="Promotion status")
-    final_path: str = Field(..., description="Final path where the skill was saved")
-
-

@@ -1,6 +1,0 @@
-<!-- Chunk 1162: bytes 4419866-4419982, type=function -->
-def validator(tmp_path):
-    schema_path = tmp_path / "taxonomy_meta.json"
-    return SkillValidator(schema_path)
-
-

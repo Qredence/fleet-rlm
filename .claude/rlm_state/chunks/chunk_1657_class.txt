@@ -1,5 +1,0 @@
-<!-- Chunk 1657: bytes 6677660-6677753, type=class -->
-class SessionError(SkillsFleetError):
-    """Base exception for session-related errors."""
-
-

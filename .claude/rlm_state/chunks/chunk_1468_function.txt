@@ -1,6 +1,0 @@
-<!-- Chunk 1468: bytes 6312526-6312621, type=function -->
-def get_cache() -> InMemoryCache:
-    """Get the global cache instance."""
-    return _cache
-
-

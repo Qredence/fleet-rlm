@@ -1,8 +1,0 @@
-<!-- Chunk 1701: bytes 7275914-7276038, type=class -->
-class ModelType(StrEnum):
-    """Valid model types for LLM instances."""
-
-    CHAT = "chat"
-    COMPLETION = "completion"
-
-

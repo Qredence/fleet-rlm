@@ -1,7 +1,0 @@
-<!-- Chunk 1989: bytes 7888538-7888773, type=function -->
-def test_validation_error_with_suggestion():
-    """Test ValidationError includes suggestion."""
-    error = ValidationError("Invalid input", suggestion="Use a valid email")
-    assert "Use a valid email" in (error.suggestion or "")
-
-

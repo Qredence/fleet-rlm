@@ -1,5 +1,0 @@
-<!-- Chunk 1665: bytes 6685688-6685771, type=function -->
-def _seed_skills_root() -> Path:
-    return _package_root() / "_seed" / "skills"
-
-

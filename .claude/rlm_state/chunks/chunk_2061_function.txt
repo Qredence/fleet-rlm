@@ -1,7 +1,0 @@
-<!-- Chunk 2061: bytes 7967013-7967126, type=function -->
-def client():
-    """Create a test client for FastAPI app."""
-    return TestClient(get_app())
-
-
-@pytest.fixture

@@ -1,7 +1,0 @@
-<!-- Chunk 787: bytes 2650574-2650811, type=class -->
-class AnalyzeIntent(dspy.Signature):
-    task_description: str = dspy.InputField(desc="...")
-    user_context: str = dspy.InputField(desc="...")
-    task_intent: TaskIntent = dspy.OutputField(desc="...")
-
-# Auto-generated Pydantic model

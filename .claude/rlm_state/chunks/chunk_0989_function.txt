@@ -1,7 +1,0 @@
-<!-- Chunk 989: bytes 3452377-3452536, type=function -->
-def test_list_command_has_help():
-    """Test list command has help."""
-    result = runner.invoke(app, ["list", "--help"])
-    assert result.exit_code == 0
-
-

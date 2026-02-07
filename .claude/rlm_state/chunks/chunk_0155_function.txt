@@ -1,8 +1,0 @@
-<!-- Chunk 155: bytes 217954-218085, type=function -->
-def bad_metric(example, pred, trace=None):
-    return example.output == pred.output
-```
-
-### 2. Use Trace for Debugging
-
-```python

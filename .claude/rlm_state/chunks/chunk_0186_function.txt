@@ -1,8 +1,0 @@
-<!-- Chunk 186: bytes 290993-291113, type=function -->
-def sample_user():
-    return User(
-        id="123",
-        email="test@example.com",
-        name="Test User"
-    )
-

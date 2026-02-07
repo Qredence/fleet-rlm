@@ -1,5 +1,0 @@
-<!-- Chunk 60: bytes 20010-20506, type=h3 -->
-### An open standard
-
-We've published **Agent Skills** as an open standard. Like MCP, we believe skills should be portable across tools and platforms - the same skill should work whether you're using Claude or other AI platforms. That said, some skills are designed to take full advantage of a specific platform's capabilities; authors can note this in the skill's compatibility field. We've been collaborating with members of the ecosystem on the standard, and we're excited by early adoption.
-

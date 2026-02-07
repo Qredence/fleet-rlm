@@ -1,5 +1,0 @@
-<!-- Chunk 58: bytes 19391-19604, type=h2 -->
-## Chapter 4: Distribution and sharing
-
-Skills make your MCP integration more complete. As users compare connectors, those with skills offer a faster path to value, giving you an edge over MCP-only alternatives.
-

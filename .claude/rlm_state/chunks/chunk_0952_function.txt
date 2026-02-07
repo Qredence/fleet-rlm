@@ -1,7 +1,0 @@
-<!-- Chunk 952: bytes 3414082-3414267, type=function -->
-def test_api_error_with_status_code():
-    """Test APIError includes status code in message."""
-    error = APIError("Request failed", status_code=404)
-    assert "404" in str(error)
-
-

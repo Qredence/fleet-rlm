@@ -1,7 +1,0 @@
-<!-- Chunk 1962: bytes 7870887-7871031, type=function -->
-def skills_api_client(api_client, mock_skill_service):
-    """API client with skills service mocked."""
-    return api_client
-
-
-@pytest.fixture

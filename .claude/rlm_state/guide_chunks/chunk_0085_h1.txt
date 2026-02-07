@@ -1,3 +1,0 @@
-<!-- Chunk 85: bytes 27184-27206, type=h1 -->
-# Smart File Storage
-

@@ -1,6 +1,0 @@
-<!-- Chunk 852: bytes 3033534-3033721, type=function -->
-def test_safe_json_loads_with_valid_json():
-    """Test safe_json_loads with valid JSON string."""
-    result = safe_json_loads('{"key": "value"}')
-    assert result == {"key": "value"}
-

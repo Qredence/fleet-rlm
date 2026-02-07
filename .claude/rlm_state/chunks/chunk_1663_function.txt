@@ -1,9 +1,0 @@
-<!-- Chunk 1663: bytes 6685250-6685560, type=function -->
-def find_repo_root(start: Path | None = None) -> Path | None:
-    """Find a repo root by walking parents for common markers."""
-    for parent in _iter_parents((start or Path.cwd()).resolve()):
-        if any((parent / marker).exists() for marker in _REPO_MARKERS):
-            return parent
-    return None
-
-

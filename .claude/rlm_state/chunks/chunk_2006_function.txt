@@ -1,7 +1,0 @@
-<!-- Chunk 2006: bytes 7893130-7893361, type=function -->
-def test_sanitize_user_id_rejects_special_chars():
-    """Test user ID sanitization rejects dangerous characters."""
-    with pytest.raises(ValueError, match="invalid characters"):
-        sanitize_user_id("../../../etc/passwd")
-
-

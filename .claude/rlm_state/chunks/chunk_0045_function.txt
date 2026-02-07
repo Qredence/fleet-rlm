@@ -1,5 +1,0 @@
-<!-- Chunk 45: bytes 123014-123164, type=function -->
-def evaluate_math(expression: str) -> float:
-    """Evaluate a mathematical expression."""
-    return dspy.PythonInterpreter({}).execute(expression)
-

@@ -1,7 +1,0 @@
-<!-- Chunk 1999: bytes 7890861-7891009, type=function -->
-def test_cli_exit_str_representation():
-    """Test CLIExit string representation."""
-    error = CLIExit("Done")
-    assert str(error) == "Done"
-
-

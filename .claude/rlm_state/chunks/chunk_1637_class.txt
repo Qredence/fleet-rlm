@@ -1,5 +1,0 @@
-<!-- Chunk 1637: bytes 6672087-6672183, type=class -->
-class DSPyWorkflowError(SkillsFleetError):
-    """Base exception for DSPy workflow errors."""
-
-

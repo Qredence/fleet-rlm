@@ -1,8 +1,0 @@
-<!-- Chunk 985: bytes 3445212-3445495, type=function -->
-def test_validate_command_with_invalid_path():
-    """Test validate command with path traversal attempt."""
-    result = runner.invoke(app, ["validate", "../../../etc/passwd"])
-    # Should reject path traversal
-    assert result.exit_code != 0 or "error" in result.stdout.lower()
-
-

@@ -1,8 +1,0 @@
-<!-- Chunk 966: bytes 3422342-3422522, type=function -->
-def test_display_error():
-    """Test error display formats correctly."""
-    console = get_console()
-    # Should not raise
-    display_error("Test error", suggestion="Fix it")
-
-

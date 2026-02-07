@@ -1,5 +1,0 @@
-<!-- Chunk 40: bytes 13114-13235, type=h1 -->
-# Too technical, no user triggers
-description: Implements the Project entity model with hierarchical relationships.
-```
-

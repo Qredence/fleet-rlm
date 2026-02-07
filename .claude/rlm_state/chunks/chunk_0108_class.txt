@@ -1,5 +1,0 @@
-<!-- Chunk 108: bytes 154960-155081, type=class -->
-class Summarize(dspy.Signature):
-    text = dspy.InputField(desc="Text")
-    summary = dspy.OutputField(desc="Summary")
-

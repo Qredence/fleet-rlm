@@ -1,3 +1,0 @@
-<!-- Chunk 121: bytes 35427-35462, type=h3 -->
-### Reference B: YAML frontmatter
-

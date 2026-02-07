@@ -1,9 +1,0 @@
-<!-- Chunk 209: bytes 299218-299396, type=function -->
-def process_product_data(data: str) -> str:
-    return data.lower()
-```
-
-### Configuration Over-Engineering
-
-**Anti-pattern:** Excessive configuration for simple cases
-```python

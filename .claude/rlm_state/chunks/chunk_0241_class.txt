@@ -1,9 +1,0 @@
-<!-- Chunk 241: bytes 309574-309771, type=class -->
-class UserProcessor(BaseProcessor):
-    def process(self, user):
-        self.sanitize(user)
-        self.validate(user)
-        self.transform_user(user)
-
-    def transform_user(self, user): ...
-

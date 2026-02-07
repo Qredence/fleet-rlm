@@ -1,9 +1,0 @@
-<!-- Chunk 85: bytes 144344-144525, type=class -->
-class BadModule(dspy.Module):
-    def forward(self, input_data: str):
-        return self.process(input=input_data).output  # Wrong!
-```
-
-### 3. Handle Errors Gracefully
-
-```python

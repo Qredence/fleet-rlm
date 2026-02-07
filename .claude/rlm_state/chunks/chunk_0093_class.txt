@@ -1,9 +1,0 @@
-<!-- Chunk 93: bytes 148657-148935, type=class -->
-class CompareDocuments(dspy.Signature):
-    document_a = dspy.InputField(desc="First document")
-    document_b = dspy.InputField(desc="Second document")
-    comparison = dspy.OutputField(desc="Comparison of the two documents")
-```
-
-**Single input, multiple outputs**:
-```python

@@ -1,7 +1,0 @@
-<!-- Chunk 954: bytes 3414494-3414661, type=function -->
-def test_cli_exit_sets_exit_code():
-    """Test CLIExit for typer.Exit compatibility."""
-    error = CLIExit("Exiting", exit_code=0)
-    assert error.exit_code == 0
-
-

@@ -1,9 +1,0 @@
-<!-- Chunk 832: bytes 2884923-2885123, type=function -->
-def notify_hitl_response(job_id: str, response: dict[str, Any]) -> None:
-    job = JOBS.get(job_id)
-    if job is None:
-        return
-    job.hitl_response = response
-    job.hitl_event.set()
-
-# NEW

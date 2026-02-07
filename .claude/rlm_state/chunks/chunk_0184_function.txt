@@ -1,9 +1,0 @@
-<!-- Chunk 184: bytes 290521-290716, type=function -->
-def test_validate_email_valid():
-    """Test that valid emails pass validation."""
-    # Arrange
-    email = "user@example.com"
-
-    # Act & Assert
-    validate_email(email)  # Should not raise
-

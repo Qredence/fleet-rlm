@@ -1,8 +1,0 @@
-<!-- Chunk 236: bytes 308686-308903, type=function -->
-def validate_email(email: str | None) -> None:
-    if not email or "@" not in email:
-        raise ValueError("Invalid email")
-
-# api/users.py, api/auth.py, api/profile.py
-from utils.validation import validate_email
-

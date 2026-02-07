@@ -1,7 +1,0 @@
-<!-- Chunk 1992: bytes 7889226-7889412, type=function -->
-def test_cli_error_str_without_suggestion():
-    """Test CLIError string representation without suggestion."""
-    error = CLIError("Test error")
-    assert str(error) == "Test error"
-
-

@@ -1,6 +1,0 @@
-<!-- Chunk 782: bytes 2648343-2648470, type=class -->
-class ValidationCheck(BaseModel):
-    name: str
-    status: Literal["pass", "fail", "warning"]
-    message: str | None = None
-

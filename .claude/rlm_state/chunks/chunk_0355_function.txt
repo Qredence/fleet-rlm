@@ -1,9 +1,0 @@
-<!-- Chunk 355: bytes 550997-551118, type=function -->
-def query_database(table, limit=10):
-    pass
-```
-
-### 4. Handle All Exceptions
-
-```python
-# Good: Handle all exceptions

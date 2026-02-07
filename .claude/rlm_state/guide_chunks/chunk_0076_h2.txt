@@ -1,6 +1,0 @@
-<!-- Chunk 76: bytes 25847-25976, type=h2 -->
-## Phase 3: Task Creation (Linear MCP)
-1. Create development tasks
-2. Attach asset links to tasks
-3. Assign to engineering team
-

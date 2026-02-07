@@ -1,7 +1,0 @@
-<!-- Chunk 2014: bytes 7894985-7895187, type=function -->
-def test_validate_timeout_rejects_negative():
-    """Test timeout validation rejects negative values."""
-    with pytest.raises(ValueError, match="must be non-negative"):
-        validate_timeout(-1)
-
-

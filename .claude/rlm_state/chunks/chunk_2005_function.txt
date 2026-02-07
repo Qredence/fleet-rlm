@@ -1,7 +1,0 @@
-<!-- Chunk 2005: bytes 7892903-7893130, type=function -->
-def test_sanitize_user_id_accepts_valid_id():
-    """Test user ID sanitization accepts valid IDs."""
-    assert sanitize_user_id("user-123") == "user-123"
-    assert sanitize_user_id("user@example.com") == "user@example.com"
-
-

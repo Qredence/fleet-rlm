@@ -1,6 +1,0 @@
-<!-- Chunk 1910: bytes 7728482-7728650, type=function -->
-def get_phase3_lm() -> dspy.LM:
-    """Get LM for Phase 3: Initialize task (worker role, thinking_level: minimal)."""
-    return get_reasoning_lm("skill_initialize")
-
-

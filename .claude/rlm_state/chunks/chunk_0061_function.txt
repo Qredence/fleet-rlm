@@ -1,5 +1,0 @@
-<!-- Chunk 61: bytes 129084-129183, type=function -->
-def query_database(table: str, limit: int = 10) -> list[dict]:
-    pass
-
-# Bad: Missing type hints

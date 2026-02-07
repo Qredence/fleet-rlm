@@ -1,4 +1,0 @@
-<!-- Chunk 205: bytes 298777-298833, type=class -->
-class DataProcessor:
-    def process(self, data): pass
-

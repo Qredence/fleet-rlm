@@ -1,9 +1,0 @@
-<!-- Chunk 919: bytes 3345030-3345185, type=function -->
-def get_redis_client():
-    return redis.Redis(host=settings.REDIS_HOST)
-```
-
-**Testing with mocks:**
-```python
-from fastapi.testclient import TestClient
-

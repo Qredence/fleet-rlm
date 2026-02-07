@@ -1,9 +1,0 @@
-<!-- Chunk 769: bytes 2632153-2632327, type=function -->
-def save_job(job_id: str, job: JobState):
-    """Save job to Redis."""
-    redis_client.setex(
-        f"job:{job_id}",
-        3600,  # 1 hour TTL
-        job.json()
-    )
-

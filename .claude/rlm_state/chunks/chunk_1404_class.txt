@@ -1,9 +1,0 @@
-<!-- Chunk 1404: bytes 5136199-5136394, type=class -->
-class UserBase(BaseModel):
-    """Base user fields shared across models"""
-
-    name: str = Field(..., min_length=1, max_length=100)
-    email: EmailStr
-    age: int = Field(..., ge=0, le=150)
-
-

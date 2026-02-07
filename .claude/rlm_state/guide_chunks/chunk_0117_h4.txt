@@ -1,7 +1,0 @@
-<!-- Chunk 117: bytes 34378-34558, type=h4 -->
-#### Before you start
-- [ ] Identified 2-3 concrete use cases
-- [ ] Tools identified (built-in or MCP)
-- [ ] Reviewed this guide and example skills
-- [ ] Planned folder structure
-

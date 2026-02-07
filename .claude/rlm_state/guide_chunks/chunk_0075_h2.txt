@@ -1,6 +1,0 @@
-<!-- Chunk 75: bytes 25725-25847, type=h2 -->
-## Phase 2: Asset Storage (Drive MCP)
-1. Create project folder in Drive
-2. Upload all assets
-3. Generate shareable links
-

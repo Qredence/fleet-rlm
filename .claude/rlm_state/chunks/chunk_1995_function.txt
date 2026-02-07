@@ -1,9 +1,0 @@
-<!-- Chunk 1995: bytes 7889959-7890211, type=function -->
-def test_api_error_without_status_code():
-    """Test APIError without status code doesn't include HTTP in message."""
-    error = APIError("Failed")
-    assert error.status_code is None
-    assert "HTTP" not in str(error)
-
-
-# Default suggestion tests

@@ -1,7 +1,0 @@
-<!-- Chunk 84: bytes 27034-27184, type=h3 -->
-### Pattern 4: Context-aware tool selection
-
-**Use when:** Same outcome, different tools depending on context.
-
-**Example: File storage**
-```markdown

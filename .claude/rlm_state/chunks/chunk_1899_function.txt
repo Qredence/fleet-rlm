@@ -1,6 +1,0 @@
-<!-- Chunk 1899: bytes 7704914-7705047, type=function -->
-def get_usage_repository(db: Session) -> UsageRepository:
-    """Get a UsageRepository instance."""
-    return UsageRepository(db)
-
-

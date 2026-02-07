@@ -1,7 +1,0 @@
-<!-- Chunk 2012: bytes 7894548-7894763, type=function -->
-def test_sanitize_user_id_rejects_too_short():
-    """Test user ID sanitization rejects empty after sanitization."""
-    with pytest.raises(ValueError, match="invalid characters"):
-        sanitize_user_id("!!!")
-
-

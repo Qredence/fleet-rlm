@@ -1,9 +1,0 @@
-<!-- Chunk 1564: bytes 6451155-6451522, type=class -->
-class PromoteDraftRequest(BaseModel):
-    """Request model for promoting a draft."""
-
-    overwrite: bool = Field(default=True, description="Overwrite existing skill if present")
-    delete_draft: bool = Field(default=False, description="Delete draft after promotion")
-    force: bool = Field(default=False, description="Force promotion even if validation failed")
-
-

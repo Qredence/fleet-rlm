@@ -1,6 +1,0 @@
-<!-- Chunk 2124: bytes 8049243-8049302, type=class -->
-class _PydanticExample(BaseModel):
-    x: int
-    y: str
-
-

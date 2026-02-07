@@ -1,9 +1,0 @@
-<!-- Chunk 5: bytes 2179-2414, type=h3 -->
-### Who this is for:
-
-•  Developers who want Claude to follow specific workflows consistently
-•  Power users who want Claude to follow specific workflows
-•  Teams looking to standardize how Claude works across their organization
-
----
-

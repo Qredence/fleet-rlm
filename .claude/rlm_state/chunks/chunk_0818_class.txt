@@ -1,8 +1,0 @@
-<!-- Chunk 818: bytes 2742645-2742967, type=class -->
-class StreamingModule(dspy.Module):
-    """Base class for streaming modules."""
-    
-    def yield_thinking(self, content: str, thinking_type: str) -> ThinkingChunk:
-        """Yield a thinking chunk (thought, reasoning, internal step, etc.)"""
-        return ThinkingChunk(type=thinking_type, content=content, step=...)
-

@@ -1,9 +1,0 @@
-<!-- Chunk 1958: bytes 7868838-7869035, type=function -->
-def api_client(app):
-    """Create API test client with default headers."""
-    client = TestClient(app)
-    client.headers["Content-Type"] = "application/json"
-    return client
-
-
-@pytest.fixture

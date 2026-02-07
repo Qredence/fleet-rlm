@@ -1,6 +1,0 @@
-<!-- Chunk 1119: bytes 4180748-4180928, type=function -->
-def test_skill_understand_model():
-    """Test that skill_understand uses high temperature."""
-    lm = get_task_lm("skill_understand")
-    assert lm.kwargs["temperature"] >= 0.6
-

@@ -1,6 +1,0 @@
-<!-- Chunk 1664: bytes 6685560-6685688, type=function -->
-def _package_root() -> Path:
-    # skill_fleet/common/paths.py -> skill_fleet/
-    return Path(__file__).resolve().parents[1]
-
-

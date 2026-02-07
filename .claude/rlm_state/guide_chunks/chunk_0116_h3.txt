@@ -1,5 +1,0 @@
-<!-- Chunk 116: bytes 34119-34378, type=h3 -->
-### Reference A: Quick checklist
-
-Use this checklist to validate your skill before and after upload. If you want a faster start, use the `skill-creator` skill to generate your first draft, then run through this list to make sure you haven't missed anything.
-

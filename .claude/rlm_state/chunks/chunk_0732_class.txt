@@ -1,7 +1,0 @@
-<!-- Chunk 732: bytes 2574513-2574654, type=class -->
-class ValidationCheck(BaseModel):
-    """Individual validation check result."""
-
-    name: str
-    status: str  # "pass", "fail", "warning"
-

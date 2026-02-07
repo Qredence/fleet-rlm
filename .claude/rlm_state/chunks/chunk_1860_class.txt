@@ -1,9 +1,0 @@
-<!-- Chunk 1860: bytes 7639011-7639154, type=class -->
-class ValidationStatusEnum:
-    """Skill validation result status."""
-
-    PASSED = "passed"
-    FAILED = "failed"
-    WARNINGS = "warnings"
-
-

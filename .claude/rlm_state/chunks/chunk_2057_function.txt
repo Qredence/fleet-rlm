@@ -1,5 +1,0 @@
-<!-- Chunk 2057: bytes 7963551-7963621, type=function -->
-def temp_analytics_dir(tmp_path):
-    return tmp_path / "analytics"
-
-

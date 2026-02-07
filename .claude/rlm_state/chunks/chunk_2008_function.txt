@@ -1,7 +1,0 @@
-<!-- Chunk 2008: bytes 7893634-7893874, type=function -->
-def test_validate_api_url_rejects_invalid_protocol():
-    """Test API URL validation rejects invalid protocols."""
-    with pytest.raises(ValueError, match="must use http:// or https://"):
-        validate_api_url("ftp://localhost:8000")
-
-

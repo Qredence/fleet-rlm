@@ -1,9 +1,0 @@
-<!-- Chunk 1739: bytes 7341205-7341521, type=class -->
-class FileSpec(BaseModel):
-    """Specification for a file to create."""
-
-    path: str = Field(description="Relative path from skill root")
-    content_type: Literal["markdown", "json", "python", "yaml", "text"] = Field(default="text")
-    description: str = Field(default="", description="Purpose of this file")
-
-

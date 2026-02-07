@@ -1,9 +1,0 @@
-<!-- Chunk 286: bytes 361213-361422, type=function -->
-def _truncate(s: str, max_chars: int) -> str:
-    if max_chars <= 0:
-        return ""
-    if len(s) <= max_chars:
-        return s
-    return s[:max_chars] + f"\n... [truncated to {max_chars} chars] ...\n"
-
-

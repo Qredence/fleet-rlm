@@ -1,9 +1,0 @@
-<!-- Chunk 1994: bytes 7889704-7889959, type=function -->
-def test_cli_error_display_base_class():
-    """Test CLIError base class display method."""
-    console = Console()
-    error = CLIError("Base error", suggestion="Help")
-    error.display(console)  # Should not raise
-
-
-# APIError without status code test

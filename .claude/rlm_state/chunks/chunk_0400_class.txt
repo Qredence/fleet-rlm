@@ -1,8 +1,0 @@
-<!-- Chunk 400: bytes 576525-576762, type=class -->
-class AnalyzeEverything(dspy.Signature):
-    text = dspy.InputField(desc="Text")
-    summary = dspy.OutputField(desc="Summary")
-    sentiment = dspy.OutputField(desc="Sentiment")
-    entities = dspy.OutputField(desc="Entities")
-
-# After

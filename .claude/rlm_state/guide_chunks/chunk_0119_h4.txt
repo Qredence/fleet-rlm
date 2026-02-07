@@ -1,9 +1,0 @@
-<!-- Chunk 119: bytes 34965-35228, type=h4 -->
-#### Before upload
-- [ ] Tested triggering on obvious tasks
-- [ ] Tested triggering on paraphrased requests
-- [ ] Verified doesn't trigger on unrelated topics
-- [ ] Functional tests pass
-- [ ] Tool integration works (if applicable)
-- [ ] Compressed as .zip file
-

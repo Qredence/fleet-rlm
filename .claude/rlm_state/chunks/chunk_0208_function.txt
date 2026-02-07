@@ -1,4 +1,0 @@
-<!-- Chunk 208: bytes 299152-299218, type=function -->
-def process_user_data(data: str) -> str:
-    return data.upper()
-

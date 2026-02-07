@@ -1,9 +1,0 @@
-<!-- Chunk 1852: bytes 7637075-7637237, type=class -->
-class SkillWeightEnum:
-    """Skill resource weight/complexity level."""
-
-    LIGHTWEIGHT = "lightweight"
-    MEDIUM = "medium"
-    HEAVYWEIGHT = "heavyweight"
-
-

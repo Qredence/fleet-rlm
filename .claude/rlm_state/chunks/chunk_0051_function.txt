@@ -1,5 +1,0 @@
-<!-- Chunk 51: bytes 126250-126370, type=function -->
-def check_email(user: str) -> str:
-    """Check if user has unread emails."""
-    return f"{user} has 5 unread emails"
-

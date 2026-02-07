@@ -1,8 +1,0 @@
-<!-- Chunk 1030: bytes 3659915-3660184, type=function -->
-def test_apply_weights_clamps_result(self):
-    """Test apply_weights clamps result to [0, 1]."""
-    # ✅ Catches overflow bug early
-    weights = {"skill_quality": 2.0}
-    score = weighting.apply_weights(scores, weights)
-    assert score <= 1.0  # Correctly clamped
-

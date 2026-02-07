@@ -1,7 +1,0 @@
-<!-- Chunk 82: bytes 26679-26817, type=h2 -->
-## Refinement Loop
-1. Address each identified issue
-2. Regenerate affected sections
-3. Re-validate
-4. Repeat until quality threshold met
-

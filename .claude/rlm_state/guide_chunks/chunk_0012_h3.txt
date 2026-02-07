@@ -1,7 +1,0 @@
-<!-- Chunk 12: bytes 3841-4205, type=h3 -->
-### For MCP Builders: Skills + Connectors
-
-💡 **Building standalone skills without MCP?** Skip to Planning and Design - you can always return here later.
-
-If you already have a working MCP server, you've done the hard part. Skills are the knowledge layer on top - capturing the workflows and best practices you already know, so Claude can apply them consistently.
-

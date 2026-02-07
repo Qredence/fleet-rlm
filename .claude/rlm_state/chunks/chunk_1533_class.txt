@@ -1,9 +1,0 @@
-<!-- Chunk 1533: bytes 6374179-6374340, type=class -->
-class TaxonomyResponse(BaseModel):
-    """Response model for retrieving taxonomy."""
-
-    taxonomy: dict[str, Any]
-    total_skills: int
-    last_updated: str
-
-

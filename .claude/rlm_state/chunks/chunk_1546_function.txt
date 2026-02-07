@@ -1,7 +1,0 @@
-<!-- Chunk 1546: bytes 6405729-6405936, type=function -->
-def _sanitize_for_log(value: Any) -> str:
-    """Remove newline characters from values before logging to prevent log injection."""
-    text = str(value)
-    return text.replace("\r", "").replace("\n", "")
-
-

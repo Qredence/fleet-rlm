@@ -1,7 +1,0 @@
-<!-- Chunk 1710: bytes 7281291-7281486, type=class -->
-class LegacyAliases(BaseModel):
-    """Legacy model name aliases for backward compatibility."""
-
-    aliases: dict[str, str] = Field(default_factory=dict, serialization_alias="legacy_aliases")
-
-

@@ -1,6 +1,0 @@
-<!-- Chunk 1053: bytes 3773788-3773967, type=function -->
-def test_api_url_protocol_validation():
-    """Test that API URLs require valid protocol."""
-    with pytest.raises(ValueError):
-        validate_api_url("ftp://localhost:8000")
-

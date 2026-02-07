@@ -1,8 +1,0 @@
-<!-- Chunk 965: bytes 3422158-3422342, type=function -->
-def test_get_console_returns_singleton():
-    """Test get_console returns same instance."""
-    console1 = get_console()
-    console2 = get_console()
-    assert console1 is console2
-
-

@@ -1,8 +1,0 @@
-<!-- Chunk 109: bytes 32083-32289, type=h2 -->
-## Performance Notes
-- Take your time to do this thoroughly
-- Quality is more important than speed
-- Do not skip validation steps
-```
-*Note:* Adding this to user prompts is more effective than in SKILL.md
-

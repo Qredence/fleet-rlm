@@ -1,8 +1,0 @@
-<!-- Chunk 81: bytes 26510-26679, type=h2 -->
-## Quality Check
-1. Run validation script: `scripts/check_report.py`
-2. Identify issues:
-   - Missing sections
-   - Inconsistent formatting
-   - Data validation errors
-

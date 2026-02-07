@@ -1,7 +1,0 @@
-<!-- Chunk 1323: bytes 4860305-4860399, type=class -->
-class SearchResult(BaseModel):
-    title: str
-    url: str
-    content: str
-    score: float
-

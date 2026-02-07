@@ -1,7 +1,0 @@
-<!-- Chunk 67: bytes 24707-24865, type=h3 -->
-### Pattern 1: Sequential workflow orchestration
-
-**Use when:** Your users need multi-step processes in a specific order.
-
-**Example structure:**
-```markdown

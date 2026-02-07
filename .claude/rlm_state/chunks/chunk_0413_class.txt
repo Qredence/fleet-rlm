@@ -1,8 +1,0 @@
-<!-- Chunk 413: bytes 588712-588929, type=class -->
-class SimpleInputOutput(dspy.Signature):
-    """Simple signature with one input and one output."""
-
-    input_text = dspy.InputField(desc="Text to process")
-    output_text = dspy.OutputField(desc="Processed text")
-
-

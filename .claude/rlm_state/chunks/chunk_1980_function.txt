@@ -1,8 +1,0 @@
-<!-- Chunk 1980: bytes 7886284-7886463, type=function -->
-def test_display_constants():
-    """Test display configuration constants."""
-    assert CONSOLE_REFRESH_RATE == 10
-    assert JSON_INDENT == 2
-    assert SEPARATOR_WIDTH == 60
-
-

@@ -1,6 +1,0 @@
-<!-- Chunk 925: bytes 3349505-3349614, type=class -->
-class PaymentRequest(BaseModel):
-    user_id: int
-    amount: float = Field(..., gt=0)
-    card: CreditCard
-

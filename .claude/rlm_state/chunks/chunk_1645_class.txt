@@ -1,5 +1,0 @@
-<!-- Chunk 1645: bytes 6674116-6674201, type=class -->
-class APIError(SkillsFleetError):
-    """Base exception for API-related errors."""
-
-

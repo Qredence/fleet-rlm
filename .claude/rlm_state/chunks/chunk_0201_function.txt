@@ -1,4 +1,0 @@
-<!-- Chunk 201: bytes 297961-298017, type=function -->
-def to_json(obj):
-    return json.dumps(obj, indent=2)
-

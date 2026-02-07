@@ -1,9 +1,0 @@
-<!-- Chunk 975: bytes 3427698-3428000, type=function -->
-def test_cli_config_initialization():
-    """Test CLIConfig class initializes correctly."""
-    config = CLIConfig(api_url="http://localhost:8000", user_id="test-user")
-    assert config.api_url == "http://localhost:8000"
-    assert config.user_id == "test-user"
-    assert config.client is not None
-
-

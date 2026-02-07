@@ -1,8 +1,0 @@
-<!-- Chunk 1392: bytes 5121197-5121306, type=class -->
-class User(BaseModel):
-    """Full user model"""
-    id: int
-    name: str
-    email: EmailStr
-    age: int
-

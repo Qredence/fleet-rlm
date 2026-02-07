@@ -1,8 +1,0 @@
-<!-- Chunk 2118: bytes 8045070-8045331, type=function -->
-def test_manager_initialization(temp_training_dir):
-    """Test manager initialization."""
-    manager = TrainingDataManager(temp_training_dir)
-    assert manager.metadata_file == temp_training_dir / "example_metadata.json"
-    assert manager._metadata == {}
-
-

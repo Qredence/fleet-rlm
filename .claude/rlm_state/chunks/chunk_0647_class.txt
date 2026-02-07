@@ -1,8 +1,0 @@
-<!-- Chunk 647: bytes 1023826-1023976, type=class -->
-class MySignature(dspy.Signature):
-    domain: str = dspy.OutputField()
-    skill_type: str = dspy.OutputField()
-
-# After
-from typing import Literal
-

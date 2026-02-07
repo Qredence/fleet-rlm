@@ -1,9 +1,0 @@
-<!-- Chunk 935: bytes 3401498-3401784, type=class -->
-class CLIError(Exception):
-    """Base exception for CLI errors."""
-    def __init__(self, message: str, exit_code: int = 1, suggestion: str = ""):
-        self.message = message
-        self.exit_code = exit_code
-        self.suggestion = suggestion
-        super().__init__(message)
-

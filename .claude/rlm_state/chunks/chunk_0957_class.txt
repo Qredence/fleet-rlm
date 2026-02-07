@@ -1,8 +1,0 @@
-<!-- Chunk 957: bytes 3416645-3416892, type=class -->
-class ConfigError(CLIError):
-    """Configuration-related errors."""
-
-    def __init__(self, message: str, suggestion: str = "Check your configuration file"):
-        super().__init__(message, exit_code=EXIT_CONFIG_ERROR, suggestion=suggestion)
-
-

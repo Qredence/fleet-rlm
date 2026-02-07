@@ -1,8 +1,0 @@
-<!-- Chunk 967: bytes 3422522-3422696, type=function -->
-def test_display_success():
-    """Test success display formats correctly."""
-    console = get_console()
-    # Should not raise
-    display_success("Operation completed")
-
-

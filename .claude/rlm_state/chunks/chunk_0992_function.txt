@@ -1,5 +1,0 @@
-<!-- Chunk 992: bytes 3454777-3454845, type=function -->
-def create_command(ctx, task, auto_approve=False):
-    ...
-
-# After

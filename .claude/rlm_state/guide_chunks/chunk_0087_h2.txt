@@ -1,7 +1,0 @@
-<!-- Chunk 87: bytes 27453-27577, type=h2 -->
-## Execute Storage
-Based on decision:
-- Call appropriate MCP tool
-- Apply service-specific metadata
-- Generate access link
-

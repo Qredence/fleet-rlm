@@ -1,5 +1,0 @@
-<!-- Chunk 10: bytes 3450-3612, type=h4 -->
-#### Composability
-
-Claude can load multiple skills simultaneously. Your skill should work well alongside others, not assume it's the only capability available.
-

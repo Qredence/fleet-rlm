@@ -1,4 +1,0 @@
-<!-- Chunk 1318: bytes 4844085-4844156, type=class -->
-class Storage(Protocol):
-    def save(self, data: bytes) -> None: ...
-

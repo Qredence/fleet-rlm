@@ -1,9 +1,0 @@
-<!-- Chunk 2000: bytes 7891009-7891193, type=function -->
-def test_cli_exit_with_none_message():
-    """Test CLIExit with None message."""
-    error = CLIExit()
-    assert error.message is None
-    assert str(error) == ""
-
-
-# Edge case tests

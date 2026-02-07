@@ -1,7 +1,0 @@
-<!-- Chunk 234: bytes 308356-308504, type=function -->
-def register(data):
-    if not data.get("email") or "@" not in data["email"]:
-        raise ValueError("Invalid email")
-    # ...
-
-# api/profile.py

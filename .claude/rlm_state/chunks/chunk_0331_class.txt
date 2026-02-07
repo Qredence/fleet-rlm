@@ -1,7 +1,0 @@
-<!-- Chunk 331: bytes 538693-538982, type=class -->
-class FactualityJudge(dspy.Signature):
-    """Judge if statement is factually correct."""
-    statement = dspy.InputField(desc="Statement to evaluate")
-    context = dspy.InputField(desc="Context for evaluation")
-    is_factual = dspy.OutputField(desc="True if factual, False otherwise")
-

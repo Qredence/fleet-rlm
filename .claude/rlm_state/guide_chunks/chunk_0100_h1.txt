@@ -1,5 +1,0 @@
-<!-- Chunk 100: bytes 29239-29274, type=h1 -->
-# Correct
-name: my-cool-skill
-```
-

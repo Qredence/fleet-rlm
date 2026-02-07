@@ -1,6 +1,0 @@
-<!-- Chunk 1586: bytes 6545151-6545283, type=function -->
-def _resolve_repo_root() -> Path:
-    """Resolve the repository root directory."""
-    return Path(__file__).resolve().parents[4]
-
-

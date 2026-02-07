@@ -1,6 +1,0 @@
-<!-- Chunk 1974: bytes 7885549-7885678, type=function -->
-def test_default_api_url():
-    """Test default API URL is localhost."""
-    assert DEFAULT_API_URL == "http://localhost:8000"
-
-

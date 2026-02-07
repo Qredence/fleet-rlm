@@ -1,6 +1,0 @@
-<!-- Chunk 253: bytes 313090-313252, type=class -->
-class PasswordService:
-    """Password hashing and verification."""
-    def hash(self, password: str): ...
-    def verify(self, password: str, hashed: str): ...
-

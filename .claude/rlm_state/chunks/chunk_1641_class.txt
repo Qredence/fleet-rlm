@@ -1,5 +1,0 @@
-<!-- Chunk 1641: bytes 6673110-6673199, type=class -->
-class AgentError(SkillsFleetError):
-    """Base exception for agent-related errors."""
-
-

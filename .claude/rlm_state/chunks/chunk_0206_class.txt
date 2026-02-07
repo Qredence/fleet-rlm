@@ -1,5 +1,0 @@
-<!-- Chunk 206: bytes 298833-298931, type=class -->
-class UserDataProcessor(DataProcessor):
-    def process(self, data):
-        return data.upper()
-

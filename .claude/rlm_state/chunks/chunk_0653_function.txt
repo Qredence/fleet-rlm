@@ -1,7 +1,0 @@
-<!-- Chunk 653: bytes 1035146-1035225, type=function -->
-def my_function() -> callable:
-    pass
-
-# ✅ Good
-from typing import Callable
-

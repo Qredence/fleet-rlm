@@ -1,9 +1,0 @@
-<!-- Chunk 144: bytes 213453-213614, type=function -->
-def exact_match(example, pred, trace=None):
-    """Exact string matching."""
-    return example.output == pred.output
-```
-
-### Case-Insensitive Match
-
-```python

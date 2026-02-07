@@ -1,9 +1,0 @@
-<!-- Chunk 526: bytes 865601-865721, type=function -->
-def get_info(location: str) -> str:
-    pass
-```
-
-### 2. Comprehensive Docstrings
-
-```python
-# Good: Detailed docstring

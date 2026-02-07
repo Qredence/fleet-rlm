@@ -1,8 +1,0 @@
-<!-- Chunk 238: bytes 309078-309233, type=class -->
-class UserProcessor:
-    def process(self, user):
-        # Sanitize (10 lines)
-        # Validate (15 lines)
-        # Transform (20 lines)
-        pass
-

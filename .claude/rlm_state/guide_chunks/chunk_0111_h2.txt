@@ -1,5 +1,0 @@
-<!-- Chunk 111: bytes 32879-33033, type=h2 -->
-## Chapter 6: Resources and references
-
-If you're building your first skill, start with the Best Practices Guide, then reference the API docs as needed.
-

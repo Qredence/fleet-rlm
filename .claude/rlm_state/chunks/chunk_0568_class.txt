@@ -1,5 +1,0 @@
-<!-- Chunk 568: bytes 888691-888839, type=class -->
-class DraftGeneration(dspy.Signature):
-    topic = dspy.InputField(desc="Topic to write about")
-    draft = dspy.OutputField(desc="Initial draft")
-

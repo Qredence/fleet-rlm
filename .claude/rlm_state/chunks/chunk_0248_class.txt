@@ -1,6 +1,0 @@
-<!-- Chunk 248: bytes 311706-311916, type=class -->
-class ElectronicsPricing(PricingStrategy):
-    def calculate(self, quantity: int, base_price: float) -> float:
-        discount = 0.85 if quantity > 5 else 0.95
-        return base_price * quantity * discount
-

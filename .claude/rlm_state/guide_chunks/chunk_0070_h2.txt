@@ -1,5 +1,0 @@
-<!-- Chunk 70: bytes 24992-25094, type=h2 -->
-## Step 2: Setup Payment
-Call MCP tool: `setup_payment_method`
-Wait for: payment method verification
-

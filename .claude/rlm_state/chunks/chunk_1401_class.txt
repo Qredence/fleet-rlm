@@ -1,7 +1,0 @@
-<!-- Chunk 1401: bytes 5130412-5130532, type=class -->
-class UserUpdate(BaseModel):
-    name: str | None = None
-    email: EmailStr | None = None
-    age: int | None = None
-
-

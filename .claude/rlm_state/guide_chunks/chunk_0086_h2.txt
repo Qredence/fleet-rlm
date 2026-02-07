@@ -1,9 +1,0 @@
-<!-- Chunk 86: bytes 27206-27453, type=h2 -->
-## Decision Tree
-1. Check file type and size
-2. Determine best storage location:
-   - Large files (>10MB): Use cloud storage MCP
-   - Collaborative docs: Use Notion/Docs MCP
-   - Code files: Use GitHub MCP
-   - Temporary files: Use local storage
-

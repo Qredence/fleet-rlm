@@ -1,9 +1,0 @@
-<!-- Chunk 1855: bytes 7637582-7637735, type=class -->
-class DependencyTypeEnum:
-    """Dependency relationship type."""
-
-    REQUIRED = "required"
-    RECOMMENDED = "recommended"
-    CONFLICT = "conflict"
-
-

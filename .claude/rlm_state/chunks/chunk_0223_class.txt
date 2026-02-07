@@ -1,8 +1,0 @@
-<!-- Chunk 223: bytes 303859-303977, type=class -->
-class User:
-    def validate(self):
-        return UserService.validate(self)
-
-# services.py
-from models import User
-

@@ -1,5 +1,0 @@
-<!-- Chunk 1132: bytes 4244961-4245058, type=function -->
-def test_coerce_reasoning_text_handles_str():
-    assert coerce_reasoning_text(" hi ") == "hi"
-
-

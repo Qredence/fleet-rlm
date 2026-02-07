@@ -1,9 +1,0 @@
-<!-- Chunk 1353: bytes 5049516-5049836, type=function -->
-def process_payment(user_id: int, amount: float, card: dict) -> dict:
-    result = db.execute(f"SELECT * FROM users WHERE id = {user_id}")  # Blocking!
-    if result['balance'] < amount:
-        raise ValueError("Insufficient funds")  # 500 error!
-    return {"status": "success"}
-
-# Naive wrapper
-@app.post("/payment")

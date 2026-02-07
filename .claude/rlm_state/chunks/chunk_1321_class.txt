@@ -1,8 +1,0 @@
-<!-- Chunk 1321: bytes 4859062-4859292, type=class -->
-class TavilySearchRequest(BaseModel):
-    query: str
-    search_depth: Literal["basic", "advanced"] = "basic"
-    include_answer: bool = False
-    include_images: bool = False
-    max_results: int = Field(default=5, ge=1, le=10)
-

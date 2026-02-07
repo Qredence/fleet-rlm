@@ -1,9 +1,0 @@
-<!-- Chunk 836: bytes 2890534-2890771, type=function -->
-def test_job_manager_db_fallback():
-    """Test that manager falls back to DB when memory miss."""
-    manager = JobManager()
-    # Simulate job in DB only
-    # Create mock DB repo
-    # Verify manager reconstructs JobState correctly
-
-

@@ -1,8 +1,0 @@
-<!-- Chunk 984: bytes 3444984-3445212, type=function -->
-def test_validate_command_requires_path():
-    """Test validate command requires a path argument."""
-    result = runner.invoke(app, ["validate"])
-    assert result.exit_code != 0
-    assert "missing" in result.stdout.lower()
-
-

@@ -1,7 +1,0 @@
-<!-- Chunk 533: bytes 867023-867197, type=function -->
-def divide_numbers(a: float, b: float) -> float:
-    if b == 0:
-        raise ValueError(f"Cannot divide by zero: {a} / {b}")
-    return a / b
-
-# Bad: Generic error messages

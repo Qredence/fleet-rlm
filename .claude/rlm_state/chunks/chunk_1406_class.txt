@@ -1,7 +1,0 @@
-<!-- Chunk 1406: bytes 5136695-5136775, type=class -->
-class UserCreate(UserBase):
-    """Model for creating a new user"""
-
-    pass
-
-

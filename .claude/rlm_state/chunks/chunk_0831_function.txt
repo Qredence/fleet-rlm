@@ -1,9 +1,0 @@
-<!-- Chunk 831: bytes 2884729-2884923, type=function -->
-def get_job(job_id: str) -> JobState | None:
-    from .job_manager import get_job_manager
-    
-    manager = get_job_manager()
-    return manager.get_job(job_id)  # Memory + DB fallback
-
-
-# OLD

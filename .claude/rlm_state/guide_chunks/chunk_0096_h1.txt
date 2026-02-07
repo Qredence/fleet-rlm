@@ -1,5 +1,0 @@
-<!-- Chunk 96: bytes 28932-29002, type=h1 -->
-# Wrong - missing delimiters
-name: my-skill
-description: Does things
-

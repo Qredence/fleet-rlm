@@ -1,5 +1,0 @@
-<!-- Chunk 23: bytes 7980-8288, type=h3 -->
-### Define success criteria
-
-How will you know your skill is working? These are aspirational targets - rough benchmarks rather than precise thresholds. Aim for rigor but accept that there will be an element of vibes-based assessment. We are actively developing more robust measurement guidance and tooling.
-

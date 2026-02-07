@@ -1,6 +1,0 @@
-<!-- Chunk 1975: bytes 7885678-7885801, type=function -->
-def test_default_api_timeout():
-    """Test default API timeout is reasonable."""
-    assert DEFAULT_API_TIMEOUT == 30.0
-
-

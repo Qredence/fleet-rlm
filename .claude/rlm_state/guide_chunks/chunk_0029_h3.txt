@@ -1,5 +1,0 @@
-<!-- Chunk 29: bytes 10273-10408, type=h3 -->
-### YAML frontmatter: The most important part
-
-The YAML frontmatter is how Claude decides whether to load your skill. Get this right.
-

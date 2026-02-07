@@ -1,5 +1,0 @@
-<!-- Chunk 525: bytes 865529-865601, type=function -->
-def get_weather_forecast(city: str) -> str:
-    pass
-
-# Bad: Vague name

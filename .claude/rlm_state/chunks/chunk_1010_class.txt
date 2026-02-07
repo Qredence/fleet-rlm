@@ -1,7 +1,0 @@
-<!-- Chunk 1010: bytes 3557710-3557895, type=class -->
-class UnderstandingSignature(dspy.Signature):
-    """Original signature."""
-    pass
-
-@signature_version("2.0", 
-    migrations={"from_v1": {"task": "intent"}})  # task → intent rename

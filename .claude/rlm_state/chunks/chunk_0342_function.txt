@@ -1,5 +1,0 @@
-<!-- Chunk 342: bytes 547444-547565, type=function -->
-def search_web(query: str) -> str:
-    """Search the web for information."""
-    return f"Search results for '{query}'"
-

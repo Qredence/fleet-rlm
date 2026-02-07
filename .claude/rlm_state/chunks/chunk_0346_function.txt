@@ -1,5 +1,0 @@
-<!-- Chunk 346: bytes 548577-548692, type=function -->
-def get_city_name(user: str) -> str:
-    """Get the city where the user is located."""
-    return "San Francisco"
-

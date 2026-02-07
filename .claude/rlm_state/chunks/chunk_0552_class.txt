@@ -1,7 +1,0 @@
-<!-- Chunk 552: bytes 881278-881482, type=class -->
-class GoodModule(dspy.Module):
-    def forward(self, input_data: str):
-        result = self.process(input=input_data)
-        return dspy.Prediction(output=result.output)
-
-# Bad: Don't return raw values

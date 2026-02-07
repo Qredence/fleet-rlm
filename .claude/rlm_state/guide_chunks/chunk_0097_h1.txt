@@ -1,5 +1,0 @@
-<!-- Chunk 97: bytes 29002-29070, type=h1 -->
-# Wrong - unclosed quotes
-name: my-skill
-description: "Does things
-

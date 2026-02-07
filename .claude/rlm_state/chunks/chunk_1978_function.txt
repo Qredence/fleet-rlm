@@ -1,7 +1,0 @@
-<!-- Chunk 1978: bytes 7886044-7886182, type=function -->
-def test_api_timeout_bounds():
-    """Test API timeout bounds."""
-    assert MIN_API_TIMEOUT == 0.1
-    assert MAX_API_TIMEOUT == 300.0
-
-

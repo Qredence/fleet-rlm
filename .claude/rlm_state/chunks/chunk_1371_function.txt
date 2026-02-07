@@ -1,5 +1,0 @@
-<!-- Chunk 1371: bytes 5082390-5082446, type=function -->
-def get_settings():
-    return Settings()
-
-@lru_cache()

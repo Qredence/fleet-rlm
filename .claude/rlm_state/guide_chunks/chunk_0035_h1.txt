@@ -1,4 +1,0 @@
-<!-- Chunk 35: bytes 12187-12424, type=h1 -->
-# Good - specific and actionable
-description: Analyzes Figma design files and generates developer handoff documentation. Use when user uploads .fig files, asks for "design specs", "component documentation", or "design-to-code handoff".
-

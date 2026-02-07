@@ -1,6 +1,0 @@
-<!-- Chunk 963: bytes 3420906-3421019, type=function -->
-def test_poll_interval():
-    """Test HITL poll interval is 2 seconds."""
-    assert HITL_POLL_INTERVAL == 2.0
-
-

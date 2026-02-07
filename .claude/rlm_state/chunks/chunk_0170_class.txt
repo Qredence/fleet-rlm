@@ -1,7 +1,0 @@
-<!-- Chunk 170: bytes 285329-285423, type=class -->
-class EmailService:
-    def send_welcome_email(self, user: User): ...
-```
-
-**Bad:**
-```python

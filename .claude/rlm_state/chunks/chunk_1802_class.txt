@@ -1,7 +1,0 @@
-<!-- Chunk 1802: bytes 7481313-7481407, type=class -->
-class ConfigurationError(ServiceError):
-    """Error in service configuration."""
-
-    pass
-
-

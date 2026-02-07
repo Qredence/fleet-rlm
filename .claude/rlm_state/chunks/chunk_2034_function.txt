@@ -1,7 +1,0 @@
-<!-- Chunk 2034: bytes 7920258-7920414, type=function -->
-def invalid_skill_request():
-    """Invalid skill creation request data (missing required fields)."""
-    return {"task_description": ""}
-
-
-@pytest.fixture

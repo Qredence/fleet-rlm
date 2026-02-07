@@ -1,9 +1,0 @@
-<!-- Chunk 1295: bytes 4764077-4764310, type=function -->
-def print_tree(items, indent=""):
-    """Helper to print tree structure."""
-    for item in items:
-        print(f"{indent}• {item['name']}")
-        if item.get("children"):
-            print_tree(item["children"], indent + "  ")
-
-
