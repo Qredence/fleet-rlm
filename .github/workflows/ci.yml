@@ -1,0 +1,37 @@
+name: CI
+
+on:
+    push:
+        branches: [main, master]
+    pull_request:
+        branches: [main, master]
+
+jobs:
+    test:
+        name: Test and Lint
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v5
+              with:
+                  version: "latest"
+                  enable-cache: true
+                  cache-dependency-glob: "uv.lock"
+
+            - name: Set up Python
+              run: uv python install
+
+            - name: Install dependencies
+              run: uv sync --all-extras --dev
+
+            - name: Lint with Ruff
+              run: |
+                  uv run ruff check src rlm_content/tests config/test_responses_endpoint.py
+                  uv run ruff format --check src rlm_content/tests config/test_responses_endpoint.py
+
+            - name: Run tests
+              run: uv run pytest
