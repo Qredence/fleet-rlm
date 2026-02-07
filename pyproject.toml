@@ -28,12 +28,12 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-package-dir = {"" = "rlm_content/src"}
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-where = ["rlm_content/src"]
+where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["rlm_content/src"]
+pythonpath = ["src"]
 testpaths = ["rlm_content/tests"]
 addopts = "-q"

@@ -1,4 +1,4 @@
-PYTHON_SOURCES = rlm_content/src rlm_content/tests config/test_responses_endpoint.py
+PYTHON_SOURCES = src rlm_content/tests config/test_responses_endpoint.py
 
 .PHONY: help sync sync-dev test lint format check precommit-install precommit-run cli-help
 
