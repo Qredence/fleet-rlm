@@ -27,5 +27,6 @@ venv/
 .claude/
 .letta/
 .agents/
+.codex/
 
 
