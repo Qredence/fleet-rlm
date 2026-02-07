@@ -224,19 +224,19 @@ def adaptive_chunks(content, initial_size=50000, max_size=200000):
         # Start with initial size
         end = min(i + initial_size, len(content))
         chunk = content[i:end]
-        
+
         # Check information density (e.g., keywords per char)
         density = len(re.findall(r'error|exception|fail', chunk, re.I)) / len(chunk)
-        
+
         # Expand if density is low (need more context)
         while density < 0.001 and end - i < max_size and end < len(content):
             end = min(end + initial_size, len(content))
             chunk = content[i:end]
             density = len(re.findall(r'error|exception|fail', chunk, re.I)) / len(chunk)
-        
+
         chunks.append((i, end, chunk))
         i = end
-    
+
     return chunks
 
 # Generate adaptive chunks
@@ -297,7 +297,7 @@ for chunk_path in prioritized_chunks:
     # Delegate to subagent
     result = delegate_to_subagent(chunk_path, query)
     results.append(result)
-    
+
     # Check if we have enough information
     if len(results) >= min_chunks:
         confidence = estimate_confidence(results, query)
@@ -315,7 +315,7 @@ PY
 
 For each selected chunk, invoke the `rlm-subcall` subagent (defined in `.agents/rlm-subcall.md`) with:
 - The user query
-- The chunk file path  
+- The chunk file path
 - Specific extraction instructions
 
 **Subagent location:** `.agents/rlm-subcall.md`
@@ -358,7 +358,7 @@ def get_cached_result(chunk_path, query):
     """Check if we've already analyzed this chunk for this query."""
     cache_key = hashlib.md5(f"{chunk_path}:{query}".encode()).hexdigest()
     cache_file = f".claude/rlm_state/cache/{cache_key}.json"
-    
+
     if os.path.exists(cache_file):
         with open(cache_file) as f:
             return json.load(f)
@@ -368,7 +368,7 @@ def cache_result(chunk_path, query, result):
     """Cache the analysis result."""
     cache_key = hashlib.md5(f"{chunk_path}:{query}".encode()).hexdigest()
     cache_file = f".claude/rlm_state/cache/{cache_key}.json"
-    
+
     os.makedirs(os.path.dirname(cache_file), exist_ok=True)
     with open(cache_file, 'w') as f:
         json.dump(result, f)
@@ -379,7 +379,7 @@ for chunk_path in chunk_paths:
     if cached:
         results.append(cached)
         continue
-    
+
     # Delegate to subagent
     result = delegate_to_subagent(chunk_path, query)
     cache_result(chunk_path, query, result)

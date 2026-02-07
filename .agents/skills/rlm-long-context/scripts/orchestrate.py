@@ -139,7 +139,10 @@ def estimate_confidence(results: list[dict], query: str) -> float:
     # Simple heuristic: more high-confidence findings = higher confidence
     total_findings = sum(len(r.get("relevant", [])) for r in results)
     high_conf = sum(
-        1 for r in results for f in r.get("relevant", []) if f.get("confidence") == "high"
+        1
+        for r in results
+        for f in r.get("relevant", [])
+        if f.get("confidence") == "high"
     )
 
     # Confidence based on finding density and quality
@@ -158,7 +161,9 @@ def print_progress(current: int, total: int, confidence: float):
     bar_len = 30
     filled = int(bar_len * current / total)
     bar = "█" * filled + "░" * (bar_len - filled)
-    print(f"\r[{bar}] {pct:.1f}% ({current}/{total}) Confidence: {confidence:.2f}", end="")
+    print(
+        f"\r[{bar}] {pct:.1f}% ({current}/{total}) Confidence: {confidence:.2f}", end=""
+    )
 
 
 def orchestrate(
@@ -187,7 +192,8 @@ def orchestrate(
     # Step 2: Process chunks with caching and early exit
     results = []
     chunks_to_process = [
-        (idx, os.path.join(config.chunks_dir, f"chunk_{idx:04d}.txt")) for idx, _ in ranked_chunks
+        (idx, os.path.join(config.chunks_dir, f"chunk_{idx:04d}.txt"))
+        for idx, _ in ranked_chunks
     ]
 
     print("🤖 Processing chunks...")
@@ -197,7 +203,9 @@ def orchestrate(
             cached = check_cache(config.cache_dir, chunk_path, query)
             if cached:
                 results.append(cached["result"])
-                print_progress(i, len(chunks_to_process), estimate_confidence(results, query))
+                print_progress(
+                    i, len(chunks_to_process), estimate_confidence(results, query)
+                )
                 print(f"  [cached] chunk_{chunk_idx:04d}")
                 continue
 
@@ -243,7 +251,9 @@ def orchestrate(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Orchestrate RLM workflow with optimizations")
+    parser = argparse.ArgumentParser(
+        description="Orchestrate RLM workflow with optimizations"
+    )
     parser.add_argument(
         "--query",
         "-q",

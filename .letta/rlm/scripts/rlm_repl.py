@@ -330,7 +330,7 @@ def cmd_exec(args: argparse.Namespace) -> int:
 
     if dropped and args.warn_unpickleable:
         msg = "Dropped unpickleable variables: " + ", ".join(dropped)
-        err = (err + ("\n" if err else "") + msg + "\n")
+        err = err + ("\n" if err else "") + msg + "\n"
 
     if out:
         sys.stdout.write(_truncate(out, args.max_output_chars))

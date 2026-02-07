@@ -10,7 +10,6 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 
 
 def get_cache_key(chunk_path: str, query: str) -> str:
@@ -132,11 +131,13 @@ def list_cache(cache_dir: str) -> list[dict]:
         filepath = os.path.join(cache_dir, filename)
         with open(filepath) as f:
             data = json.load(f)
-            entries.append({
-                "cache_key": data.get("cache_key"),
-                "query": data.get("query", "")[:50] + "...",
-                "chunk": os.path.basename(data.get("chunk_path", "")),
-            })
+            entries.append(
+                {
+                    "cache_key": data.get("cache_key"),
+                    "query": data.get("query", "")[:50] + "...",
+                    "chunk": os.path.basename(data.get("chunk_path", "")),
+                }
+            )
 
     return entries
 
@@ -170,9 +171,7 @@ def get_cache_stats(cache_dir: str) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Manage RLM subagent result cache"
-    )
+    parser = argparse.ArgumentParser(description="Manage RLM subagent result cache")
     parser.add_argument(
         "--cache-dir",
         default=".claude/rlm_state/cache",

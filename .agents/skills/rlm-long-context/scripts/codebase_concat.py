@@ -31,7 +31,11 @@ def should_include_file(filepath, include_patterns, exclude_patterns, exclude_di
 
 
 def concatenate_codebase(
-    source_dir, output_file, include_patterns=None, exclude_patterns=None, exclude_dirs=None
+    source_dir,
+    output_file,
+    include_patterns=None,
+    exclude_patterns=None,
+    exclude_dirs=None,
 ):
     """
     Concatenate all code files into single file with path markers.
@@ -104,7 +108,9 @@ def concatenate_codebase(
 
             rel_path = filepath.relative_to(source_path)
 
-            if not should_include_file(filepath, include_patterns, exclude_patterns, exclude_dirs):
+            if not should_include_file(
+                filepath, include_patterns, exclude_patterns, exclude_dirs
+            ):
                 continue
 
             try:
@@ -179,11 +185,15 @@ def main():
         default="codebase_concat.txt",
         help="Output file (default: codebase_concat.txt)",
     )
-    parser.add_argument("-i", "--include", nargs="+", help="Include patterns (e.g., *.py *.js)")
+    parser.add_argument(
+        "-i", "--include", nargs="+", help="Include patterns (e.g., *.py *.js)"
+    )
     parser.add_argument("-e", "--exclude", nargs="+", help="Exclude patterns")
     parser.add_argument("--exclude-dirs", nargs="+", help="Exclude directories")
     parser.add_argument(
-        "--extract", metavar="PATH", help="Extract specific file from concatenated output"
+        "--extract",
+        metavar="PATH",
+        help="Extract specific file from concatenated output",
     )
 
     args = parser.parse_args()

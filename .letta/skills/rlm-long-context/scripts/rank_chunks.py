@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import pickle
 import re
-from pathlib import Path
 
 
 def load_context(state_path: str) -> str:
@@ -37,12 +36,51 @@ def rank_chunks_by_query(
         List of (start_pos, end_pos, score) tuples, sorted by score descending
     """
     # Extract keywords from query (simple approach)
-    keywords = [w.lower() for w in re.findall(r"\b\w{3,}\b", query) if w.lower() not in {
-        "the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her", "was",
-        "one", "our", "out", "day", "get", "has", "him", "his", "how", "man", "new", "now",
-        "old", "see", "two", "way", "who", "boy", "did", "its", "let", "put", "say", "she",
-        "too", "use",
-    }]
+    keywords = [
+        w.lower()
+        for w in re.findall(r"\b\w{3,}\b", query)
+        if w.lower()
+        not in {
+            "the",
+            "and",
+            "for",
+            "are",
+            "but",
+            "not",
+            "you",
+            "all",
+            "can",
+            "had",
+            "her",
+            "was",
+            "one",
+            "our",
+            "out",
+            "day",
+            "get",
+            "has",
+            "him",
+            "his",
+            "how",
+            "man",
+            "new",
+            "now",
+            "old",
+            "see",
+            "two",
+            "way",
+            "who",
+            "boy",
+            "did",
+            "its",
+            "let",
+            "put",
+            "say",
+            "she",
+            "too",
+            "use",
+        }
+    ]
 
     # Create pattern from keywords
     pattern = re.compile("|".join(re.escape(k) for k in keywords), re.IGNORECASE)
@@ -69,9 +107,7 @@ def rank_chunks_by_query(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Rank chunks by relevance to a query"
-    )
+    parser = argparse.ArgumentParser(description="Rank chunks by relevance to a query")
     parser.add_argument(
         "--state",
         default=".claude/rlm_state/state.pkl",

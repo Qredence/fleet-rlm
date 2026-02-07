@@ -162,7 +162,7 @@ if auth_idx is not None:
     start = headers[auth_idx][0]
     end = headers[auth_idx + 1][0] if auth_idx + 1 < len(headers) else len(content)
     auth_section = content[start:end]
-    
+
     # Write to separate file
     from pathlib import Path
     out = Path('.letta/rlm_chunks/auth_section.txt')
@@ -299,7 +299,7 @@ Process chunks with updated extraction logic.
 ## Tips for All Workflows
 
 1. **Start with reconnaissance**: Use `peek()` and `grep()` to understand structure before chunking
-2. **Choose appropriate chunk size**: 
+2. **Choose appropriate chunk size**:
    - Smaller (100k) for dense, important content
    - Larger (250k) for sparse, repetitive content
 3. **Add overlap for safety**: 5-10k chars prevents losing context at boundaries

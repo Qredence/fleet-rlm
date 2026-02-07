@@ -10,9 +10,6 @@ import argparse
 import json
 import os
 import pickle
-import subprocess
-from pathlib import Path
-from typing import Any
 
 
 class RLMConfig:
@@ -55,10 +52,14 @@ def run_rank_chunks(
     """Run chunk ranking script."""
     cmd = [
         "python3",
-        "-m", "skills.rlm_long_context.scripts.rank_chunks",
-        "--state", config.state_path,
-        "--query", query,
-        "--chunk-size", str(config.chunk_size),
+        "-m",
+        "skills.rlm_long_context.scripts.rank_chunks",
+        "--state",
+        config.state_path,
+        "--query",
+        query,
+        "--chunk-size",
+        str(config.chunk_size),
     ]
 
     if config.top_k:
@@ -74,14 +75,14 @@ def run_rank_chunks(
 
     scores = []
     for i in range(0, len(content), config.chunk_size):
-        chunk = content[i:i + config.chunk_size]
+        chunk = content[i : i + config.chunk_size]
         score = len(pattern.findall(chunk))
         scores.append((i // config.chunk_size, score))
 
     scores.sort(key=lambda x: x[1], reverse=True)
 
     if config.top_k:
-        scores = scores[:config.top_k]
+        scores = scores[: config.top_k]
 
     return scores
 
@@ -138,7 +139,8 @@ def estimate_confidence(results: list[dict], query: str) -> float:
     # Simple heuristic: more high-confidence findings = higher confidence
     total_findings = sum(len(r.get("relevant", [])) for r in results)
     high_conf = sum(
-        1 for r in results
+        1
+        for r in results
         for f in r.get("relevant", [])
         if f.get("confidence") == "high"
     )
@@ -159,7 +161,9 @@ def print_progress(current: int, total: int, confidence: float):
     bar_len = 30
     filled = int(bar_len * current / total)
     bar = "█" * filled + "░" * (bar_len - filled)
-    print(f"\r[{bar}] {pct:.1f}% ({current}/{total}) Confidence: {confidence:.2f}", end="")
+    print(
+        f"\r[{bar}] {pct:.1f}% ({current}/{total}) Confidence: {confidence:.2f}", end=""
+    )
 
 
 def orchestrate(
@@ -197,7 +201,9 @@ def orchestrate(
             cached = check_cache(config.cache_dir, chunk_path, query)
             if cached:
                 results.append(cached["result"])
-                print_progress(i, len(chunks_to_process), estimate_confidence(results, query))
+                print_progress(
+                    i, len(chunks_to_process), estimate_confidence(results, query)
+                )
                 print(f"  [cached] chunk_{chunk_idx:04d}")
                 continue
 
@@ -222,7 +228,9 @@ def orchestrate(
         # Early exit check
         if config.enable_early_exit and i >= 3:
             if confidence >= config.confidence_threshold:
-                print(f"\n✓ Early exit: confidence {confidence:.2f} >= {config.confidence_threshold}")
+                print(
+                    f"\n✓ Early exit: confidence {confidence:.2f} >= {config.confidence_threshold}"
+                )
                 break
 
     print()  # End progress line
@@ -230,10 +238,11 @@ def orchestrate(
 
     # Show cache stats
     if config.enable_cache:
-        cache_count = len([
-            f for f in os.listdir(config.cache_dir)
-            if f.endswith(".json")
-        ]) if os.path.exists(config.cache_dir) else 0
+        cache_count = (
+            len([f for f in os.listdir(config.cache_dir) if f.endswith(".json")])
+            if os.path.exists(config.cache_dir)
+            else 0
+        )
         print(f"💾 Cache entries: {cache_count}")
 
     return results

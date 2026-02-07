@@ -340,10 +340,10 @@ def generate_log_file(filepath, lines=50000):
     """Generate test log with known error distribution."""
     levels = ['INFO'] * 1000 + ['WARN'] * 200 + ['ERROR'] * 50
     error_types = ['timeout', 'connection', 'auth', 'disk_full']
-    
+
     with open(filepath, 'w') as f:
         timestamp = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         for i in range(lines):
             level = random.choice(levels)
             if level == 'ERROR':
@@ -353,7 +353,7 @@ def generate_log_file(filepath, lines=50000):
                 msg = "WARN: Retrying operation"
             else:
                 msg = "INFO: Operation successful"
-            
+
             f.write(f"[{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
             timestamp += timedelta(seconds=random.randint(1, 10))
 
@@ -361,7 +361,7 @@ def generate_corpus(filepath, lines=200000):
     """Generate text corpus with 5% keyword density."""
     keywords = ['target_keyword', 'important', 'critical']
     filler = ['the', 'quick', 'brown', 'fox', 'jumps', 'over', 'lazy', 'dog']
-    
+
     with open(filepath, 'w') as f:
         for i in range(lines):
             if random.random() < 0.05:  # 5% density

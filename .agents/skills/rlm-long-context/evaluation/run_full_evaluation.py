@@ -216,7 +216,8 @@ def main():
             {
                 "id": "T5.5",
                 "check": "Correct paths in examples",
-                "pass": ".agents/skills/rlm-long-context/scripts/" in open("../SKILL.md").read(),
+                "pass": ".agents/skills/rlm-long-context/scripts/"
+                in open("../SKILL.md").read(),
             },
         ],
         "score": 0,
@@ -247,7 +248,11 @@ def main():
 
     # Save raw results
     with open("results/evaluation_results.json", "w") as f:
-        json.dump({"timestamp": timestamp, "summary": summary, "results": results}, f, indent=2)
+        json.dump(
+            {"timestamp": timestamp, "summary": summary, "results": results},
+            f,
+            indent=2,
+        )
 
     print("Raw results saved to: results/evaluation_results.json")
 

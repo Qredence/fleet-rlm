@@ -12,7 +12,6 @@ import argparse
 import os
 import pickle
 import re
-from pathlib import Path
 
 
 def detect_content_type(content: str) -> str:
@@ -29,6 +28,7 @@ def detect_content_type(content: str) -> str:
     if content.strip().startswith(("{", "[")):
         try:
             import json
+
             json.loads(content[:10000])  # Test first 10K
             return "json"
         except json.JSONDecodeError:
@@ -123,11 +123,13 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
                 if current_size + item_size > max_size and current_items:
                     # Save current chunk
                     chunk_content = json.dumps(current_items)
-                    chunks.append((
-                        content.find(chunk_content),
-                        content.find(chunk_content) + len(chunk_content),
-                        f"array[{len(current_items)}]"
-                    ))
+                    chunks.append(
+                        (
+                            content.find(chunk_content),
+                            content.find(chunk_content) + len(chunk_content),
+                            f"array[{len(current_items)}]",
+                        )
+                    )
                     current_items = [item]
                     current_size = item_size
                 else:
@@ -137,11 +139,13 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
             # Last chunk
             if current_items:
                 chunk_content = json.dumps(current_items)
-                chunks.append((
-                    content.find(chunk_content),
-                    content.find(chunk_content) + len(chunk_content),
-                    f"array[{len(current_items)}]"
-                ))
+                chunks.append(
+                    (
+                        content.find(chunk_content),
+                        content.find(chunk_content) + len(chunk_content),
+                        f"array[{len(current_items)}]",
+                    )
+                )
 
             return chunks
 
@@ -159,11 +163,13 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
                 if current_size + item_size > max_size and current_keys:
                     chunk_dict = {k: data[k] for k in current_keys}
                     chunk_content = json.dumps(chunk_dict)
-                    chunks.append((
-                        content.find(chunk_content),
-                        content.find(chunk_content) + len(chunk_content),
-                        f"dict[{len(current_keys)}]"
-                    ))
+                    chunks.append(
+                        (
+                            content.find(chunk_content),
+                            content.find(chunk_content) + len(chunk_content),
+                            f"dict[{len(current_keys)}]",
+                        )
+                    )
                     current_keys = [key]
                     current_size = item_size
                 else:
@@ -173,11 +179,13 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
             if current_keys:
                 chunk_dict = {k: data[k] for k in current_keys}
                 chunk_content = json.dumps(chunk_dict)
-                chunks.append((
-                    content.find(chunk_content),
-                    content.find(chunk_content) + len(chunk_content),
-                    f"dict[{len(current_keys)}]"
-                ))
+                chunks.append(
+                    (
+                        content.find(chunk_content),
+                        content.find(chunk_content) + len(chunk_content),
+                        f"dict[{len(current_keys)}]",
+                    )
+                )
 
             return chunks
 
@@ -259,9 +267,7 @@ def write_chunks(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Create semantic chunks from content"
-    )
+    parser = argparse.ArgumentParser(description="Create semantic chunks from content")
     parser.add_argument(
         "--state",
         default=".claude/rlm_state/state.pkl",
@@ -330,7 +336,7 @@ def main():
     paths = write_chunks(content, chunks, args.output, args.prefix)
 
     print(f"Created {len(paths)} semantic chunks in {args.output}")
-    print(f"\nChunk breakdown:")
+    print("\nChunk breakdown:")
     type_counts = {}
     for _, _, ct in chunks:
         type_counts[ct] = type_counts.get(ct, 0) + 1

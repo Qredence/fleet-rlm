@@ -1,6 +1,6 @@
 # RLM Long-Context Skill: Before/After Performance Comparison
 
-**Evaluation Date:** 2026-01-29  
+**Evaluation Date:** 2026-01-29
 **Method:** Controlled A/B testing with 5 evaluation dimensions
 
 ---
@@ -129,7 +129,7 @@ Path fixes             ██                              +2 pts (measured)
 
 All 5 usability tests now pass:
 - ✓ Description has WHEN triggers
-- ✓ NEVER list exists  
+- ✓ NEVER list exists
 - ✓ MANDATORY loading triggers
 - ✓ Subagent exists
 - ✓ Correct paths in examples
