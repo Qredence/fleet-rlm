@@ -116,7 +116,7 @@ result = interp.execute("matches = grep(content, 'optimizer', context=1); print(
 result = interp.execute("""
 sections = chunk_by_headers(content)
 for i, s in enumerate(sections):
-    print(f"{i}: {s['header'][:60]}  ({len(s['body'])} chars)")
+    print(f"{i}: {s['header'][:60]}  ({len(s['content'])} chars)")
 """)
 ```
 

@@ -84,6 +84,15 @@ def rank_chunks_by_query(
         }
     ]
 
+    # Guard against empty keywords list
+    if not keywords:
+        # If no meaningful keywords, return all chunks with equal score
+        scores = []
+        for i in range(0, len(content), chunk_size):
+            end = min(i + chunk_size, len(content))
+            scores.append((i, end, 0.0))
+        return scores[:top_k] if top_k else scores
+
     # Create pattern from keywords
     pattern = re.compile("|".join(re.escape(k) for k in keywords), re.IGNORECASE)
 
