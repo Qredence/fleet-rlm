@@ -80,9 +80,12 @@ def check_litellm_secret() -> dict[str, bool]:
 
         result = check_secret_presence()
 
-        for key, present in result.items():
-            status = "✓" if present else "✗"
-            print(f"  {key}: {status}")
+        total = len(result)
+        present_count = sum(1 for present in result.values() if present)
+        missing_count = total - present_count
+        print(f"  Secrets present: {present_count}/{total}")
+        if missing_count:
+            print(f"  Secrets missing: {missing_count}")
 
         return result
 
