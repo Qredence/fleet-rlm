@@ -50,7 +50,7 @@ fleet-rlm-dspy/
 │   ├── config.yaml                   # LiteLLM proxy model config
 │   └── test_responses_endpoint.py    # /v1/responses validation script
 ├── src/
-│   └── rlm_dspy_modal/               # Main Python package
+│   └── fleet_rlm/               # Main Python package
 └── rlm_content/
     ├── README.md
     ├── AGENTS.md
@@ -100,6 +100,9 @@ Entry points: `fleet-rlm` (preferred), `rlm-modal` (compatibility alias)
 - Manages Modal sandbox lifecycle (create, exec, terminate)
 - Handles JSON protocol communication with the driver
 - Supports custom tools and output field definitions
+- **Persistent storage**: Optional Modal Volumes V2 mounting at `/data/`
+- **Timeout control**: Configurable `timeout` and `idle_timeout` for sandboxes
+- **Volumes V2 API**: Uses `modal.Volume.from_name()` with automatic persistence
 
 ### `runners.py` - RLM Demo Runners
 
@@ -148,12 +151,15 @@ uv run pytest
 make test
 
 # Run linting
-uv run ruff check src rlm_content/tests config/test_responses_endpoint.py
+uv run ruff check src tests config/test_responses_endpoint.py
 make lint
 
 # Format code
-uv run ruff format src rlm_content/tests config/test_responses_endpoint.py
+uv run ruff format src tests config/test_responses_endpoint.py
 make format
+
+# Run release validation
+make release-check
 
 # Install and run pre-commit hooks
 uv run pre-commit install
@@ -173,10 +179,23 @@ uv run fleet-rlm --help
 # Run basic demo
 uv run fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
 
+# Doc-analysis commands require --docs-path
+
+# Run basic demo with persistent volume
+uv run fleet-rlm run-basic \
+    --question "What are the first 12 Fibonacci numbers?" \
+    --volume-name rlm-volume-dspy
+
 # Extract architecture from docs
 uv run fleet-rlm run-architecture \
     --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
     --query "Extract all modules and optimizers"
+
+# Extract architecture with volume caching
+uv run fleet-rlm run-architecture \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --query "Extract all modules and optimizers" \
+    --volume-name rlm-volume-dspy
 
 # Extract API endpoints
 uv run fleet-rlm run-api-endpoints --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
@@ -184,21 +203,62 @@ uv run fleet-rlm run-api-endpoints --docs-path rlm_content/dspy-knowledge/dspy-d
 # Find error patterns
 uv run fleet-rlm run-error-patterns --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
 
+# Trajectory inspection
+uv run fleet-rlm run-trajectory \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --chars 5000
+
+# Custom tool extraction
+uv run fleet-rlm run-custom-tool \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --chars 5000
+
 # Check Modal secrets
 uv run fleet-rlm check-secret
 uv run fleet-rlm check-secret-key --key DSPY_LLM_API_KEY
 ```
 
+### Volume Support (Volumes V2)
+
+All `run-*` commands support the `--volume-name` option for persistent storage using **Modal Volumes V2**:
+
+```bash
+# First, create a volume (one-time setup)
+uv run modal volume create rlm-volume-dspy
+
+# Then use it in any command
+uv run fleet-rlm run-basic \
+    --question "Your question" \
+    --volume-name rlm-volume-dspy
+```
+
+Volumes V2 are mounted at `/data/` inside the sandbox and automatically persist across runs.
+
+**Volume V2 Benefits:**
+
+- Better performance and consistency than V1
+- Automatic persistence (no manual commit/reload needed)
+- Uses `modal.Volume.from_name()` API
+- Files written to `/data/` persist when sandbox terminates
+
+**Use cases:**
+
+- Caching large documents
+- Storing intermediate results
+- Sharing data between multiple RLM runs
+
 ---
 
 ## Jupyter Notebook Workflows
+
+The notebook demonstrates all RLM capabilities including persistent storage with Modal Volumes V2.
 
 ### Setup
 
 ```bash
 uv sync
 uv run modal setup
-uv run modal volume create rlm-volume-dspy
+uv run modal volume create rlm-volume-dspy  # One-time volume creation (V2)
 ```
 
 ### Run Notebook
@@ -206,6 +266,20 @@ uv run modal volume create rlm-volume-dspy
 ```bash
 uv run jupyter lab notebooks/rlm-dspy-modal.ipynb
 ```
+
+### Notebook Contents
+
+1. **Setup** - Installation, imports, environment configuration
+2. **Modal Sandbox Driver** - Protocol for stateful code execution
+3. **ModalInterpreter** - DSPy CodeInterpreter implementation
+4. **Basic RLM Demo** - Code generation (Fibonacci)
+5. **Long Document Analysis** - Extract DSPy architecture
+6. **Parallel Processing** - Batched LLM queries for speed
+7. **Stateful Multi-Step** - Error pattern analysis
+8. **Trajectory Inspection** - Full execution history
+9. **Persistent Storage Demo** - Modal Volumes V2 integration
+10. **Custom Tools** - Regex extraction tool
+11. **RLM vs Direct LLM** - Comparison and best practices
 
 ### Execute Headlessly (for CI/validation)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import rlm_dspy_modal.config as config
+import fleet_rlm.config as config
 
 
 class _FakeLM:

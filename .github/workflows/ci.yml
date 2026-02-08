@@ -30,8 +30,8 @@ jobs:
 
             - name: Lint with Ruff
               run: |
-                  uv run ruff check src rlm_content/tests config/test_responses_endpoint.py
-                  uv run ruff format --check src rlm_content/tests config/test_responses_endpoint.py
+                  uv run ruff check src tests config/test_responses_endpoint.py
+                  uv run ruff format --check src tests config/test_responses_endpoint.py
 
             - name: Run tests
               run: uv run pytest

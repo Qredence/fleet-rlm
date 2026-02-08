@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from rlm_dspy_modal.cli import app
+from fleet_rlm.cli import app
 
 
 runner = CliRunner()
@@ -32,3 +32,16 @@ def test_cli_bad_docs_path_returns_error():
         "Docs path does not exist" in result.stdout
         or "Docs path does not exist" in result.stderr
     )
+
+
+def test_cli_requires_docs_path_for_architecture():
+    result = runner.invoke(
+        app,
+        [
+            "run-architecture",
+            "--query",
+            "extract modules",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--docs-path" in result.stdout or "--docs-path" in result.stderr

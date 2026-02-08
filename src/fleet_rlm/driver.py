@@ -1,8 +1,54 @@
+"""Sandbox driver for Modal code execution via JSON protocol.
+
+This module provides a long-lived JSON protocol driver that runs inside a Modal
+sandbox. It receives code execution commands via stdin, executes them in a
+controlled environment, and returns results via stdout.
+
+The driver supports:
+    - Stateful code execution (globals persist across calls)
+    - Tool registration and invocation
+    - Output capture (stdout/stderr)
+    - Structured final output via SUBMIT function
+
+Protocol:
+    Input (JSON, one per line):
+        {
+            "code": "python code to execute",
+            "variables": {"var_name": value},  // Optional
+            "tool_names": ["tool1", "tool2"],  // Optional
+            "output_names": ["result1", "result2"]  // Optional
+        }
+
+    Output (JSON, one per line):
+        {
+            "stdout": "captured stdout",
+            "stderr": "captured stderr",
+            "final": {...}  // Structured output from SUBMIT
+        }
+
+    Tool calls (output):
+        {"tool_call": {"name": "tool_name", "args": [...], "kwargs": {...}}}
+
+    Tool responses (input):
+        {"tool_result": ...} or {"tool_error": "error message"}
+"""
+
 from __future__ import annotations
 
 
 def sandbox_driver() -> None:
-    """Long-lived JSON protocol driver for Modal Sandbox execution."""
+    """Run the long-lived JSON protocol driver for Modal Sandbox execution.
+
+    This function runs an infinite loop reading JSON commands from stdin,
+    executing Python code, and writing results to stdout. It maintains
+    state across executions through sandbox_globals.
+
+    The driver provides these built-in capabilities to executed code:
+        - SUBMIT(): Function to return structured final output
+        - Tool functions: Dynamically registered based on tool_names in commands
+
+    The loop terminates on EOFError (stdin closed).
+    """
 
     import json
     import sys
@@ -10,19 +56,32 @@ def sandbox_driver() -> None:
     from io import StringIO
     from typing import Any
 
+    # Persistent globals that survive across code execution calls
     sandbox_globals: dict[str, Any] = {}
     proto_out = sys.__stdout__
 
     output_names: list[str] = []
 
     class _FinalOutput(BaseException):
+        """Exception to signal final output from SUBMIT call.
+
+        Used internally to transfer structured output from the sandboxed
+        code back to the driver without using normal return mechanisms.
+        """
+
         pass
 
     def _send(obj: dict) -> None:
+        """Send a JSON object to the parent process via stdout."""
         proto_out.write(json.dumps(obj) + "\n")
         proto_out.flush()
 
     def _tool_call(name: str, *args, **kwargs):
+        """Make a tool call and wait for response from parent process.
+
+        Sends a tool_call message and blocks waiting for a JSON response
+        from stdin. Raises RuntimeError if the response contains an error.
+        """
         _send({"tool_call": {"name": name, "args": list(args), "kwargs": kwargs}})
         reply = json.loads(input())
         if reply.get("tool_error"):
@@ -30,6 +89,14 @@ def sandbox_driver() -> None:
         return reply.get("tool_result")
 
     def _register_tools(names: list[str]) -> None:
+        """Register tool functions in the sandbox globals.
+
+        Creates wrapper functions for each tool name that communicate
+        back to the parent process via the JSON protocol.
+
+        Args:
+            names: List of tool names to register.
+        """
         for name in names:
             if not name.isidentifier() or name in {"SUBMIT"}:
                 continue
@@ -45,6 +112,20 @@ def sandbox_driver() -> None:
             sandbox_globals[name] = _make(name)
 
     def SUBMIT(*args, **kwargs):
+        """Return structured final output from sandboxed code.
+
+        This function is injected into the sandbox globals and allows
+        executed code to return structured data back to the parent process.
+
+        Args:
+            *args: Positional values to return. If output_names was specified
+                in the command, args must match the number of output names.
+            **kwargs: Keyword arguments to return as a dict.
+
+        Raises:
+            _FinalOutput: Always raised with the structured output to
+                break out of exec() and return control to the driver.
+        """
         if kwargs:
             raise _FinalOutput(kwargs)
 

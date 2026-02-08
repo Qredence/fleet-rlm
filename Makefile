@@ -1,6 +1,6 @@
-PYTHON_SOURCES = src rlm_content/tests config/test_responses_endpoint.py
+PYTHON_SOURCES = src tests config/test_responses_endpoint.py
 
-.PHONY: help sync sync-dev test lint format check precommit-install precommit-run cli-help
+.PHONY: help sync sync-dev test lint format check precommit-install precommit-run cli-help release-check
 
 help:
 	@echo "Targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make lint              - Run ruff checks"
 	@echo "  make format            - Run ruff formatter"
 	@echo "  make check             - Run lint + test"
+	@echo "  make release-check     - Run lint + test + build + twine checks"
 	@echo "  make precommit-install - Install pre-commit git hooks"
 	@echo "  make precommit-run     - Run pre-commit on all files"
 	@echo "  make cli-help          - Show fleet-rlm CLI help"
@@ -30,6 +31,11 @@ format:
 	uv run ruff format $(PYTHON_SOURCES)
 
 check: lint test
+
+release-check: lint test
+	rm -rf dist build
+	uv build
+	uvx twine check dist/*
 
 precommit-install:
 	uv run pre-commit install
