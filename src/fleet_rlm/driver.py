@@ -73,6 +73,8 @@ def sandbox_driver() -> None:
 
     def _send(obj: dict) -> None:
         """Send a JSON object to the parent process via stdout."""
+        if proto_out is None:
+            return
         proto_out.write(json.dumps(obj) + "\n")
         proto_out.flush()
 
@@ -144,6 +146,165 @@ def sandbox_driver() -> None:
         raise _FinalOutput(dict(zip(output_names, args)))
 
     sandbox_globals["SUBMIT"] = SUBMIT
+
+    # ------------------------------------------------------------------
+    # Sandbox-side helpers
+    # ------------------------------------------------------------------
+    # These helpers are injected into sandbox_globals so the LLM-generated
+    # code can call them directly.  They use only the stdlib (no external
+    # deps) because they execute inside the Modal sandbox image.
+    # ------------------------------------------------------------------
+
+    def peek(text: str, start: int = 0, length: int = 2000) -> str:
+        """Return a slice of *text* starting at *start* for *length* chars.
+
+        Useful for inspecting a portion of a long document without
+        exceeding context limits.
+        """
+        return text[start : start + length]
+
+    sandbox_globals["peek"] = peek
+
+    def grep(text: str, pattern: str, *, context: int = 0) -> list[str]:
+        """Return all lines in *text* that contain *pattern* (case-insensitive).
+
+        Args:
+            text: The text to search.
+            pattern: Substring to match (case-insensitive).
+            context: Number of surrounding lines to include (0 = matched line only).
+
+        Returns:
+            A list of matching lines (or line groups with context).
+        """
+        import re as _re
+
+        lines = text.splitlines()
+        pat = _re.compile(_re.escape(pattern), _re.IGNORECASE)
+        hits: list[str] = []
+        for idx, line in enumerate(lines):
+            if pat.search(line):
+                lo = max(0, idx - context)
+                hi = min(len(lines), idx + context + 1)
+                hits.append("\n".join(lines[lo:hi]))
+        return hits
+
+    sandbox_globals["grep"] = grep
+
+    def chunk_by_size(text: str, size: int = 4000, overlap: int = 200) -> list[str]:
+        """Split *text* into fixed-size chunks with optional overlap.
+
+        Args:
+            text: Text to chunk.
+            size: Maximum characters per chunk.
+            overlap: Characters of overlap between consecutive chunks.
+
+        Returns:
+            List of text chunks.
+        """
+        chunks: list[str] = []
+        start = 0
+        while start < len(text):
+            end = start + size
+            chunks.append(text[start:end])
+            start = end - overlap if overlap else end
+        return chunks
+
+    sandbox_globals["chunk_by_size"] = chunk_by_size
+
+    def chunk_by_headers(
+        text: str, pattern: str = r"^#{1,3}\s"
+    ) -> list[dict[str, str]]:
+        """Split *text* at lines matching *pattern* (regex).
+
+        Args:
+            text: Document text.
+            pattern: Regex pattern that marks a section header.
+
+        Returns:
+            List of dicts ``{"header": ..., "body": ...}`` for each section.
+        """
+        import re as _re
+
+        parts: list[dict[str, str]] = []
+        current_header = ""
+        current_lines: list[str] = []
+        regex = _re.compile(pattern)
+        for line in text.splitlines(keepends=True):
+            if regex.match(line):
+                if current_lines:
+                    parts.append(
+                        {
+                            "header": current_header.strip(),
+                            "body": "".join(current_lines),
+                        }
+                    )
+                current_header = line
+                current_lines = []
+            else:
+                current_lines.append(line)
+        if current_lines or current_header:
+            parts.append(
+                {"header": current_header.strip(), "body": "".join(current_lines)}
+            )
+        return parts
+
+    sandbox_globals["chunk_by_headers"] = chunk_by_headers
+
+    # ------ Stateful buffers ------
+    _buffers: dict[str, list] = {}
+
+    def add_buffer(name: str, value) -> None:
+        """Append *value* to the named buffer."""
+        _buffers.setdefault(name, []).append(value)
+
+    def get_buffer(name: str) -> list:
+        """Return the contents of the named buffer (empty list if missing)."""
+        return list(_buffers.get(name, []))
+
+    def clear_buffer(name: str | None = None) -> None:
+        """Clear one or all buffers."""
+        if name is None:
+            _buffers.clear()
+        else:
+            _buffers.pop(name, None)
+
+    sandbox_globals["add_buffer"] = add_buffer
+    sandbox_globals["get_buffer"] = get_buffer
+    sandbox_globals["clear_buffer"] = clear_buffer
+
+    # ------ Volume persistence helpers ------
+
+    def save_to_volume(path: str, content: str) -> str:
+        """Write *content* to ``/data/<path>`` if volume is mounted.
+
+        Returns the full path written, or an error string.
+        """
+        import os as _os
+
+        base = "/data"
+        if not _os.path.isdir(base):
+            return "[no volume mounted at /data]"
+        full = _os.path.join(base, path)
+        _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
+        with open(full, "w") as fh:
+            fh.write(content)
+        return full
+
+    def load_from_volume(path: str) -> str:
+        """Read text from ``/data/<path>``.
+
+        Returns the file contents, or an error string.
+        """
+        import os as _os
+
+        full = _os.path.join("/data", path)
+        if not _os.path.isfile(full):
+            return f"[file not found: {full}]"
+        with open(full) as fh:
+            return fh.read()
+
+    sandbox_globals["save_to_volume"] = save_to_volume
+    sandbox_globals["load_from_volume"] = load_from_volume
 
     while True:
         try:

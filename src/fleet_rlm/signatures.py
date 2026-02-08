@@ -103,3 +103,78 @@ class ExtractWithCustomTool(dspy.Signature):
     headers: list = dspy.OutputField(desc="All markdown headers found")
     code_blocks: list = dspy.OutputField(desc="All code block languages found")
     structure_summary: str = dspy.OutputField(desc="Summary of document structure")
+
+
+class AnalyzeLongDocument(dspy.Signature):
+    """Analyze a long document by navigating, querying, and synthesizing.
+
+    The LLM should use sandbox helpers (``peek``, ``grep``,
+    ``chunk_by_size``, ``chunk_by_headers``) to explore the document
+    programmatically, call ``llm_query`` on relevant sections, and
+    aggregate findings via ``SUBMIT``.
+
+    Input Fields:
+        document: Full text of the document loaded into the sandbox
+        query: What to find or analyse
+
+    Output Fields:
+        findings: List of extracted facts / answers
+        answer: Synthesised prose answer
+        sections_examined: How many sections were inspected
+    """
+
+    document: str = dspy.InputField(desc="Full document text (loaded in sandbox)")
+    query: str = dspy.InputField(desc="Analysis query or question")
+    findings: list = dspy.OutputField(desc="List of extracted facts / answers")
+    answer: str = dspy.OutputField(desc="Synthesised prose answer")
+    sections_examined: int = dspy.OutputField(desc="Number of sections inspected")
+
+
+class SummarizeLongDocument(dspy.Signature):
+    """Summarize a long document with controllable focus.
+
+    The LLM should chunk the document, query each chunk with the given
+    focus topic, and merge the per-chunk summaries into a coherent
+    whole.
+
+    Input Fields:
+        document: Full text of the document
+        focus: Topic or aspect to focus the summary on
+
+    Output Fields:
+        summary: Coherent summary text
+        key_points: Bullet-point list of key takeaways
+        coverage_pct: Estimated percentage of the document covered
+    """
+
+    document: str = dspy.InputField(desc="Full document text")
+    focus: str = dspy.InputField(desc="Topic or aspect to focus on")
+    summary: str = dspy.OutputField(desc="Coherent summary text")
+    key_points: list = dspy.OutputField(desc="Bullet-point list of key takeaways")
+    coverage_pct: int = dspy.OutputField(
+        desc="Estimated percentage of document covered (0-100)"
+    )
+
+
+class ExtractFromLogs(dspy.Signature):
+    """Extract patterns from log-style text.
+
+    The LLM should use ``grep`` and ``chunk_by_headers`` helpers to
+    search for the query pattern, categorise matches, and identify any
+    time-range information.
+
+    Input Fields:
+        logs: Full log text (loaded in sandbox)
+        query: What to search for
+
+    Output Fields:
+        matches: List of matching log entries
+        patterns: Dict mapping pattern category to example entries
+        time_range: Observed time range of matching entries
+    """
+
+    logs: str = dspy.InputField(desc="Full log text")
+    query: str = dspy.InputField(desc="Pattern or topic to search for")
+    matches: list = dspy.OutputField(desc="List of matching log entries")
+    patterns: dict = dspy.OutputField(desc="Dict mapping category to example entries")
+    time_range: str = dspy.OutputField(desc="Observed time range of matching entries")

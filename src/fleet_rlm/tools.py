@@ -6,11 +6,36 @@ interpreter and called from within the sandboxed code.
 
 Available tools:
     - regex_extract: Extract pattern matches using regular expressions
+    - rlm_helpers: Utilities for Modal sandbox and volume management
 """
 
 from __future__ import annotations
 
 import re
+
+# Re-export rlm_helpers for backward compatibility
+from .rlm_helpers import (
+    create_interpreter,
+    ensure_volume_exists,
+    get_default_volume_name,
+    get_memory_path,
+    get_workspace_volume_name,
+    load_modal_config,
+    sanitize_key,
+    setup_modal_env,
+)
+
+__all__ = [
+    "regex_extract",
+    "create_interpreter",
+    "ensure_volume_exists",
+    "get_default_volume_name",
+    "get_memory_path",
+    "get_workspace_volume_name",
+    "load_modal_config",
+    "sanitize_key",
+    "setup_modal_env",
+]
 
 
 def regex_extract(text: str, pattern: str, flags: int = 0) -> list:
