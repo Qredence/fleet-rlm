@@ -76,11 +76,17 @@ def check_secret() -> bool:
 
         result = check_secret_presence()
         ok = True
-        for key, present in result.items():
-            status = "OK" if present else "MISSING"
-            print(f"  {key}: {status}")
-            if not present:
+        total = 0
+        present_count = 0
+        missing_count = 0
+        for _key, present in result.items():
+            total += 1
+            if present:
+                present_count += 1
+            else:
+                missing_count += 1
                 ok = False
+        print(f"  Secrets: {present_count}/{total} present ({missing_count} missing)")
         return ok
     except Exception as e:
         print(f"  Could not check: {e}")
