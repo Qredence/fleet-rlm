@@ -153,7 +153,7 @@ def main() -> None:
         print("\nAll checks passed.")
     else:
         failed = [k for k, v in results.items() if not v]
-        print(f"\nFailed: {', '.join(failed)}")
+        print(f"\nFailed checks: {len(failed)}")
         sys.exit(1)
 
 
