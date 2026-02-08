@@ -12,6 +12,7 @@ build/
 # Virtual environments
 .venv/
 venv/
+.test_venv/
 
 # Environment and secrets
 .env
