@@ -76,9 +76,9 @@ def check_secret() -> bool:
 
         result = check_secret_presence()
         ok = True
-        for key, present in result.items():
+        for idx, (key, present) in enumerate(result.items(), start=1):
             status = "OK" if present else "MISSING"
-            print(f"  {key}: {status}")
+            print(f"  Secret {idx}: {status}")
             if not present:
                 ok = False
         return ok
