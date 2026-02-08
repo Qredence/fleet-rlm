@@ -10,6 +10,7 @@ import getpass
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
+import logging
 
 if TYPE_CHECKING:
     from fleet_rlm import ModalInterpreter
@@ -127,8 +128,10 @@ def load_modal_config() -> dict[str, str]:
                 "token_secret": active_profile.get("token_secret", ""),
             }
 
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to load Modal config from %s: %s", config_path, exc
+        )
 
     return {}
 
