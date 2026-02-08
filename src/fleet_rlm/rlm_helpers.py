@@ -78,7 +78,7 @@ def ensure_volume_exists(volume_name: str | None = None) -> str:
     name = volume_name or get_default_volume_name()
 
     # Ensure volume exists using from_name (V2 compatible)
-    modal.Volume.from_name(name, create_if_missing=True)
+    modal.Volume.from_name(name, create_if_missing=True, version=2)
     return name
 
 
@@ -103,7 +103,11 @@ def load_modal_config() -> dict[str, str]:
         return {}
 
     try:
-        import tomllib  # type: ignore
+        try:
+            import tomllib  # type: ignore
+        except ImportError:
+            # Python 3.10 doesn't have tomllib in stdlib
+            import tomli as tomllib  # type: ignore
 
         with open(config_path, "rb") as f:
             config = tomllib.load(f)

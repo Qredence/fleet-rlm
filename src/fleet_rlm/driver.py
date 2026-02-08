@@ -200,13 +200,28 @@ def sandbox_driver() -> None:
 
         Returns:
             List of text chunks.
+
+        Raises:
+            ValueError: If size <= 0, overlap < 0, or overlap >= size.
         """
+        if not text:
+            return []
+        if size <= 0:
+            raise ValueError("size must be positive")
+        if overlap < 0:
+            raise ValueError("overlap must be non-negative")
+        if overlap >= size:
+            raise ValueError("overlap must be less than size")
+
         chunks: list[str] = []
-        start = 0
-        while start < len(text):
-            end = start + size
-            chunks.append(text[start:end])
-            start = end - overlap if overlap else end
+        step = size - overlap
+        for start in range(0, len(text), step):
+            chunk = text[start : start + size]
+            if chunk:
+                chunks.append(chunk)
+            # Stop if we've reached the end
+            if start + size >= len(text):
+                break
         return chunks
 
     sandbox_globals["chunk_by_size"] = chunk_by_size
@@ -221,7 +236,7 @@ def sandbox_driver() -> None:
             pattern: Regex pattern that marks a section header.
 
         Returns:
-            List of dicts ``{"header": ..., "body": ...}`` for each section.
+            List of dicts ``{"header": ..., "content": ...}`` for each section.
         """
         import re as _re
 
@@ -235,7 +250,7 @@ def sandbox_driver() -> None:
                     parts.append(
                         {
                             "header": current_header.strip(),
-                            "body": "".join(current_lines),
+                            "content": "".join(current_lines),
                         }
                     )
                 current_header = line
@@ -244,7 +259,7 @@ def sandbox_driver() -> None:
                 current_lines.append(line)
         if current_lines or current_header:
             parts.append(
-                {"header": current_header.strip(), "body": "".join(current_lines)}
+                {"header": current_header.strip(), "content": "".join(current_lines)}
             )
         return parts
 

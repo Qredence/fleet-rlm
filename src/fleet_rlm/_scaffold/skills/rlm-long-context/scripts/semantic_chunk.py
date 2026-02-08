@@ -189,6 +189,8 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
             return chunks
 
     except json.JSONDecodeError:
+        # If the content is not valid JSON, intentionally fall back to
+        # generic size-based chunking handled after this block.
         pass
 
     return chunk_by_size(content, max_size)
