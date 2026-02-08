@@ -59,7 +59,7 @@ These functions are injected automatically by the driver and available inside
 | `peek`             | `peek(text, start=0, length=2000)`             | `str` — slice of text                     |
 | `grep`             | `grep(text, pattern, *, context=0)`            | `list[str]` — matching lines              |
 | `chunk_by_size`    | `chunk_by_size(text, size=4000, overlap=200)`  | `list[str]`                               |
-| `chunk_by_headers` | `chunk_by_headers(text, pattern=r"^#{1,3}\s")` | `list[dict]` with keys `header`, `body`   |
+| `chunk_by_headers` | `chunk_by_headers(text, pattern=r"^#{1,3}\s")` | `list[dict]` with keys `header`, `content`|
 | `add_buffer`       | `add_buffer(name, value)`                      | `None` — append to named buffer           |
 | `get_buffer`       | `get_buffer(name)`                             | `list` — buffer contents                  |
 | `clear_buffer`     | `clear_buffer(name=None)`                      | `None` — clear one or all buffers         |

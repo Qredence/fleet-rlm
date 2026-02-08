@@ -125,7 +125,7 @@ class TestContextManager:
                 with interp:
                     raise ValueError("test error")
 
-        mock_shutdown.assert_called_once()
+            mock_shutdown.assert_called_once()
 
     def test_context_manager_full_lifecycle(self, mock_modal):
         """Test the full with-block lifecycle."""
