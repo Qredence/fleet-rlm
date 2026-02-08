@@ -19,6 +19,93 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
 
 ---
 
+## Using dspy.RLM with Claude Code
+
+`fleet-rlm` is designed to work seamlessly with **Claude Code** (Claude's agentic coding capabilities). The bundled skills and agents enable Claude to leverage `dspy.RLM` for complex, long-context tasks.
+
+### Why Use RLM with Claude Code?
+
+| Challenge | RLM Solution |
+|-----------|-------------|
+| Context window limits | Code explores data programmatically instead of loading everything |
+| Complex multi-step analysis | Sub-agents handle specialized tasks via `llm_query()` |
+| Reproducibility | All exploration steps are Python code — auditable and replayable |
+| Secure execution | Modal sandboxes isolate untrusted code from your environment |
+
+### Agent Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ CLAUDE CODE (Orchestrator)                                  │
+│  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │ rlm-orchestrator│  │ rlm-specialist  │                  │
+│  │ (coordinates    │→ │ (executes       │                  │
+│  │  multi-agent    │  │  complex RLM    │                  │
+│  │  workflows)     │  │  tasks)         │                  │
+│  └─────────────────┘  └─────────────────┘                  │
+│           │                    │                            │
+│           ▼                    ▼                            │
+│  ┌─────────────────────────────────────────┐               │
+│  │ ModalInterpreter (dspy.CodeInterpreter) │               │
+│  │  • Manages sandbox lifecycle            │               │
+│  │  • Bridges tools to/from sandbox        │               │
+│  │  • Handles llm_query() sub-calls        │               │
+│  └─────────────────────────────────────────┘               │
+│                        │                                    │
+└────────────────────────┼────────────────────────────────────┘
+                         │ JSON protocol
+                         ▼
+              ┌──────────────────────┐
+              │ MODAL SANDBOX        │
+              │  • Python 3.12       │
+              │  • Isolated exec()   │
+              │  • Sub-LLM calls     │
+              └──────────────────────┘
+```
+
+### Quick Start with Claude Code
+
+1. **Install skills and agents** to your Claude configuration:
+   ```bash
+   uv run fleet-rlm init
+   ```
+
+2. **Use the `rlm` skill** in Claude Code for long-context tasks:
+   ```
+   @rlm Analyze this 500KB log file and extract all error patterns
+   ```
+
+3. **Use the `rlm-orchestrator` agent** for multi-step workflows:
+   ```
+   @rlm-orchestrator Process these 10 documentation files, 
+   extract API endpoints, and generate a summary report
+   ```
+
+### Sub-Agent Patterns
+
+The RLM approach enables powerful sub-agent delegation:
+
+```python
+# Inside Modal sandbox, the LLM-generated code can call:
+result = llm_query(
+    "Extract all function signatures from this code",
+    context=code_snippet
+)
+
+# Or batch multiple sub-queries in parallel:
+results = llm_query_batched([
+    {"query": "Summarize section 1", "context": chunk1},
+    {"query": "Summarize section 2", "context": chunk2},
+])
+```
+
+This pattern allows Claude to:
+- **Delegate semantic analysis** to sub-LLMs while keeping orchestration logic in Python
+- **Process chunks in parallel** for large documents
+- **Accumulate results** across multiple iterations using stateful buffers
+
+---
+
 ## Features
 
 - **Secure Cloud Execution**: Code runs in Modal's isolated sandbox environment
@@ -57,25 +144,80 @@ uv sync
 uv sync --extra dev
 ```
 
+### Skills and Agents Installation
+
+`fleet-rlm` includes custom Claude skills and agents optimized for RLM workflows. Install them to your user directory for use across all projects:
+
+```bash
+# List available skills and agents
+uv run fleet-rlm init --list
+
+# Install all skills and agents to ~/.claude/
+uv run fleet-rlm init
+
+# Or install to a custom directory
+uv run fleet-rlm init --target ~/.config/claude
+
+# Force overwrite existing files
+uv run fleet-rlm init --force
+```
+
+**Note**: Skills and agents are workflow definitions only. You still need to configure Modal authentication and secrets separately (see [Setup Modal](#2-setup-modal) above).
+
+**Available Skills:**
+
+- `dspy-signature` - Generate and validate DSPy signatures
+- `modal-sandbox` - Manage Modal sandboxes
+- `rlm` - Run RLM for long-context tasks
+- `rlm-batch` - Execute parallel tasks
+- `rlm-debug` - Debug RLM execution
+- `rlm-execute` - Execute Python in sandboxes
+- `rlm-long-context` - (EXPERIMENTAL) Research implementation
+- `rlm-memory` - Long-term memory persistence
+- `rlm-run` - Run RLM tasks with proper configuration
+- `rlm-test-suite` - Test and evaluate workflows
+
+**Available Agents:**
+
+- `modal-interpreter-agent` - Direct Modal sandbox interaction
+- `rlm-orchestrator` - Multi-agent RLM coordination (recommended for complex tasks)
+- `rlm-specialist` - Complex RLM task execution with full sandbox access
+- `rlm-subcall` - Lightweight sub-LLM calls for delegation patterns
+
+> **Tip**: Start with `rlm-orchestrator` for multi-file or multi-step tasks. It coordinates `rlm-specialist` and `rlm-subcall` automatically.
+
 ---
 
 ## Quick Start
 
 ### 1. Configure Environment
 
-Create a `.env` file in the repository root:
+Copy the environment template and fill in your values:
 
 ```bash
-# Required
-DSPY_LM_MODEL=openai/gemini-3-flash-preview
-DSPY_LLM_API_KEY=sk-...
+# Copy the template
+cp .env.example .env
 
-# Optional
-DSPY_LM_API_BASE=https://your-litellm-proxy.com
-DSPY_LM_MAX_TOKENS=65536
+# Edit with your API keys and model configuration
+# See .env.example for detailed documentation on each variable
+vim .env
 ```
 
+**Required variables:**
+
+- `DSPY_LM_MODEL` - LLM model identifier (e.g., `openai/gpt-4`, `google/gemini-3-flash-preview`)
+- `DSPY_LLM_API_KEY` - API key for your LLM provider
+
+**Optional variables:**
+
+- `DSPY_LM_API_BASE` - Custom API endpoint (if using proxy or self-hosted)
+- `DSPY_LM_MAX_TOKENS` - Maximum response length (default: 8192)
+
+⚠️ **Security**: The `.env` file is gitignored and will never be committed. Keep your API keys safe!
+
 ### 2. Setup Modal
+
+**Important**: Modal authentication and secrets are **per user**. Each developer needs to run Modal setup in their own environment and create secrets in their own Modal account. Credentials are not shared or bundled with `fleet-rlm`.
 
 ```bash
 # Authenticate with Modal
@@ -133,6 +275,7 @@ uv run fleet-rlm check-secret
 
 | Command              | Description                                  |
 | -------------------- | -------------------------------------------- |
+| `init`               | Install bundled Claude skills and agents     |
 | `run-basic`          | Basic code generation (Fibonacci example)    |
 | `run-architecture`   | Extract DSPy architecture from documentation |
 | `run-api-endpoints`  | Extract API endpoints using batched queries  |
@@ -276,7 +419,7 @@ make precommit-install
 make precommit-run
 ```
 
-Release process documentation is in [`RELEASING.md`](RELEASING.md), including the TestPyPI-first workflow.
+Release process documentation is in [`RELEASING.md`](scripts/RELEASING.md), including the TestPyPI-first workflow.
 
 ---
 
@@ -363,3 +506,4 @@ Built with:
 - [DSPy](https://dspy-docs.vercel.app/) - Framework for programming with language models
 - [Modal](https://modal.com/) - Serverless computing for AI
 - [Typer](https://typer.tiangolo.com/) - CLI framework
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - Agentic coding with Claude
