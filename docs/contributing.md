@@ -62,6 +62,22 @@ uv run pytest
 
 Add new tests in `tests/` for any new functionality. Mock external services like Modal using `monkeypatch`.
 
+The test suite covers:
+
+| Test File                 | What It Tests                                             |
+| :------------------------ | :-------------------------------------------------------- |
+| `test_chunking.py`        | All chunking strategies (size, headers, timestamps, JSON) |
+| `test_cli_smoke.py`       | CLI help display and command discovery                    |
+| `test_config.py`          | Environment variable loading and fallbacks                |
+| `test_context_manager.py` | `__enter__`/`__exit__` context manager protocol           |
+| `test_driver_helpers.py`  | Sandbox-side helpers (peek, grep, chunk, buffers, volume) |
+| `test_driver_protocol.py` | SUBMIT output mapping and tool call round-trips           |
+| `test_rlm_benchmarks.py`  | Performance benchmarks (chunking throughput)              |
+| `test_rlm_integration.py` | End-to-end integration (mocked Modal sandbox)             |
+| `test_rlm_regression.py`  | Regression tests for edge cases                           |
+| `test_tools.py`           | Regex extraction, groups, flags                           |
+| `test_volume_support.py`  | Volume mount/persistence configuration                    |
+
 ## Documentation
 
 - **README.md**: High-level overview.

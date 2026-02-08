@@ -18,8 +18,13 @@ This project is based on research from the [Recursive Language Models paper](htt
 - **Secure Cloud Execution**: Code runs in Modal's isolated sandbox environment.
 - **DSPy Integration**: Built on DSPy 3.1.3 with custom signatures for RLM tasks.
 - **CLI Interface**: Typer-based CLI with multiple demo commands.
+- **Sandbox-Side Helpers**: Built-in functions (`peek`, `grep`, `chunk_by_size`, `chunk_by_headers`, buffers, volume I/O) injected into the sandbox for the Planner to use.
+- **Chunking Strategies**: Host-side and sandbox-side chunking by size, headers, timestamps, and JSON keys.
+- **Context Manager**: `with ModalInterpreter() as interp:` for automatic resource cleanup.
 - **Extensible Tools**: Support for custom tools that bridge sandbox and host.
+- **Long-Context Signatures**: `AnalyzeLongDocument`, `SummarizeLongDocument`, `ExtractFromLogs` for structured long-document processing.
 - **Secret Management**: Secure handling of API keys via Modal secrets.
+- **Persistent Storage**: Modal Volumes V2 for data that survives across runs.
 
 ## Getting Started
 
@@ -34,6 +39,7 @@ Check out the [Getting Started guide](getting-started.md) to set up your environ
   - **[Document Analysis](tutorials/doc-analysis.md)**: Extracting information from long documents.
 - **Guides**:
   - **[CLI Reference](guides/cli-reference.md)**: Detailed command documentation.
+  - **[Skills and Agents](guides/skills-and-agents.md)**: Installing and using custom Claude skills and agents for RLM workflows.
   - **[Jupyter Notebooks](guides/notebooks.md)**: Using the provided notebooks.
   - **[Troubleshooting](guides/troubleshooting.md)**: Common issues and fixes.
 - **[Contributing](contributing.md)**: How to contribute to the project.

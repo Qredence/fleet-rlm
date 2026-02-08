@@ -33,17 +33,29 @@ This guide will walk you through installing `fleet-rlm` and setting up the neces
 
 ### 1. Local Environment Variables
 
-Create a `.env` file in the repository root to configure the Planner LM (the model that writes the code).
+Create a `.env` file in the repository root by copying the provided template:
 
 ```bash
-# Required
-DSPY_LM_MODEL=openai/gemini-3-flash-preview
-DSPY_LLM_API_KEY=sk-...
+# Copy the template
+cp .env.example .env
 
-# Optional
-DSPY_LM_API_BASE=https://your-litellm-proxy.com
-DSPY_LM_MAX_TOKENS=65536
+# Edit with your API keys and model configuration
+vim .env
 ```
+
+The template (`.env.example`) documents all available variables:
+
+**Required variables:**
+
+- `DSPY_LM_MODEL` - LLM model identifier (e.g., `openai/gpt-4`, `google/gemini-3-flash-preview`)
+- `DSPY_LLM_API_KEY` - API key for your LLM provider
+
+**Optional variables:**
+
+- `DSPY_LM_API_BASE` - Custom API endpoint (if using proxy or self-hosted)
+- `DSPY_LM_MAX_TOKENS` - Maximum response length (default: 8192)
+
+⚠️ **Security**: The `.env` file is gitignored and will never be committed. Keep your API keys safe!
 
 ### 2. Modal Setup
 
@@ -74,6 +86,35 @@ The actual code execution happens in a Modal Sandbox. You need to setup authenti
     ```
 
     _Ensure these values match your provider configuration._
+
+## Skills and Agents Installation
+
+`fleet-rlm` includes custom Claude skills and agents optimized for RLM workflows. Install them to your user directory for use across all projects:
+
+**Prerequisites**: Complete Modal setup (above) before installing skills/agents. They require Modal credentials to function.
+
+```bash
+# List available skills and agents
+uv run fleet-rlm init --list
+
+# Install all skills and agents to ~/.claude/
+uv run fleet-rlm init
+
+# Or install to a custom directory
+uv run fleet-rlm init --target ~/.config/claude
+
+# Force overwrite existing files
+uv run fleet-rlm init --force
+```
+
+This command copies:
+
+- **10 Skills**: RLM workflow patterns, debugging, testing, execution
+- **4 Agents**: Specialized agents for RLM orchestration and execution
+
+Once installed, these skills and agents are available in all your Claude-enabled projects.
+
+**Important**: Skills and agents are workflow definitions only—they don't include credentials. Each user must configure their own Modal authentication using the steps above.
 
 ## Verifying Setup
 
