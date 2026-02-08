@@ -451,7 +451,7 @@ def check_secret_key(
 
 @app.command("init")
 def init(
-    target: Path = typer.Option(
+    target: Path | None = typer.Option(
         None,
         help="Target directory (defaults to ~/.claude)",
     ),
