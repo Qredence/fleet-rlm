@@ -16,6 +16,7 @@ enabling bidirectional communication for tool calls and structured output.
 
 from __future__ import annotations
 
+import importlib.resources
 import inspect
 import json
 import queue
@@ -28,6 +29,33 @@ import modal
 from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
 
 from .driver import sandbox_driver
+
+
+def _load_driver_source() -> str:
+    """Load the sandbox_driver function source.
+
+    Tries ``inspect.getsource`` first (works for normal installs).
+    Falls back to reading the driver module file via ``importlib.resources``
+    (works for zipped / compiled distributions where source introspection
+    may fail).
+    """
+    try:
+        return inspect.getsource(sandbox_driver)
+    except OSError:
+        ref = importlib.resources.files("fleet_rlm").joinpath("driver.py")
+        source = ref.read_text(encoding="utf-8")
+        # Extract only the sandbox_driver function body (everything after
+        # the module-level code preceding 'def sandbox_driver').
+        marker = "def sandbox_driver"
+        idx = source.find(marker)
+        if idx == -1:
+            raise RuntimeError(
+                "Cannot locate sandbox_driver in driver.py source"
+            )
+        return source[idx:]
+
+
+_DRIVER_SOURCE: str = _load_driver_source()
 
 
 def _build_default_image(
@@ -269,8 +297,7 @@ class ModalInterpreter:
         if self._sandbox is not None:
             return
 
-        driver_source = inspect.getsource(sandbox_driver)
-        driver_command = f"{driver_source}\n\nsandbox_driver()"
+        driver_command = f"{_DRIVER_SOURCE}\n\nsandbox_driver()"
 
         # Resolve App at sandbox-creation time to keep _client fresh.
         app = self._resolve_app()

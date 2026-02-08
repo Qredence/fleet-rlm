@@ -568,6 +568,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "dspy" },
     { name = "modal" },
+    { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -586,6 +587,7 @@ requires-dist = [
     { name = "modal", specifier = ">=1.3.2" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
+    { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "typer", specifier = ">=0.12" },

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 import dspy
+from dotenv import load_dotenv
 
 
 def _find_project_root(start: Path) -> Path:
@@ -29,36 +30,6 @@ def _find_project_root(start: Path) -> Path:
         if (path / "pyproject.toml").exists():
             return path
     return start
-
-
-def _load_dotenv(path: Path) -> None:
-    """Load environment variables from a .env file.
-
-    Parses the file line by line, handling comments (lines starting with #),
-    empty lines, and quoted values. Only sets variables that are not already
-    present in the environment.
-
-    Args:
-        path: Path to the .env file.
-    """
-    if not path.exists():
-        return
-
-    for raw in path.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and (
-            (value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")
-        ):
-            value = value[1:-1]
-
-        if key and key not in os.environ:
-            os.environ[key] = value
 
 
 def _guard_modal_shadowing() -> None:
@@ -136,7 +107,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
         project_root = _find_project_root(Path.cwd())
         dotenv_path = project_root / ".env"
 
-    _load_dotenv(dotenv_path)
+    load_dotenv(dotenv_path, override=False)
     _guard_modal_shadowing()
 
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
