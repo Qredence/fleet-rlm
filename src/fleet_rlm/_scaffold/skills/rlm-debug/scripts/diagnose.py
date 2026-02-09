@@ -26,9 +26,9 @@ def check_modal() -> bool:
     config_path = Path.home() / ".modal.toml"
 
     if token_id:
-        print(f"  Token (env): {token_id[:8]}...")
+        print("  Token (env): present (hidden)")
     elif config_path.exists():
-        print(f"  Token (file): {config_path}")
+        print("  Token (file): present (hidden)")
     else:
         print("  FAIL: No credentials. Run: uv run modal token set")
         return False
@@ -52,7 +52,7 @@ def check_env() -> bool:
     for key in required:
         val = os.environ.get(key, "")
         if val:
-            print(f"  {key}: {val[:30]}...")
+            print(f"  {key}: present (hidden)")
         else:
             print(f"  {key}: MISSING")
             ok = False
@@ -60,7 +60,7 @@ def check_env() -> bool:
     for primary, fallback in fallback_keys:
         val = os.environ.get(primary, "") or os.environ.get(fallback, "")
         if val:
-            print(f"  {primary}: {'*' * min(len(val), 8)}...")
+            print(f"  {primary}: present (hidden)")
         else:
             print(f"  {primary}: MISSING (also checked {fallback})")
             ok = False
