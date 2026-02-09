@@ -623,7 +623,7 @@ For complete installation options and troubleshooting, see the [Skills and Agent
 
 - **[Skills and Agents Guide](skills-and-agents.md)** — Installation details, command options, and package structure
 - **[AGENTS.md](../../AGENTS.md)** — Project architecture and RLM patterns
-- **[VFS_TAXONOMY.md](../../VFS_TAXONOMY.md)** — Modal Sandbox file system structure
+- **[VFS_TAXONOMY.md](../VFS_TAXONOMY.md)** — Modal Sandbox file system structure
 - **[Core Concepts](../concepts.md)** — RLM theory and implementation details
 - **[Claude Code Skills Docs](https://code.claude.com/docs/en/skills)** — Official skills documentation
 - **[Claude Code Sub-Agents Docs](https://code.claude.com/docs/en/sub-agents)** — Official subagent documentation
