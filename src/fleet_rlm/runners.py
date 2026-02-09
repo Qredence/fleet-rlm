@@ -31,10 +31,12 @@ import modal
 from .config import configure_planner_from_env
 from .interpreter import ModalInterpreter
 from .signatures import (
+    AnalyzeLongDocument,
     ExtractAPIEndpoints,
     ExtractArchitecture,
     ExtractWithCustomTool,
     FindErrorPatterns,
+    SummarizeLongDocument,
 )
 from .tools import regex_extract
 
@@ -456,6 +458,85 @@ def run_custom_tool(
         }
     finally:
         interpreter.shutdown()
+
+
+def run_long_context(
+    *,
+    docs_path: Path | str,
+    query: str,
+    mode: str = "analyze",
+    max_iterations: int = 30,
+    max_llm_calls: int = 50,
+    verbose: bool = True,
+    timeout: int = 900,
+    secret_name: str = "LITELLM",
+    volume_name: str | None = None,
+    env_file: Path | None = None,
+) -> dict[str, Any]:
+    """Run a long-context analysis or summarization task.
+
+    Loads a document into the sandbox and uses injected helpers
+    (``peek``, ``grep``, ``chunk_by_size``, ``chunk_by_headers``,
+    buffers, volume persistence) to let the RLM explore it
+    programmatically.
+
+    Args:
+        docs_path: Path to the document file.
+        query: The analysis query or focus topic.
+        mode: ``"analyze"`` (default) or ``"summarize"``.
+        max_iterations: Maximum RLM iterations (default: 30).
+        max_llm_calls: Maximum LLM calls (default: 50).
+        verbose: Enable verbose output (default: True).
+        timeout: Sandbox timeout in seconds (default: 900).
+        secret_name: Modal secret name (default: "LITELLM").
+        volume_name: Optional Modal volume name for persistence.
+        env_file: Optional path to .env file.
+
+    Returns:
+        Dictionary with results specific to the chosen mode.
+        For ``"analyze"``:
+            - findings, answer, sections_examined, doc_chars
+        For ``"summarize"``:
+            - summary, key_points, coverage_pct, doc_chars
+
+    Raises:
+        ValueError: If *mode* is not ``"analyze"`` or ``"summarize"``.
+    """
+    if mode not in ("analyze", "summarize"):
+        raise ValueError(f"mode must be 'analyze' or 'summarize', got {mode!r}")
+
+    docs = _read_docs(docs_path)
+    _require_planner_ready(env_file)
+
+    sig = AnalyzeLongDocument if mode == "analyze" else SummarizeLongDocument
+
+    with _interpreter(
+        timeout=timeout, secret_name=secret_name, volume_name=volume_name
+    ) as interpreter:
+        rlm = dspy.RLM(
+            signature=sig,
+            interpreter=interpreter,
+            max_iterations=max_iterations,
+            max_llm_calls=max_llm_calls,
+            verbose=verbose,
+        )
+
+        if mode == "analyze":
+            result = rlm(document=docs, query=query)
+            return {
+                "findings": result.findings,
+                "answer": result.answer,
+                "sections_examined": result.sections_examined,
+                "doc_chars": len(docs),
+            }
+        else:
+            result = rlm(document=docs, focus=query)
+            return {
+                "summary": result.summary,
+                "key_points": result.key_points,
+                "coverage_pct": result.coverage_pct,
+                "doc_chars": len(docs),
+            }
 
 
 def check_secret_presence(*, secret_name: str = "LITELLM") -> dict[str, bool]:

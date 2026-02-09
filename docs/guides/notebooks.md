@@ -16,13 +16,13 @@ The provided notebook `notebooks/rlm-dspy-modal.ipynb` is a comprehensive guide 
 
 1.  **Setup**: Imports and environment configuration.
 2.  **Modal Sandbox Driver**: Defining the `driver.py` code that runs remotely.
-3.  **ModalInterpreter**: The Python class bridging DSPy and Modal.
+3.  **ModalInterpreter**: The Python class bridging DSPy and Modal (supports `with` context manager).
 4.  **Demos**:
     - Basic Fibonacci generation.
-    - Long Document Analysis.
+    - Long Document Analysis (with sandbox helpers: `peek`, `grep`, `chunk_by_size`, `chunk_by_headers`).
     - Parallel Processing.
-    - Stateful Multi-Step Logic.
-    - Persistent Storage with Volumes.
+    - Stateful Multi-Step Logic (with `add_buffer` / `get_buffer`).
+    - Persistent Storage with Volumes (with `save_to_volume` / `load_from_volume`).
     - Custom Tools.
 
 ## Headless Execution

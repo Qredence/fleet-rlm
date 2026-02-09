@@ -12,6 +12,7 @@ build/
 # Virtual environments
 .venv/
 venv/
+.test_venv/
 
 # Environment and secrets
 .env
@@ -26,7 +27,7 @@ venv/
 .vscode/
 
 # Local agent/tooling state
-.claude/
+
 .letta/
 .agents/
 .codex/
@@ -34,3 +35,8 @@ venv/
 
 PLANS.md
 notebooks/dspy-rlm-end-to-end-use-case.ipynb
+.junie/memory/errors.md
+.junie/memory/feedback.md
+.junie/memory/language.json
+.junie/memory/memory.version
+.junie/memory/tasks.md

@@ -60,3 +60,11 @@ Delete or rename any file named `modal.py` in your project root or source folder
 
 - **Check the Trajectory**: Use `run-trajectory` to see exactly what the Planner is thinking and what code it is writing.
 - **Inspect Secrets**: Use `check-secret` and `check-secret-key` to verify the environment values that the application sees.
+- **Use the Context Manager**: Wrap `ModalInterpreter` in a `with` block to ensure resources are always cleaned up, even if an error occurs:
+  ```python
+  with ModalInterpreter() as interp:
+      result = interp.execute("print('hello')")
+  ```
+- **Test Sandbox Helpers Locally**: The sandbox-side helpers (`peek`, `grep`, `chunk_by_size`, etc.) are tested in `tests/test_driver_helpers.py`. You can run these tests to verify helper behaviour without a live Modal connection.
+- **Inspect Buffers**: If using stateful multi-step analysis, check buffer contents with `get_buffer("name")` inside your sandbox code to verify accumulated state.
+- **Volume Debugging**: Check whether your volume is mounted by running `save_to_volume("test.txt", "hello")` in the sandbox. If it returns `[no volume mounted at /data]`, the volume was not configured.

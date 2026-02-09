@@ -330,7 +330,7 @@ uv run modal setup        # Authenticate Modal
 uv run modal volume create rlm-volume-dspy  # Create volume
 ```
 
-For package publication workflow (TestPyPI then PyPI), see [RELEASING.md](RELEASING.md).
+For package publication workflow (TestPyPI then PyPI), see [RELEASING.md](scripts/RELEASING.md).
 
 ---
 

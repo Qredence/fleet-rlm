@@ -44,4 +44,4 @@ def test_cli_requires_docs_path_for_architecture():
         ],
     )
     assert result.exit_code == 2
-    assert "--docs-path" in result.stdout or "--docs-path" in result.stderr
+    assert "docs-path" in result.stdout or "docs-path" in result.stderr

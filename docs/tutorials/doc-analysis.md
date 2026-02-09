@@ -58,3 +58,42 @@ uv run fleet-rlm run-custom-tool \
 ```
 
 This uses `regex_extract` inside the sandbox to find matches before processing them.
+
+## Scenario 5: Long-Context Analysis
+
+For very large documents that exceed typical context window limits, the `run-long-context` command leverages sandbox-side helpers to let the RLM explore the document programmatically.
+
+### Analyze Mode
+
+The RLM uses `peek`, `grep`, and `chunk_by_headers` to navigate the document, calls `llm_query` on relevant sections, and synthesizes findings.
+
+```bash
+uv run fleet-rlm run-long-context \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --query "What are the main design decisions?" \
+    --mode analyze
+```
+
+### Summarize Mode
+
+The RLM chunks the document, queries each chunk with the given focus topic, and merges per-chunk summaries into a coherent whole.
+
+```bash
+uv run fleet-rlm run-long-context \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --query "DSPy optimizers" \
+    --mode summarize
+```
+
+### How It Works
+
+Under the hood the RLM has access to these sandbox-side helpers:
+
+- **`peek(text, start, length)`** — Inspect a slice of the document.
+- **`grep(text, pattern, context=0)`** — Case-insensitive line search.
+- **`chunk_by_size(text, size, overlap)`** — Fixed-size chunking.
+- **`chunk_by_headers(text, pattern)`** — Split at markdown headers.
+- **`add_buffer` / `get_buffer` / `clear_buffer`** — Accumulate findings across iterations.
+- **`save_to_volume` / `load_from_volume`** — Persist results across runs.
+
+The Planner LLM writes Python code that calls these helpers, inspects the results, delegates to sub-LLMs (`llm_query`), and eventually calls `SUBMIT()` with the structured output.

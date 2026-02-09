@@ -1,6 +1,6 @@
 PYTHON_SOURCES = src tests config/test_responses_endpoint.py
 
-.PHONY: help sync sync-dev test lint format check precommit-install precommit-run cli-help release-check
+.PHONY: help sync sync-dev test lint format check precommit-install precommit-run cli-help sync-scaffold release-check
 
 help:
 	@echo "Targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make lint              - Run ruff checks"
 	@echo "  make format            - Run ruff formatter"
 	@echo "  make check             - Run lint + test"
+	@echo "  make sync-scaffold     - Sync .claude/ to src/fleet_rlm/_scaffold/"
 	@echo "  make release-check     - Run lint + test + build + twine checks"
 	@echo "  make precommit-install - Install pre-commit git hooks"
 	@echo "  make precommit-run     - Run pre-commit on all files"
@@ -32,7 +33,13 @@ format:
 
 check: lint test
 
-release-check: lint test
+sync-scaffold:
+	@echo "Syncing .claude/ to src/fleet_rlm/_scaffold/..."
+	rsync -a --delete .claude/skills/ src/fleet_rlm/_scaffold/skills/
+	rsync -a --delete .claude/agents/ src/fleet_rlm/_scaffold/agents/
+	@echo "Scaffold sync complete"
+
+release-check: sync-scaffold lint test
 	rm -rf dist build
 	uv build
 	uvx twine check dist/*

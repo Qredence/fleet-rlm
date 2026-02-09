@@ -251,6 +251,9 @@ class ModalInterpreter:
         Raises:
             ValueError: If volume_name was not configured.
         """
+        if self.volume_name is None:
+            raise ValueError("volume_name was not configured")
+
         return modal.Volume.from_name(
             self.volume_name, create_if_missing=True, version=2
         )
@@ -556,3 +559,31 @@ class ModalInterpreter:
         self._stdout_reader_thread = None
         self._stderr_iter = None
         self._volume = None
+
+    def __enter__(self) -> "ModalInterpreter":
+        """Start the interpreter and return it for use as a context manager.
+
+        Enables the ``with ModalInterpreter() as interp:`` pattern for
+        automatic resource cleanup.
+
+        Returns:
+            The started ModalInterpreter instance.
+
+        Example:
+            >>> with ModalInterpreter(timeout=120) as interp:
+            ...     result = interp.execute("print('hello')")
+        """
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Shutdown the interpreter on context manager exit.
+
+        Always shuts down the sandbox, regardless of whether an
+        exception occurred.
+
+        Returns:
+            False — exceptions are not suppressed.
+        """
+        self.shutdown()
+        return False
