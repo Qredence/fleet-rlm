@@ -21,6 +21,8 @@ Example:
     >>> rlm = dspy.RLM(signature=ExtractArchitecture, interpreter=interpreter)
 """
 
+__version__ = "0.3.0"
+
 from .chunking import (
     chunk_by_headers,
     chunk_by_json_keys,
@@ -50,6 +52,7 @@ from .signatures import (
 from .tools import regex_extract
 
 __all__ = [
+    "__version__",
     "configure_planner_from_env",
     "sandbox_driver",
     "ModalInterpreter",
