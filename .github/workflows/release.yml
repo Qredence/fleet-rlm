@@ -121,13 +121,31 @@ jobs:
               with:
                   python-version: "3.12"
 
+            - name: Wait for TestPyPI indexing
+              run: |
+                  echo "⏳ Waiting 60 seconds for TestPyPI to index the new version..."
+                  sleep 60
+
             - name: Install from TestPyPI
               run: |
                   python -m pip install --upgrade pip
-                  pip install \
-                    --index-url https://test.pypi.org/simple/ \
-                    --extra-index-url https://pypi.org/simple \
-                    fleet-rlm==${{ inputs.version }}
+                  # Retry up to 3 times with exponential backoff
+                  for i in 1 2 3; do
+                    echo "Attempt $i to install fleet-rlm==${{ inputs.version }}"
+                    if pip install \
+                      --index-url https://test.pypi.org/simple/ \
+                      --extra-index-url https://pypi.org/simple \
+                      fleet-rlm==${{ inputs.version }}; then
+                      echo "✅ Successfully installed"
+                      exit 0
+                    fi
+                    if [ $i -lt 3 ]; then
+                      echo "⚠️ Install failed, waiting $((i * 30)) seconds before retry..."
+                      sleep $((i * 30))
+                    fi
+                  done
+                  echo "❌ Failed to install after 3 attempts"
+                  exit 1
 
             - name: Test CLI availability
               run: |
