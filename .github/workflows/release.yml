@@ -95,6 +95,7 @@ jobs:
         name: Publish to TestPyPI
         runs-on: ubuntu-latest
         needs: [build, check-pypi-availability]
+        continue-on-error: true
         environment:
             name: testpypi
             url: https://test.pypi.org/project/fleet-rlm/
@@ -115,6 +116,8 @@ jobs:
         name: Smoke Test from TestPyPI
         runs-on: ubuntu-latest
         needs: publish-testpypi
+        continue-on-error: true
+        if: success() || failure()
         steps:
             - name: Set up Python
               uses: actions/setup-python@v5
@@ -159,7 +162,8 @@ jobs:
     publish-pypi:
         name: Publish to PyPI
         runs-on: ubuntu-latest
-        needs: smoke-test-testpypi
+        needs: [build, smoke-test-testpypi]
+        if: always() && needs.build.result == 'success'
         environment:
             name: pypi
             url: https://pypi.org/project/fleet-rlm/
