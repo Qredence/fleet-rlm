@@ -114,8 +114,8 @@ def run_basic(
 
 @app.command("run-architecture")
 def run_architecture(
-    docs_path: Path = typer.Option(
-        ...,
+    docs_path: Path | None = typer.Option(
+        None,
         "--docs-path",
         help="Path to long-context docs text (required)",
     ),
@@ -144,6 +144,9 @@ def run_architecture(
             --docs-path docs.txt \\
             --query "What are the main components?"
     """
+    if docs_path is None:
+        typer.echo("Error: '--docs-path' is required for run-architecture.", err=True)
+        raise typer.Exit(code=2)
     try:
         result = runners.run_architecture(
             docs_path=docs_path,
