@@ -14,6 +14,10 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
+              with:
+                  fetch-depth: 1
+                  fetch-tags: false
+                  submodules: false
 
             - name: Install uv
               uses: astral-sh/setup-uv@v5
