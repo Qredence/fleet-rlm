@@ -33,15 +33,17 @@ Check out the [Getting Started guide](getting-started.md) to set up your environ
 ## Documentation Contents
 
 - **[Getting Started](getting-started.md)**: Installation, Environment Setup, and Modal Configuration.
-- **[Core Concepts](concepts.md)**: Theory behind RLM, Architecture, and Design Patterns.
+- **[Core Concepts](concepts.md)**: Theory behind RLM, Architecture, Design Patterns, and the Long-Context Workflow.
 - **Tutorials**:
   - **[Basic Usage](tutorials/basic-usage.md)**: Running the Fibonacci demo.
   - **[Document Analysis](tutorials/doc-analysis.md)**: Extracting information from long documents.
 - **Guides**:
   - **[CLI Reference](guides/cli-reference.md)**: Detailed command documentation.
   - **[Skills and Agents](guides/skills-and-agents.md)**: Installing and using custom Claude skills and agents for RLM workflows.
+  - **[Skills Usage](guides/skills-usage.md)**: Detailed skill invocation patterns and three-tier architecture (Skills, Subagents, Agent Teams).
   - **[Jupyter Notebooks](guides/notebooks.md)**: Using the provided notebooks.
   - **[Troubleshooting](guides/troubleshooting.md)**: Common issues and fixes.
+- **[VFS Taxonomy](VFS_TAXONOMY.md)**: Modal Sandbox file system structure for persistent storage.
 - **[Contributing](contributing.md)**: How to contribute to the project.
 
 ## License

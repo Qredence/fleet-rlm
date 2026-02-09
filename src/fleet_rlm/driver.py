@@ -51,6 +51,7 @@ def sandbox_driver() -> None:
     """
 
     import json
+    import re as _re
     import sys
     from contextlib import redirect_stderr, redirect_stdout
     from io import StringIO
@@ -176,8 +177,6 @@ def sandbox_driver() -> None:
         Returns:
             A list of matching lines (or line groups with context).
         """
-        import re as _re
-
         lines = text.splitlines()
         pat = _re.compile(_re.escape(pattern), _re.IGNORECASE)
         hits: list[str] = []
@@ -218,11 +217,9 @@ def sandbox_driver() -> None:
     def chunk_by_headers(
         text: str,
         pattern: str = r"^#{1,3} ",
-        flags: int = 0,
-    ) -> list[dict[str, str]]:
+        flags: int = _re.MULTILINE,
+    ) -> list[dict]:
         """Split *text* at lines matching *pattern* (regex)."""
-        import re as _re
-
         if not text:
             return []
 
@@ -232,7 +229,7 @@ def sandbox_driver() -> None:
         if not matches:
             return [{"header": "", "content": text.strip(), "start_pos": 0}]
 
-        parts: list[dict[str, str]] = []
+        parts: list[dict] = []
 
         if matches[0].start() > 0:
             preamble = text[: matches[0].start()].strip()

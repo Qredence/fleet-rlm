@@ -114,34 +114,52 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
             chunks = []
             current_items = []
             current_size = 0
+            current_start_pos = 0  # Track position in original content
 
-            for item in items:
+            for idx, item in enumerate(items):
                 item_str = json.dumps(item)
                 item_size = len(item_str)
 
+                # Find the position of this item in the original content
+                # Search starting from current position to handle duplicates
+                search_start = (
+                    current_start_pos
+                    if not current_items
+                    else current_start_pos + len(json.dumps(current_items)) - 1
+                )
+                item_pos = content.find(item_str, max(0, search_start - len(item_str)))
+                if item_pos == -1:
+                    # Fallback: position tracking may be unreliable for duplicates
+                    item_pos = -1
+
                 if current_size + item_size > max_size and current_items:
-                    # Save current chunk
-                    chunk_content = json.dumps(current_items)
+                    # Save current chunk with tracked position
+                    chunk_start = current_start_pos if current_start_pos >= 0 else -1
                     chunks.append(
                         (
-                            content.find(chunk_content),
-                            content.find(chunk_content) + len(chunk_content),
+                            chunk_start,
+                            chunk_start + current_size if chunk_start >= 0 else -1,
                             f"array[{len(current_items)}]",
                         )
                     )
                     current_items = [item]
                     current_size = item_size
+                    current_start_pos = (
+                        item_pos if item_pos >= 0 else current_start_pos + 1
+                    )
                 else:
+                    if not current_items:
+                        current_start_pos = item_pos if item_pos >= 0 else 0
                     current_items.append(item)
                     current_size += item_size
 
             # Last chunk
             if current_items:
-                chunk_content = json.dumps(current_items)
+                chunk_start = current_start_pos if current_start_pos >= 0 else -1
                 chunks.append(
                     (
-                        content.find(chunk_content),
-                        content.find(chunk_content) + len(chunk_content),
+                        chunk_start,
+                        chunk_start + current_size if chunk_start >= 0 else -1,
                         f"array[{len(current_items)}]",
                     )
                 )
@@ -154,34 +172,50 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
             chunks = []
             current_keys = []
             current_size = 0
+            current_start_pos = 0  # Track position in original content
 
             for key, value in items:
                 item_str = json.dumps({key: value})
                 item_size = len(item_str)
 
+                # Find the position of this key in the original content
+                search_start = (
+                    current_start_pos
+                    if not current_keys
+                    else current_start_pos
+                    + len(json.dumps({k: data[k] for k in current_keys}))
+                    - 1
+                )
+                key_pos = content.find(f'"{key}"', max(0, search_start - len(item_str)))
+                if key_pos == -1:
+                    key_pos = content.find(key, max(0, search_start - len(item_str)))
+
                 if current_size + item_size > max_size and current_keys:
-                    chunk_dict = {k: data[k] for k in current_keys}
-                    chunk_content = json.dumps(chunk_dict)
+                    chunk_start = current_start_pos if current_start_pos >= 0 else -1
                     chunks.append(
                         (
-                            content.find(chunk_content),
-                            content.find(chunk_content) + len(chunk_content),
+                            chunk_start,
+                            chunk_start + current_size if chunk_start >= 0 else -1,
                             f"dict[{len(current_keys)}]",
                         )
                     )
                     current_keys = [key]
                     current_size = item_size
+                    current_start_pos = (
+                        key_pos if key_pos >= 0 else current_start_pos + 1
+                    )
                 else:
+                    if not current_keys:
+                        current_start_pos = key_pos if key_pos >= 0 else 0
                     current_keys.append(key)
                     current_size += item_size
 
             if current_keys:
-                chunk_dict = {k: data[k] for k in current_keys}
-                chunk_content = json.dumps(chunk_dict)
+                chunk_start = current_start_pos if current_start_pos >= 0 else -1
                 chunks.append(
                     (
-                        content.find(chunk_content),
-                        content.find(chunk_content) + len(chunk_content),
+                        chunk_start,
+                        chunk_start + current_size if chunk_start >= 0 else -1,
                         f"dict[{len(current_keys)}]",
                     )
                 )
@@ -189,8 +223,6 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
             return chunks
 
     except json.JSONDecodeError:
-        # If the content is not valid JSON, intentionally fall back to
-        # generic size-based chunking handled after this block.
         # If the content is not valid JSON, intentionally fall back to
         # generic size-based chunking handled after this block.
         pass

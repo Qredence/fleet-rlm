@@ -13,6 +13,7 @@ import re
 def load_context(state_path: str) -> str:
     """Load context from RLM state file (pickle format)."""
     import pickle
+
     with open(state_path, "rb") as f:
         state = pickle.load(f)
     return state.get("content", "")

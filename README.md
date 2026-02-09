@@ -478,10 +478,11 @@ Remove any `modal.py` file or `__pycache__/modal.*.pyc` in the working directory
 
 ## References
 
-- **RLM Paper**: [Recursive Language Models](https://arxiv.org/abs/2501.123)
+- **RLM Paper**: [Recursive Language Models](https://arxiv.org/abs/2501.123) (also available in `rlm-volume-dspy` at `/data/rlm-knowledge/`)
 - **DSPy Docs**: https://dspy-docs.vercel.app/
 - **Modal Docs**: https://modal.com/docs
 - **UV Docs**: https://docs.astral.sh/uv/
+- **Project Docs**: See `docs/` directory for detailed guides and architecture documentation
 
 ---
 

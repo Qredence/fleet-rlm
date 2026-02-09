@@ -23,6 +23,42 @@ uv run ruff format src tests               # Format
 uv run ty check src                        # Type check (use ty, never mypy)
 ```
 
+## Architecture Overview
+
+### Component Diagram
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   CLI (Typer)   │────▶│  Modal Sandbox   │────▶│  DSPy Planner   │
+│   cli.py        │     │  interpreter.py  │     │  config.py      │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+                             │
+                             ▼
+                      ┌──────────────────┐
+                      │  Sandbox Driver  │
+                      │  driver.py       │
+                      │  (runs in Modal) │
+                      └──────────────────┘
+```
+
+### Long-Context RLM Workflow
+
+The `.claude/skills/rlm-long-context/` scripts handle large contexts:
+
+1. **Chunking**: Content split using semantic boundaries
+2. **Ranking**: Chunks ranked by query relevance
+3. **Caching**: Results cached per chunk+query
+4. **Processing**: Subagents process in relevance order
+5. **Early Exit**: Stops when confidence threshold reached
+
+### Key Design Patterns
+
+**Sandbox-Injectable Functions**: Functions in `chunking.py` are pure (stdlib-only) for sandbox injection.
+
+**JSON Protocol**: Sandbox communicates via JSON lines on stdin/stdout.
+
+**Stateful Execution**: Globals persist across calls for incremental workflows.
+
 ## Project Layout
 
 ```
