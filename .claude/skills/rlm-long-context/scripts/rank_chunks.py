@@ -7,12 +7,12 @@ Ranks chunks by relevance to a query before processing.
 from __future__ import annotations
 
 import argparse
-import pickle
 import re
 
 
 def load_context(state_path: str) -> str:
     """Load context from RLM state file (pickle format)."""
+    import pickle
     with open(state_path, "rb") as f:
         state = pickle.load(f)
     return state.get("content", "")
@@ -84,9 +84,9 @@ def rank_chunks_by_query(
         }
     ]
 
-    # Guard against empty keywords list
+    # Guard against empty keywords (e.g., query is only stopwords)
     if not keywords:
-        # If no meaningful keywords, return all chunks with equal score
+        # Return all chunks with equal zero score
         scores = []
         for i in range(0, len(content), chunk_size):
             end = min(i + chunk_size, len(content))

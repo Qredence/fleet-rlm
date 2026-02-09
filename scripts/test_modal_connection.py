@@ -20,11 +20,11 @@ def load_modal_config():
     config_path = Path.home() / ".modal.toml"
     if config_path.exists():
         try:
-            # Python 3.11+ has tomllib in stdlib, 3.10 needs tomli
             try:
-                import tomllib
+                import tomllib  # type: ignore
             except ImportError:
-                import tomli as tomllib
+                # Python 3.10 doesn't have tomllib in stdlib
+                import tomli as tomllib  # type: ignore
 
             with open(config_path, "rb") as f:
                 config = tomllib.load(f)
