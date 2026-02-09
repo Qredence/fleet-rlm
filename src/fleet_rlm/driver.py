@@ -190,20 +190,10 @@ def sandbox_driver() -> None:
 
     sandbox_globals["grep"] = grep
 
-    def chunk_by_size(text: str, size: int = 4000, overlap: int = 200) -> list[str]:
-        """Split *text* into fixed-size chunks with optional overlap.
-
-        Args:
-            text: Text to chunk.
-            size: Maximum characters per chunk.
-            overlap: Characters of overlap between consecutive chunks.
-
-        Returns:
-            List of text chunks.
-
-        Raises:
-            ValueError: If size <= 0, overlap < 0, or overlap >= size.
-        """
+    # NOTE: These functions mirror fleet_rlm.chunking (the canonical source).
+    # Keep defaults and logic in sync with chunking.py.
+    def chunk_by_size(text: str, size: int = 200_000, overlap: int = 0) -> list[str]:
+        """Split *text* into fixed-size chunks with optional overlap."""
         if not text:
             return []
         if size <= 0:
@@ -219,7 +209,6 @@ def sandbox_driver() -> None:
             chunk = text[start : start + size]
             if chunk:
                 chunks.append(chunk)
-            # Stop if we've reached the end
             if start + size >= len(text):
                 break
         return chunks
@@ -227,39 +216,43 @@ def sandbox_driver() -> None:
     sandbox_globals["chunk_by_size"] = chunk_by_size
 
     def chunk_by_headers(
-        text: str, pattern: str = r"^#{1,3}\s"
+        text: str,
+        pattern: str = r"^#{1,3} ",
+        flags: int = 0,
     ) -> list[dict[str, str]]:
-        """Split *text* at lines matching *pattern* (regex).
-
-        Args:
-            text: Document text.
-            pattern: Regex pattern that marks a section header.
-
-        Returns:
-            List of dicts ``{"header": ..., "content": ...}`` for each section.
-        """
+        """Split *text* at lines matching *pattern* (regex)."""
         import re as _re
 
+        if not text:
+            return []
+
+        compiled = _re.compile(pattern, flags | _re.MULTILINE)
+        matches = list(compiled.finditer(text))
+
+        if not matches:
+            return [{"header": "", "content": text.strip(), "start_pos": 0}]
+
         parts: list[dict[str, str]] = []
-        current_header = ""
-        current_lines: list[str] = []
-        regex = _re.compile(pattern)
-        for line in text.splitlines(keepends=True):
-            if regex.match(line):
-                if current_lines:
-                    parts.append(
-                        {
-                            "header": current_header.strip(),
-                            "content": "".join(current_lines),
-                        }
-                    )
-                current_header = line
-                current_lines = []
+
+        if matches[0].start() > 0:
+            preamble = text[: matches[0].start()].strip()
+            if preamble:
+                parts.append({"header": "", "content": preamble, "start_pos": 0})
+
+        for i, match in enumerate(matches):
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            section = text[match.start() : end]
+
+            newline_pos = section.find("\n")
+            if newline_pos == -1:
+                header = section.strip()
+                content = ""
             else:
-                current_lines.append(line)
-        if current_lines or current_header:
+                header = section[:newline_pos].strip()
+                content = section[newline_pos + 1 :].strip()
+
             parts.append(
-                {"header": current_header.strip(), "content": "".join(current_lines)}
+                {"header": header, "content": content, "start_pos": match.start()}
             )
         return parts
 
