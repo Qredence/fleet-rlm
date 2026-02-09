@@ -66,23 +66,23 @@ From `src/fleet_rlm/signatures.py`:
 
 ```python
 # Architecture extraction
-"document, query -> modules, optimizers, design_principles"
+"docs, query -> modules, optimizers, design_principles"
 
 # API endpoint extraction
-"document -> endpoints, count"
+"docs -> api_endpoints"
 
 # Error pattern analysis
-"document -> error_patterns, categories, solutions"
+"docs -> error_categories, total_errors_found"
 
 # Custom tool extraction
-"document, pattern -> matches, context"
+"docs -> headers, code_blocks, structure_summary"
 
 # Long document analysis
-"document, query -> findings, answer"
+"document, query -> findings, answer, sections_examined"
 
 # Long document summarization
-"document, focus -> summary, key_points"
+"document, focus -> summary, key_points, coverage_pct"
 
 # Log extraction
-"logs, query -> matches, patterns"
+"logs, query -> matches, patterns, time_range"
 ```

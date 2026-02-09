@@ -112,10 +112,10 @@ print(result.confidence)   # NOT result["confidence"]
 
 Defined in `src/fleet_rlm/signatures.py`:
 
-- `ExtractArchitecture`: `document, query -> modules, optimizers, design_principles`
-- `ExtractAPIEndpoints`: `document -> endpoints, count`
-- `FindErrorPatterns`: `document -> error_patterns, categories, solutions`
-- `ExtractWithCustomTool`: `document, pattern -> matches, context`
-- `AnalyzeLongDocument`: `document, query -> findings, answer`
-- `SummarizeLongDocument`: `document, focus -> summary, key_points`
-- `ExtractFromLogs`: `logs, query -> matches, patterns`
+- `ExtractArchitecture`: `docs, query -> modules, optimizers, design_principles`
+- `ExtractAPIEndpoints`: `docs -> api_endpoints`
+- `FindErrorPatterns`: `docs -> error_categories, total_errors_found`
+- `ExtractWithCustomTool`: `docs -> headers, code_blocks, structure_summary`
+- `AnalyzeLongDocument`: `document, query -> findings, answer, sections_examined`
+- `SummarizeLongDocument`: `document, focus -> summary, key_points, coverage_pct`
+- `ExtractFromLogs`: `logs, query -> matches, patterns, time_range`
