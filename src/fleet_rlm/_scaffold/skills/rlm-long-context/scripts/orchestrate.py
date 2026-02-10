@@ -11,6 +11,17 @@ import json
 import os
 import pickle
 
+try:
+    # Module/package execution path.
+    from .cache_manager import cache_result, get_cached_result
+    from .rank_chunks import load_context as load_rank_context
+    from .rank_chunks import rank_chunks_by_query
+except ImportError:
+    # Direct script execution path.
+    from cache_manager import cache_result, get_cached_result
+    from rank_chunks import load_context as load_rank_context
+    from rank_chunks import rank_chunks_by_query
+
 
 class RLMConfig:
     """Configuration for RLM workflow."""
@@ -48,87 +59,15 @@ def load_content(state_path: str) -> str:
 def run_rank_chunks(
     config: RLMConfig,
     query: str,
-) -> list[tuple[int, float]]:
-    """Run chunk ranking script."""
-    cmd = [
-        "python3",
-        "-m",
-        "skills.rlm_long_context.scripts.rank_chunks",
-        "--state",
-        config.state_path,
-        "--query",
-        query,
-        "--chunk-size",
-        str(config.chunk_size),
-    ]
-
-    if config.top_k:
-        cmd.extend(["--top-k", str(config.top_k)])
-
-    # Parse output to get ranked chunks
-    # This is a simplified version - in practice you'd parse the script output
-    content = load_content(config.state_path)
-    import re
-
-    keywords = [w.lower() for w in re.findall(r"\b\w{3,}\b", query)]
-    pattern = re.compile("|".join(re.escape(k) for k in keywords), re.IGNORECASE)
-
-    scores = []
-    for i in range(0, len(content), config.chunk_size):
-        chunk = content[i : i + config.chunk_size]
-        score = len(pattern.findall(chunk))
-        scores.append((i // config.chunk_size, score))
-
-    scores.sort(key=lambda x: x[1], reverse=True)
-
-    if config.top_k:
-        scores = scores[: config.top_k]
-
-    return scores
-
-
-def check_cache(
-    cache_dir: str,
-    chunk_path: str,
-    query: str,
-) -> dict | None:
-    """Check if result is cached."""
-    import hashlib
-
-    key_data = f"{chunk_path}:{query}"
-    cache_key = hashlib.sha256(key_data.encode()).hexdigest()[:32]
-    cache_path = os.path.join(cache_dir, f"{cache_key}.json")
-
-    if os.path.exists(cache_path):
-        with open(cache_path) as f:
-            return json.load(f)
-    return None
-
-
-def save_cache(
-    cache_dir: str,
-    chunk_path: str,
-    query: str,
-    result: dict,
-):
-    """Save result to cache."""
-    import hashlib
-
-    os.makedirs(cache_dir, exist_ok=True)
-
-    key_data = f"{chunk_path}:{query}"
-    cache_key = hashlib.sha256(key_data.encode()).hexdigest()[:32]
-    cache_path = os.path.join(cache_dir, f"{cache_key}.json")
-
-    cache_entry = {
-        "chunk_path": chunk_path,
-        "query": query,
-        "cache_key": cache_key,
-        "result": result,
-    }
-
-    with open(cache_path, "w") as f:
-        json.dump(cache_entry, f, indent=2)
+) -> list[tuple[int, int, float]]:
+    """Run chunk ranking by importing from rank_chunks module."""
+    content = load_rank_context(config.state_path)
+    return rank_chunks_by_query(
+        content=content,
+        query=query,
+        chunk_size=config.chunk_size,
+        top_k=config.top_k,
+    )
 
 
 def estimate_confidence(results: list[dict], query: str) -> float:
@@ -192,15 +131,21 @@ def orchestrate(
     # Step 2: Process chunks with caching and early exit
     results = []
     chunks_to_process = [
-        (idx, os.path.join(config.chunks_dir, f"chunk_{idx:04d}.txt"))
-        for idx, _ in ranked_chunks
+        (
+            start,
+            os.path.join(
+                config.chunks_dir, f"chunk_{start // config.chunk_size:04d}.txt"
+            ),
+        )
+        for start, _end, _score in ranked_chunks
     ]
 
     print("🤖 Processing chunks...")
-    for i, (chunk_idx, chunk_path) in enumerate(chunks_to_process, 1):
+    for i, (chunk_start, chunk_path) in enumerate(chunks_to_process, 1):
+        chunk_idx = chunk_start // config.chunk_size
         # Check cache first
         if config.enable_cache:
-            cached = check_cache(config.cache_dir, chunk_path, query)
+            cached = get_cached_result(config.cache_dir, chunk_path, query)
             if cached:
                 results.append(cached["result"])
                 print_progress(
@@ -219,7 +164,7 @@ def orchestrate(
 
         # Cache the result
         if config.enable_cache:
-            save_cache(config.cache_dir, chunk_path, query, result)
+            cache_result(config.cache_dir, chunk_path, query, result)
 
         results.append(result)
 
