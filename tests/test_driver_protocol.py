@@ -54,3 +54,39 @@ def test_tool_call_roundtrip(monkeypatch):
     assert len(messages) == 2
     assert messages[0]["tool_call"]["name"] == "add"
     assert messages[1]["final"] == {"sum": 5}
+
+
+def test_final_variable_does_not_mask_runtime_error(monkeypatch):
+    command = {
+        "code": "Final = {'ok': True}\nraise RuntimeError('boom')",
+        "variables": {},
+        "tool_names": [],
+        "output_names": [],
+    }
+    messages = _run_driver(monkeypatch, [json.dumps(command)])
+
+    assert len(messages) == 1
+    assert messages[0]["final"] is None
+    assert "RuntimeError: boom" in messages[0]["stderr"]
+
+
+def test_final_variable_does_not_leak_across_commands(monkeypatch):
+    command_one = {
+        "code": "Final = {'stale': True}\nSUBMIT('ok')",
+        "variables": {},
+        "tool_names": [],
+        "output_names": ["status"],
+    }
+    command_two = {
+        "code": "x = 1",
+        "variables": {},
+        "tool_names": [],
+        "output_names": [],
+    }
+    messages = _run_driver(
+        monkeypatch, [json.dumps(command_one), json.dumps(command_two)]
+    )
+
+    assert len(messages) == 2
+    assert messages[0]["final"] == {"status": "ok"}
+    assert messages[1]["final"] is None

@@ -9,6 +9,7 @@ The driver supports:
     - Tool registration and invocation
     - Output capture (stdout/stderr)
     - Structured final output via SUBMIT function
+    - Final variable convention (see below)
 
 Protocol:
     Input (JSON, one per line):
@@ -23,7 +24,7 @@ Protocol:
         {
             "stdout": "captured stdout",
             "stderr": "captured stderr",
-            "final": {...}  // Structured output from SUBMIT
+            "final": {...}  // Structured output from SUBMIT or Final
         }
 
     Tool calls (output):
@@ -31,6 +32,22 @@ Protocol:
 
     Tool responses (input):
         {"tool_result": ...} or {"tool_error": "error message"}
+
+Final Variable Convention:
+    As described in the RLM paper (Section 2), code executed in the REPL can
+    signal completion by setting a variable named ``Final``. When the driver
+    detects that ``Final`` has been set in the globals after code execution,
+    it automatically returns the value of ``Final`` as the structured output
+    and stops further iteration.
+
+    This provides a natural way for LLM-generated code to indicate completion:
+
+        >>> analysis = process_document(text)
+        >>> Final = {"result": analysis, "status": "complete"}
+
+    The driver will detect ``Final``, return its value, and terminate the
+    session. If ``Final`` is not set, execution continues normally (backwards
+    compatible with SUBMIT-based workflows).
 """
 
 from __future__ import annotations
@@ -45,9 +62,14 @@ def sandbox_driver() -> None:
 
     The driver provides these built-in capabilities to executed code:
         - SUBMIT(): Function to return structured final output
+        - Final variable: Set a variable named ``Final`` to return structured
+          output (alternative to SUBMIT, as per RLM paper Section 2)
+        - llm_query(prompt): Query a sub-LLM for semantic analysis (via tool_call)
+        - llm_query_batched(prompts): Query multiple prompts concurrently (via tool_call)
         - Tool functions: Dynamically registered based on tool_names in commands
 
-    The loop terminates on EOFError (stdin closed).
+    The loop terminates on EOFError (stdin closed) or when ``Final`` is set
+    (if the caller stops sending commands after receiving a Final response).
     """
 
     import json
@@ -91,6 +113,11 @@ def sandbox_driver() -> None:
             raise RuntimeError(reply["tool_error"])
         return reply.get("tool_result")
 
+    # Reserved tool names that conflict with built-in sandbox functions
+    _RESERVED_TOOL_NAMES = frozenset(
+        {"llm_query", "llm_query_batched", "SUBMIT", "print"}
+    )
+
     def _register_tools(names: list[str]) -> None:
         """Register tool functions in the sandbox globals.
 
@@ -101,7 +128,7 @@ def sandbox_driver() -> None:
             names: List of tool names to register.
         """
         for name in names:
-            if not name.isidentifier() or name in {"SUBMIT"}:
+            if not name.isidentifier() or name in _RESERVED_TOOL_NAMES:
                 continue
             if name in sandbox_globals:
                 continue
@@ -147,6 +174,45 @@ def sandbox_driver() -> None:
         raise _FinalOutput(dict(zip(output_names, args)))
 
     sandbox_globals["SUBMIT"] = SUBMIT
+
+    # ------------------------------------------------------------------
+    # Built-in RLM tools: llm_query and llm_query_batched
+    # ------------------------------------------------------------------
+    # These tools enable recursive LLM calls from within sandboxed code.
+    # They use _tool_call() to communicate back to the parent interpreter
+    # which handles the actual LLM queries and call counting.
+    # ------------------------------------------------------------------
+
+    def llm_query(prompt: str) -> str:
+        """Query a sub-LLM for semantic analysis.
+
+        Args:
+            prompt: The prompt to send to the sub-LLM.
+
+        Returns:
+            The response text from the sub-LLM.
+
+        Raises:
+            RuntimeError: If the LLM call fails or max_llm_calls exceeded.
+        """
+        return _tool_call("llm_query", prompt)
+
+    def llm_query_batched(prompts: list[str]) -> list[str]:
+        """Query the sub-LLM with multiple prompts concurrently.
+
+        Args:
+            prompts: List of prompts to send to the sub-LLM.
+
+        Returns:
+            List of response texts, in the same order as prompts.
+
+        Raises:
+            RuntimeError: If any LLM call fails or max_llm_calls exceeded.
+        """
+        return _tool_call("llm_query_batched", prompts)
+
+    sandbox_globals["llm_query"] = llm_query
+    sandbox_globals["llm_query_batched"] = llm_query_batched
 
     # ------------------------------------------------------------------
     # Sandbox-side helpers
@@ -341,13 +407,26 @@ def sandbox_driver() -> None:
         stderr_io = StringIO()
         final_obj = None
 
+        had_exec_error = False
         with redirect_stdout(stdout_io), redirect_stderr(stderr_io):
             try:
                 exec(code, sandbox_globals)
             except _FinalOutput as exc:
                 final_obj = exc.args[0] if exc.args else None
             except Exception as exc:  # pragma: no cover
+                had_exec_error = True
                 print(f"[Error] {type(exc).__name__}: {exc}", file=sys.stderr)
+
+        # Final Variable Convention: Check if 'Final' was set in globals.
+        # Always clear it after execution to prevent stale values leaking into
+        # later commands in this stateful session.
+        if had_exec_error:
+            sandbox_globals.pop("Final", None)
+        else:
+            _missing = object()
+            final_from_var = sandbox_globals.pop("Final", _missing)
+            if final_obj is None and final_from_var is not _missing:
+                final_obj = final_from_var
 
         _send(
             {
