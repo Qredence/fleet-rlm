@@ -22,8 +22,10 @@ import queue
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Iterator, Sequence
 
+import dspy
 import modal
 from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
 
@@ -58,10 +60,12 @@ class ModalInterpreter:
         - Isolated execution environment via Modal Sandbox
         - Stateful globals that persist across code executions
         - Tool registration for custom function calls
+        - Built-in RLM tools: llm_query, llm_query_batched (with max_llm_calls limit)
         - Volume support for persistent file storage
         - Secret management for API keys
         - Automatic sensitive data redaction in logs
         - Configurable timeouts for sandbox and execution
+        - Metadata-only stdout history to prevent context pollution (RLM paper Section 2)
 
     Lifecycle:
         1. Initialize with configuration (image, secrets, volumes, etc.)
@@ -83,6 +87,17 @@ class ModalInterpreter:
         image_pip_packages: Packages for default image (default: ("numpy", "pandas")).
         volume_name: Optional Modal Volume name for persistent storage.
         volume_mount_path: Mount path for volume inside sandbox (default: "/data").
+        summarize_stdout: Whether to summarize long stdout to prevent context
+            window pollution (default: True). Per RLM paper Section 2.
+        stdout_summary_threshold: Character threshold above which stdout is
+            summarized (default: 500).
+        stdout_summary_prefix_len: Number of characters to include in summary
+            prefix (default: 200).
+        sub_lm: Optional LM for llm_query/llm_query_batched calls. Defaults to
+            dspy.settings.lm. Allows using a different (e.g., cheaper) model
+            for sub-queries.
+        max_llm_calls: Maximum number of sub-LLM calls (llm_query/
+            llm_query_batched) allowed per session (default: 50).
 
     Example:
         >>> interpreter = ModalInterpreter(timeout=300, volume_name="my-data")
@@ -93,6 +108,31 @@ class ModalInterpreter:
         Or using the context manager pattern:
         >>> with ModalInterpreter() as interp:
         ...     result = interp.execute("x = 1 + 1")
+
+    Metadata-Only History:
+        As described in the RLM paper (Section 2), long stdout outputs can
+        pollute the LLM's context window during recursive iterations. When
+        ``summarize_stdout=True`` (default) and output exceeds the threshold,
+        the interpreter returns metadata instead:
+
+            [Output: 1,247 chars, 42 lines]
+            Prefix: "First 200 chars of output..."
+
+        This keeps the context window clean while still providing useful
+        information about what was produced. Errors are always shown in full.
+
+    Built-in RLM Tools:
+        The interpreter provides built-in tools for recursive LLM calls:
+
+        - ``llm_query(prompt: str) -> str``: Query a sub-LLM for semantic
+          analysis. Counts against ``max_llm_calls`` limit.
+
+        - ``llm_query_batched(prompts: list[str]) -> list[str]]: Query
+          multiple prompts concurrently. Each prompt counts against
+          ``max_llm_calls`` limit.
+
+        These tools enable the RLM pattern where code can call sub-LLMs
+        for semantic tasks while the parent LLM handles the orchestration.
     """
 
     def __init__(
@@ -110,6 +150,11 @@ class ModalInterpreter:
         image_pip_packages: Sequence[str] = ("numpy", "pandas"),
         volume_name: str | None = None,
         volume_mount_path: str = "/data",
+        summarize_stdout: bool = True,
+        stdout_summary_threshold: int = 500,
+        stdout_summary_prefix_len: int = 200,
+        sub_lm: dspy.LM | None = None,
+        max_llm_calls: int = 50,
     ) -> None:
         self.image = image or _build_default_image(
             python_version=image_python_version, pip_packages=image_pip_packages
@@ -124,6 +169,17 @@ class ModalInterpreter:
         self.execute_timeout = execute_timeout or timeout
         self.volume_name = volume_name
         self.volume_mount_path = volume_mount_path
+
+        # Sub-LM configuration for llm_query/llm_query_batched (DSPy RLM pattern)
+        self.sub_lm = sub_lm
+        self.max_llm_calls = max_llm_calls
+        self._llm_call_count = 0
+        self._llm_call_lock = threading.Lock()
+
+        # Metadata-only history configuration (RLM paper Section 2)
+        self.summarize_stdout = summarize_stdout
+        self.stdout_summary_threshold = stdout_summary_threshold
+        self.stdout_summary_prefix_len = stdout_summary_prefix_len
 
         self.output_fields: list[dict] | None = None
         self._tools_registered = False
@@ -272,6 +328,10 @@ class ModalInterpreter:
         if self._sandbox is not None:
             return
 
+        # Reset per-session sub-LLM call counter on fresh sandbox start.
+        with self._llm_call_lock:
+            self._llm_call_count = 0
+
         driver_source = inspect.getsource(sandbox_driver)
         driver_command = f"{driver_source}\n\nsandbox_driver()"
 
@@ -305,8 +365,12 @@ class ModalInterpreter:
 
         Returns:
             List of tool names available to sandboxed code.
+            Always includes built-in RLM tools: llm_query, llm_query_batched.
         """
-        return list(self._tools.keys()) if self._tools else []
+        tools = ["llm_query", "llm_query_batched"]  # Built-in RLM tools
+        if self._tools:
+            tools.extend(self._tools.keys())
+        return tools
 
     def _output_names(self) -> list[str]:
         """Get the list of output field names.
@@ -321,6 +385,174 @@ class ModalInterpreter:
             for field in self.output_fields
             if isinstance(field, dict) and field.get("name")
         ]
+
+    def _summarize_stdout(self, stdout: str) -> str:
+        """Summarize stdout output to prevent context window pollution.
+
+        As described in the RLM paper (Section 2), long stdout outputs can
+        pollute the LLM's context window during recursive iterations. This
+        method returns metadata about the output instead of the full content
+        when the output exceeds the configured threshold.
+
+        The summary includes:
+            - Total character count
+            - Line count
+            - A short prefix of the output (first N chars)
+            - Indication if output was truncated
+
+        Args:
+            stdout: The stdout output from sandbox execution.
+
+        Returns:
+            Either the original stdout (if short) or a metadata summary
+            (if long and summarize_stdout is enabled).
+
+        Example:
+            Short output (under threshold):
+                "Hello, world!"
+
+            Long output (over threshold):
+                "[Output: 1,247 chars, 42 lines]\\n"
+                "Prefix: \\"First 200 chars of output...\\""
+        """
+        if not self.summarize_stdout:
+            return stdout
+
+        if len(stdout) <= self.stdout_summary_threshold:
+            return stdout
+
+        # Calculate metadata
+        total_chars = len(stdout)
+        line_count = stdout.count("\n")
+        prefix_len = min(self.stdout_summary_prefix_len, len(stdout))
+        prefix = stdout[:prefix_len]
+
+        # Escape newlines in prefix for cleaner display
+        prefix_display = prefix.replace("\n", "\\n")
+
+        # Truncate prefix if it was cut mid-line
+        if len(prefix) == prefix_len and prefix_len < len(stdout):
+            prefix_display += "..."
+
+        summary = (
+            f"[Output: {total_chars:,} chars, {line_count} lines]\n"
+            f'Prefix: "{prefix_display}"'
+        )
+
+        return summary
+
+    def _check_and_increment_llm_calls(self, n: int = 1) -> None:
+        """Check and increment the LLM call counter.
+
+        Args:
+            n: Number of calls to add (default: 1 for single query,
+               len(prompts) for batched queries).
+
+        Raises:
+            RuntimeError: If the call would exceed max_llm_calls limit.
+        """
+        with self._llm_call_lock:
+            if self._llm_call_count + n > self.max_llm_calls:
+                raise RuntimeError(
+                    f"LLM call limit exceeded: {self._llm_call_count} + {n} > {self.max_llm_calls}. "
+                    f"Use Python code for aggregation instead of making more LLM calls."
+                )
+            self._llm_call_count += n
+
+    def _query_sub_lm(self, prompt: str) -> str:
+        """Query the sub-LM with a prompt string.
+
+        Args:
+            prompt: The prompt to send to the sub-LM.
+
+        Returns:
+            The response text from the sub-LM.
+
+        Raises:
+            RuntimeError: If no LM is configured.
+        """
+        target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
+        if target_lm is None:
+            raise RuntimeError(
+                "No LM configured. Use dspy.configure(lm=...) or pass sub_lm to ModalInterpreter."
+            )
+        response = target_lm(prompt)
+        if isinstance(response, list) and response:
+            item = response[0]
+            if isinstance(item, dict) and "text" in item:
+                return item["text"]
+            return str(item)
+        return str(response)
+
+    def llm_query(self, prompt: str) -> str:
+        """Query a sub-LLM for semantic analysis.
+
+        This is a built-in RLM tool that allows sandboxed code to make
+        recursive LLM calls. Each call counts against max_llm_calls.
+
+        Args:
+            prompt: The prompt to send to the sub-LLM.
+
+        Returns:
+            The response text from the sub-LLM.
+
+        Raises:
+            ValueError: If prompt is empty.
+            RuntimeError: If max_llm_calls would be exceeded.
+
+        Example:
+            >>> result = llm_query("Summarize this text in one sentence.")
+        """
+        if not prompt:
+            raise ValueError("prompt cannot be empty")
+        self._check_and_increment_llm_calls(1)
+        return self._query_sub_lm(prompt)
+
+    def llm_query_batched(self, prompts: list[str]) -> list[str]:
+        """Query the sub-LLM with multiple prompts concurrently.
+
+        This is a built-in RLM tool for making multiple LLM calls in parallel.
+        Each prompt counts against max_llm_calls.
+
+        Args:
+            prompts: List of prompts to send to the sub-LLM.
+
+        Returns:
+            List of response texts, in the same order as prompts.
+
+        Raises:
+            RuntimeError: If max_llm_calls would be exceeded, or if any
+                batched query fails.
+
+        Example:
+            >>> prompts = ["Summarize A", "Summarize B", "Summarize C"]
+            >>> results = llm_query_batched(prompts)
+        """
+        if not prompts:
+            return []
+        self._check_and_increment_llm_calls(len(prompts))
+
+        results: dict[int, str] = {}
+        errors: list[tuple[int, Exception]] = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_idx = {
+                executor.submit(self._query_sub_lm, p): i for i, p in enumerate(prompts)
+            }
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:
+                    errors.append((idx, exc))
+        if errors:
+            errors.sort(key=lambda x: x[0])
+            details = "; ".join(
+                f"prompt[{idx}]: {type(exc).__name__}: {exc}" for idx, exc in errors
+            )
+            raise RuntimeError(
+                f"llm_query_batched failed for {len(errors)}/{len(prompts)} prompts: {details}"
+            ) from errors[0][1]
+        return [results[i] for i in range(len(prompts))]
 
     def _write_line(self, payload: dict[str, Any]) -> None:
         """Write a JSON payload to the sandbox stdin.
@@ -439,9 +671,17 @@ class ModalInterpreter:
                 kwargs = call.get("kwargs") or {}
 
                 try:
-                    if not name or name not in self._tools:
+                    # Handle built-in RLM tools
+                    if name == "llm_query":
+                        result = self.llm_query(*args, **kwargs)
+                    elif name == "llm_query_batched":
+                        result = self.llm_query_batched(*args, **kwargs)
+                    # Handle user-registered tools
+                    elif name and name in self._tools:
+                        result = self._tools[name](*args, **kwargs)
+                    else:
                         raise CodeInterpreterError(f"Unknown tool: {name}")
-                    result = self._tools[name](*args, **kwargs)
+
                     try:
                         json.dumps(result)
                         reply = {"tool_result": result}
@@ -461,9 +701,15 @@ class ModalInterpreter:
                 if final_obj is not None:
                     return FinalOutput(final_obj)
 
+                # Apply metadata-only history for long stdout (RLM paper Section 2)
+                # Errors are always shown in full to aid debugging
                 if stderr:
-                    return stdout + ("\n" if stdout else "") + stderr
-                return stdout
+                    # Always show full stderr for debugging, but summarize stdout if long
+                    summarized_stdout = self._summarize_stdout(stdout)
+                    return (
+                        summarized_stdout + ("\n" if summarized_stdout else "") + stderr
+                    )
+                return self._summarize_stdout(stdout)
 
     def commit(self) -> None:
         """Commit volume changes to persistent storage.
