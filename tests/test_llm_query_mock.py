@@ -365,14 +365,16 @@ class TestLLMQueryMock:
             def terminate(self):
                 return None
 
-        with patch(
-            "fleet_rlm.interpreter.modal.Sandbox.create", return_value=_DummySandbox()
-        ):
-            interp = ModalInterpreter()
-            interp._llm_call_count = 7
-            interp.start()
-            assert interp._llm_call_count == 0
-            interp.shutdown()
+        with patch.object(ModalInterpreter, "_resolve_app", return_value=object()):
+            with patch(
+                "fleet_rlm.interpreter.modal.Sandbox.create",
+                return_value=_DummySandbox(),
+            ):
+                interp = ModalInterpreter()
+                interp._llm_call_count = 7
+                interp.start()
+                assert interp._llm_call_count == 0
+                interp.shutdown()
 
 
 class TestCheckAndIncrement:
