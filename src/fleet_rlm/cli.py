@@ -465,24 +465,44 @@ def init(
     agents_only: bool = typer.Option(
         False, "--agents-only", help="Install only agents, not skills"
     ),
+    teams_only: bool = typer.Option(
+        False, "--teams-only", help="Install only team templates"
+    ),
+    hooks_only: bool = typer.Option(
+        False, "--hooks-only", help="Install only hook templates"
+    ),
+    no_teams: bool = typer.Option(
+        False, "--no-teams", help="Skip installing team templates"
+    ),
+    no_hooks: bool = typer.Option(
+        False, "--no-hooks", help="Skip installing hook templates"
+    ),
     list_available: bool = typer.Option(
-        False, "--list", help="List available skills and agents (no install)"
+        False, "--list", help="List available scaffold assets (no install)"
     ),
 ) -> None:
-    """Bootstrap Claude Code skills and agents to user-level directory.
+    """Bootstrap Claude Code scaffold assets to user-level directory.
 
-    Copies the bundled RLM skills and agents from the installed fleet-rlm
+    Copies the bundled RLM skills, agents, teams, and hooks from the installed
+    fleet-rlm
     package to ~/.claude/ (or a custom target), making them available across
     all projects.
 
-    By default, installs both skills and agents to ~/.claude/. Use --skills-only
-    or --agents-only to install just one category.
+    By default, installs skills, agents, teams, and hooks to ~/.claude/. Use
+    --*-only flags to install just one category, or --no-* flags to skip
+    teams/hooks in a full install.
+
+    Team templates target Claude Code agent teams, which require setting
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 in Claude settings/environment.
 
     Examples:
         $ fleet-rlm init                    # install to ~/.claude/
         $ fleet-rlm init --force            # overwrite existing
         $ fleet-rlm init --list             # show what's available
         $ fleet-rlm init --skills-only      # just skills
+        $ fleet-rlm init --teams-only       # just team templates
+        $ fleet-rlm init --hooks-only       # just hook templates
+        $ fleet-rlm init --no-hooks         # install all except hooks
         $ fleet-rlm init --target /tmp/test # custom location
     """
     try:
@@ -500,14 +520,40 @@ def init(
             typer.echo("\nAvailable Agents:")
             for agent in scaffold.list_agents():
                 typer.echo(
-                    f"  - {agent['name']}: {agent['description']} (model: {agent['model']})"
+                    f"  - {agent['name']}: {agent['description']} "
+                    f"(model: {agent['model']})"
                 )
+            typer.echo("\nAvailable Teams:")
+            for team in scaffold.list_teams():
+                typer.echo(
+                    f"  - {team['name']}: {team['description']} ({team['files']} files)"
+                )
+            typer.echo("\nAvailable Hooks:")
+            for hook in scaffold.list_hooks():
+                event = f", event: {hook['event']}" if hook["event"] else ""
+                typer.echo(f"  - {hook['name']}: {hook['description']}{event}")
             return
 
         # Install mode
-        if agents_only and skills_only:
+        only_modes = [
+            ("skills", skills_only),
+            ("agents", agents_only),
+            ("teams", teams_only),
+            ("hooks", hooks_only),
+        ]
+        active_only_modes = [name for name, enabled in only_modes if enabled]
+
+        if len(active_only_modes) > 1:
             typer.echo(
-                "Error: Cannot specify both --skills-only and --agents-only", err=True
+                "Error: Only one --*-only mode can be specified at a time.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        if active_only_modes and (no_teams or no_hooks):
+            typer.echo(
+                "Error: --*-only modes cannot be combined with --no-teams/--no-hooks.",
+                err=True,
             )
             raise typer.Exit(code=1)
 
@@ -533,23 +579,70 @@ def init(
             if len(installed) < len(total):
                 skipped = len(total) - len(installed)
                 typer.echo(f"  Skipped {skipped} existing (use --force to overwrite)")
-        else:
-            # Install both
-            result = scaffold.install_all(target, force=force)
+        elif teams_only:
+            installed = scaffold.install_teams(target, force=force)
+            total = scaffold.list_teams()
             typer.echo(
-                f"Installed {len(result['skills_installed'])} of {result['skills_total']} skills "
-                f"and {len(result['agents_installed'])} of {result['agents_total']} agents to {target}/"
+                f"Installed {len(installed)} of {len(total)} teams to {target}/teams/"
             )
+            if installed:
+                typer.echo(f"  Teams: {', '.join(installed)}")
+            if len(installed) < len(total):
+                skipped = len(total) - len(installed)
+                typer.echo(f"  Skipped {skipped} existing (use --force to overwrite)")
+        elif hooks_only:
+            installed = scaffold.install_hooks(target, force=force)
+            total = scaffold.list_hooks()
+            typer.echo(
+                f"Installed {len(installed)} of {len(total)} hooks to {target}/hooks/"
+            )
+            if installed:
+                typer.echo(f"  Hooks: {', '.join(installed)}")
+            if len(installed) < len(total):
+                skipped = len(total) - len(installed)
+                typer.echo(f"  Skipped {skipped} existing (use --force to overwrite)")
+        else:
+            # Install all categories (with optional exclusions).
+            result = scaffold.install_all(
+                target,
+                force=force,
+                include_teams=not no_teams,
+                include_hooks=not no_hooks,
+            )
+
+            summary_parts = [
+                f"{len(result['skills_installed'])} of {result['skills_total']} skills",
+                f"{len(result['agents_installed'])} of {result['agents_total']} agents",
+            ]
+            if not no_teams:
+                summary_parts.append(
+                    f"{len(result['teams_installed'])} of {result['teams_total']} teams"
+                )
+            if not no_hooks:
+                summary_parts.append(
+                    f"{len(result['hooks_installed'])} of {result['hooks_total']} hooks"
+                )
+
+            typer.echo(f"Installed {', '.join(summary_parts)} to {target}/")
             if result["skills_installed"]:
                 typer.echo(f"  Skills: {', '.join(result['skills_installed'])}")
             if result["agents_installed"]:
                 typer.echo(f"  Agents: {', '.join(result['agents_installed'])}")
+            if not no_teams and result["teams_installed"]:
+                typer.echo(f"  Teams: {', '.join(result['teams_installed'])}")
+            if not no_hooks and result["hooks_installed"]:
+                typer.echo(f"  Hooks: {', '.join(result['hooks_installed'])}")
+
             total_skipped = (
                 result["skills_total"]
                 - len(result["skills_installed"])
                 + result["agents_total"]
                 - len(result["agents_installed"])
             )
+            if not no_teams:
+                total_skipped += result["teams_total"] - len(result["teams_installed"])
+            if not no_hooks:
+                total_skipped += result["hooks_total"] - len(result["hooks_installed"])
             if total_skipped > 0:
                 typer.echo(
                     f"  Skipped {total_skipped} existing (use --force to overwrite)"

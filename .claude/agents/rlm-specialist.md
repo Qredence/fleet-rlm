@@ -45,6 +45,29 @@ the isolated execution context and focused tool access to apply them.
 
 ## Capabilities
 
+### Built-in RLM Tools
+
+The sandbox provides these built-in tools for recursive LLM calls:
+
+- **`llm_query(prompt: str) -> str`** - Query a sub-LLM for semantic analysis. Each call counts against `max_llm_calls`.
+- **`llm_query_batched(prompts: list[str]) -> list[str]`** - Concurrent sub-LLM queries. Much faster for multiple independent analyses.
+
+Both tools respect the `max_llm_calls` limit and use `sub_lm` when configured.
+
+### Final Variable Convention
+
+In addition to `SUBMIT()`, you can use the `Final` variable convention:
+
+```python
+# Option 1: SUBMIT (traditional)
+SUBMIT(answer=result)
+
+# Option 2: Final variable (RLM paper style)
+Final = {"answer": result}
+```
+
+Both signal completion and return structured output. Use whichever feels more natural.
+
 ### Multi-Step Pipeline with Checkpoints
 
 ```python
@@ -95,8 +118,11 @@ except FileNotFoundError:
 - Use `chunk_by_size` with overlap for uniform chunks
 - Process top-K chunks only for targeted queries (rank with `grep`)
 - Use buffers (`add_buffer`/`get_buffer`) for stateful accumulation
+- Use `llm_query_batched()` instead of sequential `llm_query()` for parallel analysis
 - Reduce `max_iterations` and `max_llm_calls` to minimum needed
+- Use `sub_lm` with a cheaper model (e.g., GPT-4o-mini) for cost optimization
 - Increase `timeout` only when needed (default 600s is usually sufficient)
+- Enable `summarize_stdout` to prevent context window pollution (default: True)
 
 ## Debugging Workflow
 
@@ -105,6 +131,60 @@ except FileNotFoundError:
 3. **Isolate**: Test individual `interp.execute()` calls
 4. **Fix**: Address root cause (credentials, timeouts, code errors)
 5. **Verify**: Re-run full pipeline
+
+## Debugging llm_query Issues
+
+### max_llm_calls Exceeded
+```
+RuntimeError: LLM call limit exceeded: 50 + 1 > 50
+```
+**Fix**: Increase `max_llm_calls` or use Python code for aggregation instead:
+```python
+# Instead of many llm_query calls, aggregate in Python
+results = [process_with_python(chunk) for chunk in chunks]
+```
+
+### llm_query Not Available in Sandbox
+```
+NameError: name 'llm_query' is not defined
+```
+**Fix**: Ensure you're using fleet_rlm >= 0.3.0. The functions are auto-injected.
+
+### sub_lm Not Being Used
+**Check**: Verify `sub_lm` is passed to ModalInterpreter, not dspy.RLM:
+```python
+# Correct
+interp = ModalInterpreter(sub_lm=cheap_lm)
+rlm = dspy.RLM(..., interpreter=interp)
+
+# Incorrect - sub_lm goes to interpreter, not RLM
+rlm = dspy.RLM(..., sub_lm=cheap_lm)  # Won't work
+```
+
+## Cost Optimization with sub_lm
+
+Use a cheaper model for sub-queries while keeping the main planner on a strong model:
+
+```python
+import dspy
+from fleet_rlm import ModalInterpreter
+
+# Main planner uses GPT-4o
+dspy.configure(lm=dspy.LM("openai/gpt-4o"))
+
+# Sub-queries use GPT-4o-mini (10x cheaper)
+cheap_lm = dspy.LM("openai/gpt-4o-mini")
+
+with ModalInterpreter(sub_lm=cheap_lm, max_llm_calls=100) as interp:
+    rlm = dspy.RLM(
+        signature=MySignature,
+        interpreter=interp,
+        max_iterations=15,
+    )
+    result = rlm(document=large_text, query="Analyze this")
+```
+
+This pattern can reduce costs by 5-10x while maintaining quality.
 
 ## Rules
 
