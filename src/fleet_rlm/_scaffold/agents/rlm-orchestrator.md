@@ -70,6 +70,10 @@ with ModalInterpreter(timeout=600, volume_name='rlm-volume-dspy') as interp:
 Scout with injected helpers: `peek(content, 0, 3000)`, `grep(content, 'pattern')`,
 `chunk_by_headers(content)`, `chunk_by_size(content, 8000, 400)`.
 
+**Built-in RLM tools for semantic analysis:**
+- `llm_query(prompt)` - Query sub-LLM for semantic analysis (counts against max_llm_calls)
+- `llm_query_batched(prompts)` - Concurrent sub-LLM queries for parallel analysis
+
 ### Phase 2: Chunk and Write
 
 ```python
@@ -114,6 +118,29 @@ SUBMIT(findings=unique, total=len(unique))
 """, variables={'all_results': all_results})
 ```
 
+### Phase 3 Alternative: Parallel Analysis with llm_query_batched
+
+For faster analysis when you have many chunks, use `llm_query_batched` for concurrent processing:
+
+```python
+result = interp.execute("""
+# Create prompts for each chunk
+prompts = [f"Analyze this chunk and extract key points: {chunk[:1000]}"
+           for chunk in chunks[:10]]  # First 10 chunks
+
+# Query all in parallel (much faster than sequential)
+responses = llm_query_batched(prompts)
+
+# Process responses
+findings = []
+for i, response in enumerate(responses):
+    if not response.startswith('[ERROR]'):
+        findings.append({'chunk': i, 'analysis': response})
+
+Final = {'findings': findings, 'count': len(findings)}
+""")
+```
+
 ## Full RLM Mode (Automated)
 
 For fully automated execution where the LLM writes its own exploration code:
@@ -136,6 +163,38 @@ with ModalInterpreter(timeout=900, volume_name='rlm-volume-dspy') as interp:
     )
     print(result.findings, result.answer)
 ```
+
+## Output Conventions
+
+### SUBMIT (Traditional)
+Use `SUBMIT()` to return structured output:
+
+```python
+SUBMIT(findings=results, answer=summary)
+```
+
+### Final Variable (RLM Paper Convention)
+Alternatively, set a `Final` variable to signal completion:
+
+```python
+analysis = process_document(text)
+Final = {"findings": analysis, "status": "complete"}
+```
+
+Both work identically - use whichever feels more natural. The `Final` convention
+matches the RLM paper's description of signaling completion via variable assignment.
+
+## Metadata-Only History
+
+Long stdout outputs are automatically summarized to prevent context window pollution:
+
+```
+[Output: 1,247 chars, 42 lines]
+Prefix: "First 200 chars of output..."
+```
+
+This keeps the LLM's context window clean during recursive iterations while still
+providing useful feedback. Errors are always shown in full for debugging.
 
 ## Rules
 

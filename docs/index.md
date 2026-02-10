@@ -39,7 +39,7 @@ Check out the [Getting Started guide](getting-started.md) to set up your environ
   - **[Document Analysis](tutorials/doc-analysis.md)**: Extracting information from long documents.
 - **Guides**:
   - **[CLI Reference](guides/cli-reference.md)**: Detailed command documentation.
-  - **[Skills and Agents](guides/skills-and-agents.md)**: Installing and using custom Claude skills and agents for RLM workflows.
+  - **[Skills and Agents](guides/skills-and-agents.md)**: Installing and using bundled scaffold assets (skills, agents, team templates, hooks) for RLM workflows.
   - **[Skills Usage](guides/skills-usage.md)**: Detailed skill invocation patterns and three-tier architecture (Skills, Subagents, Agent Teams).
   - **[Jupyter Notebooks](guides/notebooks.md)**: Using the provided notebooks.
   - **[Troubleshooting](guides/troubleshooting.md)**: Common issues and fixes.

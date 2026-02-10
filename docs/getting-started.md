@@ -87,17 +87,17 @@ The actual code execution happens in a Modal Sandbox. You need to setup authenti
 
     _Ensure these values match your provider configuration._
 
-## Skills and Agents Installation
+## Scaffold Assets Installation
 
-`fleet-rlm` includes custom Claude skills and agents optimized for RLM workflows. Install them to your user directory for use across all projects:
+`fleet-rlm` includes custom Claude skills, agents, team templates, and hook templates optimized for RLM workflows. Install them to your user directory for use across all projects:
 
-**Prerequisites**: Complete Modal setup (above) before installing skills/agents. They require Modal credentials to function.
+**Prerequisites**: Complete Modal setup (above) before installing scaffold assets. They require Modal credentials to function.
 
 ```bash
-# List available skills and agents
+# List available scaffold assets
 uv run fleet-rlm init --list
 
-# Install all skills and agents to ~/.claude/
+# Install all scaffold assets to ~/.claude/
 uv run fleet-rlm init
 
 # Or install to a custom directory
@@ -110,11 +110,13 @@ uv run fleet-rlm init --force
 This command copies:
 
 - **10 Skills**: RLM workflow patterns, debugging, testing, execution
-- **4 Agents**: Specialized agents for RLM orchestration and execution
+- **Agent definitions**: Primary agents and team-support agent definitions
+- **1 Team template**: Team config and inbox scaffolding
+- **5 Hook templates**: Prompt hooks for troubleshooting and workflow hints
 
-Once installed, these skills and agents are available in all your Claude-enabled projects.
+Once installed, these scaffold assets are available in all your Claude-enabled projects.
 
-**Important**: Skills and agents are workflow definitions only—they don't include credentials. Each user must configure their own Modal authentication using the steps above.
+**Important**: Scaffold assets are workflow definitions only—they don't include credentials. Each user must configure their own Modal authentication using the steps above.
 
 ## Verifying Setup
 

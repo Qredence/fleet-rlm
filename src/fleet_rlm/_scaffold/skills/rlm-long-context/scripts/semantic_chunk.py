@@ -105,70 +105,75 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
     """Chunk by top-level JSON objects/arrays."""
     import json
 
+    def _find_json_span(
+        text: str,
+        *,
+        candidates: list[str],
+        start_index: int,
+    ) -> tuple[int, int] | None:
+        """Locate one candidate JSON snippet in text starting at a position."""
+        for candidate in candidates:
+            pos = text.find(candidate, start_index)
+            if pos != -1:
+                return pos, pos + len(candidate)
+        return None
+
     try:
         data = json.loads(content)
 
         if isinstance(data, list):
-            # Split list into chunks
-            items = data
-            chunks = []
+            # Split list into grouped chunks first.
+            groups: list[list[object]] = []
             current_items = []
             current_size = 0
 
-            for item in items:
+            for item in data:
                 item_str = json.dumps(item)
                 item_size = len(item_str)
 
                 if current_size + item_size > max_size and current_items:
-                    # Save current chunk
-                    chunk_content = json.dumps(current_items)
-                    chunks.append(
-                        (
-                            content.find(chunk_content),
-                            content.find(chunk_content) + len(chunk_content),
-                            f"array[{len(current_items)}]",
-                        )
-                    )
+                    groups.append(current_items)
                     current_items = [item]
                     current_size = item_size
                 else:
                     current_items.append(item)
                     current_size += item_size
 
-            # Last chunk
             if current_items:
-                chunk_content = json.dumps(current_items)
-                chunks.append(
-                    (
-                        content.find(chunk_content),
-                        content.find(chunk_content) + len(chunk_content),
-                        f"array[{len(current_items)}]",
-                    )
+                groups.append(current_items)
+
+            # Recover source ranges from grouped JSON. If any range is ambiguous,
+            # fall back to deterministic size-based chunking.
+            chunks = []
+            search_start = 0
+            for group in groups:
+                default_json = json.dumps(group)
+                compact_json = json.dumps(group, separators=(",", ":"))
+                span = _find_json_span(
+                    content,
+                    candidates=[default_json, compact_json],
+                    start_index=search_start,
                 )
+                if span is None:
+                    return chunk_by_size(content, max_size)
+                start, end = span
+                chunks.append((start, end, f"array[{len(group)}]"))
+                search_start = end
 
             return chunks
 
         elif isinstance(data, dict):
-            # Split dict into key groups
-            items = list(data.items())
-            chunks = []
+            # Split dict into grouped key sets first.
+            groups: list[list[str]] = []
             current_keys = []
             current_size = 0
 
-            for key, value in items:
+            for key, value in data.items():
                 item_str = json.dumps({key: value})
                 item_size = len(item_str)
 
                 if current_size + item_size > max_size and current_keys:
-                    chunk_dict = {k: data[k] for k in current_keys}
-                    chunk_content = json.dumps(chunk_dict)
-                    chunks.append(
-                        (
-                            content.find(chunk_content),
-                            content.find(chunk_content) + len(chunk_content),
-                            f"dict[{len(current_keys)}]",
-                        )
-                    )
+                    groups.append(current_keys)
                     current_keys = [key]
                     current_size = item_size
                 else:
@@ -176,15 +181,24 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
                     current_size += item_size
 
             if current_keys:
-                chunk_dict = {k: data[k] for k in current_keys}
-                chunk_content = json.dumps(chunk_dict)
-                chunks.append(
-                    (
-                        content.find(chunk_content),
-                        content.find(chunk_content) + len(chunk_content),
-                        f"dict[{len(current_keys)}]",
-                    )
+                groups.append(current_keys)
+
+            chunks = []
+            search_start = 0
+            for group in groups:
+                group_dict = {k: data[k] for k in group}
+                default_json = json.dumps(group_dict)
+                compact_json = json.dumps(group_dict, separators=(",", ":"))
+                span = _find_json_span(
+                    content,
+                    candidates=[default_json, compact_json],
+                    start_index=search_start,
                 )
+                if span is None:
+                    return chunk_by_size(content, max_size)
+                start, end = span
+                chunks.append((start, end, f"dict[{len(group)}]"))
+                search_start = end
 
             return chunks
 

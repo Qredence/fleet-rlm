@@ -88,8 +88,10 @@ print('fleet_rlm imports OK')
 | "Modal credentials not found" | `uv run modal token set`                                             |
 | "LITELLM secret incomplete"   | `modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...` |
 | "Sandbox timeout"             | Increase `timeout` parameter (e.g., `ModalInterpreter(timeout=900)`) |
+| "LLM call limit exceeded"     | Increase `max_llm_calls` or reduce queries                           |
 | FinalOutput `AttributeError`  | Use `result.field`, not `result['field']` or `result.get('field')`   |
 | Volume not persisting         | Pass same `volume_name` to every `ModalInterpreter` instance         |
+| llm_query not defined         | Update fleet_rlm to >= 0.3.0                                         |
 
 ## ModalInterpreter API Quick Reference
 
@@ -98,6 +100,10 @@ ModalInterpreter(
     timeout=600,              # Sandbox lifetime (seconds)
     volume_name=None,         # Modal Volume V2 name
     secret_name='LITELLM',    # Modal secret name
+    max_llm_calls=50,         # Max sub-LLM calls per session
+    sub_lm=None,              # Optional LM for llm_query calls
+    summarize_stdout=True,    # Summarize long outputs
+    stdout_summary_threshold=500,  # Char threshold for summarization
 )
 ```
 
@@ -108,6 +114,69 @@ ModalInterpreter(
 | `shutdown()`                    | None                   | Terminate sandbox (idempotent) |
 | `commit()`                      | None                   | Commit volume changes          |
 | `reload()`                      | None                   | Reload volume                  |
+| `llm_query(prompt)`             | `str`                  | Sub-LLM query (in sandbox)     |
+| `llm_query_batched(prompts)`    | `list[str]`            | Parallel sub-LLM queries       |
+
+## Built-in Sandbox Tools
+
+When code runs in the sandbox, these tools are available:
+
+### RLM Tools
+- **`llm_query(prompt: str) -> str`** - Query sub-LLM for semantic analysis
+- **`llm_query_batched(prompts: list[str]) -> list[str]`** - Concurrent queries
+
+### Output Functions
+- **`SUBMIT(**kwargs)`** - Return structured output (raises FinalOutput)
+- **`Final = {...}`** - Alternative: set Final variable to return output
+
+### Utility Helpers
+- **`peek(text, start, length)`** - Extract text slice
+- **`grep(text, pattern, context=0)`** - Find matching lines
+- **`chunk_by_size(text, size, overlap)`** - Split into chunks
+- **`chunk_by_headers(text, pattern)`** - Split at headers
+- **`save_to_volume(path, content)`** - Write to /data
+- **`load_from_volume(path)`** - Read from /data
+- **`add_buffer(name, value)`** - Append to named buffer
+- **`get_buffer(name)`** - Get buffer contents
+
+## Configuration Options
+
+### max_llm_calls
+Maximum number of `llm_query`/`llm_query_batched` calls allowed per session:
+```python
+interp = ModalInterpreter(max_llm_calls=100)
+```
+
+### sub_lm
+Use a different (e.g., cheaper) model for sub-queries:
+```python
+cheap_lm = dspy.LM("openai/gpt-4o-mini")
+interp = ModalInterpreter(sub_lm=cheap_lm)
+```
+
+### summarize_stdout
+Prevent context window pollution by summarizing long outputs:
+```python
+interp = ModalInterpreter(
+    summarize_stdout=True,           # Enable (default)
+    stdout_summary_threshold=500,    # Threshold in chars
+    stdout_summary_prefix_len=200,   # Prefix length in summary
+)
+```
+
+## Output Conventions
+
+### SUBMIT (Traditional)
+```python
+SUBMIT(answer="result", confidence=0.95)
+```
+
+### Final Variable (RLM Paper Convention)
+```python
+Final = {"answer": "result", "confidence": 0.95}
+```
+
+Both return `FinalOutput` with fields accessible as attributes: `result.answer`
 
 ## Rules
 

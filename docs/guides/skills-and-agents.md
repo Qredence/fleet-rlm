@@ -1,25 +1,25 @@
 # Skills and Agents Guide
 
-This guide explains how to install and use the custom Claude skills and agents bundled with `fleet-rlm`.
+This guide explains how to install and use the Claude scaffold assets bundled with `fleet-rlm`.
 
 ## Overview
 
-`fleet-rlm` includes **10 specialized skills** and **4 custom agents** designed for RLM workflows. These are packaged with the PyPI distribution and can be installed to your user directory (`~/.claude/`) for use across all projects.
+`fleet-rlm` includes **10 specialized skills**, primary and team-support **agent definitions**, **team templates**, and **hook templates** for RLM workflows. These are packaged with the PyPI distribution and can be installed to your user directory (`~/.claude/`) for use across all projects.
 
 ## Prerequisites
 
-⚠️ **Important**: Skills and agents are just workflow definitions—they don't include credentials. Before using RLM features, you must:
+⚠️ **Important**: Scaffold assets are workflow definitions only—they don't include credentials. Before using RLM features, you must:
 
 1. **Set up Modal authentication** (per user, one-time):
 
    ```bash
-   modal setup
+   uv run modal setup
    ```
 
 2. **Create Modal secrets** for LLM access:
 
    ```bash
-   modal secret create LITELLM \
+   uv run modal secret create LITELLM \
        DSPY_LM_MODEL=... \
        DSPY_LM_API_BASE=... \
        DSPY_LLM_API_KEY=... \
@@ -28,7 +28,7 @@ This guide explains how to install and use the custom Claude skills and agents b
 
 3. **Optional**: Create Modal volumes for persistent storage:
    ```bash
-   modal volume create rlm-volume-dspy
+   uv run modal volume create rlm-volume-dspy
    ```
 
 See the [Getting Started Guide](../getting-started.md) for detailed setup instructions.
@@ -97,6 +97,8 @@ uv run fleet-rlm init --force
 | `rlm-long-context` | (EXPERIMENTAL) Research implementation for RLM  | 8     |
 
 ## Available Agents
+
+`fleet-rlm init` installs primary agents and additional team-support agent definitions under `~/.claude/agents/teams/`.
 
 ### Agent Hierarchy
 
@@ -182,16 +184,32 @@ When installed, the structure looks like:
 │   │   └── SKILL.md
 │   └── rlm-test-suite/
 │       └── SKILL.md
-└── agents/
-    ├── modal-interpreter-agent.md
-    ├── rlm-orchestrator.md
-    ├── rlm-specialist.md
-    └── rlm-subcall.md
+├── agents/
+│   ├── modal-interpreter-agent.md
+│   ├── rlm-orchestrator.md
+│   ├── rlm-specialist.md
+│   ├── rlm-subcall.md
+│   └── teams/
+│       ├── agent-designer.md
+│       ├── architect-explorer.md
+│       ├── fleet-rlm-explorer-team.md
+│       ├── testing-analyst.md
+│       └── ux-reviewer.md
+├── teams/
+│   └── fleet-rlm/
+│       ├── config.json
+│       └── inboxes/
+└── hooks/
+    ├── README.md
+    ├── hookify.fleet-rlm-document-process.local.md
+    ├── hookify.fleet-rlm-large-file.local.md
+    ├── hookify.fleet-rlm-llm-query-error.local.md
+    └── hookify.fleet-rlm-modal-error.local.md
 ```
 
 ## Updating Skills and Agents
 
-When `fleet-rlm` releases new versions with updated skills/agents:
+When `fleet-rlm` releases new versions with updated scaffold assets:
 
 1. **Upgrade the package:**
 
@@ -199,7 +217,7 @@ When `fleet-rlm` releases new versions with updated skills/agents:
    uv sync --upgrade-package fleet-rlm
    ```
 
-2. **Reinstall skills and agents:**
+2. **Reinstall scaffold assets:**
    ```bash
    uv run fleet-rlm init --force
    ```
@@ -208,12 +226,13 @@ The `--force` flag overwrites existing files with the new versions.
 
 ## Cross-Project Usage
 
-Once installed to `~/.claude/`, skills and agents are available in **all your projects**, not just `fleet-rlm`. This enables:
+Once installed to `~/.claude/`, scaffold assets are available in **all your projects**, not just `fleet-rlm`. This enables:
 
 - Using RLM patterns in other codebases
 - Reusing debugging and testing workflows
 - Applying DSPy signature generation knowledge anywhere
 - Leveraging Modal sandbox management across projects
+- Reusing team templates and hooks across workflows
 
 ## Skill Development
 
@@ -286,12 +305,12 @@ If you get "Modal authentication failed" when running RLM tasks:
    uv run fleet-rlm check-secret
    ```
 
-**Remember**: Skills/agents are just files. Modal credentials must be configured separately per user.
+**Remember**: Scaffold assets are just files. Modal credentials must be configured separately per user.
 
 ### Reinstall from Scratch
 
 ```bash
-rm -rf ~/.claude/skills ~/.claude/agents
+rm -rf ~/.claude/skills ~/.claude/agents ~/.claude/teams ~/.claude/hooks
 uv run fleet-rlm init
 ```
 

@@ -76,17 +76,11 @@ def check_secret() -> bool:
 
         result = check_secret_presence()
         ok = True
-        total = 0
-        present_count = 0
-        missing_count = 0
-        for _key, present in result.items():
-            total += 1
-            if present:
-                present_count += 1
-            else:
-                missing_count += 1
+        for idx, (key, present) in enumerate(result.items(), start=1):
+            status = "OK" if present else "MISSING"
+            print(f"  Secret {idx}: {status}")
+            if not present:
                 ok = False
-        print(f"  Secrets: {present_count}/{total} present ({missing_count} missing)")
         return ok
     except Exception as e:
         print(f"  Could not check: {e}")
@@ -159,7 +153,7 @@ def main() -> None:
         print("\nAll checks passed.")
     else:
         failed = [k for k, v in results.items() if not v]
-        print(f"\nFailed: {', '.join(failed)}")
+        print(f"\nFailed checks: {len(failed)}")
         sys.exit(1)
 
 

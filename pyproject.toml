@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.3.1"
+version = "0.3.2"
 description = "Python package + Typer CLI implementation of the RLM with Modal notebook"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,7 +51,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"fleet_rlm._scaffold" = ["**/*.md", "**/*.py"]
+"fleet_rlm._scaffold" = ["**/*.md", "**/*.py", "**/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

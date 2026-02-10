@@ -1,0 +1,79 @@
+{
+  "name": "fleet-rlm",
+  "description": "Fleet RLM team for long-context processing using Recursive Language Models with DSPy and Modal",
+  "createdAt": 1770672919989,
+  "leadAgentId": "team-lead@fleet-rlm",
+  "leadSessionId": "139cbfb0-01f8-4f84-b429-ecbacdf3d05a",
+  "members": [
+    {
+      "agentId": "team-lead@fleet-rlm",
+      "name": "team-lead",
+      "agentType": "researcher",
+      "model": "kimi-for-coding",
+      "joinedAt": 1770672919989,
+      "tmuxPaneId": "",
+      "cwd": "/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy",
+      "subscriptions": []
+    },
+    {
+      "agentId": "rlm-orchestrator@fleet-rlm",
+      "name": "rlm-orchestrator",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "prompt": "You are the **rlm-orchestrator** agent in the fleet-rlm team. Your role is to orchestrate long-context processing using the RLM pattern.\n\n**Your task**: Claim Task #1 \"Orchestrate long-context RLM processing\" and wait for instructions from the team lead.\n\nTo claim the task, use TaskUpdate with taskId \"1\", status \"in_progress\", and owner \"rlm-orchestrator\".\n\nOnce claimed, send a message to the team lead (recipient: team-lead) saying you're ready for work.\n\nSkills you have access to:\n- rlm: Navigate-Query-Synthesize patterns, CLI commands, ModalInterpreter workflows\n- rlm-execute: Sandbox execution patterns, volume persistence\n- rlm-memory: Long-term state via Modal Volumes\n\nYou can spawn rlm-subcall agents via Task(rlm-subcall) when needed for chunk analysis.",
+      "color": "blue",
+      "planModeRequired": false,
+      "joinedAt": 1770672933812,
+      "tmuxPaneId": "%0",
+      "cwd": "/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy",
+      "subscriptions": [],
+      "backendType": "tmux",
+      "isActive": false
+    },
+    {
+      "agentId": "rlm-specialist@fleet-rlm",
+      "name": "rlm-specialist",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "prompt": "You are the **rlm-specialist** agent in the fleet-rlm team. Your role is to debug, optimize, and build advanced RLM workflows.\n\n**Your task**: Claim Task #2 \"Debug and optimize RLM workflows\" and wait for instructions from the team lead.\n\nTo claim the task, use TaskUpdate with taskId \"2\", status \"in_progress\", and owner \"rlm-specialist\".\n\nOnce claimed, send a message to the team lead (recipient: team-lead) saying you're ready for work.\n\nSkills you have access to:\n- rlm: RLM patterns and ModalInterpreter workflows\n- rlm-debug: Live diagnostics, troubleshooting steps\n- rlm-execute: Sandbox execution, volume persistence\n- modal-sandbox: Sandbox lifecycle management\n\nYou can spawn subagents for focused analysis when needed.",
+      "color": "green",
+      "planModeRequired": false,
+      "joinedAt": 1770672936353,
+      "tmuxPaneId": "%1",
+      "cwd": "/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy",
+      "subscriptions": [],
+      "backendType": "tmux",
+      "isActive": false
+    },
+    {
+      "agentId": "modal-interpreter-agent@fleet-rlm",
+      "name": "modal-interpreter-agent",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "prompt": "You are the **modal-interpreter-agent** in the fleet-rlm team. Your role is to diagnose and troubleshoot Modal sandbox and interpreter issues.\n\n**Your task**: Claim Task #3 \"Diagnose Modal sandbox issues\" and wait for instructions from the team lead.\n\nTo claim the task, use TaskUpdate with taskId \"3\", status \"in_progress\", and owner \"modal-interpreter-agent\".\n\nOnce claimed, send a message to the team lead (recipient: team-lead) saying you're ready for work.\n\nSkills you have access to:\n- modal-sandbox: Volume/sandbox CLI commands, lifecycle management\n- rlm-debug: Live environment diagnostics\n\nYou have project-level memory that persists across sessions.",
+      "color": "yellow",
+      "planModeRequired": false,
+      "joinedAt": 1770672939271,
+      "tmuxPaneId": "%2",
+      "cwd": "/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy",
+      "subscriptions": [],
+      "backendType": "tmux",
+      "isActive": false
+    },
+    {
+      "agentId": "rlm-subcall@fleet-rlm",
+      "name": "rlm-subcall",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "prompt": "You are the **rlm-subcall** agent in the fleet-rlm team. You are a lightweight leaf-node agent for analyzing single text chunks.\n\n**Your role**: When invoked by rlm-orchestrator (or team lead), analyze a single chunk of text and return structured JSON findings.\n\nYou have minimal tools (Read only) and should:\n1. Read the file at the provided chunk_path\n2. Analyze contents against the query\n3. Extract findings with verbatim evidence\n4. Return strict JSON output\n\nWait to be invoked with specific chunk_path, query, and chunk_id parameters.\n\nYou do NOT spawn subagents - you are a leaf node.",
+      "color": "purple",
+      "planModeRequired": false,
+      "joinedAt": 1770672941243,
+      "tmuxPaneId": "%3",
+      "cwd": "/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy",
+      "subscriptions": [],
+      "backendType": "tmux",
+      "isActive": false
+    }
+  ]
+}

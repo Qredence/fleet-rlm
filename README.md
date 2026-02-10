@@ -21,14 +21,14 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
 
 ## Using dspy.RLM with Claude Code
 
-`fleet-rlm` is designed to work seamlessly with **Claude Code** (Claude's agentic coding capabilities). The bundled skills and agents enable Claude to leverage `dspy.RLM` for complex, long-context tasks.
+`fleet-rlm` is designed to work seamlessly with **Claude Code** (Claude's agentic coding capabilities). The bundled skills, agents, team templates, and hooks enable Claude to leverage `dspy.RLM` for complex, long-context tasks.
 
 ### Why Use RLM with Claude Code?
 
 | Challenge | RLM Solution |
 |-----------|-------------|
 | Context window limits | Code explores data programmatically instead of loading everything |
-| Complex multi-step analysis | Sub-agents handle specialized tasks via `llm_query()` |
+| Complex multi-step analysis | Sandbox code can delegate semantic work via `llm_query()` / `llm_query_batched()` (and Claude subagents can orchestrate this workflow) |
 | Reproducibility | All exploration steps are Python code — auditable and replayable |
 | Secure execution | Modal sandboxes isolate untrusted code from your environment |
 
@@ -65,10 +65,12 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
 
 ### Quick Start with Claude Code
 
-1. **Install skills and agents** to your Claude configuration:
+1. **Install scaffold assets** to your Claude configuration:
    ```bash
    uv run fleet-rlm init
    ```
+
+   This installs skills, agents, teams, and hooks to `~/.claude/` by default.
 
 2. **Use the `rlm` skill** in Claude Code for long-context tasks:
    ```
@@ -81,25 +83,24 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
    extract API endpoints, and generate a summary report
    ```
 
-### Sub-Agent Patterns
+### Sub-LLM Patterns
 
-The RLM approach enables powerful sub-agent delegation:
+The RLM approach enables semantic delegation from sandbox code:
 
 ```python
 # Inside Modal sandbox, the LLM-generated code can call:
-result = llm_query(
-    "Extract all function signatures from this code",
-    context=code_snippet
-)
+result = llm_query("Extract all function signatures from this code snippet")
 
 # Or batch multiple sub-queries in parallel:
 results = llm_query_batched([
-    {"query": "Summarize section 1", "context": chunk1},
-    {"query": "Summarize section 2", "context": chunk2},
+    "Summarize section 1",
+    "Summarize section 2",
 ])
 ```
 
-This pattern allows Claude to:
+In Claude workflows, the packaged `rlm-subcall` agent can be used as an orchestration pattern around these calls.
+
+This pattern allows you to:
 - **Delegate semantic analysis** to sub-LLMs while keeping orchestration logic in Python
 - **Process chunks in parallel** for large documents
 - **Accumulate results** across multiple iterations using stateful buffers
@@ -144,15 +145,15 @@ uv sync
 uv sync --extra dev
 ```
 
-### Skills and Agents Installation
+### Scaffold Installation
 
-`fleet-rlm` includes custom Claude skills and agents optimized for RLM workflows. Install them to your user directory for use across all projects:
+`fleet-rlm` includes custom Claude skills, agents, team templates, and hooks optimized for RLM workflows. Install them to your user directory for use across all projects:
 
 ```bash
-# List available skills and agents
+# List available scaffold assets
 uv run fleet-rlm init --list
 
-# Install all skills and agents to ~/.claude/
+# Install all scaffold assets to ~/.claude/
 uv run fleet-rlm init
 
 # Or install to a custom directory
@@ -160,9 +161,19 @@ uv run fleet-rlm init --target ~/.config/claude
 
 # Force overwrite existing files
 uv run fleet-rlm init --force
+
+# Install only team templates
+uv run fleet-rlm init --teams-only
+
+# Install only hooks
+uv run fleet-rlm init --hooks-only
+
+# Install all except hooks
+uv run fleet-rlm init --no-hooks
 ```
 
-**Note**: Skills and agents are workflow definitions only. You still need to configure Modal authentication and secrets separately (see [Setup Modal](#2-setup-modal) above).
+**Note**: Scaffold assets are workflow definitions only. You still need to configure Modal authentication and secrets separately (see [Setup Modal](#2-setup-modal) above).
+**Agent Teams** are experimental in Claude Code and require setting `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in Claude settings or your environment. Team config lives under `~/.claude/teams/{team}/config.json`; runtime task state is managed by Claude under `~/.claude/tasks/{team}/`.
 
 **Available Skills:**
 
@@ -183,6 +194,17 @@ uv run fleet-rlm init --force
 - `rlm-orchestrator` - Multi-agent RLM coordination (recommended for complex tasks)
 - `rlm-specialist` - Complex RLM task execution with full sandbox access
 - `rlm-subcall` - Lightweight sub-LLM calls for delegation patterns
+
+**Available Team Templates:**
+
+- `fleet-rlm` - Preconfigured multi-agent team layout for RLM orchestration
+
+**Available Hooks:**
+
+- `hookify.fleet-rlm-document-process.local.md` - Prompt hook for document processing workflows
+- `hookify.fleet-rlm-large-file.local.md` - Prompt hook for large-file workflow suggestions
+- `hookify.fleet-rlm-llm-query-error.local.md` - Prompt hook for llm_query troubleshooting guidance
+- `hookify.fleet-rlm-modal-error.local.md` - Prompt hook for Modal/sandbox troubleshooting guidance
 
 > **Tip**: Start with `rlm-orchestrator` for multi-file or multi-step tasks. It coordinates `rlm-specialist` and `rlm-subcall` automatically.
 
@@ -265,6 +287,12 @@ uv run fleet-rlm run-custom-tool \
     --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
     --chars 5000
 
+# Analyze or summarize long-context docs with sandbox helpers
+uv run fleet-rlm run-long-context \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --query "What are the main design decisions?" \
+    --mode analyze
+
 # Check Modal secrets are configured
 uv run fleet-rlm check-secret
 ```
@@ -275,13 +303,14 @@ uv run fleet-rlm check-secret
 
 | Command              | Description                                  |
 | -------------------- | -------------------------------------------- |
-| `init`               | Install bundled Claude skills and agents     |
+| `init`               | Install bundled Claude scaffold assets       |
 | `run-basic`          | Basic code generation (Fibonacci example)    |
 | `run-architecture`   | Extract DSPy architecture from documentation |
-| `run-api-endpoints`  | Extract API endpoints using batched queries  |
+| `run-api-endpoints`  | Extract API endpoints from documentation      |
 | `run-error-patterns` | Find and categorize error patterns in docs   |
 | `run-trajectory`     | Examine RLM execution trajectory             |
 | `run-custom-tool`    | Demo with custom regex tool                  |
+| `run-long-context`   | Analyze or summarize a long document         |
 | `check-secret`       | Verify Modal secret presence                 |
 | `check-secret-key`   | Inspect specific secret key                  |
 

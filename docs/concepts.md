@@ -78,10 +78,10 @@ The driver injects the following helper functions into the sandbox `globals` so 
 
 | Helper                               | Description                                                          |
 | :----------------------------------- | :------------------------------------------------------------------- |
-| `peek(text, start, length)`          | Return a slice of a large document without exceeding context limits. |
+| `peek(text, start=0, length=2000)`   | Return a slice of a large document without exceeding context limits. |
 | `grep(text, pattern, context=0)`     | Case-insensitive line search with optional surrounding context.      |
-| `chunk_by_size(text, size, overlap)` | Split text into fixed-size chunks with optional overlap.             |
-| `chunk_by_headers(text, pattern)`    | Split document at lines matching a regex header pattern.             |
+| `chunk_by_size(text, size=200_000, overlap=0)` | Split text into fixed-size chunks with optional overlap.   |
+| `chunk_by_headers(text, pattern=r"^#{1,3} ", flags=re.MULTILINE)` | Split document at regex header boundaries. |
 | `add_buffer(name, value)`            | Append a value to a named buffer (persists across iterations).       |
 | `get_buffer(name)`                   | Retrieve the contents of a named buffer.                             |
 | `clear_buffer(name)`                 | Clear one (or all) named buffers.                                    |
@@ -98,7 +98,7 @@ These helpers use only the Python standard library and require no external packa
 
 **Stateful Execution**: Globals persist across `execute()` calls for incremental workflows. Use buffers or volume storage for multi-step pipelines.
 
-**Agent-Based Sub-LLM Calls**: Instead of direct `llm_query()` function calls, fleet-rlm uses specialized agents (`rlm-subcall`) for semantic analysis, providing better isolation and error handling.
+**Sub-LLM Calls**: `llm_query()` and `llm_query_batched()` are built-in tools exposed in the sandbox runtime by `driver.py` and brokered by `ModalInterpreter`. In Claude workflows, the packaged `rlm-subcall` agent can be used as an orchestration pattern around these calls.
 
 ### Host-Side Chunking Module
 
@@ -147,8 +147,8 @@ DSPy's default RLM implementation uses a Deno/Pyodide WASM sandbox running local
 ┌─────────────────────────────────────────────────────────────┐
 │ fleet-rlm (Modal Cloud)                                     │
 │  ┌─────────────┐    ┌──────────────┐   ┌─────────────┐     │
-│  │   LLM       │───▶│Modal Sandbox │───▶│ rlm-subcall │     │
-│  │             │◀───│  (driver.py) │◀──│   agent     │     │
+│  │   LLM       │───▶│Modal Sandbox │───▶│ Sub-LLM via │     │
+│  │             │◀───│  (driver.py) │◀──│ llm_query()  │     │
 │  └─────────────┘    └──────────────┘   └─────────────┘     │
 │         │                  │                                  │
 │         └──────────────────┘ (JSON over stdin/stdout)        │
@@ -167,7 +167,7 @@ fleet-rlm extends the RLM concept with Modal cloud infrastructure:
 | **Signature Usage** | `dspy.RLM(signature, ...)` | Same ✅ |
 | **LM Configuration** | `dspy.configure(lm=dspy.LM(...))` | Same ✅ |
 | **Output Access** | `result.field` | Same ✅ |
-| **Sub-LLM Calls** | `llm_query()` built-in | `rlm-subcall` agent |
+| **Sub-LLM Calls** | `llm_query()` built-in | `llm_query()` / `llm_query_batched()` built-ins (optionally orchestrated via `rlm-subcall`) |
 | **Persistence** | None (ephemeral) | Modal volumes (`/data`) |
 | **Execution Context** | Local browser/WASM | Cloud sandbox (gRPC) |
 | **Max Context Size** | ~10MB (browser limits) | 100MB+ (cloud storage) |

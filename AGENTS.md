@@ -17,11 +17,15 @@ uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...
 uv run fleet-rlm --help                    # Show all CLI commands
 uv run fleet-rlm run-basic                 # Test sandbox with Fibonacci
 uv run fleet-rlm check-secret              # Verify Modal secrets
+uv run fleet-rlm init                      # Install skills/agents/teams/hooks to ~/.claude
+uv run fleet-rlm init --list               # List scaffold assets
 uv run pytest                              # Run tests (mocked Modal)
 uv run ruff check src tests                # Lint
 uv run ruff format src tests               # Format
 uv run ty check src                        # Type check (use ty, never mypy)
 ```
+
+For Claude Code agent teams, set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in Claude settings or shell env.
 
 ## Architecture Overview
 

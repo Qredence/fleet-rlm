@@ -13,18 +13,77 @@ as the sub-LLM for semantic analysis of individual chunks.
 ## Delegation Guidance
 
 This skill provides **domain knowledge** — load it for RLM best practices. For
-**execution delegation**, combine it with subagents:
+**execution delegation**, spawn the fleet-rlm agent team:
+
+### Quick Agent Spawning
+
+```python
+# Process large documents
+Task("rlm-orchestrator", "Process <file> and extract <information>")
+
+# Debug RLM issues
+Task("rlm-specialist", "Debug this RLM failure: <error>")
+
+# Check Modal setup
+Task("modal-interpreter-agent", "Verify Modal credentials and sandbox")
+
+# Analyze a single chunk
+Task("rlm-subcall", "Analyze chunk at <path> for <query>")
+```
+
+### Detailed Delegation Matrix
 
 | Scenario                                | Approach                                                         |
 | --------------------------------------- | ---------------------------------------------------------------- |
 | Process a large file inline             | Load this skill, use ModalInterpreter directly                   |
-| Delegate large-file processing          | Delegate to `rlm-orchestrator` subagent (which loads this skill) |
-| Analyze individual chunks               | Delegate to `rlm-subcall` subagent (leaf node)                   |
-| Debug a failing pipeline                | Use `rlm-debug` skill or delegate to `rlm-specialist`            |
-| Parallel document analysis (agent team) | Each teammate loads this skill automatically via CLAUDE.md       |
+| Delegate large-file processing          | Spawn `rlm-orchestrator` agent (auto-loads this skill)           |
+| Analyze individual chunks               | Spawn `rlm-subcall` agent (leaf node)                            |
+| Debug a failing pipeline                | Spawn `rlm-specialist` agent (auto-loads rlm-debug)              |
+| Check Modal infrastructure              | Spawn `modal-interpreter-agent`                                  |
+| Parallel document analysis (agent team) | Spawn multiple agents, they coordinate via shared task list      |
 
-> **Synergy**: Skills inject knowledge; subagents isolate execution.
-> Use both: delegate to `rlm-orchestrator` which loads this skill + `rlm-execute` + `rlm-memory`.
+> **Synergy**: Skills inject knowledge; agents provide isolated execution contexts.
+> Spawn `rlm-orchestrator` for complex tasks - it loads this skill + `rlm-execute` + `rlm-memory`.
+
+## New Features (DSPy RLM Aligned)
+
+### Built-in Sandbox Tools
+
+Code running in the sandbox now has access to:
+
+| Tool | Description | Example |
+|------|-------------|---------|
+| `llm_query(prompt)` | Single sub-LLM call | `result = llm_query("Summarize: " + text)` |
+| `llm_query_batched(prompts)` | Parallel sub-LLM calls | `results = llm_query_batched(["Q1", "Q2", "Q3"])` |
+| `SUBMIT(**kwargs)` | Return structured output | `SUBMIT(answer=42, status="ok")` |
+| `Final = value` | Alternative to SUBMIT (RLM paper) | `Final = {"answer": 42}` |
+
+### Configuration Options
+
+```python
+ModalInterpreter(
+    timeout=600,                    # Sandbox lifetime
+    volume_name='rlm-volume-dspy',  # V2 volume for persistence
+    max_llm_calls=50,               # Limit sub-LLM calls (default: 50)
+    sub_lm=cheap_lm,                # Use different LM for sub-queries
+    summarize_stdout=True,          # Metadata-only for long outputs
+    stdout_summary_threshold=500,   # Threshold for summarization
+)
+```
+
+### Output Conventions
+
+Two ways to return results from sandbox:
+
+```python
+# Option 1: SUBMIT (traditional)
+SUBMIT(answer="result", confidence="high")
+
+# Option 2: Final variable (RLM paper convention)
+Final = {"answer": "result", "confidence": "high"}
+```
+
+Both are equivalent - use whichever is more natural for your code.
 
 ## Additional Resources
 
