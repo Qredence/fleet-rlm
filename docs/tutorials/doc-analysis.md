@@ -25,7 +25,7 @@ uv run fleet-rlm run-architecture \
 
 ## Scenario 2: Batch Processing (API Endpoints)
 
-If you need to process the entire document to find all occurrences of something (e.g., API endpoints), straightforward reading is slow. RLM uses batching.
+If you need to process the entire document to find all occurrences of something (e.g., API endpoints), straightforward reading is slow. RLM uses signature-driven extraction in the sandbox loop.
 
 ### Command
 
@@ -33,7 +33,7 @@ If you need to process the entire document to find all occurrences of something 
 uv run fleet-rlm run-api-endpoints --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
 ```
 
-This command splits the document and runs parallel queries to extract endpoints defined in different sections simultaneously.
+This command runs structured endpoint extraction over the document using the `ExtractAPIEndpoints` signature and sandbox execution loop.
 
 ## Scenario 3: Pattern Finding (Error Analysis)
 
@@ -65,7 +65,7 @@ For very large documents that exceed typical context window limits, the `run-lon
 
 ### Analyze Mode
 
-The RLM uses `peek`, `grep`, and `chunk_by_headers` to navigate the document, calls `llm_query` on relevant sections, and synthesizes findings.
+The RLM uses `peek`, `grep`, and `chunk_by_headers` to navigate the document, calls `llm_query` when semantic sub-analysis is needed, and synthesizes findings.
 
 ```bash
 uv run fleet-rlm run-long-context \
@@ -76,7 +76,7 @@ uv run fleet-rlm run-long-context \
 
 ### Summarize Mode
 
-The RLM chunks the document, queries each chunk with the given focus topic, and merges per-chunk summaries into a coherent whole.
+The RLM chunks the document, queries relevant chunks with the given focus topic, and merges per-chunk summaries into a coherent whole.
 
 ```bash
 uv run fleet-rlm run-long-context \
@@ -89,11 +89,11 @@ uv run fleet-rlm run-long-context \
 
 Under the hood the RLM has access to these sandbox-side helpers:
 
-- **`peek(text, start, length)`** — Inspect a slice of the document.
+- **`peek(text, start=0, length=2000)`** — Inspect a slice of the document.
 - **`grep(text, pattern, context=0)`** — Case-insensitive line search.
-- **`chunk_by_size(text, size, overlap)`** — Fixed-size chunking.
-- **`chunk_by_headers(text, pattern)`** — Split at markdown headers.
+- **`chunk_by_size(text, size=200_000, overlap=0)`** — Fixed-size chunking.
+- **`chunk_by_headers(text, pattern=r"^#{1,3} ", flags=re.MULTILINE)`** — Split at markdown headers.
 - **`add_buffer` / `get_buffer` / `clear_buffer`** — Accumulate findings across iterations.
 - **`save_to_volume` / `load_from_volume`** — Persist results across runs.
 
-The Planner LLM writes Python code that calls these helpers, inspects the results, delegates to sub-LLMs (`llm_query`), and eventually calls `SUBMIT()` with the structured output.
+The Planner LLM writes Python code that calls these helpers, inspects the results, optionally delegates to sub-LLMs (`llm_query` / `llm_query_batched`), and eventually calls `SUBMIT()` with the structured output.

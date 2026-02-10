@@ -28,7 +28,7 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
 | Challenge | RLM Solution |
 |-----------|-------------|
 | Context window limits | Code explores data programmatically instead of loading everything |
-| Complex multi-step analysis | Sub-agents handle specialized tasks via `llm_query()` |
+| Complex multi-step analysis | Sandbox code can delegate semantic work via `llm_query()` / `llm_query_batched()` (and Claude subagents can orchestrate this workflow) |
 | Reproducibility | All exploration steps are Python code — auditable and replayable |
 | Secure execution | Modal sandboxes isolate untrusted code from your environment |
 
@@ -83,25 +83,24 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
    extract API endpoints, and generate a summary report
    ```
 
-### Sub-Agent Patterns
+### Sub-LLM Patterns
 
-The RLM approach enables powerful sub-agent delegation:
+The RLM approach enables semantic delegation from sandbox code:
 
 ```python
 # Inside Modal sandbox, the LLM-generated code can call:
-result = llm_query(
-    "Extract all function signatures from this code",
-    context=code_snippet
-)
+result = llm_query("Extract all function signatures from this code snippet")
 
 # Or batch multiple sub-queries in parallel:
 results = llm_query_batched([
-    {"query": "Summarize section 1", "context": chunk1},
-    {"query": "Summarize section 2", "context": chunk2},
+    "Summarize section 1",
+    "Summarize section 2",
 ])
 ```
 
-This pattern allows Claude to:
+In Claude workflows, the packaged `rlm-subcall` agent can be used as an orchestration pattern around these calls.
+
+This pattern allows you to:
 - **Delegate semantic analysis** to sub-LLMs while keeping orchestration logic in Python
 - **Process chunks in parallel** for large documents
 - **Accumulate results** across multiple iterations using stateful buffers
@@ -288,6 +287,12 @@ uv run fleet-rlm run-custom-tool \
     --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
     --chars 5000
 
+# Analyze or summarize long-context docs with sandbox helpers
+uv run fleet-rlm run-long-context \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --query "What are the main design decisions?" \
+    --mode analyze
+
 # Check Modal secrets are configured
 uv run fleet-rlm check-secret
 ```
@@ -301,10 +306,11 @@ uv run fleet-rlm check-secret
 | `init`               | Install bundled Claude scaffold assets       |
 | `run-basic`          | Basic code generation (Fibonacci example)    |
 | `run-architecture`   | Extract DSPy architecture from documentation |
-| `run-api-endpoints`  | Extract API endpoints using batched queries  |
+| `run-api-endpoints`  | Extract API endpoints from documentation      |
 | `run-error-patterns` | Find and categorize error patterns in docs   |
 | `run-trajectory`     | Examine RLM execution trajectory             |
 | `run-custom-tool`    | Demo with custom regex tool                  |
+| `run-long-context`   | Analyze or summarize a long document         |
 | `check-secret`       | Verify Modal secret presence                 |
 | `check-secret-key`   | Inspect specific secret key                  |
 

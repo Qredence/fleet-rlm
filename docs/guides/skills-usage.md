@@ -204,7 +204,7 @@ You can also **explicitly mention** a skill to ensure it's used:
 **What Happens:**
 
 - `rlm-test-suite` skill provides test commands and evaluation metrics
-- Lists all 11 test files and what they validate
+- Covers the repository test suite and what each test command validates
 
 **Example Prompt:**
 
@@ -585,7 +585,7 @@ skills for each teammate — they inherit project context from CLAUDE.md.
 
 ## Installation for Other Projects
 
-fleet-rlm is distributed as a PyPI package that bundles the RLM skills and agents. After installing the package, use the `fleet-rlm init` CLI command to bootstrap them to your user-level Claude directory (`~/.claude/`).
+fleet-rlm is distributed as a PyPI package that bundles RLM scaffold assets. After installing the package, use the `fleet-rlm init` CLI command to bootstrap them to your user-level Claude directory (`~/.claude/`).
 
 See the **[Skills and Agents Guide](skills-and-agents.md)** for detailed installation instructions, command options, and package structure.
 
@@ -596,16 +596,18 @@ See the **[Skills and Agents Guide](skills-and-agents.md)** for detailed install
 uv add fleet-rlm
 # or: pip install fleet-rlm
 
-# Bootstrap skills and agents to ~/.claude/
+# Bootstrap scaffold assets to ~/.claude/
 fleet-rlm init
 ```
 
 This installs:
 
 - 10 skills to `~/.claude/skills/`
-- 4 agents to `~/.claude/agents/`
+- agent definitions to `~/.claude/agents/` (including `agents/teams/`)
+- 1 team template to `~/.claude/teams/`
+- 5 hooks to `~/.claude/hooks/`
 
-**User-level placement**: Skills and agents are available in ALL projects on your machine. You don't need to run `init` in each project.
+**User-level placement**: These assets are available in ALL projects on your machine. You don't need to run `init` in each project.
 
 ### Updating After Package Upgrade
 
@@ -613,7 +615,7 @@ This installs:
 # Upgrade the package
 uv upgrade fleet-rlm
 
-# Update your installed skills/agents
+# Update your installed scaffold assets
 fleet-rlm init --force
 ```
 
