@@ -365,7 +365,9 @@ class TestLLMQueryMock:
             def terminate(self):
                 return None
 
-        with patch("fleet_rlm.interpreter.modal.Sandbox.create", return_value=_DummySandbox()):
+        with patch(
+            "fleet_rlm.interpreter.modal.Sandbox.create", return_value=_DummySandbox()
+        ):
             interp = ModalInterpreter()
             interp._llm_call_count = 7
             interp.start()
