@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
 from fleet_rlm.cli import app
+from fleet_rlm.interactive import DependencyCheck
 
 
 runner = CliRunner()
@@ -15,6 +17,7 @@ def test_cli_help_lists_subcommands():
     assert result.exit_code == 0
     assert "run-basic" in result.stdout
     assert "run-architecture" in result.stdout
+    assert "run-react-chat" in result.stdout
     assert "check-secret" in result.stdout
 
 
@@ -122,3 +125,83 @@ def test_init_rejects_only_mode_with_exclusion(tmp_path: Path):
         "--*-only modes cannot be combined" in result.stdout
         or "--*-only modes cannot be combined" in result.stderr
     )
+
+
+def test_run_react_chat_help():
+    result = runner.invoke(app, ["run-react-chat", "--help"])
+    assert result.exit_code == 0
+    assert "--profile" in result.stdout
+    assert "--react-max-iters" in result.stdout
+    assert "--rlm-max-iterations" in result.stdout
+    assert "--rlm-max-llm-calls" in result.stdout
+
+
+def test_code_chat_help():
+    result = runner.invoke(app, ["code-chat", "--help"])
+    assert result.exit_code == 0
+    assert "--react-max-iters" in result.stdout
+    assert "--trace" in result.stdout
+    assert "--no-stream" in result.stdout
+
+
+def test_run_react_chat_exit(monkeypatch):
+    class _FakeChatAgent:
+        def __init__(self):
+            self.history = SimpleNamespace(messages=[])
+            self.react_tools = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+        def reset(self, *, clear_sandbox_buffers=True):
+            self.history = SimpleNamespace(messages=[])
+            return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
+
+        def load_document(self, path, alias="active"):
+            return {"status": "ok", "path": path, "alias": alias}
+
+        def chat_turn(self, message):
+            self.history.messages.append(
+                {"user_request": message, "assistant_response": "stub"}
+            )
+            return {"assistant_response": "stub", "trajectory": {}}
+
+    monkeypatch.setattr(
+        "fleet_rlm.runners.build_react_chat_agent",
+        lambda **kwargs: _FakeChatAgent(),
+    )
+
+    result = runner.invoke(app, ["run-react-chat"], input="/exit\n")
+    assert result.exit_code == 0
+    assert "fleet-rlm code-chat" in result.stdout
+    assert "Exiting code-chat." in result.stdout
+
+
+def test_run_react_chat_aliases_to_code_chat(monkeypatch):
+    calls = []
+
+    def _fake_run_code_chat_session(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr("fleet_rlm.cli._run_code_chat_session", _fake_run_code_chat_session)
+
+    result = runner.invoke(app, ["run-react-chat", "--react-max-iters", "3"])
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["react_max_iters"] == 3
+
+
+def test_code_chat_missing_extras_exits_with_install_hint(monkeypatch):
+    monkeypatch.setattr(
+        "fleet_rlm.interactive.check_interactive_dependencies",
+        lambda: DependencyCheck(ok=False, missing=["prompt_toolkit", "rich"]),
+    )
+
+    result = runner.invoke(app, ["code-chat"])
+    assert result.exit_code == 2
+    out = result.stdout + result.stderr
+    assert "dependencies are missing" in out
+    assert "uv sync --extra dev --extra interactive" in out

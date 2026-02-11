@@ -30,6 +30,7 @@ import modal
 
 from .config import configure_planner_from_env
 from .interpreter import ModalInterpreter
+from .react_agent import RLMReActChatAgent
 from .signatures import (
     AnalyzeLongDocument,
     ExtractAPIEndpoints,
@@ -98,6 +99,90 @@ def _interpreter(
     return ModalInterpreter(
         timeout=timeout, secret_name=secret_name, volume_name=volume_name
     )
+
+
+def build_react_chat_agent(
+    *,
+    docs_path: Path | str | None = None,
+    react_max_iters: int = 10,
+    rlm_max_iterations: int = 30,
+    rlm_max_llm_calls: int = 50,
+    timeout: int = 900,
+    secret_name: str = "LITELLM",
+    volume_name: str | None = None,
+    verbose: bool = False,
+    history_max_turns: int | None = None,
+    extra_tools: list | None = None,
+    env_file: Path | None = None,
+) -> RLMReActChatAgent:
+    """Build an interactive DSPy ReAct chat agent for RLM workflows.
+
+    Args:
+        docs_path: Optional path to preload as the active document.
+        react_max_iters: Maximum DSPy ReAct tool-iteration loops.
+        rlm_max_iterations: Maximum iterations for internal ``dspy.RLM`` tools.
+        rlm_max_llm_calls: Maximum LLM calls for internal RLM/interpreter usage.
+        timeout: Modal sandbox timeout in seconds.
+        secret_name: Modal secret name.
+        volume_name: Optional Modal volume name for persistence.
+        verbose: Verbose mode for internal RLM calls.
+        history_max_turns: Optional cap for retained chat turns.
+        extra_tools: Optional additional callable tools exposed to ReAct.
+        env_file: Optional ``.env`` file path for planner setup.
+
+    Returns:
+        A configured ``RLMReActChatAgent`` instance.
+    """
+    _require_planner_ready(env_file)
+
+    agent = RLMReActChatAgent(
+        react_max_iters=react_max_iters,
+        rlm_max_iterations=rlm_max_iterations,
+        rlm_max_llm_calls=rlm_max_llm_calls,
+        timeout=timeout,
+        secret_name=secret_name,
+        volume_name=volume_name,
+        verbose=verbose,
+        history_max_turns=history_max_turns,
+        extra_tools=extra_tools,
+    )
+
+    if docs_path is not None:
+        agent.load_document(str(docs_path), alias="active")
+
+    return agent
+
+
+def run_react_chat_once(
+    *,
+    message: str,
+    docs_path: Path | str | None = None,
+    react_max_iters: int = 10,
+    rlm_max_iterations: int = 30,
+    rlm_max_llm_calls: int = 50,
+    timeout: int = 900,
+    secret_name: str = "LITELLM",
+    volume_name: str | None = None,
+    verbose: bool = False,
+    include_trajectory: bool = True,
+    env_file: Path | None = None,
+) -> dict[str, Any]:
+    """Run a single prompt through the interactive ReAct chat agent."""
+    with build_react_chat_agent(
+        docs_path=docs_path,
+        react_max_iters=react_max_iters,
+        rlm_max_iterations=rlm_max_iterations,
+        rlm_max_llm_calls=rlm_max_llm_calls,
+        timeout=timeout,
+        secret_name=secret_name,
+        volume_name=volume_name,
+        verbose=verbose,
+        env_file=env_file,
+    ) as agent:
+        result = agent.chat_turn(message)
+        if not include_trajectory:
+            result.pop("trajectory", None)
+        return result
 
 
 def run_basic(

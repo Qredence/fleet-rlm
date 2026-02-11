@@ -8,6 +8,16 @@ The `fleet-rlm` application uses [Typer](https://typer.tiangolo.com/) to provide
 uv run fleet-rlm [COMMAND] [OPTIONS]
 ```
 
+## Optional Extras
+
+```bash
+# Interactive coding TUI
+uv sync --extra dev --extra interactive
+
+# API + MCP server surfaces
+uv sync --extra dev --extra interactive --extra mcp --extra server
+```
+
 ## Commands
 
 ### Setup Commands
@@ -27,6 +37,10 @@ uv run fleet-rlm [COMMAND] [OPTIONS]
 | `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to text file<br>`--chars`: Limit input size                                     |
 | `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to text file                                                                    |
 | `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to text file<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize` |
+| `code-chat`          | Primary interactive coding-first ReAct + RLM terminal UI.      | `--docs-path`<br>`--react-max-iters`<br>`--trace`<br>`--no-stream`<br>`--profile`                    |
+| `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                           |
+| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`<br>`--react-max-iters`                                                           |
+| `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                 |
 
 ### Utility Commands
 
@@ -126,6 +140,38 @@ For any command, you can append `--help` to see the full list of arguments and o
 ```bash
 uv run fleet-rlm run-architecture --help
 uv run fleet-rlm init --help
+```
+
+## `code-chat` Details
+
+`code-chat` is the primary interactive coding runtime for the ReAct agent.
+
+### Slash Commands
+
+- `/exit`
+- `/help`
+- `/history`
+- `/reset`
+- `/tools`
+- `/load <path>`
+- `/docs`
+- `/trace on|off`
+- `/profile show|set <name>`
+- `/py` (multiline Python execution in Modal sandbox; finish with `:end`)
+- `/rg <pattern> [path]`
+- `/save-buffer <name> <path>`
+- `/load-volume <path> [alias]`
+
+### Examples
+
+```bash
+uv run fleet-rlm code-chat \
+  --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+  --react-max-iters 10 \
+  --trace
+
+# Alias command (kept for compatibility)
+uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
 ```
 
 ## `run-long-context` Details

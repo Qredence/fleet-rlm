@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import json
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -66,8 +67,70 @@ def _handle_error(exc: Exception) -> None:
     Raises:
         typer.Exit: Always raised with exit code 1 after printing the error.
     """
+    if isinstance(exc, typer.Exit):
+        raise exc
     typer.echo(f"Error: {exc}", err=True)
     raise typer.Exit(code=1) from exc
+
+
+def _code_chat_missing_extras_message(missing: list[str]) -> str:
+    pkg_list = ", ".join(sorted(missing))
+    return (
+        "Interactive code-chat dependencies are missing: "
+        f"{pkg_list}\n"
+        "Install them with:\n"
+        "  uv sync --extra dev --extra interactive"
+    )
+
+
+def _run_code_chat_session(
+    *,
+    docs_path: Path | None,
+    react_max_iters: int,
+    rlm_max_iterations: int,
+    rlm_max_llm_calls: int,
+    timeout: int,
+    secret_name: str,
+    volume_name: str | None,
+    trace: bool | None,
+    no_stream: bool,
+    profile: str,
+) -> None:
+    from .interactive import check_interactive_dependencies
+    from .interactive.config import get_profile
+    from .interactive.models import SessionConfig
+    from .interactive.session import CodeChatSession
+
+    dep_check = check_interactive_dependencies()
+    if not dep_check.ok:
+        typer.echo(_code_chat_missing_extras_message(dep_check.missing), err=True)
+        raise typer.Exit(code=2)
+
+    profile_cfg = get_profile(profile)
+    session_cfg = SessionConfig(
+        profile_name=profile_cfg.name,
+        docs_path=str(docs_path) if docs_path else profile_cfg.docs_path,
+        secret_name=secret_name or profile_cfg.secret_name,
+        volume_name=volume_name if volume_name is not None else profile_cfg.volume_name,
+        timeout=timeout or profile_cfg.timeout,
+        react_max_iters=react_max_iters or profile_cfg.react_max_iters,
+        rlm_max_iterations=rlm_max_iterations or profile_cfg.rlm_max_iterations,
+        rlm_max_llm_calls=rlm_max_llm_calls or profile_cfg.rlm_max_llm_calls,
+        trace=trace if trace is not None else profile_cfg.trace,
+        stream=(not no_stream) if no_stream else profile_cfg.stream,
+    )
+
+    with runners.build_react_chat_agent(
+        docs_path=Path(session_cfg.docs_path) if session_cfg.docs_path else None,
+        react_max_iters=session_cfg.react_max_iters,
+        rlm_max_iterations=session_cfg.rlm_max_iterations,
+        rlm_max_llm_calls=session_cfg.rlm_max_llm_calls,
+        timeout=session_cfg.timeout,
+        secret_name=session_cfg.secret_name,
+        volume_name=session_cfg.volume_name,
+    ) as chat_agent:
+        session = CodeChatSession(agent=chat_agent, config=session_cfg)
+        session.run()
 
 
 @app.command("run-basic")
@@ -398,6 +461,198 @@ def run_long_context(
             volume_name=volume_name,
         )
         _print_result(result, verbose=full_output)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@app.command("code-chat")
+def code_chat(
+    docs_path: Path | None = typer.Option(
+        None,
+        "--docs-path",
+        help="Optional document path to preload as active context",
+    ),
+    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
+    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
+    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
+    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
+    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
+    volume_name: str | None = typer.Option(
+        None, help="Modal volume name for persistent storage"
+    ),
+    trace: bool | None = typer.Option(
+        None, "--trace/--no-trace", help="Print ReAct trajectory for each turn"
+    ),
+    no_stream: bool = typer.Option(False, "--no-stream", help="Disable DSPy streaming"),
+    profile: str = typer.Option("default", "--profile", help="Interactive profile name"),
+) -> None:
+    """Start coding-first interactive DSPy ReAct + RLM terminal UI.
+
+    REPL commands:
+        /exit              Exit the session
+        /history           Show current chat history
+        /reset             Reset history and clear sandbox buffers
+        /tools             List ReAct tools
+        /load <path>       Load a document as the active context
+    """
+    try:
+        _run_code_chat_session(
+            docs_path=docs_path,
+            react_max_iters=react_max_iters,
+            rlm_max_iterations=rlm_max_iterations,
+            rlm_max_llm_calls=rlm_max_llm_calls,
+            timeout=timeout,
+            secret_name=secret_name,
+            volume_name=volume_name,
+            trace=trace,
+            no_stream=no_stream,
+            profile=profile,
+        )
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@app.command("run-react-chat")
+def run_react_chat(
+    docs_path: Path | None = typer.Option(
+        None,
+        "--docs-path",
+        help="Optional document path to preload as active context",
+    ),
+    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
+    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
+    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
+    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
+    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
+    volume_name: str | None = typer.Option(
+        None, help="Modal volume name for persistent storage"
+    ),
+    trace: bool | None = typer.Option(
+        None, "--trace/--no-trace", help="Print ReAct trajectory for each turn"
+    ),
+    no_stream: bool = typer.Option(False, "--no-stream", help="Disable DSPy streaming"),
+    profile: str = typer.Option("default", "--profile", help="Interactive profile name"),
+) -> None:
+    """Backward-compatible alias for `code-chat`."""
+    try:
+        _run_code_chat_session(
+            docs_path=docs_path,
+            react_max_iters=react_max_iters,
+            rlm_max_iterations=rlm_max_iterations,
+            rlm_max_llm_calls=rlm_max_llm_calls,
+            timeout=timeout,
+            secret_name=secret_name,
+            volume_name=volume_name,
+            trace=trace,
+            no_stream=no_stream,
+            profile=profile,
+        )
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@app.command("serve-api")
+def serve_api(
+    host: str = typer.Option("127.0.0.1", help="Bind host"),
+    port: int = typer.Option(8000, help="Bind port"),
+    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
+    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
+    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
+    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
+    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
+    volume_name: str | None = typer.Option(
+        None, help="Modal volume name for persistent storage"
+    ),
+) -> None:
+    """Run optional FastAPI server surface (requires `--extra server`)."""
+    try:
+        missing = [
+            pkg
+            for pkg in ("fastapi", "uvicorn")
+            if find_spec(pkg) is None
+        ]
+        if missing:
+            typer.echo(
+                "Server dependencies missing: "
+                + ", ".join(missing)
+                + "\nInstall with:\n  uv sync --extra dev --extra server",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+        import uvicorn
+
+        from .server.app import ServerRuntimeConfig, create_app
+
+        app_obj = create_app(
+            config=ServerRuntimeConfig(
+                secret_name=secret_name,
+                volume_name=volume_name,
+                timeout=timeout,
+                react_max_iters=react_max_iters,
+                rlm_max_iterations=rlm_max_iterations,
+                rlm_max_llm_calls=rlm_max_llm_calls,
+            )
+        )
+        uvicorn.run(app_obj, host=host, port=port)
+    except Exception as exc:
+        _handle_error(exc)
+
+
+@app.command("serve-mcp")
+def serve_mcp(
+    transport: str = typer.Option(
+        "stdio",
+        help="FastMCP transport: stdio, sse, streamable-http",
+    ),
+    host: str = typer.Option("127.0.0.1", help="Host for HTTP transports"),
+    port: int = typer.Option(8001, help="Port for HTTP transports"),
+    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
+    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
+    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
+    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
+    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
+    volume_name: str | None = typer.Option(
+        None, help="Modal volume name for persistent storage"
+    ),
+) -> None:
+    """Run optional FastMCP server surface (requires `--extra mcp`)."""
+    try:
+        missing = [
+            pkg
+            for pkg in ("fastmcp",)
+            if find_spec(pkg) is None
+        ]
+        if missing:
+            typer.echo(
+                "MCP dependencies missing: "
+                + ", ".join(missing)
+                + "\nInstall with:\n  uv sync --extra dev --extra mcp",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+        from .mcp.server import MCPRuntimeConfig, create_mcp_server
+
+        server = create_mcp_server(
+            config=MCPRuntimeConfig(
+                secret_name=secret_name,
+                volume_name=volume_name,
+                timeout=timeout,
+                react_max_iters=react_max_iters,
+                rlm_max_iterations=rlm_max_iterations,
+                rlm_max_llm_calls=rlm_max_llm_calls,
+            )
+        )
+
+        transport_norm = transport.strip().lower()
+        if transport_norm == "stdio":
+            server.run(transport="stdio")
+        elif transport_norm in {"sse", "streamable-http"}:
+            server.run(transport=transport_norm, host=host, port=port)
+        else:
+            typer.echo("transport must be one of: stdio, sse, streamable-http", err=True)
+            raise typer.Exit(code=2)
     except Exception as exc:
         _handle_error(exc)
 

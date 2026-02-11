@@ -125,7 +125,7 @@ This pattern allows you to:
 | Package Manager    | `uv` (modern Python package manager) |
 | Core Framework     | DSPy 3.1.3                           |
 | Cloud Sandbox      | Modal                                |
-| CLI Framework      | Typer >= 0.12                        |
+| CLI Framework      | Typer 0.21.1                         |
 | Testing            | pytest >= 8.2                        |
 | Linting/Formatting | ruff >= 0.8                          |
 
@@ -143,7 +143,20 @@ uv sync
 
 # For development (includes test tools)
 uv sync --extra dev
+
+# For interactive coding TUI (code-chat)
+uv sync --extra dev --extra interactive
+
+# For full optional surface (interactive + MCP + API server)
+uv sync --extra dev --extra interactive --extra mcp --extra server
 ```
+
+### Optional Extras
+
+- `interactive`: prompt-toolkit + rich code-chat runtime (`code-chat`, `run-react-chat`)
+- `mcp`: FastMCP surface (`serve-mcp`)
+- `server`: FastAPI/websocket surface (`serve-api`)
+- `full`: Convenience superset of `interactive`, `mcp`, and `server`
 
 ### Scaffold Installation
 
@@ -293,6 +306,18 @@ uv run fleet-rlm run-long-context \
     --query "What are the main design decisions?" \
     --mode analyze
 
+# Start interactive DSPy ReAct chat with specialized RLM tools
+uv run fleet-rlm code-chat \
+    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
+    --trace
+
+# Backward-compatible alias
+uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
+
+# Optional server surfaces
+uv run fleet-rlm serve-api --port 8000
+uv run fleet-rlm serve-mcp --transport stdio
+
 # Check Modal secrets are configured
 uv run fleet-rlm check-secret
 ```
@@ -311,6 +336,10 @@ uv run fleet-rlm check-secret
 | `run-trajectory`     | Examine RLM execution trajectory             |
 | `run-custom-tool`    | Demo with custom regex tool                  |
 | `run-long-context`   | Analyze or summarize a long document         |
+| `code-chat`          | Primary interactive coding TUI for ReAct+RLM |
+| `run-react-chat`     | Backward-compatible alias of `code-chat`     |
+| `serve-api`          | Optional FastAPI/websocket service           |
+| `serve-mcp`          | Optional FastMCP service                      |
 | `check-secret`       | Verify Modal secret presence                 |
 | `check-secret-key`   | Inspect specific secret key                  |
 

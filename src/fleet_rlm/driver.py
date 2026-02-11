@@ -321,6 +321,70 @@ def sandbox_driver() -> None:
 
     sandbox_globals["chunk_by_headers"] = chunk_by_headers
 
+    def chunk_by_timestamps(
+        text: str,
+        pattern: str = r"^\d{4}-\d{2}-\d{2}[T ]",
+        flags: int = _re.MULTILINE,
+    ) -> list[dict]:
+        """Split log-style text by timestamp boundaries."""
+        if not text:
+            return []
+
+        compiled = _re.compile(pattern, flags)
+        matches = list(compiled.finditer(text))
+
+        if not matches:
+            return [{"timestamp": "", "content": text, "start_pos": 0}]
+
+        chunks: list[dict] = []
+
+        if matches[0].start() > 0:
+            preamble = text[: matches[0].start()].strip()
+            if preamble:
+                chunks.append({"timestamp": "", "content": preamble, "start_pos": 0})
+
+        for i, match in enumerate(matches):
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            content = text[match.start() : end].strip()
+            timestamp = match.group(0).strip()
+            chunks.append(
+                {
+                    "timestamp": timestamp,
+                    "content": content,
+                    "start_pos": match.start(),
+                }
+            )
+
+        return chunks
+
+    sandbox_globals["chunk_by_timestamps"] = chunk_by_timestamps
+
+    def chunk_by_json_keys(text: str) -> list[dict]:
+        """Split a JSON object into per-key chunks."""
+        if not text or not text.strip():
+            return []
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Expected JSON object, got {type(data).__name__}")
+
+        chunks: list[dict] = []
+        for key, value in data.items():
+            chunks.append(
+                {
+                    "key": key,
+                    "content": json.dumps(value, indent=2, default=str),
+                    "value_type": type(value).__name__,
+                }
+            )
+        return chunks
+
+    sandbox_globals["chunk_by_json_keys"] = chunk_by_json_keys
+
     # ------ Stateful buffers ------
     _buffers: dict[str, list] = {}
 

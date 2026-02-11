@@ -1,16 +1,23 @@
 """Full integration test for llm_query and llm_query_batched with real API calls."""
 
 import sys
-sys.path.insert(0, '/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/src')
 
-# Load environment variables from .env file
 from dotenv import load_dotenv
-load_dotenv()
-
 import os
 import dspy
+import pytest
 from fleet_rlm import ModalInterpreter
 from dspy.primitives.code_interpreter import FinalOutput
+
+# Load environment variables from .env file
+load_dotenv()
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("MODAL_TOKEN_ID")
+    or not os.environ.get("MODAL_TOKEN_SECRET")
+    or not os.environ.get("DSPY_LLM_API_KEY"),
+    reason="Integration test requires Modal credentials and DSPY_LLM_API_KEY",
+)
 
 # Configure DSPy from environment variables
 lm_model = os.environ.get('DSPY_LM_MODEL', 'openai/gpt-4o-mini')
@@ -18,8 +25,7 @@ lm_api_base = os.environ.get('DSPY_LM_API_BASE')
 lm_api_key = os.environ.get('DSPY_LLM_API_KEY')
 
 if not lm_api_key:
-    print("ERROR: DSPY_LLM_API_KEY not found in environment")
-    sys.exit(1)
+    pytest.skip("DSPY_LLM_API_KEY not found in environment", allow_module_level=True)
 
 config = {"api_key": lm_api_key}
 if lm_api_base:
@@ -117,7 +123,7 @@ print(f"\\nSynthesis preview: {Final[:200]}...")
         result_data = get_result_value(result)
 
         if isinstance(result_data, str):
-            print(f"\n✓ Synthesis result:")
+            print("\n✓ Synthesis result:")
             print("-" * 60)
             print(result_data)
             print("-" * 60)

@@ -198,6 +198,75 @@ class TestChunkByHeadersHelper:
 
 
 # ---------------------------------------------------------------------------
+# chunk_by_timestamps
+# ---------------------------------------------------------------------------
+
+
+class TestChunkByTimestampsHelper:
+    """Test the chunk_by_timestamps() helper injected into sandbox."""
+
+    def test_timestamp_chunks(self, monkeypatch):
+        msgs = _run_driver(
+            monkeypatch,
+            [
+                _cmd(
+                    'text = "2026-01-01 INFO Start\\n2026-01-02 ERROR Fail"\n'
+                    "chunks = chunk_by_timestamps(text)\n"
+                    "SUBMIT(len(chunks))"
+                )
+            ],
+        )
+        assert msgs[0]["final"]["output"] == 2
+
+    def test_timestamp_no_matches(self, monkeypatch):
+        msgs = _run_driver(
+            monkeypatch,
+            [_cmd('chunks = chunk_by_timestamps("plain text")\nSUBMIT(chunks[0]["timestamp"])')],
+        )
+        assert msgs[0]["final"]["output"] == ""
+
+
+# ---------------------------------------------------------------------------
+# chunk_by_json_keys
+# ---------------------------------------------------------------------------
+
+
+class TestChunkByJsonKeysHelper:
+    """Test the chunk_by_json_keys() helper injected into sandbox."""
+
+    def test_json_key_chunks(self, monkeypatch):
+        msgs = _run_driver(
+            monkeypatch,
+            [
+                _cmd(
+                    'text = \'{"users": [1, 2], "config": {"debug": true}}\'\n'
+                    "chunks = chunk_by_json_keys(text)\n"
+                    "SUBMIT(len(chunks))"
+                )
+            ],
+        )
+        assert msgs[0]["final"]["output"] == 2
+
+    def test_json_key_invalid_json(self, monkeypatch):
+        msgs = _run_driver(
+            monkeypatch,
+            [
+                _cmd(
+                    """
+try:
+    chunk_by_json_keys("not-json")
+    SUBMIT(status="unexpected")
+except Exception as exc:
+    SUBMIT(status="error", message=str(exc))
+"""
+                )
+            ],
+        )
+        assert msgs[0]["final"]["status"] == "error"
+        assert "Invalid JSON" in msgs[0]["final"]["message"]
+
+
+# ---------------------------------------------------------------------------
 # Buffers
 # ---------------------------------------------------------------------------
 

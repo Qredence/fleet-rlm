@@ -32,6 +32,7 @@ from .chunking import (
 from .config import configure_planner_from_env
 from .driver import sandbox_driver
 from .interpreter import ModalInterpreter
+from .react_agent import RLMReActChatAgent, RLMReActChatSignature
 from .scaffold import (
     get_scaffold_dir,
     install_agents,
@@ -56,6 +57,8 @@ __all__ = [
     "configure_planner_from_env",
     "sandbox_driver",
     "ModalInterpreter",
+    "RLMReActChatAgent",
+    "RLMReActChatSignature",
     "ExtractArchitecture",
     "ExtractAPIEndpoints",
     "FindErrorPatterns",

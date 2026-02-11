@@ -5,7 +5,9 @@ RLM (Recursive Language Model) implementation using DSPy + Modal for sandboxed c
 ## Setup
 
 ```bash
-uv sync --extra dev          # Install all dependencies
+uv sync --extra dev                              # Base dev environment
+uv sync --extra dev --extra interactive          # code-chat runtime
+uv sync --extra dev --extra interactive --extra mcp --extra server  # full optional surface
 cp .env.example .env         # Configure DSPY_LM_MODEL, DSPY_LLM_API_KEY
 uv run modal setup           # Authenticate with Modal (per-user)
 uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...
@@ -16,6 +18,10 @@ uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...
 ```bash
 uv run fleet-rlm --help                    # Show all CLI commands
 uv run fleet-rlm run-basic                 # Test sandbox with Fibonacci
+uv run fleet-rlm code-chat                 # Interactive coding-first ReAct + RLM chat
+uv run fleet-rlm run-react-chat            # Backward-compatible alias of code-chat
+uv run fleet-rlm serve-api                 # Optional FastAPI surface (requires --extra server)
+uv run fleet-rlm serve-mcp                 # Optional FastMCP surface (requires --extra mcp)
 uv run fleet-rlm check-secret              # Verify Modal secrets
 uv run fleet-rlm init                      # Install skills/agents/teams/hooks to ~/.claude
 uv run fleet-rlm init --list               # List scaffold assets
@@ -107,9 +113,16 @@ Tests mock Modal—no cloud calls during `pytest`.
 - `grep(text, pattern)` — search lines
 - `chunk_by_size(text, size)` — split text
 - `chunk_by_headers(text, pattern)` — split at headers
+- `chunk_by_timestamps(text, pattern)` — split logs at timestamps
+- `chunk_by_json_keys(text)` — split JSON objects by top-level key
 - `add_buffer(name, value)` / `get_buffer(name)` — stateful accumulation
 - `save_to_volume(path, content)` / `load_from_volume(path)` — persist to `/data/`
 - `SUBMIT(*args, **kwargs)` — return structured output
+
+**Interactive ReAct chat pattern:**
+- `RLMReActChatAgent` defines `agent = dspy.ReAct(...)` with specialized tools
+- Chat memory is `dspy.History`; sandbox memory uses buffers + optional Volume V2
+- Use `fleet-rlm run-react-chat` for interactive orchestration over RLM tools
 
 ## Troubleshooting
 

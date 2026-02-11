@@ -6,6 +6,15 @@ from pathlib import Path
 
 from fleet_rlm import scaffold
 
+EXPECTED_AGENT_NAMES = {
+    "modal-interpreter-agent",
+    "rlm-orchestrator",
+    "rlm-specialist",
+    "rlm-subcall",
+}
+
+EXPECTED_AGENT_COUNT = len(EXPECTED_AGENT_NAMES)
+
 
 def test_get_scaffold_dir_exists():
     """The scaffold directory should exist in the installed package."""
@@ -52,10 +61,10 @@ def test_list_skills_includes_expected_names():
     assert skill_names == expected
 
 
-def test_list_agents_returns_all_9():
-    """Should list top-level and nested team agents."""
+def test_list_agents_returns_expected_count():
+    """Should list the expected packaged agent definitions."""
     agents = scaffold.list_agents()
-    assert len(agents) == 9
+    assert len(agents) == EXPECTED_AGENT_COUNT
     # Check that each agent has the expected fields
     for agent in agents:
         assert "name" in agent
@@ -68,21 +77,10 @@ def test_list_agents_returns_all_9():
 
 
 def test_list_agents_includes_expected_names():
-    """Should include both root and teams/ agent definitions."""
+    """Should include the packaged agent definitions."""
     agents = scaffold.list_agents()
     agent_names = {a["name"] for a in agents}
-    expected = {
-        "modal-interpreter-agent",
-        "rlm-orchestrator",
-        "rlm-specialist",
-        "rlm-subcall",
-        "teams/agent-designer",
-        "teams/architect-explorer",
-        "teams/fleet-rlm-explorer-team",
-        "teams/testing-analyst",
-        "teams/ux-reviewer",
-    }
-    assert agent_names == expected
+    assert agent_names == EXPECTED_AGENT_NAMES
 
 
 def test_list_teams_returns_expected_template():
@@ -168,8 +166,7 @@ def test_install_agents_creates_files(tmp_path: Path):
     target = tmp_path / "test_claude"
     installed = scaffold.install_agents(target, force=False)
 
-    # Should install top-level + nested team agents
-    assert len(installed) == 9
+    assert len(installed) == EXPECTED_AGENT_COUNT
 
     # Check that the agents directory was created
     agents_dir = target / "agents"
@@ -190,7 +187,7 @@ def test_install_agents_skips_existing(tmp_path: Path):
 
     # First install
     installed_first = scaffold.install_agents(target, force=False)
-    assert len(installed_first) == 9
+    assert len(installed_first) == EXPECTED_AGENT_COUNT
 
     # Second install without force should skip all
     installed_second = scaffold.install_agents(target, force=False)
@@ -203,7 +200,7 @@ def test_install_agents_force_overwrites(tmp_path: Path):
 
     # First install
     installed_first = scaffold.install_agents(target, force=False)
-    assert len(installed_first) == 9
+    assert len(installed_first) == EXPECTED_AGENT_COUNT
 
     # Modify a file to verify overwrite
     orchestrator = target / "agents" / "rlm-orchestrator.md"
@@ -212,7 +209,7 @@ def test_install_agents_force_overwrites(tmp_path: Path):
 
     # Second install with force should overwrite all
     installed_second = scaffold.install_agents(target, force=True)
-    assert len(installed_second) == 9
+    assert len(installed_second) == EXPECTED_AGENT_COUNT
 
     # Verify the file was restored
     assert orchestrator.read_text() == original_content
@@ -272,18 +269,17 @@ def test_install_all_returns_summary(tmp_path: Path):
 
     # Check counts
     assert len(result["skills_installed"]) == 10
-    assert len(result["agents_installed"]) == 9
+    assert len(result["agents_installed"]) == EXPECTED_AGENT_COUNT
     assert len(result["teams_installed"]) == 1
     assert len(result["hooks_installed"]) == len(scaffold.list_hooks())
     assert result["skills_total"] == 10
-    assert result["agents_total"] == 9
+    assert result["agents_total"] == EXPECTED_AGENT_COUNT
     assert result["teams_total"] == 1
     assert result["hooks_total"] == len(scaffold.list_hooks())
 
     # Verify files exist
     assert (target / "skills" / "rlm" / "SKILL.md").exists()
     assert (target / "agents" / "rlm-orchestrator.md").exists()
-    assert (target / "agents" / "teams" / "agent-designer.md").exists()
     assert (target / "teams" / "fleet-rlm" / "config.json").exists()
     assert (target / "hooks" / "hookify.fleet-rlm-modal-error.local.md").exists()
 
@@ -299,11 +295,11 @@ def test_install_all_skips_partial_existing(tmp_path: Path):
     result = scaffold.install_all(target, force=False)
 
     assert len(result["skills_installed"]) == 0  # All skipped
-    assert len(result["agents_installed"]) == 9  # Newly installed
+    assert len(result["agents_installed"]) == EXPECTED_AGENT_COUNT
     assert len(result["teams_installed"]) == 1
     assert len(result["hooks_installed"]) == len(scaffold.list_hooks())
     assert result["skills_total"] == 10
-    assert result["agents_total"] == 9
+    assert result["agents_total"] == EXPECTED_AGENT_COUNT
     assert result["teams_total"] == 1
     assert result["hooks_total"] == len(scaffold.list_hooks())
 

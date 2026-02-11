@@ -1,15 +1,22 @@
 """Test fleet-rlm with V2 volume 'rlm-volume-dspy'."""
 
 import sys
-sys.path.insert(0, '/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/src')
 
 from dotenv import load_dotenv
-load_dotenv()
-
 import os
 import dspy
+import pytest
 from fleet_rlm import ModalInterpreter
 from dspy.primitives.code_interpreter import FinalOutput
+
+load_dotenv()
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("MODAL_TOKEN_ID")
+    or not os.environ.get("MODAL_TOKEN_SECRET")
+    or not os.environ.get("DSPY_LLM_API_KEY"),
+    reason="Integration test requires Modal credentials and DSPY_LLM_API_KEY",
+)
 
 # Configure DSPy
 lm_model = os.environ.get('DSPY_LM_MODEL', 'openai/gpt-4o-mini')
@@ -42,9 +49,9 @@ def main():
         max_llm_calls=5,
         volume_name='rlm-volume-dspy',  # V2 volume
     ) as interp:
-        print(f"\n✓ ModalInterpreter initialized with V2 volume")
-        print(f"  Volume name: rlm-volume-dspy")
-        print(f"  Mount path: /data")
+        print("\n✓ ModalInterpreter initialized with V2 volume")
+        print("  Volume name: rlm-volume-dspy")
+        print("  Mount path: /data")
 
         print("\n--- Step 1: Verify V2 volume is accessible ---")
 

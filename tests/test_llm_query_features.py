@@ -9,14 +9,22 @@ This script tests the recursive sub-LLM pattern:
 """
 
 import sys
-sys.path.insert(0, '/Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/src')
 
 import dspy
+import pytest
 from fleet_rlm import ModalInterpreter
 from dspy.primitives.code_interpreter import FinalOutput
 
 # Configure DSPy from environment variables (loaded from .env file)
 import os
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("MODAL_TOKEN_ID")
+    or not os.environ.get("MODAL_TOKEN_SECRET")
+    or not os.environ.get("DSPY_LLM_API_KEY"),
+    reason="Integration test requires Modal credentials and DSPY_LLM_API_KEY",
+)
+
 try:
     # Use DSPY_* environment variables from .env file
     lm_model = os.environ.get('DSPY_LM_MODEL', 'openai/gpt-4o-mini')
@@ -70,7 +78,7 @@ def test_llm_query_features():
         stdout_summary_threshold=500,  # Summarize long stdout
         volume_name="rlm-test-volume",  # Use volume for PDF storage
     ) as interp:
-        print(f"ModalInterpreter initialized")
+        print("ModalInterpreter initialized")
         print(f"Sandbox: {interp._sandbox}")
 
         # Upload PDF to volume first
