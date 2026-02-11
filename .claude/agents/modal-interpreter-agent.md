@@ -1,9 +1,7 @@
 ---
 name: modal-interpreter-agent
 description: >-
-  Diagnose and troubleshoot Modal sandbox and interpreter issues. Use
-  proactively when Modal connection fails, sandbox creation errors occur,
-  credentials are misconfigured, or RLM tests fail with Modal-related errors.
+Diagnose and troubleshoot Modal sandbox and interpreter issues. Use proactively when Modal connection fails, sandbox creation errors occur, credentials are misconfigured, or RLM tests fail with Modal-related errors.
 tools: Read, Bash, Grep, Glob
 model: sonnet
 maxTurns: 15
