@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import typer
 
@@ -93,20 +93,47 @@ def _run_code_chat_session(
     secret_name: str,
     volume_name: str | None,
     trace: bool | None,
+    trace_mode: str | None,
     no_stream: bool,
+    stream_refresh_ms: int,
+    legacy: bool,
     profile: str,
 ) -> None:
     from .interactive import check_interactive_dependencies
     from .interactive.config import get_profile
-    from .interactive.models import SessionConfig
-    from .interactive.session import CodeChatSession
+    from .interactive.models import SessionConfig, TraceMode
 
-    dep_check = check_interactive_dependencies()
+    dep_mode = "legacy" if legacy else "textual"
+    dep_check = check_interactive_dependencies(mode=dep_mode)
     if not dep_check.ok:
         typer.echo(_code_chat_missing_extras_message(dep_check.missing), err=True)
         raise typer.Exit(code=2)
 
     profile_cfg = get_profile(profile)
+    trace_mode_normalized: str | None = None
+    if trace_mode is not None:
+        trace_mode_normalized = trace_mode.strip().lower()
+        if trace_mode_normalized not in {"compact", "verbose", "off"}:
+            raise typer.BadParameter(
+                "--trace-mode must be one of: compact, verbose, off"
+            )
+
+    if trace is True:
+        textual_trace_mode: TraceMode = "compact"
+    elif trace is False:
+        textual_trace_mode = "off"
+    elif trace_mode_normalized is not None:
+        textual_trace_mode = cast(TraceMode, trace_mode_normalized)
+    else:
+        textual_trace_mode = "compact"
+    legacy_trace = (
+        trace
+        if trace is not None
+        else (trace_mode_normalized != "off")
+        if trace_mode_normalized is not None
+        else profile_cfg.trace
+    )
+
     session_cfg = SessionConfig(
         profile_name=profile_cfg.name,
         docs_path=str(docs_path) if docs_path else profile_cfg.docs_path,
@@ -116,8 +143,10 @@ def _run_code_chat_session(
         react_max_iters=react_max_iters or profile_cfg.react_max_iters,
         rlm_max_iterations=rlm_max_iterations or profile_cfg.rlm_max_iterations,
         rlm_max_llm_calls=rlm_max_llm_calls or profile_cfg.rlm_max_llm_calls,
-        trace=trace if trace is not None else profile_cfg.trace,
+        trace=legacy_trace,
+        trace_mode=textual_trace_mode,
         stream=(not no_stream) if no_stream else profile_cfg.stream,
+        stream_refresh_ms=stream_refresh_ms,
     )
 
     with runners.build_react_chat_agent(
@@ -129,8 +158,15 @@ def _run_code_chat_session(
         secret_name=session_cfg.secret_name,
         volume_name=session_cfg.volume_name,
     ) as chat_agent:
-        session = CodeChatSession(agent=chat_agent, config=session_cfg)
-        session.run()
+        if legacy:
+            from .interactive.legacy_session import CodeChatSession
+
+            session = CodeChatSession(agent=chat_agent, config=session_cfg)
+            session.run()
+        else:
+            from .interactive.textual_app import run_code_chat_textual_app
+
+            run_code_chat_textual_app(agent=chat_agent, config=session_cfg)
 
 
 @app.command("run-basic")
@@ -483,7 +519,22 @@ def code_chat(
     trace: bool | None = typer.Option(
         None, "--trace/--no-trace", help="Print ReAct trajectory for each turn"
     ),
+    trace_mode: str | None = typer.Option(
+        None,
+        "--trace-mode",
+        help="Trace display mode: compact, verbose, or off",
+    ),
     no_stream: bool = typer.Option(False, "--no-stream", help="Disable DSPy streaming"),
+    stream_refresh_ms: int = typer.Option(
+        40,
+        "--stream-refresh-ms",
+        help="UI refresh cadence for streamed updates in milliseconds",
+    ),
+    legacy: bool = typer.Option(
+        False,
+        "--legacy",
+        help="Use legacy prompt-toolkit runtime instead of Textual",
+    ),
     profile: str = typer.Option("default", "--profile", help="Interactive profile name"),
 ) -> None:
     """Start coding-first interactive DSPy ReAct + RLM terminal UI.
@@ -505,7 +556,10 @@ def code_chat(
             secret_name=secret_name,
             volume_name=volume_name,
             trace=trace,
+            trace_mode=trace_mode,
             no_stream=no_stream,
+            stream_refresh_ms=stream_refresh_ms,
+            legacy=legacy,
             profile=profile,
         )
     except Exception as exc:
@@ -530,7 +584,22 @@ def run_react_chat(
     trace: bool | None = typer.Option(
         None, "--trace/--no-trace", help="Print ReAct trajectory for each turn"
     ),
+    trace_mode: str | None = typer.Option(
+        None,
+        "--trace-mode",
+        help="Trace display mode: compact, verbose, or off",
+    ),
     no_stream: bool = typer.Option(False, "--no-stream", help="Disable DSPy streaming"),
+    stream_refresh_ms: int = typer.Option(
+        40,
+        "--stream-refresh-ms",
+        help="UI refresh cadence for streamed updates in milliseconds",
+    ),
+    legacy: bool = typer.Option(
+        False,
+        "--legacy",
+        help="Use legacy prompt-toolkit runtime instead of Textual",
+    ),
     profile: str = typer.Option("default", "--profile", help="Interactive profile name"),
 ) -> None:
     """Backward-compatible alias for `code-chat`."""
@@ -544,7 +613,10 @@ def run_react_chat(
             secret_name=secret_name,
             volume_name=volume_name,
             trace=trace,
+            trace_mode=trace_mode,
             no_stream=no_stream,
+            stream_refresh_ms=stream_refresh_ms,
+            legacy=legacy,
             profile=profile,
         )
     except Exception as exc:

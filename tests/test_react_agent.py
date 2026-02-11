@@ -212,3 +212,113 @@ def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
 
     assert result["assistant_response"] == "echo:fallback please"
     assert len(agent.history.messages) == 1
+
+
+def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+
+    def _fake_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            assert "user_request" in stream_kwargs
+            yield StatusMessage(message="Calling tool: grep")
+            yield StreamResponse(
+                predict_name="react",
+                signature_field_name="assistant_response",
+                chunk="alpha ",
+                is_last_chunk=False,
+            )
+            yield StreamResponse(
+                predict_name="react",
+                signature_field_name="next_thought",
+                chunk="thinking",
+                is_last_chunk=True,
+            )
+            yield StatusMessage(message="Tool finished.")
+            yield dspy.Prediction(
+                assistant_response="alpha done",
+                trajectory={"tool_name_0": "grep"},
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    events = list(agent.iter_chat_turn_stream("hello", trace=True))
+    kinds = [event.kind for event in events]
+
+    assert kinds == [
+        "status",
+        "tool_call",
+        "assistant_token",
+        "reasoning_step",
+        "status",
+        "tool_result",
+        "final",
+    ]
+    assert events[-1].text == "alpha done"
+    assert events[-1].payload["trajectory"] == {"tool_name_0": "grep"}
+    assert len(agent.history.messages) == 1
+
+
+def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+
+    def _fake_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            yield StreamResponse(
+                predict_name="react",
+                signature_field_name="assistant_response",
+                chunk="partial ",
+                is_last_chunk=False,
+            )
+            yield StreamResponse(
+                predict_name="react",
+                signature_field_name="assistant_response",
+                chunk="tail",
+                is_last_chunk=False,
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _fake_streamify)
+
+    checks = {"calls": 0}
+
+    def _cancel_check() -> bool:
+        checks["calls"] += 1
+        return checks["calls"] >= 2
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    events = list(
+        agent.iter_chat_turn_stream("cancel me", trace=False, cancel_check=_cancel_check)
+    )
+
+    assert any(event.kind == "cancelled" for event in events)
+    cancelled = [event for event in events if event.kind == "cancelled"][0]
+    assert "partial" in cancelled.text
+    assert cancelled.text.endswith("[cancelled]")
+    assert len(agent.history.messages) == 1
+    assert agent.history.messages[0]["assistant_response"].endswith("[cancelled]")
+
+
+def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+
+    def _bad_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            raise RuntimeError("broken stream")
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _bad_streamify)
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    events = list(agent.iter_chat_turn_stream("fallback now", trace=False))
+    assert events[0].kind == "status"
+    assert events[-1].kind == "final"
+    assert events[-1].text == "echo:fallback now"
+    assert len(agent.history.messages) == 1

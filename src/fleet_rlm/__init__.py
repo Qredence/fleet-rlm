@@ -21,7 +21,7 @@ Example:
     >>> rlm = dspy.RLM(signature=ExtractArchitecture, interpreter=interpreter)
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.3"
 
 from .chunking import (
     chunk_by_headers,
@@ -41,6 +41,16 @@ from .scaffold import (
     list_agents,
     list_skills,
 )
+from .agent_state import (
+    AgentStateManager,
+    AnalysisResult,
+    CodeScript,
+)
+from .stateful_sandbox import (
+    ExecutionRecord,
+    SandboxResult,
+    StatefulSandboxManager,
+)
 from .signatures import (
     AnalyzeLongDocument,
     ExtractAPIEndpoints,
@@ -59,6 +69,12 @@ __all__ = [
     "ModalInterpreter",
     "RLMReActChatAgent",
     "RLMReActChatSignature",
+    "AgentStateManager",
+    "AnalysisResult",
+    "CodeScript",
+    "StatefulSandboxManager",
+    "ExecutionRecord",
+    "SandboxResult",
     "ExtractArchitecture",
     "ExtractAPIEndpoints",
     "FindErrorPatterns",

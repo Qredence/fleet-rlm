@@ -1,0 +1,368 @@
+{
+  "document_stats": {
+    "total_chars": 81397,
+    "total_lines": 3124,
+    "chunks": 11
+  },
+  "chunk_extractions": [
+    {
+      "chunk_index": 0,
+      "modules": [],
+      "optimizers": [],
+      "classes": [],
+      "functions": []
+    },
+    {
+      "chunk_index": 1,
+      "modules": [],
+      "optimizers": [],
+      "classes": [
+        "Evaluate",
+        "ChatAdapter",
+        "TwoStepAdapter",
+        "CompleteAndGrounded",
+        "EvaluationResult",
+        "JSONAdapter",
+        "Adapter"
+      ],
+      "functions": []
+    },
+    {
+      "chunk_index": 2,
+      "modules": [
+        "Module",
+        "BestOfN",
+        "ChainOfThought",
+        "MultiChainComparison"
+      ],
+      "optimizers": [],
+      "classes": [
+        "Document",
+        "SemanticF1",
+        "Citations",
+        "ChainOfThought",
+        "Module",
+        "BestOfN",
+        "MultiChainComparison",
+        "Embedder",
+        "LM"
+      ],
+      "functions": []
+    },
+    {
+      "chunk_index": 3,
+      "modules": [
+        "ReAct",
+        "Predict",
+        "ProgramOfThought",
+        "Refine",
+        "MultiChainComparison",
+        "Parallel"
+      ],
+      "optimizers": [
+        "BootstrapFewShotWithRandomSearch",
+        "BootstrapFewShot",
+        "BootstrapFinetune",
+        "BetterTogether"
+      ],
+      "classes": [
+        "ReAct",
+        "Predict",
+        "ProgramOfThought",
+        "BootstrapFinetune",
+        "Refine",
+        "BootstrapFewShot",
+        "MultiChainComparison",
+        "BetterTogether",
+        "BootstrapFewShotWithRandomSearch",
+        "Parallel"
+      ],
+      "functions": []
+    },
+    {
+      "chunk_index": 4,
+      "modules": [],
+      "optimizers": [
+        "LabeledFewShot",
+        "Ensemble",
+        "BootstrapFinetune",
+        "KNNFewShot",
+        "BootstrapRS",
+        "COPRO",
+        "InferRules",
+        "KNN"
+      ],
+      "classes": [
+        "Example",
+        "KNN",
+        "Ensemble",
+        "BootstrapFinetune",
+        "KNNFewShot",
+        "Code",
+        "BootstrapRS",
+        "COPRO",
+        "Audio",
+        "History",
+        "InferRules",
+        "LabeledFewShot"
+      ],
+      "functions": []
+    },
+    {
+      "chunk_index": 5,
+      "modules": [],
+      "optimizers": [],
+      "classes": [
+        "OutputField",
+        "Image",
+        "Signature",
+        "Prediction",
+        "ToolCalls",
+        "PythonInterpreter",
+        "ColBERTv2",
+        "Embeddings",
+        "Tool",
+        "InputField",
+        "History"
+      ],
+      "functions": []
+    },
+    {
+      "chunk_index": 6,
+      "modules": [],
+      "optimizers": [],
+      "classes": [
+        "StatusMessageProvider",
+        "StatusMessage",
+        "StreamListener"
+      ],
+      "functions": []
+    },
+    {
+      "chunk_index": 7,
+      "modules": [],
+      "optimizers": [],
+      "classes": [
+        "Parameter",
+        "Action",
+        "Tool"
+      ],
+      "functions": [
+        "__str__",
+        "__repr__"
+      ]
+    },
+    {
+      "chunk_index": 8,
+      "modules": [],
+      "optimizers": [],
+      "classes": [
+        "ActionOutput",
+        "Action",
+        "Teleprompter",
+        "Proposer",
+        "Tool",
+        "Actor",
+        "LabeledFewShot"
+      ],
+      "functions": [
+        "__str__",
+        "propose_instruction_for_predictor",
+        "__repr__",
+        "create_subdir_in_cachedir",
+        "propose_instructions_for_program",
+        "__init__",
+        "get_dspy_field_type",
+        "compile",
+        "get_params"
+      ]
+    },
+    {
+      "chunk_index": 9,
+      "modules": [],
+      "optimizers": [],
+      "classes": [
+        "DummyTeleprompter"
+      ],
+      "functions": [
+        "example_function",
+        "test_answer_exact_match_no_match",
+        "test_answer_exact_match_string",
+        "test_answer_exact_match_list",
+        "create_subdir_in_cachedir",
+        "test_metadata",
+        "test_normalize_audio_format",
+        "test_generated_cases",
+        "__init__",
+        "compile"
+      ]
+    },
+    {
+      "chunk_index": 10,
+      "modules": [],
+      "optimizers": [],
+      "classes": [
+        "Profile",
+        "DummyTeleprompter",
+        "Account"
+      ],
+      "functions": [
+        "add",
+        "hello",
+        "wrong_tool",
+        "__init__",
+        "test_get_params",
+        "get_account_name",
+        "compile",
+        "current_datetime"
+      ]
+    }
+  ],
+  "rlm_results": {
+    "modules": {
+      "predict_modules": [
+        "BestOfN",
+        "ChainOfThought",
+        "Module",
+        "MultiChainComparison",
+        "Parallel",
+        "Predict",
+        "ProgramOfThought",
+        "ReAct",
+        "Refine"
+      ],
+      "other_modules": [],
+      "all_modules": [
+        "BestOfN",
+        "ChainOfThought",
+        "Module",
+        "MultiChainComparison",
+        "Parallel",
+        "Predict",
+        "ProgramOfThought",
+        "ReAct",
+        "Refine"
+      ]
+    },
+    "optimizers": {
+      "bootstrap_optimizers": [
+        "BootstrapFewShot",
+        "BootstrapFewShotWithRandomSearch",
+        "BootstrapFinetune",
+        "BootstrapRS"
+      ],
+      "other_optimizers": [
+        "BetterTogether",
+        "COPRO",
+        "Ensemble",
+        "InferRules",
+        "KNN",
+        "KNNFewShot",
+        "LabeledFewShot"
+      ],
+      "all_optimizers": [
+        "BetterTogether",
+        "BootstrapFewShot",
+        "BootstrapFewShotWithRandomSearch",
+        "BootstrapFinetune",
+        "BootstrapRS",
+        "COPRO",
+        "Ensemble",
+        "InferRules",
+        "KNN",
+        "KNNFewShot",
+        "LabeledFewShot"
+      ]
+    },
+    "classes": [
+      "Account",
+      "Action",
+      "ActionOutput",
+      "Actor",
+      "Adapter",
+      "Audio",
+      "BestOfN",
+      "BetterTogether",
+      "BootstrapFewShot",
+      "BootstrapFewShotWithRandomSearch",
+      "BootstrapFinetune",
+      "BootstrapRS",
+      "COPRO",
+      "ChainOfThought",
+      "ChatAdapter",
+      "Citations",
+      "Code",
+      "ColBERTv2",
+      "CompleteAndGrounded",
+      "Document",
+      "DummyTeleprompter",
+      "Embedder",
+      "Embeddings",
+      "Ensemble",
+      "Evaluate",
+      "EvaluationResult",
+      "Example",
+      "History",
+      "Image",
+      "InferRules",
+      "InputField",
+      "JSONAdapter",
+      "KNN",
+      "KNNFewShot",
+      "LabeledFewShot",
+      "Module",
+      "MultiChainComparison",
+      "OutputField",
+      "Parallel",
+      "Parameter",
+      "Predict",
+      "Prediction",
+      "Profile",
+      "ProgramOfThought",
+      "Proposer",
+      "PythonInterpreter",
+      "ReAct",
+      "Refine",
+      "SemanticF1",
+      "Signature",
+      "StatusMessage",
+      "StatusMessageProvider",
+      "StreamListener",
+      "Teleprompter",
+      "Tool",
+      "ToolCalls",
+      "TwoStepAdapter"
+    ],
+    "functions": [
+      "__init__",
+      "__repr__",
+      "__str__",
+      "add",
+      "compile",
+      "create_subdir_in_cachedir",
+      "current_datetime",
+      "example_function",
+      "get_account_name",
+      "get_dspy_field_type",
+      "get_params",
+      "hello",
+      "propose_instruction_for_predictor",
+      "propose_instructions_for_program",
+      "test_answer_exact_match_list",
+      "test_answer_exact_match_no_match",
+      "test_answer_exact_match_string",
+      "test_generated_cases",
+      "test_get_params",
+      "test_metadata",
+      "test_normalize_audio_format",
+      "wrong_tool"
+    ],
+    "statistics": {
+      "total_modules": 9,
+      "total_optimizers": 11,
+      "total_classes": 57,
+      "total_functions": 22,
+      "chunks_processed": 11
+    }
+  }
+}

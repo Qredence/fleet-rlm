@@ -27,6 +27,7 @@ dependencies = [
     "tomli>=2.0.0; python_version < '3.11'",
     "typer==0.21.1",
     "mlflow>=3.8.1",
+    "textual>=7.5.0",
 ]
 
 [project.urls]
@@ -40,6 +41,7 @@ interactive = [
     "aiofiles>=24.0,<26.0",
     "loguru>=0.6.0,<0.8",
     "prompt-toolkit==3.0.52",
+    "textual==7.5.0",
     "pillow==12.1.0",
     "rich==14.2.0",
     "streamingjson==0.0.5",
@@ -68,6 +70,7 @@ full = [
     "aiofiles>=24.0,<26.0",
     "loguru>=0.6.0,<0.8",
     "prompt-toolkit==3.0.52",
+    "textual==7.5.0",
     "pillow==12.1.0",
     "rich==14.2.0",
     "streamingjson==0.0.5",

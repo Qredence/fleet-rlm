@@ -18,7 +18,8 @@ uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...
 ```bash
 uv run fleet-rlm --help                    # Show all CLI commands
 uv run fleet-rlm run-basic                 # Test sandbox with Fibonacci
-uv run fleet-rlm code-chat                 # Interactive coding-first ReAct + RLM chat
+uv run fleet-rlm code-chat                 # Textual-first interactive ReAct + RLM chat
+uv run fleet-rlm code-chat --legacy        # Prompt-toolkit fallback REPL
 uv run fleet-rlm run-react-chat            # Backward-compatible alias of code-chat
 uv run fleet-rlm serve-api                 # Optional FastAPI surface (requires --extra server)
 uv run fleet-rlm serve-mcp                 # Optional FastMCP surface (requires --extra mcp)
@@ -96,6 +97,8 @@ src/fleet_rlm/
 uv run pytest                              # All tests
 uv run pytest tests/test_driver.py -v      # Single file
 uv run pytest -k "test_name"               # Pattern match
+uv run pytest tests/test_cli_smoke.py -k "code_chat"   # CLI routing and legacy fallback
+uv run pytest tests/test_textual_app.py -q  # Textual UI pilot tests (requires textual extra)
 ```
 
 Tests mock Modal—no cloud calls during `pytest`.
@@ -122,7 +125,9 @@ Tests mock Modal—no cloud calls during `pytest`.
 **Interactive ReAct chat pattern:**
 - `RLMReActChatAgent` defines `agent = dspy.ReAct(...)` with specialized tools
 - Chat memory is `dspy.History`; sandbox memory uses buffers + optional Volume V2
-- Use `fleet-rlm run-react-chat` for interactive orchestration over RLM tools
+- `code-chat` / `run-react-chat` launch Textual by default, with `--legacy` for prompt-toolkit
+- Trace defaults to `compact`; use `--trace-mode compact|verbose|off` (`--trace` and `--no-trace` still work)
+- Textual keybindings: `Ctrl+C` cancel turn, `Ctrl+L` clear panes, `F2` reasoning pane, `F3` tools pane
 
 ## Troubleshooting
 

@@ -1,0 +1,401 @@
+{
+  "document_stats": {
+    "total_chars": 114401,
+    "total_lines": 2499,
+    "chunks_analyzed": 23,
+    "total_chunks": 23
+  },
+  "chunk_analyses": [
+    {
+      "chunk_index": 0,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Inference-Time Scaling",
+        "Evaluation & Benchmarks",
+        "Model Training"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 1,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Inference-Time Scaling",
+        "Model Training"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 2,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Inference-Time Scaling",
+        "Evaluation & Benchmarks"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 3,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Evaluation & Benchmarks",
+        "Model Training"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 4,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Inference-Time Scaling",
+        "Evaluation & Benchmarks",
+        "Model Training"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 5,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Inference-Time Scaling",
+        "Sandbox Execution",
+        "Evaluation & Benchmarks",
+        "Model Training"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 6,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Evaluation & Benchmarks"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 7,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 8,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 9,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Evaluation & Benchmarks",
+        "Model Training"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 10,
+      "header": "Introduction",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Evaluation & Benchmarks"
+      ],
+      "findings": [
+        "Context rot degrades LLM quality with longer prompts",
+        "RLMs treat long prompts as external environment"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "high"
+    },
+    {
+      "chunk_index": 11,
+      "header": "Suppose our context is ~1M chars, and we want each sub-LLM query to be ~0.1M chars so we split it into 5 chunks",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 12,
+      "header": "After finding out the context is separated by Markdown headers, we can chunk, summarize, and answer",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 13,
+      "header": "After finding out the context is separated by Markdown headers, we can chunk, summarize, and answer",
+      "topics": [
+        "Long Context Processing"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 14,
+      "header": "After finding out we need to search for \"magic\" and \"number\" in the context",
+      "topics": [
+        "Long Context Processing"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 15,
+      "header": "Print first 500 chars",
+      "topics": [
+        "Long Context Processing",
+        "Evaluation & Benchmarks"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 16,
+      "header": "Matches words with exactly 2 r\u2019s",
+      "topics": [
+        "Long Context Processing"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 17,
+      "header": "Matches words with exactly 2 r\u2019s",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Evaluation & Benchmarks"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 18,
+      "header": "Matches words with exactly 2 r\u2019s",
+      "topics": [
+        "Recursive Language Models"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 19,
+      "header": "Matches words with exactly 2 r\u2019s",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Inference-Time Scaling",
+        "Evaluation & Benchmarks"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 20,
+      "header": "Matches words with exactly 2 r\u2019s",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 21,
+      "header": "Matches words with exactly 2 r\u2019s",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Model Training"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    },
+    {
+      "chunk_index": 22,
+      "header": "Matches words with exactly 2 r\u2019s",
+      "topics": [
+        "Recursive Language Models",
+        "Long Context Processing",
+        "Inference-Time Scaling"
+      ],
+      "findings": [
+        "Supporting content for main thesis"
+      ],
+      "methodology": "",
+      "algorithms": [],
+      "importance": "low"
+    }
+  ],
+  "synthesis": {
+    "overall_structure": "Academic paper with 23 sections covering Recursive Language Models. Structure: Abstract \u2192 Introduction \u2192 Methods \u2192 Experiments \u2192 Results \u2192 Conclusion.",
+    "key_themes": [
+      "Recursive Language Models",
+      "Model Training",
+      "Sandbox Execution",
+      "Long Context Processing",
+      "Inference-Time Scaling",
+      "Evaluation & Benchmarks"
+    ],
+    "main_contributions": [
+      "Introduction of Recursive Language Models (RLMs) paradigm",
+      "Demonstration of 100x context window scaling",
+      "Post-training of first natively recursive model (RLM-Qwen3-8B)",
+      "Comprehensive evaluation on 4 long-context tasks",
+      "Cost-effective alternative to vanilla frontier LLMs"
+    ],
+    "technical_innovations": [
+      "External environment treatment for long prompts",
+      "Programmatic code execution for content exploration",
+      "Recursive self-calling over document snippets",
+      "Tool-augmented inference with sandbox isolation",
+      "JSON protocol for structured tool communication"
+    ],
+    "experimental_highlights": [
+      "Analyzed 114,401 characters in 23 chunks",
+      "High-importance sections: 11/23",
+      "Tasks: S-NIAH, OOLONG, OOLONG-Pairs",
+      "Performance maintained from 2^13 to 2^18 tokens"
+    ],
+    "recommendations": [
+      "Read Abstract and Introduction for overview",
+      "Study Methods section for implementation details",
+      "Review Experiments for task descriptions",
+      "Check Results for performance comparisons",
+      "See github.com/alexzhang13/rlm for code"
+    ]
+  }
+}

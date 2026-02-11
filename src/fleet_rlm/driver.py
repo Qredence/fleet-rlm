@@ -441,6 +441,139 @@ def sandbox_driver() -> None:
     sandbox_globals["save_to_volume"] = save_to_volume
     sandbox_globals["load_from_volume"] = load_from_volume
 
+    # ------ Workspace helpers for stateful agent sessions ------
+
+    def _resolve_workspace_path(path: str) -> tuple[str | None, str | None]:
+        """Resolve and validate a workspace path stays under /data/workspace."""
+        import os as _os
+
+        base = "/data/workspace"
+        base_real = _os.path.realpath(base)
+        raw = str(path or "").strip()
+        if not raw:
+            return None, "[error: workspace path cannot be empty]"
+
+        resolved = _os.path.realpath(_os.path.normpath(_os.path.join(base, raw)))
+        if resolved != base_real and not resolved.startswith(base_real + _os.sep):
+            return None, f"[error: invalid workspace path: {raw}]"
+
+        return resolved, None
+
+    def workspace_write(path: str, content: str) -> str:
+        """Write *content* to ``/data/workspace/<path>``.
+
+        Creates parent directories if needed. Returns full path or error.
+        """
+        import os as _os
+
+        full, path_error = _resolve_workspace_path(path)
+        if path_error is not None:
+            return path_error
+
+        base = "/data/workspace"
+        if not _os.path.isdir("/data"):
+            return "[error: no volume mounted at /data]"
+        _os.makedirs(base, exist_ok=True)
+        if full is None:
+            return "[error: invalid workspace path]"
+        _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
+        with open(full, "w") as fh:
+            fh.write(content)
+        return full
+
+    def workspace_read(path: str) -> str:
+        """Read text from ``/data/workspace/<path>``.
+
+        Returns file contents or error message.
+        """
+        import os as _os
+
+        full, path_error = _resolve_workspace_path(path)
+        if path_error is not None:
+            return path_error
+        if full is None:
+            return "[error: invalid workspace path]"
+        if not _os.path.isfile(full):
+            return f"[error: file not found: {full}]"
+        with open(full) as fh:
+            return fh.read()
+
+    def workspace_list(pattern: str = "*") -> list[str]:
+        """List files in workspace matching glob *pattern*."""
+        import glob as _glob
+        import os as _os
+
+        base = "/data/workspace"
+        if not _os.path.isdir(base):
+            return []
+        search_path = _os.path.join(base, "**", pattern)
+        files = _glob.glob(search_path, recursive=True)
+        base_real = _os.path.realpath(base)
+
+        rel_paths: list[str] = []
+        for found in files:
+            if not _os.path.isfile(found):
+                continue
+            found_real = _os.path.realpath(found)
+            if found_real != base_real and not found_real.startswith(base_real + _os.sep):
+                continue
+            rel_paths.append(_os.path.relpath(found_real, base_real))
+        return rel_paths
+
+    def workspace_append(path: str, content: str) -> str:
+        """Append *content* to ``/data/workspace/<path>`` (creates if missing)."""
+        import os as _os
+
+        full, path_error = _resolve_workspace_path(path)
+        if path_error is not None:
+            return path_error
+
+        base = "/data/workspace"
+        if not _os.path.isdir("/data"):
+            return "[error: no volume mounted at /data]"
+        _os.makedirs(base, exist_ok=True)
+        if full is None:
+            return "[error: invalid workspace path]"
+        _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
+        with open(full, "a") as fh:
+            fh.write(content)
+        return full
+
+    sandbox_globals["workspace_write"] = workspace_write
+    sandbox_globals["workspace_read"] = workspace_read
+    sandbox_globals["workspace_list"] = workspace_list
+    sandbox_globals["workspace_append"] = workspace_append
+
+    # ------ Session execution history ------
+
+    _session_history: list[dict] = []
+
+    def log_execution(code: str, result: dict, metadata: dict | None = None) -> None:
+        """Log code execution to session history for tracking and learning."""
+        import time as _time
+
+        entry = {
+            "timestamp": _time.time(),
+            "code_preview": code[:200] + "..." if len(code) > 200 else code,
+            "stdout_preview": result.get("stdout", "")[:200],
+            "stderr_preview": result.get("stderr", "")[:200],
+            "had_final": result.get("final") is not None,
+            "metadata": metadata or {},
+        }
+        _session_history.append(entry)
+
+    def get_session_history() -> list[dict]:
+        """Return all logged executions in this session."""
+        return list(_session_history)
+
+    def get_last_execution() -> dict | None:
+        """Return the most recent execution entry, or None if empty."""
+        return _session_history[-1] if _session_history else None
+
+    sandbox_globals["log_execution"] = log_execution
+    sandbox_globals["get_session_history"] = get_session_history
+    sandbox_globals["get_last_execution"] = get_last_execution
+
     while True:
         try:
             line = input()
@@ -492,10 +625,13 @@ def sandbox_driver() -> None:
             if final_obj is None and final_from_var is not _missing:
                 final_obj = final_from_var
 
-        _send(
-            {
-                "stdout": stdout_io.getvalue(),
-                "stderr": stderr_io.getvalue(),
-                "final": final_obj,
-            }
-        )
+        result = {
+            "stdout": stdout_io.getvalue(),
+            "stderr": stderr_io.getvalue(),
+            "final": final_obj,
+        }
+
+        # Log execution for session history tracking
+        log_execution(code, result, {"had_error": had_exec_error})
+
+        _send(result)

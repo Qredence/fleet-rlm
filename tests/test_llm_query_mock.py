@@ -231,6 +231,26 @@ class TestLLMQueryMock:
 
                 assert result == "extracted text"
 
+    def test_query_sub_lm_times_out_without_blocking(self):
+        """Timeout should raise quickly instead of waiting for LM completion."""
+        from fleet_rlm.interpreter import ModalInterpreter
+
+        def slow_lm(_prompt):
+            time.sleep(0.2)
+            return "too-late"
+
+        with patch.object(ModalInterpreter, "start"):
+            with patch.object(ModalInterpreter, "shutdown"):
+                interp = ModalInterpreter(sub_lm=slow_lm, llm_call_timeout=0.01)
+
+                started = time.time()
+                with pytest.raises(RuntimeError) as exc_info:
+                    interp._query_sub_lm("test")
+                elapsed = time.time() - started
+
+                assert "timed out" in str(exc_info.value).lower()
+                assert elapsed < 0.15
+
     def test_query_sub_lm_raises_when_no_lm(self):
         """Test that RuntimeError is raised when no LM is configured."""
         from fleet_rlm.interpreter import ModalInterpreter

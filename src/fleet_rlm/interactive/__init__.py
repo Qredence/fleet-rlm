@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -14,10 +15,11 @@ class DependencyCheck:
     missing: list[str]
 
 
-def check_interactive_dependencies() -> DependencyCheck:
+def check_interactive_dependencies(
+    *, mode: Literal["textual", "legacy", "all"] = "textual"
+) -> DependencyCheck:
     """Check whether interactive extras dependencies are importable."""
-    required = [
-        "prompt_toolkit",
+    common = [
         "rich",
         "loguru",
         "tenacity",
@@ -25,6 +27,12 @@ def check_interactive_dependencies() -> DependencyCheck:
         "tomlkit",
         "ripgrepy",
     ]
+    if mode == "legacy":
+        required = [*common, "prompt_toolkit"]
+    elif mode == "all":
+        required = [*common, "prompt_toolkit", "textual"]
+    else:
+        required = [*common, "textual"]
     missing = [name for name in required if importlib.util.find_spec(name) is None]
     return DependencyCheck(ok=not missing, missing=missing)
 

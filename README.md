@@ -144,7 +144,7 @@ uv sync
 # For development (includes test tools)
 uv sync --extra dev
 
-# For interactive coding TUI (code-chat)
+# For interactive coding TUI (Textual-first `code-chat` + legacy fallback)
 uv sync --extra dev --extra interactive
 
 # For full optional surface (interactive + MCP + API server)
@@ -153,7 +153,7 @@ uv sync --extra dev --extra interactive --extra mcp --extra server
 
 ### Optional Extras
 
-- `interactive`: prompt-toolkit + rich code-chat runtime (`code-chat`, `run-react-chat`)
+- `interactive`: Textual-first code-chat runtime with prompt-toolkit fallback (`code-chat`, `run-react-chat`)
 - `mcp`: FastMCP surface (`serve-mcp`)
 - `server`: FastAPI/websocket surface (`serve-api`)
 - `full`: Convenience superset of `interactive`, `mcp`, and `server`
@@ -309,7 +309,10 @@ uv run fleet-rlm run-long-context \
 # Start interactive DSPy ReAct chat with specialized RLM tools
 uv run fleet-rlm code-chat \
     --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --trace
+    --trace-mode compact
+
+# Legacy prompt-toolkit fallback runtime
+uv run fleet-rlm code-chat --legacy
 
 # Backward-compatible alias
 uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
@@ -321,6 +324,21 @@ uv run fleet-rlm serve-mcp --transport stdio
 # Check Modal secrets are configured
 uv run fleet-rlm check-secret
 ```
+
+### Textual Interaction Notes
+
+- Default runtime for `code-chat` / `run-react-chat` is Textual.
+- Use `--legacy` for the prompt-toolkit fallback REPL.
+- Trace modes:
+  - `--trace-mode compact` (default)
+  - `--trace-mode verbose`
+  - `--trace-mode off`
+  - `--trace` maps to `compact`, `--no-trace` maps to `off`.
+- Keybindings (Textual mode):
+  - `Ctrl+C` cancel current turn
+  - `Ctrl+L` clear visible panes
+  - `F2` toggle Reasoning pane
+  - `F3` toggle Tools pane
 
 ---
 
@@ -336,7 +354,7 @@ uv run fleet-rlm check-secret
 | `run-trajectory`     | Examine RLM execution trajectory             |
 | `run-custom-tool`    | Demo with custom regex tool                  |
 | `run-long-context`   | Analyze or summarize a long document         |
-| `code-chat`          | Primary interactive coding TUI for ReAct+RLM |
+| `code-chat`          | Primary Textual-first interactive coding TUI for ReAct+RLM |
 | `run-react-chat`     | Backward-compatible alias of `code-chat`     |
 | `serve-api`          | Optional FastAPI/websocket service           |
 | `serve-mcp`          | Optional FastMCP service                      |

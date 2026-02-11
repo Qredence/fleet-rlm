@@ -22,7 +22,7 @@ import queue
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
 from typing import Any, Callable, Iterator, Sequence
 
 import dspy
@@ -98,6 +98,8 @@ class ModalInterpreter:
             for sub-queries.
         max_llm_calls: Maximum number of sub-LLM calls (llm_query/
             llm_query_batched) allowed per session (default: 50).
+        llm_call_timeout: Timeout in seconds for individual LLM calls
+            (default: 60). Prevents hung calls from blocking indefinitely.
 
     Example:
         >>> interpreter = ModalInterpreter(timeout=300, volume_name="my-data")
@@ -155,6 +157,7 @@ class ModalInterpreter:
         stdout_summary_prefix_len: int = 200,
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
+        llm_call_timeout: int = 60,
     ) -> None:
         self.image = image or _build_default_image(
             python_version=image_python_version, pip_packages=image_pip_packages
@@ -173,6 +176,7 @@ class ModalInterpreter:
         # Sub-LM configuration for llm_query/llm_query_batched (DSPy RLM pattern)
         self.sub_lm = sub_lm
         self.max_llm_calls = max_llm_calls
+        self.llm_call_timeout = llm_call_timeout
         self._llm_call_count = 0
         self._llm_call_lock = threading.Lock()
 
@@ -469,20 +473,37 @@ class ModalInterpreter:
             The response text from the sub-LM.
 
         Raises:
-            RuntimeError: If no LM is configured.
+            RuntimeError: If no LM is configured or if the call times out.
         """
         target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
         if target_lm is None:
             raise RuntimeError(
                 "No LM configured. Use dspy.configure(lm=...) or pass sub_lm to ModalInterpreter."
             )
-        response = target_lm(prompt)
-        if isinstance(response, list) and response:
-            item = response[0]
-            if isinstance(item, dict) and "text" in item:
-                return item["text"]
-            return str(item)
-        return str(response)
+
+        # Execute LM call with timeout to prevent hangs
+        def _execute_lm():
+            response = target_lm(prompt)
+            if isinstance(response, list) and response:
+                item = response[0]
+                if isinstance(item, dict) and "text" in item:
+                    return item["text"]
+                return str(item)
+            return str(response)
+
+        # Use explicit shutdown(wait=False) so timeout paths don't block on executor cleanup.
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(_execute_lm)
+        try:
+            return future.result(timeout=self.llm_call_timeout)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            raise RuntimeError(
+                f"LLM call timed out after {self.llm_call_timeout}s. "
+                "Consider increasing llm_call_timeout or checking API connectivity."
+            ) from exc
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def llm_query(self, prompt: str) -> str:
         """Query a sub-LLM for semantic analysis.
@@ -534,7 +555,12 @@ class ModalInterpreter:
 
         results: dict[int, str] = {}
         errors: list[tuple[int, Exception]] = []
-        with ThreadPoolExecutor(max_workers=8) as executor:
+
+        # Adaptive ThreadPool sizing: use min of max_llm_calls and 8, or batch size
+        # This prevents over-allocation for small batches and under-utilization for large ones
+        adaptive_workers = min(len(prompts), self.max_llm_calls, 8)
+
+        with ThreadPoolExecutor(max_workers=adaptive_workers) as executor:
             future_to_idx = {
                 executor.submit(self._query_sub_lm, p): i for i, p in enumerate(prompts)
             }

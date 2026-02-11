@@ -87,9 +87,15 @@ class _FakeAgent:
 
 
 def _build_session(monkeypatch, tmp_path: Path) -> tuple[CodeChatSession, _FakeAgent, _FakeUI]:
-    monkeypatch.setattr("fleet_rlm.interactive.session.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("fleet_rlm.interactive.session.CodeChatSession._configure_logging", lambda self: None)
-    monkeypatch.setattr("fleet_rlm.interactive.session.PromptSession", lambda *args, **kwargs: _QueuePrompt([]))
+    monkeypatch.setattr("fleet_rlm.interactive.legacy_session.Path.home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "fleet_rlm.interactive.legacy_session.CodeChatSession._configure_logging",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.interactive.legacy_session.PromptSession",
+        lambda *args, **kwargs: _QueuePrompt([]),
+    )
 
     ui = _FakeUI()
     agent = _FakeAgent()

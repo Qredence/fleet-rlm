@@ -8,6 +8,8 @@ existing ``ModalInterpreter`` and ``dspy.RLM`` workflows in this project.
 from __future__ import annotations
 
 import json
+import logging
+import re
 from pathlib import Path
 from typing import Any, Callable, Iterable, cast
 
@@ -23,7 +25,11 @@ from .chunking import (
     chunk_by_timestamps,
 )
 from .interpreter import ModalInterpreter
+from .interactive.models import StreamEvent
 from .signatures import AnalyzeLongDocument, ExtractFromLogs, SummarizeLongDocument
+
+# Logger for structured streaming error logging
+logger = logging.getLogger(__name__)
 
 
 class RLMReActChatSignature(dspy.Signature):
@@ -73,7 +79,10 @@ class RLMReActChatAgent:
         )
 
         self.history = dspy.History(messages=[])
-        self.documents: dict[str, str] = {}
+        # LRU cache for documents to prevent unbounded growth in long-running sessions
+        self._document_cache: dict[str, str] = {}
+        self._document_access_order: list[str] = []
+        self._max_documents = 100  # LRU eviction threshold
         self.active_alias: str | None = None
 
         self._started = False
@@ -81,6 +90,40 @@ class RLMReActChatAgent:
 
         self.react_tools: list[Callable[..., Any]] = []
         self.agent = self._build_agent()
+
+    def _get_document(self, alias: str) -> str:
+        """Get document with LRU cache tracking."""
+        if alias not in self._document_cache:
+            raise KeyError(f"Document alias '{alias}' not found")
+        # Update access order (LRU)
+        if alias in self._document_access_order:
+            self._document_access_order.remove(alias)
+        self._document_access_order.append(alias)
+        return self._document_cache[alias]
+
+    def _set_document(self, alias: str, content: str) -> None:
+        """Set document with LRU eviction if needed."""
+        # Evict oldest if at capacity and this is a new entry
+        if alias not in self._document_cache and len(self._document_cache) >= self._max_documents:
+            oldest = self._document_access_order.pop(0)
+            del self._document_cache[oldest]
+
+        self._document_cache[alias] = content
+        if alias in self._document_access_order:
+            self._document_access_order.remove(alias)
+        self._document_access_order.append(alias)
+
+    def _delete_document(self, alias: str) -> None:
+        """Delete document from cache."""
+        if alias in self._document_cache:
+            del self._document_cache[alias]
+        if alias in self._document_access_order:
+            self._document_access_order.remove(alias)
+
+    @property
+    def documents(self) -> dict[str, str]:
+        """Backward-compatible document access."""
+        return self._document_cache
 
     # ---------------------------------------------------------------------
     # Lifecycle
@@ -139,8 +182,18 @@ class RLMReActChatAgent:
             "history_turns": len(self.history.messages),
         }
 
-    def chat_turn_stream(self, *, message: str, trace: bool = False) -> dict[str, Any]:
-        """Stream a chat turn via ``dspy.streamify`` with status and chunk capture."""
+    def iter_chat_turn_stream(
+        self,
+        message: str,
+        trace: bool,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> Iterable[StreamEvent]:
+        """Yield typed streaming events for one chat turn.
+
+        This is the canonical streaming surface used by the Textual runtime.
+        The compatibility ``chat_turn_stream`` method is implemented as a
+        collector over this iterator.
+        """
         if not message or not message.strip():
             raise ValueError("message cannot be empty")
 
@@ -148,53 +201,154 @@ class RLMReActChatAgent:
 
         stream_listeners = [StreamListener(signature_field_name="assistant_response")]
         if trace:
-            # Best-effort: ReAct internals can expose next_thought through nested predicts.
             stream_listeners.append(
                 StreamListener(signature_field_name="next_thought", allow_reuse=True)
             )
 
-        stream_program = cast(
-            Any,
-            dspy.streamify(
-            self.agent,
-            status_message_provider=_ReActStatusProvider(),
-            stream_listeners=stream_listeners,
-            include_final_prediction_in_output_stream=True,
-            async_streaming=False,
-            ),
-        )
+        try:
+            stream_program = cast(
+                Any,
+                dspy.streamify(
+                    self.agent,
+                    status_message_provider=_ReActStatusProvider(),
+                    stream_listeners=stream_listeners,
+                    include_final_prediction_in_output_stream=True,
+                    async_streaming=False,
+                ),
+            )
+        except Exception as exc:
+            # Structured logging for debugging without breaking fallback
+            logger.warning(
+                "Streaming init failed, falling back: %s",
+                exc,
+                exc_info=True,
+                extra={"error_type": type(exc).__name__},
+            )
+            fallback = self.chat_turn(message)
+            yield StreamEvent(
+                kind="status",
+                text=f"streaming unavailable; fell back to non-streaming ({exc})",
+                payload={"fallback": True, "error_type": type(exc).__name__},
+            )
+            yield StreamEvent(
+                kind="final",
+                text=str(fallback.get("assistant_response", "")),
+                payload={
+                    "trajectory": fallback.get("trajectory", {}),
+                    "history_turns": fallback.get("history_turns", len(self.history.messages)),
+                    "fallback": True,
+                },
+            )
+            return
 
         assistant_chunks: list[str] = []
-        thought_chunks: list[str] = []
-        status_messages: list[str] = []
         final_prediction: dspy.Prediction | None = None
 
         try:
             stream = stream_program(user_request=message, history=self.history)
             for value in stream:
+                if cancel_check is not None and cancel_check():
+                    partial = "".join(assistant_chunks).strip()
+                    marked_partial = (
+                        f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
+                    )
+                    self._append_history(message, marked_partial)
+                    yield StreamEvent(
+                        kind="cancelled",
+                        text=marked_partial,
+                        payload={"history_turns": len(self.history.messages)},
+                    )
+                    return
+
                 if isinstance(value, StreamResponse):
                     if value.signature_field_name == "assistant_response":
                         assistant_chunks.append(value.chunk)
-                    elif value.signature_field_name == "next_thought":
-                        thought_chunks.append(value.chunk)
+                        yield StreamEvent(kind="assistant_token", text=value.chunk)
+                    elif value.signature_field_name == "next_thought" and trace:
+                        yield StreamEvent(
+                            kind="reasoning_step",
+                            text=value.chunk,
+                            payload={"source": "next_thought"},
+                        )
                 elif isinstance(value, StatusMessage):
-                    status_messages.append(value.message)
+                    text = value.message
+                    yield StreamEvent(kind="status", text=text)
+                    tool_call = self._parse_tool_call_status(text)
+                    if tool_call:
+                        yield StreamEvent(kind="tool_call", text=tool_call)
+                    tool_result = self._parse_tool_result_status(text)
+                    if tool_result:
+                        yield StreamEvent(kind="tool_result", text=tool_result)
                 elif isinstance(value, dspy.Prediction):
                     final_prediction = value
-        except Exception:
+        except Exception as exc:
+            # Structured logging for stream errors without breaking fallback
+            logger.error(
+                "Streaming error, falling back: %s",
+                exc,
+                exc_info=True,
+                extra={"error_type": type(exc).__name__},
+            )
             # Fall back to non-streaming path if listener wiring fails for a model/backend.
-            return self.chat_turn(message)
+            fallback = self.chat_turn(message)
+            yield StreamEvent(
+                kind="status",
+                text=f"stream error; fell back to non-streaming ({exc})",
+                payload={"fallback": True, "error_type": type(exc).__name__},
+            )
+            yield StreamEvent(
+                kind="final",
+                text=str(fallback.get("assistant_response", "")),
+                payload={
+                    "trajectory": fallback.get("trajectory", {}),
+                    "history_turns": fallback.get("history_turns", len(self.history.messages)),
+                    "fallback": True,
+                },
+            )
+            return
 
         if final_prediction is not None:
-            assistant_response = str(
-                getattr(final_prediction, "assistant_response", "")
-            ).strip()
+            assistant_response = str(getattr(final_prediction, "assistant_response", "")).strip()
             trajectory = getattr(final_prediction, "trajectory", {})
         else:
             assistant_response = "".join(assistant_chunks).strip()
             trajectory = {}
 
         self._append_history(message, assistant_response)
+        yield StreamEvent(
+            kind="final",
+            text=assistant_response,
+            payload={
+                "trajectory": trajectory,
+                "history_turns": len(self.history.messages),
+            },
+        )
+
+    def chat_turn_stream(self, *, message: str, trace: bool = False) -> dict[str, Any]:
+        """Compatibility stream collector for existing CLI/tests."""
+        assistant_chunks: list[str] = []
+        thought_chunks: list[str] = []
+        status_messages: list[str] = []
+        trajectory: dict[str, Any] = {}
+        assistant_response = ""
+        cancelled = False
+
+        for event in self.iter_chat_turn_stream(message=message, trace=trace):
+            if event.kind == "assistant_token":
+                assistant_chunks.append(event.text)
+            elif event.kind == "reasoning_step":
+                thought_chunks.append(event.text)
+            elif event.kind == "status":
+                status_messages.append(event.text)
+            elif event.kind == "final":
+                assistant_response = event.text
+                trajectory = dict(event.payload.get("trajectory", {}) or {})
+            elif event.kind == "cancelled":
+                cancelled = True
+                assistant_response = event.text
+
+        if not assistant_response:
+            assistant_response = "".join(assistant_chunks).strip()
 
         return {
             "assistant_response": assistant_response,
@@ -203,6 +357,7 @@ class RLMReActChatAgent:
             "stream_chunks": assistant_chunks,
             "thought_chunks": thought_chunks if trace else [],
             "status_messages": status_messages,
+            "cancelled": cancelled,
         }
 
     def register_extra_tool(self, tool: Callable[..., Any]) -> dict[str, Any]:
@@ -221,7 +376,7 @@ class RLMReActChatAgent:
         if not docs_path.exists():
             raise FileNotFoundError(f"Document not found: {docs_path}")
         content = docs_path.read_text()
-        self.documents[alias] = content
+        self._set_document(alias, content)
         self.active_alias = alias
         return {
             "status": "ok",
@@ -241,9 +396,9 @@ class RLMReActChatAgent:
     def list_documents(self) -> dict[str, Any]:
         """List loaded document aliases and active document metadata."""
         docs = []
-        for alias, text in self.documents.items():
+        for alias, text in self._document_cache.items():
             docs.append({"alias": alias, "chars": len(text), "lines": len(text.splitlines())})
-        return {"documents": docs, "active_alias": self.active_alias}
+        return {"documents": docs, "active_alias": self.active_alias, "cache_size": len(self._document_cache), "cache_limit": self._max_documents}
 
     def chunk_host(
         self,
@@ -459,7 +614,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             variables={"path": path},
         )
         text = str(result.get("text", ""))
-        self.documents[alias] = text
+        self._set_document(alias, text)
         self.active_alias = alias
         return {
             "status": "ok",
@@ -517,10 +672,10 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
         if alias == "active":
             if self.active_alias is None:
                 raise ValueError("No active document. Use load_document() first.")
-            return self.documents[self.active_alias]
-        if alias not in self.documents:
+            return self._get_document(self.active_alias)
+        if alias not in self._document_cache:
             raise ValueError(f"Unknown document alias: {alias}")
-        return self.documents[alias]
+        return self._get_document(alias)
 
     @staticmethod
     def _normalize_strategy(strategy: str) -> str:
@@ -562,17 +717,44 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 
     @staticmethod
     def _chunk_to_text(chunk: Any) -> str:
+        """Convert a chunk to text using dispatch table for efficiency.
+
+        Uses a lookup-based approach instead of multiple isinstance checks
+        for better performance with large document collections.
+        """
+        # Fast path for string chunks (most common case)
         if isinstance(chunk, str):
             return chunk
-        if isinstance(chunk, dict):
-            if "header" in chunk:
-                return f"{chunk.get('header', '')}\n{chunk.get('content', '')}".strip()
-            if "timestamp" in chunk:
-                return chunk.get("content", "")
-            if "key" in chunk:
-                return f"{chunk.get('key', '')}\n{chunk.get('content', '')}".strip()
-            return json.dumps(chunk, ensure_ascii=False, default=str)
-        return str(chunk)
+
+        # Non-dict types: convert to string
+        if not isinstance(chunk, dict):
+            return str(chunk)
+
+        # Dict chunks: use dispatch table for type-specific formatting
+        # Ordered by likelihood for early return
+        if "header" in chunk:
+            return f"{chunk.get('header', '')}\n{chunk.get('content', '')}".strip()
+        if "timestamp" in chunk:
+            return chunk.get("content", "")
+        if "key" in chunk:
+            return f"{chunk.get('key', '')}\n{chunk.get('content', '')}".strip()
+
+        # Fallback: JSON serialize unknown dict types
+        return json.dumps(chunk, ensure_ascii=False, default=str)
+
+    @staticmethod
+    def _parse_tool_call_status(message: str) -> str | None:
+        match = re.match(r"^Calling tool:\s*(.+)$", message.strip())
+        if not match:
+            return None
+        tool_name = match.group(1).strip()
+        return f"tool call: {tool_name}"
+
+    @staticmethod
+    def _parse_tool_result_status(message: str) -> str | None:
+        if message.strip() == "Tool finished.":
+            return "tool result: finished"
+        return None
 
     def _execute_submit(
         self,

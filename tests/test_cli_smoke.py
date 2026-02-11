@@ -134,6 +134,9 @@ def test_run_react_chat_help():
     assert "--react-max-iters" in result.stdout
     assert "--rlm-max-iterations" in result.stdout
     assert "--rlm-max-llm-calls" in result.stdout
+    assert "--legacy" in result.stdout
+    assert "--trace-mode" in result.stdout
+    assert "--stream-refresh-ms" in result.stdout
 
 
 def test_code_chat_help():
@@ -142,6 +145,9 @@ def test_code_chat_help():
     assert "--react-max-iters" in result.stdout
     assert "--trace" in result.stdout
     assert "--no-stream" in result.stdout
+    assert "--legacy" in result.stdout
+    assert "--trace-mode" in result.stdout
+    assert "--stream-refresh-ms" in result.stdout
 
 
 def test_run_react_chat_exit(monkeypatch):
@@ -174,7 +180,7 @@ def test_run_react_chat_exit(monkeypatch):
         lambda **kwargs: _FakeChatAgent(),
     )
 
-    result = runner.invoke(app, ["run-react-chat"], input="/exit\n")
+    result = runner.invoke(app, ["run-react-chat", "--legacy"], input="/exit\n")
     assert result.exit_code == 0
     assert "fleet-rlm code-chat" in result.stdout
     assert "Exiting code-chat." in result.stdout
@@ -192,12 +198,52 @@ def test_run_react_chat_aliases_to_code_chat(monkeypatch):
     assert result.exit_code == 0
     assert len(calls) == 1
     assert calls[0]["react_max_iters"] == 3
+    assert calls[0]["legacy"] is False
+
+
+def test_code_chat_legacy_routes_to_prompt_toolkit(monkeypatch):
+    calls = {"legacy": 0}
+
+    class _FakeChatAgent:
+        history = SimpleNamespace(messages=[])
+        react_tools = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+    class _FakeLegacySession:
+        def __init__(self, *, agent, config):
+            self.agent = agent
+            self.config = config
+
+        def run(self):
+            calls["legacy"] += 1
+
+    monkeypatch.setattr(
+        "fleet_rlm.interactive.check_interactive_dependencies",
+        lambda **kwargs: DependencyCheck(ok=True, missing=[]),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runners.build_react_chat_agent",
+        lambda **kwargs: _FakeChatAgent(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.interactive.legacy_session.CodeChatSession",
+        _FakeLegacySession,
+    )
+
+    result = runner.invoke(app, ["code-chat", "--legacy"])
+    assert result.exit_code == 0
+    assert calls["legacy"] == 1
 
 
 def test_code_chat_missing_extras_exits_with_install_hint(monkeypatch):
     monkeypatch.setattr(
         "fleet_rlm.interactive.check_interactive_dependencies",
-        lambda: DependencyCheck(ok=False, missing=["prompt_toolkit", "rich"]),
+        lambda **kwargs: DependencyCheck(ok=False, missing=["textual", "rich"]),
     )
 
     result = runner.invoke(app, ["code-chat"])

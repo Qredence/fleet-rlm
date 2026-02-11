@@ -360,3 +360,91 @@ class TestVolumeHelpers:
             monkeypatch, [_cmd('msg = load_from_volume("test.txt")\nSUBMIT(msg)')]
         )
         assert "not found" in msgs[0]["final"]["output"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Workspace helpers
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceHelpers:
+    """Test workspace_write / workspace_read / workspace_list / workspace_append."""
+
+    def test_workspace_read_without_volume(self, monkeypatch):
+        """Test workspace_read returns error when no volume mounted."""
+        msgs = _run_driver(
+            monkeypatch, [_cmd('msg = workspace_read("test.txt")\nSUBMIT(msg)')]
+        )
+        assert "error" in msgs[0]["final"]["output"].lower()
+
+    def test_workspace_list_without_volume(self, monkeypatch):
+        """Test workspace_list returns empty list when no volume mounted."""
+        msgs = _run_driver(
+            monkeypatch, [_cmd('files = workspace_list()\nSUBMIT(files)')]
+        )
+        assert msgs[0]["final"]["output"] == []
+
+    def test_workspace_helpers_exist(self, monkeypatch):
+        """Test that all workspace helpers are available in sandbox."""
+        msgs = _run_driver(
+            monkeypatch,
+            [
+                _cmd(
+                    "funcs = ['workspace_write', 'workspace_read', 'workspace_list', 'workspace_append']\n"
+                    "available = [f for f in funcs if f in globals()]\n"
+                    "SUBMIT(available)"
+                )
+            ],
+        )
+        assert len(msgs[0]["final"]["output"]) == 4
+
+    def test_workspace_read_rejects_parent_path_escape(self, monkeypatch):
+        """Parent traversal should be rejected before filesystem access."""
+        msgs = _run_driver(
+            monkeypatch, [_cmd('msg = workspace_read("../outside.txt")\nSUBMIT(msg)')]
+        )
+        assert "invalid workspace path" in msgs[0]["final"]["output"].lower()
+
+    def test_workspace_append_rejects_absolute_path(self, monkeypatch):
+        """Absolute paths should not be writable via workspace helpers."""
+        msgs = _run_driver(
+            monkeypatch, [_cmd('msg = workspace_append("/tmp/escape.txt", "x")\nSUBMIT(msg)')]
+        )
+        assert "invalid workspace path" in msgs[0]["final"]["output"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Session history helpers
+# ---------------------------------------------------------------------------
+
+
+class TestSessionHistoryHelpers:
+    """Test log_execution / get_session_history / get_last_execution."""
+
+    def test_session_history_helpers_exist(self, monkeypatch):
+        """Test that session history helpers are available in sandbox."""
+        msgs = _run_driver(
+            monkeypatch,
+            [
+                _cmd(
+                    "funcs = ['log_execution', 'get_session_history', 'get_last_execution']\n"
+                    "available = [f for f in funcs if f in globals()]\n"
+                    "SUBMIT(available)"
+                )
+            ],
+        )
+        assert len(msgs[0]["final"]["output"]) == 3
+
+    def test_get_session_history_empty(self, monkeypatch):
+        """Test get_session_history returns empty list initially."""
+        msgs = _run_driver(
+            monkeypatch, [_cmd('history = get_session_history()\nSUBMIT(history)')]
+        )
+        assert msgs[0]["final"]["output"] == []
+
+    def test_get_last_execution_empty(self, monkeypatch):
+        """Test get_last_execution returns None when no history."""
+        msgs = _run_driver(
+            monkeypatch, [_cmd('last = get_last_execution()\nSUBMIT(last)')]
+        )
+        assert msgs[0]["final"]["output"] is None
