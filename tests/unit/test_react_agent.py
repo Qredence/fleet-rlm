@@ -521,6 +521,98 @@ def test_read_file_slice_binary_file_returns_user_friendly_error(monkeypatch, tm
     assert "UnicodeDecodeError" not in message
 
 
+def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    class _FakeRLM:
+        def __init__(self, **kwargs):
+            pass
+
+        def __call__(self, **kwargs):
+            return SimpleNamespace(
+                findings=["f1"],
+                answer="a1",
+                sections_examined=2,
+                trajectory=[{"reasoning": "step1", "code": "pass", "output": "ok"}],
+                final_reasoning="done",
+            )
+
+    monkeypatch.setattr("fleet_rlm.react.tools.dspy.RLM", _FakeRLM)
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent.documents["doc"] = "hello"
+    agent.active_alias = "doc"
+
+    result = agent.analyze_long_document("question")
+    assert result["trajectory_steps"] == 1
+    assert result["trajectory"][0]["reasoning"] == "step1"
+    assert result["final_reasoning"] == "done"
+
+
+def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    class _FakeRLM:
+        def __init__(self, **kwargs):
+            pass
+
+        def __call__(self, **kwargs):
+            return SimpleNamespace(
+                findings=["f1"],
+                answer="a1",
+                sections_examined=2,
+                trajectory=[{"reasoning": "step1"}],
+                final_reasoning="done",
+            )
+
+    monkeypatch.setattr("fleet_rlm.react.tools.dspy.RLM", _FakeRLM)
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent.documents["doc"] = "hello"
+    agent.active_alias = "doc"
+
+    result = agent.analyze_long_document("question", include_trajectory=False)
+    assert "trajectory_steps" not in result
+    assert "trajectory" not in result
+    assert "final_reasoning" not in result
+
+
+def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
+    monkeypatch,
+):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    class _FakeRLM:
+        def __init__(self, **kwargs):
+            pass
+
+        def __call__(self, **kwargs):
+            if "focus" in kwargs:
+                return SimpleNamespace(
+                    summary="s1",
+                    key_points=["k1"],
+                    coverage_pct=90,
+                    trajectory=[{"reasoning": "sum"}],
+                )
+            return SimpleNamespace(
+                matches=[{"k": "v"}],
+                patterns=["p1"],
+                time_range="all",
+                trajectory=[{"reasoning": "logs"}],
+            )
+
+    monkeypatch.setattr("fleet_rlm.react.tools.dspy.RLM", _FakeRLM)
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent.documents["doc"] = "hello"
+    agent.active_alias = "doc"
+
+    summary = agent.summarize_long_document("focus")
+    logs = agent.extract_from_logs("query")
+    assert summary["trajectory_steps"] == 1
+    assert logs["trajectory_steps"] == 1
+
+
 def test_find_files_with_ripgrep(monkeypatch, tmp_path):
     """find_files should use ripgrep to search file contents."""
     records = []

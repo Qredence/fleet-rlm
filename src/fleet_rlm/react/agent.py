@@ -377,20 +377,37 @@ class RLMReActChatAgent:
         )
 
     def analyze_long_document(
-        self, query: str, alias: str = "active"
+        self,
+        query: str,
+        alias: str = "active",
+        include_trajectory: bool = True,
     ) -> dict[str, Any]:
         """Delegate to the ``analyze_long_document`` tool."""
-        return self._get_tool("analyze_long_document")(query, alias=alias)
+        return self._get_tool("analyze_long_document")(
+            query, alias=alias, include_trajectory=include_trajectory
+        )
 
     def summarize_long_document(
-        self, focus: str, alias: str = "active"
+        self,
+        focus: str,
+        alias: str = "active",
+        include_trajectory: bool = True,
     ) -> dict[str, Any]:
         """Delegate to the ``summarize_long_document`` tool."""
-        return self._get_tool("summarize_long_document")(focus, alias=alias)
+        return self._get_tool("summarize_long_document")(
+            focus, alias=alias, include_trajectory=include_trajectory
+        )
 
-    def extract_from_logs(self, query: str, alias: str = "active") -> dict[str, Any]:
+    def extract_from_logs(
+        self,
+        query: str,
+        alias: str = "active",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
         """Delegate to the ``extract_from_logs`` tool."""
-        return self._get_tool("extract_from_logs")(query, alias=alias)
+        return self._get_tool("extract_from_logs")(
+            query, alias=alias, include_trajectory=include_trajectory
+        )
 
     def read_buffer(self, name: str) -> dict[str, Any]:
         """Delegate to the ``read_buffer`` tool."""

@@ -42,6 +42,13 @@ uv sync --extra dev --extra mcp --extra server
 | `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`<br>`--react-max-iters`                                                                                                                                      |
 | `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                                                                                            |
 
+## Trajectory Metadata
+
+For Python API and MCP `dspy.RLM` wrappers, trajectory is included by default in responses
+(`trajectory_steps`, `trajectory`, and `final_reasoning` when available). Use
+`include_trajectory=False` on those programmatic surfaces to suppress it.
+The dedicated `run-trajectory` command remains the compact trajectory-inspection workflow.
+
 ### Utility Commands
 
 | Command            | Description                                      | Key Options                        |

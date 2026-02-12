@@ -140,7 +140,7 @@ def execute_submit(
 def _extract_text_with_markitdown(path: Path) -> tuple[str, dict[str, Any]]:
     """Extract document text via MarkItDown."""
     try:
-        from markitdown import MarkItDown  # ty: ignore[unresolved-import]
+        from markitdown import MarkItDown
     except ImportError as exc:
         raise RuntimeError(
             "MarkItDown is not installed. Run `uv sync` to install runtime dependencies."
@@ -169,7 +169,7 @@ def _extract_text_with_markitdown(path: Path) -> tuple[str, dict[str, Any]]:
 
 def _extract_text_with_pypdf(path: Path) -> tuple[str, dict[str, Any]]:
     """Extract PDF text with pypdf as fallback."""
-    from pypdf import PdfReader  # ty: ignore[unresolved-import]
+    from pypdf import PdfReader
 
     reader = PdfReader(str(path))
     page_texts: list[str] = []
@@ -239,8 +239,12 @@ def _read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
             text, meta = _extract_text_with_markitdown(path)
             if text.strip():
                 return text, meta
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "MarkItDown extraction failed for '%s': %s. Falling back to read_text().",
+                path,
+                exc,
+            )
 
     try:
         return path.read_text(), {
@@ -253,6 +257,22 @@ def _read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
                 f"Binary file detected at '{path}'. Use a text file or supported document format (for example, PDF)."
             ) from exc
         raise ValueError(f"Could not decode '{path}' as UTF-8 text.") from exc
+
+
+def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[str, Any]:
+    """Build a normalized trajectory payload from a DSPy RLM result."""
+    if not include_trajectory:
+        return {}
+
+    trajectory = list(getattr(result, "trajectory", []) or [])
+    payload: dict[str, Any] = {
+        "trajectory_steps": len(trajectory),
+        "trajectory": trajectory,
+    }
+    final_reasoning = getattr(result, "final_reasoning", None)
+    if final_reasoning:
+        payload["final_reasoning"] = final_reasoning
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +594,11 @@ SUBMIT(
             },
         )
 
-    def analyze_long_document(query: str, alias: str = "active") -> dict[str, Any]:
+    def analyze_long_document(
+        query: str,
+        alias: str = "active",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
         """Analyze a long document with the AnalyzeLongDocument RLM signature."""
         agent.start()
         document = resolve_document(agent, alias)
@@ -586,15 +610,23 @@ SUBMIT(
             verbose=agent.verbose,
         )
         result = rlm(document=document, query=query)
-        return {
+        response = {
             "status": "ok",
             "findings": result.findings,
             "answer": result.answer,
             "sections_examined": result.sections_examined,
             "doc_chars": len(document),
         }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
 
-    def summarize_long_document(focus: str, alias: str = "active") -> dict[str, Any]:
+    def summarize_long_document(
+        focus: str,
+        alias: str = "active",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
         """Summarize a long document with the SummarizeLongDocument RLM signature."""
         agent.start()
         document = resolve_document(agent, alias)
@@ -606,15 +638,23 @@ SUBMIT(
             verbose=agent.verbose,
         )
         result = rlm(document=document, focus=focus)
-        return {
+        response = {
             "status": "ok",
             "summary": result.summary,
             "key_points": result.key_points,
             "coverage_pct": result.coverage_pct,
             "doc_chars": len(document),
         }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
 
-    def extract_from_logs(query: str, alias: str = "active") -> dict[str, Any]:
+    def extract_from_logs(
+        query: str,
+        alias: str = "active",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
         """Extract structured patterns from log text via ExtractFromLogs RLM signature."""
         agent.start()
         logs = resolve_document(agent, alias)
@@ -626,12 +666,16 @@ SUBMIT(
             verbose=agent.verbose,
         )
         result = rlm(logs=logs, query=query)
-        return {
+        response = {
             "status": "ok",
             "matches": result.matches,
             "patterns": result.patterns,
             "time_range": result.time_range,
         }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
 
     # -- Buffer & volume management ------------------------------------------
 

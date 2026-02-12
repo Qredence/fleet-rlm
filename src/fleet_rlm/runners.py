@@ -42,6 +42,22 @@ from .signatures import (
 from .utils.tools import regex_extract
 
 
+def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[str, Any]:
+    """Build a normalized trajectory payload from a DSPy RLM result."""
+    if not include_trajectory:
+        return {}
+
+    trajectory = list(getattr(result, "trajectory", []) or [])
+    payload: dict[str, Any] = {
+        "trajectory_steps": len(trajectory),
+        "trajectory": trajectory,
+    }
+    final_reasoning = getattr(result, "final_reasoning", None)
+    if final_reasoning:
+        payload["final_reasoning"] = final_reasoning
+    return payload
+
+
 def _require_planner_ready(env_file: Path | None = None) -> None:
     """Ensure the DSPy planner LM is configured.
 
@@ -249,6 +265,7 @@ def run_basic(
     timeout: int = 600,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+    include_trajectory: bool = True,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
     """Run a basic RLM question-answering task.
@@ -264,12 +281,13 @@ def run_basic(
         timeout: Sandbox timeout in seconds (default: 600).
         secret_name: Modal secret name (default: "LITELLM").
         volume_name: Optional Modal volume name.
+        include_trajectory: Include RLM trajectory metadata in output.
         env_file: Optional path to .env file.
 
     Returns:
         Dictionary containing:
             - answer: The RLM's answer to the question
-            - trajectory_steps: Number of steps in the execution trajectory
+            - trajectory_steps / trajectory / final_reasoning (when included)
     """
     _require_planner_ready(env_file)
 
@@ -286,10 +304,11 @@ def run_basic(
 
     try:
         result = rlm(question=question)
-        return {
-            "answer": result.answer,
-            "trajectory_steps": len(getattr(result, "trajectory", [])),
-        }
+        response = {"answer": result.answer}
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
     finally:
         interpreter.shutdown()
 
@@ -304,6 +323,7 @@ def run_architecture(
     timeout: int = 600,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+    include_trajectory: bool = True,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
     """Extract DSPy architecture information from documentation.
@@ -320,6 +340,7 @@ def run_architecture(
         timeout: Sandbox timeout in seconds (default: 600).
         secret_name: Modal secret name (default: "LITELLM").
         volume_name: Optional Modal volume name.
+        include_trajectory: Include RLM trajectory metadata in output.
         env_file: Optional path to .env file.
 
     Returns:
@@ -346,13 +367,17 @@ def run_architecture(
 
     try:
         result = rlm(docs=docs, query=query)
-        return {
+        response = {
             "modules": result.modules,
             "optimizers": result.optimizers,
             "design_principles": result.design_principles,
             "doc_chars": len(docs),
             "doc_lines": len(docs.splitlines()),
         }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
     finally:
         interpreter.shutdown()
 
@@ -366,6 +391,7 @@ def run_api_endpoints(
     timeout: int = 600,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+    include_trajectory: bool = True,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
     """Extract API endpoints from documentation.
@@ -381,6 +407,7 @@ def run_api_endpoints(
         timeout: Sandbox timeout in seconds (default: 600).
         secret_name: Modal secret name (default: "LITELLM").
         volume_name: Optional Modal volume name.
+        include_trajectory: Include RLM trajectory metadata in output.
         env_file: Optional path to .env file.
 
     Returns:
@@ -404,10 +431,14 @@ def run_api_endpoints(
 
     try:
         result = rlm(docs=docs)
-        return {
+        response = {
             "api_endpoints": result.api_endpoints,
             "count": len(result.api_endpoints),
         }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
     finally:
         interpreter.shutdown()
 
@@ -421,6 +452,7 @@ def run_error_patterns(
     timeout: int = 600,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+    include_trajectory: bool = True,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
     """Find and categorize error patterns in documentation.
@@ -436,6 +468,7 @@ def run_error_patterns(
         timeout: Sandbox timeout in seconds (default: 600).
         secret_name: Modal secret name (default: "LITELLM").
         volume_name: Optional Modal volume name.
+        include_trajectory: Include RLM trajectory metadata in output.
         env_file: Optional path to .env file.
 
     Returns:
@@ -459,10 +492,14 @@ def run_error_patterns(
 
     try:
         result = rlm(docs=docs)
-        return {
+        response = {
             "error_categories": result.error_categories,
             "total_errors_found": result.total_errors_found,
         }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
     finally:
         interpreter.shutdown()
 
@@ -493,6 +530,7 @@ def run_trajectory(
         timeout: Sandbox timeout in seconds (default: 600).
         secret_name: Modal secret name (default: "LITELLM").
         volume_name: Optional Modal volume name.
+        include_trajectory: Include RLM trajectory metadata in output.
         env_file: Optional path to .env file.
 
     Returns:
@@ -546,6 +584,7 @@ def run_custom_tool(
     timeout: int = 600,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+    include_trajectory: bool = True,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
     """Run RLM with custom regex tool for structured extraction.
@@ -589,13 +628,17 @@ def run_custom_tool(
 
     try:
         result = rlm(docs=docs[:chars])
-        return {
+        response = {
             "headers": result.headers,
             "code_blocks": result.code_blocks,
             "structure_summary": result.structure_summary,
             "headers_count": len(result.headers),
             "code_blocks_count": len(result.code_blocks),
         }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
     finally:
         interpreter.shutdown()
 
@@ -611,6 +654,7 @@ def run_long_context(
     timeout: int = 900,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+    include_trajectory: bool = True,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
     """Run a long-context analysis or summarization task.
@@ -630,6 +674,7 @@ def run_long_context(
         timeout: Sandbox timeout in seconds (default: 900).
         secret_name: Modal secret name (default: "LITELLM").
         volume_name: Optional Modal volume name for persistence.
+        include_trajectory: Include RLM trajectory metadata in output.
         env_file: Optional path to .env file.
 
     Returns:
@@ -663,20 +708,28 @@ def run_long_context(
 
         if mode == "analyze":
             result = rlm(document=docs, query=query)
-            return {
+            response = {
                 "findings": result.findings,
                 "answer": result.answer,
                 "sections_examined": result.sections_examined,
                 "doc_chars": len(docs),
             }
+            response.update(
+                _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+            )
+            return response
         else:
             result = rlm(document=docs, focus=query)
-            return {
+            response = {
                 "summary": result.summary,
                 "key_points": result.key_points,
                 "coverage_pct": result.coverage_pct,
                 "doc_chars": len(docs),
             }
+            response.update(
+                _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+            )
+            return response
 
 
 def check_secret_presence(*, secret_name: str = "LITELLM") -> dict[str, bool]:
