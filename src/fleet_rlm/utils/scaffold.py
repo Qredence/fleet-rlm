@@ -40,8 +40,8 @@ def get_scaffold_dir() -> Path:
     Raises:
         FileNotFoundError: If the scaffold directory cannot be located.
     """
-    # The _scaffold directory is adjacent to this file
-    scaffold_dir = Path(__file__).parent / "_scaffold"
+    # The _scaffold directory is in the parent package directory
+    scaffold_dir = Path(__file__).parent.parent / "_scaffold"
     if not scaffold_dir.exists():
         raise FileNotFoundError(
             f"Scaffold directory not found at {scaffold_dir}. "

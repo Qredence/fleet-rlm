@@ -178,7 +178,7 @@ class TestToolRegistration:
 
     def test_tool_available_in_sandbox(self, interpreter):
         """Test registered tool is callable in sandbox."""
-        from fleet_rlm.tools import regex_extract
+        from fleet_rlm.utils.tools import regex_extract
 
         interpreter.tools["regex_extract"] = regex_extract
 

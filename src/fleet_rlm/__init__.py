@@ -43,14 +43,19 @@ from .react import (
     build_tool_list,
     list_react_tool_names,
 )
-from .scaffold import (
+from .utils import (
     get_scaffold_dir,
     install_agents,
     install_all,
     install_skills,
     list_agents,
     list_skills,
+    regex_extract,
 )
+
+# Backward compatibility: expose utils modules at top level
+from .utils import scaffold  # noqa: F401
+from .utils import tools  # noqa: F401
 from .stateful import (
     AgentStateManager,
     AnalysisResult,
@@ -68,7 +73,6 @@ from .signatures import (
     FindErrorPatterns,
     SummarizeLongDocument,
 )
-from .tools import regex_extract
 
 __all__ = [
     "__version__",

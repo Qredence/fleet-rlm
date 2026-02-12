@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import re
 
-# Re-export rlm_helpers for backward compatibility
-from .rlm_helpers import (
+# Re-export modal helpers for backward compatibility
+from .modal import (
     create_interpreter,
     ensure_volume_exists,
     get_default_volume_name,
