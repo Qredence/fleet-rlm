@@ -22,25 +22,25 @@ uv sync --extra dev --extra mcp --extra server
 
 ### Setup Commands
 
-| Command | Description                                                 | Key Options                                                                                                                                                                                                                                                    |
-| :------ | :---------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Command | Description                                                        | Key Options                                                                                                                                                                                                                                                                 |
+| :------ | :----------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `init`  | Install custom Claude scaffold assets (skills/agents/teams/hooks). | `--target`: Install directory (default: ~/.claude)<br>`--force`: Overwrite existing files<br>`--list`: List available content<br>`--skills-only`/`--agents-only`/`--teams-only`/`--hooks-only`: Install one asset class<br>`--no-teams`/`--no-hooks`: Skip optional classes |
 
 ### RLM Execution Commands
 
-| Command              | Description                                                    | Key Options                                                                                         |
-| :------------------- | :------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------- |
-| `run-basic`          | Run a simple Q&A task with code generation.                    | `--question`: The prompt<br>`--volume-name`: Optional persistent volume                             |
-| `run-architecture`   | Extract architecture/concepts from a document.                 | `--docs-path`: Path to text file<br>`--query`: Info to extract                                      |
-| `run-api-endpoints`  | Extract API endpoints from documentation.                      | `--docs-path`: Path to text file                                                                    |
-| `run-error-patterns` | Analyze error patterns in documentation.                       | `--docs-path`: Path to text file                                                                    |
-| `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to text file<br>`--chars`: Limit input size                                     |
-| `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to text file                                                                    |
-| `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to text file<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize` |
-| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`<br>`--react-max-iters`<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
-| `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                           |
-| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`<br>`--react-max-iters`                                                           |
-| `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                 |
+| Command              | Description                                                    | Key Options                                                                                                                                                                      |
+| :------------------- | :------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run-basic`          | Run a simple Q&A task with code generation.                    | `--question`: The prompt<br>`--volume-name`: Optional persistent volume                                                                                                          |
+| `run-architecture`   | Extract architecture/concepts from a document.                 | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Info to extract                                                                                                 |
+| `run-api-endpoints`  | Extract API endpoints from documentation.                      | `--docs-path`: Path to document file (text or PDF)                                                                                                                               |
+| `run-error-patterns` | Analyze error patterns in documentation.                       | `--docs-path`: Path to document file (text or PDF)                                                                                                                               |
+| `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to document file (text or PDF)<br>`--chars`: Limit input size                                                                                                |
+| `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to document file (text or PDF)                                                                                                                               |
+| `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize`                                                            |
+| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`: Path to document file (text or PDF)<br>`--react-max-iters`<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
+| `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                                                                                                      |
+| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`<br>`--react-max-iters`                                                                                                                                      |
+| `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                                                                                            |
 
 ### Utility Commands
 
@@ -114,11 +114,6 @@ uv run fleet-rlm init --force
 │   ├── rlm-specialist.md
 │   ├── rlm-subcall.md
 │   └── teams/
-│       ├── agent-designer.md
-│       ├── architect-explorer.md
-│       ├── fleet-rlm-explorer-team.md
-│       ├── testing-analyst.md
-│       └── ux-reviewer.md
 ├── teams/
 │   └── fleet-rlm/
 │       ├── config.json
@@ -216,13 +211,13 @@ uv run fleet-rlm run-long-context \
 
 Inside the sandbox, the Planner's generated code has access to:
 
-| Helper                                    | Description                                               |
-| :---------------------------------------- | :-------------------------------------------------------- |
-| `peek(text, start=0, length=2000)`        | Inspect a slice of a large document.                      |
-| `grep(text, pattern, context=0)`          | Case-insensitive line search with optional context lines. |
-| `chunk_by_size(text, size=200_000, overlap=0)` | Fixed-size chunking.                                 |
-| `chunk_by_headers(text, pattern=r"^#{1,3} ", flags=re.MULTILINE)` | Header-based section splitting.             |
-| `add_buffer(name, value)`                 | Accumulate values across iterations.                      |
-| `get_buffer(name)` / `clear_buffer(name)` | Retrieve or clear accumulated values.                     |
-| `save_to_volume(path, content)`           | Persist data to a mounted volume.                         |
-| `load_from_volume(path)`                  | Load persisted data from a mounted volume.                |
+| Helper                                                            | Description                                               |
+| :---------------------------------------------------------------- | :-------------------------------------------------------- |
+| `peek(text, start=0, length=2000)`                                | Inspect a slice of a large document.                      |
+| `grep(text, pattern, context=0)`                                  | Case-insensitive line search with optional context lines. |
+| `chunk_by_size(text, size=200_000, overlap=0)`                    | Fixed-size chunking.                                      |
+| `chunk_by_headers(text, pattern=r"^#{1,3} ", flags=re.MULTILINE)` | Header-based section splitting.                           |
+| `add_buffer(name, value)`                                         | Accumulate values across iterations.                      |
+| `get_buffer(name)` / `clear_buffer(name)`                         | Retrieve or clear accumulated values.                     |
+| `save_to_volume(path, content)`                                   | Persist data to a mounted volume.                         |
+| `load_from_volume(path)`                                          | Load persisted data from a mounted volume.                |

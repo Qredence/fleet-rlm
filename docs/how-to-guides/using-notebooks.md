@@ -25,6 +25,13 @@ The provided notebook `notebooks/rlm-dspy-modal.ipynb` is a comprehensive guide 
     - Persistent Storage with Volumes (with `save_to_volume` / `load_from_volume`).
     - Custom Tools.
 
+## PDF Inputs
+
+When a notebook flow calls the ReAct document tools, `load_document` and
+`read_file_slice` can ingest PDF files directly via MarkItDown with a pypdf
+fallback. If a PDF is scanned/image-only and no text can be extracted, the
+tool returns guidance to run OCR first.
+
 ## Headless Execution
 
 You can run the notebook as a script (headlessly) for testing or CI/CD purposes. This executes all cells in order.

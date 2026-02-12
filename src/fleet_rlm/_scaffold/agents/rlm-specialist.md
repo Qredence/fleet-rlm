@@ -42,6 +42,7 @@ the isolated execution context and focused tool access to apply them.
 - Designing error recovery and retry strategies
 - Cross-skill integration (combining execute, batch, memory, etc.)
 - As an **agent team teammate** for the "debugger" or "architect" role
+- PDF/document ingestion failures (binary decode errors, scanned PDF edge cases)
 
 ## Capabilities
 
@@ -185,6 +186,21 @@ with ModalInterpreter(sub_lm=cheap_lm, max_llm_calls=100) as interp:
 ```
 
 This pattern can reduce costs by 5-10x while maintaining quality.
+
+## Debugging PDF Ingestion Issues
+
+### Binary Decode Failures
+If a workflow raises UTF-8 decode errors while loading `.pdf` or binary docs:
+
+1. Ensure dependencies are synced: `uv sync`
+2. Use ReAct tools (`load_document`, `read_file_slice`) rather than direct `Path.read_text()` for PDFs
+3. Confirm `markitdown` is importable in the current environment
+
+### Scanned/Image-Only PDF
+If extraction returns an OCR-required error:
+
+- This is expected for image-only PDFs.
+- Run OCR first, then re-run `load_document` on the OCR output.
 
 ## Rules
 

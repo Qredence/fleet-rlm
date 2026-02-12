@@ -92,6 +92,7 @@ print('fleet_rlm imports OK')
 | FinalOutput `AttributeError`  | Use `result.field`, not `result['field']` or `result.get('field')`   |
 | Volume not persisting         | Pass same `volume_name` to every `ModalInterpreter` instance         |
 | llm_query not defined         | Update fleet_rlm to >= 0.3.0                                         |
+| PDF UnicodeDecodeError        | Use `load_document`/`read_file_slice` tools (MarkItDown + pypdf fallback), not raw `read_text()` |
 
 ## ModalInterpreter API Quick Reference
 
@@ -185,3 +186,4 @@ Both return `FinalOutput` with fields accessible as attributes: `result.answer`
 - ALWAYS provide copy-pasteable commands for verification
 - NEVER recommend hardcoded secrets — use Modal Secrets or env vars
 - Access `FinalOutput` fields as `.field`, never `['field']`
+- For PDFs/docs, route ingestion through ReAct document tools so binary parsing and OCR guidance are handled safely

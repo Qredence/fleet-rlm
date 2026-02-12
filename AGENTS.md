@@ -78,3 +78,4 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Type-check with `ty` (not `mypy`)
 - Format/lint with `ruff`
 - Prefer `uv run ...` for commands
+- ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis

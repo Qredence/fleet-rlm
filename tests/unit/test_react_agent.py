@@ -6,13 +6,16 @@ cloud credentials while validating host-side orchestration logic.
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import dspy
+import pytest
 from dspy.primitives.code_interpreter import FinalOutput
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
 from fleet_rlm.react import RLMReActChatAgent, RLMReActChatSignature
+from fleet_rlm.react import tools as react_tools
 
 
 class _FakeInterpreter:
@@ -390,6 +393,132 @@ def test_read_file_slice_returns_line_range(monkeypatch, tmp_path):
     assert result["lines"][0]["line"] == 3
     assert result["lines"][0]["text"] == "Line 3"
     assert result["lines"][2]["line"] == 5
+
+
+def test_load_document_pdf_includes_extraction_metadata(monkeypatch, tmp_path):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    pdf_file = tmp_path / "report.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 test bytes")
+
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools._read_document_content",
+        lambda _path: (
+            "Page one\nPage two",
+            {
+                "source_type": "pdf",
+                "extraction_method": "markitdown",
+                "page_count": 2,
+                "pages_with_text": 2,
+            },
+        ),
+    )
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.load_document(str(pdf_file))
+
+    assert result["status"] == "ok"
+    assert result["source_type"] == "pdf"
+    assert result["extraction_method"] == "markitdown"
+    assert result["page_count"] == 2
+    assert result["pages_with_text"] == 2
+
+
+def test_pdf_extraction_falls_back_to_pypdf_when_markitdown_fails(
+    monkeypatch, tmp_path
+):
+    pdf_file = tmp_path / "report.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 fallback test")
+
+    class _BadMarkItDown:
+        def convert(self, _path: str) -> object:
+            raise RuntimeError("markitdown failed")
+
+    class _Page:
+        def __init__(self, text: str):
+            self._text = text
+
+        def extract_text(self) -> str:
+            return self._text
+
+    class _PdfReader:
+        def __init__(self, _path: str):
+            self.pages = [_Page("Alpha"), _Page("Beta")]
+
+    monkeypatch.setitem(
+        sys.modules, "markitdown", SimpleNamespace(MarkItDown=_BadMarkItDown)
+    )
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=_PdfReader))
+
+    text, meta = react_tools._read_document_content(pdf_file)
+
+    assert "Alpha" in text
+    assert meta["source_type"] == "pdf"
+    assert meta["extraction_method"] == "pypdf"
+    assert meta["page_count"] == 2
+    assert meta["pages_with_text"] == 2
+
+
+def test_pdf_extraction_returns_ocr_guidance_when_no_text(monkeypatch, tmp_path):
+    pdf_file = tmp_path / "scanned.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 scanned bytes")
+
+    class _EmptyMarkItDown:
+        def convert(self, _path: str) -> object:
+            return SimpleNamespace(text_content="")
+
+    class _Page:
+        def extract_text(self) -> str:
+            return ""
+
+    class _PdfReader:
+        def __init__(self, _path: str):
+            self.pages = [_Page(), _Page()]
+
+    monkeypatch.setitem(
+        sys.modules, "markitdown", SimpleNamespace(MarkItDown=_EmptyMarkItDown)
+    )
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=_PdfReader))
+
+    with pytest.raises(ValueError, match="OCR is required"):
+        react_tools._read_document_content(pdf_file)
+
+
+def test_read_file_slice_pdf_uses_extracted_text(monkeypatch, tmp_path):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    pdf_file = tmp_path / "slice.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 slice bytes")
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools._read_document_content",
+        lambda _path: ("Line 1\nLine 2\nLine 3\nLine 4", {"source_type": "pdf"}),
+    )
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.read_file_slice(str(pdf_file), start_line=2, num_lines=2)
+
+    assert result["status"] == "ok"
+    assert result["returned_count"] == 2
+    assert result["lines"][0]["line"] == 2
+    assert result["lines"][0]["text"] == "Line 2"
+
+
+def test_read_file_slice_binary_file_returns_user_friendly_error(monkeypatch, tmp_path):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    binary_file = tmp_path / "payload.bin"
+    binary_file.write_bytes(b"\x00\x01\x02\x03\x04\xff\xfe")
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    with pytest.raises(ValueError) as excinfo:
+        agent.read_file_slice(str(binary_file))
+
+    message = str(excinfo.value)
+    assert "Binary file detected" in message
+    assert "UnicodeDecodeError" not in message
 
 
 def test_find_files_with_ripgrep(monkeypatch, tmp_path):
