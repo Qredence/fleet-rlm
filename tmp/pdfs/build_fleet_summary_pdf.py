@@ -50,7 +50,7 @@ def draw_paragraph(c: canvas.Canvas, y: float, text: str) -> float:
     lines = wrap_text(text, BODY_FONT, BODY_SIZE, CONTENT_W)
     for line in lines:
         c.drawString(MARGIN, y, line)
-        y -= (BODY_SIZE + LINE_GAP)
+        y -= BODY_SIZE + LINE_GAP
     return y
 
 
@@ -65,7 +65,7 @@ def draw_bullets(c: canvas.Canvas, y: float, bullets: list[str]) -> float:
                 c.drawString(MARGIN + TEXT_INDENT, y, line)
             else:
                 c.drawString(MARGIN + TEXT_INDENT, y, line)
-            y -= (BODY_SIZE + LINE_GAP)
+            y -= BODY_SIZE + LINE_GAP
         y -= 1
     return y
 
@@ -76,7 +76,7 @@ def main():
     y = PAGE_H - MARGIN
     c.setFont(TITLE_FONT, TITLE_SIZE)
     c.drawString(MARGIN, y, "fleet-rlm: One-Page App Summary")
-    y -= (TITLE_SIZE + 8)
+    y -= TITLE_SIZE + 8
 
     c.setFont(BODY_FONT, 8)
     c.drawString(
@@ -84,7 +84,7 @@ def main():
         y,
         "Evidence sources: README.md, AGENTS.md, docs/explanation/architecture.md, pyproject.toml, src/fleet_rlm/*.py",
     )
-    y -= (8 + SECTION_GAP)
+    y -= 8 + SECTION_GAP
 
     y = draw_heading(c, y, "What it is")
     y = draw_paragraph(
@@ -140,7 +140,7 @@ def main():
             "Create local env file: `cp .env.example .env`",
             "Configure Modal once: `uv run modal setup`",
             "Create secret (replace values): `uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LM_API_BASE=... DSPY_LLM_API_KEY=...`",
-            "Run a first command: `uv run fleet-rlm run-basic --question \"What are the first 12 Fibonacci numbers?\"`",
+            'Run a first command: `uv run fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"`',
             "Not found in repo: exact required model/provider values for `LITELLM` secret fields.",
         ],
     )
