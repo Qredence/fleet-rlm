@@ -33,6 +33,10 @@ Use `--force` to overwrite existing files if you've upgraded the package.
 | **`dspy-signature`** | Schema Design     | Writing new DSPy signatures.                |
 | **`modal-sandbox`**  | Cloud Admin       | Managing the sandbox environment.           |
 
+> Note: The `rlm` skill includes PDF/document ingestion defaults via ReAct
+> tools (`load_document`, `read_file_slice`) using MarkItDown with pypdf
+> fallback. Scanned PDFs require OCR before analysis.
+
 ## Workflow Patterns
 
 ### 1. Automatic Skill Invocation

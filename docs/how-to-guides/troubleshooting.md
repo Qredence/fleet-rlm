@@ -49,6 +49,20 @@ Sync your dependencies:
 uv sync
 ```
 
+### "Binary file detected" or PDF extraction fails
+
+**Symptoms**: `load_document` or `read_file_slice` fails on a document path.
+**Cause**:
+- The input is a non-text binary file not supported by document ingestion, or
+- The PDF is scanned/image-only and requires OCR.
+**Solution**:
+1. Reinstall runtime dependencies to ensure MarkItDown is present:
+   ```bash
+   uv sync
+   ```
+2. For scanned PDFs, run OCR first and then load the OCR'd text/PDF.
+3. Retry with `load_document` on the OCR output.
+
 ### Modal Package Shadowing
 
 **Symptoms**: Weird `AttributeError` on `modal` objects.

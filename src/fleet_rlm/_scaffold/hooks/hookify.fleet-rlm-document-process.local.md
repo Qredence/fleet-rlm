@@ -18,6 +18,7 @@ You want to process or analyze a document. The fleet-rlm team specializes in lon
 
 **What RLM can do:**
 - Extract information from large documents
+- Ingest PDFs/documents via MarkItDown with pypdf fallback
 - Parallel analysis with `llm_query_batched`
 - Synthesize findings across multiple chunks
 - Handle files >100K lines efficiently

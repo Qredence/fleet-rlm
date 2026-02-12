@@ -85,6 +85,15 @@ Final = {"answer": "result", "confidence": "high"}
 
 Both are equivalent - use whichever is more natural for your code.
 
+### Native PDF/Document Ingestion
+
+ReAct document tools now support binary documents directly:
+
+- `load_document(path)` uses **MarkItDown** first for PDF/document formats.
+- PDF parsing falls back to **pypdf** if MarkItDown fails.
+- `read_file_slice(path, ...)` works on extracted PDF text (not raw bytes).
+- Scanned/image-only PDFs return an OCR guidance error instead of a UTF-8 decode crash.
+
 ## Additional Resources
 
 - For complete ModalInterpreter API, sandbox helpers, DSPy signatures, and troubleshooting, see [references/api-reference.md](references/api-reference.md)
@@ -102,6 +111,7 @@ Both are equivalent - use whichever is more natural for your code.
    ```
 3. **Local `.env`** at project root with the same vars (for the planner LM).
 4. **Dependencies synced**: `uv sync`
+   - Includes `markitdown[all]` and `pypdf` runtime dependencies for document ingestion.
 
 ---
 
@@ -112,7 +122,7 @@ For standard long-context tasks, use the CLI directly:
 ```bash
 # Analyze a document
 uv run fleet-rlm run-long-context \
-  --docs-path <FILE> \
+  --docs-path <FILE_OR_PDF> \
   --query "<QUERY>" \
   --mode analyze \
   --max-iterations 30 \
@@ -121,7 +131,7 @@ uv run fleet-rlm run-long-context \
 
 # Summarize a document with focus
 uv run fleet-rlm run-long-context \
-  --docs-path <FILE> \
+  --docs-path <FILE_OR_PDF> \
   --query "<FOCUS_TOPIC>" \
   --mode summarize \
   --timeout 900

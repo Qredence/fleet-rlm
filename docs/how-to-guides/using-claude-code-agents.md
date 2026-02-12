@@ -42,9 +42,14 @@ uv run fleet-rlm init --force
 
 Once installed, ask Claude Code to use a skill directly in task prompts.
 
+The bundled `rlm` skill now includes native PDF/document ingestion guidance:
+ReAct tools (`load_document`, `read_file_slice`) use MarkItDown with a pypdf
+fallback, and return OCR guidance for scanned/image-only PDFs.
+
 Examples:
 
 - "Use the `rlm` skill to analyze this large document."
+- "Use the `rlm` skill to analyze this PDF report and summarize key findings."
 - "Use `rlm-debug` to diagnose Modal auth and timeout failures."
 - "Use `dspy-signature` to design a new extraction signature."
 

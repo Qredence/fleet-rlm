@@ -48,6 +48,7 @@ provide the "how" while the agent provides the isolated execution context.
 - Large log analysis or codebase-wide searches
 - Any content exceeding context limits
 - Multi-document analysis pipelines
+- PDF/document analysis where binary ingestion is needed
 
 ## Processing Flow
 
@@ -204,6 +205,7 @@ providing useful feedback. Errors are always shown in full for debugging.
 4. Write chunks to `/tmp/chunks/` (ephemeral) or `/data/chunks/` (persisted)
 5. Use sandbox helpers: `chunk_by_headers`, `chunk_by_size`, `peek`, `grep`
 6. Access FinalOutput as attributes: `result.field`, not `result['field']`
+7. For PDF inputs, prefer `agent.load_document(<pdf_path>)` from the ReAct tool layer (MarkItDown + pypdf fallback) before chunking/synthesis
 
 ## Agent Team Usage
 

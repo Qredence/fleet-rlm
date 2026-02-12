@@ -20,10 +20,13 @@ cd fleet-rlm
 uv sync --extra dev --extra server
 ```
 
+`fleet-rlm` now includes `markitdown[all]` as a core runtime dependency so
+PDF/document ingestion works in `load_document` and `read_file_slice`.
+
 ### Option B: Library Install (pip)
 
 ```bash
-pip install fleet-rlm
+uv pip install fleet-rlm
 ```
 
 ## 2. Configure Local Environment
@@ -59,4 +62,17 @@ Run the basic demo to ensure everything is working:
 
 ```bash
 uv run fleet-rlm run-basic
+```
+
+Optional PDF ingestion check:
+
+```bash
+uv run python - <<'PY'
+from fleet_rlm.runners import build_react_chat_agent
+
+agent = build_react_chat_agent()
+result = agent.load_document("rlm_content/entreprise-report-2030.pdf")
+print(result["status"], result.get("source_type"), result["chars"])
+agent.shutdown()
+PY
 ```

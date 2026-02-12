@@ -74,9 +74,17 @@ High-level functions that orchestrate the entire RLM workflow (Config -> Init In
 
 #### Functions
 
-- `run_basic(question: str) -> str`: Runs a simple RLM query (e.g., math, fibonacci).
-- `run_architecture(docs_path: str, query: str)`: Extracts architecture info from a doc file.
-- `run_long_context(document_path: str, query: str)`: Runs the long-context RLM strategy (chunking + subagents).
+- **`build_react_chat_agent(...)`**: Configures and returns an `RLMReActChatAgent` instance.
+- **`run_react_chat_once(...)`**: Runs a single turn of the interactive ReAct chat agent.
+- **`run_basic(question: str) -> dict`**: Runs a simple RLM query (e.g., math, fibonacci).
+- **`run_architecture(docs_path: str, query: str) -> dict`**: Extracts architecture info from a doc file.
+- **`run_api_endpoints(docs_path: str) -> dict`**: Extracts API endpoints from documentation.
+- **`run_error_patterns(docs_path: str) -> dict`**: Finds and categorizes error patterns.
+- **`run_trajectory(docs_path: str, chars: int) -> dict`**: Runs RLM with trajectory tracking for debugging.
+- **`run_custom_tool(docs_path: str) -> dict`**: Runs RLM using a custom regex tool for structured extraction.
+- **`run_long_context(docs_path: str, query: str, mode: str) -> dict`**: Runs the long-context RLM strategy (chunking + subagents).
+- **`check_secret_presence(secret_name: str) -> dict`**: Checks if DSPy env vars are present in a Modal secret.
+- **`check_secret_key(secret_name: str, key: str) -> dict`**: Checks if a specific env var key exists in a Modal secret.
 
 ### `fleet_rlm.signatures`
 
@@ -93,6 +101,15 @@ DSPy Signatures defining the Input/Output schemas for RLM tasks.
 - **`FindErrorPatterns`**:
   - Inputs: `docs`
   - Outputs: `error_categories`, `total_errors_found`
+- **`ExtractWithCustomTool`**:
+  - Inputs: `docs`
+  - Outputs: `headers`, `code_blocks`, `structure_summary`
 - **`AnalyzeLongDocument`**:
   - Inputs: `document`, `query`
   - Outputs: `findings`, `answer`, `sections_examined`
+- **`SummarizeLongDocument`**:
+  - Inputs: `document`, `focus`
+  - Outputs: `summary`, `key_points`, `coverage_pct`
+- **`ExtractFromLogs`**:
+  - Inputs: `logs`, `query`
+  - Outputs: `matches`, `patterns`, `time_range`
