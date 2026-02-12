@@ -1,51 +1,49 @@
 # fleet-rlm Documentation
 
-Welcome to the documentation for **fleet-rlm**, a Python package implementing **Recursive Language Models (RLM)** with DSPy and Modal for secure, cloud-based code execution.
+Welcome to **fleet-rlm**, a Python package for running Recursive Language Models (RLM) in secure Modal sandboxes.
 
-## Overview
+## Documentation Structure
 
-Recursive Language Models (RLM) represent an inference strategy where:
+Our documentation follows the [Diátaxis](https://diataxis.fr/) framework:
 
-- LLMs treat long contexts as an **external environment** rather than direct input.
-- The model writes Python code to programmatically explore data.
-- Code executes in a sandboxed environment (Modal cloud).
-- Only relevant snippets are sent to sub-LLMs for semantic analysis.
+### 🎓 [Tutorials](tutorials/index.md)
 
-This project is based on research from the [Recursive Language Models paper](https://arxiv.org/abs/2501.123) by Zhang, Kraska, and Khattab (2025).
+_Learning-oriented lessons to get you started._
+
+- [Basic Usage](tutorials/01-basic-usage.md) - Run your first agent.
+- [Document Analysis](tutorials/02-doc-analysis.md) - Extract data from files.
+- [Interactive Chat](tutorials/03-interactive-chat.md) - Use the TUI.
+
+### 🗺️ [How-to Guides](how-to-guides/index.md)
+
+_Problem-oriented steps for specific goals._
+
+- [Installation](how-to-guides/installation.md)
+- [Coniguring Modal (Secrets & Volumes)](how-to-guides/configuring-modal.md)
+- [Managing Skills](how-to-guides/managing-skills.md)
+- [Deploying the API Server](how-to-guides/deploying-server.md)
+- [Using with Claude Desktop (MCP)](how-to-guides/using-mcp-server.md)
+
+### 📖 [Reference](reference/index.md)
+
+_Information-oriented technical descriptions._
+
+- [CLI Commands](reference/cli.md)
+- [Python API](reference/python-api.md)
+- [HTTP API](reference/http-api.md)
+- [Sandbox File System](reference/sandbox-fs.md)
+
+### 🧠 [Explanation](explanation/index.md)
+
+_Understanding-oriented background and concepts._
+
+- [RLM Concepts](explanation/rlm-concepts.md)
+- [Architecture](explanation/architecture.md)
+- [Stateful Architecture](explanation/stateful-architecture.md)
 
 ## Key Features
 
-- **Secure Cloud Execution**: Code runs in Modal's isolated sandbox environment.
-- **DSPy Integration**: Built on DSPy 3.1.3 with custom signatures for RLM tasks.
-- **CLI Interface**: Typer-based CLI with multiple demo commands.
-- **Sandbox-Side Helpers**: Built-in functions (`peek`, `grep`, `chunk_by_size`, `chunk_by_headers`, buffers, volume I/O) injected into the sandbox for the Planner to use.
-- **Chunking Strategies**: Host-side and sandbox-side chunking by size, headers, timestamps, and JSON keys.
-- **Context Manager**: `with ModalInterpreter() as interp:` for automatic resource cleanup.
-- **Extensible Tools**: Support for custom tools that bridge sandbox and host.
-- **Long-Context Signatures**: `AnalyzeLongDocument`, `SummarizeLongDocument`, `ExtractFromLogs` for structured long-document processing.
-- **Secret Management**: Secure handling of API keys via Modal secrets.
-- **Persistent Storage**: Modal Volumes V2 for data that survives across runs.
-
-## Getting Started
-
-Check out the [Getting Started guide](getting-started.md) to set up your environment and run your first RLM agent.
-
-## Documentation Contents
-
-- **[Getting Started](getting-started.md)**: Installation, Environment Setup, and Modal Configuration.
-- **[Core Concepts](concepts.md)**: Theory behind RLM, Architecture, Design Patterns, and the Long-Context Workflow.
-- **Tutorials**:
-  - **[Basic Usage](tutorials/basic-usage.md)**: Running the Fibonacci demo.
-  - **[Document Analysis](tutorials/doc-analysis.md)**: Extracting information from long documents.
-- **Guides**:
-  - **[CLI Reference](guides/cli-reference.md)**: Detailed command documentation.
-  - **[Skills and Agents](guides/skills-and-agents.md)**: Installing and using bundled scaffold assets (skills, agents, team templates, hooks) for RLM workflows.
-  - **[Skills Usage](guides/skills-usage.md)**: Detailed skill invocation patterns and three-tier architecture (Skills, Subagents, Agent Teams).
-  - **[Jupyter Notebooks](guides/notebooks.md)**: Using the provided notebooks.
-  - **[Troubleshooting](guides/troubleshooting.md)**: Common issues and fixes.
-- **[VFS Taxonomy](VFS_TAXONOMY.md)**: Modal Sandbox file system structure for persistent storage.
-- **[Contributing](contributing.md)**: How to contribute to the project.
-
-## License
-
-This project is licensed under the [MIT License](../LICENSE).
+- **Secure Cloud Execution**: Hosted on Modal.
+- **DSPy Integration**: Powerful programmatic planning.
+- **Long Contexts**: Process unlimited text via RLM recursion.
+- **Multi-Interface**: CLI, TUI, FastAPI, and MCP for Claude.

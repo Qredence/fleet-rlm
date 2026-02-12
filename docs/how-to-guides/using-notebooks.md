@@ -4,7 +4,7 @@ While the CLI is great for automation, Jupyter Notebooks provide an interactive 
 
 ## Setting Up
 
-Ensure you have configured your environment as described in [Getting Started](../getting-started.md). Then launch Jupyter Lab:
+Ensure you have configured your environment as described in [Installation](installation.md). Then launch Jupyter Lab:
 
 ```bash
 uv run jupyter lab notebooks/rlm-dspy-modal.ipynb
