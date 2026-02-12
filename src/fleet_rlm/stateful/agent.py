@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from .stateful_sandbox import SandboxResult, StatefulSandboxManager
+from .sandbox import SandboxResult, StatefulSandboxManager
 
 
 @dataclass

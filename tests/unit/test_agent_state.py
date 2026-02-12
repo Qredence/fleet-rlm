@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from fleet_rlm.agent_state import AgentStateManager
+from fleet_rlm.stateful import AgentStateManager
 
 
 class _FakeInterpreter:
@@ -68,7 +68,7 @@ def test_run_script_marks_stderr_string_as_failure(monkeypatch):
     fake_sandbox = _FakeSandbox("[Error] ValueError: boom")
     _seed_script(fake_sandbox, name="demo", code="raise ValueError('boom')")
     monkeypatch.setattr(
-        "fleet_rlm.agent_state.StatefulSandboxManager",
+        "fleet_rlm.stateful.agent.StatefulSandboxManager",
         lambda **kwargs: fake_sandbox,
     )
 

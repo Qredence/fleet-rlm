@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from fleet_rlm.stateful_sandbox import (
+from fleet_rlm.stateful import (
     ExecutionRecord,
     SandboxResult,
     StatefulSandboxManager,
@@ -78,7 +78,7 @@ class TestStatefulSandboxManager:
         assert manager.workspace_path == "/data/workspace"
         assert manager._started is False
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_start(self, mock_interpreter_class):
         """Test starting the manager."""
         mock_interpreter = MagicMock()
@@ -91,7 +91,7 @@ class TestStatefulSandboxManager:
         mock_interpreter.start.assert_called_once()
         mock_interpreter.execute.assert_called_once()
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_shutdown(self, mock_interpreter_class):
         """Test shutting down the manager."""
         mock_interpreter = MagicMock()
@@ -104,7 +104,7 @@ class TestStatefulSandboxManager:
         assert manager._started is False
         mock_interpreter.shutdown.assert_called_once()
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_context_manager(self, mock_interpreter_class):
         """Test using manager as context manager."""
         mock_interpreter = MagicMock()
@@ -115,7 +115,7 @@ class TestStatefulSandboxManager:
 
         mock_interpreter.shutdown.assert_called_once()
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_save_to_workspace(self, mock_interpreter_class):
         """Test saving to workspace."""
         from dspy.primitives.code_interpreter import FinalOutput
@@ -137,7 +137,7 @@ class TestStatefulSandboxManager:
         assert result["chars"] == 13
         assert mock_interpreter.execute.call_count == 2
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_save_to_workspace_surfaces_stderr_failures(self, mock_interpreter_class):
         """String stderr payloads should be returned as errors."""
         mock_interpreter = MagicMock()
@@ -153,7 +153,7 @@ class TestStatefulSandboxManager:
         assert result["status"] == "error"
         assert "PermissionError" in result["error"]
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_load_from_workspace_success(self, mock_interpreter_class):
         """Test loading from workspace - success case."""
         from dspy.primitives.code_interpreter import FinalOutput
@@ -171,7 +171,7 @@ class TestStatefulSandboxManager:
         assert result["content"] == "Hello, World!"
         assert result["chars"] == 13
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_load_from_workspace_not_found(self, mock_interpreter_class):
         """Test loading from workspace - file not found."""
         from dspy.primitives.code_interpreter import FinalOutput
@@ -188,7 +188,7 @@ class TestStatefulSandboxManager:
         assert result["status"] == "error"
         assert "File not found" in result["error"]
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_list_workspace_files(self, mock_interpreter_class):
         """Test listing workspace files."""
         from dspy.primitives.code_interpreter import FinalOutput
@@ -204,7 +204,7 @@ class TestStatefulSandboxManager:
 
         assert files == ["file1.txt", "file2.py"]
 
-    @patch("fleet_rlm.stateful_sandbox.ModalInterpreter")
+    @patch("fleet_rlm.stateful.sandbox.ModalInterpreter")
     def test_delete_workspace_file(self, mock_interpreter_class):
         """Test deleting a workspace file."""
         from dspy.primitives.code_interpreter import FinalOutput
