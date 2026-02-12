@@ -18,7 +18,7 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from .sandbox import SandboxResult, StatefulSandboxManager
 
@@ -315,10 +315,15 @@ SUBMIT(analyses=analyses, count=len(analyses))
             else:
                 output = result
 
-            if isinstance(output, dict) and "analyses" in output:
-                analyses = output["analyses"]
+            if isinstance(output, dict):
+                output_dict = cast(dict[str, Any], output)
+                analyses = output_dict.get("analyses")
                 if isinstance(analyses, list):
-                    return [AnalysisResult.from_dict(a) for a in analyses]
+                    return [
+                        AnalysisResult.from_dict(a)
+                        for a in analyses
+                        if isinstance(a, dict)
+                    ]
                 return []
         except Exception:
             pass
@@ -501,10 +506,11 @@ SUBMIT(scripts=scripts, count=len(scripts))
             else:
                 output = result
 
-            if isinstance(output, dict) and "scripts" in output:
-                scripts = output["scripts"]
+            if isinstance(output, dict):
+                output_dict = cast(dict[str, Any], output)
+                scripts = output_dict.get("scripts")
                 if isinstance(scripts, list):
-                    return scripts
+                    return [s for s in scripts if isinstance(s, dict)]
                 return []
         except Exception:
             pass

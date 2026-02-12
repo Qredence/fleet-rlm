@@ -10,6 +10,7 @@ guides are directions that take you through the steps required to solve a real-w
 ## Integration
 
 - **[Managing Skills](managing-skills.md)**: Use the bundled Claude skills to accelerate development.
+- **[Using with Claude Code (Skills/Agents/Teams)](using-claude-code-agents.md)**: Run workflows through packaged scaffold assets.
 - **[Using Notebooks](using-notebooks.md)**: Working with Jupyter notebooks.
 - **[Using with Claude Desktop](using-mcp-server.md)**: Connect `fleet-rlm` to Claude via MCP.
 

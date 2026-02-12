@@ -21,7 +21,7 @@ class ChatResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     ok: bool = True
-    version: str = "0.3.3"
+    version: str = "0.4.0"
 
 
 class ReadyResponse(BaseModel):

@@ -17,7 +17,7 @@ You can clone the repository for development or install it as a library.
 ```bash
 git clone https://github.com/qredence/fleet-rlm.git
 cd fleet-rlm
-uv sync --extra dev --extra interactive --extra server
+uv sync --extra dev --extra server
 ```
 
 ### Option B: Library Install (pip)

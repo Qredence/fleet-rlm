@@ -519,7 +519,7 @@ def sandbox_driver() -> None:
                 base_real + _os.sep
             ):
                 continue
-            rel_paths.append(_os.path.relpath(found_real, base_real))
+            rel_paths.append(_os.fsdecode(_os.path.relpath(found_real, base_real)))
         return rel_paths
 
     def workspace_append(path: str, content: str) -> str:

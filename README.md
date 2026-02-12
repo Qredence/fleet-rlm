@@ -84,8 +84,14 @@ uv run fleet-rlm code-chat --opentui
 Start a FastAPI server to expose RLM capabilities over HTTP.
 
 ```bash
+# Dev server with hot reload
+uv run fastapi dev src/fleet_rlm/server/main.py
+
+# Production server via CLI
 uv run fleet-rlm serve-api
 ```
+
+API docs are available at `/docs` (Swagger) and `/scalar` (Scalar).
 
 ## Features
 

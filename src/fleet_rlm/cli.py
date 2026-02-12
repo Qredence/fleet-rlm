@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import typer
 
@@ -73,16 +73,6 @@ def _handle_error(exc: Exception) -> None:
     raise typer.Exit(code=1) from exc
 
 
-def _code_chat_missing_extras_message(missing: list[str]) -> str:
-    pkg_list = ", ".join(sorted(missing))
-    return (
-        "Interactive code-chat dependencies are missing: "
-        f"{pkg_list}\n"
-        "Install them with:\n"
-        "  uv sync --extra dev --extra interactive"
-    )
-
-
 def _run_code_chat_session(
     *,
     docs_path: Path | None,
@@ -96,14 +86,8 @@ def _run_code_chat_session(
     trace_mode: str | None,
     no_stream: bool,
     stream_refresh_ms: int,
-    legacy: bool,
     opentui: bool,
-    profile: str,
 ) -> None:
-    from .interactive import check_interactive_dependencies
-    from .interactive.config import get_profile
-    from .interactive.models import SessionConfig, TraceMode
-
     # Handle OpenTUI mode
     if opentui:
         import shutil
@@ -169,70 +153,11 @@ def _run_code_chat_session(
             typer.echo(f"Error running OpenTUI: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-    dep_mode = "legacy" if legacy else "textual"
-    dep_check = check_interactive_dependencies(mode=dep_mode)
-    if not dep_check.ok:
-        typer.echo(_code_chat_missing_extras_message(dep_check.missing), err=True)
-        raise typer.Exit(code=2)
-
-    profile_cfg = get_profile(profile)
-    trace_mode_normalized: str | None = None
-    if trace_mode is not None:
-        trace_mode_normalized = trace_mode.strip().lower()
-        if trace_mode_normalized not in {"compact", "verbose", "off"}:
-            raise typer.BadParameter(
-                "--trace-mode must be one of: compact, verbose, off"
-            )
-
-    if trace is True:
-        textual_trace_mode: TraceMode = "compact"
-    elif trace is False:
-        textual_trace_mode = "off"
-    elif trace_mode_normalized is not None:
-        textual_trace_mode = cast(TraceMode, trace_mode_normalized)
-    else:
-        textual_trace_mode = "compact"
-    legacy_trace = (
-        trace
-        if trace is not None
-        else (trace_mode_normalized != "off")
-        if trace_mode_normalized is not None
-        else profile_cfg.trace
+    typer.echo(
+        "Error: OpenTUI is the only supported interactive runtime. Run with --opentui.",
+        err=True,
     )
-
-    session_cfg = SessionConfig(
-        profile_name=profile_cfg.name,
-        docs_path=str(docs_path) if docs_path else profile_cfg.docs_path,
-        secret_name=secret_name or profile_cfg.secret_name,
-        volume_name=volume_name if volume_name is not None else profile_cfg.volume_name,
-        timeout=timeout or profile_cfg.timeout,
-        react_max_iters=react_max_iters or profile_cfg.react_max_iters,
-        rlm_max_iterations=rlm_max_iterations or profile_cfg.rlm_max_iterations,
-        rlm_max_llm_calls=rlm_max_llm_calls or profile_cfg.rlm_max_llm_calls,
-        trace=legacy_trace,
-        trace_mode=textual_trace_mode,
-        stream=(not no_stream) if no_stream else profile_cfg.stream,
-        stream_refresh_ms=stream_refresh_ms,
-    )
-
-    with runners.build_react_chat_agent(
-        docs_path=Path(session_cfg.docs_path) if session_cfg.docs_path else None,
-        react_max_iters=session_cfg.react_max_iters,
-        rlm_max_iterations=session_cfg.rlm_max_iterations,
-        rlm_max_llm_calls=session_cfg.rlm_max_llm_calls,
-        timeout=session_cfg.timeout,
-        secret_name=session_cfg.secret_name,
-        volume_name=session_cfg.volume_name,
-    ) as chat_agent:
-        if legacy:
-            from .interactive.legacy_session import CodeChatSession
-
-            session = CodeChatSession(agent=chat_agent, config=session_cfg)
-            session.run()
-        else:
-            from .interactive.textual_app import run_code_chat_textual_app
-
-            run_code_chat_textual_app(agent=chat_agent, config=session_cfg)
+    raise typer.Exit(code=2)
 
 
 @app.command("run-basic")
@@ -596,24 +521,15 @@ def code_chat(
         "--stream-refresh-ms",
         help="UI refresh cadence for streamed updates in milliseconds",
     ),
-    legacy: bool = typer.Option(
-        False,
-        "--legacy",
-        help="Use legacy prompt-toolkit runtime instead of Textual",
-    ),
     opentui: bool = typer.Option(
-        False,
-        "--opentui",
-        help="Use OpenTUI React frontend (requires Bun runtime)",
-    ),
-    profile: str = typer.Option(
-        "default", "--profile", help="Interactive profile name"
+        True,
+        "--opentui/--no-opentui",
+        help="Use OpenTUI React frontend (requires Bun runtime). Default: on.",
     ),
 ) -> None:
     """Start coding-first interactive DSPy ReAct + RLM terminal UI.
 
-    By default, uses the Textual TUI. Pass --legacy for prompt-toolkit,
-    or --opentui for the OpenTUI React frontend (requires Bun runtime).
+    Uses the OpenTUI React frontend.
 
     REPL commands:
         /exit              Exit the session
@@ -635,9 +551,7 @@ def code_chat(
             trace_mode=trace_mode,
             no_stream=no_stream,
             stream_refresh_ms=stream_refresh_ms,
-            legacy=legacy,
             opentui=opentui,
-            profile=profile,
         )
     except Exception as exc:
         _handle_error(exc)
@@ -672,18 +586,10 @@ def run_react_chat(
         "--stream-refresh-ms",
         help="UI refresh cadence for streamed updates in milliseconds",
     ),
-    legacy: bool = typer.Option(
-        False,
-        "--legacy",
-        help="Use legacy prompt-toolkit runtime instead of Textual",
-    ),
     opentui: bool = typer.Option(
-        False,
-        "--opentui",
-        help="Use OpenTUI React frontend (requires Bun runtime)",
-    ),
-    profile: str = typer.Option(
-        "default", "--profile", help="Interactive profile name"
+        True,
+        "--opentui/--no-opentui",
+        help="Use OpenTUI React frontend (requires Bun runtime). Default: on.",
     ),
 ) -> None:
     """Backward-compatible alias for `code-chat`."""
@@ -700,9 +606,7 @@ def run_react_chat(
             trace_mode=trace_mode,
             no_stream=no_stream,
             stream_refresh_ms=stream_refresh_ms,
-            legacy=legacy,
             opentui=opentui,
-            profile=profile,
         )
     except Exception as exc:
         _handle_error(exc)

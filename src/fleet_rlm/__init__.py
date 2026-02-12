@@ -21,7 +21,7 @@ Example:
     >>> rlm = dspy.RLM(signature=ExtractArchitecture, interpreter=interpreter)
 """
 
-__version__ = "0.3.3"
+__version__ = "0.4.0"
 
 from .chunking import (
     chunk_by_headers,

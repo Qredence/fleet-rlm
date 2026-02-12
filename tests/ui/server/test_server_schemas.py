@@ -22,7 +22,7 @@ def test_chat_response():
 def test_health_response():
     r = HealthResponse()
     assert r.ok is True
-    assert r.version == "0.3.3"
+    assert r.version == "0.4.0"
 
 
 def test_task_request_defaults():

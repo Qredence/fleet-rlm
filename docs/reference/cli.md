@@ -11,11 +11,11 @@ uv run fleet-rlm [COMMAND] [OPTIONS]
 ## Optional Extras
 
 ```bash
-# Interactive coding TUI
-uv sync --extra dev --extra interactive
+# Base development/runtime
+uv sync --extra dev
 
 # API + MCP server surfaces
-uv sync --extra dev --extra interactive --extra mcp --extra server
+uv sync --extra dev --extra mcp --extra server
 ```
 
 ## Commands
@@ -37,7 +37,7 @@ uv sync --extra dev --extra interactive --extra mcp --extra server
 | `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to text file<br>`--chars`: Limit input size                                     |
 | `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to text file                                                                    |
 | `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to text file<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize` |
-| `code-chat`          | Primary Textual-first interactive ReAct + RLM terminal UI.     | `--docs-path`<br>`--react-max-iters`<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--legacy`<br>`--profile` |
+| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`<br>`--react-max-iters`<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
 | `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                           |
 | `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`<br>`--react-max-iters`                                                           |
 | `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                 |
@@ -145,15 +145,7 @@ uv run fleet-rlm init --help
 ## `code-chat` Details
 
 `code-chat` is the primary interactive coding runtime for the ReAct agent.
-It launches the Textual UI by default. Use `--legacy` to force the
-prompt-toolkit fallback runtime.
-
-### Keybindings (Textual mode)
-
-- `Ctrl+C` cancel current turn only
-- `Ctrl+L` clear visible panes
-- `F2` toggle Reasoning pane visibility
-- `F3` toggle Tools pane visibility
+OpenTUI is the only supported runtime.
 
 ### Slash Commands
 
@@ -181,8 +173,8 @@ uv run fleet-rlm code-chat \
   --react-max-iters 10 \
   --trace-mode compact
 
-# Force legacy prompt-toolkit mode
-uv run fleet-rlm code-chat --legacy
+# Explicit OpenTUI mode
+uv run fleet-rlm code-chat --opentui
 
 # Alias command (kept for compatibility)
 uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt

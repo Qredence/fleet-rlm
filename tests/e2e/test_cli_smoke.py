@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
 from fleet_rlm.cli import app
-from fleet_rlm.interactive import DependencyCheck
 
 
 runner = CliRunner()
@@ -130,11 +128,10 @@ def test_init_rejects_only_mode_with_exclusion(tmp_path: Path):
 def test_run_react_chat_help():
     result = runner.invoke(app, ["run-react-chat", "--help"])
     assert result.exit_code == 0
-    assert "--profile" in result.stdout
     assert "--react-max-iters" in result.stdout
     assert "--rlm-max-iterations" in result.stdout
     assert "--rlm-max-llm-calls" in result.stdout
-    assert "--legacy" in result.stdout
+    assert "--opentui" in result.stdout
     assert "--trace-mode" in result.stdout
     assert "--stream-refresh-ms" in result.stdout
 
@@ -145,46 +142,9 @@ def test_code_chat_help():
     assert "--react-max-iters" in result.stdout
     assert "--trace" in result.stdout
     assert "--no-stream" in result.stdout
-    assert "--legacy" in result.stdout
     assert "--opentui" in result.stdout
     assert "--trace-mode" in result.stdout
     assert "--stream-refresh-ms" in result.stdout
-
-
-def test_run_react_chat_exit(monkeypatch):
-    class _FakeChatAgent:
-        def __init__(self):
-            self.history = SimpleNamespace(messages=[])
-            self.react_tools = []
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            return False
-
-        def reset(self, *, clear_sandbox_buffers=True):
-            self.history = SimpleNamespace(messages=[])
-            return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
-
-        def load_document(self, path, alias="active"):
-            return {"status": "ok", "path": path, "alias": alias}
-
-        def chat_turn(self, message):
-            self.history.messages.append(
-                {"user_request": message, "assistant_response": "stub"}
-            )
-            return {"assistant_response": "stub", "trajectory": {}}
-
-    monkeypatch.setattr(
-        "fleet_rlm.runners.build_react_chat_agent",
-        lambda **kwargs: _FakeChatAgent(),
-    )
-
-    result = runner.invoke(app, ["run-react-chat", "--legacy"], input="/exit\n")
-    assert result.exit_code == 0
-    assert "fleet-rlm code-chat" in result.stdout
-    assert "Exiting code-chat." in result.stdout
 
 
 def test_run_react_chat_aliases_to_code_chat(monkeypatch):
@@ -201,59 +161,14 @@ def test_run_react_chat_aliases_to_code_chat(monkeypatch):
     assert result.exit_code == 0
     assert len(calls) == 1
     assert calls[0]["react_max_iters"] == 3
-    assert calls[0]["legacy"] is False
+    assert calls[0]["opentui"] is True
 
 
-def test_code_chat_legacy_routes_to_prompt_toolkit(monkeypatch):
-    calls = {"legacy": 0}
-
-    class _FakeChatAgent:
-        history = SimpleNamespace(messages=[])
-        react_tools = []
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            return False
-
-    class _FakeLegacySession:
-        def __init__(self, *, agent, config):
-            self.agent = agent
-            self.config = config
-
-        def run(self):
-            calls["legacy"] += 1
-
-    monkeypatch.setattr(
-        "fleet_rlm.interactive.check_interactive_dependencies",
-        lambda **kwargs: DependencyCheck(ok=True, missing=[]),
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.runners.build_react_chat_agent",
-        lambda **kwargs: _FakeChatAgent(),
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.interactive.legacy_session.CodeChatSession",
-        _FakeLegacySession,
-    )
-
-    result = runner.invoke(app, ["code-chat", "--legacy"])
-    assert result.exit_code == 0
-    assert calls["legacy"] == 1
-
-
-def test_code_chat_missing_extras_exits_with_install_hint(monkeypatch):
-    monkeypatch.setattr(
-        "fleet_rlm.interactive.check_interactive_dependencies",
-        lambda **kwargs: DependencyCheck(ok=False, missing=["textual", "rich"]),
-    )
-
-    result = runner.invoke(app, ["code-chat"])
+def test_code_chat_no_opentui_exits_with_hint():
+    result = runner.invoke(app, ["code-chat", "--no-opentui"])
     assert result.exit_code == 2
     out = result.stdout + result.stderr
-    assert "dependencies are missing" in out
-    assert "uv sync --extra dev --extra interactive" in out
+    assert "OpenTUI is the only supported interactive runtime" in out
 
 
 def test_code_chat_opentui_missing_bun_exits_with_hint(monkeypatch):

@@ -23,6 +23,7 @@ _Problem-oriented steps for specific goals._
 - [Managing Skills](how-to-guides/managing-skills.md)
 - [Deploying the API Server](how-to-guides/deploying-server.md)
 - [Using with Claude Desktop (MCP)](how-to-guides/using-mcp-server.md)
+- [Using with Claude Code (Skills/Agents/Teams)](how-to-guides/using-claude-code-agents.md)
 
 ### 📖 [Reference](reference/index.md)
 
@@ -32,6 +33,7 @@ _Information-oriented technical descriptions._
 - [Python API](reference/python-api.md)
 - [HTTP API](reference/http-api.md)
 - [Sandbox File System](reference/sandbox-fs.md)
+- [Source Layout](reference/source-layout.md)
 
 ### 🧠 [Explanation](explanation/index.md)
 
@@ -40,6 +42,7 @@ _Understanding-oriented background and concepts._
 - [RLM Concepts](explanation/rlm-concepts.md)
 - [Architecture](explanation/architecture.md)
 - [Stateful Architecture](explanation/stateful-architecture.md)
+- [Memory Topology Notes](explanation/memory-topology.md)
 
 ## Key Features
 

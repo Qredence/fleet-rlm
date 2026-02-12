@@ -25,7 +25,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
 
     app = FastAPI(
         title="fleet-rlm",
-        version="0.3.3",
+        version="0.4.0",
         lifespan=lifespan,
     )
 

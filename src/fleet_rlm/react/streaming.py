@@ -77,7 +77,7 @@ def iter_chat_turn_stream(
 ) -> Iterable[StreamEvent]:
     """Yield typed streaming events for one chat turn (synchronous).
 
-    This is the canonical streaming surface used by the Textual runtime.
+    This is the canonical streaming surface used by interactive runtimes.
     """
     if not message or not message.strip():
         raise ValueError("message cannot be empty")

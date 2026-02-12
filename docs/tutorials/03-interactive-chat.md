@@ -16,8 +16,8 @@ uv run fleet-rlm code-chat
 
 Optional arguments:
 
-- `--legacy`: Use the simple command-line interface instead of the TUI.
-- `--model <name>`: Override the default LLM (e.g., `openai/gpt-4o`).
+- `--opentui/--no-opentui`: OpenTUI is the supported runtime (`--opentui` default).
+- `--docs-path <path>`: Preload a document into context.
 
 ## The User Interface
 

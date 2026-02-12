@@ -280,7 +280,7 @@ def build_tool_list(
         Use 'include' to filter by file extension (e.g., '*.py').
         """
         try:
-            from ripgrepy import Ripgrepy
+            from ripgrepy import Ripgrepy  # ty: ignore[unresolved-import]
         except ImportError:
             return {
                 "status": "error",
