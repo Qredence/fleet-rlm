@@ -29,10 +29,12 @@ from .chunking import (
     chunk_by_size,
     chunk_by_timestamps,
 )
-from .config import configure_planner_from_env
+from .config import configure_planner_from_env, get_planner_lm_from_env
 from .driver import sandbox_driver
 from .interpreter import ModalInterpreter
+from .commands import COMMAND_DISPATCH, execute_command
 from .react_agent import RLMReActChatAgent, RLMReActChatSignature
+from .react_tools import build_tool_list, list_react_tool_names
 from .scaffold import (
     get_scaffold_dir,
     install_agents,
@@ -65,10 +67,15 @@ from .tools import regex_extract
 __all__ = [
     "__version__",
     "configure_planner_from_env",
+    "get_planner_lm_from_env",
     "sandbox_driver",
     "ModalInterpreter",
     "RLMReActChatAgent",
     "RLMReActChatSignature",
+    "build_tool_list",
+    "list_react_tool_names",
+    "COMMAND_DISPATCH",
+    "execute_command",
     "AgentStateManager",
     "AnalysisResult",
     "CodeScript",

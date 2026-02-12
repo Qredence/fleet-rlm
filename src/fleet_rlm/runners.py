@@ -114,6 +114,7 @@ def build_react_chat_agent(
     history_max_turns: int | None = None,
     extra_tools: list | None = None,
     env_file: Path | None = None,
+    planner_lm: Any | None = None,
 ) -> RLMReActChatAgent:
     """Build an interactive DSPy ReAct chat agent for RLM workflows.
 
@@ -129,11 +130,15 @@ def build_react_chat_agent(
         history_max_turns: Optional cap for retained chat turns.
         extra_tools: Optional additional callable tools exposed to ReAct.
         env_file: Optional ``.env`` file path for planner setup.
+        planner_lm: Optional pre-configured LM. When provided, skips the
+            global ``dspy.configure()`` call, allowing the caller to use
+            ``dspy.context()`` for async-safe configuration.
 
     Returns:
         A configured ``RLMReActChatAgent`` instance.
     """
-    _require_planner_ready(env_file)
+    if planner_lm is None:
+        _require_planner_ready(env_file)
 
     agent = RLMReActChatAgent(
         react_max_iters=react_max_iters,
@@ -183,6 +188,56 @@ def run_react_chat_once(
         if not include_trajectory:
             result.pop("trajectory", None)
         return result
+
+
+async def arun_react_chat_once(
+    *,
+    message: str,
+    docs_path: Path | str | None = None,
+    react_max_iters: int = 10,
+    rlm_max_iterations: int = 30,
+    rlm_max_llm_calls: int = 50,
+    timeout: int = 900,
+    secret_name: str = "LITELLM",
+    volume_name: str | None = None,
+    verbose: bool = False,
+    include_trajectory: bool = True,
+    env_file: Path | None = None,
+    planner_lm: Any | None = None,
+) -> dict[str, Any]:
+    """Async version of ``run_react_chat_once`` using ``achat_turn``."""
+    agent = build_react_chat_agent(
+        docs_path=docs_path,
+        react_max_iters=react_max_iters,
+        rlm_max_iterations=rlm_max_iterations,
+        rlm_max_llm_calls=rlm_max_llm_calls,
+        timeout=timeout,
+        secret_name=secret_name,
+        volume_name=volume_name,
+        verbose=verbose,
+        env_file=env_file,
+        planner_lm=planner_lm,
+    )
+    try:
+        with dspy.context(lm=planner_lm) if planner_lm else _nullcontext():
+            with agent:
+                result = await agent.achat_turn(message)
+                if not include_trajectory:
+                    result.pop("trajectory", None)
+                return result
+    except Exception:
+        agent.shutdown()
+        raise
+
+
+class _nullcontext:
+    """Minimal no-op context manager (avoid importing contextlib)."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
 
 
 def run_basic(

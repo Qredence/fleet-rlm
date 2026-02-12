@@ -28,6 +28,8 @@ dependencies = [
     "typer==0.21.1",
     "mlflow>=3.8.1",
     "textual>=7.5.0",
+    "ripgrep>=15.0.0",
+    "uvicorn[standard]>=0.40.0",
 ]
 
 [project.urls]
@@ -59,7 +61,7 @@ mcp = [
     "httpx[socks]==0.28.1",
 ]
 server = [
-    "fastapi>=0.115.0",
+    "fastapi[standard]>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "scalar-fastapi>=1.5.0",
     "websockets>=14.0",
@@ -84,7 +86,7 @@ full = [
     "fastmcp==2.12.5",
     "pydantic==2.12.5",
     "httpx[socks]==0.28.1",
-    "fastapi>=0.115.0",
+    "fastapi[standard]>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "scalar-fastapi>=1.5.0",
     "websockets>=14.0",

@@ -34,7 +34,9 @@ class ChatUI:
         self.console.print(f"[bold red]{message}[/bold red]")
 
     def assistant(self, message: str) -> None:
-        self.console.print(Panel(Markdown(message), title="assistant", border_style="green"))
+        self.console.print(
+            Panel(Markdown(message), title="assistant", border_style="green")
+        )
 
     def trace(self, payload: Any) -> None:
         body = json.dumps(payload, indent=2, ensure_ascii=False, default=str)

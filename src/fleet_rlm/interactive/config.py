@@ -102,7 +102,9 @@ def update_profile(name: str, updates: dict[str, Any]) -> ProfileConfig:
     return get_profile(name)
 
 
-def resolve_api_key(*, service: str = "fleet-rlm", username: str = "DSPY_LLM_API_KEY") -> str | None:
+def resolve_api_key(
+    *, service: str = "fleet-rlm", username: str = "DSPY_LLM_API_KEY"
+) -> str | None:
     """Fetch API key from keyring when available, else return None."""
     try:
         import keyring

@@ -1,0 +1,143 @@
+/**
+ * TabPanel - tabbed view for Reasoning, Tools, and Stats panes.
+ * Polished with surface background, styled tabs, and formatted content.
+ */
+
+import { useAppContext } from "../context/AppContext";
+import { bg, border, fg, accent, semantic } from "../theme";
+
+function ReasoningPane() {
+  const { state } = useAppContext();
+  const lines = state.currentTurn.reasoningLines;
+
+  if (lines.length === 0) {
+    return (
+      <box padding={2}>
+        <text fg={fg.muted}>No reasoning steps yet.</text>
+      </box>
+    );
+  }
+
+  return (
+    <scrollbox flexGrow={1} padding={1}>
+      {lines.map((line, i) => (
+        <box key={i} paddingLeft={1} paddingRight={1} paddingTop={0} paddingBottom={0}>
+          <text fg={fg.secondary}>
+            <span fg={fg.muted}>{" ▸ "}</span>
+            {line}
+          </text>
+        </box>
+      ))}
+    </scrollbox>
+  );
+}
+
+function ToolsPane() {
+  const { state } = useAppContext();
+  const timeline = state.currentTurn.toolTimeline;
+
+  if (timeline.length === 0) {
+    return (
+      <box padding={2}>
+        <text fg={fg.muted}>No tool calls yet.</text>
+      </box>
+    );
+  }
+
+  return (
+    <scrollbox flexGrow={1} padding={1}>
+      {timeline.map((entry, i) => (
+        <box key={i} paddingLeft={1} paddingRight={1} paddingTop={0} paddingBottom={0}>
+          <text fg={fg.secondary}>
+            <span fg={semantic.success}>{" ◆ "}</span>
+            {entry}
+          </text>
+        </box>
+      ))}
+    </scrollbox>
+  );
+}
+
+function StatsPane() {
+  const { state } = useAppContext();
+  const turn = state.currentTurn;
+
+  return (
+    <box flexDirection="column" gap={1} padding={2}>
+      <text>
+        <span fg={fg.secondary}>Tokens: </span>
+        <span fg={fg.primary}>{turn.tokenCount}</span>
+      </text>
+      <text>
+        <span fg={fg.secondary}>History turns: </span>
+        <span fg={fg.primary}>{turn.historyTurns}</span>
+      </text>
+      <text>
+        <span fg={fg.secondary}>Reasoning steps: </span>
+        <span fg={fg.primary}>{turn.reasoningLines.length}</span>
+      </text>
+      <text>
+        <span fg={fg.secondary}>Tool calls: </span>
+        <span fg={fg.primary}>{turn.toolTimeline.length}</span>
+      </text>
+      <text>
+        <span fg={fg.secondary}>Status: </span>
+        <span fg={fg.primary}>{state.statusMessage}</span>
+      </text>
+      <text>
+        <span fg={fg.secondary}>Connection: </span>
+        <span fg={state.connectionState === "connected" ? semantic.success : fg.secondary}>
+          {state.connectionState}
+        </span>
+      </text>
+    </box>
+  );
+}
+
+export function TabPanel() {
+  const { state, dispatch } = useAppContext();
+  const activeTab = state.activeTab;
+
+  return (
+    <box
+      flexGrow={1}
+      flexDirection="column"
+      backgroundColor={bg.surface}
+      border
+      borderStyle="rounded"
+      borderColor={border.dim}
+      title=" Inspector "
+      titleAlignment="center"
+    >
+      {/* Tab headers */}
+      <box
+        height={1}
+        flexDirection="row"
+        paddingLeft={1}
+        paddingRight={1}
+        paddingTop={1}
+        backgroundColor={bg.highlight}
+      >
+        <tab-select
+          options={[
+            { name: "Reasoning", description: "Agent thinking process" },
+            { name: "Tools", description: "Tool calls and results" },
+            { name: "Stats", description: "Session statistics" },
+          ]}
+          onChange={(index) => {
+            const tabs = ["reasoning", "tools", "stats"] as const;
+            dispatch({ type: "SET_ACTIVE_TAB", payload: tabs[index]! });
+          }}
+          focused
+        />
+      </box>
+
+      {/* Tab content */}
+      <box flexGrow={1}>
+        {activeTab === "reasoning" && <ReasoningPane />}
+        {activeTab === "tools" && <ToolsPane />}
+        {activeTab === "stats" && <StatsPane />}
+      </box>
+    </box>
+  );
+}

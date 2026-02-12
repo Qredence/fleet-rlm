@@ -19,9 +19,11 @@ uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...
 uv run fleet-rlm --help                    # Show all CLI commands
 uv run fleet-rlm run-basic                 # Test sandbox with Fibonacci
 uv run fleet-rlm code-chat                 # Textual-first interactive ReAct + RLM chat
+uv run fleet-rlm code-chat --opentui       # OpenTUI React frontend (requires Bun)
 uv run fleet-rlm code-chat --legacy        # Prompt-toolkit fallback REPL
 uv run fleet-rlm run-react-chat            # Backward-compatible alias of code-chat
 uv run fleet-rlm serve-api                 # Optional FastAPI surface (requires --extra server)
+uv run fastapi dev src/fleet_rlm/server/main.py  # FastAPI dev server with hot reload
 uv run fleet-rlm serve-mcp                 # Optional FastMCP surface (requires --extra mcp)
 uv run fleet-rlm check-secret              # Verify Modal secrets
 uv run fleet-rlm init                      # Install skills/agents/teams/hooks to ~/.claude
@@ -81,7 +83,18 @@ src/fleet_rlm/
 ├── runners.py       # Workflow orchestrators for demos
 ├── signatures.py    # DSPy Signatures (Extract, Analyze, etc.)
 ├── chunking.py      # Text chunking strategies
-└── tools.py         # Custom tools (regex_extract, etc.)
+├── tools.py         # Custom tools (regex_extract, etc.)
+└── server/          # FastAPI server (requires --extra server)
+    ├── main.py      # App factory, lifespan, Scalar docs
+    ├── config.py    # ServerRuntimeConfig (Pydantic)
+    ├── deps.py      # Dependency injection (ServerState)
+    ├── schemas.py   # Request/response Pydantic models
+    ├── middleware.py # CORS + request-id middleware
+    └── routers/     # APIRouter modules
+        ├── health.py  # GET /health, GET /ready
+        ├── chat.py    # POST /chat
+        ├── ws.py      # WebSocket /ws/chat
+        └── tasks.py   # POST /tasks/{type}
 ```
 
 ## Code Style

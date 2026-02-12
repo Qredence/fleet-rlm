@@ -25,12 +25,12 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
 
 ### Why Use RLM with Claude Code?
 
-| Challenge | RLM Solution |
-|-----------|-------------|
-| Context window limits | Code explores data programmatically instead of loading everything |
+| Challenge                   | RLM Solution                                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Context window limits       | Code explores data programmatically instead of loading everything                                                                      |
 | Complex multi-step analysis | Sandbox code can delegate semantic work via `llm_query()` / `llm_query_batched()` (and Claude subagents can orchestrate this workflow) |
-| Reproducibility | All exploration steps are Python code — auditable and replayable |
-| Secure execution | Modal sandboxes isolate untrusted code from your environment |
+| Reproducibility             | All exploration steps are Python code — auditable and replayable                                                                       |
+| Secure execution            | Modal sandboxes isolate untrusted code from your environment                                                                           |
 
 ### Agent Architecture
 
@@ -66,6 +66,7 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
 ### Quick Start with Claude Code
 
 1. **Install scaffold assets** to your Claude configuration:
+
    ```bash
    uv run fleet-rlm init
    ```
@@ -73,13 +74,14 @@ This package provides both a comprehensive Jupyter notebook and a Typer CLI for 
    This installs skills, agents, teams, and hooks to `~/.claude/` by default.
 
 2. **Use the `rlm` skill** in Claude Code for long-context tasks:
+
    ```
    @rlm Analyze this 500KB log file and extract all error patterns
    ```
 
 3. **Use the `rlm-orchestrator` agent** for multi-step workflows:
    ```
-   @rlm-orchestrator Process these 10 documentation files, 
+   @rlm-orchestrator Process these 10 documentation files,
    extract API endpoints, and generate a summary report
    ```
 
@@ -101,6 +103,7 @@ results = llm_query_batched([
 In Claude workflows, the packaged `rlm-subcall` agent can be used as an orchestration pattern around these calls.
 
 This pattern allows you to:
+
 - **Delegate semantic analysis** to sub-LLMs while keeping orchestration logic in Python
 - **Process chunks in parallel** for large documents
 - **Accumulate results** across multiple iterations using stateful buffers
@@ -311,55 +314,99 @@ uv run fleet-rlm code-chat \
     --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
     --trace-mode compact
 
+# Use OpenTUI React frontend (requires Bun runtime)
+uv run fleet-rlm code-chat --opentui
+
 # Legacy prompt-toolkit fallback runtime
 uv run fleet-rlm code-chat --legacy
 
 # Backward-compatible alias
 uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
 
-# Optional server surfaces
+# FastAPI server (dev mode with hot reload)
+uv run fastapi dev src/fleet_rlm/server/main.py
+
+# FastAPI server (production via CLI)
 uv run fleet-rlm serve-api --port 8000
+
+# MCP server
 uv run fleet-rlm serve-mcp --transport stdio
 
 # Check Modal secrets are configured
 uv run fleet-rlm check-secret
 ```
 
-### Textual Interaction Notes
+### Interactive UI Options
 
-- Default runtime for `code-chat` / `run-react-chat` is Textual.
-- Use `--legacy` for the prompt-toolkit fallback REPL.
-- Trace modes:
-  - `--trace-mode compact` (default)
-  - `--trace-mode verbose`
-  - `--trace-mode off`
-  - `--trace` maps to `compact`, `--no-trace` maps to `off`.
-- Keybindings (Textual mode):
-  - `Ctrl+C` cancel current turn
-  - `Ctrl+L` clear visible panes
-  - `F2` toggle Reasoning pane
+The `code-chat` command supports three runtime modes:
+
+1. **Textual TUI (default)**: Full-featured terminal UI using Python Textual
+2. **OpenTUI React**: Modern TUI using OpenTUI React + Bun (use `--opentui`)
+3. **Legacy REPL**: Simple prompt-toolkit fallback (use `--legacy`)
+
+**Trace modes:**
+
+- `--trace-mode compact` (default)
+- `--trace-mode verbose`
+- `--trace-mode off`
+- `--trace` maps to `compact`, `--no-trace` maps to `off`
+
+**Keybindings (Textual & OpenTUI modes):**
+
+- `Ctrl+C` cancel current turn
+- `Ctrl+L` clear visible panes
+- `F2` toggle Reasoning pane
   - `F3` toggle Tools pane
 
 ---
 
 ## CLI Commands
 
-| Command              | Description                                  |
-| -------------------- | -------------------------------------------- |
-| `init`               | Install bundled Claude scaffold assets       |
-| `run-basic`          | Basic code generation (Fibonacci example)    |
-| `run-architecture`   | Extract DSPy architecture from documentation |
-| `run-api-endpoints`  | Extract API endpoints from documentation      |
-| `run-error-patterns` | Find and categorize error patterns in docs   |
-| `run-trajectory`     | Examine RLM execution trajectory             |
-| `run-custom-tool`    | Demo with custom regex tool                  |
-| `run-long-context`   | Analyze or summarize a long document         |
+| Command              | Description                                                |
+| -------------------- | ---------------------------------------------------------- |
+| `init`               | Install bundled Claude scaffold assets                     |
+| `run-basic`          | Basic code generation (Fibonacci example)                  |
+| `run-architecture`   | Extract DSPy architecture from documentation               |
+| `run-api-endpoints`  | Extract API endpoints from documentation                   |
+| `run-error-patterns` | Find and categorize error patterns in docs                 |
+| `run-trajectory`     | Examine RLM execution trajectory                           |
+| `run-custom-tool`    | Demo with custom regex tool                                |
+| `run-long-context`   | Analyze or summarize a long document                       |
 | `code-chat`          | Primary Textual-first interactive coding TUI for ReAct+RLM |
-| `run-react-chat`     | Backward-compatible alias of `code-chat`     |
-| `serve-api`          | Optional FastAPI/websocket service           |
-| `serve-mcp`          | Optional FastMCP service                      |
-| `check-secret`       | Verify Modal secret presence                 |
-| `check-secret-key`   | Inspect specific secret key                  |
+| `run-react-chat`     | Backward-compatible alias of `code-chat`                   |
+| `serve-api`          | FastAPI server with REST + WebSocket endpoints             |
+| `serve-mcp`          | Optional FastMCP service                                   |
+| `check-secret`       | Verify Modal secret presence                               |
+| `check-secret-key`   | Inspect specific secret key                                |
+
+---
+
+## API Server
+
+The `[server]` extra provides a FastAPI server with REST and WebSocket endpoints:
+
+```bash
+# Dev server with hot reload
+uv run fastapi dev src/fleet_rlm/server/main.py
+
+# Production server via CLI
+uv run fleet-rlm serve-api --port 8000
+```
+
+### Endpoints
+
+| Method | Path                  | Description                                 |
+| ------ | --------------------- | ------------------------------------------- |
+| GET    | `/health`             | Health check                                |
+| GET    | `/ready`              | Readiness probe (planner LM configured?)    |
+| POST   | `/chat`               | Synchronous one-shot chat                   |
+| WS     | `/ws/chat`            | Streaming WebSocket chat (OpenTUI protocol) |
+| POST   | `/tasks/basic`        | Run basic RLM task                          |
+| POST   | `/tasks/architecture` | Extract architecture from docs              |
+| POST   | `/tasks/long-context` | Long-context analysis/summarization         |
+| POST   | `/tasks/check-secret` | Verify Modal secrets                        |
+| GET    | `/docs`               | Swagger UI (FastAPI default)                |
+| GET    | `/scalar`             | Scalar API reference docs                   |
 
 ---
 
@@ -415,7 +462,20 @@ src/fleet_rlm/
 ├── interpreter.py   # ModalInterpreter implementation
 ├── runners.py       # High-level RLM demo runners
 ├── signatures.py    # DSPy signatures for RLM tasks
-└── tools.py         # Custom RLM tools
+├── tools.py         # Custom RLM tools
+├── server/          # FastAPI server package
+│   ├── __init__.py          # Re-exports create_app, ServerRuntimeConfig
+│   ├── main.py              # App factory, lifespan, Scalar docs mount
+│   ├── config.py            # ServerRuntimeConfig (Pydantic BaseModel)
+│   ├── deps.py              # ServerState singleton, Depends helpers
+│   ├── schemas.py           # Pydantic request/response models
+│   ├── middleware.py        # CORS + request-id middleware
+│   └── routers/
+│       ├── health.py        # GET /health, GET /ready
+│       ├── chat.py          # POST /chat
+│       ├── ws.py            # WebSocket /ws/chat
+│       └── tasks.py         # POST /tasks/{type}
+└── _scaffold/       # Bundled skills/agents for fleet-rlm init
 ```
 
 ### Module Descriptions
@@ -427,6 +487,12 @@ src/fleet_rlm/
 - **`runners.py`**: High-level functions orchestrating complete RLM workflows
 - **`signatures.py`**: RLM task signatures (ExtractArchitecture, ExtractAPIEndpoints, etc.)
 - **`tools.py`**: Custom tools like `regex_extract()` for RLM use
+- **`server/main.py`**: FastAPI app factory with async lifespan, router registration, and Scalar API docs
+- **`server/config.py`**: `ServerRuntimeConfig` Pydantic model for runtime settings (secret name, timeouts, iteration limits)
+- **`server/deps.py`**: `ServerState` singleton and FastAPI `Depends` helpers for dependency injection
+- **`server/schemas.py`**: Pydantic request/response models (`ChatRequest`, `ChatResponse`, `TaskRequest`, `WSMessage`, etc.)
+- **`server/middleware.py`**: CORS (permissive) and `X-Request-ID` header middleware
+- **`server/routers/`**: Endpoint modules — health checks, sync chat, WebSocket streaming, and task runner endpoints
 
 ---
 

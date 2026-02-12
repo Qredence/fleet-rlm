@@ -22,7 +22,11 @@ import queue
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+    TimeoutError as FutureTimeoutError,
+)
 from typing import Any, Callable, Iterator, Sequence
 
 import dspy

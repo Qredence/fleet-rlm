@@ -97,11 +97,77 @@ def _run_code_chat_session(
     no_stream: bool,
     stream_refresh_ms: int,
     legacy: bool,
+    opentui: bool,
     profile: str,
 ) -> None:
     from .interactive import check_interactive_dependencies
     from .interactive.config import get_profile
     from .interactive.models import SessionConfig, TraceMode
+
+    # Handle OpenTUI mode
+    if opentui:
+        import shutil
+        import subprocess
+        from pathlib import Path as StdPath
+
+        # Check for Bun availability
+        bun_path = shutil.which("bun")
+        if not bun_path:
+            typer.echo(
+                "Error: Bun runtime not found. Install from https://bun.sh",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+        # Locate tui/ directory relative to package root
+        package_root = StdPath(__file__).parent.parent.parent
+        tui_dir = package_root / "tui"
+        tui_entry = tui_dir / "src" / "index.tsx"
+
+        if not tui_entry.exists():
+            typer.echo(
+                f"Error: OpenTUI frontend not found at {tui_entry}",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+        # Verify backend server is running
+        import urllib.request
+
+        server_url = "http://localhost:8000/health"
+        try:
+            with urllib.request.urlopen(server_url, timeout=2) as response:
+                if response.status != 200:
+                    raise Exception("Server not healthy")
+        except Exception:
+            typer.echo(
+                "Error: Backend server not running. Start it first with:",
+                err=True,
+            )
+            typer.echo("  uv run fleet-rlm serve-api", err=True)
+            raise typer.Exit(code=2)
+
+        # Build environment for subprocess
+        env = {"WS_URL": "ws://localhost:8000/ws/chat"}
+
+        try:
+            # Spawn Bun subprocess
+            typer.echo(f"Starting OpenTUI frontend from {tui_dir}...")
+            import os
+
+            result = subprocess.run(
+                [bun_path, "run", str(tui_entry)],
+                cwd=str(tui_dir),
+                env={**os.environ, **env},
+                check=False,
+            )
+            raise typer.Exit(code=result.returncode)
+        except KeyboardInterrupt:
+            typer.echo("\nOpenTUI session interrupted.", err=True)
+            raise typer.Exit(code=130)
+        except Exception as exc:
+            typer.echo(f"Error running OpenTUI: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
 
     dep_mode = "legacy" if legacy else "textual"
     dep_check = check_interactive_dependencies(mode=dep_mode)
@@ -535,9 +601,19 @@ def code_chat(
         "--legacy",
         help="Use legacy prompt-toolkit runtime instead of Textual",
     ),
-    profile: str = typer.Option("default", "--profile", help="Interactive profile name"),
+    opentui: bool = typer.Option(
+        False,
+        "--opentui",
+        help="Use OpenTUI React frontend (requires Bun runtime)",
+    ),
+    profile: str = typer.Option(
+        "default", "--profile", help="Interactive profile name"
+    ),
 ) -> None:
     """Start coding-first interactive DSPy ReAct + RLM terminal UI.
+
+    By default, uses the Textual TUI. Pass --legacy for prompt-toolkit,
+    or --opentui for the OpenTUI React frontend (requires Bun runtime).
 
     REPL commands:
         /exit              Exit the session
@@ -560,6 +636,7 @@ def code_chat(
             no_stream=no_stream,
             stream_refresh_ms=stream_refresh_ms,
             legacy=legacy,
+            opentui=opentui,
             profile=profile,
         )
     except Exception as exc:
@@ -600,7 +677,14 @@ def run_react_chat(
         "--legacy",
         help="Use legacy prompt-toolkit runtime instead of Textual",
     ),
-    profile: str = typer.Option("default", "--profile", help="Interactive profile name"),
+    opentui: bool = typer.Option(
+        False,
+        "--opentui",
+        help="Use OpenTUI React frontend (requires Bun runtime)",
+    ),
+    profile: str = typer.Option(
+        "default", "--profile", help="Interactive profile name"
+    ),
 ) -> None:
     """Backward-compatible alias for `code-chat`."""
     try:
@@ -617,6 +701,7 @@ def run_react_chat(
             no_stream=no_stream,
             stream_refresh_ms=stream_refresh_ms,
             legacy=legacy,
+            opentui=opentui,
             profile=profile,
         )
     except Exception as exc:
@@ -638,11 +723,7 @@ def serve_api(
 ) -> None:
     """Run optional FastAPI server surface (requires `--extra server`)."""
     try:
-        missing = [
-            pkg
-            for pkg in ("fastapi", "uvicorn")
-            if find_spec(pkg) is None
-        ]
+        missing = [pkg for pkg in ("fastapi", "uvicorn") if find_spec(pkg) is None]
         if missing:
             typer.echo(
                 "Server dependencies missing: "
@@ -654,7 +735,8 @@ def serve_api(
 
         import uvicorn
 
-        from .server.app import ServerRuntimeConfig, create_app
+        from .server.config import ServerRuntimeConfig
+        from .server.main import create_app
 
         app_obj = create_app(
             config=ServerRuntimeConfig(
@@ -690,11 +772,7 @@ def serve_mcp(
 ) -> None:
     """Run optional FastMCP server surface (requires `--extra mcp`)."""
     try:
-        missing = [
-            pkg
-            for pkg in ("fastmcp",)
-            if find_spec(pkg) is None
-        ]
+        missing = [pkg for pkg in ("fastmcp",) if find_spec(pkg) is None]
         if missing:
             typer.echo(
                 "MCP dependencies missing: "
@@ -723,7 +801,9 @@ def serve_mcp(
         elif transport_norm in {"sse", "streamable-http"}:
             server.run(transport=transport_norm, host=host, port=port)
         else:
-            typer.echo("transport must be one of: stdio, sse, streamable-http", err=True)
+            typer.echo(
+                "transport must be one of: stdio, sse, streamable-http", err=True
+            )
             raise typer.Exit(code=2)
     except Exception as exc:
         _handle_error(exc)

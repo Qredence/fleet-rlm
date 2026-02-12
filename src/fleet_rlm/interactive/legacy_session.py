@@ -69,7 +69,10 @@ class CodeChatSession:
             with open(self.transcript_path, "a", encoding="utf-8") as f:
                 f.write(event.model_dump_json(ensure_ascii=False) + "\n")
 
-    @retry(wait=wait_exponential(multiplier=0.5, min=0.5, max=3), stop=stop_after_attempt(3))
+    @retry(
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=3),
+        stop=stop_after_attempt(3),
+    )
     def _chat_once(self, message: str) -> dict[str, Any]:
         if self.stream:
             return self.agent.chat_turn_stream(message=message, trace=self.trace)
@@ -146,7 +149,9 @@ class CodeChatSession:
             self.ui.data("reset", self.agent.reset(clear_sandbox_buffers=True))
             return False
         if cmd == "tools":
-            tool_names = [getattr(tool, "__name__", str(tool)) for tool in self.agent.react_tools]
+            tool_names = [
+                getattr(tool, "__name__", str(tool)) for tool in self.agent.react_tools
+            ]
             self.ui.data("tools", {"tools": tool_names})
             return False
         if cmd == "load":
@@ -204,14 +209,18 @@ class CodeChatSession:
             if len(args) != 2:
                 self.ui.error("Usage: /save-buffer <name> <path>")
                 return False
-            self.ui.data("save-buffer", self.agent.save_buffer_to_volume(args[0], args[1]))
+            self.ui.data(
+                "save-buffer", self.agent.save_buffer_to_volume(args[0], args[1])
+            )
             return False
         if cmd == "load-volume":
             if len(args) < 1:
                 self.ui.error("Usage: /load-volume <path> [alias]")
                 return False
             alias = args[1] if len(args) > 1 else "active"
-            self.ui.data("load-volume", self.agent.load_text_from_volume(args[0], alias=alias))
+            self.ui.data(
+                "load-volume", self.agent.load_text_from_volume(args[0], alias=alias)
+            )
             return False
 
         self.ui.error(f"Unknown command: /{cmd}. Type /help.")

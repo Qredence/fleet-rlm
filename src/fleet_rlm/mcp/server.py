@@ -25,7 +25,9 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
     server = FastMCP(name="fleet-rlm")
 
     @server.tool
-    def chat_turn(message: str, docs_path: str | None = None, trace: bool = False) -> dict:
+    def chat_turn(
+        message: str, docs_path: str | None = None, trace: bool = False
+    ) -> dict:
         return runners.run_react_chat_once(
             message=message,
             docs_path=docs_path,

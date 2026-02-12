@@ -5,18 +5,21 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import shlex
 import time
 from pathlib import Path
 from typing import Any, cast
 
 from dspy.primitives.code_interpreter import FinalOutput
+from rich.markdown import Markdown as RichMarkdown  # ty: ignore[unresolved-import]
+from rich.text import Text as RichText  # ty: ignore[unresolved-import]
 from textual import work  # ty: ignore[unresolved-import]
 from textual.app import App, ComposeResult  # ty: ignore[unresolved-import]
 from textual.binding import Binding  # ty: ignore[unresolved-import]
-from textual.containers import Horizontal, Vertical  # ty: ignore[unresolved-import]
-from textual.css.query import NoMatches  # ty: ignore[unresolved-import]
-from textual.widgets import (  # ty: ignore[unresolved-import]
+from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
+from textual.widgets import (
     Footer,
     Input,
     RichLog,
@@ -56,15 +59,15 @@ class CodeChatTextualApp(App[None]):
         height: 1fr;
     }
     #transcript {
-        width: 2fr;
+        width: 7fr;
         border: tall $primary;
     }
     #right {
-        width: 2fr;
+        width: 3fr;
         border: tall $boost;
     }
     #live_stream {
-        height: 7;
+        height: 4;
         border: tall $accent;
         padding: 0 1;
     }
@@ -79,10 +82,12 @@ class CodeChatTextualApp(App[None]):
     }
     #prompt_input {
         dock: bottom;
+        height: 3;
+        border: tall $primary;
     }
     #hints {
         dock: bottom;
-        height: 1;
+        height: 2;
         color: $text-muted;
         padding: 0 1;
     }
@@ -124,7 +129,7 @@ class CodeChatTextualApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Static("", id="topbar")
         with Horizontal(id="main"):
-            yield RichLog(id="transcript", wrap=True, markup=False, auto_scroll=True)
+            yield RichLog(id="transcript", wrap=True, markup=True, auto_scroll=True)
             with Vertical(id="right"):
                 yield Static("", id="live_stream")
                 with TabbedContent(id="tabs"):
@@ -132,14 +137,14 @@ class CodeChatTextualApp(App[None]):
                         yield RichLog(
                             id="reasoning_log",
                             wrap=True,
-                            markup=False,
+                            markup=True,
                             auto_scroll=True,
                         )
                     with TabPane("Tools", id="tools-pane"):
                         yield RichLog(
                             id="tools_log",
                             wrap=True,
-                            markup=False,
+                            markup=True,
                             auto_scroll=True,
                         )
                     with TabPane("Stats", id="stats-pane"):
@@ -160,7 +165,9 @@ class CodeChatTextualApp(App[None]):
             "system",
             "fleet-rlm code-chat (Textual mode). Type /help for commands.",
         )
-        self.set_interval(max(10, self.config.stream_refresh_ms) / 1000, self._on_refresh_tick)
+        self.set_interval(
+            max(10, self.config.stream_refresh_ms) / 1000, self._on_refresh_tick
+        )
         self._update_topbar()
         self._update_stats()
 
@@ -198,7 +205,10 @@ class CodeChatTextualApp(App[None]):
         if not self._transcript_batch:
             return
         self.transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        lines = [event.model_dump_json(ensure_ascii=False) + "\n" for event in self._transcript_batch]
+        lines = [
+            event.model_dump_json(ensure_ascii=False) + "\n"
+            for event in self._transcript_batch
+        ]
         with self.transcript_path.open("a", encoding="utf-8") as handle:
             handle.writelines(lines)
         self._transcript_batch.clear()
@@ -213,17 +223,41 @@ class CodeChatTextualApp(App[None]):
             return
 
     def _write_transcript_line(self, role: str, message: str) -> None:
-        self._transcript_log.write(f"{role}> {message}")
+        """Write a styled message to the main chat transcript."""
+        if role == "user":
+            label = RichText.from_markup("[bold cyan]you>[/bold cyan] ")
+            label.append(message)
+            self._transcript_log.write(label)
+        elif role == "assistant":
+            self._transcript_log.write(
+                RichText.from_markup("[bold green]assistant>[/bold green]")
+            )
+            self._transcript_log.write(RichMarkdown(message))
+        elif role == "error":
+            label = RichText.from_markup(f"[bold red]error>[/bold red] {message}")
+            self._transcript_log.write(label)
+        elif role == "system":
+            label = RichText.from_markup(f"[dim]{role}>[/dim] {message}")
+            self._transcript_log.write(label)
+        elif role == "help":
+            label = RichText.from_markup(f"[italic]{message}[/italic]")
+            self._transcript_log.write(label)
+        else:
+            self._transcript_log.write(f"{role}> {message}")
 
     def _write_data(self, title: str, payload: Any) -> None:
+        """Write structured data to the reasoning panel (not the main chat)."""
         body = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
-        self._write_transcript_line("data", f"{title}\n{body}")
+        self._reasoning_log.write(f"--- {title} ---")
+        self._reasoning_log.write(body)
 
     def _update_topbar(self) -> None:
         model = os.getenv("DSPY_LM_MODEL", "unknown")
         state = "running" if self._in_flight else "idle"
         latency = (
-            time.monotonic() - self._turn_start if self._in_flight else self._last_turn_latency
+            time.monotonic() - self._turn_start
+            if self._in_flight
+            else self._last_turn_latency
         )
         topbar = self.query_one("#topbar", Static)
         topbar.update(
@@ -307,7 +341,9 @@ class CodeChatTextualApp(App[None]):
                         text=str(result.get("assistant_response", "")),
                         payload={
                             "trajectory": result.get("trajectory", {}),
-                            "history_turns": result.get("history_turns", len(self.agent.history.messages)),
+                            "history_turns": result.get(
+                                "history_turns", len(self.agent.history.messages)
+                            ),
                         },
                     )
                 )
@@ -319,7 +355,10 @@ class CodeChatTextualApp(App[None]):
                 trace=trace_verbose,
                 cancel_check=lambda: self._cancel_requested,
             ):
-                if stream_event.kind == "reasoning_step" and self.trace_mode != "verbose":
+                if (
+                    stream_event.kind == "reasoning_step"
+                    and self.trace_mode != "verbose"
+                ):
                     continue
                 self._event_queue.put(stream_event)
         except Exception as exc:
@@ -346,7 +385,9 @@ class CodeChatTextualApp(App[None]):
                 self._tools_log.write(event.text)
             elif event.kind == "error":
                 self._write_transcript_line("error", event.text)
-                self._queue_transcript(TranscriptEvent(role="system", content=f"error: {event.text}"))
+                self._queue_transcript(
+                    TranscriptEvent(role="system", content=f"error: {event.text}")
+                )
                 terminal_seen = True
             elif event.kind in {"final", "cancelled"}:
                 terminal_seen = True
@@ -377,22 +418,86 @@ class CodeChatTextualApp(App[None]):
             output = f"{output}{marker}".strip()
 
         if output:
-            self._live_stream.update(output)
             self._write_transcript_line("assistant", output)
             self._queue_transcript(TranscriptEvent(role="assistant", content=output))
         else:
             self._write_transcript_line("assistant", marker.strip() or "<empty>")
 
+        # Route trajectory data to reasoning/tools panels instead of main chat
         if self.trace_mode != "off" and state.trajectory:
-            self._write_data("trajectory", state.trajectory)
+            self._route_trajectory_to_panels(state.trajectory)
             self._queue_transcript(
                 TranscriptEvent(role="trace", payload={"trajectory": state.trajectory})
             )
+
+        # Clear the live stream area now that the turn is done
+        self._live_stream.update("")
 
         self._last_turn_latency = max(0.0, time.monotonic() - self._turn_start)
         self._in_flight = False
         self._cancel_requested = False
         self._turn_start = 0.0
+
+    def _route_trajectory_to_panels(self, trajectory: dict[str, Any]) -> None:
+        """Parse dspy.ReAct trajectory and route to reasoning/tools panels.
+
+        Trajectory keys follow the pattern ``{field}_{step}`` where step is
+        a zero-based integer.  Thoughts and observations go to the reasoning
+        log; tool names, args, and outputs go to the tools log.
+        """
+        # Determine how many steps exist by scanning for numbered keys
+        step_indices: set[int] = set()
+        step_pat = re.compile(
+            r"^(?:next_thought|thought|tool_name|tool_args|observation|tool_output)_(\d+)$"
+        )
+        for key in trajectory:
+            m = step_pat.match(key)
+            if m:
+                step_indices.add(int(m.group(1)))
+
+        for step in sorted(step_indices):
+            # Thoughts → reasoning panel
+            thought = trajectory.get(f"next_thought_{step}") or trajectory.get(
+                f"thought_{step}"
+            )
+            if thought:
+                self._reasoning_log.write(f"[step {step}] thought: {thought}")
+
+            # Tool calls → tools panel
+            tool_name = trajectory.get(f"tool_name_{step}")
+            tool_args = trajectory.get(f"tool_args_{step}")
+            if tool_name and tool_name != "finish":
+                args_str = (
+                    json.dumps(tool_args, ensure_ascii=False, default=str)
+                    if tool_args
+                    else "{}"
+                )
+                self._tools_log.write(f"[step {step}] call: {tool_name}({args_str})")
+
+            # Observations → reasoning panel
+            observation = trajectory.get(f"observation_{step}")
+            if observation:
+                obs_text = (
+                    observation
+                    if isinstance(observation, str)
+                    else json.dumps(observation, ensure_ascii=False, default=str)
+                )
+                # Truncate very long observations for readability
+                if len(obs_text) > 500:
+                    obs_text = obs_text[:500] + "..."
+                self._reasoning_log.write(f"[step {step}] observation: {obs_text}")
+
+            # Tool output → tools panel
+            tool_output = trajectory.get(f"tool_output_{step}")
+            if tool_output:
+                out_text = (
+                    tool_output
+                    if isinstance(tool_output, str)
+                    else json.dumps(tool_output, ensure_ascii=False, default=str)
+                )
+                if len(out_text) > 500:
+                    out_text = out_text[:500] + "..."
+                self._tools_log.write(f"[step {step}] result: {out_text}")
 
     def _handle_command(self, raw: str) -> None:
         parts = shlex.split(raw[1:])
@@ -416,7 +521,9 @@ class CodeChatTextualApp(App[None]):
             self._write_data("reset", self.agent.reset(clear_sandbox_buffers=True))
             return
         if cmd == "tools":
-            tool_names = [getattr(tool, "__name__", str(tool)) for tool in self.agent.react_tools]
+            tool_names = [
+                getattr(tool, "__name__", str(tool)) for tool in self.agent.react_tools
+            ]
             self._write_data("tools", {"tools": tool_names})
             return
         if cmd == "load":
@@ -474,16 +581,24 @@ class CodeChatTextualApp(App[None]):
             return
         if cmd == "save-buffer":
             if len(args) != 2:
-                self._write_transcript_line("error", "Usage: /save-buffer <name> <path>")
+                self._write_transcript_line(
+                    "error", "Usage: /save-buffer <name> <path>"
+                )
                 return
-            self._write_data("save-buffer", self.agent.save_buffer_to_volume(args[0], args[1]))
+            self._write_data(
+                "save-buffer", self.agent.save_buffer_to_volume(args[0], args[1])
+            )
             return
         if cmd == "load-volume":
             if len(args) < 1:
-                self._write_transcript_line("error", "Usage: /load-volume <path> [alias]")
+                self._write_transcript_line(
+                    "error", "Usage: /load-volume <path> [alias]"
+                )
                 return
             alias = args[1] if len(args) > 1 else "active"
-            self._write_data("load-volume", self.agent.load_text_from_volume(args[0], alias=alias))
+            self._write_data(
+                "load-volume", self.agent.load_text_from_volume(args[0], alias=alias)
+            )
             return
 
         self._write_transcript_line("error", f"Unknown command: /{cmd}. Type /help.")
@@ -564,7 +679,9 @@ class CodeChatTextualApp(App[None]):
         if not self._in_flight:
             return
         self._cancel_requested = True
-        self._write_transcript_line("system", "Cancellation requested for current turn.")
+        self._write_transcript_line(
+            "system", "Cancellation requested for current turn."
+        )
 
     def action_clear_panes(self) -> None:
         self._transcript_log.clear()
@@ -581,6 +698,8 @@ class CodeChatTextualApp(App[None]):
         pane.display = not pane.display
 
 
-def run_code_chat_textual_app(*, agent: RLMReActChatAgent, config: SessionConfig) -> None:
+def run_code_chat_textual_app(
+    *, agent: RLMReActChatAgent, config: SessionConfig
+) -> None:
     """Launch Textual interactive app."""
     CodeChatTextualApp(agent=agent, config=config).run()

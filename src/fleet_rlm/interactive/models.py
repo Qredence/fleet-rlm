@@ -141,7 +141,9 @@ class TurnState:
             self.final_text = final_text
             self.transcript_text = final_text
             self.trajectory = dict(event.payload.get("trajectory", {}) or {})
-            self.history_turns = int(event.payload.get("history_turns", self.history_turns))
+            self.history_turns = int(
+                event.payload.get("history_turns", self.history_turns)
+            )
             self.done = True
             return
 
@@ -151,11 +153,15 @@ class TurnState:
             cancelled_text = event.text or self.transcript_text
             self.final_text = cancelled_text
             self.transcript_text = cancelled_text
-            self.history_turns = int(event.payload.get("history_turns", self.history_turns))
+            self.history_turns = int(
+                event.payload.get("history_turns", self.history_turns)
+            )
             return
 
         if event.kind == "error":
             self.errored = True
             self.done = True
             self.error_message = event.text or "unknown error"
-            self.history_turns = int(event.payload.get("history_turns", self.history_turns))
+            self.history_turns = int(
+                event.payload.get("history_turns", self.history_turns)
+            )

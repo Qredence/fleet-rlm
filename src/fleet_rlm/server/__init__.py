@@ -1,5 +1,6 @@
 """Server integration package (optional extras required)."""
 
-from .app import ServerRuntimeConfig, create_app
+from .config import ServerRuntimeConfig
+from .main import create_app
 
 __all__ = ["ServerRuntimeConfig", "create_app"]

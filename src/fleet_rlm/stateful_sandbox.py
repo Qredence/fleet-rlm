@@ -48,9 +48,15 @@ class SandboxResult:
 class CodeGenerationSignature(dspy.Signature):
     """Generate Python code to accomplish a task."""
 
-    code_task: str = dspy.InputField(desc="Description of what the code should accomplish")
-    workspace_files: list[str] = dspy.InputField(desc="List of available files in the workspace")
-    execution_history: str = dspy.InputField(desc="Recent execution history for context")
+    code_task: str = dspy.InputField(
+        desc="Description of what the code should accomplish"
+    )
+    workspace_files: list[str] = dspy.InputField(
+        desc="List of available files in the workspace"
+    )
+    execution_history: str = dspy.InputField(
+        desc="Recent execution history for context"
+    )
 
     generated_code: str = dspy.OutputField(desc="Python code to execute in the sandbox")
     explanation: str = dspy.OutputField(desc="Brief explanation of what the code does")
@@ -159,7 +165,9 @@ print(f"Workspace ready at {self.workspace_path}")
 """
         self.interpreter.execute(code)
 
-    def execute_with_rlm(self, code_task: str, context: dict[str, Any] | None = None) -> SandboxResult:
+    def execute_with_rlm(
+        self, code_task: str, context: dict[str, Any] | None = None
+    ) -> SandboxResult:
         """Execute code using dspy.RLM for orchestration.
 
         This method:
@@ -213,7 +221,9 @@ print(f"Workspace ready at {self.workspace_path}")
             execution_start = datetime.now(timezone.utc)
             result = self.interpreter.execute(generated_code)
             execution_end = datetime.now(timezone.utc)
-            execution_time_ms = int((execution_end - execution_start).total_seconds() * 1000)
+            execution_time_ms = int(
+                (execution_end - execution_start).total_seconds() * 1000
+            )
 
             # Extract output from FinalOutput or string result
             if isinstance(result, FinalOutput):
@@ -483,9 +493,7 @@ except Exception as e:
         successful_executions = sum(1 for r in self._execution_history if r.success)
         failed_executions = total_executions - successful_executions
 
-        total_time_ms = sum(
-            (r.execution_time_ms or 0) for r in self._execution_history
-        )
+        total_time_ms = sum((r.execution_time_ms or 0) for r in self._execution_history)
 
         session_duration = datetime.now(timezone.utc) - self._session_start
 
@@ -495,9 +503,13 @@ except Exception as e:
             "total_executions": total_executions,
             "successful_executions": successful_executions,
             "failed_executions": failed_executions,
-            "success_rate": successful_executions / total_executions if total_executions > 0 else 0,
+            "success_rate": successful_executions / total_executions
+            if total_executions > 0
+            else 0,
             "total_execution_time_ms": total_time_ms,
-            "average_execution_time_ms": total_time_ms / total_executions if total_executions > 0 else 0,
+            "average_execution_time_ms": total_time_ms / total_executions
+            if total_executions > 0
+            else 0,
         }
 
     def _format_execution_history(self, limit: int = 5) -> str:

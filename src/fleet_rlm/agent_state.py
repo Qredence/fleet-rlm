@@ -254,10 +254,7 @@ SUBMIT(status="ok", workspace="{self.workspace_root}")
 
         content = json.dumps(analysis.to_dict(), indent=2, default=str)
 
-        result = self.sandbox.save_to_workspace(
-            f"analyses/{name}.json",
-            content
-        )
+        result = self.sandbox.save_to_workspace(f"analyses/{name}.json", content)
 
         if result["status"] == "ok":
             return result["path"]
@@ -313,7 +310,7 @@ SUBMIT(analyses=analyses, count=len(analyses))
 """
         try:
             result = self.sandbox.interpreter.execute(code)
-            if hasattr(result, 'output'):
+            if hasattr(result, "output"):
                 output = result.output
             else:
                 output = result
@@ -345,11 +342,13 @@ SUBMIT(analyses=analyses, count=len(analyses))
 
         if existing:
             version = existing["version"] + 1
-            previous_versions = existing.get("previous_versions", []) + [{
-                "code": existing["code"],
-                "timestamp": existing["timestamp"],
-                "version": existing["version"],
-            }]
+            previous_versions = existing.get("previous_versions", []) + [
+                {
+                    "code": existing["code"],
+                    "timestamp": existing["timestamp"],
+                    "version": existing["version"],
+                }
+            ]
             # Keep only last 5 versions
             previous_versions = previous_versions[-5:]
 
@@ -365,8 +364,7 @@ SUBMIT(analyses=analyses, count=len(analyses))
 
         # Save the script metadata
         result = self.sandbox.save_to_workspace(
-            f"scripts/{name}.json",
-            json.dumps(script.to_dict(), indent=2, default=str)
+            f"scripts/{name}.json", json.dumps(script.to_dict(), indent=2, default=str)
         )
 
         # Also save the raw code for easy execution
@@ -409,7 +407,9 @@ SUBMIT(analyses=analyses, count=len(analyses))
             return CodeScript.from_dict(meta)
         return None
 
-    def run_script(self, name: str, variables: dict[str, Any] | None = None) -> SandboxResult:
+    def run_script(
+        self, name: str, variables: dict[str, Any] | None = None
+    ) -> SandboxResult:
         """Execute a previously saved script.
 
         Args:
@@ -424,9 +424,7 @@ SUBMIT(analyses=analyses, count=len(analyses))
         script = self.read_script(name)
         if not script:
             return SandboxResult(
-                success=False,
-                output=None,
-                error=f"Script '{name}' not found"
+                success=False, output=None, error=f"Script '{name}' not found"
             )
 
         # Execute the script and classify interpreter-level failures.
@@ -449,20 +447,14 @@ SUBMIT(analyses=analyses, count=len(analyses))
 
         # Save updated metadata
         self.sandbox.save_to_workspace(
-            f"scripts/{name}.json",
-            json.dumps(script.to_dict(), indent=2, default=str)
+            f"scripts/{name}.json", json.dumps(script.to_dict(), indent=2, default=str)
         )
 
         if error_message is not None:
-            return SandboxResult(
-                success=False,
-                output=None,
-                error=error_message
-            )
+            return SandboxResult(success=False, output=None, error=error_message)
 
         return SandboxResult(
-            success=True,
-            output=result.output if hasattr(result, 'output') else result
+            success=True, output=result.output if hasattr(result, "output") else result
         )
 
     def list_scripts(self) -> list[dict[str, Any]]:
@@ -501,7 +493,7 @@ SUBMIT(scripts=scripts, count=len(scripts))
 """
         try:
             result = self.sandbox.interpreter.execute(code)
-            if hasattr(result, 'output'):
+            if hasattr(result, "output"):
                 output = result.output
             else:
                 output = result
@@ -514,10 +506,7 @@ SUBMIT(scripts=scripts, count=len(scripts))
         return []
 
     def improve_script(
-        self,
-        name: str,
-        instructions: str,
-        context: dict[str, Any] | None = None
+        self, name: str, instructions: str, context: dict[str, Any] | None = None
     ) -> str:
         """Load a script, apply improvements, and save a new version.
 
@@ -557,13 +546,15 @@ Please provide the complete improved code."""
         if result.success:
             improved_code = result.output
             if isinstance(improved_code, dict):
-                improved_code = improved_code.get("generated_code", improved_code.get("output", ""))
+                improved_code = improved_code.get(
+                    "generated_code", improved_code.get("output", "")
+                )
 
             # Save as new version
             self.write_script(
                 name=name,
                 code=improved_code,
-                description=f"{script.description} (improved: {instructions[:50]}...)"
+                description=f"{script.description} (improved: {instructions[:50]}...)",
             )
 
             return improved_code
@@ -610,8 +601,7 @@ Please provide the complete improved code."""
         }
 
         result = self.sandbox.save_to_workspace(
-            f"metadata/{export_name}",
-            json.dumps(export_data, indent=2, default=str)
+            f"metadata/{export_name}", json.dumps(export_data, indent=2, default=str)
         )
 
         if result["status"] == "ok":

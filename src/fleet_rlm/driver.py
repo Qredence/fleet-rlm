@@ -515,7 +515,9 @@ def sandbox_driver() -> None:
             if not _os.path.isfile(found):
                 continue
             found_real = _os.path.realpath(found)
-            if found_real != base_real and not found_real.startswith(base_real + _os.sep):
+            if found_real != base_real and not found_real.startswith(
+                base_real + _os.sep
+            ):
                 continue
             rel_paths.append(_os.path.relpath(found_real, base_real))
         return rel_paths
