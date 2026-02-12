@@ -239,8 +239,13 @@ def _read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
             text, meta = _extract_text_with_markitdown(path)
             if text.strip():
                 return text, meta
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "markitdown extraction failed for '%s' (suffix %s); falling back to read_text: %s",
+                path,
+                suffix,
+                exc,
+            )
 
     try:
         return path.read_text(), {
