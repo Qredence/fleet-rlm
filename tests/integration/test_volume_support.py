@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fleet_rlm.interpreter import ModalInterpreter
+from fleet_rlm.core.interpreter import ModalInterpreter
 
 
 class _FakeSandbox:

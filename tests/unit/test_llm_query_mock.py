@@ -21,7 +21,7 @@ class TestLLMQueryMock:
 
     def test_llm_query_increments_counter(self):
         """Test that llm_query increments the call counter."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         # Create interpreter with mocked sandbox
         with patch.object(ModalInterpreter, "start"):
@@ -43,7 +43,7 @@ class TestLLMQueryMock:
 
     def test_max_llm_calls_enforced(self):
         """Test that max_llm_calls limit raises RuntimeError."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -66,7 +66,7 @@ class TestLLMQueryMock:
 
     def test_llm_query_empty_prompt_raises(self):
         """Test that empty prompt raises ValueError."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -79,7 +79,7 @@ class TestLLMQueryMock:
 
     def test_llm_query_batched_increments_counter(self):
         """Test that llm_query_batched increments counter by batch size."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -96,7 +96,7 @@ class TestLLMQueryMock:
 
     def test_llm_query_batched_empty_list(self):
         """Test that empty list returns empty results."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -110,7 +110,7 @@ class TestLLMQueryMock:
 
     def test_llm_query_batched_exceeds_limit(self):
         """Test that batched calls that exceed limit raise RuntimeError."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -130,7 +130,7 @@ class TestLLMQueryMock:
 
     def test_llm_query_batched_raises_on_subquery_failure(self):
         """Any failed batched sub-query should raise RuntimeError."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         def flaky_query(prompt):
             if prompt == "bad":
@@ -151,7 +151,7 @@ class TestLLMQueryMock:
 
     def test_sub_lm_used_when_provided(self):
         """Test that sub_lm is used for queries when provided."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         mock_sub_lm = MagicMock()
         mock_sub_lm.return_value = [{"text": "sub lm response"}]
@@ -168,12 +168,12 @@ class TestLLMQueryMock:
 
     def test_default_lm_used_when_no_sub_lm(self):
         """Test that dspy.settings.lm is used when sub_lm not provided."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         mock_default_lm = MagicMock()
         mock_default_lm.return_value = [{"text": "default lm response"}]
 
-        with patch("fleet_rlm.interpreter.dspy.settings") as mock_settings:
+        with patch("fleet_rlm.core.interpreter.dspy.settings") as mock_settings:
             mock_settings.lm = mock_default_lm
 
             with patch.object(ModalInterpreter, "start"):
@@ -188,7 +188,7 @@ class TestLLMQueryMock:
 
     def test_query_sub_lm_handles_string_response(self):
         """Test _query_sub_lm handles plain string responses."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         mock_lm = MagicMock()
         mock_lm.return_value = "plain string response"
@@ -203,7 +203,7 @@ class TestLLMQueryMock:
 
     def test_query_sub_lm_handles_list_response(self):
         """Test _query_sub_lm handles list responses."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         mock_lm = MagicMock()
         mock_lm.return_value = ["item1", "item2"]
@@ -218,7 +218,7 @@ class TestLLMQueryMock:
 
     def test_query_sub_lm_handles_dict_response(self):
         """Test _query_sub_lm handles dict with 'text' key."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         mock_lm = MagicMock()
         mock_lm.return_value = [{"text": "extracted text", "other": "ignored"}]
@@ -233,7 +233,7 @@ class TestLLMQueryMock:
 
     def test_query_sub_lm_times_out_without_blocking(self):
         """Timeout should raise quickly instead of waiting for LM completion."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         def slow_lm(_prompt):
             time.sleep(0.2)
@@ -253,9 +253,9 @@ class TestLLMQueryMock:
 
     def test_query_sub_lm_raises_when_no_lm(self):
         """Test that RuntimeError is raised when no LM is configured."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
-        with patch("fleet_rlm.interpreter.dspy.settings") as mock_settings:
+        with patch("fleet_rlm.core.interpreter.dspy.settings") as mock_settings:
             mock_settings.lm = None
 
             with patch.object(ModalInterpreter, "start"):
@@ -269,7 +269,7 @@ class TestLLMQueryMock:
 
     def test_llm_query_batched_concurrent_execution(self):
         """Test that llm_query_batched executes queries concurrently."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         execution_order = []
         execution_lock = threading.Lock()
@@ -301,7 +301,7 @@ class TestLLMQueryMock:
 
     def test_thread_safe_call_counting(self):
         """Test that call counting is thread-safe with concurrent batches."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         call_times = []
         call_lock = threading.Lock()
@@ -332,7 +332,7 @@ class TestLLMQueryMock:
 
     def test_tool_names_include_llm_query(self):
         """Test that _tool_names includes built-in RLM tools."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -345,7 +345,7 @@ class TestLLMQueryMock:
 
     def test_tool_names_include_user_tools(self):
         """Test that _tool_names includes user-registered tools."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         def custom_tool():
             return "custom"
@@ -363,7 +363,7 @@ class TestLLMQueryMock:
 
     def test_start_resets_llm_call_count_for_new_session(self):
         """Fresh sandbox starts should reset per-session llm call counters."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         class _DummyStdin:
             def write(self, _value):
@@ -387,7 +387,7 @@ class TestLLMQueryMock:
 
         with patch.object(ModalInterpreter, "_resolve_app", return_value=object()):
             with patch(
-                "fleet_rlm.interpreter.modal.Sandbox.create",
+                "fleet_rlm.core.interpreter.modal.Sandbox.create",
                 return_value=_DummySandbox(),
             ):
                 interp = ModalInterpreter()
@@ -402,7 +402,7 @@ class TestCheckAndIncrement:
 
     def test_single_increment(self):
         """Test single call increment."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -416,7 +416,7 @@ class TestCheckAndIncrement:
 
     def test_batch_increment(self):
         """Test batch call increment."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -430,7 +430,7 @@ class TestCheckAndIncrement:
 
     def test_exactly_at_limit(self):
         """Test that exactly at limit doesn't raise."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -441,7 +441,7 @@ class TestCheckAndIncrement:
 
     def test_one_over_limit_raises(self):
         """Test that one over limit raises RuntimeError."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):
@@ -456,7 +456,7 @@ class TestCheckAndIncrement:
 
     def test_batch_over_limit_raises(self):
         """Test that batch over limit raises RuntimeError."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         with patch.object(ModalInterpreter, "start"):
             with patch.object(ModalInterpreter, "shutdown"):

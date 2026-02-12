@@ -13,7 +13,7 @@ import io
 import json
 import sys
 
-from fleet_rlm.driver import sandbox_driver
+from fleet_rlm.core.driver import sandbox_driver
 
 
 def _run_driver(monkeypatch, lines: list[str]) -> list[dict]:

@@ -19,7 +19,7 @@ from typing import Any
 import dspy
 from dspy.primitives.code_interpreter import FinalOutput
 
-from .interpreter import ModalInterpreter
+from .core.interpreter import ModalInterpreter
 
 
 @dataclass

@@ -28,8 +28,8 @@ from typing import Any
 import dspy
 import modal
 
-from .config import configure_planner_from_env
-from .interpreter import ModalInterpreter
+from .core.config import configure_planner_from_env
+from .core.interpreter import ModalInterpreter
 from .react_agent import RLMReActChatAgent
 from .signatures import (
     AnalyzeLongDocument,

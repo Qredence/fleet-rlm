@@ -76,7 +76,7 @@ class TestContextManager:
 
     def test_enter_calls_start(self, mock_modal):
         """__enter__ should call start() and return self."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -91,7 +91,7 @@ class TestContextManager:
 
     def test_exit_calls_shutdown(self, mock_modal):
         """__exit__ should call shutdown()."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -102,7 +102,7 @@ class TestContextManager:
 
     def test_exit_returns_false(self, mock_modal):
         """__exit__ should return False (don't suppress exceptions)."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -113,7 +113,7 @@ class TestContextManager:
 
     def test_exit_called_on_exception(self, mock_modal):
         """__exit__ should be called even when exception occurs."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -129,7 +129,7 @@ class TestContextManager:
 
     def test_context_manager_full_lifecycle(self, mock_modal):
         """Test the full with-block lifecycle."""
-        from fleet_rlm.interpreter import ModalInterpreter
+        from fleet_rlm.core.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 

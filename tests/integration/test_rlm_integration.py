@@ -44,7 +44,7 @@ def check_litellm_secret():
 @pytest.fixture
 def interpreter():
     """Fixture providing a started ModalInterpreter."""
-    from fleet_rlm.interpreter import ModalInterpreter
+    from fleet_rlm.core.interpreter import ModalInterpreter
 
     if not check_litellm_secret():
         pytest.skip("LITELLM secret not configured")
@@ -58,7 +58,7 @@ def interpreter():
 @pytest.fixture
 def interpreter_with_volume():
     """Fixture providing a ModalInterpreter with volume support."""
-    from fleet_rlm.interpreter import ModalInterpreter
+    from fleet_rlm.core.interpreter import ModalInterpreter
 
     if not check_litellm_secret():
         pytest.skip("LITELLM secret not configured")
