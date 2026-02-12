@@ -8,9 +8,11 @@ import { useAppContext } from "../context/AppContext";
 import { bg, border, fg, accent, semantic } from "../theme";
 import type { TranscriptEvent } from "../types/protocol";
 import { Spinner } from "./Spinner";
+import { parseMarkdown, hasMarkdown } from "../utils/markdown";
 
 function MessageBubble({ event }: { event: TranscriptEvent }) {
   const isError = event.role === "system" && event.content.startsWith("Error:");
+  const hasMd = event.role === "assistant" && hasMarkdown(event.content);
 
   if (event.role === "user") {
     return (
@@ -38,11 +40,20 @@ function MessageBubble({ event }: { event: TranscriptEvent }) {
         paddingBottom={1}
         paddingLeft={2}
         paddingRight={2}
+        flexDirection="column"
       >
         <text>
           <span fg={fg.muted}>{" ◆ "}</span>
-          <span fg={fg.primary}>{event.content}</span>
         </text>
+        {hasMd ? (
+          <box paddingLeft={3} flexDirection="column">
+            {parseMarkdown({ content: event.content, baseColor: fg.primary, accentColor: accent.base })}
+          </box>
+        ) : (
+          <text paddingLeft={3}>
+            <span fg={fg.primary}>{event.content}</span>
+          </text>
+        )}
       </box>
     );
   }

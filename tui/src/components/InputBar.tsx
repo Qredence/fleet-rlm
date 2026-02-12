@@ -6,7 +6,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useAppContext } from "../context/AppContext";
-import { bg, fg, accent } from "../theme";
+import { bg, fg, accent, semantic } from "../theme";
 import { loadHistory, addToHistory } from "../hooks/useCommandHistory";
 
 interface InputBarProps {
@@ -20,10 +20,18 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isNavigatingHistory, setIsNavigatingHistory] = useState(false);
+  const [showError, setShowError] = useState(false);
 
   useEffect(() => {
     loadHistory().then(setHistory).catch(() => setHistory([]));
   }, []);
+
+  useEffect(() => {
+    if (showError) {
+      const timer = setTimeout(() => setShowError(false), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [showError]);
 
   const handleChange = useCallback((newValue: string) => {
     setValue(newValue);
@@ -33,7 +41,12 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
   const handleInputSubmit = useCallback(
     async (submittedValue: string) => {
       const trimmed = submittedValue.trim();
-      if (!trimmed || state.isProcessing) return;
+      if (!trimmed) {
+        setShowError(true);
+        return;
+      }
+
+      if (state.isProcessing) return;
 
       if (trimmed.startsWith("/")) {
         const spaceIdx = trimmed.indexOf(" ");
@@ -85,6 +98,9 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
   });
 
   const isDisabled = state.isProcessing;
+  const promptColor = showError ? semantic.error : isDisabled ? fg.muted : accent.base;
+  const promptText = showError ? "! " : "> ";
+
   const placeholder = isDisabled
     ? "Processing..."
     : state.connectionState !== "connected"
@@ -101,7 +117,7 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
       paddingRight={2}
       flexDirection="row"
     >
-      <text fg={isDisabled ? fg.muted : accent.base}>{"> "}</text>
+      <text fg={promptColor}>{promptText}</text>
       <box flexGrow={1}>
         <input
           value={value}
@@ -114,6 +130,11 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
           cursorColor={accent.base}
         />
       </box>
+      {history.length > 0 && (
+        <text fg={fg.muted} paddingLeft={1}>
+          ⬆{history.length}
+        </text>
+      )}
     </box>
   );
 }

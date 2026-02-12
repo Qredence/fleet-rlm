@@ -5,6 +5,7 @@
 
 import { useAppContext } from "../context/AppContext";
 import { bg, border, fg, accent, semantic } from "../theme";
+import { useKeyboard } from "@opentui/react";
 
 function ReasoningPane() {
   const { state } = useAppContext();
@@ -94,9 +95,33 @@ function StatsPane() {
   );
 }
 
+const TABS = ["reasoning", "tools", "stats"] as const;
+const TAB_NAMES = ["Reasoning", "Tools", "Stats"];
+
 export function TabPanel() {
   const { state, dispatch } = useAppContext();
   const activeTab = state.activeTab;
+  const activeIndex = TABS.indexOf(activeTab);
+
+  useKeyboard((key) => {
+    if (key.ctrl && key.name === "1") {
+      dispatch({ type: "SET_ACTIVE_TAB", payload: "reasoning" });
+    }
+    if (key.ctrl && key.name === "2") {
+      dispatch({ type: "SET_ACTIVE_TAB", payload: "tools" });
+    }
+    if (key.ctrl && key.name === "3") {
+      dispatch({ type: "SET_ACTIVE_TAB", payload: "stats" });
+    }
+    if (key.name === "tab" || key.name === "right") {
+      const nextIndex = (activeIndex + 1) % TABS.length;
+      dispatch({ type: "SET_ACTIVE_TAB", payload: TABS[nextIndex]! });
+    }
+    if ((key.name === "tab" && key.shift) || key.name === "left") {
+      const prevIndex = (activeIndex - 1 + TABS.length) % TABS.length;
+      dispatch({ type: "SET_ACTIVE_TAB", payload: TABS[prevIndex]! });
+    }
+  });
 
   return (
     <box
@@ -120,13 +145,12 @@ export function TabPanel() {
       >
         <tab-select
           options={[
-            { name: "Reasoning", description: "Agent thinking process" },
-            { name: "Tools", description: "Tool calls and results" },
-            { name: "Stats", description: "Session statistics" },
+            { name: "Reasoning", description: "Agent thinking process (Ctrl+1)" },
+            { name: "Tools", description: "Tool calls and results (Ctrl+2)" },
+            { name: "Stats", description: "Session statistics (Ctrl+3)" },
           ]}
           onChange={(index) => {
-            const tabs = ["reasoning", "tools", "stats"] as const;
-            dispatch({ type: "SET_ACTIVE_TAB", payload: tabs[index]! });
+            dispatch({ type: "SET_ACTIVE_TAB", payload: TABS[index]! });
           }}
           focused
         />
