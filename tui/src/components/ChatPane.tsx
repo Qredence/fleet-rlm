@@ -3,11 +3,15 @@
  * Surface background, role badges, and styled message bubbles.
  */
 
+import { useRef, useEffect } from "react";
 import { useAppContext } from "../context/AppContext";
 import { bg, border, fg, accent, semantic } from "../theme";
 import type { TranscriptEvent } from "../types/protocol";
+import { Spinner } from "./Spinner";
 
 function MessageBubble({ event }: { event: TranscriptEvent }) {
+  const isError = event.role === "system" && event.content.startsWith("Error:");
+
   if (event.role === "user") {
     return (
       <box
@@ -52,7 +56,7 @@ function MessageBubble({ event }: { event: TranscriptEvent }) {
         paddingLeft={2}
         paddingRight={2}
       >
-        <text fg={fg.secondary}>{event.content}</text>
+        <text fg={isError ? semantic.error : fg.secondary}>{event.content}</text>
       </box>
     );
   }
@@ -79,13 +83,19 @@ function MessageBubble({ event }: { event: TranscriptEvent }) {
 
 export function ChatPane() {
   const { state } = useAppContext();
+  const scrollRef = useRef<any>(null);
+  const prevMessageCount = useRef(0);
 
   const messages: TranscriptEvent[] = [...state.transcript];
 
-  if (state.isProcessing && state.currentTurn.transcriptText) {
+  const isProcessing = state.isProcessing;
+  const hasNewMessage = messages.length > prevMessageCount.current;
+  prevMessageCount.current = messages.length;
+
+  if (isProcessing && state.currentTurn.transcriptText) {
     messages.push({
       role: "assistant",
-      content: state.currentTurn.transcriptText + "▊",
+      content: state.currentTurn.transcriptText,
     });
   }
 
@@ -95,6 +105,12 @@ export function ChatPane() {
       content: `Error: ${state.currentTurn.errorMessage}`,
     });
   }
+
+  useEffect(() => {
+    if (hasNewMessage && scrollRef.current?.scrollToBottom) {
+      scrollRef.current.scrollToBottom();
+    }
+  }, [messages.length, hasNewMessage]);
 
   if (messages.length === 0) {
     return (
@@ -125,6 +141,7 @@ export function ChatPane() {
       titleAlignment="center"
     >
       <scrollbox
+        ref={scrollRef}
         flexGrow={1}
         focused
         padding={1}
@@ -132,6 +149,11 @@ export function ChatPane() {
         {messages.map((event, i) => (
           <MessageBubble key={i} event={event} />
         ))}
+        {isProcessing && (
+          <box paddingTop={1} paddingBottom={1} paddingLeft={2}>
+            <Spinner name="dots" interval={80} color={accent.base} />
+          </box>
+        )}
       </scrollbox>
     </box>
   );
