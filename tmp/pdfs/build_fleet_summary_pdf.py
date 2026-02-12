@@ -2,8 +2,9 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
+import os
 
-OUT_PATH = "output/pdf/fleet-rlm-app-summary.pdf"
+OUT_PATH = os.getenv("FLEET_SUMMARY_PDF_PATH", "fleet-rlm-app-summary.pdf")
 
 PAGE_W, PAGE_H = letter
 MARGIN = 0.65 * inch

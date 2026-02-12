@@ -241,8 +241,9 @@ def _read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
                 return text, meta
         except Exception as exc:
             logger.warning(
-                "MarkItDown extraction failed for '%s': %s. Falling back to read_text().",
+                "markitdown extraction failed for '%s' (suffix %s); falling back to read_text: %s",
                 path,
+                suffix,
                 exc,
             )
 
