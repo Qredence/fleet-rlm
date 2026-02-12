@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from typer.testing import CliRunner
 
@@ -8,6 +9,16 @@ from fleet_rlm.cli import app
 
 
 runner = CliRunner()
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _normalized_help_text(text: str) -> str:
+    cleaned = _ANSI_RE.sub("", text)
+    for dash in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212"):
+        cleaned = cleaned.replace(dash, "-")
+    return cleaned
 
 
 def test_cli_help_lists_subcommands():
@@ -128,23 +139,25 @@ def test_init_rejects_only_mode_with_exclusion(tmp_path: Path):
 def test_run_react_chat_help():
     result = runner.invoke(app, ["run-react-chat", "--help"])
     assert result.exit_code == 0
-    assert "--react-max-iters" in result.stdout
-    assert "--rlm-max-iterations" in result.stdout
-    assert "--rlm-max-llm-calls" in result.stdout
-    assert "--opentui" in result.stdout
-    assert "--trace-mode" in result.stdout
-    assert "--stream-refresh-ms" in result.stdout
+    help_text = _normalized_help_text(result.stdout)
+    assert "--react-max-iters" in help_text
+    assert "--rlm-max-iterations" in help_text
+    assert "--rlm-max-llm-calls" in help_text
+    assert "--opentui" in help_text
+    assert "--trace-mode" in help_text
+    assert "--stream-refresh-ms" in help_text
 
 
 def test_code_chat_help():
     result = runner.invoke(app, ["code-chat", "--help"])
     assert result.exit_code == 0
-    assert "--react-max-iters" in result.stdout
-    assert "--trace" in result.stdout
-    assert "--no-stream" in result.stdout
-    assert "--opentui" in result.stdout
-    assert "--trace-mode" in result.stdout
-    assert "--stream-refresh-ms" in result.stdout
+    help_text = _normalized_help_text(result.stdout)
+    assert "--react-max-iters" in help_text
+    assert "--trace" in help_text
+    assert "--no-stream" in help_text
+    assert "--opentui" in help_text
+    assert "--trace-mode" in help_text
+    assert "--stream-refresh-ms" in help_text
 
 
 def test_run_react_chat_aliases_to_code_chat(monkeypatch):
