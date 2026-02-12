@@ -7,20 +7,37 @@ Coordinates query-guided selection, semantic chunking, caching, and subagent del
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import pickle
 
-try:
-    # Module/package execution path.
-    from .cache_manager import cache_result, get_cached_result
-    from .rank_chunks import load_context as load_rank_context
-    from .rank_chunks import rank_chunks_by_query
-except ImportError:
-    # Direct script execution path.
-    from cache_manager import cache_result, get_cached_result
-    from rank_chunks import load_context as load_rank_context
-    from rank_chunks import rank_chunks_by_query
+
+def _load_helpers():
+    """Load helper modules for both package and direct-script execution."""
+    if __package__:
+        cache_mod = importlib.import_module(".cache_manager", package=__package__)
+        rank_mod = importlib.import_module(".rank_chunks", package=__package__)
+    else:
+        cache_mod = importlib.import_module("cache_manager")
+        rank_mod = importlib.import_module("rank_chunks")
+
+    cache_result_fn = getattr(cache_mod, "cache_result")
+    get_cached_result_fn = getattr(cache_mod, "get_cached_result")
+    load_context_fn = getattr(rank_mod, "load_context")
+    rank_chunks_fn = getattr(rank_mod, "rank_chunks_by_query")
+
+    return (
+        cache_result_fn,
+        get_cached_result_fn,
+        load_context_fn,
+        rank_chunks_fn,
+    )
+
+
+cache_result, get_cached_result, load_rank_context, rank_chunks_by_query = (
+    _load_helpers()
+)
 
 
 class RLMConfig:

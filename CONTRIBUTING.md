@@ -48,7 +48,7 @@ cd fleet-rlm
 git remote add upstream https://github.com/qredence/fleet-rlm.git
 
 # Install dependencies
-uv sync --all-groups
+uv sync --extra dev --extra interactive
 
 # Install pre-commit hooks
 uv run pre-commit install

@@ -21,7 +21,7 @@ Example:
     >>> rlm = dspy.RLM(signature=ExtractArchitecture, interpreter=interpreter)
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from .chunking import (
     chunk_by_headers,
@@ -29,16 +29,40 @@ from .chunking import (
     chunk_by_size,
     chunk_by_timestamps,
 )
-from .config import configure_planner_from_env
-from .driver import sandbox_driver
-from .interpreter import ModalInterpreter
-from .scaffold import (
+from .core import (
+    configure_planner_from_env,
+    get_planner_lm_from_env,
+    sandbox_driver,
+    ModalInterpreter,
+)
+from .react import (
+    COMMAND_DISPATCH,
+    execute_command,
+    RLMReActChatAgent,
+    RLMReActChatSignature,
+    build_tool_list,
+    list_react_tool_names,
+)
+from .utils import (
     get_scaffold_dir,
     install_agents,
     install_all,
     install_skills,
     list_agents,
     list_skills,
+    regex_extract,
+)
+
+# Backward compatibility: expose utils modules at top level
+from .utils import scaffold  # noqa: F401
+from .utils import tools  # noqa: F401
+from .stateful import (
+    AgentStateManager,
+    AnalysisResult,
+    CodeScript,
+    ExecutionRecord,
+    SandboxResult,
+    StatefulSandboxManager,
 )
 from .signatures import (
     AnalyzeLongDocument,
@@ -49,13 +73,25 @@ from .signatures import (
     FindErrorPatterns,
     SummarizeLongDocument,
 )
-from .tools import regex_extract
 
 __all__ = [
     "__version__",
     "configure_planner_from_env",
+    "get_planner_lm_from_env",
     "sandbox_driver",
     "ModalInterpreter",
+    "RLMReActChatAgent",
+    "RLMReActChatSignature",
+    "build_tool_list",
+    "list_react_tool_names",
+    "COMMAND_DISPATCH",
+    "execute_command",
+    "AgentStateManager",
+    "AnalysisResult",
+    "CodeScript",
+    "StatefulSandboxManager",
+    "ExecutionRecord",
+    "SandboxResult",
     "ExtractArchitecture",
     "ExtractAPIEndpoints",
     "FindErrorPatterns",
