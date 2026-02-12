@@ -86,6 +86,19 @@ High-level functions that orchestrate the entire RLM workflow (Config -> Init In
 - **`check_secret_presence(secret_name: str) -> dict`**: Checks if DSPy env vars are present in a Modal secret.
 - **`check_secret_key(secret_name: str, key: str) -> dict`**: Checks if a specific env var key exists in a Modal secret.
 
+### Trajectory Defaults
+
+For `dspy.RLM`-backed runner helpers (`run_basic`, `run_architecture`, `run_api_endpoints`,
+`run_error_patterns`, `run_custom_tool`, `run_long_context`), trajectory metadata is included
+by default:
+
+- `trajectory_steps`: number of RLM steps
+- `trajectory`: raw DSPy trajectory entries
+- `final_reasoning`: included when provided by DSPy
+
+Use `include_trajectory=False` to suppress these fields when you need smaller payloads.
+`run_trajectory` remains a dedicated compact inspection helper.
+
 ### `fleet_rlm.signatures`
 
 DSPy Signatures defining the Input/Output schemas for RLM tasks.
