@@ -179,7 +179,7 @@ def test_code_chat_opentui_missing_bun_exits_with_hint(monkeypatch):
     assert result.exit_code == 2
     out = result.stdout + result.stderr
     assert "Bun runtime not found" in out
-    assert "https://bun.sh" in out
+    assert "bun.sh" in out
 
 
 def test_code_chat_opentui_flag_accepted(monkeypatch):

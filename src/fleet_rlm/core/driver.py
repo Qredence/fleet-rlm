@@ -421,7 +421,7 @@ def sandbox_driver() -> None:
             return "[no volume mounted at /data]"
         full = _os.path.join(base, path)
         _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
-        with open(full, "w") as fh:
+        with open(full, "w", encoding="utf-8") as fh:
             fh.write(content)
         return full
 
@@ -435,7 +435,7 @@ def sandbox_driver() -> None:
         full = _os.path.join("/data", path)
         if not _os.path.isfile(full):
             return f"[file not found: {full}]"
-        with open(full) as fh:
+        with open(full, encoding="utf-8") as fh:
             return fh.read()
 
     sandbox_globals["save_to_volume"] = save_to_volume
@@ -477,7 +477,7 @@ def sandbox_driver() -> None:
         if full is None:
             return "[error: invalid workspace path]"
         _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
-        with open(full, "w") as fh:
+        with open(full, "w", encoding="utf-8") as fh:
             fh.write(content)
         return full
 
@@ -495,7 +495,7 @@ def sandbox_driver() -> None:
             return "[error: invalid workspace path]"
         if not _os.path.isfile(full):
             return f"[error: file not found: {full}]"
-        with open(full) as fh:
+        with open(full, encoding="utf-8") as fh:
             return fh.read()
 
     def workspace_list(pattern: str = "*") -> list[str]:
@@ -537,7 +537,7 @@ def sandbox_driver() -> None:
         if full is None:
             return "[error: invalid workspace path]"
         _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
-        with open(full, "a") as fh:
+        with open(full, "a", encoding="utf-8") as fh:
             fh.write(content)
         return full
 

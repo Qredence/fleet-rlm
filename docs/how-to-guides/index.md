@@ -1,6 +1,6 @@
 # How-to Guides
 
-guides are directions that take you through the steps required to solve a real-world problem.
+Guides are directions that take you through the steps required to solve a real-world problem.
 
 ## Setup & Configuration
 

@@ -6,7 +6,7 @@ The `fleet-rlm` server exposes both conversational and task-oriented endpoints v
 
 ### `POST /chat`
 
-Run a single turn of the RLM ReAct loop for a generic question.
+Run a single ReAct chat turn.
 
 **Request:**
 
@@ -14,7 +14,7 @@ Run a single turn of the RLM ReAct loop for a generic question.
 {
   "message": "Calculate the factorial of 500",
   "docs_path": "/data/knowledge/math_docs.txt",
-  "history": []
+  "trace": false
 }
 ```
 
@@ -22,22 +22,27 @@ Run a single turn of the RLM ReAct loop for a generic question.
 
 ```json
 {
-  "response": "The text of the agent's answer...",
-  "trajectory": [{ "thought": "...", "action": "...", "observation": "..." }]
+  "assistant_response": "The text of the agent's answer...",
+  "trajectory": {},
+  "history_turns": 1
 }
 ```
 
 ### `WS /ws/chat`
 
-WebSocket endpoint for real-time streaming.
+WebSocket endpoint for real-time streaming and command dispatch.
 
-**Data Flow:**
+**Client -> Server message shapes:**
 
-- Client sends: `{"message": "..."}`
-- Server streams:
-  - `{"type": "thought", "data": "Planning..."}`
-  - `{"type": "observation", "data": "Result..."}`
-  - `{"type": "final", "data": "Answer"}`
+- `{"type":"message","content":"...","docs_path":null,"trace":true,"trace_mode":"compact"}`
+- `{"type":"cancel"}`
+- `{"type":"command","command":"...","args":{}}`
+
+**Server -> Client message shapes:**
+
+- Event stream: `{"type":"event","data":{"kind":"...","text":"...","payload":{},"timestamp":"...ISO8601..."}}`
+- Command result: `{"type":"command_result","command":"...","result":{}}`
+- Error: `{"type":"error","message":"..."}`
 
 ## Task Endpoints (`/tasks/{type}`)
 
@@ -58,10 +63,6 @@ Runs the Long-Context RLM strategy.
 
 - `mode`: "analyze" or "summarize" (via `task_type` in body or inferred)
 
-### `POST /tasks/check-secret`
-
-Verifies that the Modal Secret is accessible.
-
 ## Schemas
 
 ### `TaskRequest`
@@ -70,11 +71,14 @@ Common input schema for task endpoints:
 
 ```json
 {
+  "task_type": "basic",
   "question": "string",
   "query": "string (optional)",
   "docs_path": "string (optional)",
-  "max_iterations": 10,
-  "max_llm_calls": 20,
+  "max_iterations": 15,
+  "max_llm_calls": 30,
+  "timeout": 600,
+  "chars": 10000,
   "verbose": true
 }
 ```

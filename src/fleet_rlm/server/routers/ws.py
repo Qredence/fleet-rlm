@@ -20,6 +20,11 @@ router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_for_log(value: object) -> str:
+    """Normalize untrusted values to a single log line."""
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
 @router.websocket("/ws/chat")
 async def chat_streaming(websocket: WebSocket):
     """Streaming WebSocket endpoint with native DSPy async streaming.
@@ -85,10 +90,8 @@ async def chat_streaming(websocket: WebSocket):
                 message = str(payload.get("content", "")).strip()
                 docs_path = payload.get("docs_path")
                 trace = bool(payload.get("trace", True))
-                # trace_mode is extracted for potential future use; currently the backend
-                # uses trace boolean to control event emission, and trace_mode is for
-                # frontend display preferences
-                _trace_mode = payload.get("trace_mode", "compact")
+                # trace_mode is accepted for client compatibility but ignored here;
+                # backend behavior is driven by the trace boolean.
 
                 if not message:
                     await websocket.send_json(
@@ -121,7 +124,7 @@ async def chat_streaming(websocket: WebSocket):
                 except Exception as exc:
                     logger.error(
                         "Streaming error: %s",
-                        exc,
+                        _sanitize_for_log(exc),
                         exc_info=True,
                         extra={"error_type": type(exc).__name__},
                     )
@@ -172,10 +175,13 @@ async def _handle_command(
     except Exception as exc:
         logger.error(
             "Command %s failed: %s",
-            command,
-            exc,
+            _sanitize_for_log(command),
+            _sanitize_for_log(exc),
             exc_info=True,
-            extra={"command": command, "error_type": type(exc).__name__},
+            extra={
+                "command": _sanitize_for_log(command),
+                "error_type": type(exc).__name__,
+            },
         )
         await websocket.send_json(
             {

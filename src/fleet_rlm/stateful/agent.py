@@ -15,12 +15,15 @@ across local sessions, enabling truly stateful agent behavior.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, cast
 
 from .sandbox import SandboxResult, StatefulSandboxManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -326,7 +329,9 @@ SUBMIT(analyses=analyses, count=len(analyses))
                     ]
                 return []
         except Exception:
-            pass
+            logger.exception(
+                "Failed to list analyses for agent '%s' from sandbox", self.agent_name
+            )
 
         return []
 
@@ -513,7 +518,9 @@ SUBMIT(scripts=scripts, count=len(scripts))
                     return [s for s in scripts if isinstance(s, dict)]
                 return []
         except Exception:
-            pass
+            logger.exception(
+                "Failed to list scripts for agent '%s' from sandbox", self.agent_name
+            )
 
         return []
 

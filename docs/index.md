@@ -19,7 +19,7 @@ _Learning-oriented lessons to get you started._
 _Problem-oriented steps for specific goals._
 
 - [Installation](how-to-guides/installation.md)
-- [Coniguring Modal (Secrets & Volumes)](how-to-guides/configuring-modal.md)
+- [Configuring Modal (Secrets & Volumes)](how-to-guides/configuring-modal.md)
 - [Managing Skills](how-to-guides/managing-skills.md)
 - [Deploying the API Server](how-to-guides/deploying-server.md)
 - [Using with Claude Desktop (MCP)](how-to-guides/using-mcp-server.md)

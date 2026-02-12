@@ -183,6 +183,8 @@ class ModalInterpreter:
         self.llm_call_timeout = llm_call_timeout
         self._llm_call_count = 0
         self._llm_call_lock = threading.Lock()
+        self._sub_lm_executor: ThreadPoolExecutor | None = None
+        self._sub_lm_executor_lock = threading.Lock()
 
         # Metadata-only history configuration (RLM paper Section 2)
         self.summarize_stdout = summarize_stdout
@@ -495,8 +497,13 @@ class ModalInterpreter:
                 return str(item)
             return str(response)
 
-        # Use explicit shutdown(wait=False) so timeout paths don't block on executor cleanup.
-        executor = ThreadPoolExecutor(max_workers=1)
+        # Reuse a single-worker executor to avoid creating unbounded background
+        # threads when repeated calls time out.
+        with self._sub_lm_executor_lock:
+            if self._sub_lm_executor is None:
+                self._sub_lm_executor = ThreadPoolExecutor(max_workers=1)
+            executor = self._sub_lm_executor
+
         future = executor.submit(_execute_lm)
         try:
             return future.result(timeout=self.llm_call_timeout)
@@ -506,8 +513,6 @@ class ModalInterpreter:
                 f"LLM call timed out after {self.llm_call_timeout}s. "
                 "Consider increasing llm_call_timeout or checking API connectivity."
             ) from exc
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
 
     def llm_query(self, prompt: str) -> str:
         """Query a sub-LLM for semantic analysis.
@@ -562,7 +567,7 @@ class ModalInterpreter:
 
         # Adaptive ThreadPool sizing: use min of max_llm_calls and 8, or batch size
         # This prevents over-allocation for small batches and under-utilization for large ones
-        adaptive_workers = min(len(prompts), self.max_llm_calls, 8)
+        adaptive_workers = max(1, min(len(prompts), self.max_llm_calls, 8))
 
         with ThreadPoolExecutor(max_workers=adaptive_workers) as executor:
             future_to_idx = {
@@ -835,6 +840,10 @@ class ModalInterpreter:
         self._stdout_reader_thread = None
         self._stderr_iter = None
         self._volume = None
+        with self._sub_lm_executor_lock:
+            if self._sub_lm_executor is not None:
+                self._sub_lm_executor.shutdown(wait=False, cancel_futures=True)
+                self._sub_lm_executor = None
 
     def __enter__(self) -> "ModalInterpreter":
         """Start the interpreter and return it for use as a context manager.

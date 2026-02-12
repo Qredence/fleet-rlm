@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from fleet_rlm import __version__
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -21,7 +23,7 @@ class ChatResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     ok: bool = True
-    version: str = "0.4.0"
+    version: str = __version__
 
 
 class ReadyResponse(BaseModel):

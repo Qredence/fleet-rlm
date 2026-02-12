@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from fleet_rlm import __version__
 from fleet_rlm.core.config import get_planner_lm_from_env
 
 from .config import ServerRuntimeConfig
@@ -25,7 +26,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
 
     app = FastAPI(
         title="fleet-rlm",
-        version="0.4.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -46,6 +47,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
                 title=app.title,
             )
     except ImportError:
+        # Scalar docs are optional and only enabled when scalar_fastapi is installed.
         pass
 
     return app
