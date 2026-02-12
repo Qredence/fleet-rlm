@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.1] - 2026-02-12
+
+### Added
+
+- Native PDF ingestion support via MarkItDown for document-processing flows.
+- Trajectory-focused unit coverage for MCP passthrough, runner behavior, and ReAct command paths.
+
+### Changed
+
+- Set RLM trajectory metadata handling to default-on across runners, ReAct tooling, and MCP server surfaces.
+- Updated CLI and Python API docs to reflect trajectory defaults and current command behavior.
+- Hardened CI by pinning workflow Python to `3.12`.
+
+### Fixed
+
+- Improved resilience in ReAct tool handling around empty-exception code paths.
+
+### Merged Pull Requests
+
+- [#15](https://github.com/Qredence/fleet-rlm/pull/15): Align fleet-rlm trajectory handling with DSPy RLM API.
+- [#16](https://github.com/Qredence/fleet-rlm/pull/16): Enable PDF ingestion and default-on RLM trajectory metadata.
+
 ## [0.4.0] - 2026-02-12
 
 ### Breaking Changes
