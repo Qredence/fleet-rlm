@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from fleet_rlm.config import get_planner_lm_from_env
+from fleet_rlm.core.config import get_planner_lm_from_env
 
 from .config import ServerRuntimeConfig
 from .deps import server_state

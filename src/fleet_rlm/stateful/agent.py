@@ -316,7 +316,10 @@ SUBMIT(analyses=analyses, count=len(analyses))
                 output = result
 
             if isinstance(output, dict) and "analyses" in output:
-                return [AnalysisResult.from_dict(a) for a in output["analyses"]]
+                analyses = output["analyses"]
+                if isinstance(analyses, list):
+                    return [AnalysisResult.from_dict(a) for a in analyses]
+                return []
         except Exception:
             pass
 
@@ -499,7 +502,10 @@ SUBMIT(scripts=scripts, count=len(scripts))
                 output = result
 
             if isinstance(output, dict) and "scripts" in output:
-                return output["scripts"]
+                scripts = output["scripts"]
+                if isinstance(scripts, list):
+                    return scripts
+                return []
         except Exception:
             pass
 

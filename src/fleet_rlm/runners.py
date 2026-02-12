@@ -30,7 +30,7 @@ import modal
 
 from .core.config import configure_planner_from_env
 from .core.interpreter import ModalInterpreter
-from .react_agent import RLMReActChatAgent
+from .react.agent import RLMReActChatAgent
 from .signatures import (
     AnalyzeLongDocument,
     ExtractAPIEndpoints,

@@ -10,7 +10,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .react_agent import RLMReActChatAgent
+    from .agent import RLMReActChatAgent
 
 # ---------------------------------------------------------------------------
 # Dispatch table: command_name -> (tool_function_name, required_args, optional_args)
