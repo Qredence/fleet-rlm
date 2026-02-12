@@ -12,7 +12,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from fleet_rlm.react_agent import RLMReActChatAgent
+from fleet_rlm.react import RLMReActChatAgent
 
 from .config import get_profile, set_active_profile
 from .models import SessionConfig, TranscriptEvent

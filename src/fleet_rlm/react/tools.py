@@ -21,16 +21,16 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable
 import dspy
 from dspy.primitives.code_interpreter import FinalOutput
 
-from .chunking import (
+from ..chunking import (
     chunk_by_headers,
     chunk_by_json_keys,
     chunk_by_size,
     chunk_by_timestamps,
 )
-from .signatures import AnalyzeLongDocument, ExtractFromLogs, SummarizeLongDocument
+from ..signatures import AnalyzeLongDocument, ExtractFromLogs, SummarizeLongDocument
 
 if TYPE_CHECKING:
-    from .react_agent import RLMReActChatAgent
+    from .agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 

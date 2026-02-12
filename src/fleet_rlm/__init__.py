@@ -35,9 +35,14 @@ from .core import (
     sandbox_driver,
     ModalInterpreter,
 )
-from .commands import COMMAND_DISPATCH, execute_command
-from .react_agent import RLMReActChatAgent, RLMReActChatSignature
-from .react_tools import build_tool_list, list_react_tool_names
+from .react import (
+    COMMAND_DISPATCH,
+    execute_command,
+    RLMReActChatAgent,
+    RLMReActChatSignature,
+    build_tool_list,
+    list_react_tool_names,
+)
 from .scaffold import (
     get_scaffold_dir,
     install_agents,

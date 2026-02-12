@@ -12,7 +12,7 @@ import dspy
 from dspy.primitives.code_interpreter import FinalOutput
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
-from fleet_rlm.react_agent import RLMReActChatAgent, RLMReActChatSignature
+from fleet_rlm.react import RLMReActChatAgent, RLMReActChatSignature
 
 
 class _FakeInterpreter:
@@ -63,7 +63,7 @@ def _make_fake_react(records):
 def test_react_agent_constructed_with_explicit_signature_and_tools(monkeypatch):
     records = []
     monkeypatch.setattr(
-        "fleet_rlm.react_agent.dspy.ReAct",
+        "fleet_rlm.react.agent.dspy.ReAct",
         _make_fake_react(records),
     )
 
@@ -84,7 +84,7 @@ def test_react_agent_constructed_with_explicit_signature_and_tools(monkeypatch):
 
 def test_tool_registry_includes_specialized_tools_and_extra_tools(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def custom_tool(topic: str) -> dict:
         return {"topic": topic}
@@ -103,7 +103,7 @@ def test_tool_registry_includes_specialized_tools_and_extra_tools(monkeypatch):
 
 def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     fake_interpreter = _FakeInterpreter()
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
@@ -121,14 +121,14 @@ def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
 
 def test_parallel_semantic_map_uses_llm_query_batched(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     fake_interpreter = _FakeInterpreter()
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
     agent.documents["doc"] = "alpha\nbeta\ngamma"
     agent.active_alias = "doc"
     monkeypatch.setattr(
-        "fleet_rlm.react_tools.chunk_text",
+        "fleet_rlm.react.tools.chunk_text",
         lambda *args, **kwargs: ["chunk one", "chunk two"],
     )
 
@@ -143,7 +143,7 @@ def test_parallel_semantic_map_uses_llm_query_batched(monkeypatch):
 
 def test_context_manager_starts_and_stops_interpreter(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     fake_interpreter = _FakeInterpreter()
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
@@ -156,7 +156,7 @@ def test_context_manager_starts_and_stops_interpreter(monkeypatch):
 
 def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
@@ -182,7 +182,7 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     result = agent.chat_turn_stream(message="say hi", trace=False)
@@ -196,7 +196,7 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
 
 def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def _bad_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
@@ -204,7 +204,7 @@ def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _bad_streamify)
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _bad_streamify)
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     result = agent.chat_turn_stream(message="fallback please", trace=True)
@@ -215,7 +215,7 @@ def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
 
 def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
@@ -241,7 +241,7 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("hello", trace=True))
@@ -263,7 +263,7 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
 
 def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
@@ -282,7 +282,7 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
 
     checks = {"calls": 0}
 
@@ -307,7 +307,7 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
 
 def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def _bad_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
@@ -315,7 +315,7 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.streamify", _bad_streamify)
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _bad_streamify)
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("fallback now", trace=False))
@@ -328,7 +328,7 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
 def test_load_document_directory_returns_file_listing(monkeypatch, tmp_path):
     """When load_document is given a directory, return a file listing instead of crashing."""
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     # Create a test directory structure
     (tmp_path / "file1.txt").write_text("content1")
@@ -354,7 +354,7 @@ def test_load_document_directory_returns_file_listing(monkeypatch, tmp_path):
 def test_list_files_returns_glob_matches(monkeypatch, tmp_path):
     """list_files should return files matching a glob pattern."""
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     # Create test files
     (tmp_path / "test1.py").write_text("python1")
@@ -374,7 +374,7 @@ def test_list_files_returns_glob_matches(monkeypatch, tmp_path):
 def test_read_file_slice_returns_line_range(monkeypatch, tmp_path):
     """read_file_slice should return a specific range of lines with line numbers."""
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     # Create a test file with 10 lines
     test_file = tmp_path / "numbers.txt"
@@ -395,7 +395,7 @@ def test_read_file_slice_returns_line_range(monkeypatch, tmp_path):
 def test_find_files_with_ripgrep(monkeypatch, tmp_path):
     """find_files should use ripgrep to search file contents."""
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     # Create test files with searchable content
     (tmp_path / "file1.txt").write_text("hello world\ngoodbye world")
@@ -417,7 +417,7 @@ def test_find_files_with_ripgrep(monkeypatch, tmp_path):
 def test_new_tools_in_tool_registry(monkeypatch):
     """Verify that new filesystem tools are registered."""
     records = []
-    monkeypatch.setattr("fleet_rlm.react_agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     tool_names = [getattr(tool, "__name__", str(tool)) for tool in agent.react_tools]

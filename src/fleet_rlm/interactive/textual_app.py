@@ -28,7 +28,7 @@ from textual.widgets import (
     TabbedContent,
 )
 
-from fleet_rlm.react_agent import RLMReActChatAgent
+from fleet_rlm.react import RLMReActChatAgent
 
 from .config import get_profile, set_active_profile
 from .models import SessionConfig, StreamEvent, TraceMode, TranscriptEvent, TurnState

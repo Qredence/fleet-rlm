@@ -16,10 +16,10 @@ import dspy
 from dspy.streaming.messages import StatusMessage, StatusMessageProvider, StreamResponse
 from dspy.streaming.streaming_listener import StreamListener
 
-from .interactive.models import StreamEvent
+from ..interactive.models import StreamEvent
 
 if TYPE_CHECKING:
-    from .react_agent import RLMReActChatAgent
+    from .agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 
