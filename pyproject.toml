@@ -1,5 +1,5 @@
 [project]
-name = "fleet_rlm_typescript_sdk"
+name = "fleet-rlm-sdk"
 version = "0.0.1"
 description = "The official Python library for the fleet-rlm-typescript-sdk API"
 dynamic = ["readme"]

@@ -1,7 +1,7 @@
 # Fleet Rlm Typescript SDK Python API library
 
 <!-- prettier-ignore -->
-[![PyPI version](https://img.shields.io/pypi/v/fleet_rlm_typescript_sdk.svg?label=pypi%20(stable))](https://pypi.org/project/fleet_rlm_typescript_sdk/)
+[![PyPI version](https://img.shields.io/pypi/v/fleet-rlm-sdk.svg?label=pypi%20(stable))](https://pypi.org/project/fleet-rlm-sdk/)
 
 The Fleet Rlm Typescript SDK Python library provides convenient access to the Fleet Rlm Typescript SDK REST API from any Python 3.9+
 application. The library includes type definitions for all request params and response fields,
@@ -16,12 +16,9 @@ The full API of this library can be found in [api.md](api.md).
 ## Installation
 
 ```sh
-# install from the production repo
-pip install git+ssh://git@github.com/Qredence/fleet-rlm.git
+# install from PyPI
+pip install fleet-rlm-sdk
 ```
-
-> [!NOTE]
-> Once this package is [published to PyPI](https://www.stainless.com/docs/guides/publish), this will become: `pip install fleet_rlm_typescript_sdk`
 
 ## Usage
 
@@ -79,8 +76,8 @@ By default, the async client uses `httpx` for HTTP requests. However, for improv
 You can enable this by installing `aiohttp`:
 
 ```sh
-# install from the production repo
-pip install 'fleet_rlm_typescript_sdk[aiohttp] @ git+ssh://git@github.com/Qredence/fleet-rlm.git'
+# install from PyPI
+pip install fleet-rlm-sdk[aiohttp]
 ```
 
 Then you can enable it by instantiating the client with `http_client=DefaultAioHttpClient()`:
