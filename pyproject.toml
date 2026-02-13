@@ -1,91 +1,255 @@
 [project]
-name = "fleet-rlm"
-version = "0.4.1"
-description = "Recursive Language Models with DSPy + Modal for secure long-context code execution"
-readme = "README.md"
-requires-python = ">=3.10"
-license = "MIT"
-license-files = ["LICENSE", "AUTHORS.md"]
-authors = [{ name = "Qredence" }]
-keywords = ["dspy", "llm", "modal", "recursive-language-model", "rlm", "agents"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Typing :: Typed",
+name = "fleet_rlm_typescript_sdk"
+version = "0.0.1"
+description = "The official Python library for the fleet-rlm-typescript-sdk API"
+dynamic = ["readme"]
+license = "Apache-2.0"
+authors = [
+{ name = "Fleet Rlm Typescript SDK", email = "" },
 ]
+
 dependencies = [
-    "dspy==3.1.3",
-    "markitdown[all]>=0.1.0,<1",
-    "modal>=1.3.2",
-    "pypdf>=6,<7",
-    "pydantic>=2.12.5,<3",
-    "python-dotenv>=1.2.1",
-    "pyyaml>=6.0.3,<7",
-    "tomli>=2.0.0; python_version < '3.11'",
-    "typer>=0.21.1,<1",
+  "httpx>=0.23.0, <1",
+  "pydantic>=1.9.0, <3",
+  "typing-extensions>=4.10, <5",
+  "anyio>=3.5.0, <5",
+  "distro>=1.7.0, <2",
+  "sniffio",
+]
+
+requires-python = ">= 3.9"
+classifiers = [
+  "Typing :: Typed",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+  "Operating System :: POSIX",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "License :: OSI Approved :: Apache Software License"
 ]
 
 [project.urls]
-Homepage = "https://github.com/qredence/fleet-rlm"
-Repository = "https://github.com/qredence/fleet-rlm"
-Issues = "https://github.com/qredence/fleet-rlm/issues"
-Documentation = "https://fleet-rlm.readthedocs.io/"
+Homepage = "https://github.com/stainless-sdks/fleet-rlm-typescript-sdk-python"
+Repository = "https://github.com/stainless-sdks/fleet-rlm-typescript-sdk-python"
 
 [project.optional-dependencies]
-dev = [
-    "pre-commit>=3.7",
-    "pytest>=8.2",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.8",
-    "ty>=0.0.1a16",
-    "build>=1.2",
-    "twine>=5.1",
-]
-mcp = [
-    "fastmcp>=2.14.0,<3",
-    "httpx[socks]>=0.28.1,<1",
-    "pydantic>=2.12.5,<3",
-]
-server = [
-    "fastapi[standard]>=0.115,<1",
-    "pydantic>=2.12.5,<3",
-    "scalar-fastapi>=1.5.0,<2",
-    "uvicorn[standard]>=0.32,<1",
-    "websockets>=14,<16",
-]
-full = [
-    "fastmcp>=2.14.0,<3",
-    "httpx[socks]>=0.28.1,<1",
-    "pydantic>=2.12.5,<3",
-    "fastapi[standard]>=0.115,<1",
-    "uvicorn[standard]>=0.32,<1",
-    "scalar-fastapi>=1.5.0,<2",
-    "websockets>=14,<16",
+aiohttp = ["aiohttp", "httpx_aiohttp>=0.1.9"]
+
+[tool.uv]
+managed = true
+required-version = ">=0.9"
+conflicts = [
+    [
+      { group = "pydantic-v1" },
+      { group = "pydantic-v2" },
+    ],
 ]
 
-[project.scripts]
-fleet-rlm = "fleet_rlm.cli:app"
-rlm-modal = "fleet_rlm.cli:app"
+[dependency-groups]
+# version pins are in uv.lock
+dev = [
+    "pyright==1.1.399",
+    "mypy==1.17",
+    "respx",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "time-machine",
+    "dirty-equals>=0.6.0",
+    "importlib-metadata>=6.7.0",
+    "rich>=13.7.1",
+    "pytest-xdist>=3.6.1",
+]
+pydantic-v1 = [
+    "pydantic>=1.9.0,<2",
+]
+pydantic-v2 = [
+    "pydantic~=2.0 ; python_full_version < '3.14'",
+    "pydantic~=2.12 ; python_full_version >= '3.14'",
+]
 
 [build-system]
-requires = ["setuptools>=77", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling==1.26.3", "hatch-fancy-pypi-readme"]
+build-backend = "hatchling.build"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+[tool.hatch.build]
+include = [
+  "src/*"
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/fleet_rlm_typescript_sdk"]
 
-[tool.setuptools.package-data]
-"fleet_rlm._scaffold" = ["**/*.md", "**/*.py", "**/*.json"]
+[tool.hatch.build.targets.sdist]
+# Basically everything except hidden files/directories (such as .github, .devcontainers, .python-version, etc)
+include = [
+  "/*.toml",
+  "/*.json",
+  "/*.lock",
+  "/*.md",
+  "/mypy.ini",
+  "/noxfile.py",
+  "bin/*",
+  "examples/*",
+  "src/*",
+  "tests/*",
+]
+
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+# replace relative links with absolute links
+pattern = '\[(.+?)\]\(((?!https?://)\S+?)\)'
+replacement = '[\1](https://github.com/stainless-sdks/fleet-rlm-typescript-sdk-python/tree/main/\g<2>)'
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "--tb=short -n auto"
+xfail_strict = true
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+filterwarnings = [
+  "error"
+]
+
+[tool.pyright]
+# this enables practically every flag given by pyright.
+# there are a couple of flags that are still disabled by
+# default in strict mode as they are experimental and niche.
+typeCheckingMode = "strict"
+pythonVersion = "3.9"
+
+exclude = [
+    "_dev",
+    ".venv",
+    ".nox",
+    ".git",
+]
+
+reportImplicitOverride = true
+reportOverlappingOverload = false
+
+reportImportCycles = false
+reportPrivateUsage = false
+
+[tool.mypy]
+pretty = true
+show_error_codes = true
+
+# Exclude _files.py because mypy isn't smart enough to apply
+# the correct type narrowing and as this is an internal module
+# it's fine to just use Pyright.
+#
+# We also exclude our `tests` as mypy doesn't always infer
+# types correctly and Pyright will still catch any type errors.
+exclude = ['src/fleet_rlm_typescript_sdk/_files.py', '_dev/.*.py', 'tests/.*']
+
+strict_equality = true
+implicit_reexport = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+warn_return_any = true
+warn_unreachable = true
+warn_unused_configs = true
+
+# Turn these options off as it could cause conflicts
+# with the Pyright options.
+warn_unused_ignores = false
+warn_redundant_casts = false
+
+disallow_any_generics = true
+disallow_untyped_defs = true
+disallow_untyped_calls = true
+disallow_subclassing_any = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+cache_fine_grained = true
+
+# By default, mypy reports an error if you assign a value to the result
+# of a function call that doesn't return anything. We do this in our test
+# cases:
+# ```
+# result = ...
+# assert result is None
+# ```
+# Changing this codegen to make mypy happy would increase complexity
+# and would not be worth it.
+disable_error_code = "func-returns-value,overload-cannot-match"
+
+# https://github.com/python/mypy/issues/12162
+[[tool.mypy.overrides]]
+module = "black.files.*"
+ignore_errors = true
+ignore_missing_imports = true
+
+
+[tool.ruff]
+line-length = 120
+output-format = "grouped"
+target-version = "py38"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+  # isort
+  "I",
+  # bugbear rules
+  "B",
+  # remove unused imports
+  "F401",
+  # check for missing future annotations
+  "FA102",
+  # bare except statements
+  "E722",
+  # unused arguments
+  "ARG",
+  # print statements
+  "T201",
+  "T203",
+  # misuse of typing.TYPE_CHECKING
+  "TC004",
+  # import rules
+  "TID251",
+]
+ignore = [
+  # mutable defaults
+  "B006",
+]
+unfixable = [
+  # disable auto fix for print statements
+  "T201",
+  "T203",
+]
+
+extend-safe-fixes = ["FA102"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"functools.lru_cache".msg = "This function does not retain type information for the wrapped function's arguments; The `lru_cache` function from `_utils` should be used instead"
+
+[tool.ruff.lint.isort]
+length-sort = true
+length-sort-straight = true
+combine-as-imports = true
+extra-standard-library = ["typing_extensions"]
+known-first-party = ["fleet_rlm_typescript_sdk", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"bin/**.py" = ["T201", "T203"]
+"scripts/**.py" = ["T201", "T203"]
+"tests/**.py" = ["T201", "T203"]
+"examples/**.py" = ["T201", "T203"]

@@ -1,126 +1,373 @@
-# fleet-rlm
+# Fleet Rlm Typescript SDK Python API library
 
-**Secure, cloud-sandboxed Recursive Language Models (RLM) with DSPy and Modal.**
+<!-- prettier-ignore -->
+[![PyPI version](https://img.shields.io/pypi/v/fleet_rlm_typescript_sdk.svg?label=pypi%20(stable))](https://pypi.org/project/fleet_rlm_typescript_sdk/)
 
-Allow your LLMs to write code that explores massive datasets or long documents in the cloud, without downloading them locally.
+The Fleet Rlm Typescript SDK Python library provides convenient access to the Fleet Rlm Typescript SDK REST API from any Python 3.9+
+application. The library includes type definitions for all request params and response fields,
+and offers both synchronous and asynchronous clients powered by [httpx](https://github.com/encode/httpx).
 
-[Documentation](https://fleet-rlm.readthedocs.io/) | [Paper](https://arxiv.org/abs/2501.123) | [Contributing](CONTRIBUTING.md)
-
----
-
-```mermaid
-graph TD
-    User[User/Agent] -->|Question| CLI[fleet-rlm CLI]
-    CLI -->|Plan| DSPy[DSPy Planner]
-    DSPy -->|Generate Code| Modal[Modal Sandbox]
-    Modal -->|Execute safely| Cloud[Cloud Environment]
-    Cloud -->|Result| Modal
-    Modal -->|Answer| User
-
-    style Modal fill:#f9f,stroke:#333,stroke-width:2px
-    style DSPy fill:#bbf,stroke:#333,stroke-width:2px
-```
-
-## What is this?
-
-**fleet-rlm** gives your AI agent a secure "computer" in the cloud. Instead of trying to shove 10,000 pages of text into a prompt, the agent writes Python code to:
-
-1.  **Search** and filter data in a remote sandbox (Modal).
-2.  **Read** only what matters.
-3.  **Synthesize** the answer.
-
-This approach, called **Recursive Language Modeling**, mimics how humans solve research tasks: we don't memorize the library; we look things up.
-
-## Quick Start: Claude Code Integration
-
-### 1. Install & Initialize
-
-Install the package and register the RLM skills with your local Claude Code agent (`~/.claude/`).
-
-```bash
-# Install fleet-rlm
-uv pip install fleet-rlm
-
-# Install skills, agents, and prompts to ~/.claude
-uv run fleet-rlm init
-```
-
-### 2. Configure Cloud Runtime
-
-Authenticate with Modal to enable the sandboxed execution environment.
-
-```bash
-uv run modal setup
-uv run modal secret create LITELLM DSPY_LM_MODEL=openai/gpt-4o DSPY_LLM_API_KEY=sk-...
-```
-
-### 3. Use with Claude
-
-Now your Claude Code agent has "superpowers". You can ask it to perform deep research tasks that require running code.
-
-**Example Prompts:**
-
-> "Use the `rlm` skill to analyze the latest papers on linear attention mechanisms."
-> "Run the `rlm-batch` agent to parallelize data extraction for these 50 files."
-
-**Available Skills:**
-
-- `rlm` - Core recursive research capability.
-- `rlm-batch` - Parallel processing.
-- `rlm-memory` - Persistent storage.
-
-## Standalone Usage
-
-You can also run fleet-rlm directly without Claude Code:
-
-**Interactive Chat (TUI)**
-Chat with the RLM agent in your terminal using the OpenTUI interface.
-
-```bash
-uv run fleet-rlm code-chat --opentui
-```
-
-**API Server**
-Start a FastAPI server to expose RLM capabilities over HTTP.
-
-```bash
-# Dev server with hot reload
-uv run fastapi dev src/fleet_rlm/server/main.py
-
-# Production server via CLI
-uv run fleet-rlm serve-api
-```
-
-API docs are available at `/docs` (Swagger) and `/scalar` (Scalar).
-
-## Features
-
-- 🔒 **Sandboxed Execution**: Code runs in isolated Modal containers, not on your laptop.
-- 🧠 **DSPy Powered**: Uses advanced prompt engineering pipelines for reliable code generation.
-- 💬 **Interactive TUI**: Chat with the agent in your terminal (`fleet-rlm code-chat`).
-- ⚡ **Production Ready**: Includes a fastapi server and MCP integration for Claude Desktop.
+It is generated with [Stainless](https://www.stainless.com/).
 
 ## Documentation
 
-- **[Tutorials](docs/tutorials/index.md)**: Step-by-step lessons.
-- **[Installation Guide](docs/how-to-guides/installation.md)**: Detailed setup instructions.
-- **[Skills & Agents](docs/how-to-guides/managing-skills.md)**: Enhance Claude with RLM capabilities.
+The full API of this library can be found in [api.md](api.md).
+
+## Installation
+
+```sh
+# install from this staging repo
+pip install git+ssh://git@github.com/stainless-sdks/fleet-rlm-typescript-sdk-python.git
+```
+
+> [!NOTE]
+> Once this package is [published to PyPI](https://www.stainless.com/docs/guides/publish), this will become: `pip install fleet_rlm_typescript_sdk`
+
+## Usage
+
+The full API of this library can be found in [api.md](api.md).
+
+```python
+import os
+from fleet_rlm_typescript_sdk import FleetRlmTypescriptSDK
+
+client = FleetRlmTypescriptSDK(
+    api_key=os.environ.get(
+        "FLEET_RLM_TYPESCRIPT_SDK_API_KEY"
+    ),  # This is the default and can be omitted
+)
+
+response = client.health.check()
+print(response.ok)
+```
+
+While you can provide an `api_key` keyword argument,
+we recommend using [python-dotenv](https://pypi.org/project/python-dotenv/)
+to add `FLEET_RLM_TYPESCRIPT_SDK_API_KEY="My API Key"` to your `.env` file
+so that your API Key is not stored in source control.
+
+## Async usage
+
+Simply import `AsyncFleetRlmTypescriptSDK` instead of `FleetRlmTypescriptSDK` and use `await` with each API call:
+
+```python
+import os
+import asyncio
+from fleet_rlm_typescript_sdk import AsyncFleetRlmTypescriptSDK
+
+client = AsyncFleetRlmTypescriptSDK(
+    api_key=os.environ.get(
+        "FLEET_RLM_TYPESCRIPT_SDK_API_KEY"
+    ),  # This is the default and can be omitted
+)
+
+
+async def main() -> None:
+    response = await client.health.check()
+    print(response.ok)
+
+
+asyncio.run(main())
+```
+
+Functionality between the synchronous and asynchronous clients is otherwise identical.
+
+### With aiohttp
+
+By default, the async client uses `httpx` for HTTP requests. However, for improved concurrency performance you may also use `aiohttp` as the HTTP backend.
+
+You can enable this by installing `aiohttp`:
+
+```sh
+# install from this staging repo
+pip install 'fleet_rlm_typescript_sdk[aiohttp] @ git+ssh://git@github.com/stainless-sdks/fleet-rlm-typescript-sdk-python.git'
+```
+
+Then you can enable it by instantiating the client with `http_client=DefaultAioHttpClient()`:
+
+```python
+import os
+import asyncio
+from fleet_rlm_typescript_sdk import DefaultAioHttpClient
+from fleet_rlm_typescript_sdk import AsyncFleetRlmTypescriptSDK
+
+
+async def main() -> None:
+    async with AsyncFleetRlmTypescriptSDK(
+        api_key=os.environ.get(
+            "FLEET_RLM_TYPESCRIPT_SDK_API_KEY"
+        ),  # This is the default and can be omitted
+        http_client=DefaultAioHttpClient(),
+    ) as client:
+        response = await client.health.check()
+        print(response.ok)
+
+
+asyncio.run(main())
+```
+
+## Using types
+
+Nested request parameters are [TypedDicts](https://docs.python.org/3/library/typing.html#typing.TypedDict). Responses are [Pydantic models](https://docs.pydantic.dev) which also provide helper methods for things like:
+
+- Serializing back into JSON, `model.to_json()`
+- Converting to a dictionary, `model.to_dict()`
+
+Typed requests and responses provide autocomplete and documentation within your editor. If you would like to see type errors in VS Code to help catch bugs earlier, set `python.analysis.typeCheckingMode` to `basic`.
+
+## Handling errors
+
+When the library is unable to connect to the API (for example, due to network connection problems or a timeout), a subclass of `fleet_rlm_typescript_sdk.APIConnectionError` is raised.
+
+When the API returns a non-success status code (that is, 4xx or 5xx
+response), a subclass of `fleet_rlm_typescript_sdk.APIStatusError` is raised, containing `status_code` and `response` properties.
+
+All errors inherit from `fleet_rlm_typescript_sdk.APIError`.
+
+```python
+import fleet_rlm_typescript_sdk
+from fleet_rlm_typescript_sdk import FleetRlmTypescriptSDK
+
+client = FleetRlmTypescriptSDK()
+
+try:
+    client.health.check()
+except fleet_rlm_typescript_sdk.APIConnectionError as e:
+    print("The server could not be reached")
+    print(e.__cause__)  # an underlying Exception, likely raised within httpx.
+except fleet_rlm_typescript_sdk.RateLimitError as e:
+    print("A 429 status code was received; we should back off a bit.")
+except fleet_rlm_typescript_sdk.APIStatusError as e:
+    print("Another non-200-range status code was received")
+    print(e.status_code)
+    print(e.response)
+```
+
+Error codes are as follows:
+
+| Status Code | Error Type                 |
+| ----------- | -------------------------- |
+| 400         | `BadRequestError`          |
+| 401         | `AuthenticationError`      |
+| 403         | `PermissionDeniedError`    |
+| 404         | `NotFoundError`            |
+| 422         | `UnprocessableEntityError` |
+| 429         | `RateLimitError`           |
+| >=500       | `InternalServerError`      |
+| N/A         | `APIConnectionError`       |
+
+### Retries
+
+Certain errors are automatically retried 2 times by default, with a short exponential backoff.
+Connection errors (for example, due to a network connectivity problem), 408 Request Timeout, 409 Conflict,
+429 Rate Limit, and >=500 Internal errors are all retried by default.
+
+You can use the `max_retries` option to configure or disable retry settings:
+
+```python
+from fleet_rlm_typescript_sdk import FleetRlmTypescriptSDK
+
+# Configure the default for all requests:
+client = FleetRlmTypescriptSDK(
+    # default is 2
+    max_retries=0,
+)
+
+# Or, configure per-request:
+client.with_options(max_retries=5).health.check()
+```
+
+### Timeouts
+
+By default requests time out after 1 minute. You can configure this with a `timeout` option,
+which accepts a float or an [`httpx.Timeout`](https://www.python-httpx.org/advanced/timeouts/#fine-tuning-the-configuration) object:
+
+```python
+from fleet_rlm_typescript_sdk import FleetRlmTypescriptSDK
+
+# Configure the default for all requests:
+client = FleetRlmTypescriptSDK(
+    # 20 seconds (default is 1 minute)
+    timeout=20.0,
+)
+
+# More granular control:
+client = FleetRlmTypescriptSDK(
+    timeout=httpx.Timeout(60.0, read=5.0, write=10.0, connect=2.0),
+)
+
+# Override per-request:
+client.with_options(timeout=5.0).health.check()
+```
+
+On timeout, an `APITimeoutError` is thrown.
+
+Note that requests that time out are [retried twice by default](#retries).
+
+## Advanced
+
+### Logging
+
+We use the standard library [`logging`](https://docs.python.org/3/library/logging.html) module.
+
+You can enable logging by setting the environment variable `FLEET_RLM_TYPESCRIPT_SDK_LOG` to `info`.
+
+```shell
+$ export FLEET_RLM_TYPESCRIPT_SDK_LOG=info
+```
+
+Or to `debug` for more verbose logging.
+
+### How to tell whether `None` means `null` or missing
+
+In an API response, a field may be explicitly `null`, or missing entirely; in either case, its value is `None` in this library. You can differentiate the two cases with `.model_fields_set`:
+
+```py
+if response.my_field is None:
+  if 'my_field' not in response.model_fields_set:
+    print('Got json like {}, without a "my_field" key present at all.')
+  else:
+    print('Got json like {"my_field": null}.')
+```
+
+### Accessing raw response data (e.g. headers)
+
+The "raw" Response object can be accessed by prefixing `.with_raw_response.` to any HTTP method call, e.g.,
+
+```py
+from fleet_rlm_typescript_sdk import FleetRlmTypescriptSDK
+
+client = FleetRlmTypescriptSDK()
+response = client.health.with_raw_response.check()
+print(response.headers.get('X-My-Header'))
+
+health = response.parse()  # get the object that `health.check()` would have returned
+print(health.ok)
+```
+
+These methods return an [`APIResponse`](https://github.com/stainless-sdks/fleet-rlm-typescript-sdk-python/tree/main/src/fleet_rlm_typescript_sdk/_response.py) object.
+
+The async client returns an [`AsyncAPIResponse`](https://github.com/stainless-sdks/fleet-rlm-typescript-sdk-python/tree/main/src/fleet_rlm_typescript_sdk/_response.py) with the same structure, the only difference being `await`able methods for reading the response content.
+
+#### `.with_streaming_response`
+
+The above interface eagerly reads the full response body when you make the request, which may not always be what you want.
+
+To stream the response body, use `.with_streaming_response` instead, which requires a context manager and only reads the response body once you call `.read()`, `.text()`, `.json()`, `.iter_bytes()`, `.iter_text()`, `.iter_lines()` or `.parse()`. In the async client, these are async methods.
+
+```python
+with client.health.with_streaming_response.check() as response:
+    print(response.headers.get("X-My-Header"))
+
+    for line in response.iter_lines():
+        print(line)
+```
+
+The context manager is required so that the response will reliably be closed.
+
+### Making custom/undocumented requests
+
+This library is typed for convenient access to the documented API.
+
+If you need to access undocumented endpoints, params, or response properties, the library can still be used.
+
+#### Undocumented endpoints
+
+To make requests to undocumented endpoints, you can make requests using `client.get`, `client.post`, and other
+http verbs. Options on the client will be respected (such as retries) when making this request.
+
+```py
+import httpx
+
+response = client.post(
+    "/foo",
+    cast_to=httpx.Response,
+    body={"my_param": True},
+)
+
+print(response.headers.get("x-foo"))
+```
+
+#### Undocumented request params
+
+If you want to explicitly send an extra param, you can do so with the `extra_query`, `extra_body`, and `extra_headers` request
+options.
+
+#### Undocumented response properties
+
+To access undocumented response properties, you can access the extra fields like `response.unknown_prop`. You
+can also get all the extra fields on the Pydantic model as a dict with
+[`response.model_extra`](https://docs.pydantic.dev/latest/api/base_model/#pydantic.BaseModel.model_extra).
+
+### Configuring the HTTP client
+
+You can directly override the [httpx client](https://www.python-httpx.org/api/#client) to customize it for your use case, including:
+
+- Support for [proxies](https://www.python-httpx.org/advanced/proxies/)
+- Custom [transports](https://www.python-httpx.org/advanced/transports/)
+- Additional [advanced](https://www.python-httpx.org/advanced/clients/) functionality
+
+```python
+import httpx
+from fleet_rlm_typescript_sdk import FleetRlmTypescriptSDK, DefaultHttpxClient
+
+client = FleetRlmTypescriptSDK(
+    # Or use the `FLEET_RLM_TYPESCRIPT_SDK_BASE_URL` env var
+    base_url="http://my.test.server.example.com:8083",
+    http_client=DefaultHttpxClient(
+        proxy="http://my.test.proxy.example.com",
+        transport=httpx.HTTPTransport(local_address="0.0.0.0"),
+    ),
+)
+```
+
+You can also customize the client on a per-request basis by using `with_options()`:
+
+```python
+client.with_options(http_client=DefaultHttpxClient(...))
+```
+
+### Managing HTTP resources
+
+By default the library closes underlying HTTP connections whenever the client is [garbage collected](https://docs.python.org/3/reference/datamodel.html#object.__del__). You can manually close the client using the `.close()` method if desired, or with a context manager that closes when exiting.
+
+```py
+from fleet_rlm_typescript_sdk import FleetRlmTypescriptSDK
+
+with FleetRlmTypescriptSDK() as client:
+  # make requests here
+  ...
+
+# HTTP client is now closed
+```
+
+## Versioning
+
+This package generally follows [SemVer](https://semver.org/spec/v2.0.0.html) conventions, though certain backwards-incompatible changes may be released as minor versions:
+
+1. Changes that only affect static types, without breaking runtime behavior.
+2. Changes to library internals which are technically public but not intended or documented for external use. _(Please open a GitHub issue to let us know if you are relying on such internals.)_
+3. Changes that we do not expect to impact the vast majority of users in practice.
+
+We take backwards-compatibility seriously and work hard to ensure you can rely on a smooth upgrade experience.
+
+We are keen for your feedback; please open an [issue](https://www.github.com/stainless-sdks/fleet-rlm-typescript-sdk-python/issues) with questions, bugs, or suggestions.
+
+### Determining the installed version
+
+If you've upgraded to the latest version but aren't seeing any new features you were expecting then your python environment is likely still using an older version.
+
+You can determine the version that is being used at runtime with:
+
+```py
+import fleet_rlm_typescript_sdk
+print(fleet_rlm_typescript_sdk.__version__)
+```
+
+## Requirements
+
+Python 3.9 or higher.
 
 ## Contributing
 
-We welcome contributions! Whether it's reporting a bug, suggesting a feature, or writing code, your input is verified.
-
-1.  Check out our [Contribution Guide](CONTRIBUTING.md).
-2.  Fork the repo and create a branch.
-3.  Run tests with `uv run pytest`.
-4.  Submit a Pull Request.
-
-## Acknowledgments
-
-This project is built upon the innovative research by **Alex L. Zhang** (MIT CSAIL), **Omar Khattab** (Stanford), and **Tim Kraska** (MIT).
-
-> Reference: [Recursive Language Models](https://arxiv.org/abs/2501.123) (Zhang, Kraska, Khattab, 2025)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+See [the contributing documentation](./CONTRIBUTING.md).

@@ -1,353 +1,128 @@
-# Contributing to fleet-rlm
+## Setting up the environment
 
-Thank you for your interest in contributing to **fleet-rlm**! This document provides guidelines and instructions for contributing to the project.
+### With `uv`
 
----
+We use [uv](https://docs.astral.sh/uv/) to manage dependencies because it will automatically provision a Python environment with the expected Python version. To set it up, run:
 
-## Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Workflow](#development-workflow)
-- [Coding Standards](#coding-standards)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation](#documentation)
-- [Submitting Changes](#submitting-changes)
-- [Reporting Issues](#reporting-issues)
-
----
-
-## Code of Conduct
-
-This project adheres to a code of conduct that all contributors are expected to follow:
-
-- Be respectful and inclusive
-- Provide constructive feedback
-- Focus on what is best for the community
-- Show empathy towards other community members
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Python >= 3.10
-- `uv` package manager (see [UV Docs](https://docs.astral.sh/uv/))
-- Git
-- A Modal account (for sandbox execution)
-
-### Initial Setup
-
-```bash
-# Fork and clone the repository
-git clone https://github.com/your-username/fleet-rlm.git
-cd fleet-rlm
-
-# Add upstream remote
-git remote add upstream https://github.com/qredence/fleet-rlm.git
-
-# Install dependencies
-uv sync --extra dev --extra interactive
-
-# Install pre-commit hooks
-uv run pre-commit install
+```sh
+$ ./scripts/bootstrap
 ```
 
-### Development Environment
+Or [install uv manually](https://docs.astral.sh/uv/getting-started/installation/) and run:
 
-```bash
-# Verify installation
-uv run fleet-rlm --help
-
-# Run tests
-uv run pytest
-
-# Check linting
-uv run ruff check .
+```sh
+$ uv sync --all-extras
 ```
 
----
+You can then run scripts using `uv run python script.py` or by manually activating the virtual environment:
 
-## Development Workflow
+```sh
+# manually activate - https://docs.python.org/3/library/venv.html#how-venvs-work
+$ source .venv/bin/activate
 
-### 1. Branch Strategy
-
-- Create a branch from `main` for your work
-- Use descriptive branch names: `feature/your-feature`, `fix/bug-fix`, `docs/update-docs`
-- Keep branches focused and small
-
-```bash
-git checkout main
-git pull upstream main
-git checkout -b feature/your-feature-name
+# now you can omit the `uv run` prefix
+$ python script.py
 ```
 
-### 2. Making Changes
+### Without `uv`
 
-- Write clear, focused commits
-- Follow commit message conventions (see [Commit Messages](#commit-messages))
-- Run tests and linting before committing
+Alternatively if you don't want to install `uv`, you can stick with the standard `pip` setup by ensuring you have the Python version specified in `.python-version`, create a virtual environment however you desire and then install dependencies using this command:
 
-```bash
-# Make your changes
-git add .
-git commit -m "feat: add new CLI command for X"
-
-# Run pre-commit hooks
-uv run pre-commit run --all-files
+```sh
+$ pip install -r requirements-dev.lock
 ```
 
-### 3. Syncing with Upstream
+## Modifying/Adding code
 
-```bash
-git fetch upstream
-git rebase upstream/main
+Most of the SDK is generated code. Modifications to code will be persisted between generations, but may
+result in merge conflicts between manual patches and changes from the generator. The generator will never
+modify the contents of the `src/fleet_rlm_typescript_sdk/lib/` and `examples/` directories.
+
+## Adding and running examples
+
+All files in the `examples/` directory are not modified by the generator and can be freely edited or added to.
+
+```py
+# add an example to examples/<your-example>.py
+
+#!/usr/bin/env -S uv run python
+…
 ```
 
----
-
-## Coding Standards
-
-### Python Style
-
-We use **ruff** for both linting and formatting:
-
-```bash
-# Format code
-uv run ruff format .
-
-# Check linting
-uv run ruff check .
-
-# Auto-fix linting issues
-uv run ruff check --fix .
+```sh
+$ chmod +x examples/<your-example>.py
+# run the example against your api
+$ ./examples/<your-example>.py
 ```
 
-### Code Quality Standards
+## Using the repository from source
 
-- **Type Hints**: Use type hints for all function signatures
-- **Docstrings**: Include module and function docstrings
-- **Import Style**: Use `from __future__ import annotations` in all files
-- **PEP 8**: Follow PEP 8 guidelines (enforced by ruff)
+If you’d like to use the repository from source, you can either install from git or link to a cloned repository:
 
-Example:
+To install via git:
 
-```python
-"""Module docstring describing the purpose of this module."""
-
-from __future__ import annotations
-
-def my_function(param1: str, param2: int) -> dict[str, str]:
-    """
-    Brief description of what the function does.
-
-    Args:
-        param1: Description of param1
-        param2: Description of param2
-
-    Returns:
-        Description of return value
-    """
-    # ...existing code...
+```sh
+$ pip install git+ssh://git@github.com/stainless-sdks/fleet-rlm-typescript-sdk-python.git
 ```
 
-### Project-Specific Conventions
+Alternatively, you can build from source and install the wheel file:
 
-- **Package Structure**: All source code under `src/fleet_rlm/`
-- **Testing**: Tests in `tests/` mirroring the source structure
-- **Environment Config**: Use `.env` for local development, never commit it
-- **Secrets**: Use Modal secrets for API keys, never hardcode them
+Building this package will create two files in the `dist/` directory, a `.tar.gz` containing the source files and a `.whl` that can be used to install the package efficiently.
 
----
+To create a distributable version of the library, all you have to do is run this command:
 
-## Testing Guidelines
-
-### Running Tests
-
-```bash
-# Run all tests
-uv run pytest
-
-# Run specific test file
-uv run pytest tests/test_cli_smoke.py
-
-# Run with coverage
-uv run pytest --cov=fleet_rlm --cov-report=html
+```sh
+$ uv build
+# or
+$ python -m build
 ```
 
-### Writing Tests
+Then to install:
 
-- Place tests in `tests/` directory
-- Use `pytest` as the test framework
-- Use descriptive test names: `test_function_name_expected_behavior`
-- Mock external dependencies (DSPy, Modal) using `monkeypatch`
-
-Example:
-
-```python
-"""Tests for the config module."""
-
-def test_env_loading_with_quotes(monkeypatch):
-    """Test that environment variables with quotes are handled correctly."""
-    monkeypatch.setenv("DSPY_LLM_API_KEY", '"sk-test-key"')
-    # ...existing code...
+```sh
+$ pip install ./path-to-wheel-file.whl
 ```
 
-### Test Coverage
+## Running tests
 
-- Aim for >80% code coverage on new features
-- Write tests for bug fixes that reproduce the issue
-- Include tests for edge cases and error conditions
+Most tests require you to [set up a mock server](https://github.com/stoplightio/prism) against the OpenAPI spec to run the tests.
 
----
-
-## Documentation
-
-### Types of Documentation
-
-1. **README.md**: High-level project overview and quick start
-2. **AGENTS.md**: Detailed project architecture and workflows
-3. **Docstrings**: Function and module documentation in code
-4. **Notebooks**: Jupyter notebooks demonstrating usage
-
-### Documentation Updates
-
-- Update README.md for user-facing changes
-- Update AGENTS.md for architectural changes
-- Add docstrings for all new functions and classes
-- Update inline comments for complex logic
-
----
-
-## Commit Messages
-
-We follow conventional commit messages:
-
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation changes
-- `style:` Code style changes (formatting, etc.)
-- `refactor:` Code refactoring
-- `test:` Adding or updating tests
-- `chore:` Maintenance tasks
-
-Examples:
-
-```
-feat: add batch processing support for API endpoints
-
-fix: handle empty responses from Modal sandbox
-
-docs: update README with new CLI commands
-
-test: add tests for regex extraction tool
+```sh
+# you will need npm installed
+$ npx prism mock path/to/your/openapi.yml
 ```
 
----
-
-## Submitting Changes
-
-### Pull Request Process
-
-1. **Update Documentation**: Ensure README and AGENTS.md are updated
-2. **Run Tests**: All tests must pass
-3. **Run Linting**: Code must be formatted and pass ruff checks
-4. **Create PR**: Provide a clear description of changes
-
-```bash
-# Ensure everything is up to date
-git fetch upstream
-git rebase upstream/main
-
-# Push to your fork
-git push origin feature/your-feature-name
+```sh
+$ ./scripts/test
 ```
 
-### Pull Request Checklist
+## Linting and formatting
 
-- [ ] Tests pass locally
-- [ ] Code is formatted with `ruff format`
-- [ ] No linting errors with `ruff check`
-- [ ] Documentation updated (README, AGENTS.md, docstrings)
-- [ ] Commit messages follow conventions
-- [ ] PR description clearly explains the change
-- [ ] Link related issues in the PR description
+This repository uses [ruff](https://github.com/astral-sh/ruff) and
+[black](https://github.com/psf/black) to format the code in the repository.
 
----
+To lint:
 
-## Reporting Issues
-
-### Bug Reports
-
-Include the following information:
-
-- Python version
-- Project version (from `pyproject.toml`)
-- Steps to reproduce the issue
-- Expected behavior vs. actual behavior
-- Error messages and stack traces
-- Environment details (OS, etc.)
-
-### Feature Requests
-
-- Describe the feature and use case
-- Explain why it would be useful
-- Provide examples of how it would work
-- Consider if it fits the project scope
-
----
-
-## Development Commands Reference
-
-```bash
-# Dependency Management
-uv sync                    # Install dependencies
-uv sync --all-groups       # Install with dev dependencies
-uv add <package>          # Add a new dependency
-
-# Code Quality
-make format               # Format code with ruff
-make lint                 # Check linting
-make check                # Run lint + tests
-make release-check        # Run lint + tests + build + twine checks
-
-# Testing
-make test                 # Run all tests
-uv run pytest             # Run tests directly
-uv run pytest -v          # Verbose test output
-
-# Pre-commit
-make precommit-install    # Install git hooks
-make precommit-run        # Run pre-commit manually
-
-# CLI Testing
-make cli-help             # Show CLI help
-uv run fleet-rlm --help   # Direct CLI help
-
-# Modal Setup
-uv run modal setup        # Authenticate Modal
-uv run modal volume create rlm-volume-dspy  # Create volume
+```sh
+$ ./scripts/lint
 ```
 
-For package publication workflow (TestPyPI then PyPI), see [RELEASING.md](scripts/RELEASING.md).
+To format and fix all ruff issues automatically:
 
----
+```sh
+$ ./scripts/format
+```
 
-## Getting Help
+## Publishing and releases
 
-- **Documentation**: Check [AGENTS.md](AGENTS.md) for detailed project docs
-- **Issues**: Search existing issues on GitHub
-- **Discussions**: Use GitHub Discussions for questions
-- **DSPy Docs**: https://dspy-docs.vercel.app/
-- **Modal Docs**: https://modal.com/docs
+Changes made to this repository via the automated release PR pipeline should publish to PyPI automatically. If
+the changes aren't made through the automated pipeline, you may want to make releases manually.
 
----
+### Publish with a GitHub workflow
 
-## License
+You can release to package managers by using [the `Publish PyPI` GitHub action](https://www.github.com/stainless-sdks/fleet-rlm-typescript-sdk-python/actions/workflows/publish-pypi.yml). This requires a setup organization or repository secret to be set up.
 
-By contributing to this project, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+### Publish manually
 
----
-
-Thank you for contributing to fleet-rlm! 🚀
+If you need to manually release a package, you can run the `bin/publish-pypi` script with a `PYPI_TOKEN` set on
+the environment.

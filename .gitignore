@@ -1,42 +1,15 @@
-# Python
-__pycache__/
-*.py[cod]
-*.so
-*.egg-info/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-dist/
-build/
+.prism.log
+_dev
 
-# Virtual environments
-.venv/
-venv/
-.test_venv/
+__pycache__
+.mypy_cache
 
-# Environment and secrets
+dist
+
+.venv
+.idea
+
 .env
-.env.*
-!.env.example
-
-# Jupyter
-.ipynb_checkpoints/
-
-# OS/editor
-.DS_Store
-.vscode/
-
-# Local agent/tooling state
-
-.letta/
-.agents/
-.codex/
-
-
-PLANS.md
-notebooks/dspy-rlm-end-to-end-use-case.ipynb
-.junie/memory/errors.md
-.junie/memory/feedback.md
-.junie/memory/language.json
-.junie/memory/memory.version
-.junie/memory/tasks.md
+.envrc
+codegen.log
+Brewfile.lock.json
