@@ -54,8 +54,8 @@ uv run ty check src
 ## Architecture Highlights
 
 - `src/fleet_rlm/core/config.py`: env loading + planner LM configuration
-- `src/fleet_rlm/core/interpreter.py`: `ModalInterpreter` lifecycle + JSON bridge
-- `src/fleet_rlm/core/driver.py`: sandbox-side execution driver and helper injection
+- `src/fleet_rlm/core/interpreter.py`: `ModalInterpreter` lifecycle + JSON bridge + execution profiles (`ROOT_INTERLOCUTOR`, `RLM_DELEGATE`, `MAINTENANCE`)
+- `src/fleet_rlm/core/driver.py`: sandbox-side execution driver, profile-aware helper/tool gating, and Final/SUBMIT extraction
 - `src/fleet_rlm/react/agent.py`: `RLMReActChatAgent`
 - `src/fleet_rlm/react/tools.py`: ReAct tool definitions
 - `src/fleet_rlm/runners.py`: high-level task runners
@@ -79,3 +79,6 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Format/lint with `ruff`
 - Prefer `uv run ...` for commands
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
+- WebSocket interactive chat should carry identity envelope fields (`workspace_id`, `user_id`, `session_id`) so per-user/per-workspace state can be restored
+- `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through `RLM_DELEGATE`
+- Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`

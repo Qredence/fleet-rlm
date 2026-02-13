@@ -28,6 +28,7 @@ from ..chunking import (
     chunk_by_timestamps,
 )
 from ..signatures import AnalyzeLongDocument, ExtractFromLogs, SummarizeLongDocument
+from ..core.interpreter import ExecutionProfile
 
 if TYPE_CHECKING:
     from .agent import RLMReActChatAgent
@@ -125,10 +126,15 @@ def execute_submit(
     code: str,
     *,
     variables: dict[str, Any] | None = None,
+    execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
 ) -> dict[str, Any]:
     """Run *code* in the sandbox and return the SUBMIT() result."""
     agent.start()
-    result = agent.interpreter.execute(code, variables=variables or {})
+    result = agent.interpreter.execute(
+        code,
+        variables=variables or {},
+        execution_profile=execution_profile,
+    )
     if isinstance(result, FinalOutput):
         output = result.output
         if isinstance(output, dict):
@@ -284,7 +290,7 @@ def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[st
 def build_tool_list(
     agent: RLMReActChatAgent,
     extra_tools: list[Callable[..., Any]] | None = None,
-) -> list[Callable[..., Any]]:
+) -> list[Any]:
     """Build the DSPy ReAct tool list with closures bound to *agent*.
 
     Each inner function has a descriptive ``__name__``, docstring, and
@@ -610,7 +616,8 @@ SUBMIT(
             max_llm_calls=agent.rlm_max_llm_calls,
             verbose=agent.verbose,
         )
-        result = rlm(document=document, query=query)
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(document=document, query=query)
         response = {
             "status": "ok",
             "findings": result.findings,
@@ -638,7 +645,8 @@ SUBMIT(
             max_llm_calls=agent.rlm_max_llm_calls,
             verbose=agent.verbose,
         )
-        result = rlm(document=document, focus=focus)
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(document=document, focus=focus)
         response = {
             "status": "ok",
             "summary": result.summary,
@@ -666,7 +674,8 @@ SUBMIT(
             max_llm_calls=agent.rlm_max_llm_calls,
             verbose=agent.verbose,
         )
-        result = rlm(logs=logs, query=query)
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(logs=logs, query=query)
         response = {
             "status": "ok",
             "matches": result.matches,
@@ -728,26 +737,97 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 
     # -- Assemble tool list --------------------------------------------------
 
-    tools: list[Callable[..., Any]] = [
-        load_document,
-        set_active_document,
-        list_documents,
-        list_files,
-        read_file_slice,
-        find_files,
-        chunk_host,
-        chunk_sandbox,
-        parallel_semantic_map,
-        analyze_long_document,
-        summarize_long_document,
-        extract_from_logs,
-        read_buffer,
-        clear_buffer,
-        save_buffer_to_volume,
-        load_text_from_volume,
+    from dspy import Tool
+
+    tools: list[Tool] = [
+        Tool(
+            load_document,
+            name="load_document",
+            desc="Load a text document from host filesystem into agent document memory",
+        ),
+        Tool(
+            set_active_document,
+            name="set_active_document",
+            desc="Set which loaded document alias should be used by default tools",
+        ),
+        Tool(
+            list_documents,
+            name="list_documents",
+            desc="List loaded document aliases and active document metadata",
+        ),
+        Tool(
+            list_files,
+            name="list_files",
+            desc="List files on the host filesystem matching a glob pattern",
+        ),
+        Tool(
+            read_file_slice,
+            name="read_file_slice",
+            desc="Read a range of lines from a host file without loading the full document",
+        ),
+        Tool(
+            find_files,
+            name="find_files",
+            desc="Search file contents on the host using regex pattern (ripgrep)",
+        ),
+        Tool(
+            chunk_host,
+            name="chunk_host",
+            desc="Chunk document on host using size/headers/timestamps/json-keys strategies",
+        ),
+        Tool(
+            chunk_sandbox,
+            name="chunk_sandbox",
+            desc="Chunk active document inside sandbox and store chunks in a buffer",
+        ),
+        Tool(
+            parallel_semantic_map,
+            name="parallel_semantic_map",
+            desc="Run parallel semantic analysis over chunks via llm_query_batched",
+        ),
+        Tool(
+            analyze_long_document,
+            name="analyze_long_document",
+            desc="Analyze a long document with the AnalyzeLongDocument RLM signature",
+        ),
+        Tool(
+            summarize_long_document,
+            name="summarize_long_document",
+            desc="Summarize a long document with the SummarizeLongDocument RLM signature",
+        ),
+        Tool(
+            extract_from_logs,
+            name="extract_from_logs",
+            desc="Extract structured patterns from log text via ExtractFromLogs RLM signature",
+        ),
+        Tool(
+            read_buffer,
+            name="read_buffer",
+            desc="Read the full contents of a sandbox buffer",
+        ),
+        Tool(
+            clear_buffer,
+            name="clear_buffer",
+            desc="Clear one sandbox buffer (or all buffers when name is empty)",
+        ),
+        Tool(
+            save_buffer_to_volume,
+            name="save_buffer_to_volume",
+            desc="Persist a sandbox buffer to Modal Volume storage as JSON",
+        ),
+        Tool(
+            load_text_from_volume,
+            name="load_text_from_volume",
+            desc="Load text from Modal Volume into host-side document memory",
+        ),
     ]
+    # Wrap extra tools with dspy.Tool if not already wrapped
     if extra_tools:
-        tools.extend(extra_tools)
+        for et in extra_tools:
+            if isinstance(et, Tool):
+                tools.append(et)
+            else:
+                tools.append(Tool(et))
     return tools
 
 
@@ -756,6 +836,14 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 # ---------------------------------------------------------------------------
 
 
-def list_react_tool_names(tools: Iterable[Callable[..., Any]]) -> list[str]:
-    """Return stable tool names for display / debugging."""
-    return [getattr(tool, "__name__", str(tool)) for tool in tools]
+def list_react_tool_names(tools: Iterable[Any]) -> list[str]:
+    """Return stable tool names for display / debugging.
+
+    Handles both raw callables (``__name__``) and ``dspy.Tool`` wrappers
+    (``.name``).
+    """
+    names: list[str] = []
+    for tool in tools:
+        name = getattr(tool, "name", None) or getattr(tool, "__name__", str(tool))
+        names.append(name)
+    return names

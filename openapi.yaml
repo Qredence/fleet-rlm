@@ -1,0 +1,290 @@
+openapi: 3.1.0
+info:
+  title: fleet-rlm
+  version: 0.4.0
+paths:
+  /health:
+    get:
+      tags:
+        - health
+      summary: Health
+      operationId: health_health_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /ready:
+    get:
+      tags:
+        - health
+      summary: Ready
+      operationId: ready_ready_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+  /chat:
+    post:
+      tags:
+        - chat
+      summary: Chat
+      operationId: chat_chat_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /tasks/basic:
+    post:
+      tags:
+        - tasks
+      summary: Run Basic
+      operationId: run_basic_tasks_basic_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /tasks/architecture:
+    post:
+      tags:
+        - tasks
+      summary: Run Architecture
+      operationId: run_architecture_tasks_architecture_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /tasks/long-context:
+    post:
+      tags:
+        - tasks
+      summary: Run Long Context
+      operationId: run_long_context_tasks_long_context_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /tasks/check-secret:
+    post:
+      tags:
+        - tasks
+      summary: Check Secret
+      operationId: check_secret_tasks_check_secret_post
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskResponse"
+components:
+  schemas:
+    ChatRequest:
+      properties:
+        message:
+          type: string
+          title: Message
+        docs_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Docs Path
+        trace:
+          type: boolean
+          title: Trace
+          default: false
+      type: object
+      required:
+        - message
+      title: ChatRequest
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: "#/components/schemas/ValidationError"
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        version:
+          type: string
+          title: Version
+          default: 0.4.0
+      type: object
+      title: HealthResponse
+    ReadyResponse:
+      properties:
+        ready:
+          type: boolean
+          title: Ready
+        planner_configured:
+          type: boolean
+          title: Planner Configured
+      type: object
+      required:
+        - ready
+        - planner_configured
+      title: ReadyResponse
+    TaskRequest:
+      properties:
+        task_type:
+          type: string
+          enum:
+            - basic
+            - architecture
+            - api_endpoints
+            - error_patterns
+            - long_context
+            - summarize
+            - custom_tool
+          title: Task Type
+        question:
+          type: string
+          title: Question
+          default: ""
+        docs_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Docs Path
+        query:
+          type: string
+          title: Query
+          default: ""
+        max_iterations:
+          type: integer
+          title: Max Iterations
+          default: 15
+        max_llm_calls:
+          type: integer
+          title: Max Llm Calls
+          default: 30
+        timeout:
+          type: integer
+          title: Timeout
+          default: 600
+        chars:
+          type: integer
+          title: Chars
+          default: 10000
+        verbose:
+          type: boolean
+          title: Verbose
+          default: true
+      type: object
+      required:
+        - task_type
+      title: TaskRequest
+    TaskResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        result:
+          additionalProperties: true
+          type: object
+          title: Result
+        error:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Error
+      type: object
+      title: TaskResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError

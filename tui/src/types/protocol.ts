@@ -62,6 +62,9 @@ export interface ClientMessage {
   docs_path?: string;
   trace?: boolean;
   trace_mode?: TraceMode;
+  workspace_id?: string;
+  user_id?: string;
+  session_id?: string | null;
 }
 
 /** Client command message to server */
@@ -69,6 +72,9 @@ export interface ClientCommandMessage {
   type: "command";
   command: string;
   args: Record<string, unknown>;
+  workspace_id?: string;
+  user_id?: string;
+  session_id?: string | null;
 }
 
 /** WebSocket message types (server -> client) */
@@ -105,6 +111,9 @@ export interface SessionConfig {
   traceMode: TraceMode;
   stream: boolean;
   streamRefreshMs: number;
+  workspaceId: string;
+  userId: string;
+  sessionId: string | null;
 }
 
 /** Transcript event for session history */

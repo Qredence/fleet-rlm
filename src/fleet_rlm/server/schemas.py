@@ -63,6 +63,9 @@ class WSMessage(BaseModel):
     docs_path: str | None = None
     trace: bool = True
     trace_mode: Literal["compact", "verbose", "off"] | None = None
+    workspace_id: str = "default"
+    user_id: str = "anonymous"
+    session_id: str | None = None
     # Command dispatch fields (used when type == "command")
     command: str = ""
     args: dict[str, Any] = Field(default_factory=dict)
@@ -74,6 +77,9 @@ class WSCommandMessage(BaseModel):
     type: Literal["command"] = "command"
     command: str
     args: dict[str, Any] = Field(default_factory=dict)
+    workspace_id: str = "default"
+    user_id: str = "anonymous"
+    session_id: str | None = None
 
 
 class WSCommandResult(BaseModel):
@@ -82,3 +88,21 @@ class WSCommandResult(BaseModel):
     type: Literal["command_result"] = "command_result"
     command: str
     result: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionStateSummary(BaseModel):
+    key: str
+    workspace_id: str
+    user_id: str
+    session_id: str | None = None
+    history_turns: int = 0
+    document_count: int = 0
+    memory_count: int = 0
+    log_count: int = 0
+    artifact_count: int = 0
+    updated_at: str | None = None
+
+
+class SessionStateResponse(BaseModel):
+    ok: bool = True
+    sessions: list[SessionStateSummary] = Field(default_factory=list)

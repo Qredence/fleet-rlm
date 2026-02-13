@@ -44,6 +44,32 @@ export function StatusBar() {
 
       <text fg={fg.secondary}>{state.statusMessage}</text>
 
+      <>
+        <text fg={fg.muted}>│</text>
+        <text>
+          <span fg={fg.secondary}>Workspace: </span>
+          <span fg={fg.primary}>{state.workspaceId}</span>
+        </text>
+      </>
+
+      <>
+        <text fg={fg.muted}>│</text>
+        <text>
+          <span fg={fg.secondary}>User: </span>
+          <span fg={fg.primary}>{state.userId}</span>
+        </text>
+      </>
+
+      {state.sessionId && (
+        <>
+          <text fg={fg.muted}>│</text>
+          <text>
+            <span fg={fg.secondary}>Session: </span>
+            <span fg={fg.primary}>{state.sessionId.slice(0, 8)}</span>
+          </text>
+        </>
+      )}
+
       {state.docsPath && (
         <>
           <text fg={fg.muted}>│</text>

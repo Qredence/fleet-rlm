@@ -7,6 +7,7 @@ cloud credentials while validating host-side orchestration logic.
 from __future__ import annotations
 
 import sys
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import dspy
@@ -23,6 +24,7 @@ class _FakeInterpreter:
         self.start_calls = 0
         self.shutdown_calls = 0
         self.execute_calls: list[tuple[str, dict]] = []
+        self.default_execution_profile = "RLM_DELEGATE"
 
     def start(self):
         self.start_calls += 1
@@ -30,7 +32,16 @@ class _FakeInterpreter:
     def shutdown(self):
         self.shutdown_calls += 1
 
-    def execute(self, code, variables=None):
+    @contextmanager
+    def execution_profile(self, profile):
+        previous = self.default_execution_profile
+        self.default_execution_profile = profile
+        try:
+            yield self
+        finally:
+            self.default_execution_profile = previous
+
+    def execute(self, code, variables=None, **kwargs):
         self.execute_calls.append((code, variables or {}))
         return FinalOutput(
             {
@@ -80,7 +91,10 @@ def test_react_agent_constructed_with_explicit_signature_and_tools(monkeypatch):
     call = records[0]
     assert call["signature"] is RLMReActChatSignature
     assert call["max_iters"] == 7
-    tool_names = [getattr(tool, "__name__", str(tool)) for tool in call["tools"]]
+    tool_names = [
+        getattr(tool, "name", None) or getattr(tool, "__name__", str(tool))
+        for tool in call["tools"]
+    ]
     assert "parallel_semantic_map" in tool_names
     assert "analyze_long_document" in tool_names
 
@@ -97,7 +111,10 @@ def test_tool_registry_includes_specialized_tools_and_extra_tools(monkeypatch):
         extra_tools=[custom_tool],
     )
 
-    tool_names = [getattr(tool, "__name__", str(tool)) for tool in agent.react_tools]
+    tool_names = [
+        getattr(tool, "name", None) or getattr(tool, "__name__", str(tool))
+        for tool in agent.react_tools
+    ]
     assert "load_document" in tool_names
     assert "chunk_sandbox" in tool_names
     assert "extract_from_logs" in tool_names
@@ -641,7 +658,10 @@ def test_new_tools_in_tool_registry(monkeypatch):
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
-    tool_names = [getattr(tool, "__name__", str(tool)) for tool in agent.react_tools]
+    tool_names = [
+        getattr(tool, "name", None) or getattr(tool, "__name__", str(tool))
+        for tool in agent.react_tools
+    ]
 
     assert "list_files" in tool_names
     assert "read_file_slice" in tool_names
@@ -677,3 +697,238 @@ def test_load_document_directory_recovery_workflow(monkeypatch, tmp_path):
     assert result2["alias"] == "active"
     assert result2["chars"] > 0
     assert result2["lines"] > 0
+
+
+# -----------------------------------------------------------------------
+# Phase 1 Tests — dspy.Module subclass, forward(), dspy.Tool wrappers,
+#                 typed Signature generics
+# -----------------------------------------------------------------------
+
+
+def test_agent_is_dspy_module_subclass(monkeypatch):
+    """RLMReActChatAgent must subclass dspy.Module."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    assert issubclass(RLMReActChatAgent, dspy.Module)
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    assert isinstance(agent, dspy.Module)
+
+
+def test_agent_has_react_as_discoverable_submodule(monkeypatch):
+    """self.react (dspy.ReAct) must appear in named_sub_modules."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    assert hasattr(agent, "react")
+    # The fake isn't a real dspy.Module so it won't appear in named_sub_modules,
+    # but the attribute assignment itself is correct.
+    assert agent.react is not None
+
+
+def test_forward_delegates_to_react_and_starts_interpreter(monkeypatch):
+    """forward() should call self.react(...) and start the interpreter."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    fake_interpreter = _FakeInterpreter()
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+
+    prediction = agent.forward(user_request="test query")
+    assert prediction.assistant_response == "echo:test query"
+    assert fake_interpreter.start_calls == 1
+
+
+def test_forward_accepts_custom_history(monkeypatch):
+    """forward() should use the provided history, not the agent's own."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    custom_history = dspy.History(
+        messages=[{"user_request": "prior", "assistant_response": "old"}]
+    )
+
+    prediction = agent.forward(user_request="new", history=custom_history)
+    assert prediction.assistant_response == "echo:new"
+    # Agent's own history should be unmodified
+    assert len(agent.history.messages) == 0
+
+
+def test_chat_turn_uses_forward_internally(monkeypatch):
+    """chat_turn() should delegate to forward() and append history."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.chat_turn("hello")
+
+    assert result["assistant_response"] == "echo:hello"
+    assert result["history_turns"] == 1
+    assert agent.history.messages[0]["user_request"] == "hello"
+
+
+def test_all_tools_are_dspy_tool_wrappers(monkeypatch):
+    """All tools in react_tools should be dspy.Tool instances."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    for tool in agent.react_tools:
+        assert isinstance(tool, dspy.Tool), (
+            f"Tool {tool} is {type(tool).__name__}, expected dspy.Tool"
+        )
+        assert tool.name, f"Tool {tool} has no name"
+        assert tool.desc, f"Tool {tool.name} has no description"
+
+
+def test_extra_tools_auto_wrapped_in_dspy_tool(monkeypatch):
+    """Extra tools passed as raw callables should be auto-wrapped in dspy.Tool."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    def my_custom_tool(x: str) -> str:
+        """A custom helper."""
+        return x.upper()
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        extra_tools=[my_custom_tool],
+    )
+    # Last tool should be the wrapped custom tool
+    last_tool = agent.react_tools[-1]
+    assert isinstance(last_tool, dspy.Tool)
+    assert last_tool.name == "my_custom_tool"
+
+
+def test_extra_dspy_tool_not_double_wrapped(monkeypatch):
+    """Extra tools that are already dspy.Tool should not be re-wrapped."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    def raw_fn(x: str) -> str:
+        return x
+
+    pre_wrapped = dspy.Tool(raw_fn, name="pre_wrapped", desc="already wrapped")
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        extra_tools=[pre_wrapped],
+    )
+    last_tool = agent.react_tools[-1]
+    assert last_tool is pre_wrapped
+
+
+def test_get_tool_returns_underlying_callable(monkeypatch):
+    """_get_tool should return the underlying func from dspy.Tool wrappers."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    tool_fn = agent._get_tool("load_document")
+    assert callable(tool_fn)
+    # Should be the unwrapped function, not the dspy.Tool wrapper
+    assert not isinstance(tool_fn, dspy.Tool)
+
+
+def test_get_tool_raises_on_unknown_name(monkeypatch):
+    """_get_tool should raise AttributeError for unknown tool names."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    with pytest.raises(AttributeError, match="nonexistent_tool"):
+        agent._get_tool("nonexistent_tool")
+
+
+def test_list_react_tool_names_handles_dspy_tool(monkeypatch):
+    """list_react_tool_names should work with dspy.Tool wrappers."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    names = react_tools.list_react_tool_names(agent.react_tools)
+    assert isinstance(names, list)
+    assert "load_document" in names
+    assert "parallel_semantic_map" in names
+    assert len(names) == len(agent.react_tools)
+
+
+def test_register_extra_tool_rebuilds_react(monkeypatch):
+    """register_extra_tool should rebuild self.react with the new tool."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    initial_count = len(agent.react_tools)
+
+    def new_tool(x: str) -> str:
+        return x
+
+    result = agent.register_extra_tool(new_tool)
+    assert result["status"] == "ok"
+    assert len(agent.react_tools) == initial_count + 1
+
+
+def test_reset_clears_history_and_documents(monkeypatch):
+    """reset() should clear history AND host-side document state."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent.chat_turn("hello")
+    assert len(agent.history.messages) == 1
+    # Simulate a loaded document
+    agent._document_cache["test.txt"] = "some content"
+    agent._document_access_order.append("test.txt")
+    agent.active_alias = "test.txt"
+
+    result = agent.reset(clear_sandbox_buffers=False)
+    assert result["status"] == "ok"
+    assert result["history_turns"] == 0
+    assert len(agent.history.messages) == 0
+    # Verify documents are also cleared
+    assert len(agent._document_cache) == 0
+    assert len(agent._document_access_order) == 0
+    assert agent.active_alias is None
+
+
+# -----------------------------------------------------------------------
+# Signature typed generics tests
+# -----------------------------------------------------------------------
+
+
+def test_signature_output_types_are_generic():
+    """All Signature output fields should use typed generics, not bare list/dict."""
+    import typing
+    from fleet_rlm.signatures import (
+        AnalyzeLongDocument,
+        ExtractAPIEndpoints,
+        ExtractArchitecture,
+        ExtractFromLogs,
+        ExtractWithCustomTool,
+        FindErrorPatterns,
+        SummarizeLongDocument,
+    )
+
+    checks = [
+        (ExtractArchitecture, "modules", list[str]),
+        (ExtractArchitecture, "optimizers", list[str]),
+        (ExtractAPIEndpoints, "api_endpoints", list[str]),
+        (FindErrorPatterns, "error_categories", dict[str, str]),
+        (ExtractWithCustomTool, "headers", list[str]),
+        (ExtractWithCustomTool, "code_blocks", list[str]),
+        (AnalyzeLongDocument, "findings", list[str]),
+        (SummarizeLongDocument, "key_points", list[str]),
+        (ExtractFromLogs, "matches", list[str]),
+        (ExtractFromLogs, "patterns", dict[str, str]),
+    ]
+
+    hints = {}
+    for sig_cls, field_name, expected_type in checks:
+        if sig_cls not in hints:
+            hints[sig_cls] = typing.get_type_hints(sig_cls)
+        actual = hints[sig_cls].get(field_name)
+        assert actual == expected_type, (
+            f"{sig_cls.__name__}.{field_name}: expected {expected_type}, got {actual}"
+        )

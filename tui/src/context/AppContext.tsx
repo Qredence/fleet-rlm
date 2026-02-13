@@ -23,6 +23,9 @@ export interface AppState {
   traceMode: TraceMode;
   streamEnabled: boolean;
   docsPath: string | null;
+  workspaceId: string;
+  userId: string;
+  sessionId: string | null;
 
   // Current turn
   currentTurn: TurnState;
@@ -76,6 +79,9 @@ const initialState: AppState = {
   traceMode: "compact",
   streamEnabled: true,
   docsPath: null,
+  workspaceId: getDefaultWorkspaceId(),
+  userId: getDefaultUserId(),
+  sessionId: getDefaultSessionId(),
   currentTurn: createEmptyTurnState(),
   isProcessing: false,
   transcript: [],
@@ -294,4 +300,31 @@ function getDefaultWsUrl(): string {
     return Bun.env.WS_URL;
   }
   return "ws://localhost:8000/ws/chat";
+}
+
+function getDefaultWorkspaceId(): string {
+  if (typeof Bun !== "undefined" && Bun.env?.WORKSPACE_ID) {
+    return Bun.env.WORKSPACE_ID;
+  }
+  return "default";
+}
+
+function getDefaultUserId(): string {
+  if (typeof Bun !== "undefined" && Bun.env?.USER_ID) {
+    return Bun.env.USER_ID;
+  }
+  if (typeof Bun !== "undefined" && Bun.env?.USER) {
+    return Bun.env.USER;
+  }
+  return "anonymous";
+}
+
+function getDefaultSessionId(): string {
+  if (typeof Bun !== "undefined" && Bun.env?.SESSION_ID) {
+    return Bun.env.SESSION_ID;
+  }
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `session-${Date.now()}`;
 }

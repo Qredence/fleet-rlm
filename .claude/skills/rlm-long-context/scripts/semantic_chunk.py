@@ -125,7 +125,9 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
                     chunks.append(
                         (
                             current_start_pos,
-                            -1 if current_start_pos == -1 else current_start_pos + current_size,
+                            -1
+                            if current_start_pos == -1
+                            else current_start_pos + current_size,
                             f"array[{len(current_items)}]",
                         )
                     )
@@ -140,7 +142,9 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
                 chunks.append(
                     (
                         current_start_pos,
-                        -1 if current_start_pos == -1 else current_start_pos + current_size,
+                        -1
+                        if current_start_pos == -1
+                        else current_start_pos + current_size,
                         f"array[{len(current_items)}]",
                     )
                 )
@@ -163,7 +167,9 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
                     chunks.append(
                         (
                             current_start_pos,
-                            -1 if current_start_pos == -1 else current_start_pos + current_size,
+                            -1
+                            if current_start_pos == -1
+                            else current_start_pos + current_size,
                             f"dict[{len(current_keys)}]",
                         )
                     )
@@ -177,7 +183,9 @@ def chunk_json(content: str, max_size: int = 200000) -> list[tuple[int, int, str
                 chunks.append(
                     (
                         current_start_pos,
-                        -1 if current_start_pos == -1 else current_start_pos + current_size,
+                        -1
+                        if current_start_pos == -1
+                        else current_start_pos + current_size,
                         f"dict[{len(current_keys)}]",
                     )
                 )

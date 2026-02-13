@@ -22,11 +22,13 @@ import queue
 import re
 import threading
 import time
+from contextlib import contextmanager
 from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
     TimeoutError as FutureTimeoutError,
 )
+from enum import Enum
 from typing import Any, Callable, Iterator, Sequence
 
 import dspy
@@ -34,6 +36,14 @@ import modal
 from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
 
 from .driver import sandbox_driver
+
+
+class ExecutionProfile(str, Enum):
+    """Execution profile controlling sandbox helper/tool exposure."""
+
+    ROOT_INTERLOCUTOR = "ROOT_INTERLOCUTOR"
+    RLM_DELEGATE = "RLM_DELEGATE"
+    MAINTENANCE = "MAINTENANCE"
 
 
 def _build_default_image(
@@ -162,6 +172,7 @@ class ModalInterpreter:
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
         llm_call_timeout: int = 60,
+        default_execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
     ) -> None:
         self.image = image or _build_default_image(
             python_version=image_python_version, pip_packages=image_pip_packages
@@ -185,6 +196,7 @@ class ModalInterpreter:
         self._llm_call_lock = threading.Lock()
         self._sub_lm_executor: ThreadPoolExecutor | None = None
         self._sub_lm_executor_lock = threading.Lock()
+        self.default_execution_profile = default_execution_profile
 
         # Metadata-only history configuration (RLM paper Section 2)
         self.summarize_stdout = summarize_stdout
@@ -606,8 +618,22 @@ class ModalInterpreter:
         elif hasattr(self._stdin, "flush"):
             self._stdin.flush()
 
+    @contextmanager
+    def execution_profile(self, profile: ExecutionProfile):
+        """Temporarily override the default execution profile."""
+        previous = self.default_execution_profile
+        self.default_execution_profile = profile
+        try:
+            yield self
+        finally:
+            self.default_execution_profile = previous
+
     def execute(
-        self, code: str, variables: dict[str, Any] | None = None
+        self,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        execution_profile: ExecutionProfile | None = None,
     ) -> str | FinalOutput:
         """Execute Python code in the Modal sandbox.
 
@@ -653,6 +679,9 @@ class ModalInterpreter:
                 "variables": safe_vars,
                 "tool_names": self._tool_names(),
                 "output_names": self._output_names(),
+                "execution_profile": (
+                    execution_profile or self.default_execution_profile
+                ).value,
             }
         )
 

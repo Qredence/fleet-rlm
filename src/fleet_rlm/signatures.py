@@ -38,8 +38,8 @@ class ExtractArchitecture(dspy.Signature):
 
     docs: str = dspy.InputField(desc="Full DSPy documentation text")
     query: str = dspy.InputField(desc="What to extract")
-    modules: list = dspy.OutputField(desc="List of DSPy modules")
-    optimizers: list = dspy.OutputField(desc="List of optimizers")
+    modules: list[str] = dspy.OutputField(desc="List of DSPy modules")
+    optimizers: list[str] = dspy.OutputField(desc="List of optimizers")
     design_principles: str = dspy.OutputField(desc="Key design principles")
 
 
@@ -57,7 +57,7 @@ class ExtractAPIEndpoints(dspy.Signature):
     """
 
     docs: str = dspy.InputField(desc="API documentation")
-    api_endpoints: list = dspy.OutputField(desc="List of API endpoints")
+    api_endpoints: list[str] = dspy.OutputField(desc="List of API endpoints")
 
 
 class FindErrorPatterns(dspy.Signature):
@@ -75,7 +75,9 @@ class FindErrorPatterns(dspy.Signature):
     """
 
     docs: str = dspy.InputField(desc="Documentation text")
-    error_categories: dict = dspy.OutputField(desc="Error types mapped to solutions")
+    error_categories: dict[str, str] = dspy.OutputField(
+        desc="Error types mapped to solutions"
+    )
     total_errors_found: int = dspy.OutputField(desc="Total errors identified")
 
 
@@ -100,8 +102,8 @@ class ExtractWithCustomTool(dspy.Signature):
     """
 
     docs: str = dspy.InputField(desc="Documentation to analyze")
-    headers: list = dspy.OutputField(desc="All markdown headers found")
-    code_blocks: list = dspy.OutputField(desc="All code block languages found")
+    headers: list[str] = dspy.OutputField(desc="All markdown headers found")
+    code_blocks: list[str] = dspy.OutputField(desc="All code block languages found")
     structure_summary: str = dspy.OutputField(desc="Summary of document structure")
 
 
@@ -125,7 +127,7 @@ class AnalyzeLongDocument(dspy.Signature):
 
     document: str = dspy.InputField(desc="Full document text (loaded in sandbox)")
     query: str = dspy.InputField(desc="Analysis query or question")
-    findings: list = dspy.OutputField(desc="List of extracted facts / answers")
+    findings: list[str] = dspy.OutputField(desc="List of extracted facts / answers")
     answer: str = dspy.OutputField(desc="Synthesised prose answer")
     sections_examined: int = dspy.OutputField(desc="Number of sections inspected")
 
@@ -150,7 +152,7 @@ class SummarizeLongDocument(dspy.Signature):
     document: str = dspy.InputField(desc="Full document text")
     focus: str = dspy.InputField(desc="Topic or aspect to focus on")
     summary: str = dspy.OutputField(desc="Coherent summary text")
-    key_points: list = dspy.OutputField(desc="Bullet-point list of key takeaways")
+    key_points: list[str] = dspy.OutputField(desc="Bullet-point list of key takeaways")
     coverage_pct: int = dspy.OutputField(
         desc="Estimated percentage of document covered (0-100)"
     )
@@ -175,6 +177,8 @@ class ExtractFromLogs(dspy.Signature):
 
     logs: str = dspy.InputField(desc="Full log text")
     query: str = dspy.InputField(desc="Pattern or topic to search for")
-    matches: list = dspy.OutputField(desc="List of matching log entries")
-    patterns: dict = dspy.OutputField(desc="Dict mapping category to example entries")
+    matches: list[str] = dspy.OutputField(desc="List of matching log entries")
+    patterns: dict[str, str] = dspy.OutputField(
+        desc="Dict mapping category to example entries"
+    )
     time_range: str = dspy.OutputField(desc="Observed time range of matching entries")

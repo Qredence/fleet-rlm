@@ -8,7 +8,7 @@ __pycache__/
 .mypy_cache/
 dist/
 build/
-
+archive/
 # Virtual environments
 .venv/
 venv/
@@ -27,10 +27,11 @@ venv/
 .vscode/
 
 # Local agent/tooling state
-
+.claude/
 .letta/
 .agents/
 .codex/
+.opencode/
 
 
 PLANS.md
@@ -40,3 +41,4 @@ notebooks/dspy-rlm-end-to-end-use-case.ipynb
 .junie/memory/language.json
 .junie/memory/memory.version
 .junie/memory/tasks.md
+.junie/.onboarding_migrated

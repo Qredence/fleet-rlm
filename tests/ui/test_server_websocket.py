@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +13,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("websockets")
 
 from fastapi.testclient import TestClient
+from dspy.primitives.code_interpreter import FinalOutput
 
 from fleet_rlm.interactive.models import StreamEvent
 from fleet_rlm.server.config import ServerRuntimeConfig
@@ -27,10 +29,41 @@ class _FakeChatAgent:
     """Fake agent for testing WebSocket streaming."""
 
     def __init__(self):
+        class _FakeInterpreter:
+            def __init__(self):
+                self.default_execution_profile = "ROOT_INTERLOCUTOR"
+                self._volume_store: dict[str, str] = {}
+
+            @contextmanager
+            def execution_profile(self, profile):
+                previous = self.default_execution_profile
+                self.default_execution_profile = profile
+                try:
+                    yield self
+                finally:
+                    self.default_execution_profile = previous
+
+            def execute(
+                self, code: str, variables: dict[str, Any] | None = None, **kwargs
+            ):
+                variables = variables or {}
+                if "load_from_volume" in code:
+                    path = str(variables.get("path", ""))
+                    text = self._volume_store.get(path, "[file not found: fake]")
+                    return FinalOutput({"text": text})
+                if "save_to_volume" in code:
+                    path = str(variables.get("path", ""))
+                    payload = str(variables.get("payload", ""))
+                    self._volume_store[path] = payload
+                    return FinalOutput({"saved_path": path})
+                return FinalOutput({})
+
         self.history = SimpleNamespace(messages=[])
         self.react_tools: list[Any] = []
         self._events: list[StreamEvent] = []
         self._loaded_docs: list[str] = []
+        self._session_state: dict[str, Any] = {}
+        self.interpreter = _FakeInterpreter()
 
     def __enter__(self):
         return self
@@ -75,6 +108,12 @@ class _FakeChatAgent:
     def reset(self, *, clear_sandbox_buffers: bool = True):
         self.history = SimpleNamespace(messages=[])
         return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
+
+    def export_session_state(self) -> dict[str, Any]:
+        return dict(self._session_state)
+
+    def import_session_state(self, state: dict[str, Any]) -> None:
+        self._session_state = dict(state)
 
 
 @pytest.fixture
