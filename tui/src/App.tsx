@@ -23,6 +23,9 @@ function AppContent() {
   const ws = useWebSocket({
     url: state.wsUrl,
     autoConnect: true,
+    workspaceId: state.workspaceId,
+    userId: state.userId,
+    sessionId: state.sessionId,
     onEvent: (event) => {
       dispatch({ type: "APPLY_EVENT", payload: event });
 

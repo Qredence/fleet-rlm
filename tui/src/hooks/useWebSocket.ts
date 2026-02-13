@@ -20,6 +20,9 @@ export interface UseWebSocketOptions {
   autoConnect?: boolean;
   reconnectDelay?: number;
   maxReconnectAttempts?: number;
+  workspaceId?: string;
+  userId?: string;
+  sessionId?: string | null;
   onEvent?: (event: StreamEvent) => void;
   onError?: (error: string) => void;
   onConnectionChange?: (state: ConnectionState) => void;
@@ -46,6 +49,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     autoConnect = true,
     reconnectDelay = 2000,
     maxReconnectAttempts = 5,
+    workspaceId = "default",
+    userId = "anonymous",
+    sessionId = null,
     onEvent,
     onError,
     onConnectionChange,
@@ -191,6 +197,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         docs_path: docsPath,
         trace: traceMode !== "off",
         trace_mode: traceMode,
+        workspace_id: workspaceId,
+        user_id: userId,
+        session_id: sessionId,
       };
 
       try {
@@ -201,7 +210,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         );
       }
     },
-    [],
+    [workspaceId, userId, sessionId],
   );
 
   const sendCancel = useCallback(() => {
@@ -211,6 +220,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
     const message: ClientMessage = {
       type: "cancel",
+      workspace_id: workspaceId,
+      user_id: userId,
+      session_id: sessionId,
     };
 
     try {
@@ -220,7 +232,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         `Failed to send cancel: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-  }, []);
+  }, [workspaceId, userId, sessionId]);
 
   const sendCommand = useCallback(
     (command: string, args: Record<string, unknown>) => {
@@ -233,6 +245,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         type: "command",
         command,
         args,
+        workspace_id: workspaceId,
+        user_id: userId,
+        session_id: sessionId,
       };
 
       try {
@@ -243,7 +258,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         );
       }
     },
-    [],
+    [workspaceId, userId, sessionId],
   );
 
   // Auto-connect on mount
