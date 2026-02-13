@@ -35,3 +35,6 @@ def test_ws_message_defaults():
     msg = WSMessage()
     assert msg.type == "message"
     assert msg.content == ""
+    assert msg.workspace_id == "default"
+    assert msg.user_id == "anonymous"
+    assert msg.session_id is None

@@ -10,7 +10,7 @@ from fleet_rlm.core.config import get_planner_lm_from_env
 from .config import ServerRuntimeConfig
 from .deps import server_state
 from .middleware import add_middlewares
-from .routers import chat, health, tasks, ws
+from .routers import chat, health, sessions, tasks, ws
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     app.include_router(chat.router)
     app.include_router(ws.router)
     app.include_router(tasks.router)
+    app.include_router(sessions.router)
 
     try:
         from scalar_fastapi import get_scalar_api_reference

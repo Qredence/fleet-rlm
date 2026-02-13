@@ -94,7 +94,7 @@ def iter_chat_turn_stream(
         stream_program = cast(
             Any,
             dspy.streamify(
-                agent.agent,
+                agent.react,
                 status_message_provider=ReActStatusProvider(),
                 stream_listeners=stream_listeners,
                 include_final_prediction_in_output_stream=True,
@@ -245,7 +245,7 @@ async def aiter_chat_turn_stream(
         stream_program = cast(
             Any,
             dspy.streamify(
-                agent.agent,
+                agent.react,
                 status_message_provider=ReActStatusProvider(),
                 stream_listeners=stream_listeners,
                 include_final_prediction_in_output_stream=True,

@@ -90,3 +90,21 @@ def test_final_variable_does_not_leak_across_commands(monkeypatch):
     assert len(messages) == 2
     assert messages[0]["final"] == {"status": "ok"}
     assert messages[1]["final"] is None
+
+
+def test_root_profile_blocks_helper_access(monkeypatch):
+    command = {
+        "code": 'text = "hello"\nSUBMIT(peek(text, 0, 2))',
+        "variables": {},
+        "tool_names": [],
+        "output_names": [],
+        "execution_profile": "ROOT_INTERLOCUTOR",
+    }
+    messages = _run_driver(monkeypatch, [json.dumps(command)])
+
+    assert len(messages) == 1
+    assert messages[0]["final"] is None
+    assert (
+        "Helper 'peek' is not available in ROOT_INTERLOCUTOR profile"
+        in messages[0]["stderr"]
+    )

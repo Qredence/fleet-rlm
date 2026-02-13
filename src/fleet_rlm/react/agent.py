@@ -34,8 +34,13 @@ class RLMReActChatSignature(dspy.Signature):
     assistant_response: str = dspy.OutputField(desc="Final assistant response to user")
 
 
-class RLMReActChatAgent:
+class RLMReActChatAgent(dspy.Module):
     """Interactive ReAct agent that can orchestrate RLM workflows via tools.
+
+    Subclasses ``dspy.Module`` so the agent is:
+        - Discoverable in the module graph (``named_sub_modules()``).
+        - Optimizable by ``BootstrapFewShot``, ``MIPROv2``, etc.
+        - Serializable via ``save()`` / ``load()``.
 
     The agent is intentionally stateful:
         - Conversation memory is stored as ``dspy.History``.
@@ -57,6 +62,7 @@ class RLMReActChatAgent:
         extra_tools: list[Callable[..., Any]] | None = None,
         interpreter: ModalInterpreter | None = None,
     ) -> None:
+        super().__init__()
         self.react_max_iters = react_max_iters
         self.rlm_max_iterations = rlm_max_iterations
         self.rlm_max_llm_calls = rlm_max_llm_calls
@@ -81,7 +87,7 @@ class RLMReActChatAgent:
         self._extra_tools: list[Callable[..., Any]] = list(extra_tools or [])
 
         self.react_tools: list[Callable[..., Any]] = []
-        self.agent = self._build_agent()
+        self.react = self._build_agent()
 
     # -----------------------------------------------------------------
     # Document cache management
@@ -146,19 +152,96 @@ class RLMReActChatAgent:
         self._started = False
 
     def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
-        """Reset chat history and (optionally) sandbox buffers."""
+        """Reset chat history, document cache, and (optionally) sandbox buffers."""
         self.history = dspy.History(messages=[])
+        # Clear host-side document state to prevent cross-session leakage.
+        docs_count = len(self._document_cache)
+        self._document_cache.clear()
+        self._document_access_order.clear()
+        self.active_alias = None
         if clear_sandbox_buffers:
             # Find clear_buffer tool and call it
             for tool in self.react_tools:
-                if getattr(tool, "__name__", None) == "clear_buffer":
-                    tool()
+                tool_name = getattr(tool, "name", None) or getattr(
+                    tool, "__name__", None
+                )
+                if tool_name == "clear_buffer":
+                    tool() if not isinstance(tool, dspy.Tool) else tool.func()
                     break
         return {
             "status": "ok",
             "history_turns": 0,
+            "documents_cleared": docs_count,
             "buffers_cleared": clear_sandbox_buffers,
         }
+
+    def export_session_state(self) -> dict[str, Any]:
+        """Export serializable session state for persistence."""
+        return {
+            "history": list(self.history.messages),
+            "documents": dict(self._document_cache),
+            "active_alias": self.active_alias,
+            "document_access_order": list(self._document_access_order),
+        }
+
+    def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Restore session state from a previously exported payload."""
+        history = state.get("history", [])
+        if not isinstance(history, list):
+            history = []
+        self.history = dspy.History(messages=history)
+
+        documents = state.get("documents", {})
+        if isinstance(documents, dict):
+            self._document_cache = {
+                str(alias): str(content) for alias, content in documents.items()
+            }
+        else:
+            self._document_cache = {}
+
+        access_order = state.get("document_access_order", [])
+        if isinstance(access_order, list):
+            self._document_access_order = [
+                str(alias)
+                for alias in access_order
+                if str(alias) in self._document_cache
+            ]
+        else:
+            self._document_access_order = []
+
+        # Ensure all cached docs appear in order, even if absent in saved LRU list.
+        for alias in self._document_cache:
+            if alias not in self._document_access_order:
+                self._document_access_order.append(alias)
+
+        active_alias = state.get("active_alias")
+        if isinstance(active_alias, str) and active_alias in self._document_cache:
+            self.active_alias = active_alias
+        else:
+            self.active_alias = None
+
+        return {
+            "status": "ok",
+            "history_turns": len(self.history.messages),
+            "documents": len(self._document_cache),
+            "active_alias": self.active_alias,
+        }
+
+    # -----------------------------------------------------------------
+    # DSPy Module forward
+    # -----------------------------------------------------------------
+
+    def forward(
+        self, *, user_request: str, history: dspy.History | None = None
+    ) -> dspy.Prediction:
+        """DSPy-compatible forward pass through the ReAct agent.
+
+        This is the method DSPy optimizers call. It delegates to
+        ``self.react`` (the ``dspy.ReAct`` sub-module) so the full
+        module graph is visible to optimizers and ``save()``/``load()``.
+        """
+        self.start()
+        return self.react(user_request=user_request, history=history or self.history)
 
     # -----------------------------------------------------------------
     # Public chat API — synchronous
@@ -169,8 +252,7 @@ class RLMReActChatAgent:
         if not message or not message.strip():
             raise ValueError("message cannot be empty")
 
-        self.start()
-        prediction = self.agent(user_request=message, history=self.history)
+        prediction = self.forward(user_request=message)
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         self._append_history(message, assistant_response)
 
@@ -238,7 +320,7 @@ class RLMReActChatAgent:
             raise ValueError("message cannot be empty")
 
         self.start()
-        prediction = await self.agent.acall(user_request=message, history=self.history)
+        prediction = await self.react.acall(user_request=message, history=self.history)
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         self._append_history(message, assistant_response)
 
@@ -281,7 +363,7 @@ class RLMReActChatAgent:
     def register_extra_tool(self, tool: Callable[..., Any]) -> dict[str, Any]:
         """Register an additional tool and rebuild the ReAct agent."""
         self._extra_tools.append(tool)
-        self.agent = self._build_agent()
+        self.react = self._build_agent()
         return {"status": "ok", "tool_name": getattr(tool, "__name__", str(tool))}
 
     # -----------------------------------------------------------------
@@ -293,10 +375,16 @@ class RLMReActChatAgent:
     # -----------------------------------------------------------------
 
     def _get_tool(self, name: str) -> Callable[..., Any]:
-        """Look up a tool by ``__name__`` in the current tool list."""
+        """Look up a tool by name in the current tool list.
+
+        Handles both raw callables (via ``__name__``) and ``dspy.Tool``
+        wrappers (via ``.name``).
+        """
         for tool in self.react_tools:
-            if getattr(tool, "__name__", None) == name:
-                return tool
+            tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+            if tool_name == name:
+                # Return the underlying callable for dspy.Tool wrappers
+                return tool.func if isinstance(tool, dspy.Tool) else tool
         raise AttributeError(f"No tool named {name!r}")
 
     def load_document(self, path: str, alias: str = "active") -> dict[str, Any]:
@@ -429,7 +517,7 @@ class RLMReActChatAgent:
     # Internal helpers
     # -----------------------------------------------------------------
 
-    def _build_agent(self) -> dspy.ReAct:
+    def _build_agent(self) -> dspy.Module:
         self.react_tools = build_tool_list(self, self._extra_tools)
         return dspy.ReAct(
             signature=RLMReActChatSignature,

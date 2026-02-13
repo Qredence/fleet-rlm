@@ -46,11 +46,7 @@ dev = [
     "build>=1.2",
     "twine>=5.1",
 ]
-mcp = [
-    "fastmcp>=2.14.0,<3",
-    "httpx[socks]>=0.28.1,<1",
-    "pydantic>=2.12.5,<3",
-]
+mcp = ["fastmcp>=2.14.0,<3", "httpx[socks]>=0.28.1,<1", "pydantic>=2.12.5,<3"]
 server = [
     "fastapi[standard]>=0.115,<1",
     "pydantic>=2.12.5,<3",

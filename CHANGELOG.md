@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.2] - 2026-02-13
+
+### Added
+
+- `RLMReActChatAgent` now subclasses `dspy.Module` with a canonical `forward()` entry point, enabling DSPy optimization, serialization, and module-graph discovery. (#18)
+- All 16 react tools are explicitly wrapped with `dspy.Tool(func, name=..., desc=...)` for reliable function-calling schema generation. (#18)
+- Extra tools passed as raw callables are auto-wrapped in `dspy.Tool`; pre-wrapped `dspy.Tool` instances are preserved as-is. (#18)
+- 16 new unit tests covering `dspy.Module` subclass, `forward()`, `dspy.Tool` wrappers, `_get_tool` lookup, `list_react_tool_names`, and typed Signature generics.
+
+### Changed
+
+- Renamed internal `self.agent` → `self.react` on `RLMReActChatAgent` so the `dspy.ReAct` sub-module is discoverable via `named_sub_modules()`. (#18)
+- Updated `streaming.py` references from `agent.agent` → `agent.react`. (#18)
+- All bare `list` / `dict` output fields on DSPy Signatures now use typed generics (`list[str]`, `dict[str, str]`). (#18)
+- `build_tool_list` return type annotation updated from `list[Callable]` to `list[Any]` to reflect `dspy.Tool` instances.
+
+### Fixed
+
+- **Session state leak on key switch**: agent is now reset when switching to a new workspace-user identity with no saved state, preventing history/document leakage across boundaries. (#23)
+- **Session restore after restart**: exported session state is now included in the volume-persisted manifest, fixing silently broken session restoration on process restart. (#24)
+- **Host-side document leak on reset**: `reset()` now clears `_document_cache`, `_document_access_order`, and `active_alias` in addition to history and sandbox buffers.
+- **Cross-tenant identity collision**: unauthenticated WebSocket connections now receive a per-connection `anon-{uuid}` user identity instead of sharing `default:anonymous`, preventing state leakage between unrelated clients.
+
 ## [0.4.1] - 2026-02-12
 
 ### Added

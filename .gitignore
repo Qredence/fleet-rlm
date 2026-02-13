@@ -27,7 +27,7 @@ venv/
 .vscode/
 
 # Local agent/tooling state
-
+.claude/
 .letta/
 .agents/
 .codex/

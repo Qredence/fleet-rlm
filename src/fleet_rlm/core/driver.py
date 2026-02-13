@@ -17,7 +17,8 @@ Protocol:
             "code": "python code to execute",
             "variables": {"var_name": value},  // Optional
             "tool_names": ["tool1", "tool2"],  // Optional
-            "output_names": ["result1", "result2"]  // Optional
+            "output_names": ["result1", "result2"],  // Optional
+            "execution_profile": "ROOT_INTERLOCUTOR|RLM_DELEGATE|MAINTENANCE"  // Optional
         }
 
     Output (JSON, one per line):
@@ -82,6 +83,8 @@ def sandbox_driver() -> None:
     # Persistent globals that survive across code execution calls
     sandbox_globals: dict[str, Any] = {}
     proto_out = sys.__stdout__
+    current_execution_profile = "RLM_DELEGATE"
+    _dynamic_tool_names: set[str] = set()
 
     output_names: list[str] = []
 
@@ -118,6 +121,21 @@ def sandbox_driver() -> None:
         {"llm_query", "llm_query_batched", "SUBMIT", "print"}
     )
 
+    def _wrap_helper(fn):
+        """Guard helper availability by execution profile."""
+
+        def _wrapped(*args, **kwargs):
+            if current_execution_profile == "ROOT_INTERLOCUTOR":
+                raise RuntimeError(
+                    f"Helper '{fn.__name__}' is not available in ROOT_INTERLOCUTOR profile. "
+                    "Delegate tool-heavy work via llm_query/llm_query_batched."
+                )
+            return fn(*args, **kwargs)
+
+        _wrapped.__name__ = fn.__name__
+        _wrapped.__doc__ = fn.__doc__
+        return _wrapped
+
     def _register_tools(names: list[str]) -> None:
         """Register tool functions in the sandbox globals.
 
@@ -127,6 +145,12 @@ def sandbox_driver() -> None:
         Args:
             names: List of tool names to register.
         """
+        if current_execution_profile == "ROOT_INTERLOCUTOR":
+            for dyn_name in list(_dynamic_tool_names):
+                sandbox_globals.pop(dyn_name, None)
+            _dynamic_tool_names.clear()
+            return
+
         for name in names:
             if not name.isidentifier() or name in _RESERVED_TOOL_NAMES:
                 continue
@@ -140,6 +164,7 @@ def sandbox_driver() -> None:
                 return _fn
 
             sandbox_globals[name] = _make(name)
+            _dynamic_tool_names.add(name)
 
     def SUBMIT(*args, **kwargs):
         """Return structured final output from sandboxed code.
@@ -230,7 +255,7 @@ def sandbox_driver() -> None:
         """
         return text[start : start + length]
 
-    sandbox_globals["peek"] = peek
+    sandbox_globals["peek"] = _wrap_helper(peek)
 
     def grep(text: str, pattern: str, *, context: int = 0) -> list[str]:
         """Return all lines in *text* that contain *pattern* (case-insensitive).
@@ -253,7 +278,7 @@ def sandbox_driver() -> None:
                 hits.append("\n".join(lines[lo:hi]))
         return hits
 
-    sandbox_globals["grep"] = grep
+    sandbox_globals["grep"] = _wrap_helper(grep)
 
     # NOTE: These functions mirror fleet_rlm.chunking (the canonical source).
     # Keep defaults and logic in sync with chunking.py.
@@ -278,7 +303,7 @@ def sandbox_driver() -> None:
                 break
         return chunks
 
-    sandbox_globals["chunk_by_size"] = chunk_by_size
+    sandbox_globals["chunk_by_size"] = _wrap_helper(chunk_by_size)
 
     def chunk_by_headers(
         text: str,
@@ -319,7 +344,7 @@ def sandbox_driver() -> None:
             )
         return parts
 
-    sandbox_globals["chunk_by_headers"] = chunk_by_headers
+    sandbox_globals["chunk_by_headers"] = _wrap_helper(chunk_by_headers)
 
     def chunk_by_timestamps(
         text: str,
@@ -357,7 +382,7 @@ def sandbox_driver() -> None:
 
         return chunks
 
-    sandbox_globals["chunk_by_timestamps"] = chunk_by_timestamps
+    sandbox_globals["chunk_by_timestamps"] = _wrap_helper(chunk_by_timestamps)
 
     def chunk_by_json_keys(text: str) -> list[dict]:
         """Split a JSON object into per-key chunks."""
@@ -383,7 +408,7 @@ def sandbox_driver() -> None:
             )
         return chunks
 
-    sandbox_globals["chunk_by_json_keys"] = chunk_by_json_keys
+    sandbox_globals["chunk_by_json_keys"] = _wrap_helper(chunk_by_json_keys)
 
     # ------ Stateful buffers ------
     _buffers: dict[str, list] = {}
@@ -403,9 +428,9 @@ def sandbox_driver() -> None:
         else:
             _buffers.pop(name, None)
 
-    sandbox_globals["add_buffer"] = add_buffer
-    sandbox_globals["get_buffer"] = get_buffer
-    sandbox_globals["clear_buffer"] = clear_buffer
+    sandbox_globals["add_buffer"] = _wrap_helper(add_buffer)
+    sandbox_globals["get_buffer"] = _wrap_helper(get_buffer)
+    sandbox_globals["clear_buffer"] = _wrap_helper(clear_buffer)
 
     # ------ Volume persistence helpers ------
 
@@ -438,8 +463,8 @@ def sandbox_driver() -> None:
         with open(full, encoding="utf-8") as fh:
             return fh.read()
 
-    sandbox_globals["save_to_volume"] = save_to_volume
-    sandbox_globals["load_from_volume"] = load_from_volume
+    sandbox_globals["save_to_volume"] = _wrap_helper(save_to_volume)
+    sandbox_globals["load_from_volume"] = _wrap_helper(load_from_volume)
 
     # ------ Workspace helpers for stateful agent sessions ------
 
@@ -541,10 +566,10 @@ def sandbox_driver() -> None:
             fh.write(content)
         return full
 
-    sandbox_globals["workspace_write"] = workspace_write
-    sandbox_globals["workspace_read"] = workspace_read
-    sandbox_globals["workspace_list"] = workspace_list
-    sandbox_globals["workspace_append"] = workspace_append
+    sandbox_globals["workspace_write"] = _wrap_helper(workspace_write)
+    sandbox_globals["workspace_read"] = _wrap_helper(workspace_read)
+    sandbox_globals["workspace_list"] = _wrap_helper(workspace_list)
+    sandbox_globals["workspace_append"] = _wrap_helper(workspace_append)
 
     # ------ Session execution history ------
 
@@ -572,9 +597,9 @@ def sandbox_driver() -> None:
         """Return the most recent execution entry, or None if empty."""
         return _session_history[-1] if _session_history else None
 
-    sandbox_globals["log_execution"] = log_execution
-    sandbox_globals["get_session_history"] = get_session_history
-    sandbox_globals["get_last_execution"] = get_last_execution
+    sandbox_globals["log_execution"] = _wrap_helper(log_execution)
+    sandbox_globals["get_session_history"] = _wrap_helper(get_session_history)
+    sandbox_globals["get_last_execution"] = _wrap_helper(get_last_execution)
 
     while True:
         try:
@@ -594,6 +619,16 @@ def sandbox_driver() -> None:
         variables = command.get("variables", {}) or {}
         tool_names = list(command.get("tool_names", []) or [])
         output_names = list(command.get("output_names", []) or [])
+        execution_profile = str(
+            command.get("execution_profile", "RLM_DELEGATE")
+        ).strip()
+        if execution_profile not in {
+            "ROOT_INTERLOCUTOR",
+            "RLM_DELEGATE",
+            "MAINTENANCE",
+        }:
+            execution_profile = "RLM_DELEGATE"
+        current_execution_profile = execution_profile
 
         if code is None:
             _send({"stdout": "", "stderr": "[Error] No code provided", "final": None})

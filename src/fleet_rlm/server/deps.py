@@ -13,6 +13,7 @@ class ServerState:
     def __init__(self) -> None:
         self.config = ServerRuntimeConfig()
         self.planner_lm: Any | None = None
+        self.sessions: dict[str, dict[str, Any]] = {}
 
     @property
     def is_ready(self) -> bool:
@@ -28,3 +29,8 @@ def get_config() -> ServerRuntimeConfig:
 
 def get_planner_lm() -> Any:
     return server_state.planner_lm
+
+
+def session_key(workspace_id: str, user_id: str) -> str:
+    """Build a stable in-memory key for a stateful user/workspace session."""
+    return f"{workspace_id}:{user_id}"
