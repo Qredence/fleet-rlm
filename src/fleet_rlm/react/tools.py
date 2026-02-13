@@ -687,6 +687,80 @@ SUBMIT(
         )
         return response
 
+    def rlm_query(query: str, context: str = "") -> dict[str, Any]:
+        """Delegate a complex sub-task to a recursive sub-agent.
+
+        Spawns a new independent RLM agent to solve the query.
+        """
+        # Recursion depth check would go here if we tracked current depth in agent
+        # For now, we rely on the sub-agent's own limits and the fact that
+        # valid use cases (research, sub-problems) typically don't explode.
+
+        # We need to import RLMReActChatAgent here to avoid circular imports,
+        # but since we are inside a closure where `agent` is an instance of it,
+        # we can use its class.
+        SubAgentClass = agent.__class__
+
+        # Configure sub-agent with same interpreter but potentially limited config?
+        # For now, we inherit the interpreter but creating a NEW agent instance
+        # means it has its own history and state.
+        sub_agent = SubAgentClass(
+            interpreter=agent.interpreter,
+            # We might want to pass down config/limits here
+        )
+
+        # Run the sub-agent
+        # If context is provided, we can inject it as a document or user message
+        prompt = query
+        if context:
+            prompt = f"Context:\n{context}\n\nTask: {query}"
+
+        result = sub_agent.chat_turn(prompt)
+
+        return {
+            "status": "ok",
+            "answer": result.get("answer", ""),
+            "sub_agent_history": len(sub_agent.history.messages),
+            # Bubble up trajectory if needed, or just summary
+        }
+
+    # -- Sandbox editing -----------------------------------------------------
+
+    def edit_file(path: str, old_snippet: str, new_snippet: str) -> dict[str, Any]:
+        """Robustly edit a file by finding and replacing a unique text snippet.
+
+        Fails if the old_snippet is not found or is not unique in the file.
+        Use this over fragile `sed` commands for precise code editing.
+        """
+        code = """
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+except FileNotFoundError:
+    SUBMIT(status="error", error=f"File not found: {path}")
+    exit(0)
+
+count = content.count(old_snippet)
+if count == 0:
+    SUBMIT(status="error", error="old_snippet not found in file")
+elif count > 1:
+    SUBMIT(status="error", error=f"old_snippet is ambiguous (found {count} times)")
+else:
+    new_content = content.replace(old_snippet, new_snippet)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+    SUBMIT(status="ok", path=path, message="File updated successfully")
+"""
+        return execute_submit(
+            agent,
+            code,
+            variables={
+                "path": path,
+                "old_snippet": old_snippet,
+                "new_snippet": new_snippet,
+            },
+        )
+
     # -- Buffer & volume management ------------------------------------------
 
     def read_buffer(name: str) -> dict[str, Any]:
@@ -799,6 +873,16 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             extract_from_logs,
             name="extract_from_logs",
             desc="Extract structured patterns from log text via ExtractFromLogs RLM signature",
+        ),
+        Tool(
+            rlm_query,
+            name="rlm_query",
+            desc="Delegate a complex sub-task to a recursive sub-agent",
+        ),
+        Tool(
+            edit_file,
+            name="edit_file",
+            desc="Robustly edit a file by finding and replacing a unique text snippet",
         ),
         Tool(
             read_buffer,

@@ -82,3 +82,23 @@ Tests mock Modal APIs and should run without cloud credentials.
 - WebSocket interactive chat should carry identity envelope fields (`workspace_id`, `user_id`, `session_id`) so per-user/per-workspace state can be restored
 - `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through `RLM_DELEGATE`
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
+
+## Import Verification
+
+- Always verify imports after any file creation or refactoring. Run `python -c "import <module>"` to catch ImportErrors immediately.
+
+## Code Quality and Debugging
+
+- When fixing type/lint errors, first clear stale caches (`.ruff_cache/`, `__pycache__/`, `.mypy_cache/`) before making code changes.
+
+## Task Planning
+
+- Before creating tasks or making extensive changes, confirm the user's intent - especially for 'replan' or 'start fresh' requests.
+
+## Modal Sandbox
+
+- For Modal Sandbox work: always verify volume paths exist and API credentials are valid before running tests.
+
+## Multi-Agent Workflows
+
+- When using the teammate/RLM system: prefer using existing Junie guidelines and agents rather than spawning new exploration tasks.

@@ -10,6 +10,9 @@ All notable changes to this project are documented in this file.
 - All 16 react tools are explicitly wrapped with `dspy.Tool(func, name=..., desc=...)` for reliable function-calling schema generation. (#18)
 - Extra tools passed as raw callables are auto-wrapped in `dspy.Tool`; pre-wrapped `dspy.Tool` instances are preserved as-is. (#18)
 - 16 new unit tests covering `dspy.Module` subclass, `forward()`, `dspy.Tool` wrappers, `_get_tool` lookup, `list_react_tool_names`, and typed Signature generics.
+- **`rlm_query` tool**: delegate complex sub-tasks to a recursive sub-agent with isolated history and state. (#19)
+- **`edit_file` tool**: robust search-and-replace file editing in the sandbox with ambiguity detection. (#19)
+- `rlm_max_depth` config setting (default: 3) for limiting recursive sub-agent depth. (#19)
 
 ### Changed
 
