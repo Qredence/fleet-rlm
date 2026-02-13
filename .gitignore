@@ -42,4 +42,3 @@ notebooks/dspy-rlm-end-to-end-use-case.ipynb
 .junie/memory/memory.version
 .junie/memory/tasks.md
 .junie/.onboarding_migrated
-.gitignore
