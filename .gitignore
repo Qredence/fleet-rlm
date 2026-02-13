@@ -8,7 +8,7 @@ __pycache__/
 .mypy_cache/
 dist/
 build/
-
+archive/
 # Virtual environments
 .venv/
 venv/
@@ -31,6 +31,7 @@ venv/
 .letta/
 .agents/
 .codex/
+.opencode/
 
 
 PLANS.md
