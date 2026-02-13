@@ -50,20 +50,87 @@ export interface MarkdownProps {
   content: string;
   baseColor?: string;
   accentColor?: string;
+  codeBg?: string;
 }
 
-export function parseMarkdown({ content, baseColor = "#cccccc", accentColor = "#7aa2f7" }: MarkdownProps) {
+export function parseMarkdown({ content, baseColor = "#cccccc", accentColor = "#7aa2f7", codeBg = "#1c1c1c" }: MarkdownProps) {
+  // Check for fenced code blocks first
+  const codeBlockMatch = content.match(/^```(\w*)\n?([\s\S]*?)```$/m);
+  if (codeBlockMatch) {
+    const language = codeBlockMatch[1] || "text";
+    const code = codeBlockMatch[2]?.trim() || "";
+    
+    // If entire content is a code block, return just the code
+    const isOnlyCodeBlock = content.trim().startsWith("```") && content.trim().endsWith("```");
+    if (isOnlyCodeBlock) {
+      return [
+        <box key="code-block" backgroundColor={codeBg} padding={1} marginTop={1} marginBottom={1} flexDirection="column">
+          <text fg={accentColor}><strong>{language || "code"}</strong></text>
+          <text fg={baseColor}>{code}</text>
+        </box>
+      ];
+    }
+  }
+  
+  // Otherwise parse as regular markdown
   const lines = content.split(/\n/);
   const elements: ReturnType<typeof renderLine>[] = [];
+  let inCodeBlock = false;
+  let codeBlockLines: string[] = [];
+  let codeLanguage = "";
+  let lineIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
     
-    const rendered = renderLine(line, baseColor, accentColor, i);
+    // Check for code block start
+    if (line.startsWith("```")) {
+      if (!inCodeBlock) {
+        // Start of code block
+        inCodeBlock = true;
+        codeLanguage = line.slice(3).trim() || "text";
+        codeBlockLines = [];
+        continue;
+      } else {
+        // End of code block - render it
+        const code = codeBlockLines.join("\n");
+        elements.push(
+          <box key={`code-${lineIndex++}`} backgroundColor={codeBg} padding={1} marginTop={1} marginBottom={1} flexDirection="column">
+            <text fg={accentColor}><strong>{codeLanguage || "code"}</strong></text>
+            <text fg={baseColor}>{code}</text>
+          </box>
+        );
+        inCodeBlock = false;
+        codeBlockLines = [];
+        codeLanguage = "";
+        continue;
+      }
+    }
+
+    if (inCodeBlock) {
+      codeBlockLines.push(line);
+      continue;
+    }
+
+    // Skip empty lines at boundaries
+    if (!line && elements.length === 0) continue;
+    
+    const rendered = renderLine(line, baseColor, accentColor, lineIndex++);
     if (rendered) {
       elements.push(rendered);
     }
+  }
+
+  // Handle unclosed code block
+  if (inCodeBlock && codeBlockLines.length > 0) {
+    const code = codeBlockLines.join("\n");
+    elements.push(
+      <box key={`code-${lineIndex++}`} backgroundColor={codeBg} padding={1} marginTop={1} marginBottom={1} flexDirection="column">
+        <text fg={accentColor}><strong>{codeLanguage || "code"}</strong></text>
+        <text fg={baseColor}>{code}</text>
+      </box>
+    );
   }
 
   return elements;
@@ -140,5 +207,5 @@ function renderInline(text: string, baseColor: string, accentColor: string) {
 }
 
 export function hasMarkdown(text: string): boolean {
-  return /[*_`#\-\[)\]]/.test(text);
+  return /[*_`#\-\[)\]]/.test(text) || text.includes("```");
 }

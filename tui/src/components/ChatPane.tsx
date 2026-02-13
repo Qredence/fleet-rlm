@@ -3,12 +3,14 @@
  * Surface background, role badges, and styled message bubbles.
  */
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { useAppContext } from "../context/AppContext";
+import { useKeyboard } from "@opentui/react";
 import { bg, border, fg, accent, semantic } from "../theme";
 import type { TranscriptEvent } from "../types/protocol";
 import { Spinner } from "./Spinner";
 import { parseMarkdown, hasMarkdown } from "../utils/markdown";
+import { copyToClipboard } from "../hooks/useClipboard";
 
 function MessageBubble({ event }: { event: TranscriptEvent }) {
   const isError = event.role === "system" && event.content.startsWith("Error:");
@@ -96,12 +98,40 @@ export function ChatPane() {
   const { state } = useAppContext();
   const scrollRef = useRef<any>(null);
   const prevMessageCount = useRef(0);
+  const [copiedFeedback, setCopiedFeedback] = useState(false);
 
   const messages: TranscriptEvent[] = [...state.transcript];
 
   const isProcessing = state.isProcessing;
   const hasNewMessage = messages.length > prevMessageCount.current;
   prevMessageCount.current = messages.length;
+
+  // Copy last assistant message to clipboard
+  const copyLastMessage = useCallback(() => {
+    // Find last assistant message
+    let lastAssistantContent: string | null = null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === "assistant") {
+        lastAssistantContent = messages[i]?.content || null;
+        break;
+      }
+    }
+
+    if (lastAssistantContent) {
+      const success = copyToClipboard(lastAssistantContent);
+      if (success) {
+        setCopiedFeedback(true);
+        setTimeout(() => setCopiedFeedback(false), 1500);
+      }
+    }
+  }, [messages]);
+
+  // Handle Ctrl+Y to copy
+  useKeyboard((key) => {
+    if (key.ctrl && key.name === "y") {
+      copyLastMessage();
+    }
+  });
 
   if (isProcessing && state.currentTurn.transcriptText) {
     messages.push({
@@ -144,6 +174,7 @@ export function ChatPane() {
   return (
     <box
       flexGrow={1}
+      flexDirection="column"
       backgroundColor={bg.surface}
       border
       borderStyle="rounded"
@@ -151,6 +182,11 @@ export function ChatPane() {
       title=" Chat "
       titleAlignment="center"
     >
+      {copiedFeedback && (
+        <box height={1} backgroundColor={semantic.success} paddingLeft={2}>
+          <text fg="#000000">Copied to clipboard!</text>
+        </box>
+      )}
       <scrollbox
         ref={scrollRef}
         flexGrow={1}

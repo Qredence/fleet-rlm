@@ -63,11 +63,24 @@ function StatsPane() {
   const { state } = useAppContext();
   const turn = state.currentTurn;
 
+  // Calculate derived metrics
+  const avgTokensPerTurn = turn.historyTurns > 0 
+    ? Math.round(turn.tokenCount / turn.historyTurns) 
+    : turn.tokenCount;
+  
+  const errorCount = state.transcript.filter(
+    (e) => e.role === "system" && e.content.startsWith("Error:")
+  ).length;
+
   return (
     <box flexDirection="column" gap={1} padding={2}>
       <text>
         <span fg={fg.secondary}>Tokens: </span>
         <span fg={fg.primary}>{turn.tokenCount}</span>
+      </text>
+      <text>
+        <span fg={fg.secondary}>Avg/turn: </span>
+        <span fg={fg.primary}>{avgTokensPerTurn}</span>
       </text>
       <text>
         <span fg={fg.secondary}>History turns: </span>
@@ -81,6 +94,13 @@ function StatsPane() {
         <span fg={fg.secondary}>Tool calls: </span>
         <span fg={fg.primary}>{turn.toolTimeline.length}</span>
       </text>
+      {errorCount > 0 && (
+        <text>
+          <span fg={fg.secondary}>Errors: </span>
+          <span fg={semantic.error}>{errorCount}</span>
+        </text>
+      )}
+      <text fg={fg.muted}>{"─".repeat(15)}</text>
       <text>
         <span fg={fg.secondary}>Status: </span>
         <span fg={fg.primary}>{state.statusMessage}</span>
