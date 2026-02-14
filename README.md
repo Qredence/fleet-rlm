@@ -2,7 +2,7 @@
 
 **Secure, cloud-sandboxed Recursive Language Models (RLM) with DSPy and Modal.**
 
-Allow your LLMs to write code that explores massive datasets or long documents in the cloud, without downloading them locally.
+`fleet-rlm` provides a robust, production-ready implementation of **Recursive Language Modeling** aligned with the [DSPy RLM API](https://dspy.ai/api/modules/RLM/). It gives your AI agent a secure "computer" in the cloud to read, search, and analyze massive datasets without local resource constraints.
 
 [Documentation](https://fleet-rlm.readthedocs.io/) | [Paper](https://arxiv.org/abs/2501.123) | [Contributing](CONTRIBUTING.md)
 
@@ -10,117 +10,97 @@ Allow your LLMs to write code that explores massive datasets or long documents i
 
 ```mermaid
 graph TD
-    User[User/Agent] -->|Question| CLI[fleet-rlm CLI]
-    CLI -->|Plan| DSPy[DSPy Planner]
-    DSPy -->|Generate Code| Modal[Modal Sandbox]
-    Modal -->|Execute safely| Cloud[Cloud Environment]
-    Cloud -->|Result| Modal
-    Modal -->|Answer| User
+    User([User]) <--> API[Agent API / CLI]
+    API <--> Agent[RLMReActChatAgent]
 
-    style Modal fill:#f9f,stroke:#333,stroke-width:2px
-    style DSPy fill:#bbf,stroke:#333,stroke-width:2px
+    subgraph "Reasoning & Planning"
+        Agent -- "Thought" --> Agent
+        Agent -- "Delegate" --> RLM[dspy.RLM]
+    end
+
+    subgraph "Execution Plane (Modal Cloud)"
+        RLM -->|Generate Code| Sandbox[Modal Sandbox]
+        Sandbox -->|Execute| Cloud[Cloud Environment]
+        Cloud -->|Result| Sandbox
+    end
+
+    Sandbox -->|Answer| RLM
+    RLM -->|Report| Agent
 ```
 
-## What is this?
+## Features
 
-**fleet-rlm** gives your AI agent a secure "computer" in the cloud. Instead of trying to shove 10,000 pages of text into a prompt, the agent writes Python code to:
+- **Interactive Agent**: `RLMReActChatAgent` combines fast, interactive chat with deep, recursive task execution.
+- **DSPy Aligned**: Fully implements `dspy.RLM`, `dspy.Module`, and `dspy.Tool` interfaces for compatibility with DSPy optimizers (`BootstrapFewShot`, `MIPROv2`).
+- **Secure Sandbox**: Code runs in isolated **Modal** containers with persistent storage volumes and sensitive data redaction.
+- **Recursive Delegation**: Large tasks are broken down into sub-tasks handled by specialized RLM instances.
+- **Observability**: Real-time streaming of thoughts, tool execution, and sandbox outputs.
 
-1.  **Search** and filter data in a remote sandbox (Modal).
-2.  **Read** only what matters.
-3.  **Synthesize** the answer.
+## Quick Start
 
-This approach, called **Recursive Language Modeling**, mimics how humans solve research tasks: we don't memorize the library; we look things up.
-
-## Quick Start: Claude Code Integration
-
-### 1. Install & Initialize
-
-Install the package and register the RLM skills with your local Claude Code agent (`~/.claude/`).
+### 1. Install
 
 ```bash
-# Install fleet-rlm
 uv pip install fleet-rlm
-
-# Install skills, agents, and prompts to ~/.claude
-uv run fleet-rlm init
 ```
 
-### 2. Configure Cloud Runtime
+### 2. Configure
 
-Authenticate with Modal to enable the sandboxed execution environment.
+Set up your Modal and LLM credentials:
 
 ```bash
 uv run modal setup
 uv run modal secret create LITELLM DSPY_LM_MODEL=openai/gpt-4o DSPY_LLM_API_KEY=sk-...
 ```
 
-### 3. Use with Claude
+### 3. Run Interactive Chat
 
-Now your Claude Code agent has "superpowers". You can ask it to perform deep research tasks that require running code.
-
-**Example Prompts:**
-
-> "Use the `rlm` skill to analyze the latest papers on linear attention mechanisms."
-> "Run the `rlm-batch` agent to parallelize data extraction for these 50 files."
-
-**Available Skills:**
-
-- `rlm` - Core recursive research capability.
-- `rlm-batch` - Parallel processing.
-- `rlm-memory` - Persistent storage.
-
-## Standalone Usage
-
-You can also run fleet-rlm directly without Claude Code:
-
-**Interactive Chat (TUI)**
-Chat with the RLM agent in your terminal using the OpenTUI interface.
+Start the terminal user interface (TUI) to chat with the agent:
 
 ```bash
 uv run fleet-rlm code-chat --opentui
 ```
 
-**API Server**
-Start a FastAPI server to expose RLM capabilities over HTTP.
+**Example Commands:**
+
+> "Load the file `README.md` and summarize it."
+> "Analyze the logs in `/var/logs` for error patterns."
+> "Refactor `src/server.py` to use FastAPI."
+
+### 4. Run API Server
+
+Start the production-ready FastAPI server:
 
 ```bash
-# Dev server with hot reload
-uv run fastapi dev src/fleet_rlm/server/main.py
-
-# Production server via CLI
 uv run fleet-rlm serve-api
 ```
 
-API docs are available at `/docs` (Swagger) and `/scalar` (Scalar).
-
-## Features
-
-- 🔒 **Sandboxed Execution**: Code runs in isolated Modal containers, not on your laptop.
-- 🧠 **DSPy Powered**: Uses advanced prompt engineering pipelines for reliable code generation.
-- 💬 **Interactive TUI**: Chat with the agent in your terminal (`fleet-rlm code-chat`).
-- ⚡ **Production Ready**: Includes a fastapi server and MCP integration for Claude Desktop.
-
 ## Documentation
 
+- **[Concepts](docs/concepts.md)**: Core architecture (Agent, RLM, Sandbox).
+- **[User Flows](docs/user_flows.md)**: Interaction diagrams (Chat, Tools, Delegation).
+- **[Architecture](docs/architecture.md)**: System components and hierarchy.
 - **[Tutorials](docs/tutorials/index.md)**: Step-by-step lessons.
-- **[Installation Guide](docs/how-to-guides/installation.md)**: Detailed setup instructions.
-- **[Skills & Agents](docs/how-to-guides/managing-skills.md)**: Enhance Claude with RLM capabilities.
+
+## Architecture
+
+This project implements the [Recursive Language Modeling](https://arxiv.org/abs/2501.123) paradigm:
+
+1.  **Agent**: A generic ReAct agent handles user interaction and tool selection.
+2.  **Tools**: Provide capabilities like `load_document`, `list_files`, and `rlm_query`.
+3.  **RLM**: When `rlm_query` is called, a dedicated `dspy.RLM` module is instantiated.
+4.  **Sandbox**: The RLM generates Python code which is executed in a secure Modal sandbox (the `ModalInterpreter`).
 
 ## Contributing
 
-We welcome contributions! Whether it's reporting a bug, suggesting a feature, or writing code, your input is verified.
+We welcome contributions! Please see our [Contribution Guide](CONTRIBUTING.md) and run tests before submitting:
 
-1.  Check out our [Contribution Guide](CONTRIBUTING.md).
-2.  Fork the repo and create a branch.
-3.  Run tests with `uv run pytest`.
-4.  Submit a Pull Request.
-
-## Acknowledgments
-
-This project is built upon the innovative research by **Alex L. Zhang** (MIT CSAIL), **Omar Khattab** (Stanford), and **Tim Kraska** (MIT).
-
-> Reference: [Recursive Language Models](https://arxiv.org/abs/2501.123) (Zhang, Kraska, Khattab, 2025)
+```bash
+uv run pytest
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE).
+
+Developed based on research by **Alex L. Zhang** (MIT CSAIL), **Omar Khattab** (Stanford), and **Tim Kraska** (MIT).
