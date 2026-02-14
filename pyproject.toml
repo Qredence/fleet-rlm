@@ -52,7 +52,7 @@ server = [
     "pydantic>=2.12.5,<3",
     "scalar-fastapi>=1.5.0,<2",
     "uvicorn[standard]>=0.32,<1",
-    "websockets>=14,<16",
+    "websockets>=14,<17",
 ]
 full = [
     "fastmcp>=2.14.0,<3",
@@ -61,7 +61,7 @@ full = [
     "fastapi[standard]>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
     "scalar-fastapi>=1.5.0,<2",
-    "websockets>=14,<16",
+    "websockets>=14,<17",
 ]
 
 [project.scripts]
