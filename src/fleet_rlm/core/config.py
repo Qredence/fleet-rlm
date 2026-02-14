@@ -191,3 +191,54 @@ def get_planner_lm_from_env(*, env_file: Path | None = None) -> dspy.LM | None:
         api_key=api_key,
         max_tokens=int(os.environ.get("DSPY_LM_MAX_TOKENS", "64000")),
     )
+
+
+def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
+    """Load RLM settings from the YAML configuration file.
+
+    Reads the rlm_settings section from config/config.yaml and returns
+    the configuration values with defaults for missing keys.
+
+    Args:
+        config_path: Optional path to the configuration file. If not provided,
+            searches for config.yaml in the project root (directory containing
+            pyproject.toml) or current working directory.
+
+    Returns:
+        Dictionary containing RLM configuration with the following keys:
+            - max_iterations: Maximum iterations for RLM code execution (default: 30)
+            - max_llm_calls: Maximum LLM calls per task (default: 50)
+            - max_output_chars: Maximum output characters (default: 10000)
+            - stdout_summary_threshold: Threshold for stdout summarization (default: 10000)
+            - stdout_summary_prefix_len: Prefix length in summaries (default: 200)
+            - verbose: Enable verbose logging (default: False)
+
+    Example:
+        >>> from fleet_rlm.core.config import load_rlm_settings
+        >>> settings = load_rlm_settings()
+        >>> print(f"Max iterations: {settings['max_iterations']}")
+    """
+    import yaml
+
+    if config_path is None:
+        project_root = _find_project_root(Path.cwd())
+        config_path = project_root / "config" / "config.yaml"
+
+    defaults = {
+        "max_iterations": 30,
+        "max_llm_calls": 50,
+        "max_output_chars": 10000,
+        "stdout_summary_threshold": 10000,
+        "stdout_summary_prefix_len": 200,
+        "verbose": False,
+    }
+
+    if not config_path.exists():
+        return defaults
+
+    try:
+        config = yaml.safe_load(config_path.read_text())
+        rlm_config = config.get("rlm_settings", {})
+        return {**defaults, **rlm_config}
+    except Exception:
+        return defaults

@@ -167,7 +167,7 @@ class ModalInterpreter:
         volume_name: str | None = None,
         volume_mount_path: str = "/data",
         summarize_stdout: bool = True,
-        stdout_summary_threshold: int = 500,
+        stdout_summary_threshold: int = 10000,
         stdout_summary_prefix_len: int = 200,
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
