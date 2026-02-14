@@ -19,10 +19,21 @@ import os
 
 import pytest
 
-# Skip all tests if Modal credentials not available
+def _lm_configured():
+    """Check if an LM is configured for DSPy."""
+    try:
+        import dspy
+        return dspy.settings.lm is not None
+    except Exception:
+        return False
+
+
+# Skip all tests if Modal credentials or LM not available
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("MODAL_TOKEN_ID") or not os.environ.get("MODAL_TOKEN_SECRET"),
-    reason="Modal credentials not configured",
+    not os.environ.get("MODAL_TOKEN_ID")
+    or not os.environ.get("MODAL_TOKEN_SECRET")
+    or not _lm_configured(),
+    reason="Modal credentials or LM not configured",
 )
 
 
