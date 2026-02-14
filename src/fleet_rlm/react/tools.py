@@ -18,7 +18,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
-import dspy
 from dspy.primitives.code_interpreter import FinalOutput
 
 from ..chunking import (
@@ -27,7 +26,6 @@ from ..chunking import (
     chunk_by_size,
     chunk_by_timestamps,
 )
-from ..signatures import AnalyzeLongDocument, ExtractFromLogs, SummarizeLongDocument
 from ..core.interpreter import ExecutionProfile
 
 if TYPE_CHECKING:
@@ -551,267 +549,10 @@ SUBMIT(
         }
         return execute_submit(agent, code, variables=variables)
 
-    # -- Long-context analysis -----------------------------------------------
-
-    def parallel_semantic_map(
-        query: str,
-        chunk_strategy: str = "headers",
-        max_chunks: int = 24,
-        buffer_name: str = "findings",
-    ) -> dict[str, Any]:
-        """Run parallel semantic analysis over chunks via llm_query_batched."""
-        text = resolve_document(agent, "active")
-        chunks = chunk_text(
-            text, chunk_strategy, size=80_000, overlap=1_000, pattern=""
-        )
-        chunk_texts = [chunk_to_text(c) for c in chunks][:max_chunks]
-
-        prompts = []
-        for idx, chunk_item in enumerate(chunk_texts):
-            prompts.append(
-                (
-                    f"Query: {query}\n"
-                    f"Chunk index: {idx}\n"
-                    "Return concise findings as plain text.\n\n"
-                    f"{chunk_item[:6000]}"
-                )
-            )
-
-        code = """
-clear_buffer(buffer_name)
-responses = llm_query_batched(prompts)
-for idx, response in enumerate(responses):
-    add_buffer(buffer_name, {"chunk_index": idx, "response": response})
-
-SUBMIT(
-    status="ok",
-    strategy=chunk_strategy,
-    chunk_count=len(prompts),
-    findings_count=len(responses),
-    buffer_name=buffer_name,
-)
-"""
-        return execute_submit(
-            agent,
-            code,
-            variables={
-                "prompts": prompts,
-                "buffer_name": buffer_name,
-                "chunk_strategy": chunk_strategy,
-            },
-        )
-
-    def analyze_long_document(
-        query: str,
-        alias: str = "active",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Analyze a long document with the AnalyzeLongDocument RLM signature."""
-        agent.start()
-        document = resolve_document(agent, alias)
-        rlm = dspy.RLM(
-            signature=AnalyzeLongDocument,
-            interpreter=agent.interpreter,
-            max_iterations=agent.rlm_max_iterations,
-            max_llm_calls=agent.rlm_max_llm_calls,
-            verbose=agent.verbose,
-        )
-        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
-            result = rlm(document=document, query=query)
-        response = {
-            "status": "ok",
-            "findings": result.findings,
-            "answer": result.answer,
-            "sections_examined": result.sections_examined,
-            "doc_chars": len(document),
-        }
-        response.update(
-            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
-        )
-        return response
-
-    def summarize_long_document(
-        focus: str,
-        alias: str = "active",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Summarize a long document with the SummarizeLongDocument RLM signature."""
-        agent.start()
-        document = resolve_document(agent, alias)
-        rlm = dspy.RLM(
-            signature=SummarizeLongDocument,
-            interpreter=agent.interpreter,
-            max_iterations=agent.rlm_max_iterations,
-            max_llm_calls=agent.rlm_max_llm_calls,
-            verbose=agent.verbose,
-        )
-        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
-            result = rlm(document=document, focus=focus)
-        response = {
-            "status": "ok",
-            "summary": result.summary,
-            "key_points": result.key_points,
-            "coverage_pct": result.coverage_pct,
-            "doc_chars": len(document),
-        }
-        response.update(
-            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
-        )
-        return response
-
-    def extract_from_logs(
-        query: str,
-        alias: str = "active",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Extract structured patterns from log text via ExtractFromLogs RLM signature."""
-        agent.start()
-        logs = resolve_document(agent, alias)
-        rlm = dspy.RLM(
-            signature=ExtractFromLogs,
-            interpreter=agent.interpreter,
-            max_iterations=agent.rlm_max_iterations,
-            max_llm_calls=agent.rlm_max_llm_calls,
-            verbose=agent.verbose,
-        )
-        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
-            result = rlm(logs=logs, query=query)
-        response = {
-            "status": "ok",
-            "matches": result.matches,
-            "patterns": result.patterns,
-            "time_range": result.time_range,
-        }
-        response.update(
-            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
-        )
-        return response
-
-    def rlm_query(query: str, context: str = "") -> dict[str, Any]:
-        """Delegate a complex sub-task to a recursive sub-agent.
-
-        Spawns a new independent RLM agent to solve the query.
-        """
-        # Recursion depth check would go here if we tracked current depth in agent
-        # For now, we rely on the sub-agent's own limits and the fact that
-        # valid use cases (research, sub-problems) typically don't explode.
-
-        # We need to import RLMReActChatAgent here to avoid circular imports,
-        # but since we are inside a closure where `agent` is an instance of it,
-        # we can use its class.
-        SubAgentClass = agent.__class__
-
-        # Configure sub-agent with same interpreter but potentially limited config?
-        # For now, we inherit the interpreter but creating a NEW agent instance
-        # means it has its own history and state.
-        sub_agent = SubAgentClass(
-            interpreter=agent.interpreter,
-            # We might want to pass down config/limits here
-        )
-
-        # Run the sub-agent
-        # If context is provided, we can inject it as a document or user message
-        prompt = query
-        if context:
-            prompt = f"Context:\n{context}\n\nTask: {query}"
-
-        result = sub_agent.chat_turn(prompt)
-
-        return {
-            "status": "ok",
-            "answer": result.get("answer", ""),
-            "sub_agent_history": len(sub_agent.history.messages),
-            # Bubble up trajectory if needed, or just summary
-        }
-
-    # -- Sandbox editing -----------------------------------------------------
-
-    def edit_file(path: str, old_snippet: str, new_snippet: str) -> dict[str, Any]:
-        """Robustly edit a file by finding and replacing a unique text snippet.
-
-        Fails if the old_snippet is not found or is not unique in the file.
-        Use this over fragile `sed` commands for precise code editing.
-        """
-        code = """
-try:
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
-except FileNotFoundError:
-    SUBMIT(status="error", error=f"File not found: {path}")
-    exit(0)
-
-count = content.count(old_snippet)
-if count == 0:
-    SUBMIT(status="error", error="old_snippet not found in file")
-elif count > 1:
-    SUBMIT(status="error", error=f"old_snippet is ambiguous (found {count} times)")
-else:
-    new_content = content.replace(old_snippet, new_snippet)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(new_content)
-    SUBMIT(status="ok", path=path, message="File updated successfully")
-"""
-        return execute_submit(
-            agent,
-            code,
-            variables={
-                "path": path,
-                "old_snippet": old_snippet,
-                "new_snippet": new_snippet,
-            },
-        )
-
-    # -- Buffer & volume management ------------------------------------------
-
-    def read_buffer(name: str) -> dict[str, Any]:
-        """Read the full contents of a sandbox buffer."""
-        result = execute_submit(
-            agent, "SUBMIT(items=get_buffer(name))", variables={"name": name}
-        )
-        items = result.get("items", [])
-        return {"status": "ok", "name": name, "items": items, "count": len(items)}
-
-    def clear_buffer(name: str = "") -> dict[str, Any]:
-        """Clear one sandbox buffer (or all buffers when name is empty)."""
-        if name:
-            code = 'clear_buffer(name)\nSUBMIT(status="ok", scope="single", name=name)'
-            variables: dict[str, Any] = {"name": name}
-        else:
-            code = 'clear_buffer()\nSUBMIT(status="ok", scope="all")'
-            variables = {}
-        return execute_submit(agent, code, variables=variables)
-
-    def save_buffer_to_volume(name: str, path: str) -> dict[str, Any]:
-        """Persist a sandbox buffer to Modal Volume storage as JSON."""
-        code = """
-import json
-items = get_buffer(name)
-payload = json.dumps(items, indent=2, ensure_ascii=False, default=str)
-saved_path = save_to_volume(path, payload)
-SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
-"""
-        return execute_submit(agent, code, variables={"name": name, "path": path})
-
-    def load_text_from_volume(path: str, alias: str = "active") -> dict[str, Any]:
-        """Load text from Modal Volume into host-side document memory."""
-        result = execute_submit(
-            agent,
-            'text = load_from_volume(path)\nSUBMIT(status="ok", text=text)',
-            variables={"path": path},
-        )
-        text = str(result.get("text", ""))
-        agent._set_document(alias, text)
-        agent.active_alias = alias
-        return {
-            "status": "ok",
-            "alias": alias,
-            "chars": len(text),
-            "lines": len(text.splitlines()),
-        }
-
     # -- Assemble tool list --------------------------------------------------
 
     from dspy import Tool
+    from .tools_sandbox import build_sandbox_tools
 
     tools: list[Tool] = [
         Tool(
@@ -854,57 +595,9 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             name="chunk_sandbox",
             desc="Chunk active document inside sandbox and store chunks in a buffer",
         ),
-        Tool(
-            parallel_semantic_map,
-            name="parallel_semantic_map",
-            desc="Run parallel semantic analysis over chunks via llm_query_batched",
-        ),
-        Tool(
-            analyze_long_document,
-            name="analyze_long_document",
-            desc="Analyze a long document with the AnalyzeLongDocument RLM signature",
-        ),
-        Tool(
-            summarize_long_document,
-            name="summarize_long_document",
-            desc="Summarize a long document with the SummarizeLongDocument RLM signature",
-        ),
-        Tool(
-            extract_from_logs,
-            name="extract_from_logs",
-            desc="Extract structured patterns from log text via ExtractFromLogs RLM signature",
-        ),
-        Tool(
-            rlm_query,
-            name="rlm_query",
-            desc="Delegate a complex sub-task to a recursive sub-agent",
-        ),
-        Tool(
-            edit_file,
-            name="edit_file",
-            desc="Robustly edit a file by finding and replacing a unique text snippet",
-        ),
-        Tool(
-            read_buffer,
-            name="read_buffer",
-            desc="Read the full contents of a sandbox buffer",
-        ),
-        Tool(
-            clear_buffer,
-            name="clear_buffer",
-            desc="Clear one sandbox buffer (or all buffers when name is empty)",
-        ),
-        Tool(
-            save_buffer_to_volume,
-            name="save_buffer_to_volume",
-            desc="Persist a sandbox buffer to Modal Volume storage as JSON",
-        ),
-        Tool(
-            load_text_from_volume,
-            name="load_text_from_volume",
-            desc="Load text from Modal Volume into host-side document memory",
-        ),
     ]
+    # Add sandbox / RLM / buffer tools from dedicated module
+    tools.extend(build_sandbox_tools(agent))
     # Wrap extra tools with dspy.Tool if not already wrapped
     if extra_tools:
         for et in extra_tools:

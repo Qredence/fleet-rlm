@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm import runners
+from fleet_rlm import runners_demos
 
 
 class _FakeInterpreter:
@@ -72,10 +73,12 @@ def _fake_rlm_factory():
 
 @pytest.fixture(autouse=True)
 def _patch_runners(monkeypatch):
-    monkeypatch.setattr(runners, "_require_planner_ready", lambda env_file=None: None)
-    monkeypatch.setattr(runners, "_read_docs", lambda path: "doc text\nline2")
-    monkeypatch.setattr(runners, "_interpreter", lambda **kwargs: _FakeInterpreter())
-    monkeypatch.setattr(runners.dspy, "RLM", _fake_rlm_factory())
+    # Patch both runners (re-export hub) and runners_demos (where fns live)
+    for mod in (runners, runners_demos):
+        monkeypatch.setattr(mod, "_require_planner_ready", lambda env_file=None: None)
+        monkeypatch.setattr(mod, "_read_docs", lambda path: "doc text\nline2")
+        monkeypatch.setattr(mod, "_interpreter", lambda **kwargs: _FakeInterpreter())
+    monkeypatch.setattr(runners_demos.dspy, "RLM", _fake_rlm_factory())
 
 
 @pytest.mark.parametrize(
