@@ -44,27 +44,39 @@ uv run fleet-rlm code-chat --opentui
 uv run fleet-rlm serve-api --port 8000
 uv run fleet-rlm serve-api interpreter.volume_name=my-volume --port 8000
 uv run fleet-rlm serve-mcp --transport stdio
-uv run pytest
+
+# Quality gate (run all three before pushing)
+uv run ruff check src tests && uv run ty check src && uv run pytest -q
+
+# Individual checks
 uv run ruff check src tests
 uv run ruff format src tests
 uv run ty check src
+uv run pytest
 ```
 
 ## Interactive Surface
 
 - OpenTUI under `tui/` is the active and only supported interactive runtime.
-- Python Textual and legacy prompt-toolkit runtimes have been removed.
+- Python Textual and legacy prompt-toolkit UI runtimes have been removed (v0.4.0).
+- `src/fleet_rlm/interactive/models.py` is retained — it contains streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`, not UI code.
 
 ## Architecture Highlights
 
+- `src/fleet_rlm/config.py`: top-level Hydra `AppConfig` loader and runtime settings
+- `src/fleet_rlm/conf/`: Hydra config YAML directory
 - `src/fleet_rlm/core/config.py`: env loading + planner LM configuration
 - `src/fleet_rlm/core/interpreter.py`: `ModalInterpreter` lifecycle + JSON bridge + execution profiles (`ROOT_INTERLOCUTOR`, `RLM_DELEGATE`, `MAINTENANCE`)
 - `src/fleet_rlm/core/driver.py`: sandbox-side execution driver, profile-aware helper/tool gating, and Final/SUBMIT extraction
-- `src/fleet_rlm/react/agent.py`: `RLMReActChatAgent`
-- `src/fleet_rlm/react/tools.py`: ReAct tool definitions
+- `src/fleet_rlm/logging.py`: structured logging helper
+- `src/fleet_rlm/react/agent.py`: `RLMReActChatAgent` (`dspy.Module` subclass)
+- `src/fleet_rlm/react/tools.py`: ReAct tool definitions (wrapped with `dspy.Tool`)
+- `src/fleet_rlm/react/tools_sandbox.py`: sandbox-specific tools (`rlm_query`, `edit_file`) with depth enforcement
+- `src/fleet_rlm/react/streaming.py`: async/streaming ReAct execution with trajectory normalization
+- `src/fleet_rlm/react/commands.py`: WebSocket command dispatch → tool mapping
 - `src/fleet_rlm/runners.py`: high-level task runners
 - `src/fleet_rlm/cli.py`: Typer CLI entrypoint
-- `src/fleet_rlm/server/`: optional FastAPI server
+- `src/fleet_rlm/server/`: optional FastAPI server (`/ws/chat`, `/chat`, `/tasks/basic`)
 - `src/fleet_rlm/mcp/`: optional FastMCP server
 
 ## Testing Notes
@@ -74,7 +86,12 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `tests/e2e/test_cli_smoke.py`
 - `tests/integration/test_rlm_integration.py`
 - `tests/unit/test_driver_protocol.py`
+- `tests/unit/test_config.py`
+- `tests/unit/test_react_agent.py`
+- `tests/unit/test_react_streaming.py`
+- `tests/unit/test_tools_sandbox.py`
 - `tests/ui/server/*`
+- `tests/ui/server/test_router_chat_tasks.py`
 
 ## Conventions
 

@@ -77,8 +77,8 @@ uvx twine check dist/*
 
 Expected outputs:
 
-- `dist/fleet_rlm-0.1.0.tar.gz`
-- `dist/fleet_rlm-0.1.0-py3-none-any.whl`
+- `dist/fleet_rlm-0.4.2.tar.gz`
+- `dist/fleet_rlm-0.4.2-py3-none-any.whl`
 
 ## 3) Upload to TestPyPI
 
@@ -105,7 +105,7 @@ uv venv .venv-release-smoke
 uv pip install --python .venv-release-smoke/bin/python \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple \
-  fleet-rlm==0.1.0
+  fleet-rlm==0.4.2
 source .venv-release-smoke/bin/activate
 fleet-rlm --help
 deactivate
@@ -133,8 +133,8 @@ uvx twine upload dist/*
 
 ```bash
 # from repo root
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.4.2
+git push origin v0.4.2
 ```
 
 Then update changelog/release notes with:
@@ -146,6 +146,6 @@ Then update changelog/release notes with:
 
 ## Important rules
 
-- PyPI versions are immutable. You cannot re-upload `0.1.0` after publishing.
-- If upload fails after partial publish, bump version (`0.1.1`) and rebuild.
+- PyPI versions are immutable. You cannot re-upload a published version.
+- If upload fails after partial publish, bump the patch version and rebuild.
 - Always upload the exact artifacts validated by `twine check`.

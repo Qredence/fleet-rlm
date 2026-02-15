@@ -33,10 +33,22 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev --python 3.12
 
+      - name: Validate version matches pyproject.toml
+        run: |
+          TOML_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$TOML_VERSION" != "${{ inputs.version }}" ]; then
+            echo "::error::Version mismatch: workflow input '${{ inputs.version }}' != pyproject.toml '$TOML_VERSION'"
+            exit 1
+          fi
+          echo "✅ Version $TOML_VERSION matches workflow input"
+
       - name: Lint with Ruff
         run: |
           uv run ruff check src tests config/test_responses_endpoint.py
           uv run ruff format --check src tests config/test_responses_endpoint.py
+
+      - name: Type-check with ty
+        run: uv run ty check src
 
       - name: Run tests
         run: uv run pytest
@@ -223,6 +235,6 @@ jobs:
 
             ### What's Changed
 
-            Please see [RELEASING.md](https://github.com/${{ github.repository }}/blob/main/RELEASING.md) for the complete release process.
+            See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for the full list of changes in this release.
 
             **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ inputs.version }}...main
