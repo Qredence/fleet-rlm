@@ -475,12 +475,21 @@ def test_signature_output_types_are_generic():
     import typing
     from fleet_rlm.signatures import (
         AnalyzeLongDocument,
+        CodeChangePlan,
+        ClarificationQuestionSignature,
+        CoreMemoryUpdateProposal,
         ExtractAPIEndpoints,
         ExtractArchitecture,
         ExtractFromLogs,
         ExtractWithCustomTool,
         FindErrorPatterns,
+        GroundedAnswerWithCitations,
+        IncidentTriageFromLogs,
+        MemoryActionIntentSignature,
+        MemoryStructureAuditSignature,
+        MemoryStructureMigrationPlanSignature,
         SummarizeLongDocument,
+        VolumeFileTreeSignature,
     )
 
     checks = [
@@ -494,6 +503,18 @@ def test_signature_output_types_are_generic():
         (SummarizeLongDocument, "key_points", list[str]),
         (ExtractFromLogs, "matches", list[str]),
         (ExtractFromLogs, "patterns", dict[str, str]),
+        (GroundedAnswerWithCitations, "citations", list[dict[str, str]]),
+        (IncidentTriageFromLogs, "probable_root_causes", list[str]),
+        (IncidentTriageFromLogs, "recommended_actions", list[str]),
+        (CodeChangePlan, "plan_steps", list[str]),
+        (CodeChangePlan, "files_to_touch", list[str]),
+        (CoreMemoryUpdateProposal, "keep", list[str]),
+        (CoreMemoryUpdateProposal, "update", list[str]),
+        (VolumeFileTreeSignature, "nodes", list[dict[str, str]]),
+        (MemoryActionIntentSignature, "target_paths", list[str]),
+        (MemoryStructureAuditSignature, "issues", list[str]),
+        (MemoryStructureMigrationPlanSignature, "operations", list[dict[str, str]]),
+        (ClarificationQuestionSignature, "questions", list[str]),
     ]
 
     hints = {}

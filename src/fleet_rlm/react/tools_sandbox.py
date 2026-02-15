@@ -11,11 +11,7 @@ import logging
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-import dspy
-
-
 from ..core.interpreter import ExecutionProfile
-from ..signatures import AnalyzeLongDocument, ExtractFromLogs, SummarizeLongDocument
 from .tools import (
     chunk_text,
     chunk_to_text,
@@ -102,13 +98,7 @@ SUBMIT(
         """Analyze a long document with the AnalyzeLongDocument RLM signature."""
         agent.start()
         document = resolve_document(agent, alias)
-        rlm = dspy.RLM(
-            signature=AnalyzeLongDocument,
-            interpreter=agent.interpreter,
-            max_iterations=agent.rlm_max_iterations,
-            max_llm_calls=agent.rlm_max_llm_calls,
-            verbose=agent.verbose,
-        )
+        rlm = agent.get_runtime_module("analyze_long_document")
         with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
             result = rlm(document=document, query=query)
         response = {
@@ -131,13 +121,7 @@ SUBMIT(
         """Summarize a long document with the SummarizeLongDocument RLM signature."""
         agent.start()
         document = resolve_document(agent, alias)
-        rlm = dspy.RLM(
-            signature=SummarizeLongDocument,
-            interpreter=agent.interpreter,
-            max_iterations=agent.rlm_max_iterations,
-            max_llm_calls=agent.rlm_max_llm_calls,
-            verbose=agent.verbose,
-        )
+        rlm = agent.get_runtime_module("summarize_long_document")
         with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
             result = rlm(document=document, focus=focus)
         response = {
@@ -160,13 +144,7 @@ SUBMIT(
         """Extract structured patterns from log text via ExtractFromLogs RLM signature."""
         agent.start()
         logs = resolve_document(agent, alias)
-        rlm = dspy.RLM(
-            signature=ExtractFromLogs,
-            interpreter=agent.interpreter,
-            max_iterations=agent.rlm_max_iterations,
-            max_llm_calls=agent.rlm_max_llm_calls,
-            verbose=agent.verbose,
-        )
+        rlm = agent.get_runtime_module("extract_from_logs")
         with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
             result = rlm(logs=logs, query=query)
         response = {
@@ -179,6 +157,371 @@ SUBMIT(
             _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
         )
         return response
+
+    def grounded_answer(
+        query: str,
+        alias: str = "active",
+        chunk_strategy: str = "headers",
+        max_chunks: int = 24,
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Answer a query with explicit machine-readable citations."""
+        agent.start()
+        document = resolve_document(agent, alias)
+        chunks = chunk_text(
+            document, chunk_strategy, size=80_000, overlap=1_000, pattern=""
+        )
+        evidence_chunks = [chunk_to_text(chunk) for chunk in chunks][:max_chunks]
+        if not evidence_chunks:
+            return {
+                "status": "error",
+                "error": "No evidence chunks available. Load a non-empty document first.",
+            }
+
+        rlm = agent.get_runtime_module("grounded_answer")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(
+                query=query,
+                evidence_chunks=evidence_chunks,
+                response_style="concise",
+            )
+
+        citations_raw = getattr(result, "citations", []) or []
+        citations: list[dict[str, str]] = []
+        for idx, item in enumerate(citations_raw):
+            row = item if isinstance(item, dict) else {"evidence": str(item)}
+            normalized = {
+                "source": str(row.get("source", alias)),
+                "chunk_id": str(row.get("chunk_id", idx)),
+                "evidence": str(row.get("evidence", ""))[:280],
+                "reason": str(row.get("reason", "")),
+            }
+            citations.append(normalized)
+
+        response = {
+            "status": "ok",
+            "answer": str(getattr(result, "answer", "")),
+            "citations": citations,
+            "confidence": int(getattr(result, "confidence", 0) or 0),
+            "coverage_notes": str(getattr(result, "coverage_notes", "")),
+            "doc_chars": len(document),
+        }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
+
+    def triage_incident_logs(
+        query: str,
+        alias: str = "active",
+        service_context: str = "",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Triage logs into severity, causes, impact, and actions."""
+        agent.start()
+        logs = resolve_document(agent, alias)
+        rlm = agent.get_runtime_module("triage_incident_logs")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(logs=logs, service_context=service_context, query=query)
+
+        severity = str(getattr(result, "severity", "")).strip().lower()
+        if severity not in {"low", "medium", "high", "critical"}:
+            severity = "low"
+
+        response = {
+            "status": "ok",
+            "severity": severity,
+            "probable_root_causes": list(
+                getattr(result, "probable_root_causes", []) or []
+            ),
+            "impacted_components": list(
+                getattr(result, "impacted_components", []) or []
+            ),
+            "recommended_actions": list(
+                getattr(result, "recommended_actions", []) or []
+            ),
+            "time_range": str(getattr(result, "time_range", "unknown")),
+        }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
+
+    def plan_code_change(
+        task: str,
+        repo_context: str = "",
+        constraints: str = "",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Build a structured code-change plan from task and constraints."""
+        agent.start()
+        context_text = repo_context or "No additional repo context provided."
+        constraints_text = (
+            constraints or "Keep changes minimal and backward compatible."
+        )
+        rlm = agent.get_runtime_module("plan_code_change")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(
+                task=task,
+                repo_context=context_text,
+                constraints=constraints_text,
+            )
+
+        response = {
+            "status": "ok",
+            "plan_steps": list(getattr(result, "plan_steps", []) or []),
+            "files_to_touch": list(getattr(result, "files_to_touch", []) or []),
+            "validation_commands": list(
+                getattr(result, "validation_commands", []) or []
+            ),
+            "risks": list(getattr(result, "risks", []) or []),
+        }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
+
+    def propose_core_memory_update(
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Propose safe updates to core memory from current state/history."""
+        agent.start()
+        history_entries = agent.history_messages()
+        turn_lines = []
+        for idx, turn in enumerate(history_entries[-20:], start=1):
+            if isinstance(turn, dict):
+                user_msg = str(turn.get("user_request", ""))
+                assistant_msg = str(turn.get("assistant_response", ""))
+                turn_lines.append(
+                    f"Turn {idx}\nUser: {user_msg}\nAssistant: {assistant_msg}"
+                )
+            else:
+                turn_lines.append(f"Turn {idx}\n{turn}")
+        turn_history = "\n\n".join(turn_lines) or "No recent turns."
+        current_memory = agent.fmt_core_memory()
+
+        rlm = agent.get_runtime_module("propose_core_memory_update")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(turn_history=turn_history, current_memory=current_memory)
+
+        response = {
+            "status": "ok",
+            "keep": list(getattr(result, "keep", []) or []),
+            "update": list(getattr(result, "update", []) or []),
+            "remove": list(getattr(result, "remove", []) or []),
+            "rationale": str(getattr(result, "rationale", "")),
+        }
+        response.update(
+            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+        )
+        return response
+
+    def memory_tree(
+        root_path: str = "/data/memory",
+        max_depth: int = 4,
+        include_hidden: bool = False,
+    ) -> dict[str, Any]:
+        """Return a bounded tree-style snapshot of the Modal volume memory path."""
+        try:
+            resolved_path = _resolve_volume_path(
+                root_path,
+                default_root="/data/memory",
+                allowed_root="/data",
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        if agent.interpreter._volume:
+            try:
+                agent.interpreter.reload()
+            except Exception:
+                pass
+
+        rlm = agent.get_runtime_module("memory_tree")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(
+                root_path=resolved_path,
+                max_depth=max(0, int(max_depth)),
+                include_hidden=bool(include_hidden),
+            )
+
+        raw_nodes = list(getattr(result, "nodes", []) or [])
+        node_cap = 2000
+        normalized_nodes: list[dict[str, str]] = []
+        for idx, raw in enumerate(raw_nodes[:node_cap]):
+            row = raw if isinstance(raw, dict) else {"path": str(raw)}
+            normalized_nodes.append(
+                {
+                    "path": str(row.get("path", "")),
+                    "type": str(row.get("type", "unknown")),
+                    "size_bytes": str(row.get("size_bytes", "0")),
+                    "depth": str(row.get("depth", idx)),
+                }
+            )
+
+        return {
+            "status": "ok",
+            "root_path": resolved_path,
+            "nodes": normalized_nodes,
+            "total_files": int(getattr(result, "total_files", 0) or 0),
+            "total_dirs": int(getattr(result, "total_dirs", 0) or 0),
+            "truncated": bool(getattr(result, "truncated", False))
+            or len(raw_nodes) > node_cap,
+        }
+
+    def memory_action_intent(
+        user_request: str,
+        policy_constraints: str = "",
+    ) -> dict[str, Any]:
+        """Classify intended memory action and risk; this tool never mutates state."""
+        tree_payload = memory_tree()
+        current_tree = list(tree_payload.get("nodes", []) or [])
+        constraints_text = (
+            policy_constraints
+            or "Prefer non-destructive operations and ask for confirmation on risky actions."
+        )
+        rlm = agent.get_runtime_module("memory_action_intent")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(
+                user_request=user_request,
+                current_tree=current_tree,
+                policy_constraints=constraints_text,
+            )
+
+        action_type = str(getattr(result, "action_type", "noop")).strip().lower()
+        allowed_actions = {
+            "read",
+            "write",
+            "append",
+            "move",
+            "delete",
+            "mkdir",
+            "tree",
+            "audit",
+            "migrate",
+            "noop",
+        }
+        if action_type not in allowed_actions:
+            action_type = "noop"
+
+        risk_level = str(getattr(result, "risk_level", "medium")).strip().lower()
+        if risk_level not in {"low", "medium", "high"}:
+            risk_level = "medium"
+
+        requires_confirmation = bool(
+            getattr(result, "requires_confirmation", risk_level == "high")
+        )
+
+        return {
+            "status": "ok",
+            "action_type": action_type,
+            "target_paths": list(getattr(result, "target_paths", []) or []),
+            "content_plan": list(getattr(result, "content_plan", []) or []),
+            "risk_level": risk_level,
+            "requires_confirmation": requires_confirmation,
+            "rationale": str(getattr(result, "rationale", "")),
+        }
+
+    def memory_structure_audit(
+        usage_goals: str = "",
+    ) -> dict[str, Any]:
+        """Audit memory structure and return organization recommendations."""
+        tree_payload = memory_tree()
+        if tree_payload.get("status") != "ok":
+            return tree_payload
+        tree_snapshot = list(tree_payload.get("nodes", []) or [])
+        goals = (
+            usage_goals or "Keep memory discoverable, consistent, and easy to maintain."
+        )
+        rlm = agent.get_runtime_module("memory_structure_audit")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(tree_snapshot=tree_snapshot, usage_goals=goals)
+
+        return {
+            "status": "ok",
+            "issues": list(getattr(result, "issues", []) or []),
+            "recommended_layout": list(getattr(result, "recommended_layout", []) or []),
+            "naming_conventions": list(getattr(result, "naming_conventions", []) or []),
+            "retention_rules": list(getattr(result, "retention_rules", []) or []),
+            "priority_fixes": list(getattr(result, "priority_fixes", []) or []),
+        }
+
+    def memory_structure_migration_plan(
+        approved_constraints: str = "",
+    ) -> dict[str, Any]:
+        """Generate a reversible migration plan from current memory audit findings."""
+        audit = memory_structure_audit()
+        if audit.get("status") != "ok":
+            return audit
+        findings = list(audit.get("issues", []) or [])
+        constraints = (
+            approved_constraints
+            or "No destructive operation without explicit confirmation and rollback."
+        )
+        rlm = agent.get_runtime_module("memory_structure_migration_plan")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(
+                audit_findings=findings,
+                approved_constraints=constraints,
+            )
+
+        raw_ops = list(getattr(result, "operations", []) or [])
+        operations: list[dict[str, str]] = []
+        for raw in raw_ops:
+            row = raw if isinstance(raw, dict) else {"op": str(raw)}
+            operations.append(
+                {
+                    "op": str(row.get("op", "")),
+                    "src": str(row.get("src", "")),
+                    "dst": str(row.get("dst", "")),
+                    "reason": str(row.get("reason", "")),
+                }
+            )
+
+        return {
+            "status": "ok",
+            "operations": operations,
+            "rollback_steps": list(getattr(result, "rollback_steps", []) or []),
+            "verification_checks": list(
+                getattr(result, "verification_checks", []) or []
+            ),
+            "estimated_risk": str(getattr(result, "estimated_risk", "medium")),
+        }
+
+    def clarification_questions(
+        request: str,
+        operation_risk: str = "medium",
+    ) -> dict[str, Any]:
+        """Generate clarification questions for ambiguous/high-risk operations."""
+        tree_payload = memory_tree()
+        tree_nodes = list(tree_payload.get("nodes", []) or [])[:20]
+        available_context = (
+            f"memory_root=/data/memory; nodes_sample={tree_nodes}; "
+            f"history_turns={agent.history_turns()}"
+        )
+        risk_norm = operation_risk.strip().lower()
+        if risk_norm not in {"low", "medium", "high"}:
+            risk_norm = "medium"
+
+        rlm = agent.get_runtime_module("clarification_questions")
+        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = rlm(
+                ambiguous_request=request,
+                available_context=available_context,
+                operation_risk=risk_norm,
+            )
+
+        proceed_without_answer = bool(getattr(result, "proceed_without_answer", False))
+        if risk_norm == "high":
+            proceed_without_answer = False
+
+        return {
+            "status": "ok",
+            "questions": list(getattr(result, "questions", []) or []),
+            "blocking_unknowns": list(getattr(result, "blocking_unknowns", []) or []),
+            "safe_default": str(getattr(result, "safe_default", "")),
+            "proceed_without_answer": proceed_without_answer,
+        }
 
     def rlm_query(query: str, context: str = "") -> dict[str, Any]:
         """Delegate a complex sub-task to a recursive sub-agent.
@@ -603,6 +946,51 @@ except Exception as e:
             extract_from_logs,
             name="extract_from_logs",
             desc="Extract structured patterns from log text via ExtractFromLogs RLM signature",
+        ),
+        Tool(
+            grounded_answer,
+            name="grounded_answer",
+            desc="Answer a query from chunked evidence with structured citations",
+        ),
+        Tool(
+            triage_incident_logs,
+            name="triage_incident_logs",
+            desc="Triage logs into severity, causes, impacted components, and actions",
+        ),
+        Tool(
+            plan_code_change,
+            name="plan_code_change",
+            desc="Generate a structured implementation plan for a code-change task",
+        ),
+        Tool(
+            propose_core_memory_update,
+            name="propose_core_memory_update",
+            desc="Propose keep/update/remove changes for core memory blocks",
+        ),
+        Tool(
+            memory_tree,
+            name="memory_tree",
+            desc="Return a bounded file-tree snapshot for a path in Modal volume memory",
+        ),
+        Tool(
+            memory_action_intent,
+            name="memory_action_intent",
+            desc="Infer memory action intent, risk, and confirmation needs from a request",
+        ),
+        Tool(
+            memory_structure_audit,
+            name="memory_structure_audit",
+            desc="Audit memory layout and recommend structure conventions",
+        ),
+        Tool(
+            memory_structure_migration_plan,
+            name="memory_structure_migration_plan",
+            desc="Generate reversible migration operations from memory audit findings",
+        ),
+        Tool(
+            clarification_questions,
+            name="clarification_questions",
+            desc="Generate clarification questions for ambiguous or risky memory operations",
         ),
         Tool(
             rlm_query,
