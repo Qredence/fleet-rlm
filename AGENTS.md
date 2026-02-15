@@ -28,6 +28,9 @@ uv run modal secret create LITELLM \
   DSPY_LM_MODEL=... \
   DSPY_LM_API_BASE=... \
   DSPY_LLM_API_KEY=...
+
+# serve-api defaults to persistent volume `rlm-volume-dspy`
+# when interpreter.volume_name is not explicitly provided.
 ```
 
 ## Common Commands
@@ -39,6 +42,7 @@ uv run fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
 uv run fleet-rlm run-architecture --docs-path rlm_content/dspy-knowledge/dspy-doc.txt --query "Extract all modules and optimizers"
 uv run fleet-rlm code-chat --opentui
 uv run fleet-rlm serve-api --port 8000
+uv run fleet-rlm serve-api interpreter.volume_name=my-volume --port 8000
 uv run fleet-rlm serve-mcp --transport stdio
 uv run pytest
 uv run ruff check src tests
@@ -78,6 +82,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Type-check with `ty` (not `mypy`)
 - Format/lint with `ruff`
 - Prefer `uv run ...` for commands
+- `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
 - WebSocket interactive chat should carry identity envelope fields (`workspace_id`, `user_id`, `session_id`) so per-user/per-workspace state can be restored
 - `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through `RLM_DELEGATE`
@@ -85,11 +90,11 @@ Tests mock Modal APIs and should run without cloud credentials.
 
 ## Import Verification
 
-- Always verify imports after any file creation or refactoring. Run `python -c "import <module>"` to catch ImportErrors immediately.
+- Always verify imports after any file creation or refactoring. Run `uv run python -c "import <module>"` to catch ImportErrors immediately.
 
 ## Code Quality and Debugging
 
-- When fixing type/lint errors, first clear stale caches (`.ruff_cache/`, `__pycache__/`, `.mypy_cache/`) before making code changes.
+- When fixing type/lint errors, first clear stale caches (`.ruff_cache/`, `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`) and run `pre-commit clean` before making code changes.
 
 ## Task Planning
 
@@ -101,4 +106,4 @@ Tests mock Modal APIs and should run without cloud credentials.
 
 ## Multi-Agent Workflows
 
-- When using the teammate/RLM system: prefer using existing Junie guidelines and agents rather than spawning new exploration tasks.
+- When using the teammate/RLM system: prefer using existing agents in `@.claude/agents/` rather than spawning new exploration tasks.
