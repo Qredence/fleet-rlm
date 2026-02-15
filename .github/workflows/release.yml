@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g., 0.1.0)"
+        description: "Version to release (e.g., 0.1.0 or v0.1.0)"
         required: true
         type: string
 
@@ -16,6 +16,9 @@ jobs:
   preflight:
     name: Preflight Checks
     runs-on: ubuntu-latest
+    outputs:
+      normalized_version: ${{ steps.version.outputs.normalized_version }}
+      tag_version: ${{ steps.version.outputs.tag_version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,14 +36,29 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev --python 3.12
 
-      - name: Validate version matches pyproject.toml
+      - name: Normalize and validate version against pyproject.toml
+        id: version
         run: |
-          TOML_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          if [ "$TOML_VERSION" != "${{ inputs.version }}" ]; then
-            echo "::error::Version mismatch: workflow input '${{ inputs.version }}' != pyproject.toml '$TOML_VERSION'"
+          INPUT_VERSION="${{ inputs.version }}"
+          NORMALIZED_VERSION="${INPUT_VERSION#v}"
+          TAG_VERSION="v${NORMALIZED_VERSION}"
+
+          if [ -z "$NORMALIZED_VERSION" ]; then
+            echo "::error::Version input cannot be empty"
             exit 1
           fi
-          echo "✅ Version $TOML_VERSION matches workflow input"
+
+          TOML_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+
+          if [ "$TOML_VERSION" != "$NORMALIZED_VERSION" ]; then
+            echo "::error::Version mismatch: workflow input '$INPUT_VERSION' (normalized '$NORMALIZED_VERSION') != pyproject.toml '$TOML_VERSION'"
+            exit 1
+          fi
+
+          echo "normalized_version=$NORMALIZED_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "✅ Version $TOML_VERSION matches workflow input '$INPUT_VERSION'"
 
       - name: Lint with Ruff
         run: |
@@ -127,7 +145,7 @@ jobs:
   smoke-test-testpypi:
     name: Smoke Test from TestPyPI
     runs-on: ubuntu-latest
-    needs: publish-testpypi
+    needs: [publish-testpypi, preflight]
     continue-on-error: true
     if: success() || failure()
     steps:
@@ -146,11 +164,11 @@ jobs:
           python -m pip install --upgrade pip
           # Retry up to 3 times with exponential backoff
           for i in 1 2 3; do
-            echo "Attempt $i to install fleet-rlm==${{ inputs.version }}"
+            echo "Attempt $i to install fleet-rlm==${{ needs.preflight.outputs.normalized_version }}"
             if pip install \
               --index-url https://test.pypi.org/simple/ \
               --extra-index-url https://pypi.org/simple \
-              fleet-rlm==${{ inputs.version }}; then
+              fleet-rlm==${{ needs.preflight.outputs.normalized_version }}; then
               echo "✅ Successfully installed"
               exit 0
             fi
@@ -192,7 +210,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: publish-pypi
+    needs: [publish-pypi, preflight]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -207,24 +225,24 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
-          git push origin "v${{ inputs.version }}"
+          git tag -a "${{ needs.preflight.outputs.tag_version }}" -m "Release ${{ needs.preflight.outputs.tag_version }}"
+          git push origin "${{ needs.preflight.outputs.tag_version }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version }}
-          name: Release v${{ inputs.version }}
+          tag_name: ${{ needs.preflight.outputs.tag_version }}
+          name: Release ${{ needs.preflight.outputs.tag_version }}
           draft: false
           prerelease: false
           files: dist/*
           body: |
-            ## Release v${{ inputs.version }}
+            ## Release ${{ needs.preflight.outputs.tag_version }}
 
             ### Installation
 
             ```bash
-            pip install fleet-rlm==${{ inputs.version }}
+            pip install fleet-rlm==${{ needs.preflight.outputs.normalized_version }}
             ```
 
             ### CLI Usage
@@ -237,4 +255,4 @@ jobs:
 
             See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for the full list of changes in this release.
 
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ inputs.version }}...main
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ needs.preflight.outputs.tag_version }}...main

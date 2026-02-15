@@ -8,7 +8,7 @@ Use the GitHub Actions workflow for a fully automated release:
 
 1. Go to **Actions** → **Release to PyPI** in the GitHub repository
 2. Click **Run workflow**
-3. Enter the version number (e.g., `0.1.0`)
+3. Enter the version number (e.g., `0.1.0` or `v0.1.0`)
 4. Approve the TestPyPI environment deployment
 5. Once smoke tests pass, approve the PyPI environment deployment
 
