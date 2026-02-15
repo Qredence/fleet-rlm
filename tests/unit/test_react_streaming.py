@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import dspy
+import pytest
 from dspy.primitives.code_interpreter import FinalOutput
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
@@ -89,6 +90,8 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
         def _stream(**stream_kwargs):
             assert "user_request" in stream_kwargs
             assert "history" in stream_kwargs
+            assert "core_memory" in stream_kwargs
+            assert stream_kwargs["core_memory"]
             yield StatusMessage(message="reasoning")
             yield StreamResponse(
                 predict_name="react",
@@ -183,6 +186,48 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
 
     final_event = events[-1]
     assert final_event.text == "hello world"
+    assert len(agent.history.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    def _fake_streamify(*args, **kwargs):
+        assert kwargs.get("async_streaming") is True
+
+        async def _stream(**stream_kwargs):
+            assert "user_request" in stream_kwargs
+            assert "history" in stream_kwargs
+            assert "core_memory" in stream_kwargs
+            assert stream_kwargs["core_memory"]
+            yield StreamResponse(
+                predict_name="react",
+                signature_field_name="assistant_response",
+                chunk="hello",
+                is_last_chunk=True,
+            )
+            yield dspy.Prediction(
+                assistant_response="hello",
+                trajectory={"tool_name_0": "finish"},
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    events = [
+        event
+        async for event in agent.aiter_chat_turn_stream(
+            "say hi",
+            trace=False,
+        )
+    ]
+
+    assert events[-1].kind == "final"
+    assert events[-1].text == "hello"
     assert len(agent.history.messages) == 1
 
 

@@ -238,7 +238,7 @@ class RLMReActChatAgent(dspy.Module):
     def export_session_state(self) -> dict[str, Any]:
         """Export serializable session state for persistence."""
         return {
-            "history": list(self.history.messages),
+            "history": self.history_messages(),
             "documents": dict(self._document_cache),
             "active_alias": self.active_alias,
             "document_access_order": list(self._document_access_order),
@@ -287,7 +287,7 @@ class RLMReActChatAgent(dspy.Module):
 
         return {
             "status": "ok",
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
             "documents": len(self._document_cache),
             "active_alias": self.active_alias,
             "core_memory_keys": list(self._core_memory.keys()),
@@ -329,7 +329,7 @@ class RLMReActChatAgent(dspy.Module):
         return {
             "assistant_response": assistant_response,
             "trajectory": getattr(prediction, "trajectory", {}),
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
             "core_memory_snapshot": self._core_memory.copy(),
         }
 
@@ -374,7 +374,7 @@ class RLMReActChatAgent(dspy.Module):
         return {
             "assistant_response": assistant_response,
             "trajectory": trajectory,
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
             "stream_chunks": assistant_chunks,
             "thought_chunks": thought_chunks if trace else [],
             "status_messages": status_messages,
@@ -391,14 +391,18 @@ class RLMReActChatAgent(dspy.Module):
             raise ValueError("message cannot be empty")
 
         self.start()
-        prediction = await self.react.acall(user_request=message, history=self.history)
+        prediction = await self.react.acall(
+            user_request=message,
+            history=self.history,
+            core_memory=self.fmt_core_memory(),
+        )
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         self._append_history(message, assistant_response)
 
         return {
             "assistant_response": assistant_response,
             "trajectory": getattr(prediction, "trajectory", {}),
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
         }
 
     async def aiter_chat_turn_stream(
@@ -596,8 +600,22 @@ class RLMReActChatAgent(dspy.Module):
             max_iters=self.react_max_iters,
         )
 
+    def history_messages(self) -> list[Any]:
+        """Return chat history messages as a defensive list copy."""
+        messages = getattr(self.history, "messages", None)
+        if messages is None:
+            return []
+        try:
+            return list(messages)
+        except TypeError:
+            return []
+
+    def history_turns(self) -> int:
+        """Return number of stored history turns safely."""
+        return len(self.history_messages())
+
     def _append_history(self, user_request: str, assistant_response: str) -> None:
-        messages = list(self.history.messages)
+        messages = self.history_messages()
         messages.append(
             {
                 "user_request": user_request,

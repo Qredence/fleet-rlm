@@ -199,7 +199,7 @@ SUBMIT(
         return {
             "status": "ok",
             "answer": result.get("answer", ""),
-            "sub_agent_history": len(sub_agent.history.messages),
+            "sub_agent_history": sub_agent.history_turns(),
         }
 
     # -- Sandbox editing -----------------------------------------------------

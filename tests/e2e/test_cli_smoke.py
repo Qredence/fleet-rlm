@@ -3,12 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+import pytest
 from typer.testing import CliRunner
 
 from fleet_rlm.cli import app
 
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _seed_cli_config(monkeypatch):
+    """Initialize CLI config for tests that invoke Typer app directly.
+
+    In production, config is initialized by `fleet_rlm.cli.main()` before
+    Typer dispatch. These tests call `app` directly, so seed a non-None value
+    to exercise command logic instead of the entrypoint guardrail.
+    """
+    monkeypatch.setattr("fleet_rlm.cli._CONFIG", object())
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -140,9 +152,9 @@ def test_run_react_chat_help():
     result = runner.invoke(app, ["run-react-chat", "--help"])
     assert result.exit_code == 0
     help_text = _normalized_help_text(result.stdout)
-    assert "--react-max-iters" in help_text
-    assert "--rlm-max-iterations" in help_text
-    assert "--rlm-max-llm-calls" in help_text
+    assert "--docs-path" in help_text
+    assert "--trace" in help_text
+    assert "--no-stream" in help_text
     assert "--opentui" in help_text
     assert "--trace-mode" in help_text
     assert "--stream-refresh-ms" in help_text
@@ -152,7 +164,7 @@ def test_code_chat_help():
     result = runner.invoke(app, ["code-chat", "--help"])
     assert result.exit_code == 0
     help_text = _normalized_help_text(result.stdout)
-    assert "--react-max-iters" in help_text
+    assert "--docs-path" in help_text
     assert "--trace" in help_text
     assert "--no-stream" in help_text
     assert "--opentui" in help_text
@@ -170,10 +182,22 @@ def test_run_react_chat_aliases_to_code_chat(monkeypatch):
         "fleet_rlm.cli._run_code_chat_session", _fake_run_code_chat_session
     )
 
-    result = runner.invoke(app, ["run-react-chat", "--react-max-iters", "3"])
+    result = runner.invoke(
+        app,
+        [
+            "run-react-chat",
+            "--trace",
+            "--no-stream",
+            "--stream-refresh-ms",
+            "25",
+            "--opentui",
+        ],
+    )
     assert result.exit_code == 0
     assert len(calls) == 1
-    assert calls[0]["react_max_iters"] == 3
+    assert calls[0]["trace"] is True
+    assert calls[0]["no_stream"] is True
+    assert calls[0]["stream_refresh_ms"] == 25
     assert calls[0]["opentui"] is True
 
 

@@ -155,21 +155,21 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
     return True
 
 
-def get_planner_lm_from_env(*, env_file: Path | None = None) -> dspy.LM | None:
-    """Create and return a DSPy LM from environment without configuring it globally.
+def get_planner_lm_from_env(
+    *, env_file: Path | None = None, model_name: str | None = None
+) -> dspy.LM | None:
+    """Create and return a DSPy LM from environment.
 
     This is the async-safe version of configure_planner_from_env(). It creates
     and returns the LM object without calling dspy.configure(), allowing the
     caller to use dspy.context() for thread-local configuration instead.
 
     Args:
-        env_file: Optional path to a specific .env file. If not provided,
-            searches for .env in the project root (directory containing
-            pyproject.toml) or current working directory.
+        env_file: Optional path to a specific .env file.
+        model_name: Optional explicit model identifier to use, overriding environment.
 
     Returns:
-        A configured dspy.LM instance if environment variables are set,
-        None otherwise.
+        A configured dspy.LM instance if configuration is available, None otherwise.
     """
     dotenv_path = env_file
     if dotenv_path is None:
@@ -180,7 +180,7 @@ def get_planner_lm_from_env(*, env_file: Path | None = None) -> dspy.LM | None:
     _guard_modal_shadowing()
 
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
-    model = os.environ.get("DSPY_LM_MODEL")
+    model = model_name or os.environ.get("DSPY_LM_MODEL")
 
     if not model or not api_key:
         return None

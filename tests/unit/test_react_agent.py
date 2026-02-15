@@ -235,6 +235,34 @@ def test_chat_turn_uses_forward_internally(monkeypatch):
     assert agent.history.messages[0]["user_request"] == "hello"
 
 
+@pytest.mark.asyncio
+async def test_achat_turn_passes_core_memory_to_react(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    captured: dict[str, object] = {}
+
+    class _FakeAsyncReact:
+        async def acall(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                assistant_response="echo:hello",
+                trajectory={"tool_name_0": "finish"},
+            )
+
+    agent.react = _FakeAsyncReact()  # type: ignore[assignment]
+
+    result = await agent.achat_turn("hello")
+    assert result["assistant_response"] == "echo:hello"
+    assert captured["user_request"] == "hello"
+    captured_history = captured["history"]
+    assert isinstance(captured_history, dspy.History)
+    assert len(captured_history.messages) == 0
+    assert len(agent.history.messages) == 1
+    assert captured["core_memory"] == agent.fmt_core_memory()
+
+
 def test_all_tools_are_dspy_tool_wrappers(monkeypatch):
     """All tools in react_tools should be dspy.Tool instances."""
     records = []

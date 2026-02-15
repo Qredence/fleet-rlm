@@ -119,9 +119,7 @@ def iter_chat_turn_stream(
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -131,7 +129,11 @@ def iter_chat_turn_stream(
     final_prediction: dspy.Prediction | None = None
 
     try:
-        stream = stream_program(user_request=message, history=agent.history)
+        stream = stream_program(
+            user_request=message,
+            history=agent.history,
+            core_memory=agent.fmt_core_memory(),
+        )
         for value in stream:
             if cancel_check is not None and cancel_check():
                 partial = "".join(assistant_chunks).strip()
@@ -142,7 +144,7 @@ def iter_chat_turn_stream(
                 yield StreamEvent(
                     kind="cancelled",
                     text=marked_partial,
-                    payload={"history_turns": len(agent.history.messages)},
+                    payload={"history_turns": agent.history_turns()},
                 )
                 return
 
@@ -174,7 +176,9 @@ def iter_chat_turn_stream(
                     if steps:
                         for idx, step in enumerate(steps):
                             if isinstance(step, dict):
-                                step_text = step.get("thought", step.get("action", str(step)))
+                                step_text = step.get(
+                                    "thought", step.get("action", str(step))
+                                )
                                 yield StreamEvent(
                                     kind="trajectory_step",
                                     text=step_text,
@@ -202,9 +206,7 @@ def iter_chat_turn_stream(
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -242,7 +244,7 @@ def iter_chat_turn_stream(
         payload={
             "trajectory": trajectory,
             "final_reasoning": final_reasoning,
-            "history_turns": len(agent.history.messages),
+            "history_turns": agent.history_turns(),
         },
     )
 
@@ -304,9 +306,7 @@ async def aiter_chat_turn_stream(
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -316,7 +316,11 @@ async def aiter_chat_turn_stream(
     final_prediction: dspy.Prediction | None = None
 
     try:
-        output_stream = stream_program(user_request=message, history=agent.history)
+        output_stream = stream_program(
+            user_request=message,
+            history=agent.history,
+            core_memory=agent.fmt_core_memory(),
+        )
         async for value in output_stream:
             if cancel_check is not None and cancel_check():
                 partial = "".join(assistant_chunks).strip()
@@ -327,7 +331,7 @@ async def aiter_chat_turn_stream(
                 yield StreamEvent(
                     kind="cancelled",
                     text=marked_partial,
-                    payload={"history_turns": len(agent.history.messages)},
+                    payload={"history_turns": agent.history_turns()},
                 )
                 return
 
@@ -359,7 +363,9 @@ async def aiter_chat_turn_stream(
                     if steps:
                         for idx, step in enumerate(steps):
                             if isinstance(step, dict):
-                                step_text = step.get("thought", step.get("action", str(step)))
+                                step_text = step.get(
+                                    "thought", step.get("action", str(step))
+                                )
                                 yield StreamEvent(
                                     kind="trajectory_step",
                                     text=step_text,
@@ -387,9 +393,7 @@ async def aiter_chat_turn_stream(
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -427,6 +431,6 @@ async def aiter_chat_turn_stream(
         payload={
             "trajectory": trajectory,
             "final_reasoning": final_reasoning,
-            "history_turns": len(agent.history.messages),
+            "history_turns": agent.history_turns(),
         },
     )

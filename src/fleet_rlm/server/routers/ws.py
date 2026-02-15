@@ -11,6 +11,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import dspy
 from dspy.primitives.code_interpreter import FinalOutput
@@ -136,7 +137,7 @@ async def chat_streaming(websocket: WebSocket):
         # Connection-scoped fallback: each WS gets a unique user identity
         # so unauthenticated clients never share session state.
         connection_user_id = f"anon-{uuid.uuid4().hex[:12]}"
-        session_record: dict | None = None
+        session_record: dict[str, Any] | None = None
 
         async def persist_session_state(
             *, include_volume_save: bool = True, latest_user_message: str = ""
@@ -145,12 +146,35 @@ async def chat_streaming(websocket: WebSocket):
             if session_record is None:
                 return
             exported_state = agent.export_session_state()
-            manifest = session_record.setdefault("manifest", {})
-            logs = manifest.setdefault("logs", [])
-            memory = manifest.setdefault("memory", [])
-            generated_docs = manifest.setdefault("generated_docs", [])
-            artifacts = manifest.setdefault("artifacts", [])
-            metadata = manifest.setdefault("metadata", {})
+            manifest = session_record.get("manifest")
+            if not isinstance(manifest, dict):
+                manifest = {}
+                session_record["manifest"] = manifest
+
+            logs = manifest.get("logs")
+            if not isinstance(logs, list):
+                logs = []
+                manifest["logs"] = logs
+
+            memory = manifest.get("memory")
+            if not isinstance(memory, list):
+                memory = []
+                manifest["memory"] = memory
+
+            generated_docs = manifest.get("generated_docs")
+            if not isinstance(generated_docs, list):
+                generated_docs = []
+                manifest["generated_docs"] = generated_docs
+
+            artifacts = manifest.get("artifacts")
+            if not isinstance(artifacts, list):
+                artifacts = []
+                manifest["artifacts"] = artifacts
+
+            metadata = manifest.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                manifest["metadata"] = metadata
 
             if latest_user_message:
                 logs.append(
@@ -176,9 +200,16 @@ async def chat_streaming(websocket: WebSocket):
             manifest["state"] = (
                 exported_state  # Persist full state for volume restore (#24)
             )
-            session_record["session"]["state"] = exported_state
-            session_record["session"]["session_id"] = session_record.get("session_id")
-            server_state.sessions[session_record["key"]] = session_record
+            session_data = session_record.get("session")
+            if not isinstance(session_data, dict):
+                session_data = {}
+                session_record["session"] = session_data
+            session_data["state"] = exported_state
+            session_data["session_id"] = session_record.get("session_id")
+
+            record_key = session_record.get("key")
+            if isinstance(record_key, str):
+                server_state.sessions[record_key] = session_record
 
             if include_volume_save and active_manifest_path and interpreter is not None:
                 _volume_save_manifest(agent, active_manifest_path, manifest)
@@ -236,13 +267,15 @@ async def chat_streaming(websocket: WebSocket):
                     active_key = key
                     active_manifest_path = manifest_path
                     session_record = cached
-                    restored_state = (
-                        cached.get("session", {}).get("state", {})
-                        if isinstance(cached.get("session"), dict)
+                    session_data = cached.get("session")
+                    restored_state: Any = (
+                        session_data.get("state", {})
+                        if isinstance(session_data, dict)
                         else {}
                     )
-                    if not restored_state and isinstance(cached.get("manifest"), dict):
-                        restored_state = cached["manifest"].get("state", {})
+                    manifest_data = cached.get("manifest")
+                    if not restored_state and isinstance(manifest_data, dict):
+                        restored_state = manifest_data.get("state", {})
                     if isinstance(restored_state, dict) and restored_state:
                         agent.import_session_state(restored_state)
                     else:
@@ -332,8 +365,8 @@ async def chat_streaming(websocket: WebSocket):
 async def _handle_command(
     websocket: WebSocket,
     agent: "runners.RLMReActChatAgent",
-    payload: dict,
-    session_record: dict | None,
+    payload: dict[str, Any],
+    session_record: dict[str, Any] | None,
 ) -> None:
     """Dispatch a command message to the agent and return the result."""
     command = str(payload.get("command", "")).strip()
@@ -351,8 +384,16 @@ async def _handle_command(
 
         # Track likely artifact writes as session metadata.
         if session_record is not None and command in {"save_buffer", "load_volume"}:
-            manifest = session_record.setdefault("manifest", {})
-            artifacts = manifest.setdefault("artifacts", [])
+            manifest = session_record.get("manifest")
+            if not isinstance(manifest, dict):
+                manifest = {}
+                session_record["manifest"] = manifest
+
+            artifacts = manifest.get("artifacts")
+            if not isinstance(artifacts, list):
+                artifacts = []
+                manifest["artifacts"] = artifacts
+
             artifacts.append(
                 {
                     "timestamp": _now_iso(),

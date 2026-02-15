@@ -17,3 +17,4 @@ class ServerRuntimeConfig(BaseModel):
     ws_default_user_id: str = "anonymous"
     ws_enforce_react_interlocutor: bool = True
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
+    agent_model: str | None = None  # Model identifier to use for the agent

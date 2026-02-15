@@ -20,16 +20,19 @@ async def chat(
     if planner_lm is None:
         raise HTTPException(503, "Planner LM not configured")
 
-    result = await runners.arun_react_chat_once(
-        message=request.message,
-        docs_path=request.docs_path,
-        react_max_iters=config.react_max_iters,
-        rlm_max_iterations=config.rlm_max_iterations,
-        rlm_max_llm_calls=config.rlm_max_llm_calls,
-        timeout=config.timeout,
-        secret_name=config.secret_name,
-        volume_name=config.volume_name,
-        include_trajectory=request.trace,
-        planner_lm=planner_lm,
-    )
-    return result
+    try:
+        result = await runners.arun_react_chat_once(
+            message=request.message,
+            docs_path=request.docs_path,
+            react_max_iters=config.react_max_iters,
+            rlm_max_iterations=config.rlm_max_iterations,
+            rlm_max_llm_calls=config.rlm_max_llm_calls,
+            timeout=config.timeout,
+            secret_name=config.secret_name,
+            volume_name=config.volume_name,
+            include_trajectory=request.trace,
+            planner_lm=planner_lm,
+        )
+        return result
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
