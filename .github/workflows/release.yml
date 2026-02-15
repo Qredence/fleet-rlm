@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
           enable-cache: true
@@ -61,10 +61,10 @@ jobs:
       artifact_name: ${{ steps.artifact.outputs.name }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload distributions
         id: artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: python-package-distributions
           path: dist/
@@ -113,7 +113,7 @@ jobs:
       url: https://test.pypi.org/project/fleet-rlm/
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: python-package-distributions
           path: dist/
@@ -132,7 +132,7 @@ jobs:
     if: success() || failure()
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -181,7 +181,7 @@ jobs:
       url: https://pypi.org/project/fleet-rlm/
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: python-package-distributions
           path: dist/
@@ -195,10 +195,10 @@ jobs:
     needs: publish-pypi
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: python-package-distributions
           path: dist/
