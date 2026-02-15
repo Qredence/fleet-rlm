@@ -42,3 +42,16 @@ notebooks/dspy-rlm-end-to-end-use-case.ipynb
 .junie/memory/memory.version
 .junie/memory/tasks.md
 .junie/.onboarding_migrated
+
+# Local plan files
+plans/alignment_analysis.md
+plans/architecture.md
+plans/concepts.md
+plans/dspy_alignment_audit.md
+plans/dspy_alignment_verification.md
+plans/feature_comparison_matrix.md
+plans/implementation_plan.md
+plans/memory_concept.md
+plans/task.md
+plans/user_flows.md
+plans/walkthrough.md
