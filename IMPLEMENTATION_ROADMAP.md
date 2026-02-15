@@ -10,13 +10,13 @@
 
 ## Gap Analysis Summary
 
-| Category         | Status                 | Count    |
-| ---------------- | ---------------------- | -------- |
-| ✅ **Completed** | Fully implemented      | 15 items |
-| ✅ **Phase 3**   | Config & Observability | 3 items  |
+| Category         | Status                 | Count                   |
+| ---------------- | ---------------------- | ----------------------- |
+| ✅ **Completed** | Fully implemented      | 15 items                |
+| ✅ **Phase 3**   | Config & Observability | 3 items                 |
 | 🔵 **Phase 4**   | Interpreter & CodeAct  | 1 active + 2 follow-ups |
-| 🟢 **Phase 5**   | Polish & Optimization  | 3 items  |
-| ⚪ **Future**    | Recursive sub-agents   | 1 item   |
+| 🟢 **Phase 5**   | Polish & Optimization  | 3 items                 |
+| ⚪ **Future**    | Recursive sub-agents   | 1 item                  |
 
 ---
 
@@ -277,12 +277,12 @@ Phase 4 (in progress)
 
 ## Success Metrics
 
-| Phase   | Completion Criteria                               |
-| ------- | ------------------------------------------------- |
+| Phase   | Completion Criteria                                         |
+| ------- | ----------------------------------------------------------- |
 | Phase 3 | All config values loadable from YAML and wired runtime-wide |
-| Phase 4 | `mode="codeact"` agent passes integration tests   |
-| Phase 5 | 10% faster interpreter startup                    |
-| Phase 6 | Recursive depth tracking verified                 |
+| Phase 4 | `mode="codeact"` agent passes integration tests             |
+| Phase 5 | 10% faster interpreter startup                              |
+| Phase 6 | Recursive depth tracking verified                           |
 
 ---
 
