@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.4.1"
+version = "0.4.2"
 description = "Recursive Language Models with DSPy + Modal for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.10"
