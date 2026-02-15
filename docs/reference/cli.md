@@ -37,10 +37,26 @@ uv sync --extra dev --extra mcp --extra server
 | `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to document file (text or PDF)<br>`--chars`: Limit input size                                                                                                |
 | `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to document file (text or PDF)                                                                                                                               |
 | `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize`                                                            |
-| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`: Path to document file (text or PDF)<br>`--react-max-iters`<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
+| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`: Path to document file (text or PDF)<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
 | `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                                                                                                      |
-| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`<br>`--react-max-iters`                                                                                                                                      |
+| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`                                                                                                                                      |
 | `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                                                                                            |
+
+## Runtime Overrides (Hydra)
+
+Use Hydra-style overrides (`key=value`) with CLI commands to tune runtime behavior.
+
+Examples:
+
+```bash
+uv run fleet-rlm serve-api --port 8000 \
+    interpreter.async_execute=true \
+    agent.guardrail_mode=warn \
+    rlm_settings.max_iters=8
+
+uv run fleet-rlm serve-mcp --transport stdio \
+    agent.guardrail_mode=strict
+```
 
 ## Trajectory Metadata
 
@@ -172,7 +188,6 @@ OpenTUI is the only supported runtime.
 ```bash
 uv run fleet-rlm code-chat \
   --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-  --react-max-iters 10 \
   --trace-mode compact
 
 # Explicit OpenTUI mode
@@ -181,6 +196,14 @@ uv run fleet-rlm code-chat --opentui
 # Alias command (kept for compatibility)
 uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
 ```
+
+### WebSocket command aliases
+
+The backend command dispatcher also supports these command names for interactive clients:
+
+- `process_document`
+- `write_to_file`
+- `edit_core_memory`
 
 ## `run-long-context` Details
 

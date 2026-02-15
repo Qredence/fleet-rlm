@@ -24,9 +24,15 @@ Run a single ReAct chat turn.
 {
   "assistant_response": "The text of the agent's answer...",
   "trajectory": {},
-  "history_turns": 1
+  "history_turns": 1,
+  "guardrail_warnings": []
 }
 ```
+
+Notes:
+
+- `trajectory` is omitted when `trace=false`.
+- `guardrail_warnings` is additive and may be an empty array.
 
 ### `WS /ws/chat`
 
@@ -34,15 +40,68 @@ WebSocket endpoint for real-time streaming and command dispatch.
 
 **Client -> Server message shapes:**
 
-- `{"type":"message","content":"...","docs_path":null,"trace":true,"trace_mode":"compact"}`
-- `{"type":"cancel"}`
-- `{"type":"command","command":"...","args":{}}`
+- Message turn:
+
+```json
+{
+  "type": "message",
+  "content": "...",
+  "docs_path": null,
+  "trace": true,
+  "trace_mode": "compact",
+  "workspace_id": "default",
+  "user_id": "alice",
+  "session_id": "session-123"
+}
+```
+
+- Cancel:
+
+```json
+{ "type": "cancel" }
+```
+
+- Command dispatch:
+
+```json
+{
+  "type": "command",
+  "command": "write_to_file",
+  "args": { "path": "notes/todo.md", "content": "...", "append": true },
+  "workspace_id": "default",
+  "user_id": "alice",
+  "session_id": "session-123"
+}
+```
 
 **Server -> Client message shapes:**
 
-- Event stream: `{"type":"event","data":{"kind":"...","text":"...","payload":{},"timestamp":"...ISO8601..."}}`
+- Event stream:
+
+```json
+{
+  "type": "event",
+  "data": {
+    "kind": "final",
+    "text": "assistant response text",
+    "payload": {
+      "trajectory": {},
+      "final_reasoning": "...",
+      "history_turns": 3,
+      "guardrail_warnings": []
+    },
+    "timestamp": "...ISO8601..."
+  }
+}
+```
+
 - Command result: `{"type":"command_result","command":"...","result":{}}`
 - Error: `{"type":"error","message":"..."}`
+
+Session identity notes:
+
+- Session cache key: `workspace_id:user_id`.
+- If `user_id` is not provided, the server assigns a per-connection anonymous ID.
 
 ## Task Endpoints (`/tasks/{type}`)
 
@@ -88,7 +147,7 @@ Common input schema for task endpoints:
 ```json
 {
   "ok": true,
-  "result": {}, // Arbitrary result dict
+  "result": {},
   "error": "string (if ok=false)"
 }
 ```

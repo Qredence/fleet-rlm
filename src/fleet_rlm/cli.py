@@ -281,6 +281,10 @@ def serve_api(
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
                 rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
                 rlm_max_depth=_CONFIG.rlm_settings.max_depth,
+                interpreter_async_execute=_CONFIG.interpreter.async_execute,
+                agent_guardrail_mode=_CONFIG.agent.guardrail_mode,
+                agent_min_substantive_chars=_CONFIG.agent.min_substantive_chars,
+                agent_max_output_chars=_CONFIG.rlm_settings.max_output_chars,
                 agent_model=_CONFIG.agent.model,
             )
         )
@@ -327,6 +331,10 @@ def serve_mcp(
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
                 rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
                 rlm_max_depth=_CONFIG.rlm_settings.max_depth,
+                interpreter_async_execute=_CONFIG.interpreter.async_execute,
+                agent_guardrail_mode=_CONFIG.agent.guardrail_mode,
+                agent_min_substantive_chars=_CONFIG.agent.min_substantive_chars,
+                agent_max_output_chars=_CONFIG.rlm_settings.max_output_chars,
             )
         )
 

@@ -276,6 +276,11 @@ def iter_chat_turn_stream(
         trajectory = {}
         final_reasoning = ""
 
+    assistant_response, guardrail_warnings = agent._validate_assistant_response(
+        assistant_response=assistant_response,
+        trajectory=trajectory,
+    )
+
     agent._append_history(message, assistant_response)
     yield StreamEvent(
         kind="final",
@@ -284,6 +289,7 @@ def iter_chat_turn_stream(
             "trajectory": trajectory,
             "final_reasoning": final_reasoning,
             "history_turns": agent.history_turns(),
+            "guardrail_warnings": guardrail_warnings,
         },
     )
 
@@ -463,6 +469,11 @@ async def aiter_chat_turn_stream(
         trajectory = {}
         final_reasoning = ""
 
+    assistant_response, guardrail_warnings = agent._validate_assistant_response(
+        assistant_response=assistant_response,
+        trajectory=trajectory,
+    )
+
     agent._append_history(message, assistant_response)
     yield StreamEvent(
         kind="final",
@@ -471,5 +482,6 @@ async def aiter_chat_turn_stream(
             "trajectory": trajectory,
             "final_reasoning": final_reasoning,
             "history_turns": agent.history_turns(),
+            "guardrail_warnings": guardrail_warnings,
         },
     )
