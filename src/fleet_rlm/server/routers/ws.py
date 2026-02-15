@@ -112,6 +112,7 @@ async def chat_streaming(websocket: WebSocket):
         react_max_iters=cfg.react_max_iters,
         rlm_max_iterations=cfg.rlm_max_iterations,
         rlm_max_llm_calls=cfg.rlm_max_llm_calls,
+        max_depth=cfg.rlm_max_depth,
         timeout=cfg.timeout,
         secret_name=cfg.secret_name,
         volume_name=cfg.volume_name,

@@ -64,6 +64,8 @@ class RLMReActChatAgent(dspy.Module):
         history_max_turns: int | None = None,
         extra_tools: list[Callable[..., Any]] | None = None,
         interpreter: ModalInterpreter | None = None,
+        max_depth: int = 3,
+        current_depth: int = 0,
     ) -> None:
         super().__init__()
         self.react_max_iters = react_max_iters
@@ -71,6 +73,8 @@ class RLMReActChatAgent(dspy.Module):
         self.rlm_max_llm_calls = rlm_max_llm_calls
         self.verbose = verbose
         self.history_max_turns = history_max_turns
+        self._max_depth = max_depth
+        self._current_depth = current_depth
 
         self.interpreter = interpreter or ModalInterpreter(
             timeout=timeout,

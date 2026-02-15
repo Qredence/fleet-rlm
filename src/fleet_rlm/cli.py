@@ -279,7 +279,7 @@ def serve_api(
                 timeout=_CONFIG.interpreter.timeout,
                 react_max_iters=_CONFIG.agent.max_iters,
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
-                rlm_max_llm_calls=50,  # TODO: Add to AgentConfig
+                rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
                 agent_model=_CONFIG.agent.model,
             )
         )
@@ -324,7 +324,7 @@ def serve_mcp(
                 timeout=_CONFIG.interpreter.timeout,
                 react_max_iters=_CONFIG.agent.max_iters,
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
-                rlm_max_llm_calls=50,  # TODO: Add to AgentConfig
+                rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
             )
         )
 

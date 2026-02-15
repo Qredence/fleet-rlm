@@ -43,6 +43,42 @@ def parse_tool_result_status(message: str) -> str | None:
     return None
 
 
+def _normalize_trajectory(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert DSPy ReAct flat trajectory to structured step list.
+
+    DSPy 3.1.3 ReAct returns: {"thought_0": ..., "tool_name_0": ..., "input_0": ..., "output_0": ...}
+    We normalize to: [{"index": 0, "thought": ..., "tool_name": ..., ...}, ...]
+
+    Args:
+        raw: Flat trajectory dict from DSPy ReAct or already-structured dict with "steps" key.
+
+    Returns:
+        List of step dictionaries, each with an "index" field and relevant data fields.
+    """
+    if not raw:
+        return []
+    # If already structured (future DSPy versions), pass through
+    if "steps" in raw and isinstance(raw["steps"], list):
+        return raw["steps"]
+
+    # Extract step indices from keys like "thought_0", "tool_name_1"
+    indices: set[int] = set()
+    for key in raw:
+        parts = key.rsplit("_", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            indices.add(int(parts[1]))
+
+    steps = []
+    for i in sorted(indices):
+        step: dict[str, Any] = {"index": i}
+        for field in ("thought", "tool_name", "input", "output", "observation"):
+            val = raw.get(f"{field}_{i}")
+            if val is not None:
+                step[field] = val
+        steps.append(step)
+    return steps
+
+
 # ---------------------------------------------------------------------------
 # Status message provider
 # ---------------------------------------------------------------------------
@@ -172,7 +208,7 @@ def iter_chat_turn_stream(
                 # Emit trajectory steps as they're captured
                 trajectory = getattr(final_prediction, "trajectory", {})
                 if trajectory and isinstance(trajectory, dict):
-                    steps = trajectory.get("steps", trajectory.get("trajectory", []))
+                    steps = _normalize_trajectory(trajectory)
                     if steps:
                         for idx, step in enumerate(steps):
                             if isinstance(step, dict):
@@ -223,7 +259,7 @@ def iter_chat_turn_stream(
             final_reasoning = str(final_prediction.reasoning)
         elif trajectory and isinstance(trajectory, dict):
             # Try to construct reasoning from trajectory steps
-            steps = trajectory.get("steps", trajectory.get("trajectory", []))
+            steps = _normalize_trajectory(trajectory)
             if steps:
                 reasoning_parts = []
                 for step in steps:
@@ -359,7 +395,7 @@ async def aiter_chat_turn_stream(
                 # Emit trajectory steps as they're captured
                 trajectory = getattr(final_prediction, "trajectory", {})
                 if trajectory and isinstance(trajectory, dict):
-                    steps = trajectory.get("steps", trajectory.get("trajectory", []))
+                    steps = _normalize_trajectory(trajectory)
                     if steps:
                         for idx, step in enumerate(steps):
                             if isinstance(step, dict):
@@ -410,7 +446,7 @@ async def aiter_chat_turn_stream(
             final_reasoning = str(final_prediction.reasoning)
         elif trajectory and isinstance(trajectory, dict):
             # Try to construct reasoning from trajectory steps
-            steps = trajectory.get("steps", trajectory.get("trajectory", []))
+            steps = _normalize_trajectory(trajectory)
             if steps:
                 reasoning_parts = []
                 for step in steps:

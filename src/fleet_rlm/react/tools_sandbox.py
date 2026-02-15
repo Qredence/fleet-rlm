@@ -184,10 +184,18 @@ SUBMIT(
 
         Spawns a new independent RLM agent to solve the query.
         """
+        if agent._current_depth >= agent._max_depth:
+            return {
+                "status": "error",
+                "error": f"Max recursion depth ({agent._max_depth}) reached. Cannot spawn sub-agent.",
+            }
+
         SubAgentClass = agent.__class__
 
         sub_agent = SubAgentClass(
             interpreter=agent.interpreter,
+            max_depth=agent._max_depth,
+            current_depth=agent._current_depth + 1,
         )
 
         prompt = query
@@ -198,8 +206,9 @@ SUBMIT(
 
         return {
             "status": "ok",
-            "answer": result.get("answer", ""),
+            "answer": result.get("assistant_response", ""),
             "sub_agent_history": sub_agent.history_turns(),
+            "depth": agent._current_depth + 1,
         }
 
     # -- Sandbox editing -----------------------------------------------------

@@ -24,3 +24,13 @@ memory:
     scratchpad: 1000
   # Path in the volume for archival memory
   archival_path: "/data/memory"
+
+rlm_settings:
+  max_depth: 2
+  max_iters: 5
+  max_iterations: 30
+  max_llm_calls: 50
+  max_output_chars: 10000
+  stdout_summary_threshold: 10000
+  stdout_summary_prefix_len: 200
+  verbose: false

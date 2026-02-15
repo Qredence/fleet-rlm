@@ -112,6 +112,7 @@ def build_react_chat_agent(
     react_max_iters: int = 10,
     rlm_max_iterations: int = 30,
     rlm_max_llm_calls: int = 50,
+    max_depth: int = 3,
     timeout: int = 900,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
@@ -128,6 +129,7 @@ def build_react_chat_agent(
         react_max_iters: Maximum DSPy ReAct tool-iteration loops.
         rlm_max_iterations: Maximum iterations for internal ``dspy.RLM`` tools.
         rlm_max_llm_calls: Maximum LLM calls for internal RLM/interpreter usage.
+        max_depth: Maximum recursion depth for sub-agent spawning.
         timeout: Modal sandbox timeout in seconds.
         secret_name: Modal secret name.
         volume_name: Optional Modal volume name for persistence.
@@ -149,6 +151,7 @@ def build_react_chat_agent(
         react_max_iters=react_max_iters,
         rlm_max_iterations=rlm_max_iterations,
         rlm_max_llm_calls=rlm_max_llm_calls,
+        max_depth=max_depth,
         timeout=timeout,
         secret_name=secret_name,
         volume_name=volume_name,

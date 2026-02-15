@@ -49,6 +49,9 @@ def mock_agent():
     agent.interpreter = _FakeInterpreter()
     # Mock documents property
     agent.documents = {}
+    # Mock depth tracking
+    agent._max_depth = 2
+    agent._current_depth = 0
     return agent
 
 
@@ -90,7 +93,8 @@ def test_rlm_query_spawns_sub_agent(mock_agent):
     # Mock the __class__ of our mock_agent to return a Mock class
     MockAgentClass = MagicMock()
     mock_instance = MockAgentClass.return_value
-    mock_instance.chat_turn.return_value = {"answer": "42"}
+    # DSPy 3.1.3 uses 'assistant_response' key
+    mock_instance.chat_turn.return_value = {"assistant_response": "42"}
     mock_instance.history.messages = ["a", "b"]
 
     mock_agent.__class__ = MockAgentClass
@@ -111,3 +115,62 @@ def test_rlm_query_spawns_sub_agent(mock_agent):
     # Verify result
     assert result["status"] == "ok"
     assert result["answer"] == "42"
+
+
+def test_rlm_query_enforces_max_depth(mock_agent):
+    """Test that rlm_query respects max_depth and prevents infinite recursion."""
+    MockAgentClass = MagicMock()
+    mock_instance = MockAgentClass.return_value
+    mock_instance.chat_turn.return_value = {"answer": "test"}
+    mock_instance.history.messages = []
+
+    mock_agent.__class__ = MockAgentClass
+    mock_agent._max_depth = 2
+    mock_agent._current_depth = 1  # One level down already
+
+    tools = build_tool_list(mock_agent)
+    query_tool = next(t for t in tools if t.name == "rlm_query")
+
+    result = query_tool(query="Test query")
+
+    # Should have spawned with incremented depth
+    call_args = MockAgentClass.call_args
+    assert call_args.kwargs.get("current_depth") == 2  # Verify result is ok
+    assert result["status"] == "ok"
+
+
+def test_rlm_query_blocks_at_max_depth(mock_agent):
+    """Test that rlm_query blocks when max_depth is reached."""
+    mock_agent._max_depth = 2
+    mock_agent._current_depth = 2  # Already at max
+
+    tools = build_tool_list(mock_agent)
+    query_tool = next(t for t in tools if t.name == "rlm_query")
+
+    result = query_tool(query="Test query")
+
+    # Should return error due to depth exceeded
+    assert result["status"] == "error"
+    assert "max recursion depth" in result["error"].lower()
+
+
+def test_rlm_query_extracts_answer_correctly(mock_agent):
+    """Test that rlm_query extracts answer from the correct key."""
+    MockAgentClass = MagicMock()
+    mock_instance = MockAgentClass.return_value
+    # DSPy 3.1.3 uses 'assistant_response' key
+    mock_instance.chat_turn.return_value = {"assistant_response": "The answer is 42"}
+    mock_instance.history.messages = []
+
+    mock_agent.__class__ = MockAgentClass
+    mock_agent._max_depth = 2
+    mock_agent._current_depth = 0
+
+    tools = build_tool_list(mock_agent)
+    query_tool = next(t for t in tools if t.name == "rlm_query")
+
+    result = query_tool(query="What is the answer?")
+
+    # Should extract from 'assistant_response', not 'answer'
+    assert result["status"] == "ok"
+    assert result["answer"] == "The answer is 42"

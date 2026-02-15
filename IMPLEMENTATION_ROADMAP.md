@@ -4,8 +4,6 @@
 
 **Current State:** Phase 1-2 are **COMPLETED**. Core DSPy alignment achieved, file splitting done, Core Memory and Stateful Memory implemented.
 
-**Critical Bug Found:** Duplicate `fmt_core_memory()` method in `agent.py` (lines 142-148 and 153-158).
-
 **Remaining Work:** Phases 3-5, recursive sub-agents, and CodeAct integration.
 
 ---
@@ -15,33 +13,10 @@
 | Category | Status | Count |
 |----------|--------|-------|
 | ✅ **Completed** | Fully implemented | 15 items |
-| 🔴 **Critical Gap** | Must fix before proceeding | 1 item (duplicate method) |
-| 🟡 **Phase 3** | Config & Observability | 3 items |
+|  **Phase 3** | Config & Observability | 3 items |
 | 🔵 **Phase 4** | Interpreter & CodeAct | 3 items |
 | 🟢 **Phase 5** | Polish & Optimization | 3 items |
 | ⚪ **Future** | Recursive sub-agents | 1 item |
-
----
-
-## Phase 0: Critical Bug Fix (Immediate)
-
-### Task 0.1: Fix Duplicate Method in agent.py
-**File:** `src/fleet_rlm/react/agent.py`
-**Lines:** 142-158
-**Issue:** `fmt_core_memory()` is defined twice (lines 142-148 and 153-158)
-
-**Action:**
-```python
-# Remove duplicate definition (lines 149-158)
-# Keep only the first definition (lines 142-148)
-```
-
-**Verification:**
-```bash
-python -c "from fleet_rlm.react.agent import RLMReActChatAgent; print('Import OK')"
-```
-
-**Estimated Effort:** 5 minutes
 
 ---
 
@@ -76,7 +51,7 @@ All file splitting completed:
 
 ### Task 3.1: Surface Trajectory + final_reasoning in Streaming
 **Priority:** High
-**Files:** 
+**Files:**
 - `src/fleet_rlm/react/streaming.py`
 - `src/fleet_rlm/react/agent.py`
 
@@ -91,23 +66,8 @@ All file splitting completed:
 
 ---
 
-### Task 3.2: Increase stdout_summary_threshold to 10,000
-**Priority:** High
-**File:** `src/fleet_rlm/core/interpreter.py`
-
-**Implementation:**
-```python
-# Find the threshold configuration
-# Current value is likely 500 (per alignment_analysis.md)
-# Update to 10000 to match DSPy RLM
-```
-
-**Verification:**
-```bash
-python -c "from fleet_rlm.core.interpreter import ModalInterpreter; print('Threshold updated')"
-```
-
-**Estimated Effort:** 30 minutes
+### Task 3.2: ~~Increase stdout_summary_threshold to 10,000~~ (COMPLETED ✅)
+`stdout_summary_threshold` is already set to 10,000 in `src/fleet_rlm/core/interpreter.py`.
 
 ---
 
@@ -260,7 +220,7 @@ def spawn_sub_agent(task: str, depth: int = 0) -> dict:
     """Spawn a child RLM for sub-task delegation."""
     if depth >= MAX_RECURSION_DEPTH:
         return {"error": "Max recursion depth reached"}
-    
+
     child_rlm = dspy.RLM(
         signature="task -> result",
         interpreter=agent.interpreter,
