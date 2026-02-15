@@ -64,7 +64,7 @@ class RLMReActChatAgent(dspy.Module):
         history_max_turns: int | None = None,
         extra_tools: list[Callable[..., Any]] | None = None,
         interpreter: ModalInterpreter | None = None,
-        max_depth: int = 3,
+        max_depth: int = 2,
         current_depth: int = 0,
     ) -> None:
         super().__init__()

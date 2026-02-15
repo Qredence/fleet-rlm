@@ -9,10 +9,10 @@ class ServerRuntimeConfig(BaseModel):
     secret_name: str = "LITELLM"
     volume_name: str | None = None
     timeout: int = 900
-    react_max_iters: int = 10
+    react_max_iters: int = 5
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
-    rlm_max_depth: int = 3  # Maximum recursion depth for sub-agents (rlm_query)
+    rlm_max_depth: int = 2  # Maximum recursion depth for sub-agents (rlm_query)
     ws_default_workspace_id: str = "default"
     ws_default_user_id: str = "anonymous"
     ws_enforce_react_interlocutor: bool = True

@@ -277,9 +277,10 @@ def serve_api(
                 else "LITELLM",
                 volume_name=_resolve_server_volume_name(_CONFIG),
                 timeout=_CONFIG.interpreter.timeout,
-                react_max_iters=_CONFIG.agent.max_iters,
+                react_max_iters=_CONFIG.rlm_settings.max_iters,
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
                 rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
+                rlm_max_depth=_CONFIG.rlm_settings.max_depth,
                 agent_model=_CONFIG.agent.model,
             )
         )
@@ -322,9 +323,10 @@ def serve_mcp(
                 else "LITELLM",
                 volume_name=_CONFIG.interpreter.volume_name,
                 timeout=_CONFIG.interpreter.timeout,
-                react_max_iters=_CONFIG.agent.max_iters,
+                react_max_iters=_CONFIG.rlm_settings.max_iters,
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
                 rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
+                rlm_max_depth=_CONFIG.rlm_settings.max_depth,
             )
         )
 

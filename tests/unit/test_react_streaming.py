@@ -346,6 +346,14 @@ def test_normalize_trajectory_handles_structured_dict():
     assert result == steps
 
 
+def test_normalize_trajectory_handles_legacy_trajectory_list():
+    """Test _normalize_trajectory with legacy 'trajectory' list shape."""
+    steps = [{"index": 0, "tool_name": "finish"}]
+    trajectory = {"trajectory": steps}
+    result = _normalize_trajectory(trajectory)
+    assert result == steps
+
+
 def test_normalize_trajectory_handles_none():
     """Test _normalize_trajectory with None input."""
     result = _normalize_trajectory(None)

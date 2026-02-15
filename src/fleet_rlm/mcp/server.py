@@ -15,6 +15,7 @@ class MCPRuntimeConfig:
     react_max_iters: int = 10
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
+    rlm_max_depth: int = 2
 
 
 def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
@@ -34,6 +35,7 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
             react_max_iters=cfg.react_max_iters,
             rlm_max_iterations=cfg.rlm_max_iterations,
             rlm_max_llm_calls=cfg.rlm_max_llm_calls,
+            max_depth=cfg.rlm_max_depth,
             timeout=cfg.timeout,
             secret_name=cfg.secret_name,
             volume_name=cfg.volume_name,

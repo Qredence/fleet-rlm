@@ -43,14 +43,14 @@ def parse_tool_result_status(message: str) -> str | None:
     return None
 
 
-def _normalize_trajectory(raw: dict[str, Any]) -> list[dict[str, Any]]:
+def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Convert DSPy ReAct flat trajectory to structured step list.
 
     DSPy 3.1.3 ReAct returns: {"thought_0": ..., "tool_name_0": ..., "input_0": ..., "output_0": ...}
     We normalize to: [{"index": 0, "thought": ..., "tool_name": ..., ...}, ...]
 
     Args:
-        raw: Flat trajectory dict from DSPy ReAct or already-structured dict with "steps" key.
+        raw: Optional trajectory payload from DSPy ReAct.
 
     Returns:
         List of step dictionaries, each with an "index" field and relevant data fields.
@@ -60,6 +60,9 @@ def _normalize_trajectory(raw: dict[str, Any]) -> list[dict[str, Any]]:
     # If already structured (future DSPy versions), pass through
     if "steps" in raw and isinstance(raw["steps"], list):
         return raw["steps"]
+    # Legacy structured shape used by some DSPy outputs
+    if "trajectory" in raw and isinstance(raw["trajectory"], list):
+        return raw["trajectory"]
 
     # Extract step indices from keys like "thought_0", "tool_name_1"
     indices: set[int] = set()

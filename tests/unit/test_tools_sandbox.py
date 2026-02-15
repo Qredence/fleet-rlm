@@ -121,7 +121,7 @@ def test_rlm_query_enforces_max_depth(mock_agent):
     """Test that rlm_query respects max_depth and prevents infinite recursion."""
     MockAgentClass = MagicMock()
     mock_instance = MockAgentClass.return_value
-    mock_instance.chat_turn.return_value = {"answer": "test"}
+    mock_instance.chat_turn.return_value = {"assistant_response": "test"}
     mock_instance.history.messages = []
 
     mock_agent.__class__ = MockAgentClass
