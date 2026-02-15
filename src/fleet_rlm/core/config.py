@@ -196,6 +196,10 @@ def get_planner_lm_from_env(
 def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
     """Load RLM settings from the YAML configuration file.
 
+    .. deprecated:: 0.4.2
+        Use ``AppConfig.rlm_settings`` via Hydra configuration instead.
+        This function will be removed in version 0.6.0.
+
     Reads the rlm_settings section from config/config.yaml and returns
     the configuration values with defaults for missing keys.
 
@@ -218,7 +222,14 @@ def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
         >>> settings = load_rlm_settings()
         >>> print(f"Max iterations: {settings['max_iterations']}")
     """
+    import warnings
     import yaml
+
+    warnings.warn(
+        "load_rlm_settings() is deprecated. Use AppConfig.rlm_settings via Hydra.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     if config_path is None:
         project_root = _find_project_root(Path.cwd())

@@ -64,10 +64,10 @@ function StatsPane() {
   const turn = state.currentTurn;
 
   // Calculate derived metrics
-  const avgTokensPerTurn = turn.historyTurns > 0 
-    ? Math.round(turn.tokenCount / turn.historyTurns) 
+  const avgTokensPerTurn = turn.historyTurns > 0
+    ? Math.round(turn.tokenCount / turn.historyTurns)
     : turn.tokenCount;
-  
+
   const errorCount = state.transcript.filter(
     (e) => e.role === "system" && e.content.startsWith("Error:")
   ).length;

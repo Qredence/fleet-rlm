@@ -15,6 +15,7 @@ from dspy.primitives.code_interpreter import FinalOutput
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
 from fleet_rlm.react import RLMReActChatAgent
+from fleet_rlm.react.streaming import _normalize_trajectory
 
 
 # ---------------------------------------------------------------------------
@@ -295,3 +296,71 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
     assert events[-1].kind == "final"
     assert events[-1].text == "echo:fallback now"
     assert len(agent.history.messages) == 1
+
+
+# ---------------------------------------------------------------------------
+# _normalize_trajectory tests
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_trajectory_handles_dict():
+    """Test _normalize_trajectory with plain dict trajectory."""
+    trajectory = {"tool_name_0": "finish", "tool_name_1": "search"}
+    result = _normalize_trajectory(trajectory)
+    # Should extract steps with index
+    assert len(result) == 2
+    assert result[0]["index"] == 0
+    assert result[0]["tool_name"] == "finish"
+    assert result[1]["index"] == 1
+    assert result[1]["tool_name"] == "search"
+
+
+def test_normalize_trajectory_handles_multiple_fields():
+    """Test _normalize_trajectory with multiple fields per step."""
+    trajectory = {
+        "thought_0": "First thought",
+        "tool_name_0": "tool1",
+        "input_0": "arg1",
+        "output_0": "result1",
+        "thought_1": "Second thought",
+        "tool_name_1": "tool2",
+    }
+    result = _normalize_trajectory(trajectory)
+    assert len(result) == 2
+    assert result[0]["index"] == 0
+    assert result[0]["thought"] == "First thought"
+    assert result[0]["tool_name"] == "tool1"
+    assert result[0]["input"] == "arg1"
+    assert result[0]["output"] == "result1"
+    assert result[1]["index"] == 1
+    assert result[1]["thought"] == "Second thought"
+    assert result[1]["tool_name"] == "tool2"
+
+
+def test_normalize_trajectory_handles_structured_dict():
+    """Test _normalize_trajectory with already-structured dict (future DSPy)."""
+    steps = [{"index": 0, "tool_name": "finish"}]
+    trajectory = {"steps": steps}
+    result = _normalize_trajectory(trajectory)
+    # Should pass through
+    assert result == steps
+
+
+def test_normalize_trajectory_handles_legacy_trajectory_list():
+    """Test _normalize_trajectory with legacy 'trajectory' list shape."""
+    steps = [{"index": 0, "tool_name": "finish"}]
+    trajectory = {"trajectory": steps}
+    result = _normalize_trajectory(trajectory)
+    assert result == steps
+
+
+def test_normalize_trajectory_handles_none():
+    """Test _normalize_trajectory with None input."""
+    result = _normalize_trajectory(None)
+    assert result == []
+
+
+def test_normalize_trajectory_handles_empty_dict():
+    """Test _normalize_trajectory with empty dict input."""
+    result = _normalize_trajectory({})
+    assert result == []

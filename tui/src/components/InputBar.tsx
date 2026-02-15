@@ -69,11 +69,11 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
   useKeyboard((key) => {
     if (key.name === "arrowup" && !state.isProcessing) {
       if (history.length === 0) return;
-      
-      const newIndex = isNavigatingHistory 
+
+      const newIndex = isNavigatingHistory
         ? Math.min(historyIndex + 1, history.length - 1)
         : 0;
-      
+
       if (newIndex !== historyIndex) {
         setHistoryIndex(newIndex);
         const histItem = history[history.length - 1 - newIndex] ?? "";

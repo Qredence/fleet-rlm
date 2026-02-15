@@ -30,15 +30,15 @@ import { useEffect } from "react"
 
 function App() {
   const renderer = useRenderer()
-  
+
   useEffect(() => {
     // Access renderer properties
     console.log(`Terminal: ${renderer.width}x${renderer.height}`)
-    
+
     // Show debug console
     renderer.console.show()
   }, [renderer])
-  
+
   return <text>Hello</text>
 }
 ```
@@ -52,7 +52,7 @@ import { useKeyboard, useRenderer } from "@opentui/react"
 
 function App() {
   const renderer = useRenderer()
-  
+
   useKeyboard((key) => {
     if (key.name === "escape") {
       renderer.destroy()  // Never use process.exit() directly!
@@ -61,14 +61,14 @@ function App() {
       saveDocument()
     }
   })
-  
+
   return <text>Press ESC to exit</text>
 }
 
 // With release events
 function GameControls() {
   const [pressed, setPressed] = useState(new Set<string>())
-  
+
   useKeyboard(
     (event) => {
       setPressed(keys => {
@@ -83,7 +83,7 @@ function GameControls() {
     },
     { release: true }  // Include release events
   )
-  
+
   return <text>Pressed: {Array.from(pressed).join(", ")}</text>
 }
 ```
@@ -112,7 +112,7 @@ function App() {
   useOnResize((width, height) => {
     console.log(`Resized to ${width}x${height}`)
   })
-  
+
   return <text>Resize the terminal</text>
 }
 ```
@@ -126,7 +126,7 @@ import { useTerminalDimensions } from "@opentui/react"
 
 function ResponsiveLayout() {
   const { width, height } = useTerminalDimensions()
-  
+
   return (
     <box flexDirection={width > 80 ? "row" : "column"}>
       <box flexGrow={1}>
@@ -150,12 +150,12 @@ import { useEffect, useState } from "react"
 
 function AnimatedBox() {
   const [width, setWidth] = useState(0)
-  
+
   const timeline = useTimeline({
     duration: 2000,
     loop: false,
   })
-  
+
   useEffect(() => {
     timeline.add(
       { width: 0 },
@@ -169,7 +169,7 @@ function AnimatedBox() {
       }
     )
   }, [timeline])
-  
+
   return <box style={{ width, height: 3, backgroundColor: "#6a5acd" }} />
 }
 ```
@@ -220,26 +220,26 @@ function AnimatedBox() {
   borderColor="#FFFFFF"
   title="Title"
   titleAlignment="center"   // left | center | right
-  
+
   // Colors
   backgroundColor="#1a1a2e"
-  
+
   // Layout (see layout/REFERENCE.md)
   flexDirection="row"
   justifyContent="center"
   alignItems="center"
   gap={2}
-  
+
   // Spacing
   padding={2}
   paddingTop={1}
   margin={1}
-  
+
   // Dimensions
   width={40}
   height={10}
   flexGrow={1}
-  
+
   // Events
   onMouseDown={(e) => {}}
   onMouseUp={(e) => {}}
@@ -394,10 +394,10 @@ import type {
   BoxProps,
   InputProps,
   SelectProps,
-  
+
   // Hook types
   KeyEvent,
-  
+
   // From core
   CliRenderer,
 } from "@opentui/react"

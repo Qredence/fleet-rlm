@@ -71,7 +71,7 @@ input.on(InputRenderableEvents.BLUR, () => {})
 // React
 function ControlledInput() {
   const [value, setValue] = useState("")
-  
+
   return (
     <input
       value={value}
@@ -84,7 +84,7 @@ function ControlledInput() {
 // Solid
 function ControlledInput() {
   const [value, setValue] = createSignal("")
-  
+
   return (
     <input
       value={value()}
@@ -362,13 +362,13 @@ function SingleInput() {
 function Form() {
   const [focusIndex, setFocusIndex] = useState(0)
   const fields = ["name", "email", "message"]
-  
+
   useKeyboard((key) => {
     if (key.name === "tab") {
       setFocusIndex(i => (i + 1) % fields.length)
     }
   })
-  
+
   return (
     <box flexDirection="column" gap={1}>
       {fields.map((field, i) => (
@@ -400,7 +400,7 @@ function LoginForm() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [focusField, setFocusField] = useState<"username" | "password">("username")
-  
+
   useKeyboard((key) => {
     if (key.name === "tab") {
       setFocusField(f => f === "username" ? "password" : "username")
@@ -409,7 +409,7 @@ function LoginForm() {
       handleLogin()
     }
   })
-  
+
   return (
     <box flexDirection="column" gap={1} border padding={2}>
       <box flexDirection="row" gap={1}>
@@ -442,17 +442,17 @@ function SearchableList({ items, onItemSelected }) {
   const [query, setQuery] = useState("")
   const [focusSearch, setFocusSearch] = useState(true)
   const [preview, setPreview] = useState(null)
-  
+
   const filtered = items.filter(item =>
     item.toLowerCase().includes(query.toLowerCase())
   )
-  
+
   useKeyboard((key) => {
     if (key.name === "tab") {
       setFocusSearch(f => !f)
     }
   })
-  
+
   return (
     <box flexDirection="column">
       <input

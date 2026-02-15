@@ -5,7 +5,8 @@ def test_default_config():
     cfg = ServerRuntimeConfig()
     assert cfg.secret_name == "LITELLM"
     assert cfg.timeout == 900
-    assert cfg.react_max_iters == 10
+    assert cfg.react_max_iters == 5
+    assert cfg.rlm_max_depth == 2
     assert cfg.volume_name is None
     assert cfg.ws_default_workspace_id == "default"
     assert cfg.ws_default_user_id == "anonymous"

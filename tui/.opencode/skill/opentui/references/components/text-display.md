@@ -307,7 +307,7 @@ Text wraps based on parent container:
 ```tsx
 <box width={40}>
   <text>
-    This long text will wrap when it reaches the edge of the 
+    This long text will wrap when it reaches the edge of the
     40-character wide parent container.
   </text>
 </box>

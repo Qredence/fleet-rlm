@@ -68,9 +68,47 @@ class AgentConfig(BaseModel):
     )
 
 
+class RlmSettings(BaseModel):
+    """RLM execution settings."""
+
+    max_depth: int = Field(
+        default=2,
+        description="Maximum recursion depth for RLM subagents.",
+    )
+    max_iters: int = Field(
+        default=5,
+        description="Maximum iterations for ReAct agent.",
+    )
+    max_iterations: int = Field(
+        default=30,
+        description="Maximum iterations for RLM code execution.",
+    )
+    max_llm_calls: int = Field(
+        default=50,
+        description="Maximum LLM calls per task.",
+    )
+    max_output_chars: int = Field(
+        default=10000,
+        description="Maximum output characters.",
+    )
+    stdout_summary_threshold: int = Field(
+        default=10000,
+        description="Threshold for stdout summarization.",
+    )
+    stdout_summary_prefix_len: int = Field(
+        default=200,
+        description="Prefix length in summaries.",
+    )
+    verbose: bool = Field(
+        default=False,
+        description="Enable verbose logging.",
+    )
+
+
 class AppConfig(BaseModel):
     """Root configuration for the fleet-rlm application."""
 
     agent: AgentConfig = Field(default_factory=AgentConfig)
     interpreter: InterpreterConfig = Field(default_factory=InterpreterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    rlm_settings: RlmSettings = Field(default_factory=RlmSettings)

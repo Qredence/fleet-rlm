@@ -54,7 +54,7 @@ import { createSignal } from "solid-js"
 
 function App() {
   const [count, setCount] = createSignal(0)
-  
+
   return (
     <box border padding={2}>
       <text>Count: {count()}</text>
@@ -82,12 +82,12 @@ import { createSignal, createEffect } from "solid-js"
 
 function Counter() {
   const [count, setCount] = createSignal(0)
-  
+
   // Effect runs when count changes
   createEffect(() => {
     console.log("Count is now:", count())
   })
-  
+
   return <text>Count: {count()}</text>
 }
 ```
