@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+
+agent:
+  max_iters: 10
+  # Default to DSPY_LM_MODEL environment variable if set, otherwise fallback to a known model
+  # from config/config.yaml (e.g., gemini-3-flash-preview or deepseek-v3.2-maas).
+  # We use OC env interpolation to respect user's existing .env setup.
+  model: "${oc.env:DSPY_LM_MODEL,gemini-3-flash-preview}"
+  temperature: 0.0
+  rlm_max_iterations: 30
+
+interpreter:
+  image: "python:3.11-slim-bookworm"
+  timeout: 900
+  secrets: ["LITELLM"]
+  volume_name: null
+
+memory:
+  # Limits for core memory blocks (in characters)
+  core_memory_limits:
+    persona: 2000
+    human: 2000
+    scratchpad: 1000
+  # Path in the volume for archival memory
+  archival_path: "/data/memory"

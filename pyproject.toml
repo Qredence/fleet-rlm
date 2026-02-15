@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.4.1"
+version = "0.4.2"
 description = "Recursive Language Models with DSPy + Modal for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,12 +20,15 @@ classifiers = [
 ]
 dependencies = [
     "dspy==3.1.3",
+    "hydra-core>=1.3,<2",
     "markitdown[all]>=0.1.0,<1",
+    "omegaconf>=2.3,<3",
     "modal>=1.3.2",
     "pypdf>=6,<7",
     "pydantic>=2.12.5,<3",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3,<7",
+    "structlog>=24.1.0,<25",
     "tomli>=2.0.0; python_version < '3.11'",
     "typer>=0.21.1,<1",
 ]
@@ -65,8 +68,8 @@ full = [
 ]
 
 [project.scripts]
-fleet-rlm = "fleet_rlm.cli:app"
-rlm-modal = "fleet_rlm.cli:app"
+fleet-rlm = "fleet_rlm.cli:main"
+rlm-modal = "fleet_rlm.cli:main"
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
@@ -85,3 +88,4 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["benchmark: performance/throughput benchmark tests"]

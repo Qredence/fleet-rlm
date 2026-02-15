@@ -155,21 +155,21 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
     return True
 
 
-def get_planner_lm_from_env(*, env_file: Path | None = None) -> dspy.LM | None:
-    """Create and return a DSPy LM from environment without configuring it globally.
+def get_planner_lm_from_env(
+    *, env_file: Path | None = None, model_name: str | None = None
+) -> dspy.LM | None:
+    """Create and return a DSPy LM from environment.
 
     This is the async-safe version of configure_planner_from_env(). It creates
     and returns the LM object without calling dspy.configure(), allowing the
     caller to use dspy.context() for thread-local configuration instead.
 
     Args:
-        env_file: Optional path to a specific .env file. If not provided,
-            searches for .env in the project root (directory containing
-            pyproject.toml) or current working directory.
+        env_file: Optional path to a specific .env file.
+        model_name: Optional explicit model identifier to use, overriding environment.
 
     Returns:
-        A configured dspy.LM instance if environment variables are set,
-        None otherwise.
+        A configured dspy.LM instance if configuration is available, None otherwise.
     """
     dotenv_path = env_file
     if dotenv_path is None:
@@ -180,7 +180,7 @@ def get_planner_lm_from_env(*, env_file: Path | None = None) -> dspy.LM | None:
     _guard_modal_shadowing()
 
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
-    model = os.environ.get("DSPY_LM_MODEL")
+    model = model_name or os.environ.get("DSPY_LM_MODEL")
 
     if not model or not api_key:
         return None
@@ -191,3 +191,54 @@ def get_planner_lm_from_env(*, env_file: Path | None = None) -> dspy.LM | None:
         api_key=api_key,
         max_tokens=int(os.environ.get("DSPY_LM_MAX_TOKENS", "64000")),
     )
+
+
+def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
+    """Load RLM settings from the YAML configuration file.
+
+    Reads the rlm_settings section from config/config.yaml and returns
+    the configuration values with defaults for missing keys.
+
+    Args:
+        config_path: Optional path to the configuration file. If not provided,
+            searches for config.yaml in the project root (directory containing
+            pyproject.toml) or current working directory.
+
+    Returns:
+        Dictionary containing RLM configuration with the following keys:
+            - max_iterations: Maximum iterations for RLM code execution (default: 30)
+            - max_llm_calls: Maximum LLM calls per task (default: 50)
+            - max_output_chars: Maximum output characters (default: 10000)
+            - stdout_summary_threshold: Threshold for stdout summarization (default: 10000)
+            - stdout_summary_prefix_len: Prefix length in summaries (default: 200)
+            - verbose: Enable verbose logging (default: False)
+
+    Example:
+        >>> from fleet_rlm.core.config import load_rlm_settings
+        >>> settings = load_rlm_settings()
+        >>> print(f"Max iterations: {settings['max_iterations']}")
+    """
+    import yaml
+
+    if config_path is None:
+        project_root = _find_project_root(Path.cwd())
+        config_path = project_root / "config" / "config.yaml"
+
+    defaults = {
+        "max_iterations": 30,
+        "max_llm_calls": 50,
+        "max_output_chars": 10000,
+        "stdout_summary_threshold": 10000,
+        "stdout_summary_prefix_len": 200,
+        "verbose": True,
+    }
+
+    if not config_path.exists():
+        return defaults
+
+    try:
+        config = yaml.safe_load(config_path.read_text())
+        rlm_config = config.get("rlm_settings", {})
+        return {**defaults, **rlm_config}
+    except Exception:
+        return defaults

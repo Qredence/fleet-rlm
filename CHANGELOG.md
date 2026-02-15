@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [0.4.2] - 2026-02-13
+## [0.4.2] - 2026-02-15
 
 ### Added
 
@@ -10,6 +10,13 @@ All notable changes to this project are documented in this file.
 - All 16 react tools are explicitly wrapped with `dspy.Tool(func, name=..., desc=...)` for reliable function-calling schema generation. (#18)
 - Extra tools passed as raw callables are auto-wrapped in `dspy.Tool`; pre-wrapped `dspy.Tool` instances are preserved as-is. (#18)
 - 16 new unit tests covering `dspy.Module` subclass, `forward()`, `dspy.Tool` wrappers, `_get_tool` lookup, `list_react_tool_names`, and typed Signature generics.
+- **`rlm_query` tool**: delegate complex sub-tasks to a recursive sub-agent with isolated history and state. (#19)
+- **`edit_file` tool**: robust search-and-replace file editing in the sandbox with ambiguity detection. (#19)
+- `rlm_max_depth` config setting (default: 3) for limiting recursive sub-agent depth. (#19)
+- New centralized config surface under `src/fleet_rlm/conf/` and `AppConfig` loader support for CLI/server runtime wiring.
+- Structured logging helper module (`src/fleet_rlm/logging.py`) for consistent runtime logging setup.
+- New API router regression suite `tests/ui/server/test_router_chat_tasks.py` covering `/chat` and `/tasks/basic` input/error behavior.
+- Expanded async/streaming ReAct unit coverage for `core_memory` propagation (`tests/unit/test_react_agent.py`, `tests/unit/test_react_streaming.py`).
 
 ### Changed
 
@@ -17,6 +24,9 @@ All notable changes to this project are documented in this file.
 - Updated `streaming.py` references from `agent.agent` → `agent.react`. (#18)
 - All bare `list` / `dict` output fields on DSPy Signatures now use typed generics (`list[str]`, `dict[str, str]`). (#18)
 - `build_tool_list` return type annotation updated from `list[Callable]` to `list[Any]` to reflect `dspy.Tool` instances.
+- CLI bootstrap now composes runtime settings through Hydra-backed config loading for server/chat flows.
+- Streaming/fallback payloads and sandbox sub-agent reporting now use centralized history helper methods instead of direct `history.messages` access.
+- Registered pytest `benchmark` marker in `pyproject.toml` to keep test output warning-free.
 
 ### Fixed
 
@@ -24,6 +34,10 @@ All notable changes to this project are documented in this file.
 - **Session restore after restart**: exported session state is now included in the volume-persisted manifest, fixing silently broken session restoration on process restart. (#24)
 - **Host-side document leak on reset**: `reset()` now clears `_document_cache`, `_document_access_order`, and `active_alias` in addition to history and sandbox buffers.
 - **Cross-tenant identity collision**: unauthenticated WebSocket connections now receive a per-connection `anon-{uuid}` user identity instead of sharing `default:anonymous`, preventing state leakage between unrelated clients.
+- **`/chat` invalid input handling**: invalid/unknown `docs_path` and related client input errors are now returned as HTTP 400 instead of HTTP 500.
+- **`/tasks/basic` empty input handling**: empty or whitespace-only `question` values are rejected with HTTP 400 (`question is required`).
+- **DSPy async/streaming signature parity**: async chat and streaming ReAct calls now pass `core_memory`, eliminating repeated missing-input warnings for `RLMReActChatSignature`.
+- **FastAPI planner bootstrap compatibility**: lifespan initialization now safely handles both default and explicit `agent_model` resolution paths.
 
 ## [0.4.1] - 2026-02-12
 
@@ -81,3 +95,7 @@ All notable changes to this project are documented in this file.
 - Removed empty placeholder package directories under `src/fleet_rlm/`.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
+
+[0.4.2]: https://github.com/Qredence/fleet-rlm/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/Qredence/fleet-rlm/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/Qredence/fleet-rlm/releases/tag/v0.4.0

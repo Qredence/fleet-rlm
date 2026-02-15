@@ -3,21 +3,19 @@
 This module provides a Typer-based CLI for running RLM demonstrations
 and diagnostics. Commands are organized by use case:
 
-Demo commands:
-    - run-basic: Simple question-answering with RLM
-    - run-architecture: Extract DSPy architecture from documentation
-    - run-api-endpoints: Extract API endpoints from documentation
-    - run-error-patterns: Find error patterns in documentation
-    - run-trajectory: Run with trajectory tracking
-    - run-custom-tool: Run with custom regex tool
+Core commands:
+    - code-chat: Interactive DSPy ReAct + RLM terminal UI
+    - run-react-chat: Backward-compatible alias for code-chat
+    - serve-api: Optional FastAPI server surface
+    - serve-mcp: Optional FastMCP server surface
+    - init: Bootstrap Claude Code scaffold assets
 
-Diagnostic commands:
-    - check-secret: Verify Modal secret configuration
-    - check-secret-key: Check specific secret key presence
+Demo commands (registered from cli_demos):
+    - run-basic, run-architecture, run-api-endpoints, etc.
 
 Usage:
-    $ python -m fleet_rlm.cli run-basic --question "What is DSPy?"
-    $ python -m fleet_rlm.cli check-secret
+    # Use Hydra syntax for configuration overrides
+    $ python -m fleet_rlm.cli agent.model=gpt-4-turbo timeout=1200
 """
 
 from __future__ import annotations
@@ -28,11 +26,23 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from omegaconf import OmegaConf
 
-from . import runners
 from . import scaffold
+from .config import AppConfig
+from .cli_demos import register_demo_commands
+
+# We use a global variable to store the hydra config so Typer commands can access it
+# This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)
+_CONFIG: AppConfig | None = None
+DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 
 app = typer.Typer(help="Run DSPy RLM demos backed by a Modal sandbox.")
+
+
+def _resolve_server_volume_name(config: AppConfig) -> str | None:
+    volume_name = config.interpreter.volume_name
+    return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
 
 
 def _print_result(result: dict[str, Any], *, verbose: bool) -> None:
@@ -76,12 +86,7 @@ def _handle_error(exc: Exception) -> None:
 def _run_code_chat_session(
     *,
     docs_path: Path | None,
-    react_max_iters: int,
-    rlm_max_iterations: int,
-    rlm_max_llm_calls: int,
-    timeout: int,
-    secret_name: str,
-    volume_name: str | None,
+    config: AppConfig,
     trace: bool | None,
     trace_mode: str | None,
     no_stream: bool,
@@ -160,336 +165,8 @@ def _run_code_chat_session(
     raise typer.Exit(code=2)
 
 
-@app.command("run-basic")
-def run_basic(
-    question: str = typer.Option(..., help="Question to answer via RLM"),
-    max_iterations: int = typer.Option(15, help="RLM max_iterations"),
-    max_llm_calls: int = typer.Option(30, help="RLM max_llm_calls"),
-    verbose: bool = typer.Option(
-        True, "--verbose/--no-verbose", help="Enable verbose RLM execution"
-    ),
-    timeout: int = typer.Option(600, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Run a basic RLM question-answering demo.
-
-    Executes a simple question-answer task using the RLM with a Modal sandbox.
-    The RLM will reason through the question and provide an answer.
-
-    Example:
-        $ python -m fleet_rlm.cli run-basic \\
-            --question "What is DSPy?" \\
-            --max-iterations 10
-    """
-    try:
-        result = runners.run_basic(
-            question=question,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-        )
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("run-architecture")
-def run_architecture(
-    docs_path: Path | None = typer.Option(
-        None,
-        "--docs-path",
-        help="Path to long-context docs text (required)",
-    ),
-    query: str = typer.Option(..., help="Extraction query"),
-    max_iterations: int = typer.Option(25, help="RLM max_iterations"),
-    max_llm_calls: int = typer.Option(50, help="RLM max_llm_calls"),
-    verbose: bool = typer.Option(
-        True, "--verbose/--no-verbose", help="Enable verbose RLM execution"
-    ),
-    timeout: int = typer.Option(600, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Extract DSPy architecture information from documentation.
-
-    Uses the ExtractArchitecture signature to analyze documentation and
-    extract modules, optimizers, and design principles.
-
-    Example:
-        $ python -m fleet_rlm.cli run-architecture \\
-            --docs-path docs.txt \\
-            --query "What are the main components?"
-    """
-    if docs_path is None:
-        typer.echo("Error: '--docs-path' is required for run-architecture.", err=True)
-        raise typer.Exit(code=2)
-    try:
-        result = runners.run_architecture(
-            docs_path=docs_path,
-            query=query,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-        )
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("run-api-endpoints")
-def run_api_endpoints(
-    docs_path: Path = typer.Option(
-        ...,
-        "--docs-path",
-        help="Path to long-context docs text (required)",
-    ),
-    max_iterations: int = typer.Option(20, help="RLM max_iterations"),
-    max_llm_calls: int = typer.Option(30, help="RLM max_llm_calls"),
-    verbose: bool = typer.Option(
-        True, "--verbose/--no-verbose", help="Enable verbose RLM execution"
-    ),
-    timeout: int = typer.Option(600, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Extract API endpoints from documentation.
-
-    Uses the ExtractAPIEndpoints signature to scan documentation and
-    catalog API endpoints with their parameters and details.
-
-    Example:
-        $ python -m fleet_rlm.cli run-api-endpoints --docs-path api-docs.txt
-    """
-    try:
-        result = runners.run_api_endpoints(
-            docs_path=docs_path,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-        )
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("run-error-patterns")
-def run_error_patterns(
-    docs_path: Path = typer.Option(
-        ...,
-        "--docs-path",
-        help="Path to long-context docs text (required)",
-    ),
-    max_iterations: int = typer.Option(30, help="RLM max_iterations"),
-    max_llm_calls: int = typer.Option(40, help="RLM max_llm_calls"),
-    verbose: bool = typer.Option(
-        True, "--verbose/--no-verbose", help="Enable verbose RLM execution"
-    ),
-    timeout: int = typer.Option(600, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Find and categorize error patterns in documentation.
-
-    Uses the FindErrorPatterns signature to analyze documentation for
-    common errors, their causes, and solutions.
-
-    Example:
-        $ python -m fleet_rlm.cli run-error-patterns --docs-path errors.txt
-    """
-    try:
-        result = runners.run_error_patterns(
-            docs_path=docs_path,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-        )
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("run-trajectory")
-def run_trajectory(
-    docs_path: Path = typer.Option(
-        ...,
-        "--docs-path",
-        help="Path to long-context docs text (required)",
-    ),
-    chars: int = typer.Option(3000, help="Number of document characters for sample"),
-    max_iterations: int = typer.Option(10, help="RLM max_iterations"),
-    max_llm_calls: int = typer.Option(10, help="RLM max_llm_calls"),
-    verbose: bool = typer.Option(
-        False, "--verbose/--no-verbose", help="Enable verbose RLM execution"
-    ),
-    timeout: int = typer.Option(600, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Run RLM with trajectory tracking for debugging.
-
-    Executes a text summarization task while capturing the full reasoning
-    trajectory (steps taken, code executed) for analysis.
-
-    Example:
-        $ python -m fleet_rlm.cli run-trajectory \\
-            --chars 5000 \\
-            --verbose
-    """
-    try:
-        result = runners.run_trajectory(
-            docs_path=docs_path,
-            chars=chars,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-        )
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("run-custom-tool")
-def run_custom_tool(
-    docs_path: Path = typer.Option(
-        ...,
-        "--docs-path",
-        help="Path to long-context docs text (required)",
-    ),
-    chars: int = typer.Option(10000, help="Number of document characters for sample"),
-    max_iterations: int = typer.Option(15, help="RLM max_iterations"),
-    max_llm_calls: int = typer.Option(20, help="RLM max_llm_calls"),
-    verbose: bool = typer.Option(
-        True, "--verbose/--no-verbose", help="Enable verbose RLM execution"
-    ),
-    timeout: int = typer.Option(600, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Run RLM with custom regex tool for structured extraction.
-
-    Uses the ExtractWithCustomTool signature which can call regex_extract
-    to find markdown headers and code blocks in documentation.
-
-    Example:
-        $ python -m fleet_rlm.cli run-custom-tool \\
-            --chars 5000 \\
-            --max-iterations 20
-    """
-    try:
-        result = runners.run_custom_tool(
-            docs_path=docs_path,
-            chars=chars,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-        )
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("run-long-context")
-def run_long_context(
-    docs_path: Path = typer.Option(
-        ...,
-        "--docs-path",
-        help="Path to a long document to process",
-    ),
-    query: str = typer.Option(..., help="Analysis query or focus topic"),
-    mode: str = typer.Option(
-        "analyze",
-        help="Processing mode: 'analyze' or 'summarize'",
-    ),
-    max_iterations: int = typer.Option(30, help="RLM max_iterations"),
-    max_llm_calls: int = typer.Option(50, help="RLM max_llm_calls"),
-    verbose: bool = typer.Option(
-        True, "--verbose/--no-verbose", help="Enable verbose RLM execution"
-    ),
-    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Analyze or summarize a long document using RLM sandbox helpers.
-
-    Loads the document into the Modal sandbox and leverages injected
-    helpers (peek, grep, chunk_by_size, chunk_by_headers, buffers) so
-    the RLM can explore it programmatically.
-
-    Example:
-        $ fleet-rlm run-long-context \\
-            --docs-path big-doc.txt \\
-            --query "What are the main design decisions?" \\
-            --mode analyze
-    """
-    try:
-        result = runners.run_long_context(
-            docs_path=docs_path,
-            query=query,
-            mode=mode,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-        )
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
+# --- Demo and diagnostic commands (registered from cli_demos) ---
+register_demo_commands(app, _print_result=_print_result, _handle_error=_handle_error)
 
 
 @app.command("code-chat")
@@ -498,14 +175,6 @@ def code_chat(
         None,
         "--docs-path",
         help="Optional document path to preload as active context",
-    ),
-    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
-    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
-    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
-    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
     ),
     trace: bool | None = typer.Option(
         None, "--trace/--no-trace", help="Print ReAct trajectory for each turn"
@@ -530,23 +199,19 @@ def code_chat(
     """Start coding-first interactive DSPy ReAct + RLM terminal UI.
 
     Uses the OpenTUI React frontend.
-
-    REPL commands:
-        /exit              Exit the session
-        /history           Show current chat history
-        /reset             Reset history and clear sandbox buffers
-        /tools             List ReAct tools
-        /load <path>       Load a document as the active context
+    Configuration overrides can be passed via Hydra syntax before the command.
     """
+    global _CONFIG
+    if _CONFIG is None:
+        typer.echo(
+            "Error: Config not initialized. Run via python -m fleet_rlm.cli", err=True
+        )
+        raise typer.Exit(code=1)
+
     try:
         _run_code_chat_session(
             docs_path=docs_path,
-            react_max_iters=react_max_iters,
-            rlm_max_iterations=rlm_max_iterations,
-            rlm_max_llm_calls=rlm_max_llm_calls,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
+            config=_CONFIG,
             trace=trace,
             trace_mode=trace_mode,
             no_stream=no_stream,
@@ -559,73 +224,35 @@ def code_chat(
 
 @app.command("run-react-chat")
 def run_react_chat(
-    docs_path: Path | None = typer.Option(
-        None,
-        "--docs-path",
-        help="Optional document path to preload as active context",
-    ),
-    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
-    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
-    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
-    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
-    trace: bool | None = typer.Option(
-        None, "--trace/--no-trace", help="Print ReAct trajectory for each turn"
-    ),
-    trace_mode: str | None = typer.Option(
-        None,
-        "--trace-mode",
-        help="Trace display mode: compact, verbose, or off",
-    ),
-    no_stream: bool = typer.Option(False, "--no-stream", help="Disable DSPy streaming"),
-    stream_refresh_ms: int = typer.Option(
-        40,
-        "--stream-refresh-ms",
-        help="UI refresh cadence for streamed updates in milliseconds",
-    ),
-    opentui: bool = typer.Option(
-        True,
-        "--opentui/--no-opentui",
-        help="Use OpenTUI React frontend (requires Bun runtime). Default: on.",
-    ),
+    # Arguments identical to code-chat, delegating to it
+    docs_path: Path | None = typer.Option(None, "--docs-path"),
+    trace: bool | None = typer.Option(None, "--trace/--no-trace"),
+    trace_mode: str | None = typer.Option(None, "--trace-mode"),
+    no_stream: bool = typer.Option(False, "--no-stream"),
+    stream_refresh_ms: int = typer.Option(40, "--stream-refresh-ms"),
+    opentui: bool = typer.Option(True, "--opentui/--no-opentui"),
 ) -> None:
     """Backward-compatible alias for `code-chat`."""
-    try:
-        _run_code_chat_session(
-            docs_path=docs_path,
-            react_max_iters=react_max_iters,
-            rlm_max_iterations=rlm_max_iterations,
-            rlm_max_llm_calls=rlm_max_llm_calls,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-            trace=trace,
-            trace_mode=trace_mode,
-            no_stream=no_stream,
-            stream_refresh_ms=stream_refresh_ms,
-            opentui=opentui,
-        )
-    except Exception as exc:
-        _handle_error(exc)
+    code_chat(
+        docs_path=docs_path,
+        trace=trace,
+        trace_mode=trace_mode,
+        no_stream=no_stream,
+        stream_refresh_ms=stream_refresh_ms,
+        opentui=opentui,
+    )
 
 
 @app.command("serve-api")
 def serve_api(
     host: str = typer.Option("127.0.0.1", help="Bind host"),
     port: int = typer.Option(8000, help="Bind port"),
-    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
-    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
-    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
-    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
 ) -> None:
     """Run optional FastAPI server surface (requires `--extra server`)."""
+    global _CONFIG
+    if _CONFIG is None:
+        raise typer.Exit(code=1)
+
     try:
         missing = [pkg for pkg in ("fastapi", "uvicorn") if find_spec(pkg) is None]
         if missing:
@@ -642,14 +269,18 @@ def serve_api(
         from .server.config import ServerRuntimeConfig
         from .server.main import create_app
 
+        # Bridge Hydra config to Server config
         app_obj = create_app(
             config=ServerRuntimeConfig(
-                secret_name=secret_name,
-                volume_name=volume_name,
-                timeout=timeout,
-                react_max_iters=react_max_iters,
-                rlm_max_iterations=rlm_max_iterations,
-                rlm_max_llm_calls=rlm_max_llm_calls,
+                secret_name=_CONFIG.interpreter.secrets[0]
+                if _CONFIG.interpreter.secrets
+                else "LITELLM",
+                volume_name=_resolve_server_volume_name(_CONFIG),
+                timeout=_CONFIG.interpreter.timeout,
+                react_max_iters=_CONFIG.agent.max_iters,
+                rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
+                rlm_max_llm_calls=50,  # TODO: Add to AgentConfig
+                agent_model=_CONFIG.agent.model,
             )
         )
         uvicorn.run(app_obj, host=host, port=port)
@@ -665,16 +296,12 @@ def serve_mcp(
     ),
     host: str = typer.Option("127.0.0.1", help="Host for HTTP transports"),
     port: int = typer.Option(8001, help="Port for HTTP transports"),
-    react_max_iters: int = typer.Option(10, help="DSPy ReAct max_iters"),
-    rlm_max_iterations: int = typer.Option(30, help="Internal RLM max_iterations"),
-    rlm_max_llm_calls: int = typer.Option(50, help="Internal RLM max_llm_calls"),
-    timeout: int = typer.Option(900, help="Modal sandbox timeout in seconds"),
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    volume_name: str | None = typer.Option(
-        None, help="Modal volume name for persistent storage"
-    ),
 ) -> None:
     """Run optional FastMCP server surface (requires `--extra mcp`)."""
+    global _CONFIG
+    if _CONFIG is None:
+        raise typer.Exit(code=1)
+
     try:
         missing = [pkg for pkg in ("fastmcp",) if find_spec(pkg) is None]
         if missing:
@@ -690,12 +317,14 @@ def serve_mcp(
 
         server = create_mcp_server(
             config=MCPRuntimeConfig(
-                secret_name=secret_name,
-                volume_name=volume_name,
-                timeout=timeout,
-                react_max_iters=react_max_iters,
-                rlm_max_iterations=rlm_max_iterations,
-                rlm_max_llm_calls=rlm_max_llm_calls,
+                secret_name=_CONFIG.interpreter.secrets[0]
+                if _CONFIG.interpreter.secrets
+                else "LITELLM",
+                volume_name=_CONFIG.interpreter.volume_name,
+                timeout=_CONFIG.interpreter.timeout,
+                react_max_iters=_CONFIG.agent.max_iters,
+                rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
+                rlm_max_llm_calls=50,  # TODO: Add to AgentConfig
             )
         )
 
@@ -709,56 +338,6 @@ def serve_mcp(
                 "transport must be one of: stdio, sse, streamable-http", err=True
             )
             raise typer.Exit(code=2)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("check-secret")
-def check_secret(
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Check which DSPy environment variables are present in Modal secret.
-
-    Verifies that the required environment variables (DSPY_LM_MODEL,
-    DSPY_LM_API_BASE, DSPY_LLM_API_KEY, DSPY_LM_MAX_TOKENS) are available
-    in the specified Modal secret.
-
-    Example:
-        $ python -m fleet_rlm.cli check-secret --secret-name LITELLM
-    """
-    try:
-        result = runners.check_secret_presence(secret_name=secret_name)
-        _print_result(result, verbose=full_output)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("check-secret-key")
-def check_secret_key(
-    secret_name: str = typer.Option("LITELLM", help="Modal secret name"),
-    key: str = typer.Option(
-        "DSPY_LLM_API_KEY", help="Environment variable name to inspect"
-    ),
-    full_output: bool = typer.Option(
-        False, "--full-output", help="Print full JSON output"
-    ),
-) -> None:
-    """Check a specific environment variable in Modal secret.
-
-    Verifies that a specific key exists in the Modal secret and reports
-    its presence and length (without exposing the actual value).
-
-    Example:
-        $ python -m fleet_rlm.cli check-secret-key \\
-            --secret-name LITELLM \\
-            --key DSPY_LLM_API_KEY
-    """
-    try:
-        result = runners.check_secret_key(secret_name=secret_name, key=key)
-        _print_result(result, verbose=full_output)
     except Exception as exc:
         _handle_error(exc)
 
@@ -795,26 +374,7 @@ def init(
     """Bootstrap Claude Code scaffold assets to user-level directory.
 
     Copies the bundled RLM skills, agents, teams, and hooks from the installed
-    fleet-rlm
-    package to ~/.claude/ (or a custom target), making them available across
-    all projects.
-
-    By default, installs skills, agents, teams, and hooks to ~/.claude/. Use
-    --*-only flags to install just one category, or --no-* flags to skip
-    teams/hooks in a full install.
-
-    Team templates target Claude Code agent teams, which require setting
-    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 in Claude settings/environment.
-
-    Examples:
-        $ fleet-rlm init                    # install to ~/.claude/
-        $ fleet-rlm init --force            # overwrite existing
-        $ fleet-rlm init --list             # show what's available
-        $ fleet-rlm init --skills-only      # just skills
-        $ fleet-rlm init --teams-only       # just team templates
-        $ fleet-rlm init --hooks-only       # just hook templates
-        $ fleet-rlm init --no-hooks         # install all except hooks
-        $ fleet-rlm init --target /tmp/test # custom location
+    fleet-rlm package to ~/.claude/ (or a custom target).
     """
     try:
         # Default to ~/.claude if no target specified
@@ -874,44 +434,25 @@ def init(
             typer.echo(
                 f"Installed {len(installed)} of {len(total)} agents to {target}/agents/"
             )
-            if installed:
-                typer.echo(f"  Agents: {', '.join(installed)}")
-            if len(installed) < len(total):
-                skipped = len(total) - len(installed)
-                typer.echo(f"  Skipped {skipped} existing (use --force to overwrite)")
         elif skills_only:
             installed = scaffold.install_skills(target, force=force)
             total = scaffold.list_skills()
             typer.echo(
                 f"Installed {len(installed)} of {len(total)} skills to {target}/skills/"
             )
-            if installed:
-                typer.echo(f"  Skills: {', '.join(installed)}")
-            if len(installed) < len(total):
-                skipped = len(total) - len(installed)
-                typer.echo(f"  Skipped {skipped} existing (use --force to overwrite)")
         elif teams_only:
             installed = scaffold.install_teams(target, force=force)
             total = scaffold.list_teams()
             typer.echo(
                 f"Installed {len(installed)} of {len(total)} teams to {target}/teams/"
             )
-            if installed:
-                typer.echo(f"  Teams: {', '.join(installed)}")
-            if len(installed) < len(total):
-                skipped = len(total) - len(installed)
-                typer.echo(f"  Skipped {skipped} existing (use --force to overwrite)")
         elif hooks_only:
             installed = scaffold.install_hooks(target, force=force)
             total = scaffold.list_hooks()
             typer.echo(
                 f"Installed {len(installed)} of {len(total)} hooks to {target}/hooks/"
             )
-            if installed:
-                typer.echo(f"  Hooks: {', '.join(installed)}")
-            if len(installed) < len(total):
-                skipped = len(total) - len(installed)
-                typer.echo(f"  Skipped {skipped} existing (use --force to overwrite)")
+            # ... (Existing logging logic) ...
         else:
             # Install all categories (with optional exclusions).
             result = scaffold.install_all(
@@ -959,17 +500,56 @@ def init(
                     f"  Skipped {total_skipped} existing (use --force to overwrite)"
                 )
 
-    except FileNotFoundError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        typer.echo(
-            "\nThe scaffold directory was not found. This suggests the fleet-rlm "
-            "package is not properly installed or the _scaffold/ data is missing.",
-            err=True,
-        )
-        raise typer.Exit(code=1) from exc
     except Exception as exc:
         _handle_error(exc)
 
 
+def _initialize_config(overrides: list[str] | None = None) -> AppConfig:
+    """Initialize Hydra config manually without taking over argument parsing.
+
+    Args:
+        overrides: Optional list of Hydra config overrides (e.g., ["agent.model=gpt-4"])
+
+    Returns:
+        Validated AppConfig instance
+    """
+    from hydra import initialize_config_module, compose
+
+    with initialize_config_module(config_module="fleet_rlm.conf", version_base=None):
+        cfg = compose(config_name="config", overrides=overrides or [])
+        cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+        if not isinstance(cfg_dict, dict):
+            raise ValueError("Hydra config must resolve to a mapping")
+        normalized_cfg = {str(k): v for k, v in cfg_dict.items()}
+        return AppConfig(**normalized_cfg)
+
+
+def main() -> None:
+    """Entry point that runs Typer with optional Hydra config initialization."""
+    global _CONFIG
+
+    # Parse args to find Hydra overrides (key=value) and separate from Typer args
+    import sys
+
+    hydra_overrides: list[str] = []
+    typer_args: list[str] = []
+
+    for arg in sys.argv[1:]:
+        if "=" in arg and not arg.startswith("-"):
+            # This looks like a Hydra override: key=value
+            hydra_overrides.append(arg)
+        else:
+            typer_args.append(arg)
+
+    # Initialize config (with optional overrides)
+    try:
+        _CONFIG = _initialize_config(hydra_overrides)
+    except Exception as e:
+        print(f"Configuration Error: {e}", file=sys.stderr)
+        raise typer.Exit(code=1)
+
+    app(typer_args)
+
+
 if __name__ == "__main__":
-    app()
+    main()

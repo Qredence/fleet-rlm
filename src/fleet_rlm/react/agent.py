@@ -28,6 +28,9 @@ class RLMReActChatSignature(dspy.Signature):
     """Interactive ReAct chat signature with explicit conversation history."""
 
     user_request: str = dspy.InputField(desc="Current user request in the chat session")
+    core_memory: str = dspy.InputField(
+        desc="Persistent memory blocks (Persona, Human, Scratchpad) that define your identity and context"
+    )
     history: dspy.History = dspy.InputField(
         desc="Prior chat turns using keys user_request and assistant_response"
     )
@@ -83,11 +86,65 @@ class RLMReActChatAgent(dspy.Module):
         self._max_documents = 100
         self.active_alias: str | None = None
 
+        # -- Core Memory (Tier 1) --
+        # Host-side only. Persistence via export_session_state.
+        self._core_memory: dict[str, str] = {
+            "persona": "I am a helpful AI assistant focused on writing high-quality code.",
+            "human": "The user is a developer working on this project.",
+            "scratchpad": "No current active task.",
+        }
+        # Character limits per block to prevent context window explosion
+        self._core_memory_limits: dict[str, int] = {
+            "persona": 2000,
+            "human": 2000,
+            "scratchpad": 1000,
+        }
+
         self._started = False
         self._extra_tools: list[Callable[..., Any]] = list(extra_tools or [])
 
+        # Register Core Memory tools
+        self._extra_tools.extend([self.core_memory_append, self.core_memory_replace])
+
         self.react_tools: list[Callable[..., Any]] = []
         self.react = self._build_agent()
+
+    # -----------------------------------------------------------------
+    # Core Memory Management
+    # -----------------------------------------------------------------
+
+    def core_memory_append(self, section: str, content: str) -> str:
+        """Append text to a specific Core Memory block (e.g. 'scratchpad', 'human')."""
+        if section not in self._core_memory:
+            return f"Error: Core memory block '{section}' does not exist. Available: {list(self._core_memory.keys())}"
+
+        current_len = len(self._core_memory[section])
+        new_len = current_len + len(content) + 1  # +1 for newline
+        limit = self._core_memory_limits.get(section, 1000)
+
+        if new_len > limit:
+            return f"Error: Appending content would exceed limit for '{section}' ({new_len} > {limit}). Please summarize or replace."
+
+        self._core_memory[section] += f"\n{content}"
+        return f"Appended to '{section}'. New content length: {len(self._core_memory[section])} chars."
+
+    def core_memory_replace(self, section: str, content: str) -> str:
+        """Replace the entire content of a Core Memory block."""
+        if section not in self._core_memory:
+            return f"Error: Core memory block '{section}' does not exist. Available: {list(self._core_memory.keys())}"
+
+        if len(content) > self._core_memory_limits.get(section, 1000):
+            return f"Error: Content exceeds limit for '{section}' ({len(content)} > {self._core_memory_limits.get(section, 1000)})."
+
+        self._core_memory[section] = content
+        return f"Updated block '{section}'."
+
+    def fmt_core_memory(self) -> str:
+        """Format the core memory blocks for the prompt."""
+        blocks = []
+        for key, value in self._core_memory.items():
+            blocks.append(f"<{key}>\n{value}\n</{key}>")
+        return "\n\n".join(blocks)
 
     # -----------------------------------------------------------------
     # Document cache management
@@ -146,6 +203,9 @@ class RLMReActChatAgent(dspy.Module):
         self.interpreter.start()
         self._started = True
 
+        # Ideally try to load existing memory here
+        # self._load_core_memory()
+
     def shutdown(self) -> None:
         """Shutdown the interpreter and mark this agent session as stopped."""
         self.interpreter.shutdown()
@@ -178,10 +238,11 @@ class RLMReActChatAgent(dspy.Module):
     def export_session_state(self) -> dict[str, Any]:
         """Export serializable session state for persistence."""
         return {
-            "history": list(self.history.messages),
+            "history": self.history_messages(),
             "documents": dict(self._document_cache),
             "active_alias": self.active_alias,
             "document_access_order": list(self._document_access_order),
+            "core_memory": self._core_memory,
         }
 
     def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -220,11 +281,16 @@ class RLMReActChatAgent(dspy.Module):
         else:
             self.active_alias = None
 
+        core_memory = state.get("core_memory")
+        if isinstance(core_memory, dict):
+            self._core_memory = core_memory
+
         return {
             "status": "ok",
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
             "documents": len(self._document_cache),
             "active_alias": self.active_alias,
+            "core_memory_keys": list(self._core_memory.keys()),
         }
 
     # -----------------------------------------------------------------
@@ -241,7 +307,11 @@ class RLMReActChatAgent(dspy.Module):
         module graph is visible to optimizers and ``save()``/``load()``.
         """
         self.start()
-        return self.react(user_request=user_request, history=history or self.history)
+        return self.react(
+            user_request=user_request,
+            history=history or self.history,
+            core_memory=self.fmt_core_memory(),
+        )
 
     # -----------------------------------------------------------------
     # Public chat API — synchronous
@@ -259,7 +329,8 @@ class RLMReActChatAgent(dspy.Module):
         return {
             "assistant_response": assistant_response,
             "trajectory": getattr(prediction, "trajectory", {}),
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
+            "core_memory_snapshot": self._core_memory.copy(),
         }
 
     def iter_chat_turn_stream(
@@ -303,7 +374,7 @@ class RLMReActChatAgent(dspy.Module):
         return {
             "assistant_response": assistant_response,
             "trajectory": trajectory,
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
             "stream_chunks": assistant_chunks,
             "thought_chunks": thought_chunks if trace else [],
             "status_messages": status_messages,
@@ -320,14 +391,18 @@ class RLMReActChatAgent(dspy.Module):
             raise ValueError("message cannot be empty")
 
         self.start()
-        prediction = await self.react.acall(user_request=message, history=self.history)
+        prediction = await self.react.acall(
+            user_request=message,
+            history=self.history,
+            core_memory=self.fmt_core_memory(),
+        )
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         self._append_history(message, assistant_response)
 
         return {
             "assistant_response": assistant_response,
             "trajectory": getattr(prediction, "trajectory", {}),
-            "history_turns": len(self.history.messages),
+            "history_turns": self.history_turns(),
         }
 
     async def aiter_chat_turn_stream(
@@ -525,8 +600,22 @@ class RLMReActChatAgent(dspy.Module):
             max_iters=self.react_max_iters,
         )
 
+    def history_messages(self) -> list[Any]:
+        """Return chat history messages as a defensive list copy."""
+        messages = getattr(self.history, "messages", None)
+        if messages is None:
+            return []
+        try:
+            return list(messages)
+        except TypeError:
+            return []
+
+    def history_turns(self) -> int:
+        """Return number of stored history turns safely."""
+        return len(self.history_messages())
+
     def _append_history(self, user_request: str, assistant_response: str) -> None:
-        messages = list(self.history.messages)
+        messages = self.history_messages()
         messages.append(
             {
                 "user_request": user_request,
