@@ -13,10 +13,12 @@ import time
 
 import pytest
 
+
 def _lm_configured():
     """Check if an LM is configured for DSPy."""
     try:
         import dspy
+
         return dspy.settings.lm is not None
     except Exception:
         return False
