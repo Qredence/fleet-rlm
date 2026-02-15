@@ -230,7 +230,7 @@ def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
         "max_output_chars": 10000,
         "stdout_summary_threshold": 10000,
         "stdout_summary_prefix_len": 200,
-        "verbose": False,
+        "verbose": True,
     }
 
     if not config_path.exists():

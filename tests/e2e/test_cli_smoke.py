@@ -6,7 +6,8 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-from fleet_rlm.cli import app
+from fleet_rlm.cli import app, _resolve_server_volume_name
+from fleet_rlm.config import AppConfig
 
 
 runner = CliRunner()
@@ -252,3 +253,15 @@ def test_run_react_chat_opentui_flag_passes_through(monkeypatch):
     assert result.exit_code == 0
     assert len(calls) == 1
     assert calls[0]["opentui"] is True
+
+
+def test_resolve_server_volume_name_defaults_to_persistent_volume():
+    config = AppConfig()
+    assert _resolve_server_volume_name(config) == "rlm-volume-dspy"
+
+
+def test_resolve_server_volume_name_preserves_configured_volume():
+    config = AppConfig(
+        interpreter={"volume_name": "custom-volume"},
+    )
+    assert _resolve_server_volume_name(config) == "custom-volume"

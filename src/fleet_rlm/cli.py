@@ -35,8 +35,14 @@ from .cli_demos import register_demo_commands
 # We use a global variable to store the hydra config so Typer commands can access it
 # This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)
 _CONFIG: AppConfig | None = None
+DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 
 app = typer.Typer(help="Run DSPy RLM demos backed by a Modal sandbox.")
+
+
+def _resolve_server_volume_name(config: AppConfig) -> str | None:
+    volume_name = config.interpreter.volume_name
+    return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
 
 
 def _print_result(result: dict[str, Any], *, verbose: bool) -> None:
@@ -269,7 +275,7 @@ def serve_api(
                 secret_name=_CONFIG.interpreter.secrets[0]
                 if _CONFIG.interpreter.secrets
                 else "LITELLM",
-                volume_name=_CONFIG.interpreter.volume_name,
+                volume_name=_resolve_server_volume_name(_CONFIG),
                 timeout=_CONFIG.interpreter.timeout,
                 react_max_iters=_CONFIG.agent.max_iters,
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
