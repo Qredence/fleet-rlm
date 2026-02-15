@@ -32,7 +32,7 @@ venv/
 .agents/
 .codex/
 .opencode/
-
+plans/
 
 PLANS.md
 notebooks/dspy-rlm-end-to-end-use-case.ipynb
