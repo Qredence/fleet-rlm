@@ -12,7 +12,7 @@ in :mod:`fleet_rlm.streaming`, and command dispatch in
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Literal
 
 import dspy
 
@@ -66,6 +66,10 @@ class RLMReActChatAgent(dspy.Module):
         interpreter: ModalInterpreter | None = None,
         max_depth: int = 2,
         current_depth: int = 0,
+        interpreter_async_execute: bool = True,
+        guardrail_mode: Literal["off", "warn", "strict"] = "off",
+        max_output_chars: int = 10000,
+        min_substantive_chars: int = 20,
     ) -> None:
         super().__init__()
         self.react_max_iters = react_max_iters
@@ -75,12 +79,16 @@ class RLMReActChatAgent(dspy.Module):
         self.history_max_turns = history_max_turns
         self._max_depth = max_depth
         self._current_depth = current_depth
+        self.guardrail_mode = guardrail_mode
+        self.max_output_chars = max_output_chars
+        self.min_substantive_chars = min_substantive_chars
 
         self.interpreter = interpreter or ModalInterpreter(
             timeout=timeout,
             secret_name=secret_name,
             volume_name=volume_name,
             max_llm_calls=rlm_max_llm_calls,
+            async_execute=interpreter_async_execute,
         )
 
         self.history = dspy.History(messages=[])
@@ -311,11 +319,21 @@ class RLMReActChatAgent(dspy.Module):
         module graph is visible to optimizers and ``save()``/``load()``.
         """
         self.start()
-        return self.react(
+        prediction = self.react(
             user_request=user_request,
             history=history or self.history,
             core_memory=self.fmt_core_memory(),
         )
+        assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
+        trajectory = getattr(prediction, "trajectory", {})
+        assistant_response, warnings = self._validate_assistant_response(
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+        )
+        setattr(prediction, "assistant_response", assistant_response)
+        if warnings:
+            setattr(prediction, "guardrail_warnings", warnings)
+        return prediction
 
     # -----------------------------------------------------------------
     # Public chat API — synchronous
@@ -328,6 +346,7 @@ class RLMReActChatAgent(dspy.Module):
 
         prediction = self.forward(user_request=message)
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
+        guardrail_warnings = list(getattr(prediction, "guardrail_warnings", []) or [])
         self._append_history(message, assistant_response)
 
         return {
@@ -335,6 +354,7 @@ class RLMReActChatAgent(dspy.Module):
             "trajectory": getattr(prediction, "trajectory", {}),
             "history_turns": self.history_turns(),
             "core_memory_snapshot": self._core_memory.copy(),
+            "guardrail_warnings": guardrail_warnings,
         }
 
     def iter_chat_turn_stream(
@@ -357,6 +377,7 @@ class RLMReActChatAgent(dspy.Module):
         trajectory: dict[str, Any] = {}
         assistant_response = ""
         cancelled = False
+        guardrail_warnings: list[str] = []
 
         for event in self.iter_chat_turn_stream(message=message, trace=trace):
             if event.kind == "assistant_token":
@@ -368,6 +389,9 @@ class RLMReActChatAgent(dspy.Module):
             elif event.kind == "final":
                 assistant_response = event.text
                 trajectory = dict(event.payload.get("trajectory", {}) or {})
+                guardrail_warnings = list(
+                    event.payload.get("guardrail_warnings", []) or []
+                )
             elif event.kind == "cancelled":
                 cancelled = True
                 assistant_response = event.text
@@ -383,6 +407,7 @@ class RLMReActChatAgent(dspy.Module):
             "thought_chunks": thought_chunks if trace else [],
             "status_messages": status_messages,
             "cancelled": cancelled,
+            "guardrail_warnings": guardrail_warnings,
         }
 
     # -----------------------------------------------------------------
@@ -401,12 +426,18 @@ class RLMReActChatAgent(dspy.Module):
             core_memory=self.fmt_core_memory(),
         )
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
+        trajectory = getattr(prediction, "trajectory", {})
+        assistant_response, warnings = self._validate_assistant_response(
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+        )
         self._append_history(message, assistant_response)
 
         return {
             "assistant_response": assistant_response,
-            "trajectory": getattr(prediction, "trajectory", {}),
+            "trajectory": trajectory,
             "history_turns": self.history_turns(),
+            "guardrail_warnings": warnings,
         }
 
     async def aiter_chat_turn_stream(
@@ -592,6 +623,28 @@ class RLMReActChatAgent(dspy.Module):
         """Delegate to the ``load_text_from_volume`` tool."""
         return self._get_tool("load_text_from_volume")(path, alias=alias)
 
+    def process_document(self, path: str, alias: str = "active") -> dict[str, Any]:
+        """Delegate to the ``process_document`` volume tool."""
+        return self._get_tool("process_document")(path, alias=alias)
+
+    def write_to_file(
+        self,
+        path: str,
+        content: str,
+        append: bool = False,
+    ) -> dict[str, Any]:
+        """Delegate to the ``write_to_file`` volume tool."""
+        return self._get_tool("write_to_file")(path, content, append=append)
+
+    def edit_core_memory(
+        self,
+        section: str,
+        content: str,
+        mode: str = "append",
+    ) -> dict[str, Any]:
+        """Delegate to the ``edit_core_memory`` tool."""
+        return self._get_tool("edit_core_memory")(section, content, mode=mode)
+
     # -----------------------------------------------------------------
     # Internal helpers
     # -----------------------------------------------------------------
@@ -629,3 +682,60 @@ class RLMReActChatAgent(dspy.Module):
         if self.history_max_turns is not None and self.history_max_turns > 0:
             messages = messages[-self.history_max_turns :]
         self.history = dspy.History(messages=messages)
+
+    def _validate_assistant_response(
+        self,
+        *,
+        assistant_response: str,
+        trajectory: dict[str, Any] | None = None,
+    ) -> tuple[str, list[str]]:
+        """Apply configurable response guardrails.
+
+        Returns sanitized response text and warning messages.
+        Raises ``ValueError`` in strict mode for hard guardrail violations.
+        """
+        response = str(assistant_response or "").strip()
+        mode = self.guardrail_mode
+
+        hard_issues: list[str] = []
+        warnings: list[str] = []
+
+        if not response:
+            hard_issues.append("empty assistant response")
+
+        if len(response) > self.max_output_chars:
+            hard_issues.append(
+                f"assistant response length {len(response)} exceeds max_output_chars={self.max_output_chars}"
+            )
+
+        if response and len(response) < self.min_substantive_chars:
+            warnings.append(
+                "assistant response appears brief; consider adding more substantive detail"
+            )
+
+        if self._trajectory_has_tool_errors(trajectory):
+            warnings.append(
+                "trajectory indicates at least one tool error; consider retrying or recovering before final response"
+            )
+
+        if hard_issues and mode == "strict":
+            raise ValueError("guardrail violation: " + "; ".join(hard_issues))
+
+        if hard_issues and mode == "warn":
+            warnings.extend([f"guardrail warning: {issue}" for issue in hard_issues])
+
+        return response, warnings if mode in {"warn", "strict"} else []
+
+    @staticmethod
+    def _trajectory_has_tool_errors(trajectory: dict[str, Any] | None) -> bool:
+        """Best-effort detector for tool error traces in trajectory payloads."""
+        if not trajectory or not isinstance(trajectory, dict):
+            return False
+
+        for key, value in trajectory.items():
+            if not key.startswith("output_"):
+                continue
+            text = str(value).lower()
+            if any(token in text for token in ("error", "exception", "traceback")):
+                return True
+        return False

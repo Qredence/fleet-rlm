@@ -30,6 +30,10 @@ async def chat(
             timeout=config.timeout,
             secret_name=config.secret_name,
             volume_name=config.volume_name,
+            interpreter_async_execute=config.interpreter_async_execute,
+            guardrail_mode=config.agent_guardrail_mode,
+            max_output_chars=config.agent_max_output_chars,
+            min_substantive_chars=config.agent_min_substantive_chars,
             include_trajectory=request.trace,
             planner_lm=planner_lm,
         )

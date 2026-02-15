@@ -434,20 +434,58 @@ def sandbox_driver() -> None:
 
     # ------ Volume persistence helpers ------
 
+    def _resolve_volume_path(path: str) -> tuple[str | None, str | None]:
+        """Resolve and validate a path stays under ``/data``."""
+        import os as _os
+
+        base = "/data"
+        base_real = _os.path.realpath(base)
+        raw = str(path or "").strip()
+        if not raw:
+            return None, "[error: volume path cannot be empty]"
+
+        # Relative paths are rooted at /data, absolute paths must already
+        # be under /data.
+        joined = (
+            _os.path.normpath(raw)
+            if _os.path.isabs(raw)
+            else _os.path.normpath(_os.path.join(base, raw))
+        )
+        resolved = _os.path.realpath(joined)
+        if resolved != base_real and not resolved.startswith(base_real + _os.sep):
+            return None, f"[error: invalid volume path: {raw}]"
+        return resolved, None
+
     def save_to_volume(path: str, content: str) -> str:
         """Write *content* to ``/data/<path>`` if volume is mounted.
 
         Returns the full path written, or an error string.
         """
         import os as _os
+        import subprocess as _subprocess
 
         base = "/data"
         if not _os.path.isdir(base):
-            return "[no volume mounted at /data]"
-        full = _os.path.join(base, path)
+            return "[error: no volume mounted at /data]"
+
+        full, path_error = _resolve_volume_path(path)
+        if path_error is not None or full is None:
+            return path_error or "[error: invalid volume path]"
+
         _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
         with open(full, "w", encoding="utf-8") as fh:
             fh.write(content)
+
+        # Best-effort flush hints for mounted volumes.
+        try:
+            _os.sync()
+        except AttributeError:
+            pass
+        try:
+            _subprocess.run(["sync", "/data"], check=False, capture_output=True)
+        except Exception:
+            pass
+
         return full
 
     def load_from_volume(path: str) -> str:
@@ -457,9 +495,12 @@ def sandbox_driver() -> None:
         """
         import os as _os
 
-        full = _os.path.join("/data", path)
+        full, path_error = _resolve_volume_path(path)
+        if path_error is not None or full is None:
+            return path_error or "[error: invalid volume path]"
+
         if not _os.path.isfile(full):
-            return f"[file not found: {full}]"
+            return f"[error: file not found: {full}]"
         with open(full, encoding="utf-8") as fh:
             return fh.read()
 

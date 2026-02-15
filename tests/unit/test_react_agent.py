@@ -235,6 +235,68 @@ def test_chat_turn_uses_forward_internally(monkeypatch):
     assert agent.history.messages[0]["user_request"] == "hello"
 
 
+def test_forward_guardrail_strict_rejects_empty_response(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    class _EmptyReact:
+        def __call__(self, **kwargs):
+            return SimpleNamespace(assistant_response="   ", trajectory={})
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        guardrail_mode="strict",
+    )
+    agent.react = _EmptyReact()  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match="empty assistant response"):
+        agent.forward(user_request="hello")
+
+
+def test_chat_turn_warn_mode_includes_guardrail_warnings(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    class _ShortReact:
+        def __call__(self, **kwargs):
+            return SimpleNamespace(assistant_response="ok", trajectory={})
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        guardrail_mode="warn",
+        min_substantive_chars=20,
+    )
+    agent.react = _ShortReact()  # type: ignore[assignment]
+
+    result = agent.chat_turn("hello")
+    assert result["assistant_response"] == "ok"
+    assert result["guardrail_warnings"]
+    assert any("brief" in warning for warning in result["guardrail_warnings"])
+
+
+def test_forward_warn_mode_reports_tool_error_trajectory(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    class _ToolErrorReact:
+        def __call__(self, **kwargs):
+            return SimpleNamespace(
+                assistant_response="This is a sufficiently detailed response.",
+                trajectory={"output_0": "RuntimeError: boom"},
+            )
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        guardrail_mode="warn",
+    )
+    agent.react = _ToolErrorReact()  # type: ignore[assignment]
+
+    prediction = agent.forward(user_request="hello")
+    warnings = list(getattr(prediction, "guardrail_warnings", []) or [])
+    assert warnings
+    assert any("tool error" in warning for warning in warnings)
+
+
 @pytest.mark.asyncio
 async def test_achat_turn_passes_core_memory_to_react(monkeypatch):
     records = []

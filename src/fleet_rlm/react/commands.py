@@ -57,6 +57,9 @@ COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
     "clear_buffer": ("clear_buffer", [], ["name"]),
     "save_buffer": ("save_buffer_to_volume", ["name", "path"], []),
     "load_volume": ("load_text_from_volume", ["path"], ["alias"]),
+    "process_document": ("process_document", ["path"], ["alias"]),
+    "write_to_file": ("write_to_file", ["path", "content"], ["append"]),
+    "edit_core_memory": ("edit_core_memory", ["section", "content"], ["mode"]),
     "reset": ("reset", [], ["clear_sandbox_buffers"]),
 }
 
@@ -70,6 +73,8 @@ _BLOCKING_COMMANDS = frozenset(
         "chunk_sandbox",
         "save_buffer",
         "load_volume",
+        "process_document",
+        "write_to_file",
         "read_buffer",
         "find_files",
     }

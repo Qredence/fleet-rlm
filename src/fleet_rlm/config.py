@@ -5,7 +5,7 @@ and memory systems. It is designed to be used with Hydra for hierarchical
 configuration management (YAML -> Dict -> Pydantic).
 """
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -30,7 +30,7 @@ class InterpreterConfig(BaseModel):
     """Configuration for the Modal Interpreter sandbox."""
 
     image: str = Field(
-        default="python:3.11-slim-bookworm",
+        default="python:3.13-slim-bookworm",
         description="Base Docker image for the sandbox.",
     )
     volume_name: Optional[str] = Field(
@@ -44,6 +44,10 @@ class InterpreterConfig(BaseModel):
     secrets: list[str] = Field(
         default_factory=list,
         description="List of Modal Secret names to inject into the sandbox.",
+    )
+    async_execute: bool = Field(
+        default=True,
+        description="Whether async interpreter calls should run execute() via a non-blocking async wrapper.",
     )
 
 
@@ -65,6 +69,14 @@ class AgentConfig(BaseModel):
     rlm_max_iterations: int = Field(
         default=30,
         description="Maximum total RLM iterations across delegation.",
+    )
+    guardrail_mode: Literal["off", "warn", "strict"] = Field(
+        default="off",
+        description="Guardrail behavior for assistant responses.",
+    )
+    min_substantive_chars: int = Field(
+        default=20,
+        description="Minimum response length considered substantive for warning-level guardrails.",
     )
 
 

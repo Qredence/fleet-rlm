@@ -154,3 +154,76 @@ class TestContextManager:
                 assert not shutdown_called
 
         assert shutdown_called
+
+
+@pytest.mark.asyncio
+async def test_aexecute_uses_to_thread_when_enabled(mock_modal, monkeypatch):
+    """aexecute() should dispatch execute() via asyncio.to_thread by default."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10, async_execute=True)
+    calls: dict[str, object] = {}
+
+    def fake_execute(code, variables=None, *, execution_profile=None):
+        calls["execute"] = {
+            "code": code,
+            "variables": variables,
+            "execution_profile": execution_profile,
+        }
+        return "ok"
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls["to_thread"] = True
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(interp, "execute", fake_execute)
+    monkeypatch.setattr("fleet_rlm.core.interpreter.asyncio.to_thread", fake_to_thread)
+
+    result = await interp.aexecute("print('hi')", {"x": 1})
+    assert result == "ok"
+    assert calls.get("to_thread") is True
+    assert calls["execute"]["code"] == "print('hi')"
+
+
+@pytest.mark.asyncio
+async def test_aexecute_runs_sync_directly_when_disabled(mock_modal, monkeypatch):
+    """aexecute() should call execute() directly when async_execute is disabled."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10, async_execute=False)
+    calls: dict[str, object] = {}
+
+    def fake_execute(code, variables=None, *, execution_profile=None):
+        calls["execute"] = code
+        return "sync-ok"
+
+    async def fail_to_thread(*args, **kwargs):
+        raise AssertionError(
+            "asyncio.to_thread should not be used when async_execute=False"
+        )
+
+    monkeypatch.setattr(interp, "execute", fake_execute)
+    monkeypatch.setattr("fleet_rlm.core.interpreter.asyncio.to_thread", fail_to_thread)
+
+    result = await interp.aexecute("x = 1")
+    assert result == "sync-ok"
+    assert calls["execute"] == "x = 1"
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_calls_start_and_shutdown(mock_modal):
+    """__aenter__/__aexit__ should mirror sync lifecycle semantics."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10, async_execute=False)
+
+    with (
+        patch.object(interp, "start") as mock_start,
+        patch.object(interp, "shutdown") as mock_shutdown,
+    ):
+        async with interp as ctx:
+            assert ctx is interp
+            mock_start.assert_called_once()
+            mock_shutdown.assert_not_called()
+
+    mock_shutdown.assert_called_once()

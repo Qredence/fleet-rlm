@@ -9,12 +9,15 @@ agent:
   model: "${oc.env:DSPY_LM_MODEL,gemini-3-flash-preview}"
   temperature: 0.0
   rlm_max_iterations: 30
+  guardrail_mode: "off"
+  min_substantive_chars: 20
 
 interpreter:
-  image: "python:3.11-slim-bookworm"
+  image: "python:3.13-slim-bookworm"
   timeout: 900
   secrets: ["LITELLM"]
   volume_name: null
+  async_execute: true
 
 memory:
   # Limits for core memory blocks (in characters)
@@ -33,4 +36,4 @@ rlm_settings:
   max_output_chars: 10000
   stdout_summary_threshold: 10000
   stdout_summary_prefix_len: 200
-  verbose: false
+  verbose: True

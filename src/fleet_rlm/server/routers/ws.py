@@ -116,6 +116,10 @@ async def chat_streaming(websocket: WebSocket):
         timeout=cfg.timeout,
         secret_name=cfg.secret_name,
         volume_name=cfg.volume_name,
+        interpreter_async_execute=cfg.interpreter_async_execute,
+        guardrail_mode=cfg.agent_guardrail_mode,
+        max_output_chars=cfg.agent_max_output_chars,
+        min_substantive_chars=cfg.agent_min_substantive_chars,
         planner_lm=_planner_lm,
     )
 

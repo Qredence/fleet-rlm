@@ -65,8 +65,10 @@ Stateless chat endpoint. Checks for RLM completion in a single turn.
 
 ```json
 {
-  "response": "The value of pi is 3.1415926535",
-  "trajectory": [ ... ]
+  "assistant_response": "The value of pi is 3.1415926535",
+  "trajectory": {},
+  "history_turns": 1,
+  "guardrail_warnings": []
 }
 ```
 
@@ -80,8 +82,25 @@ WebSocket endpoint for real-time streaming of agent thoughts and tool outputs.
 
 ## Configuration
 
-The server is configured via environment variables:
+The server is configured by Hydra config plus environment-backed model credentials.
 
-- `DSPY_LM_MODEL`: The LLM to use.
-- `RLM_SERVER_TIMEOUT`: Request timeout in seconds.
-- `RLM_MAX_STEPS`: Maximum ReAct steps per request.
+Common runtime knobs:
+
+- `interpreter.timeout`
+- `interpreter.async_execute`
+- `agent.guardrail_mode` (`off`, `warn`, `strict`)
+- `agent.min_substantive_chars`
+- `rlm_settings.max_iters`
+- `rlm_settings.max_llm_calls`
+- `rlm_settings.max_depth`
+
+Example:
+
+```bash
+uv run fleet-rlm serve-api --host 0.0.0.0 --port 8000 \
+  interpreter.async_execute=true \
+  agent.guardrail_mode=warn \
+  rlm_settings.max_iters=8
+```
+
+For planner LM setup, export `DSPY_LM_MODEL` and (`DSPY_LLM_API_KEY` or `DSPY_LM_API_KEY`).

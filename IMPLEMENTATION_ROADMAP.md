@@ -2,21 +2,21 @@
 
 ## Executive Summary
 
-**Current State:** Phase 1-2 are **COMPLETED**. Core DSPy alignment achieved, file splitting done, Core Memory and Stateful Memory implemented.
+**Current State:** Phase 1-3 are **COMPLETED** and Phase 4 is **IN PROGRESS**. Core DSPy alignment, config/runtime wiring, async interpreter execution, and guardrail surfaces are implemented.
 
-**Remaining Work:** Phases 3-5, recursive sub-agents, and CodeAct integration.
+**Remaining Work:** Phase 4 completion items (CodeAct evaluation path), Phase 5 optimizations, and recursive sub-agents.
 
 ---
 
 ## Gap Analysis Summary
 
-| Category         | Status                 | Count    |
-| ---------------- | ---------------------- | -------- |
-| ✅ **Completed** | Fully implemented      | 15 items |
-| **Phase 3**      | Config & Observability | 3 items  |
-| 🔵 **Phase 4**   | Interpreter & CodeAct  | 3 items  |
-| 🟢 **Phase 5**   | Polish & Optimization  | 3 items  |
-| ⚪ **Future**    | Recursive sub-agents   | 1 item   |
+| Category         | Status                 | Count                   |
+| ---------------- | ---------------------- | ----------------------- |
+| ✅ **Completed** | Fully implemented      | 15 items                |
+| ✅ **Phase 3**   | Config & Observability | 3 items                 |
+| 🔵 **Phase 4**   | Interpreter & CodeAct  | 1 active + 2 follow-ups |
+| 🟢 **Phase 5**   | Polish & Optimization  | 3 items                 |
+| ⚪ **Future**    | Recursive sub-agents   | 1 item                  |
 
 ---
 
@@ -47,9 +47,9 @@ All file splitting completed:
 
 ---
 
-## Phase 3: Config & Observability
+## Phase 3: Config & Observability (COMPLETED ✅)
 
-### Task 3.1: Surface Trajectory + final_reasoning in Streaming
+### Task 3.1: Surface Trajectory + final_reasoning in Streaming (COMPLETED ✅)
 
 **Priority:** High
 **Files:**
@@ -65,7 +65,7 @@ All file splitting completed:
 
 **Code Location:** `src/fleet_rlm/react/streaming.py:47-90`
 
-**Estimated Effort:** 2-3 hours
+**Status:** Implemented and validated in streaming payload paths.
 
 ---
 
@@ -75,17 +75,17 @@ All file splitting completed:
 
 ---
 
-### Task 3.3: Add rlm_settings Section to config/config.yaml
+### Task 3.3: Add `rlm_settings` Section to Hydra Config (COMPLETED ✅)
 
 **Priority:** High
 **Files:**
 
-- `config/config.yaml`
-- `src/fleet_rlm/core/config.py`
+- `src/fleet_rlm/conf/config.yaml`
+- `src/fleet_rlm/config.py`
 
 **Implementation:**
 
-1. Extend config.yaml schema with `rlm_settings` section:
+1. Extended typed + YAML config surfaces with execution controls:
 
 ```yaml
 rlm_settings:
@@ -96,15 +96,15 @@ rlm_settings:
   verbose: false
 ```
 
-2. Update `config.py` to load and validate rlm_settings
+2. Wired values through CLI/server/MCP/runners to ensure runtime consistency.
 
-**Estimated Effort:** 2 hours
+**Status:** Implemented and in use.
 
 ---
 
 ## Phase 4: Interpreter & CodeAct
 
-### Task 4.1: Implement async execute() via Modal Async APIs
+### Task 4.1: Implement async execute() via Modal Async APIs (COMPLETED ✅)
 
 **Priority:** High
 **File:** `src/fleet_rlm/core/interpreter.py`
@@ -117,28 +117,19 @@ rlm_settings:
 
 **Key Method Location:** `src/fleet_rlm/core/interpreter.py:450-520`
 
-**Estimated Effort:** 4-6 hours
+**Status:** `aexecute` and async context manager support are implemented and covered by tests.
 
 ---
 
-### Task 4.2: Fix ReAct Minor Gaps (Suggest/Assert)
+### Task 4.2: Harden ReAct Response Validation (IN PROGRESS)
 
 **Priority:** Medium
 **File:** `src/fleet_rlm/react/agent.py`
 
 **Implementation:**
 
-1. Add `dspy.Suggest` assertions for quality control
-2. Add `dspy.Assert` for critical validations
-3. Example:
-
-```python
-import dspy
-
-# In forward() or tool execution:
-dspy.Suggest(len(response) > 10, "Response seems too short")
-dspy.Assert(tool_result is not None, "Tool must return a result")
-```
+1. Guardrail modes (`off|warn|strict`) and thresholds are implemented.
+2. Add any remaining quality assertions only if they do not destabilize existing ReAct contracts.
 
 **Estimated Effort:** 2 hours
 
@@ -261,38 +252,37 @@ def spawn_sub_agent(task: str, depth: int = 0) -> dict:
 
 ---
 
-## Task Dependencies
+## Task Dependencies (Updated)
 
 ```
-Phase 0 (Bug Fix)
+Phase 1/2 (complete)
     │
     ▼
-Phase 3 (Config)
-    ├── Task 3.1 ────┐
-    ├── Task 3.2 ────┼──► Phase 4 (CodeAct)
-    └── Task 3.3 ────┘         │
-                               ├── Task 4.1 (async)
-                               ├── Task 4.2 (Suggest/Assert)
-                               └── Task 4.3 (CodeAct)
-                                    │
-                                    ▼
-                               Phase 5 (Polish)
-                                    │
-                                    ▼
-                               Phase 6 (Recursive)
+Phase 3 (complete)
+    │
+    ▼
+Phase 4 (in progress)
+    ├── Task 4.1 (complete)
+    ├── Task 4.2 (stabilization)
+    └── Task 4.3 (CodeAct evaluation)
+           │
+           ▼
+      Phase 5 (optimization)
+           │
+           ▼
+      Phase 6 (recursive)
 ```
 
 ---
 
 ## Success Metrics
 
-| Phase   | Completion Criteria                               |
-| ------- | ------------------------------------------------- |
-| Phase 0 | `pytest tests/unit/test_react_agent.py -x` passes |
-| Phase 3 | All config values loadable from YAML              |
-| Phase 4 | `mode="codeact"` agent passes integration tests   |
-| Phase 5 | 10% faster interpreter startup                    |
-| Phase 6 | Recursive depth tracking verified                 |
+| Phase   | Completion Criteria                                         |
+| ------- | ----------------------------------------------------------- |
+| Phase 3 | All config values loadable from YAML and wired runtime-wide |
+| Phase 4 | `mode="codeact"` agent passes integration tests             |
+| Phase 5 | 10% faster interpreter startup                              |
+| Phase 6 | Recursive depth tracking verified                           |
 
 ---
 

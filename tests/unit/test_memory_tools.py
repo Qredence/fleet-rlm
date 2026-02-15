@@ -173,6 +173,91 @@ def test_memory_write_skips_commit_if_no_volume(monkeypatch):
     assert fake_interpreter.commit_calls == 0
 
 
+def test_memory_write_resolves_relative_path_under_data_memory(monkeypatch):
+    """Relative paths should resolve to /data/memory for safer defaults."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    fake_interpreter = _FakeInterpreter()
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    memory_write = tool_map["memory_write"]
+
+    result = memory_write.func(path="notes/new.txt", content="hello")
+
+    assert result["status"] == "ok"
+    assert len(fake_interpreter.execute_calls) == 1
+    _code, vars = fake_interpreter.execute_calls[0]
+    assert vars["path"] == "/data/memory/notes/new.txt"
+
+
+def test_memory_write_rejects_path_escape(monkeypatch):
+    """Path traversal outside /data should be rejected before sandbox execution."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    fake_interpreter = _FakeInterpreter()
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    memory_write = tool_map["memory_write"]
+
+    result = memory_write.func(path="../../etc/passwd", content="nope")
+
+    assert result["status"] == "error"
+    assert "Path must stay within mounted volume root" in result["error"]
+    assert fake_interpreter.execute_calls == []
+
+
+def test_write_to_file_append_mode(monkeypatch):
+    """write_to_file should support append mode for persistent notes/logs."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    fake_interpreter = _FakeInterpreter()
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    write_to_file = tool_map["write_to_file"]
+
+    result = write_to_file.func(path="logs/session.txt", content="line1\n", append=True)
+
+    assert result["status"] == "ok"
+    assert len(fake_interpreter.execute_calls) == 1
+    code, vars = fake_interpreter.execute_calls[0]
+    assert 'open(path, "a", encoding="utf-8")' in code
+    assert vars["path"] == "/data/memory/logs/session.txt"
+
+
+def test_edit_core_memory_tool_append(monkeypatch):
+    """edit_core_memory tool should route append edits through host core memory API."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    fake_interpreter = _FakeInterpreter()
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+    agent._core_memory = {
+        "persona": "p",
+        "human": "h",
+        "scratchpad": "Task start",
+    }
+    agent._core_memory_limits = {"persona": 2000, "human": 2000, "scratchpad": 1000}
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    edit_core_memory = tool_map["edit_core_memory"]
+
+    result = edit_core_memory.func(
+        section="scratchpad",
+        content="step 1",
+        mode="append",
+    )
+
+    assert result["status"] == "ok"
+    assert result["section"] == "scratchpad"
+    assert "step 1" in agent._core_memory["scratchpad"]
+
+
 def test_core_memory_append_within_limit(monkeypatch):
     """core_memory_append should update host-side state if within limits."""
     records = []

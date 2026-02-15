@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from fleet_rlm import runners
 
@@ -16,6 +17,10 @@ class MCPRuntimeConfig:
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
     rlm_max_depth: int = 2
+    interpreter_async_execute: bool = True
+    agent_guardrail_mode: Literal["off", "warn", "strict"] = "off"
+    agent_min_substantive_chars: int = 20
+    agent_max_output_chars: int = 10000
 
 
 def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
@@ -39,6 +44,10 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
             timeout=cfg.timeout,
             secret_name=cfg.secret_name,
             volume_name=cfg.volume_name,
+            interpreter_async_execute=cfg.interpreter_async_execute,
+            guardrail_mode=cfg.agent_guardrail_mode,
+            max_output_chars=cfg.agent_max_output_chars,
+            min_substantive_chars=cfg.agent_min_substantive_chars,
             include_trajectory=trace,
         )
 
