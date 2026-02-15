@@ -15,7 +15,7 @@ import { useRenderer } from "@opentui/solid"
 
 function App() {
   const renderer = useRenderer()
-  
+
   const handleExit = () => {
     renderer.destroy()  // Cleans up and exits properly
   }
@@ -248,19 +248,19 @@ Show requires fallback for proper rendering:
 // WRONG - Interval never cleared
 function Timer() {
   const [time, setTime] = createSignal(0)
-  
+
   setInterval(() => setTime(t => t + 1), 1000)
-  
+
   return <text>{time()}</text>
 }
 
 // CORRECT
 function Timer() {
   const [time, setTime] = createSignal(0)
-  
+
   const interval = setInterval(() => setTime(t => t + 1), 1000)
   onCleanup(() => clearInterval(interval))
-  
+
   return <text>{time()}</text>
 }
 ```
@@ -270,10 +270,10 @@ function Timer() {
 ```tsx
 createEffect(() => {
   const subscription = subscribe(data())
-  
+
   // WRONG - No cleanup
   // subscription stays active
-  
+
   // CORRECT
   onCleanup(() => subscription.unsubscribe())
 })
@@ -321,12 +321,12 @@ import { onMount } from "solid-js"
 
 function App() {
   const renderer = useRenderer()
-  
+
   onMount(() => {
     renderer.console.show()
     console.log("Now visible!")
   })
-  
+
   return <box>{/* ... */}</box>
 }
 ```

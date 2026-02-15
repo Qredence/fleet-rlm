@@ -218,19 +218,19 @@ model_list:
 rlm_settings:
   # Maximum iterations for RLM code execution loops
   max_iterations: 30
-  
+
   # Maximum LLM calls per RLM task
   max_llm_calls: 50
-  
+
   # Maximum output characters before truncation
   max_output_chars: 10000
-  
+
   # Character threshold for stdout summarization
   stdout_summary_threshold: 10000
-  
+
   # Length of prefix shown in stdout summaries
   stdout_summary_prefix_len: 200
-  
+
   # Enable verbose logging for RLM execution
   verbose: false
 

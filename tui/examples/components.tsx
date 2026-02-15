@@ -31,17 +31,17 @@ function ExampleApp() {
             <text>Default (dots):</text>
             <Spinner />
           </box>
-          
+
           <box>
             <text>Bouncing Ball:</text>
             <Spinner name="bouncingBall" color="cyan" />
           </box>
-          
+
           <box>
             <text>Moon:</text>
             <Spinner name="moon" />
           </box>
-          
+
           <box>
             <text>Pulse:</text>
             <Spinner
@@ -49,7 +49,7 @@ function ExampleApp() {
               color={createPulse(["red", "yellow", "green", "cyan", "blue", "magenta"])}
             />
           </box>
-          
+
           <box>
             <text>Wave:</text>
             <Spinner
@@ -88,7 +88,7 @@ function ExampleApp() {
 async function main() {
   const renderer = await createCliRenderer();
   const root = createRoot(renderer);
-  
+
   root.render(<ExampleApp />);
 }
 

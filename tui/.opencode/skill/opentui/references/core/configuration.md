@@ -10,10 +10,10 @@ import { createCliRenderer, ConsolePosition } from "@opentui/core"
 const renderer = await createCliRenderer({
   // Rendering
   targetFPS: 60,                    // Target frames per second (default: 60)
-  
+
   // Behavior
   exitOnCtrlC: true,                // Exit on Ctrl+C (default: true)
-  
+
   // Console overlay
   consoleOptions: {
     position: ConsolePosition.BOTTOM,  // BOTTOM | TOP | LEFT | RIGHT
@@ -24,7 +24,7 @@ const renderer = await createCliRenderer({
     colorDebug: "#888888",
     startInDebugMode: false,
   },
-  
+
   // Lifecycle
   onDestroy: () => {
     // Cleanup callback

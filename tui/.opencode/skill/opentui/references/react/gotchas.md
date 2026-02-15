@@ -15,7 +15,7 @@ import { useRenderer } from "@opentui/react"
 
 function App() {
   const renderer = useRenderer()
-  
+
   const handleExit = () => {
     renderer.destroy()  // Cleans up and exits properly
   }
@@ -162,7 +162,7 @@ function ChildWithKeyboard() {
 ```tsx
 function App() {
   const [handled, setHandled] = useState(false)
-  
+
   useKeyboard((key) => {
     if (handled) {
       setHandled(false)
@@ -170,7 +170,7 @@ function App() {
     }
     // Handle at app level
   })
-  
+
   return <Child onKeyHandled={() => setHandled(true)} />
 }
 ```
@@ -264,10 +264,10 @@ const style = useMemo(() => ({ padding: 2 }), [])
 Use React.memo for expensive components:
 
 ```tsx
-const ExpensiveList = React.memo(function ExpensiveList({ 
-  items 
-}: { 
-  items: Item[] 
+const ExpensiveList = React.memo(function ExpensiveList({
+  items
+}: {
+  items: Item[]
 }) {
   return (
     <box flexDirection="column">
@@ -287,25 +287,25 @@ Don't update state during render:
 // WRONG
 function Component({ value }: { value: number }) {
   const [count, setCount] = useState(0)
-  
+
   // This causes infinite loop!
   if (value > 10) {
     setCount(value)
   }
-  
+
   return <text>{count}</text>
 }
 
 // CORRECT
 function Component({ value }: { value: number }) {
   const [count, setCount] = useState(0)
-  
+
   useEffect(() => {
     if (value > 10) {
       setCount(value)
     }
   }, [value])
-  
+
   return <text>{count}</text>
 }
 ```
@@ -322,12 +322,12 @@ import { useEffect } from "react"
 
 function App() {
   const renderer = useRenderer()
-  
+
   useEffect(() => {
     renderer.console.show()
     console.log("Now you can see this!")
   }, [renderer])
-  
+
   return <box>{/* ... */}</box>
 }
 ```

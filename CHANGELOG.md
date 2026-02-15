@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `max_depth` and `max_iters` fields to `RlmSettings` Pydantic model for centralized recursion and iteration control.
+- `_normalize_trajectory()` helper in `react/streaming.py` to handle DSPy 3.1.3 flat trajectory format (`tool_name_0`, `thought_0`, etc.).
+- Comprehensive unit test coverage for `RlmSettings`, `_normalize_trajectory()`, and depth enforcement (11 new tests).
+- Depth tracking instance variables (`_max_depth`, `_current_depth`) on `RLMReActChatAgent` for recursion depth enforcement.
+
+### Changed
+
+- Hydra config now fully wires `max_depth` and `max_iters` through CLI, runners, and WebSocket server initialization.
+- `rlm_query` tool now extracts answer from correct `assistant_response` key (DSPy 3.1.3 compatibility) instead of wrong `answer` key.
+- Trajectory normalization applied to both sync and async streaming paths for consistent structured output.
+- CLI `rlm_max_llm_calls` now reads from config instead of hardcoded value.
+
+### Fixed
+
+- **rlm_query answer extraction bug**: Fixed to use `assistant_response` key from DSPy 3.1.3 output instead of non-existent `answer` key.
+- **Infinite recursion vulnerability**: `rlm_query` now enforces `max_depth` limit to prevent unbounded subagent spawning.
+- **Trajectory format incompatibility**: Added normalization layer for DSPy 3.1.3 flat trajectory dictionaries.
+
+### Deprecated
+
+- `load_rlm_settings()` in `core/config.py` in favor of unified Hydra config loading via `AppConfig.rlm_settings`.
+
 ## [0.4.2] - 2026-02-15
 
 ### Added

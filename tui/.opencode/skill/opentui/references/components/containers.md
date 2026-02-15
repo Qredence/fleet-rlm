@@ -308,7 +308,7 @@ function List({ items, renderItem }) {
   <box height={3} border>
     <text>Header</text>
   </box>
-  
+
   {/* Main area with sidebar */}
   <box flexDirection="row" flexGrow={1}>
     <box width={20} border>
@@ -320,7 +320,7 @@ function List({ items, renderItem }) {
       </scrollbox>
     </box>
   </box>
-  
+
   {/* Footer */}
   <box height={1}>
     <text>Footer</text>

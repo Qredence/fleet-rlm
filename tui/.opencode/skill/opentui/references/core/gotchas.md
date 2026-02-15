@@ -126,11 +126,11 @@ test("reproduces the issue", async () => {
     width: 40,
     height: 10,
   })
-  
+
   // Setup that reproduces the bug
   const box = new BoxRenderable(renderer, { ... })
   renderer.root.add(box)
-  
+
   // Verify with snapshot
   expect(snapshot()).toMatchSnapshot()
 })

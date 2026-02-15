@@ -64,17 +64,17 @@ function escapeRegExp(string: string): string {
 // Build search regex from options
 function buildSearchRegex(options: SearchOptions): RegExp {
   let pattern = options.pattern;
-  
+
   if (!options.regex) {
     pattern = escapeRegExp(pattern);
   }
-  
+
   if (options.wholeWord) {
     pattern = `\\b${pattern}\\b`;
   }
-  
+
   const flags = options.caseSensitive ? "g" : "gi";
-  
+
   return new RegExp(pattern, flags);
 }
 
@@ -88,7 +88,7 @@ function shouldIncludeFile(filePath: string, include?: string[], exclude?: strin
       }
     }
   }
-  
+
   if (include) {
     for (const pattern of include) {
       const regex = new RegExp(pattern.replace(/\*/g, ".*").replace(/\?/g, "."));
@@ -98,7 +98,7 @@ function shouldIncludeFile(filePath: string, include?: string[], exclude?: strin
     }
     return false;
   }
-  
+
   return true;
 }
 
@@ -111,11 +111,11 @@ function searchInText(
 ): SearchResult[] {
   const results: SearchResult[] = [];
   const lines = content.split("\n");
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     const matches: SearchResult["matches"] = [];
-    
+
     let match;
     while ((match = regex.exec(line)) !== null) {
       matches.push({
@@ -124,7 +124,7 @@ function searchInText(
         text: match[0],
       });
     }
-    
+
     if (matches.length > 0) {
       const firstMatch = matches[0]!;
       const result: SearchResult = {
@@ -134,21 +134,21 @@ function searchInText(
         line,
         matches,
       };
-      
+
       if (contextLines > 0) {
         result.context = {
           before: lines.slice(Math.max(0, i - contextLines), i).filter((l): l is string => l !== undefined),
           after: lines.slice(i + 1, Math.min(lines.length, i + 1 + contextLines)).filter((l): l is string => l !== undefined),
         };
       }
-      
+
       results.push(result);
     }
-    
+
     // Reset regex lastIndex for next line
     regex.lastIndex = 0;
   }
-  
+
   return results;
 }
 
@@ -156,13 +156,13 @@ function searchInText(
 export function highlightMatches(line: string, matches: SearchResult["matches"]): string {
   let result = "";
   let lastEnd = 0;
-  
+
   for (const match of matches) {
     result += line.slice(lastEnd, match.start);
     result += `\x1b[1;31m${match.text}\x1b[0m`;
     lastEnd = match.end;
   }
-  
+
   result += line.slice(lastEnd);
   return result;
 }
@@ -170,10 +170,10 @@ export function highlightMatches(line: string, matches: SearchResult["matches"])
 // Format result for display
 export function formatSearchResult(result: SearchResult, showContext: boolean = true): string {
   const lines: string[] = [];
-  
+
   // File path and line number
   lines.push(`\x1b[36m${result.filePath}\x1b[0m:\x1b[32m${result.lineNumber}\x1b[0m:\x1b[32m${result.column}\x1b[0m`);
-  
+
   // Context before
   if (showContext && result.context?.before) {
     for (let i = 0; i < result.context.before.length; i++) {
@@ -181,10 +181,10 @@ export function formatSearchResult(result: SearchResult, showContext: boolean = 
       lines.push(`\x1b[90m${lineNum.toString().padStart(6)}│ ${result.context.before[i]}\x1b[0m`);
     }
   }
-  
+
   // Match line with highlights
   lines.push(`\x1b[32m${result.lineNumber.toString().padStart(6)}│\x1b[0m ${highlightMatches(result.line, result.matches)}`);
-  
+
   // Context after
   if (showContext && result.context?.after) {
     for (let i = 0; i < result.context.after.length; i++) {
@@ -192,7 +192,7 @@ export function formatSearchResult(result: SearchResult, showContext: boolean = 
       lines.push(`\x1b[90m${lineNum.toString().padStart(6)}│ ${result.context.after[i]}\x1b[0m`);
     }
   }
-  
+
   return lines.join("\n");
 }
 
@@ -309,11 +309,11 @@ export function useSearch() {
 // Search component for OpenTUI
 export function Search({ options }: SearchProps) {
   const { results, isSearching, error, search } = useSearch();
-  
+
   useEffect(() => {
     search(options);
   }, [options, search]);
-  
+
   if (isSearching) {
     return (
       <box flexDirection="row" alignItems="center" gap={1}>
@@ -321,7 +321,7 @@ export function Search({ options }: SearchProps) {
       </box>
     );
   }
-  
+
   if (error) {
     return (
       <box>
@@ -329,7 +329,7 @@ export function Search({ options }: SearchProps) {
       </box>
     );
   }
-  
+
   if (results.length === 0) {
     return (
       <box>
@@ -337,7 +337,7 @@ export function Search({ options }: SearchProps) {
       </box>
     );
   }
-  
+
   return (
     <box flexDirection="column" gap={1}>
       <text>Found {results.length} result{results.length !== 1 ? "s" : ""}:</text>
@@ -361,7 +361,7 @@ export function SearchInput({
   const [pattern, setPattern] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [regex, setRegex] = useState(false);
-  
+
   const handleSubmit = () => {
     if (pattern.trim()) {
       onSearch({
@@ -371,7 +371,7 @@ export function SearchInput({
       });
     }
   };
-  
+
   return (
     <box flexDirection="column" gap={1}>
       <box flexDirection="row" gap={1}>

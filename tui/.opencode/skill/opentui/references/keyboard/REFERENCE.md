@@ -44,7 +44,7 @@ renderer.keyInput.on("keypress", (key: KeyEvent) => {
     renderer.destroy()
     return
   }
-  
+
   if (key.ctrl && key.name === "s") {
     saveDocument()
   }
@@ -63,7 +63,7 @@ function App() {
       renderer.destroy()
     }
   })
-  
+
   return <text>Press ESC to exit</text>
 }
 ```
@@ -81,7 +81,7 @@ function App() {
       renderer.destroy()
     }
   })
-  
+
   return <text>Press ESC to exit</text>
 }
 ```
@@ -142,15 +142,15 @@ renderer.keyInput.on("keypress", (key) => {
   if (key.ctrl && key.name === "c") {
     // Ctrl+C
   }
-  
+
   if (key.shift && key.name === "tab") {
     // Shift+Tab
   }
-  
+
   if (key.meta && key.name === "s") {
     // Alt+S (meta = Alt on most systems)
   }
-  
+
   if (key.option && key.name === "a") {
     // Option+A (macOS)
   }
@@ -231,7 +231,7 @@ useKeyboard(
 function Menu() {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const items = ["Home", "Settings", "Help", "Quit"]
-  
+
   useKeyboard((key) => {
     switch (key.name) {
       case "up":
@@ -247,7 +247,7 @@ function Menu() {
         break
     }
   })
-  
+
   return (
     <box flexDirection="column">
       {items.map((item, i) => (
@@ -272,7 +272,7 @@ function Modal({ onClose, children }) {
       onClose()
     }
   })
-  
+
   return (
     <box border padding={2}>
       {children}
@@ -287,7 +287,7 @@ function Modal({ onClose, children }) {
 function Editor() {
   const [mode, setMode] = useState<"normal" | "insert">("normal")
   const [content, setContent] = useState("")
-  
+
   useKeyboard((key) => {
     if (mode === "normal") {
       switch (key.name) {
@@ -311,7 +311,7 @@ function Editor() {
       // Input component handles text in insert mode
     }
   })
-  
+
   return (
     <box flexDirection="column">
       <text>Mode: {mode}</text>
@@ -330,7 +330,7 @@ function Editor() {
 ```tsx
 function Game() {
   const [pressed, setPressed] = useState(new Set<string>())
-  
+
   useKeyboard(
     (key) => {
       setPressed(keys => {
@@ -345,7 +345,7 @@ function Game() {
     },
     { release: true }
   )
-  
+
   // Game logic uses pressed set
   useEffect(() => {
     if (pressed.has("up") || pressed.has("w")) {
@@ -355,7 +355,7 @@ function Game() {
       moveDown()
     }
   }, [pressed])
-  
+
   return <text>WASD or arrows to move</text>
 }
 ```
@@ -371,7 +371,7 @@ function ShortcutsHelp() {
     { keys: "Tab", action: "Next field" },
     { keys: "Shift+Tab", action: "Previous field" },
   ]
-  
+
   return (
     <box border title="Keyboard Shortcuts" padding={1}>
       {shortcuts.map(({ keys, action }) => (
@@ -420,16 +420,16 @@ To prevent conflicts, check if an input is focused before handling global shortc
 function App() {
   const renderer = useRenderer()
   const [inputFocused, setInputFocused] = useState(false)
-  
+
   useKeyboard((key) => {
     if (inputFocused) return  // Let input handle it
-    
+
     // Global shortcuts
     if (key.name === "escape") {
       renderer.destroy()
     }
   })
-  
+
   return (
     <input
       focused={inputFocused}
