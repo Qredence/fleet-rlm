@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-02-15
+
+### Fixed
+
+- **Package-data configuration**: Added `fleet_rlm.conf` to setuptools package-data to include Hydra config files (`config.yaml`) in distribution. Without this, the CLI would fail with "Cannot find primary config 'config'" when installed from PyPI.
+- **py.typed marker**: Explicitly declared `py.typed` in package-data to ensure PEP 561 compliance.
+
 ## [0.4.2] - 2026-02-15
 
 ### Added
@@ -112,6 +119,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.4.3]: https://github.com/Qredence/fleet-rlm/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Qredence/fleet-rlm/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Qredence/fleet-rlm/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Qredence/fleet-rlm/releases/tag/v0.4.0

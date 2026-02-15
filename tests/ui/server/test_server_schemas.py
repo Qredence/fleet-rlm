@@ -1,3 +1,5 @@
+from importlib.metadata import version
+
 from fleet_rlm.server.schemas import (
     ChatRequest,
     ChatResponse,
@@ -22,7 +24,7 @@ def test_chat_response():
 def test_health_response():
     r = HealthResponse()
     assert r.ok is True
-    assert r.version == "0.4.2"
+    assert r.version == version("fleet-rlm")
 
 
 def test_task_request_defaults():
