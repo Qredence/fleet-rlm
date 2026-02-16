@@ -121,4 +121,30 @@ export interface TranscriptEvent {
   role: "user" | "assistant" | "system" | "trace" | "status";
   content: string;
   payload?: Record<string, unknown> | null;
+  timestamp?: string; // ISO 8601 format - when message was created
+}
+
+export interface RecentDoc {
+  path: string;
+  alias?: string;
+  loadedAt: string; // ISO 8601 format
+}
+
+export type CommandCategory = "commands" | "actions" | "settings" | "shortcuts" | "recent";
+
+export interface PaletteCommand {
+  id: string;
+  label: string;
+  description?: string;
+  category: CommandCategory;
+  shortcut?: string;
+  keywords?: string[];
+  icon?: string;
+}
+
+export interface CommandPaletteState {
+  isOpen: boolean;
+  query: string;
+  selectedIndex: number;
+  category: CommandCategory | null;
 }

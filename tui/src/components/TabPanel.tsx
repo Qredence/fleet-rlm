@@ -6,10 +6,18 @@
 import { useAppContext } from "../context/AppContext";
 import { bg, border, fg, accent, semantic } from "../theme";
 import { useKeyboard } from "@opentui/react";
+import { useRef, useEffect } from "react";
 
 function ReasoningPane() {
   const { state } = useAppContext();
   const lines = state.currentTurn.reasoningLines;
+  const scrollRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (scrollRef.current?.scrollToBottom) {
+      scrollRef.current.scrollToBottom();
+    }
+  }, [lines.length]);
 
   if (lines.length === 0) {
     return (
@@ -20,11 +28,19 @@ function ReasoningPane() {
   }
 
   return (
-    <scrollbox flexGrow={1} padding={1}>
+    <scrollbox
+      ref={scrollRef}
+      flexGrow={1}
+      padding={1}
+      stickyScroll
+      stickyStart="bottom"
+      style={{ scrollbarOptions: { showArrows: true, trackOptions: { foregroundColor: accent.base, backgroundColor: bg.highlight } } }}
+    >
       {lines.map((line, i) => (
-        <box key={i} paddingLeft={1} paddingRight={1} paddingTop={0} paddingBottom={0}>
+        <box key={i} paddingTop={i > 0 ? 1 : 0} paddingLeft={1} paddingRight={1}>
           <text fg={fg.secondary}>
-            <span fg={fg.muted}>{" ▸ "}</span>
+            <span fg={fg.muted}>{String(i + 1).padStart(2, " ")} │ </span>
+            <span fg={accent.base}>▸ </span>
             {line}
           </text>
         </box>
@@ -36,6 +52,27 @@ function ReasoningPane() {
 function ToolsPane() {
   const { state } = useAppContext();
   const timeline = state.currentTurn.toolTimeline;
+  const scrollRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (scrollRef.current?.scrollToBottom) {
+      scrollRef.current.scrollToBottom();
+    }
+  }, [timeline.length]);
+
+  const getToolIcon = (entry: string): { icon: string; color: string } => {
+    const lower = entry.toLowerCase();
+    if (lower.includes("error") || lower.includes("failed")) {
+      return { icon: "✗", color: semantic.error };
+    }
+    if (lower.includes("result") || lower.includes("completed")) {
+      return { icon: "✓", color: semantic.success };
+    }
+    if (lower.includes("calling") || lower.includes("executing")) {
+      return { icon: "◆", color: accent.base };
+    }
+    return { icon: "◆", color: semantic.success };
+  };
 
   if (timeline.length === 0) {
     return (
@@ -46,15 +83,35 @@ function ToolsPane() {
   }
 
   return (
-    <scrollbox flexGrow={1} padding={1}>
-      {timeline.map((entry, i) => (
-        <box key={i} paddingLeft={1} paddingRight={1} paddingTop={0} paddingBottom={0}>
-          <text fg={fg.secondary}>
-            <span fg={semantic.success}>{" ◆ "}</span>
-            {entry}
-          </text>
-        </box>
-      ))}
+    <scrollbox
+      ref={scrollRef}
+      flexGrow={1}
+      padding={1}
+      stickyScroll
+      stickyStart="bottom"
+      style={{ scrollbarOptions: { showArrows: true, trackOptions: { foregroundColor: accent.base, backgroundColor: bg.highlight } } }}
+    >
+      {timeline.map((entry, i) => {
+        const { icon, color } = getToolIcon(entry);
+        const showSeparator = i > 0 && i % 5 === 0;
+
+        return (
+          <>
+            {showSeparator && (
+              <box paddingTop={1}>
+                <text fg={fg.muted}>─{"".repeat(25)}</text>
+              </box>
+            )}
+            <box key={i} paddingTop={i > 0 ? 1 : 0} paddingLeft={1} paddingRight={1}>
+              <text fg={fg.secondary}>
+                <span fg={fg.muted}>{String(i + 1).padStart(2, " ")} │ </span>
+                <span fg={color}>{icon} </span>
+                {entry}
+              </text>
+            </box>
+          </>
+        );
+      })}
     </scrollbox>
   );
 }
