@@ -46,7 +46,8 @@ import type {
   WorkingPhase,
 } from "./types.js";
 
-const PLACEHOLDER = "Type @ to mention files, / for commands, or ? for shortcuts";
+const PLACEHOLDER =
+  "Type @ to mention files, / for commands, or ? for shortcuts";
 const DEFAULT_COMMANDS = [
   "help",
   "status",
@@ -83,7 +84,11 @@ function parseCliOptions(argv: string[]): CliOptions {
     }
     if (token === "--trace-mode" && argv[index + 1]) {
       const nextMode = argv[index + 1];
-      if (nextMode === "compact" || nextMode === "verbose" || nextMode === "off") {
+      if (
+        nextMode === "compact" ||
+        nextMode === "verbose" ||
+        nextMode === "off"
+      ) {
         traceMode = nextMode;
       }
       index += 1;
@@ -135,7 +140,9 @@ function suppressKnownInkWarnings(): void {
       first.includes('Each child in a list should have a unique "key" prop')
     ) {
       const hasStaticHint = args.some(
-        (item) => typeof item === "string" && item.includes("render method of `Static`"),
+        (item) =>
+          typeof item === "string" &&
+          item.includes("render method of `Static`"),
       );
       if (hasStaticHint) {
         return;
@@ -161,7 +168,10 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
   const [workingPhase, setWorkingPhase] = useState<WorkingPhase>("idle");
   const [transcriptLines, setTranscriptLines] = useState<TranscriptLine[]>([
     nextLine("system", "Welcome to fleet."),
-    nextLine("system", "Use / for command palette, @ for file mentions, Esc for back."),
+    nextLine(
+      "system",
+      "Use / for command palette, @ for file mentions, Esc for back.",
+    ),
   ]);
   const [streamingText, setStreamingText] = useState("");
   const [commands, setCommands] = useState<string[]>(DEFAULT_COMMANDS);
@@ -176,10 +186,13 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
     values: {},
     masked_values: {},
   });
-  const [statusPayload, setStatusPayload] = useState<Record<string, unknown> | null>(null);
-  const [settingsEditKey, setSettingsEditKey] = useState<"DSPY_LM_MODEL" | "DSPY_LM_API_BASE">(
-    "DSPY_LM_MODEL",
-  );
+  const [statusPayload, setStatusPayload] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [settingsEditKey, setSettingsEditKey] = useState<
+    "DSPY_LM_MODEL" | "DSPY_LM_API_BASE"
+  >("DSPY_LM_MODEL");
   const [settingsEditValue, setSettingsEditValue] = useState("");
 
   const overlayView = overlayStack.at(-1) ?? "none";
@@ -187,14 +200,22 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
     () => (overlayView === "none" ? detectMentionQuery(composerValue) : null),
     [composerValue, overlayView],
   );
-  const rootQuery = composerValue.startsWith("/") ? composerValue.slice(1).trim() : "";
+  const rootQuery = composerValue.startsWith("/")
+    ? composerValue.slice(1).trim()
+    : "";
 
   const rootItems = useMemo(
     () => filterPalette(buildRootPalette(commands), rootQuery),
     [commands, rootQuery],
   );
-  const settingsItems = useMemo(() => buildSettingsPalette(settingsSnapshot), [settingsSnapshot]);
-  const mentionSuggestions = useMemo(() => mentionItems.slice(0, 16), [mentionItems]);
+  const settingsItems = useMemo(
+    () => buildSettingsPalette(settingsSnapshot),
+    [settingsSnapshot],
+  );
+  const mentionSuggestions = useMemo(
+    () => mentionItems.slice(0, 16),
+    [mentionItems],
+  );
 
   const client = useMemo(
     () =>
@@ -223,9 +244,14 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
     streamingRef.current = streamingText;
   }, [streamingText]);
 
-  const appendLine = useCallback((role: TranscriptLine["role"], text: string): void => {
-    setTranscriptLines((previous) => [...previous, nextLine(role, text)].slice(-400));
-  }, []);
+  const appendLine = useCallback(
+    (role: TranscriptLine["role"], text: string): void => {
+      setTranscriptLines((previous) =>
+        [...previous, nextLine(role, text)].slice(-400),
+      );
+    },
+    [],
+  );
   const appendEvent = useCallback(
     (kind: string, text: string, payload: unknown): void => {
       const next = reduceInlineEvent(eventFeedStateRef.current, eventFeedMode, {
@@ -283,19 +309,26 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
   }, []);
 
   const fetchSettings = useCallback(async (): Promise<void> => {
-    const response = parseBridgeSettingsSnapshot(await client.request("settings.get", {}));
+    const response = parseBridgeSettingsSnapshot(
+      await client.request("settings.get", {}),
+    );
     setSettingsSnapshot(response);
   }, [client]);
 
   const fetchStatus = useCallback(async (): Promise<void> => {
-    const response = parseBridgeStatusPayload(await client.request("status.get", {}));
+    const response = parseBridgeStatusPayload(
+      await client.request("status.get", {}),
+    );
     setStatusPayload(response);
   }, [client]);
 
   const executeBridgeCommand = useCallback(
     async (command: string, args: Record<string, unknown>): Promise<void> => {
       setWorkingPhase("thinking");
-      const result = await client.request("command.execute", { command, args });
+      const result = await client.request("commands.execute", {
+        command,
+        args,
+      });
       appendLine("status", formatValue(result));
       setWorkingPhase("idle");
     },
@@ -336,7 +369,8 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
     async (item: PaletteItem): Promise<void> => {
       if (item.action === "view-model-provider") {
         const model = settingsSnapshot.masked_values.DSPY_LM_MODEL || "<unset>";
-        const apiBase = settingsSnapshot.masked_values.DSPY_LM_API_BASE || "<unset>";
+        const apiBase =
+          settingsSnapshot.masked_values.DSPY_LM_API_BASE || "<unset>";
         appendLine("status", `Model: ${model}`);
         appendLine("status", `API base: ${apiBase}`);
         return;
@@ -353,7 +387,12 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
         openOverlay("settings-edit");
       }
     },
-    [appendLine, openOverlay, settingsSnapshot.masked_values, settingsSnapshot.values],
+    [
+      appendLine,
+      openOverlay,
+      settingsSnapshot.masked_values,
+      settingsSnapshot.values,
+    ],
   );
 
   const applyActiveSelection = useCallback(async (): Promise<void> => {
@@ -365,18 +404,22 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
       return;
     }
     if (overlayView === "palette-settings") {
-      const selected = settingsItems[clampIndex(paletteIndex, settingsItems.length)];
+      const selected =
+        settingsItems[clampIndex(paletteIndex, settingsItems.length)];
       if (selected) {
         await handleSettingsSelection(selected);
       }
       return;
     }
     if (overlayView === "none" && mentionSuggestions.length > 0) {
-      const selected = mentionSuggestions[clampIndex(mentionIndex, mentionSuggestions.length)];
+      const selected =
+        mentionSuggestions[clampIndex(mentionIndex, mentionSuggestions.length)];
       if (!selected) {
         return;
       }
-      setComposerValue((previous) => applyMentionSelection(previous, selected.path));
+      setComposerValue((previous) =>
+        applyMentionSelection(previous, selected.path),
+      );
     }
   }, [
     handleRootSelection,
@@ -495,9 +538,12 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
         );
 
         const responseText =
-          typeof response.assistant_response === "string" ? response.assistant_response.trim() : "";
+          typeof response.assistant_response === "string"
+            ? response.assistant_response.trim()
+            : "";
         const pendingText = pendingFinalTextRef.current.trim();
-        const finalText = pendingText || responseText || streamingRef.current.trim();
+        const finalText =
+          pendingText || responseText || streamingRef.current.trim();
         if (finalText) {
           appendLine("assistant", finalText);
         }
@@ -573,7 +619,9 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
 
     void (async () => {
       try {
-        const response = parseBridgeSessionInit(await client.request("session.init", {}));
+        const response = parseBridgeSessionInit(
+          await client.request("session.init", {}),
+        );
         if (!alive) {
           return;
         }
@@ -582,7 +630,9 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
         const toolCommands = Array.isArray(response.commands?.tool_commands)
           ? response.commands?.tool_commands
           : [];
-        const wrapperCommands = Array.isArray(response.commands?.wrapper_commands)
+        const wrapperCommands = Array.isArray(
+          response.commands?.wrapper_commands,
+        )
           ? response.commands?.wrapper_commands
           : [];
         const merged = Array.from(
@@ -618,7 +668,7 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
     void (async () => {
       try {
         const response = parseBridgeMentionSearch(
-          await client.request("mention.search", {
+          await client.request("mentions.search", {
             query: mentionQuery,
             limit: 16,
           }),
@@ -694,7 +744,10 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
     }
 
     if (key.escape) {
-      if (overlayView === "settings-edit" || overlayView === "palette-settings") {
+      if (
+        overlayView === "settings-edit" ||
+        overlayView === "palette-settings"
+      ) {
         closeOneOverlay();
         return;
       }
@@ -736,11 +789,15 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
 
     if (mentionSuggestions.length > 0) {
       if (key.upArrow) {
-        setMentionIndex((previous) => moveIndex(previous, -1, mentionSuggestions.length));
+        setMentionIndex((previous) =>
+          moveIndex(previous, -1, mentionSuggestions.length),
+        );
         return;
       }
       if (key.downArrow) {
-        setMentionIndex((previous) => moveIndex(previous, 1, mentionSuggestions.length));
+        setMentionIndex((previous) =>
+          moveIndex(previous, 1, mentionSuggestions.length),
+        );
         return;
       }
       if (key.tab) {
@@ -790,7 +847,11 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
 
   return (
     <ShellFrame>
-      <HeaderBar status={status} sessionId={sessionId} workingPhase={workingPhase} />
+      <HeaderBar
+        status={status}
+        sessionId={sessionId}
+        workingPhase={workingPhase}
+      />
 
       <Box marginTop={1} flexDirection="column">
         <TranscriptStatic lines={transcriptLines} />
@@ -808,7 +869,9 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
         />
       ) : null}
 
-      {overlayView === "status-panel" ? <StatusPanel payload={statusPayload} /> : null}
+      {overlayView === "status-panel" ? (
+        <StatusPanel payload={statusPayload} />
+      ) : null}
 
       {overlayView === "none" && mentionSuggestions.length > 0 ? (
         <MentionPanel items={mentionSuggestions} selectedIndex={mentionIndex} />
@@ -823,7 +886,10 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
           if (overlayView === "settings-edit") {
             return;
           }
-          if (overlayView === "palette-root" || overlayView === "palette-settings") {
+          if (
+            overlayView === "palette-root" ||
+            overlayView === "palette-settings"
+          ) {
             void applyActiveSelection();
             return;
           }
@@ -839,7 +905,8 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
 
       {overlayView === "palette-settings" ? (
         <Text color="gray">
-          Model: {settingsSnapshot.masked_values.DSPY_LM_MODEL || "<unset>"} • API base:{" "}
+          Model: {settingsSnapshot.masked_values.DSPY_LM_MODEL || "<unset>"} •
+          API base:{" "}
           {settingsSnapshot.masked_values.DSPY_LM_API_BASE || "<unset>"}
         </Text>
       ) : null}

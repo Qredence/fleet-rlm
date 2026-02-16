@@ -49,6 +49,18 @@ def test_fleet_completer_suggests_slash_commands() -> None:
     assert "/settings" in texts
 
 
+def test_fleet_completer_suggests_mentions(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "src").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    completer = tc._FleetCompleter()
+    completions = list(
+        completer.get_completions(Document(text="@s", cursor_position=2), None)
+    )
+    texts = {completion.text for completion in completions}
+    assert "src/" in texts
+
+
 def test_write_env_updates_persists_values(tmp_path: Path, monkeypatch) -> None:
     env_path = tmp_path / ".env"
     monkeypatch.delenv("DSPY_LM_MODEL", raising=False)

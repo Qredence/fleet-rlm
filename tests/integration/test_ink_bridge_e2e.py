@@ -187,3 +187,13 @@ def test_fleet_cli_launcher_imports():
     from fleet_rlm.fleet_cli import main
 
     assert callable(main)
+
+
+def test_ink_cli_uses_plural_bridge_rpc_methods():
+    """Guard Ink↔bridge method-name contract for command + mention paths."""
+    source = Path("tui-ink/src/cli.tsx").read_text(encoding="utf-8")
+
+    assert "commands.execute" in source
+    assert "mentions.search" in source
+    assert "command.execute" not in source
+    assert "mention.search" not in source

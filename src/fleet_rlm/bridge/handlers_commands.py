@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fleet_rlm import runners
+from fleet_rlm.core.interpreter import ExecutionProfile
 from fleet_rlm.react.commands import COMMAND_DISPATCH
 
 from .protocol import BridgeRPCError
@@ -61,7 +62,12 @@ async def execute_command(runtime: Any, params: dict[str, Any]) -> dict[str, Any
             data={"available": sorted(COMMAND_DISPATCH)},
         )
 
-    result = await runtime.agent.execute_command(command, args)
+    interpreter = getattr(runtime.agent, "interpreter", None)
+    if interpreter is not None and hasattr(interpreter, "execution_profile"):
+        with interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            result = await runtime.agent.execute_command(command, args)
+    else:
+        result = await runtime.agent.execute_command(command, args)
     return {"command": command, "result": result}
 
 

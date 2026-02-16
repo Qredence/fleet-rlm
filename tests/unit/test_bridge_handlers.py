@@ -11,6 +11,7 @@ from fleet_rlm.bridge import (
     handlers_status,
 )
 from fleet_rlm.bridge.protocol import BridgeRPCError
+from fleet_rlm.core.interpreter import ExecutionProfile
 from fleet_rlm.react.commands import COMMAND_DISPATCH
 
 
@@ -185,7 +186,83 @@ def test_settings_get_masks_secrets(tmp_path, monkeypatch):
     # Mask format is "prefix...suffix" for long keys
     assert snapshot["masked_values"]["DSPY_LLM_API_KEY"].startswith("sk-")
     assert "..." in snapshot["masked_values"]["DSPY_LLM_API_KEY"]
+    # Secret values are masked in `values` by default.
+    assert (
+        snapshot["values"]["DSPY_LLM_API_KEY"]
+        == snapshot["masked_values"]["DSPY_LLM_API_KEY"]
+    )
     assert snapshot["values"]["DSPY_LM_MODEL"] == "openai/gpt-4"
+
+
+def test_settings_get_can_include_secret_values_when_opted_in(tmp_path, monkeypatch):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / "pyproject.toml").write_text("[project]\nname='demo'\n")
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-super-secret-key")
+
+    snapshot = handlers_settings.get_settings(
+        {
+            "keys": ["DSPY_LLM_API_KEY"],
+            "include_secret_values": True,
+        }
+    )
+
+    assert snapshot["secret_values_included"] is True
+    assert snapshot["values"]["DSPY_LLM_API_KEY"] == "sk-super-secret-key"
+
+
+@pytest.mark.asyncio
+async def test_commands_execute_uses_delegate_profile_when_available(monkeypatch):
+    entered_profiles: list[ExecutionProfile] = []
+
+    class FakeExecutionProfileCtx:
+        def __init__(self, profile: ExecutionProfile) -> None:
+            self._profile = profile
+
+        def __enter__(self) -> None:
+            entered_profiles.append(self._profile)
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    class FakeInterpreter:
+        def execution_profile(
+            self, profile: ExecutionProfile
+        ) -> FakeExecutionProfileCtx:
+            return FakeExecutionProfileCtx(profile)
+
+    dispatched_command = next(iter(COMMAND_DISPATCH))
+
+    class FakeAgent:
+        interpreter = FakeInterpreter()
+
+        async def execute_command(self, command: str, args: dict):
+            return {"command": command, "args": args, "ok": True}
+
+    runtime = SimpleNamespace(
+        command_permissions={},
+        secret_name="LITELLM",
+        ensure_agent=lambda: None,
+        agent=FakeAgent(),
+        config=SimpleNamespace(
+            rlm_settings=SimpleNamespace(
+                max_iterations=5,
+                max_llm_calls=100,
+                verbose=False,
+            ),
+            interpreter=SimpleNamespace(timeout=120),
+        ),
+        volume_name="demo-volume",
+    )
+
+    result = await handlers_commands.execute_command(
+        runtime,
+        {"command": dispatched_command, "args": {"x": 1}},
+    )
+
+    assert result["result"]["ok"] is True
+    assert entered_profiles == [ExecutionProfile.RLM_DELEGATE]
 
 
 def test_mentions_search_handles_large_repo(tmp_path):

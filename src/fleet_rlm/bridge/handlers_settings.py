@@ -14,17 +14,26 @@ _SECRET_KEYS = {"DSPY_LLM_API_KEY", "DSPY_LM_API_KEY", "MODAL_TOKEN_SECRET"}
 def get_settings(params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return current settings snapshot and masked values."""
     env_path = _resolve_env_path()
-    keys = _requested_keys(params or {})
-    values = {key: os.environ.get(key, "") for key in keys}
+    payload = params or {}
+    keys = _requested_keys(payload)
+    include_secret_values = bool(payload.get("include_secret_values", False))
+    raw_values = {key: os.environ.get(key, "") for key in keys}
     masked = {
         key: _mask_secret(value) if key in _SECRET_KEYS else value
-        for key, value in values.items()
+        for key, value in raw_values.items()
+    }
+    values = {
+        key: raw_values[key]
+        if (key not in _SECRET_KEYS or include_secret_values)
+        else masked[key]
+        for key in keys
     }
     return {
         "env_path": str(env_path),
         "keys": keys,
         "values": values,
         "masked_values": masked,
+        "secret_values_included": include_secret_values,
     }
 
 

@@ -1,6 +1,12 @@
 export type TraceMode = "compact" | "verbose" | "off";
 
-export type TranscriptRole = "system" | "user" | "assistant" | "tool" | "status" | "error";
+export type TranscriptRole =
+  | "system"
+  | "user"
+  | "assistant"
+  | "tool"
+  | "status"
+  | "error";
 
 export type WorkingPhase = "idle" | "thinking" | "tool";
 
@@ -43,4 +49,5 @@ export interface BridgeSessionInit {
 export interface SettingsSnapshot {
   values: Record<string, string>;
   masked_values: Record<string, string>;
+  secret_values_included?: boolean;
 }

@@ -1046,7 +1046,7 @@ class _FleetCompleter(Completer):
                         )
             return
 
-        mention = re.search(r"@([^\\s]*)$", text)
+        mention = re.search(r"@(\S*)$", text)
         if not mention:
             return
         prefix = mention.group(1)
