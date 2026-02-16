@@ -81,6 +81,8 @@ class StreamEvent:
     text: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Control signal: flush any batched tokens before emitting this event
+    flush_tokens: bool = False
 
 
 @dataclass(slots=True)

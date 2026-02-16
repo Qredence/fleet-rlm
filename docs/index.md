@@ -12,7 +12,7 @@ _Learning-oriented lessons to get you started._
 
 - [Basic Usage](tutorials/01-basic-usage.md) - Run your first agent.
 - [Document Analysis](tutorials/02-doc-analysis.md) - Extract data from files.
-- [Interactive Chat](tutorials/03-interactive-chat.md) - Use the TUI.
+- [Interactive Chat](tutorials/03-interactive-chat.md) - Use `fleet` (Ink/Python) or `code-chat` (OpenTUI).
 
 ### 🗺️ [How-to Guides](how-to-guides/index.md)
 

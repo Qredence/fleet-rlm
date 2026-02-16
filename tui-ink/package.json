@@ -1,0 +1,33 @@
+{
+  "name": "fleet-rlm-tui-ink",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ink frontend for fleet bridge stdio runtime",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test dist/**/*.test.js",
+    "lint": "biome lint src",
+    "format": "biome format src --write",
+    "check": "biome check src"
+  },
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "ink": "^6.7.0",
+    "ink-scroll-list": "^0.4.1",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.0",
+    "string-width": "^7.2.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.1",
+    "@types/react": "^19.2.2",
+    "ink-testing-library": "^4.0.0",
+    "typescript": "^5.7.2"
+  }
+}
