@@ -74,6 +74,23 @@ modal secret create LITELLM DSPY_LM_MODEL=openai/gpt-4o DSPY_LLM_API_KEY=sk-...
 ### 3. Run
 
 ```bash
+# Standalone interactive chat (prefers Ink UI; falls back to Python UI)
+fleet
+
+# Force a specific runtime
+fleet --ui ink
+fleet --ui python
+
+# In chat:
+#   / = command palette (level-2 settings submenu via Enter)
+#   @ = file/path mention search
+#   ? = shortcut hints
+#   Esc = back/close menus
+#   Ctrl+L = clear transcript
+#   /events verbose = show detailed thinking and reasoning (default)
+#   /events compact = condensed event summary
+#   /events off = hide all events
+
 # Interactive chat (requires OpenTUI / Bun)
 fleet-rlm code-chat --opentui
 
@@ -100,6 +117,13 @@ uv sync --extra dev
 
 # With server/MCP support
 uv sync --extra dev --extra server --extra mcp
+
+# Build Ink frontend bundle for `fleet --ui ink`
+cd tui-ink
+npm install
+npm run build
+npm run test
+cd ..
 
 # Copy environment template
 cp .env.example .env
