@@ -43,5 +43,4 @@ export interface BridgeSessionInit {
 export interface SettingsSnapshot {
   values: Record<string, string>;
   masked_values: Record<string, string>;
-  secret_values_included?: boolean;
 }

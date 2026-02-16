@@ -194,7 +194,8 @@ def test_settings_get_masks_secrets(tmp_path, monkeypatch):
     assert snapshot["values"]["DSPY_LM_MODEL"] == "openai/gpt-4"
 
 
-def test_settings_get_can_include_secret_values_when_opted_in(tmp_path, monkeypatch):
+def test_settings_get_always_masks_secret_values(tmp_path, monkeypatch):
+    """Secret values must never appear in cleartext, even when opted-in."""
     project_root = tmp_path / "repo"
     project_root.mkdir()
     (project_root / "pyproject.toml").write_text("[project]\nname='demo'\n")
@@ -208,8 +209,12 @@ def test_settings_get_can_include_secret_values_when_opted_in(tmp_path, monkeypa
         }
     )
 
-    assert snapshot["secret_values_included"] is True
-    assert snapshot["values"]["DSPY_LLM_API_KEY"] == "sk-super-secret-key"
+    assert "secret_values_included" not in snapshot
+    assert snapshot["values"]["DSPY_LLM_API_KEY"] != "sk-super-secret-key"
+    assert (
+        snapshot["values"]["DSPY_LLM_API_KEY"]
+        == snapshot["masked_values"]["DSPY_LLM_API_KEY"]
+    )
 
 
 @pytest.mark.asyncio
