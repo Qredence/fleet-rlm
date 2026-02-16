@@ -72,7 +72,7 @@ test("Composer displays dim border when disabled", () => {
 test("Composer calls onChange when input changes", () => {
   const changes: string[] = [];
 
-  const { stdin } = render(
+  render(
     React.createElement(Composer, {
       value: "",
       placeholder: "Type...",

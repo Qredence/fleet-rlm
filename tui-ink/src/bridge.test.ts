@@ -51,7 +51,6 @@ test("start() sets up process with correct arguments", () => {
   const client = createClient();
   const internals = getInternals(client);
 
-  let spawnArgs: string[] | undefined;
   internals.process = {
     stdin: { destroyed: false, write: () => true, end: () => {} },
     stdout: { on: () => {} },
@@ -131,7 +130,7 @@ test("shutdown() sends session.shutdown and cleans up", async () => {
   };
 
   // Simulate a pending request to test graceful shutdown
-  const requestPromise = client.request("test.method", {});
+  void client.request("test.method", {});
 
   // Shutdown should attempt to send session.shutdown
   const shutdownPromise = client.shutdown();
@@ -171,7 +170,7 @@ test("shutdown() kills process with SIGTERM then SIGKILL if needed", async () =>
     on: () => {},
   };
 
-  const shutdownPromise = client.shutdown();
+  void client.shutdown();
 
   // Wait for the 100ms timeout
   await new Promise((resolve) => setTimeout(resolve, 150));
@@ -581,7 +580,6 @@ test("onEvent() handles legacy event format", () => {
 
 test("onError() receives process errors", () => {
   const client = createClient();
-  const internals = getInternals(client);
   const errors: Error[] = [];
 
   const unsubscribe = client.onError((error) => errors.push(error));

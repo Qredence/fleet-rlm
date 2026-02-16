@@ -1,12 +1,6 @@
 export type TraceMode = "compact" | "verbose" | "off";
 
-export type TranscriptRole =
-  | "system"
-  | "user"
-  | "assistant"
-  | "tool"
-  | "status"
-  | "error";
+export type TranscriptRole = "system" | "user" | "assistant" | "tool" | "status" | "error";
 
 export type WorkingPhase = "idle" | "thinking" | "tool";
 
