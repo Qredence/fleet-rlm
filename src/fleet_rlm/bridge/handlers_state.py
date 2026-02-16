@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 # Default state directory - uses Modal volume if available, else local temp
 # Modal volumes are mounted at /data/memory in the sandbox
@@ -242,8 +245,8 @@ def clear_namespace(params: dict[str, Any]) -> dict[str, Any]:
             try:
                 f.unlink()
                 deleted_count += 1
-            except IOError:
-                pass
+            except IOError as exc:
+                logger.warning("Failed to delete state file '%s': %s", f, exc)
         # Try to remove empty directory
         try:
             namespace_dir.rmdir()
