@@ -1,7 +1,7 @@
 """Streaming orchestration for the RLM ReAct chat agent.
 
 Provides synchronous and asynchronous streaming iterators that yield
-:class:`~fleet_rlm.interactive.models.StreamEvent` objects, plus a DSPy
+:class:`~fleet_rlm.models.StreamEvent` objects, plus a DSPy
 :class:`StatusMessageProvider` for concise ReAct status messages.
 """
 
@@ -16,7 +16,7 @@ import dspy
 from dspy.streaming.messages import StatusMessage, StatusMessageProvider, StreamResponse
 from dspy.streaming.streaming_listener import StreamListener
 
-from ..interactive.models import StreamEvent
+from ..models import StreamEvent
 
 if TYPE_CHECKING:
     from .agent import RLMReActChatAgent
@@ -155,6 +155,7 @@ def iter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
@@ -220,6 +221,7 @@ def iter_chat_turn_stream(
                                 )
                                 yield StreamEvent(
                                     kind="trajectory_step",
+                                    flush_tokens=True,
                                     text=step_text,
                                     payload={
                                         "step_index": idx,
@@ -242,6 +244,7 @@ def iter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
@@ -284,6 +287,7 @@ def iter_chat_turn_stream(
     agent._append_history(message, assistant_response)
     yield StreamEvent(
         kind="final",
+        flush_tokens=True,
         text=assistant_response,
         payload={
             "trajectory": trajectory,
@@ -348,6 +352,7 @@ async def aiter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
@@ -413,6 +418,7 @@ async def aiter_chat_turn_stream(
                                 )
                                 yield StreamEvent(
                                     kind="trajectory_step",
+                                    flush_tokens=True,
                                     text=step_text,
                                     payload={
                                         "step_index": idx,
@@ -435,6 +441,7 @@ async def aiter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
@@ -477,6 +484,7 @@ async def aiter_chat_turn_stream(
     agent._append_history(message, assistant_response)
     yield StreamEvent(
         kind="final",
+        flush_tokens=True,
         text=assistant_response,
         payload={
             "trajectory": trajectory,

@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterable, Literal
 import dspy
 
 from .commands import execute_command as _execute_command
-from ..interactive.models import StreamEvent
+from ..models import StreamEvent
 from ..core.interpreter import ModalInterpreter
 from .tools import build_tool_list
 from .streaming import aiter_chat_turn_stream as _aiter_stream
