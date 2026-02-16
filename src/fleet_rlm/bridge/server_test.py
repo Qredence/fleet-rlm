@@ -1,0 +1,1 @@
+"""Bridge server test"""
