@@ -351,7 +351,7 @@ class BridgeRuntime:
         if request.method == "chat.cancel":
             return cancel_chat(self, params)
         if request.method == "commands.execute":
-            return execute_command(self, params)
+            return await execute_command(self, params)
         if request.method == "mentions.search":
             return search_mentions(params)
 

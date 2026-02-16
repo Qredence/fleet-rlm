@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +21,7 @@ def list_commands(params: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
-def execute_command(runtime: Any, params: dict[str, Any]) -> dict[str, Any]:
+async def execute_command(runtime: Any, params: dict[str, Any]) -> dict[str, Any]:
     """Execute tool or wrapper command through runtime and return result."""
     command = str(params.get("command", "")).strip()
     if not command:
@@ -62,7 +61,7 @@ def execute_command(runtime: Any, params: dict[str, Any]) -> dict[str, Any]:
             data={"available": sorted(COMMAND_DISPATCH)},
         )
 
-    result = asyncio.run(runtime.agent.execute_command(command, args))
+    result = await runtime.agent.execute_command(command, args)
     return {"command": command, "result": result}
 
 

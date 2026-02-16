@@ -41,13 +41,21 @@ def test_settings_update_and_get_roundtrip(tmp_path, monkeypatch):
     assert (project_root / ".env").exists()
 
 
-def test_commands_execute_wrapper_and_dispatch(monkeypatch):
+@pytest.mark.asyncio
+async def test_commands_execute_wrapper_and_dispatch(monkeypatch):
     runtime = SimpleNamespace(
         command_permissions={},
         secret_name="LITELLM",
         ensure_agent=lambda: None,
         agent=None,
-        config=SimpleNamespace(),
+        config=SimpleNamespace(
+            rlm_settings=SimpleNamespace(
+                max_iterations=5,
+                max_llm_calls=100,
+                verbose=False,
+            ),
+            interpreter=SimpleNamespace(timeout=120),
+        ),
         volume_name="demo-volume",
     )
     monkeypatch.setattr(
@@ -55,7 +63,7 @@ def test_commands_execute_wrapper_and_dispatch(monkeypatch):
         "check_secret_presence",
         lambda secret_name: {"secret_name": secret_name, "present": True},
     )
-    wrapper_result = handlers_commands.execute_command(
+    wrapper_result = await handlers_commands.execute_command(
         runtime, {"command": "check-secret", "args": {}}
     )
     assert wrapper_result["result"]["present"] is True
@@ -67,17 +75,20 @@ def test_commands_execute_wrapper_and_dispatch(monkeypatch):
             return {"command": command, "args": args, "ok": True}
 
     runtime.agent = FakeAgent()
-    dispatch_result = handlers_commands.execute_command(
+    dispatch_result = await handlers_commands.execute_command(
         runtime, {"command": dispatched_command, "args": {"x": 1}}
     )
     assert dispatch_result["result"]["ok"] is True
     assert dispatch_result["result"]["command"] == dispatched_command
 
 
-def test_commands_execute_respects_deny_policy():
+@pytest.mark.asyncio
+async def test_commands_execute_respects_deny_policy():
     runtime = SimpleNamespace(command_permissions={"dangerous": "deny"})
     with pytest.raises(BridgeRPCError) as exc:
-        handlers_commands.execute_command(runtime, {"command": "dangerous", "args": {}})
+        await handlers_commands.execute_command(
+            runtime, {"command": "dangerous", "args": {}}
+        )
     assert exc.value.code == "DENIED"
 
 
