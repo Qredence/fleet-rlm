@@ -16,24 +16,16 @@ def get_settings(params: dict[str, Any] | None = None) -> dict[str, Any]:
     env_path = _resolve_env_path()
     payload = params or {}
     keys = _requested_keys(payload)
-    include_secret_values = bool(payload.get("include_secret_values", False))
     raw_values = {key: os.environ.get(key, "") for key in keys}
     masked = {
         key: _mask_secret(value) if key in _SECRET_KEYS else value
         for key, value in raw_values.items()
     }
-    values = {
-        key: raw_values[key]
-        if (key not in _SECRET_KEYS or include_secret_values)
-        else masked[key]
-        for key in keys
-    }
     return {
         "env_path": str(env_path),
         "keys": keys,
-        "values": values,
+        "values": masked,
         "masked_values": masked,
-        "secret_values_included": include_secret_values,
     }
 
 
