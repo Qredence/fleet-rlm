@@ -8,6 +8,14 @@ The `fleet-rlm` application uses [Typer](https://typer.tiangolo.com/) to provide
 uv run fleet-rlm [COMMAND] [OPTIONS]
 ```
 
+The package also installs a standalone interactive launcher:
+
+```bash
+fleet [--ui auto|ink|python] [OPTIONS] [hydra-overrides]
+```
+
+Use this when you want bridge-powered chat from a single command without starting the OpenTUI runtime manually.
+
 ## Optional Extras
 
 ```bash
@@ -41,6 +49,22 @@ uv sync --extra dev --extra mcp --extra server
 | `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                                                                                                                    |
 | `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`                                                                                                                                                                           |
 | `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                                                                                                          |
+
+## Standalone `fleet` launcher
+
+The `fleet` entrypoint is a standalone chat launcher installed with the package scripts.
+
+- `--ui auto` (default): prefer Ink (`tui-ink`) and fall back to Python UI
+- `--ui ink`: require Ink runtime
+- `--ui python`: force Python UI
+
+Examples:
+
+```bash
+fleet
+fleet --ui ink
+fleet --ui python --trace-mode compact
+```
 
 ## Runtime Overrides (Hydra)
 
@@ -164,6 +188,8 @@ uv run fleet-rlm init --help
 
 `code-chat` is the primary interactive coding runtime for the ReAct agent.
 OpenTUI is the only supported runtime.
+
+Note: this OpenTUI-only statement applies to `fleet-rlm code-chat`. The standalone `fleet` launcher supports Ink-first with Python fallback as documented above.
 
 ### Slash Commands
 

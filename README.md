@@ -107,6 +107,11 @@ fleet-rlm serve-api --port 8000
 fleet-rlm serve-mcp --transport stdio
 ```
 
+`fleet` and `fleet-rlm code-chat` serve different interactive paths:
+
+- `fleet` = standalone bridge chat launcher (Ink preferred, Python fallback)
+- `fleet-rlm code-chat` = OpenTUI runtime (OpenTUI/Bun required)
+
 ## Development Setup
 
 ```bash
