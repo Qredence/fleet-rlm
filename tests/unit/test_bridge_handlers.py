@@ -217,6 +217,24 @@ def test_settings_get_always_masks_secret_values(tmp_path, monkeypatch):
     )
 
 
+def test_settings_get_masks_sensitive_key_patterns(tmp_path, monkeypatch):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / "pyproject.toml").write_text("[project]\nname='demo'\n")
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv("CUSTOM_PASSWORD", "my-very-secret-password")
+    monkeypatch.setenv("SERVICE_TOKEN", "token-super-secret-value")
+    monkeypatch.setenv("SAFE_NAME", "openai/gpt-4")
+
+    snapshot = handlers_settings.get_settings(
+        {"keys": ["CUSTOM_PASSWORD", "SERVICE_TOKEN", "SAFE_NAME"]}
+    )
+
+    assert snapshot["values"]["CUSTOM_PASSWORD"] != "my-very-secret-password"
+    assert snapshot["values"]["SERVICE_TOKEN"] != "token-super-secret-value"
+    assert snapshot["values"]["SAFE_NAME"] == "openai/gpt-4"
+
+
 @pytest.mark.asyncio
 async def test_commands_execute_uses_delegate_profile_when_available(monkeypatch):
     entered_profiles: list[ExecutionProfile] = []
