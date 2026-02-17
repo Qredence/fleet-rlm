@@ -2,6 +2,59 @@
 
 Visualizing the structural components and relationships within `fleet-rlm`.
 
+## Overview
+
+```
+                        ┌─────────────────────────────────────────┐
+                        │           Entry Points                  │
+                        │                                         │
+                        │   CLI    FastAPI   Ink TUI    MCP       │
+                        │  (Typer) (WS/REST) (bridge)  (stdio)   │
+                        └────────────┬────────────────────────────┘
+                                     │
+                        ┌────────────▼────────────────────────────┐
+                        │     RLMReActChatAgent (dspy.Module)     │
+                        │                                         │
+                        │  ReAct Loop ◄── Chat History            │
+                        │      │      ◄── Core Memory             │
+                        │      │      ◄── Document Cache          │
+                        │      │          (Guardrails)            │
+                        │      ▼                                  │
+                        │  ┌──────────┬──────────┬────────────┐   │
+                        │  │ load_doc │ rlm_query│execute_code│   │
+                        │  │ read_file│ llm_query│ edit_file  │   │
+                        │  │ chunk_*  │(recursive)│ search    │   │
+                        │  └────┬─────┴─────┬────┴─────┬──────┘   │
+                        └───────┼───────────┼──────────┼──────────┘
+                                │           │          │
+                        ┌───────▼───────────▼──────────▼──────────┐
+                        │         ModalInterpreter                │
+                        │    (JSON protocol · exec profiles)      │
+                        │   ROOT │ DELEGATE │ MAINTENANCE         │
+                        └────────────────┬────────────────────────┘
+                                         │ stdin/stdout
+                    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+                      Modal Cloud        │
+                        ┌────────────────▼────────────────────────┐
+                        │          Sandbox Driver                 │
+                        │   exec() · helpers · tool_call bridge   │
+                        │                                         │
+                        │   ┌──────────────────────────────────┐  │
+                        │   │    Persistent Volume (/data/)    │  │
+                        │   │  workspaces/  artifacts/  memory/│  │
+                        │   └──────────────────────────────────┘  │
+                        └─────────────────────────────────────────┘
+```
+
+**Layers at a glance:**
+
+| Layer         | Components                          | Responsibility                                        |
+| ------------- | ----------------------------------- | ----------------------------------------------------- |
+| Entry Points  | CLI, FastAPI, Ink TUI (bridge), MCP | User-facing surfaces — all converge on the same agent |
+| Orchestration | `RLMReActChatAgent` + ReAct tools   | DSPy reasoning loop, tool dispatch, history & memory  |
+| Execution     | `ModalInterpreter`                  | JSON protocol to sandbox, execution profile gating    |
+| Sandbox       | Driver + Volume                     | Isolated Python exec, persistent `/data/` storage     |
+
 ## 1. Module Hierarchy
 
 The DSPy module structure of the interactive agent.
