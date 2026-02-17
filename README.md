@@ -122,21 +122,17 @@ modal secret create LITELLM DSPY_LM_MODEL=openai/gemini-3-pro-preview DSPY_LLM_A
 
 ### 3. Run
 
-**Start FastAPI server:**
+**Interactive Chat (OpenTUI):**
 
 ```bash
-uv run fleet-rlm serve-api --port 8000
-```
-
-```bash
+# Requires OpenTUI / Bun
 fleet-rlm code-chat --opentui
 ```
 
-
-**Run standalone interactive chat:**
+**Standalone Interactive Chat (Ink):**
 
 ```bash
-# Standalone interactive chat (prefers Ink UI; falls back to Python UI)
+# Prefers Ink UI; falls back to Python UI
 fleet
 
 # Force a specific runtime
@@ -144,24 +140,23 @@ fleet --ui ink
 fleet --ui python
 ```
 
-
-
-
-## Interactive chat (requires OpenTUI / Bun)
-fleet-rlm code-chat --opentui
-
-## One-shot task
-fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
-
-## Document analysis
-fleet-rlm run-architecture --docs-path docs/architecture.md --query "Extract all components"
-
-## API server (FastAPI + WebSocket)
-fleet-rlm serve-api --port 8000
-
-# MCP server
+**One-shot Tasks:**
 
 ```bash
+# Basic question
+fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
+
+# Document analysis
+fleet-rlm run-architecture --docs-path docs/architecture.md --query "Extract all components"
+```
+
+**Servers:**
+
+```bash
+# API server (FastAPI + WebSocket)
+uv run fleet-rlm serve-api --port 8000
+
+# MCP server
 fleet-rlm serve-mcp --transport stdio
 ```
 
