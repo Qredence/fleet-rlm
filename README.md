@@ -5,6 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml/badge.svg)](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml)
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/fleet-rlm?period=monthly&units=INTERNATIONAL_SYSTEM&left_color=MAGENTA&right_color=BLACK&left_text=downloads%2Fmonth)](https://pepy.tech/projects/fleet-rlm)
+
 **Secure, cloud-sandboxed Recursive Language Models (RLM) with DSPy and Modal.**
 
 `fleet-rlm` provides a production-ready implementation of **Recursive Language Modeling** aligned with the [DSPy RLM API](https://dspy.ai/api/modules/RLM/). It gives your AI agent a secure "computer" in the cloud to read, search, and analyze massive datasets without local resource constraints.
@@ -74,6 +76,23 @@ modal secret create LITELLM DSPY_LM_MODEL=openai/gpt-4o DSPY_LLM_API_KEY=sk-...
 ### 3. Run
 
 ```bash
+# Standalone interactive chat (prefers Ink UI; falls back to Python UI)
+fleet
+
+# Force a specific runtime
+fleet --ui ink
+fleet --ui python
+
+# In chat:
+#   / = command palette (level-2 settings submenu via Enter)
+#   @ = file/path mention search
+#   ? = shortcut hints
+#   Esc = back/close menus
+#   Ctrl+L = clear transcript
+#   /events verbose = show detailed thinking and reasoning (default)
+#   /events compact = condensed event summary
+#   /events off = hide all events
+
 # Interactive chat (requires OpenTUI / Bun)
 fleet-rlm code-chat --opentui
 
@@ -90,6 +109,11 @@ fleet-rlm serve-api --port 8000
 fleet-rlm serve-mcp --transport stdio
 ```
 
+`fleet` and `fleet-rlm code-chat` serve different interactive paths:
+
+- `fleet` = standalone bridge chat launcher (Ink preferred, Python fallback)
+- `fleet-rlm code-chat` = OpenTUI runtime (OpenTUI/Bun required)
+
 ## Development Setup
 
 ```bash
@@ -100,6 +124,13 @@ uv sync --extra dev
 
 # With server/MCP support
 uv sync --extra dev --extra server --extra mcp
+
+# Build Ink frontend bundle for `fleet --ui ink`
+cd tui-ink
+npm install
+npm run build
+npm run test
+cd ..
 
 # Copy environment template
 cp .env.example .env

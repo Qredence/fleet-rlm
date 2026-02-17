@@ -12,6 +12,7 @@ import { HintsBar } from "./components/HintsBar";
 import { ChatPane } from "./components/ChatPane";
 import { TabPanel } from "./components/TabPanel";
 import { InputBar } from "./components/InputBar";
+import { CommandPalette } from "./components/CommandPalette";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { bg } from "./theme";
 
@@ -377,12 +378,14 @@ Buffers & Storage:
       dispatch({ type: "CLEAR_TRANSCRIPT" });
     }
 
-    if (key.name === "f2") {
-      dispatch({ type: "TOGGLE_REASONING" });
+    // Ctrl+B: Toggle sidebar
+    if (key.ctrl && key.name === "b") {
+      dispatch({ type: "TOGGLE_SIDEBAR" });
     }
 
-    if (key.name === "f3") {
-      dispatch({ type: "TOGGLE_TOOLS" });
+    // Ctrl+P: Open command palette
+    if (key.ctrl && key.name === "p") {
+      dispatch({ type: "OPEN_COMMAND_PALETTE" });
     }
   });
 
@@ -403,14 +406,40 @@ Buffers & Storage:
           <ChatPane />
         </box>
 
-        {/* Right: Tabbed panel (30%) */}
-        <box flexGrow={3}>
-          <TabPanel />
-        </box>
+        {/* Right: Tabbed panel (30%) - collapsible */}
+        {!state.sidebarCollapsed && (
+          <box flexGrow={3}>
+            <TabPanel />
+          </box>
+        )}
       </box>
 
       {/* Input bar */}
       <InputBar onSubmit={handleSubmit} onSlashCommand={handleSlashCommand} />
+
+      {/* Command palette overlay */}
+      <CommandPalette
+        isOpen={state.commandPalette.isOpen}
+        onClose={() => dispatch({ type: "CLOSE_COMMAND_PALETTE" })}
+        onSlashCommand={handleSlashCommand}
+        onClearChat={() => dispatch({ type: "CLEAR_TRANSCRIPT" })}
+        onToggleSidebar={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
+        onCopyLast={() => {
+          // Copy last assistant message
+          const lastMsg = [...state.transcript].reverse().find(m => m.role === "assistant");
+          if (lastMsg) {
+            import("./hooks/useClipboard").then(({ copyToClipboard }) => {
+              copyToClipboard(lastMsg.content);
+            });
+          }
+        }}
+        onCancel={() => {
+          if (state.isProcessing) {
+            ws.sendCancel();
+            dispatch({ type: "CANCEL_TURN" });
+          }
+        }}
+      />
 
       {/* Bottom hints bar */}
       <HintsBar />

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.4.0
+  version: 0.4.4
 paths:
   /health:
     get:
@@ -141,6 +141,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskResponse"
+  /sessions/state:
+    get:
+      tags:
+        - sessions
+      summary: List Session State
+      description: Return lightweight summaries of active/restored session state.
+      operationId: list_session_state_sessions_state_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStateResponse"
 components:
   schemas:
     ChatRequest:
@@ -179,7 +193,7 @@ components:
         version:
           type: string
           title: Version
-          default: 0.4.0
+          default: 0.4.4
       type: object
       title: HealthResponse
     ReadyResponse:
@@ -195,6 +209,66 @@ components:
         - ready
         - planner_configured
       title: ReadyResponse
+    SessionStateResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        sessions:
+          items:
+            $ref: "#/components/schemas/SessionStateSummary"
+          type: array
+          title: Sessions
+      type: object
+      title: SessionStateResponse
+    SessionStateSummary:
+      properties:
+        key:
+          type: string
+          title: Key
+        workspace_id:
+          type: string
+          title: Workspace Id
+        user_id:
+          type: string
+          title: User Id
+        session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Session Id
+        history_turns:
+          type: integer
+          title: History Turns
+          default: 0
+        document_count:
+          type: integer
+          title: Document Count
+          default: 0
+        memory_count:
+          type: integer
+          title: Memory Count
+          default: 0
+        log_count:
+          type: integer
+          title: Log Count
+          default: 0
+        artifact_count:
+          type: integer
+          title: Artifact Count
+          default: 0
+        updated_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Updated At
+      type: object
+      required:
+        - key
+        - workspace_id
+        - user_id
+      title: SessionStateSummary
     TaskRequest:
       properties:
         task_type:

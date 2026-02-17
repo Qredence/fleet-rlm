@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- **Change:** Aligned Ink bridge RPC method calls with bridge server namespaces (`commands.execute`, `mentions.search`).
+  **Outcome:** Slash command execution and mention-search requests from Ink now resolve to valid bridge handlers instead of unknown-method failures.
+- **Change:** Corrected standalone terminal mention completion pattern to match non-whitespace suffixes after `@`.
+  **Outcome:** `@` path suggestions now trigger reliably for common prefixes.
+- **Change:** Updated bridge settings snapshot behavior to mask secret values by default in `values`, with explicit opt-in to include raw secrets.
+  **Outcome:** Reduced accidental secret exposure in interactive settings payloads while preserving intentional debugging access.
+
+### Changed
+
+- **Change:** Bridge command execution now enters `ExecutionProfile.RLM_DELEGATE` when interpreter profile context is available.
+  **Outcome:** Command execution behavior is now consistent with the websocket runtime profile boundary.
+- **Change:** Added regression tests for RPC contract method names, mention completion behavior, delegate-profile command execution, and secret masking semantics.
+  **Outcome:** Higher confidence against regressions across Ink, bridge, and standalone terminal surfaces.
+- **Change:** Clarified runtime surface documentation for `fleet` (Ink-first/Python-fallback) versus `fleet-rlm code-chat` (OpenTUI-only).
+  **Outcome:** Reduced operator confusion about which interactive runtime is expected in each entrypoint.
+
 ## 0.4.4
 
 ### Highlights (User Impact)

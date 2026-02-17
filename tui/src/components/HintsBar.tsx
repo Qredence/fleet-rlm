@@ -30,9 +30,8 @@ export function HintsBar() {
       <KeyHint keyLabel="Ctrl+C" desc="Cancel" />
       <KeyHint keyLabel="Ctrl+L" desc="Clear" />
       <KeyHint keyLabel="Ctrl+Y" desc="Copy" />
-      <KeyHint keyLabel="F2" desc="Reasoning" />
-      <KeyHint keyLabel="F3" desc="Tools" />
-      <KeyHint keyLabel="/help" desc="Commands" />
+      <KeyHint keyLabel="Ctrl+P" desc="Commands" />
+      <KeyHint keyLabel="Ctrl+B" desc="Sidebar" />
     </box>
   );
 }

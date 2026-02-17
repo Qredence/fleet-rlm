@@ -6,8 +6,9 @@
 import { useState, useCallback, useEffect } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useAppContext } from "../context/AppContext";
-import { bg, fg, accent, semantic } from "../theme";
+import { bg, fg, accent, semantic, border } from "../theme";
 import { loadHistory, addToHistory } from "../hooks/useCommandHistory";
+import { hasFileReferences, expandFileReferences } from "../utils/fileReference";
 
 interface InputBarProps {
   onSubmit: (text: string) => void;
@@ -21,6 +22,7 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isNavigatingHistory, setIsNavigatingHistory] = useState(false);
   const [showError, setShowError] = useState(false);
+  const [isExpanding, setIsExpanding] = useState(false);
 
   useEffect(() => {
     loadHistory().then(setHistory).catch(() => setHistory([]));
@@ -54,7 +56,14 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
         const args = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
         onSlashCommand(command, args);
       } else {
-        onSubmit(trimmed);
+        // Expand @-mentions if present
+        let finalContent = trimmed;
+        if (hasFileReferences(trimmed)) {
+          setIsExpanding(true);
+          finalContent = await expandFileReferences(trimmed);
+          setIsExpanding(false);
+        }
+        onSubmit(finalContent);
       }
 
       const newHistory = await addToHistory(trimmed, history);
@@ -105,7 +114,7 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
     ? "Processing..."
     : state.connectionState !== "connected"
       ? "Connecting..."
-      : "Type a message or /help for commands";
+      : "Type a message, @file to reference files, or /help for commands";
 
   return (
     <box
@@ -128,6 +137,7 @@ export function InputBar({ onSubmit, onSlashCommand }: InputBarProps) {
           backgroundColor={bg.elevated}
           textColor={fg.primary}
           cursorColor={accent.base}
+          focusedBackgroundColor={bg.highlight}
         />
       </box>
       {history.length > 0 && (
