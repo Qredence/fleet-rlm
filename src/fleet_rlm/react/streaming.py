@@ -1,7 +1,7 @@
 """Streaming orchestration for the RLM ReAct chat agent.
 
 Provides synchronous and asynchronous streaming iterators that yield
-:class:`~fleet_rlm.interactive.models.StreamEvent` objects, plus a DSPy
+:class:`~fleet_rlm.models.StreamEvent` objects, plus a DSPy
 :class:`StatusMessageProvider` for concise ReAct status messages.
 """
 
@@ -16,7 +16,7 @@ import dspy
 from dspy.streaming.messages import StatusMessage, StatusMessageProvider, StreamResponse
 from dspy.streaming.streaming_listener import StreamListener
 
-from ..interactive.models import StreamEvent
+from ..models import StreamEvent
 
 if TYPE_CHECKING:
     from .agent import RLMReActChatAgent
@@ -41,6 +41,45 @@ def parse_tool_result_status(message: str) -> str | None:
     if message.strip() == "Tool finished.":
         return "tool result: finished"
     return None
+
+
+def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Convert DSPy ReAct flat trajectory to structured step list.
+
+    DSPy 3.1.3 ReAct returns: {"thought_0": ..., "tool_name_0": ..., "input_0": ..., "output_0": ...}
+    We normalize to: [{"index": 0, "thought": ..., "tool_name": ..., ...}, ...]
+
+    Args:
+        raw: Optional trajectory payload from DSPy ReAct.
+
+    Returns:
+        List of step dictionaries, each with an "index" field and relevant data fields.
+    """
+    if not raw:
+        return []
+    # If already structured (future DSPy versions), pass through
+    if "steps" in raw and isinstance(raw["steps"], list):
+        return raw["steps"]
+    # Legacy structured shape used by some DSPy outputs
+    if "trajectory" in raw and isinstance(raw["trajectory"], list):
+        return raw["trajectory"]
+
+    # Extract step indices from keys like "thought_0", "tool_name_1"
+    indices: set[int] = set()
+    for key in raw:
+        parts = key.rsplit("_", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            indices.add(int(parts[1]))
+
+    steps = []
+    for i in sorted(indices):
+        step: dict[str, Any] = {"index": i}
+        for field in ("thought", "tool_name", "input", "output", "observation"):
+            val = raw.get(f"{field}_{i}")
+            if val is not None:
+                step[field] = val
+        steps.append(step)
+    return steps
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +155,11 @@ def iter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -131,7 +169,11 @@ def iter_chat_turn_stream(
     final_prediction: dspy.Prediction | None = None
 
     try:
-        stream = stream_program(user_request=message, history=agent.history)
+        stream = stream_program(
+            user_request=message,
+            history=agent.history,
+            core_memory=agent.fmt_core_memory(),
+        )
         for value in stream:
             if cancel_check is not None and cancel_check():
                 partial = "".join(assistant_chunks).strip()
@@ -142,7 +184,7 @@ def iter_chat_turn_stream(
                 yield StreamEvent(
                     kind="cancelled",
                     text=marked_partial,
-                    payload={"history_turns": len(agent.history.messages)},
+                    payload={"history_turns": agent.history_turns()},
                 )
                 return
 
@@ -167,6 +209,26 @@ def iter_chat_turn_stream(
                     yield StreamEvent(kind="tool_result", text=tool_result)
             elif isinstance(value, dspy.Prediction):
                 final_prediction = value
+                # Emit trajectory steps as they're captured
+                trajectory = getattr(final_prediction, "trajectory", {})
+                if trajectory and isinstance(trajectory, dict):
+                    steps = _normalize_trajectory(trajectory)
+                    if steps:
+                        for idx, step in enumerate(steps):
+                            if isinstance(step, dict):
+                                step_text = step.get(
+                                    "thought", step.get("action", str(step))
+                                )
+                                yield StreamEvent(
+                                    kind="trajectory_step",
+                                    flush_tokens=True,
+                                    text=step_text,
+                                    payload={
+                                        "step_index": idx,
+                                        "step_data": step,
+                                        "total_steps": len(steps),
+                                    },
+                                )
     except Exception as exc:
         logger.error(
             "Streaming error, falling back: %s",
@@ -182,12 +244,11 @@ def iter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -198,17 +259,41 @@ def iter_chat_turn_stream(
             getattr(final_prediction, "assistant_response", "")
         ).strip()
         trajectory = getattr(final_prediction, "trajectory", {})
+        # Extract final reasoning/thinking
+        final_reasoning = ""
+        if hasattr(final_prediction, "reasoning"):
+            final_reasoning = str(final_prediction.reasoning)
+        elif trajectory and isinstance(trajectory, dict):
+            # Try to construct reasoning from trajectory steps
+            steps = _normalize_trajectory(trajectory)
+            if steps:
+                reasoning_parts = []
+                for step in steps:
+                    if isinstance(step, dict):
+                        thought = step.get("thought", "")
+                        if thought:
+                            reasoning_parts.append(thought)
+                final_reasoning = "\n".join(reasoning_parts)
     else:
         assistant_response = "".join(assistant_chunks).strip()
         trajectory = {}
+        final_reasoning = ""
+
+    assistant_response, guardrail_warnings = agent._validate_assistant_response(
+        assistant_response=assistant_response,
+        trajectory=trajectory,
+    )
 
     agent._append_history(message, assistant_response)
     yield StreamEvent(
         kind="final",
+        flush_tokens=True,
         text=assistant_response,
         payload={
             "trajectory": trajectory,
-            "history_turns": len(agent.history.messages),
+            "final_reasoning": final_reasoning,
+            "history_turns": agent.history_turns(),
+            "guardrail_warnings": guardrail_warnings,
         },
     )
 
@@ -267,12 +352,11 @@ async def aiter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -282,7 +366,11 @@ async def aiter_chat_turn_stream(
     final_prediction: dspy.Prediction | None = None
 
     try:
-        output_stream = stream_program(user_request=message, history=agent.history)
+        output_stream = stream_program(
+            user_request=message,
+            history=agent.history,
+            core_memory=agent.fmt_core_memory(),
+        )
         async for value in output_stream:
             if cancel_check is not None and cancel_check():
                 partial = "".join(assistant_chunks).strip()
@@ -293,7 +381,7 @@ async def aiter_chat_turn_stream(
                 yield StreamEvent(
                     kind="cancelled",
                     text=marked_partial,
-                    payload={"history_turns": len(agent.history.messages)},
+                    payload={"history_turns": agent.history_turns()},
                 )
                 return
 
@@ -318,6 +406,26 @@ async def aiter_chat_turn_stream(
                     yield StreamEvent(kind="tool_result", text=tool_result)
             elif isinstance(value, dspy.Prediction):
                 final_prediction = value
+                # Emit trajectory steps as they're captured
+                trajectory = getattr(final_prediction, "trajectory", {})
+                if trajectory and isinstance(trajectory, dict):
+                    steps = _normalize_trajectory(trajectory)
+                    if steps:
+                        for idx, step in enumerate(steps):
+                            if isinstance(step, dict):
+                                step_text = step.get(
+                                    "thought", step.get("action", str(step))
+                                )
+                                yield StreamEvent(
+                                    kind="trajectory_step",
+                                    flush_tokens=True,
+                                    text=step_text,
+                                    payload={
+                                        "step_index": idx,
+                                        "step_data": step,
+                                        "total_steps": len(steps),
+                                    },
+                                )
     except Exception as exc:
         logger.error(
             "Async streaming error, falling back: %s",
@@ -333,12 +441,11 @@ async def aiter_chat_turn_stream(
         )
         yield StreamEvent(
             kind="final",
+            flush_tokens=True,
             text=str(fallback.get("assistant_response", "")),
             payload={
                 "trajectory": fallback.get("trajectory", {}),
-                "history_turns": fallback.get(
-                    "history_turns", len(agent.history.messages)
-                ),
+                "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
             },
         )
@@ -349,16 +456,40 @@ async def aiter_chat_turn_stream(
             getattr(final_prediction, "assistant_response", "")
         ).strip()
         trajectory = getattr(final_prediction, "trajectory", {})
+        # Extract final reasoning/thinking
+        final_reasoning = ""
+        if hasattr(final_prediction, "reasoning"):
+            final_reasoning = str(final_prediction.reasoning)
+        elif trajectory and isinstance(trajectory, dict):
+            # Try to construct reasoning from trajectory steps
+            steps = _normalize_trajectory(trajectory)
+            if steps:
+                reasoning_parts = []
+                for step in steps:
+                    if isinstance(step, dict):
+                        thought = step.get("thought", "")
+                        if thought:
+                            reasoning_parts.append(thought)
+                final_reasoning = "\n".join(reasoning_parts)
     else:
         assistant_response = "".join(assistant_chunks).strip()
         trajectory = {}
+        final_reasoning = ""
+
+    assistant_response, guardrail_warnings = agent._validate_assistant_response(
+        assistant_response=assistant_response,
+        trajectory=trajectory,
+    )
 
     agent._append_history(message, assistant_response)
     yield StreamEvent(
         kind="final",
+        flush_tokens=True,
         text=assistant_response,
         payload={
             "trajectory": trajectory,
-            "history_turns": len(agent.history.messages),
+            "final_reasoning": final_reasoning,
+            "history_turns": agent.history_turns(),
+            "guardrail_warnings": guardrail_warnings,
         },
     )

@@ -95,7 +95,7 @@ export class Skill {
         } else if (entry.name.endsWith(".md")) {
           const skillFile = join(dir, entry.name);
           const file = Bun.file(skillFile);
-          
+
           if (await file.exists()) {
             const content = await file.text();
             const name = entry.name.replace(/\.md$/, "");

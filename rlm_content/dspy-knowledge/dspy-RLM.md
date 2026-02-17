@@ -34,9 +34,9 @@ print(result.answer)
 
 ## Deno Installation
 
-RLM relies on [Deno](https://deno.land/) and (Pyodide)[tocite] to create a WASM sandbox locally that 
+RLM relies on [Deno](https://deno.land/) and (Pyodide)[tocite] to create a WASM sandbox locally that
 
-You can install Deno with: `curl -fsSL https://deno.land/install.sh | sh` on macOS and Linux. See the [Deno Installation Docs](https://docs.deno.com/runtime/getting_started/installation/) for more details. Make sure to accept the prompt when it asks to add it to your shell profile. 
+You can install Deno with: `curl -fsSL https://deno.land/install.sh | sh` on macOS and Linux. See the [Deno Installation Docs](https://docs.deno.com/runtime/getting_started/installation/) for more details. Make sure to accept the prompt when it asks to add it to your shell profile.
 
 After you have installed Deno, **Make sure to restart your shell**
 

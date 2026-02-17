@@ -15,7 +15,11 @@ from .routers import chat, health, sessions, tasks, ws
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    server_state.planner_lm = get_planner_lm_from_env()
+    model_name = server_state.config.agent_model if server_state.config else None
+    if model_name is None:
+        server_state.planner_lm = get_planner_lm_from_env()
+    else:
+        server_state.planner_lm = get_planner_lm_from_env(model_name=model_name)
     yield
     server_state.planner_lm = None
 

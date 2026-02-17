@@ -2,28 +2,126 @@
 
 All notable changes to this project are documented in this file.
 
-## [0.4.2] - 2026-02-13
-
-### Added
-
-- `RLMReActChatAgent` now subclasses `dspy.Module` with a canonical `forward()` entry point, enabling DSPy optimization, serialization, and module-graph discovery. (#18)
-- All 16 react tools are explicitly wrapped with `dspy.Tool(func, name=..., desc=...)` for reliable function-calling schema generation. (#18)
-- Extra tools passed as raw callables are auto-wrapped in `dspy.Tool`; pre-wrapped `dspy.Tool` instances are preserved as-is. (#18)
-- 16 new unit tests covering `dspy.Module` subclass, `forward()`, `dspy.Tool` wrappers, `_get_tool` lookup, `list_react_tool_names`, and typed Signature generics.
-
-### Changed
-
-- Renamed internal `self.agent` → `self.react` on `RLMReActChatAgent` so the `dspy.ReAct` sub-module is discoverable via `named_sub_modules()`. (#18)
-- Updated `streaming.py` references from `agent.agent` → `agent.react`. (#18)
-- All bare `list` / `dict` output fields on DSPy Signatures now use typed generics (`list[str]`, `dict[str, str]`). (#18)
-- `build_tool_list` return type annotation updated from `list[Callable]` to `list[Any]` to reflect `dspy.Tool` instances.
+## Unreleased
 
 ### Fixed
 
-- **Session state leak on key switch**: agent is now reset when switching to a new workspace-user identity with no saved state, preventing history/document leakage across boundaries. (#23)
-- **Session restore after restart**: exported session state is now included in the volume-persisted manifest, fixing silently broken session restoration on process restart. (#24)
-- **Host-side document leak on reset**: `reset()` now clears `_document_cache`, `_document_access_order`, and `active_alias` in addition to history and sandbox buffers.
-- **Cross-tenant identity collision**: unauthenticated WebSocket connections now receive a per-connection `anon-{uuid}` user identity instead of sharing `default:anonymous`, preventing state leakage between unrelated clients.
+- **Change:** Aligned Ink bridge RPC method calls with bridge server namespaces (`commands.execute`, `mentions.search`).
+  **Outcome:** Slash command execution and mention-search requests from Ink now resolve to valid bridge handlers instead of unknown-method failures.
+- **Change:** Corrected standalone terminal mention completion pattern to match non-whitespace suffixes after `@`.
+  **Outcome:** `@` path suggestions now trigger reliably for common prefixes.
+- **Change:** Updated bridge settings snapshot behavior to mask secret values by default in `values`, with explicit opt-in to include raw secrets.
+  **Outcome:** Reduced accidental secret exposure in interactive settings payloads while preserving intentional debugging access.
+
+### Changed
+
+- **Change:** Bridge command execution now enters `ExecutionProfile.RLM_DELEGATE` when interpreter profile context is available.
+  **Outcome:** Command execution behavior is now consistent with the websocket runtime profile boundary.
+- **Change:** Added regression tests for RPC contract method names, mention completion behavior, delegate-profile command execution, and secret masking semantics.
+  **Outcome:** Higher confidence against regressions across Ink, bridge, and standalone terminal surfaces.
+- **Change:** Clarified runtime surface documentation for `fleet` (Ink-first/Python-fallback) versus `fleet-rlm code-chat` (OpenTUI-only).
+  **Outcome:** Reduced operator confusion about which interactive runtime is expected in each entrypoint.
+
+## 0.4.4
+
+### Highlights (User Impact)
+
+- Safer Modal volume operations with path-boundary checks and stronger write/read consistency behavior.
+- Better async runtime behavior via non-blocking interpreter execution in async server/streaming paths.
+- Higher response quality visibility with configurable guardrails and streaming warning metadata.
+- Simpler document/memory workflows through new convenience tools and command aliases.
+
+### Added
+
+- **Change:** Added async interpreter execution support via `ModalInterpreter.aexecute(...)` and async lifecycle context management (`__aenter__` / `__aexit__`).
+  **Outcome:** Non-blocking async server/streaming paths with behavior parity to sync execution.
+- **Change:** Added ReAct response guardrail controls with configurable modes (`off | warn | strict`) and warning propagation for low-substance responses and tool-error trajectories.
+  **Outcome:** Improved response quality/safety with configurable strictness and clearer operator visibility.
+- **Change:** Added persistent-volume convenience tools: `process_document`, `write_to_file`, and `edit_core_memory`.
+  **Outcome:** Simpler, more ergonomic document + memory workflows for agent operations.
+- **Change:** Added command aliases for `process_document`, `write_to_file`, and `edit_core_memory` in command dispatch.
+  **Outcome:** These capabilities are uniformly available through command-driven UX paths.
+- **Change:** Added unit coverage for async interpreter behavior, guardrails, command dispatch, and persistent memory tool behavior.
+  **Outcome:** Lower regression risk and higher confidence in runtime/tooling stability.
+
+### Changed
+
+- **Change:** Modal runtime defaults now target Python 3.13 across config and interpreter defaults (`python:3.13-slim-bookworm`, `image_python_version="3.13"`).
+  **Outcome:** Consistent runtime defaults across config and interpreter internals; reduced version drift.
+- **Change:** Runtime wiring now propagates interpreter async and guardrail settings end-to-end through CLI/server/MCP/runners/agent construction.
+  **Outcome:** Config changes now take effect consistently across all runtime entry points.
+- **Change:** Streaming final payload now includes additive `guardrail_warnings` metadata while preserving existing trajectory/reasoning fields.
+  **Outcome:** Better observability for quality issues without breaking existing payload consumers.
+
+### Fixed
+
+- **Change:** Hardened Modal volume path handling for sandbox tools and driver helpers to prevent path traversal outside mounted `/data`.
+  **Outcome:** Tighter filesystem safety boundaries for volume-backed operations.
+- **Change:** Improved volume consistency semantics for tool workflows with best-effort flush (`os.sync()` / `sync /data`) and explicit commit/reload integration (`commit()` on writes, `reload()` before reads).
+  **Outcome:** More predictable persistence/read freshness across containers and sessions.
+
+## [0.4.3] - 2026-02-15
+
+### Highlights (User Impact)
+
+- Packaging now reliably includes runtime Hydra config files.
+- Type-checking consumers get explicit PEP 561 package typing support.
+
+### Fixed
+
+- **Change:** Added `fleet_rlm.conf` to setuptools package-data so Hydra config files (including `config.yaml`) are shipped in distributions.
+  **Outcome:** Installed/PyPI builds no longer fail at startup with missing primary config errors.
+- **Change:** Explicitly declared `py.typed` in package-data.
+  **Outcome:** Downstream type checkers correctly detect and consume package type information.
+
+## [0.4.2] - 2026-02-15
+
+### Highlights (User Impact)
+
+- ReAct agent alignment with DSPy primitives significantly improved reliability and composability.
+- Recursive delegation is now safer (`max_depth`) and more compatible with DSPy 3.1.3 trajectories.
+- WebSocket/session handling is more isolated and robust across tenants and restarts.
+- API input handling now returns clearer client-facing 400 errors instead of generic server failures.
+
+### Added
+
+- **Change:** `RLMReActChatAgent` now subclasses `dspy.Module` with canonical `forward()`, and ReAct tools are explicitly wrapped as `dspy.Tool` (including auto-wrap for extra raw callables). (#18)
+  **Outcome:** Better DSPy optimizer/module-graph compatibility and more reliable tool schema/function-calling behavior.
+- **Change:** Added `rlm_query`, `edit_file`, `rlm_max_depth`, centralized recursion controls in `RlmSettings`, and depth tracking fields on the agent. (#19)
+  **Outcome:** Recursive delegation and sandbox editing are available with bounded depth for safer execution.
+- **Change:** Added DSPy 3.1.3 trajectory normalization helper and expanded async/streaming/core-memory test coverage (including API router regression tests).
+  **Outcome:** More stable streaming/debug payloads and reduced regression risk in chat/task endpoints.
+- **Change:** Added centralized Hydra config surface (`src/fleet_rlm/conf/`) and structured logging helper.
+  **Outcome:** Cleaner runtime configuration and more consistent operational logging.
+
+### Changed
+
+- **Change:** Internal ReAct handle renamed from `self.agent` to `self.react`, and streaming references updated accordingly. (#18)
+  **Outcome:** DSPy sub-module discovery is correct and maintenance/debug tooling is clearer.
+- **Change:** Signature/output typing, tool list typing, and history helper usage were standardized.
+  **Outcome:** Stronger type safety and more predictable runtime behavior.
+- **Change:** Hydra-driven runtime wiring now consistently propagates `max_depth`, `max_iters`, and `rlm_max_llm_calls` through CLI/runners/server initialization.
+  **Outcome:** Runtime limits and iteration controls are configurable from a single source instead of fragmented defaults.
+- **Change:** Trajectory normalization now applies across sync and async streaming; pytest benchmark marker was registered.
+  **Outcome:** More consistent trace output and cleaner test execution.
+
+### Fixed
+
+- **Change:** Fixed `rlm_query` answer extraction (`assistant_response`) and enforced recursion depth to prevent runaway delegation.
+  **Outcome:** Correct sub-agent answers and bounded recursive execution.
+- **Change:** Fixed DSPy 3.1.3 trajectory compatibility and async/streaming signature parity (`core_memory` propagation).
+  **Outcome:** Cleaner, warning-free streaming behavior with more reliable tracing metadata.
+- **Change:** Fixed session lifecycle issues (identity switch reset, manifest export for restart restore, reset cache cleanup, anonymous identity collision handling). (#23, #24)
+  **Outcome:** Stronger tenant isolation and dependable session restore behavior.
+- **Change:** Fixed API input handling for `/chat` and `/tasks/basic` to return 400 for client errors.
+  **Outcome:** More accurate client-facing error semantics and easier debugging for callers.
+- **Change:** Fixed FastAPI planner bootstrap compatibility for default and explicit `agent_model` paths.
+  **Outcome:** More robust startup behavior across deployment configurations.
+
+### Deprecated
+
+- **Change:** Deprecated `load_rlm_settings()` in `core/config.py` in favor of unified Hydra config loading via `AppConfig.rlm_settings`.
+  **Outcome:** Configuration now has a single authoritative loading path, reducing drift and ambiguity.
 
 ## [0.4.1] - 2026-02-12
 
@@ -81,3 +179,8 @@ All notable changes to this project are documented in this file.
 - Removed empty placeholder package directories under `src/fleet_rlm/`.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
+
+[0.4.3]: https://github.com/Qredence/fleet-rlm/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/Qredence/fleet-rlm/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/Qredence/fleet-rlm/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/Qredence/fleet-rlm/releases/tag/v0.4.0

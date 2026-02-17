@@ -48,7 +48,7 @@ cd fleet-rlm
 git remote add upstream https://github.com/qredence/fleet-rlm.git
 
 # Install dependencies
-uv sync --extra dev --extra interactive
+uv sync --extra dev
 
 # Install pre-commit hooks
 uv run pre-commit install
@@ -63,8 +63,8 @@ uv run fleet-rlm --help
 # Run tests
 uv run pytest
 
-# Check linting
-uv run ruff check .
+# Quality gate
+uv run ruff check src tests && uv run ty check src && uv run pytest -q
 ```
 
 ---
@@ -128,15 +128,14 @@ uv run ruff check --fix .
 
 - **Type Hints**: Use type hints for all function signatures
 - **Docstrings**: Include module and function docstrings
-- **Import Style**: Use `from __future__ import annotations` in all files
 - **PEP 8**: Follow PEP 8 guidelines (enforced by ruff)
+- **Type Checking**: Use `ty` for type checking (not `mypy`)
 
 Example:
 
 ```python
 """Module docstring describing the purpose of this module."""
 
-from __future__ import annotations
 
 def my_function(param1: str, param2: int) -> dict[str, str]:
     """
@@ -303,7 +302,7 @@ Include the following information:
 ```bash
 # Dependency Management
 uv sync                    # Install dependencies
-uv sync --all-groups       # Install with dev dependencies
+uv sync --extra dev        # Install with dev dependencies
 uv add <package>          # Add a new dependency
 
 # Code Quality

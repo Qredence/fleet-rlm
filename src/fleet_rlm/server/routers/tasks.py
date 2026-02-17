@@ -19,6 +19,8 @@ async def run_basic(
 ):
     if get_planner_lm() is None:
         raise HTTPException(503, "Planner LM not configured")
+    if not request.question.strip():
+        raise HTTPException(400, "question is required")
     try:
         result = await asyncio.to_thread(
             runners.run_basic,

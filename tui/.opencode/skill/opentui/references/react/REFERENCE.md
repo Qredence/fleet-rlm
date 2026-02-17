@@ -55,7 +55,7 @@ import { useState } from "react"
 
 function App() {
   const [count, setCount] = useState(0)
-  
+
   return (
     <box border padding={2}>
       <text>Count: {count}</text>

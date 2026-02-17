@@ -37,7 +37,7 @@ class SessionConfig(BaseModel):
     react_max_iters: int = 10
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
-    trace: bool = False
+    trace: bool = True
     trace_mode: TraceMode = "compact"
     stream: bool = True
     stream_refresh_ms: int = 40
@@ -66,6 +66,7 @@ StreamEventKind = Literal[
     "reasoning_step",
     "tool_call",
     "tool_result",
+    "trajectory_step",
     "final",
     "error",
     "cancelled",
@@ -80,6 +81,8 @@ class StreamEvent:
     text: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Control signal: flush any batched tokens before emitting this event
+    flush_tokens: bool = False
 
 
 @dataclass(slots=True)
@@ -96,6 +99,7 @@ class TurnState:
     status_messages: list[str] = field(default_factory=list)
     trajectory: dict[str, Any] = field(default_factory=dict)
     final_text: str = ""
+    final_reasoning: str = ""
     history_turns: int = 0
     token_count: int = 0
     cancelled: bool = False
@@ -136,11 +140,20 @@ class TurnState:
                 self.tool_timeline.append(event.text)
             return
 
+        if event.kind == "trajectory_step":
+            step_data = event.payload.get("step_data", {})
+            if step_data:
+                current_steps = self.trajectory.get("steps", [])
+                current_steps.append(step_data)
+                self.trajectory["steps"] = current_steps
+            return
+
         if event.kind == "final":
             final_text = event.text or self.transcript_text
             self.final_text = final_text
             self.transcript_text = final_text
             self.trajectory = dict(event.payload.get("trajectory", {}) or {})
+            self.final_reasoning = event.payload.get("final_reasoning", "")
             self.history_turns = int(
                 event.payload.get("history_turns", self.history_turns)
             )

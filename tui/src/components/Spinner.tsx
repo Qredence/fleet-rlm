@@ -171,11 +171,11 @@ function colorToAnsi(color: ColorInput): string {
       brightCyan: "\x1b[96m",
       brightWhite: "\x1b[97m",
     };
-    
+
     if (namedColors[color]) {
       return namedColors[color];
     }
-    
+
     // Hex color
     if (color.startsWith("#")) {
       const hex = color.slice(1);
@@ -184,21 +184,21 @@ function colorToAnsi(color: ColorInput): string {
       const b = parseInt(hex.slice(4, 6), 16);
       return `\x1b[38;2;${r};${g};${b}m`;
     }
-    
+
     return "";
   }
-  
+
   if ("r" in color) {
     // RGB
     return `\x1b[38;2;${color.r};${color.g};${color.b}m`;
   }
-  
+
   // HSL - convert to RGB (simplified)
   const { h, s, l } = color;
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
   const m = l - c / 2;
-  
+
   let r, g, b;
   if (h < 60) {
     [r, g, b] = [c, x, 0];
@@ -213,7 +213,7 @@ function colorToAnsi(color: ColorInput): string {
   } else {
     [r, g, b] = [c, 0, x];
   }
-  
+
   return `\x1b[38;2;${Math.round((r + m) * 255)};${Math.round((g + m) * 255)};${Math.round((b + m) * 255)}m`;
 }
 
@@ -229,21 +229,21 @@ export function Spinner({
   const [frame, setFrame] = useState(0);
   const frames = customFrames || spinnerFrames[name];
   const currentFrame = frames[frame % frames.length] ?? frames[0] ?? " ";
-  
+
   useEffect(() => {
     if (!autoplay) return;
-    
+
     const timer = setInterval(() => {
       setFrame((f) => (f + 1) % frames.length);
     }, interval);
-    
+
     return () => clearInterval(timer);
   }, [autoplay, interval, frames.length]);
-  
+
   // Calculate color for current frame
   let frameColor: string;
   const colorStr = color as ColorInput;
-  
+
   if (typeof color === "function") {
     // If it's a color generator, apply to each char
     const colorFn = color as ColorGenerator;
@@ -257,7 +257,7 @@ export function Spinner({
     const ansi = colorToAnsi(colorStr);
     frameColor = `${ansi}${currentFrame}\x1b[0m`;
   }
-  
+
   return (
     <text>
       {frameColor}

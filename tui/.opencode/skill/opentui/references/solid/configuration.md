@@ -32,10 +32,10 @@ bun install @opentui/solid @opentui/core solid-js
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    
+
     "jsx": "preserve",
     "jsxImportSource": "@opentui/solid",
-    
+
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
@@ -147,17 +147,17 @@ import { ConsolePosition } from "@opentui/core"
 render(() => <App />, {
   // Rendering
   targetFPS: 60,
-  
+
   // Behavior
   exitOnCtrlC: true,
-  
+
   // Debug console
   consoleOptions: {
     position: ConsolePosition.BOTTOM,
     sizePercent: 30,
     startInDebugMode: false,
   },
-  
+
   // Cleanup
   onDestroy: () => {
     // Cleanup code

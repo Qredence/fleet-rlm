@@ -61,18 +61,18 @@ export function StreamDown({
 }: StreamDownProps) {
   const [displayedContent, setDisplayedContent] = useState("");
   const [isComplete, setIsComplete] = useState(false);
-  
+
   useEffect(() => {
     if (!isStreaming) {
       setDisplayedContent(content);
       setIsComplete(true);
       return;
     }
-    
+
     let currentIndex = 0;
     setDisplayedContent("");
     setIsComplete(false);
-    
+
     const streamInterval = setInterval(() => {
       if (currentIndex >= content.length) {
         clearInterval(streamInterval);
@@ -80,17 +80,17 @@ export function StreamDown({
         onComplete?.();
         return;
       }
-      
+
       const nextIndex = Math.min(currentIndex + chunkSize, content.length);
       setDisplayedContent(content.slice(0, nextIndex));
       currentIndex = nextIndex;
     }, 1000 / speed);
-    
+
     return () => clearInterval(streamInterval);
   }, [content, speed, chunkSize, isStreaming, onComplete]);
-  
+
   const parsedContent = parseMarkdown(displayedContent);
-  
+
   return (
     <text>
       {parsedContent}
@@ -112,30 +112,30 @@ export function CodeStream({
   isStreaming?: boolean;
 }) {
   const [displayedContent, setDisplayedContent] = useState("");
-  
+
   useEffect(() => {
     if (!isStreaming) {
       setDisplayedContent(content);
       return;
     }
-    
+
     let currentIndex = 0;
     setDisplayedContent("");
-    
+
     const streamInterval = setInterval(() => {
       if (currentIndex >= content.length) {
         clearInterval(streamInterval);
         return;
       }
-      
+
       const nextIndex = Math.min(currentIndex + 5, content.length);
       setDisplayedContent(content.slice(0, nextIndex));
       currentIndex = nextIndex;
     }, 1000 / speed);
-    
+
     return () => clearInterval(streamInterval);
   }, [content, speed, isStreaming]);
-  
+
   return (
     <box
       backgroundColor="#1e1e1e"

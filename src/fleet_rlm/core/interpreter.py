@@ -16,6 +16,7 @@ enabling bidirectional communication for tool calls and structured output.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import queue
@@ -52,7 +53,7 @@ def _build_default_image(
     """Build a default Modal image for sandbox execution.
 
     Args:
-        python_version: Python version string (e.g., "3.12").
+        python_version: Python version string (e.g., "3.13").
         pip_packages: Sequence of pip packages to install.
 
     Returns:
@@ -97,7 +98,7 @@ class ModalInterpreter:
         execute_timeout: Timeout for individual execute() calls (default: same as timeout).
         app_name: Name for Modal App lookup/creation (default: "dspy-rlm-interpreter").
         secret_name: Default secret name if secrets not provided (default: "LITELLM").
-        image_python_version: Python version for default image (default: "3.12").
+        image_python_version: Python version for default image (default: "3.13").
         image_pip_packages: Packages for default image (default: ("numpy", "pandas")).
         volume_name: Optional Modal Volume name for persistent storage.
         volume_mount_path: Mount path for volume inside sandbox (default: "/data").
@@ -162,17 +163,18 @@ class ModalInterpreter:
         execute_timeout: int | None = None,
         app_name: str = "dspy-rlm-interpreter",
         secret_name: str = "LITELLM",
-        image_python_version: str = "3.12",
+        image_python_version: str = "3.13",
         image_pip_packages: Sequence[str] = ("numpy", "pandas"),
         volume_name: str | None = None,
         volume_mount_path: str = "/data",
         summarize_stdout: bool = True,
-        stdout_summary_threshold: int = 500,
+        stdout_summary_threshold: int = 10000,
         stdout_summary_prefix_len: int = 200,
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
         llm_call_timeout: int = 60,
         default_execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
+        async_execute: bool = True,
     ) -> None:
         self.image = image or _build_default_image(
             python_version=image_python_version, pip_packages=image_pip_packages
@@ -197,6 +199,7 @@ class ModalInterpreter:
         self._sub_lm_executor: ThreadPoolExecutor | None = None
         self._sub_lm_executor_lock = threading.Lock()
         self.default_execution_profile = default_execution_profile
+        self.async_execute = async_execute
 
         # Metadata-only history configuration (RLM paper Section 2)
         self.summarize_stdout = summarize_stdout
@@ -775,6 +778,28 @@ class ModalInterpreter:
                     )
                 return self._summarize_stdout(stdout)
 
+    async def aexecute(
+        self,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+    ) -> str | FinalOutput:
+        """Asynchronously execute Python code in the Modal sandbox.
+
+        Uses a non-blocking async wrapper around the existing synchronous
+        ``execute()`` protocol to preserve behavior parity while avoiding
+        event-loop blocking in async runtimes.
+        """
+        if self.async_execute:
+            return await asyncio.to_thread(
+                self.execute,
+                code,
+                variables,
+                execution_profile=execution_profile,
+            )
+        return self.execute(code, variables, execution_profile=execution_profile)
+
     def commit(self) -> None:
         """Commit volume changes to persistent storage.
 
@@ -900,4 +925,27 @@ class ModalInterpreter:
             False — exceptions are not suppressed.
         """
         self.shutdown()
+        return False
+
+    async def __aenter__(self) -> "ModalInterpreter":
+        """Async context manager entrypoint.
+
+        Mirrors ``__enter__`` but runs startup without blocking when
+        ``async_execute`` is enabled.
+        """
+        if self.async_execute:
+            await asyncio.to_thread(self.start)
+        else:
+            self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Async context manager exitpoint.
+
+        Mirrors ``__exit__`` and does not suppress exceptions.
+        """
+        if self.async_execute:
+            await asyncio.to_thread(self.shutdown)
+        else:
+            self.shutdown()
         return False

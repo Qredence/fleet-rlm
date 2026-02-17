@@ -59,7 +59,7 @@ export function parseMarkdown({ content, baseColor = "#cccccc", accentColor = "#
   if (codeBlockMatch) {
     const language = codeBlockMatch[1] || "text";
     const code = codeBlockMatch[2]?.trim() || "";
-    
+
     // If entire content is a code block, return just the code
     const isOnlyCodeBlock = content.trim().startsWith("```") && content.trim().endsWith("```");
     if (isOnlyCodeBlock) {
@@ -71,7 +71,7 @@ export function parseMarkdown({ content, baseColor = "#cccccc", accentColor = "#
       ];
     }
   }
-  
+
   // Otherwise parse as regular markdown
   const lines = content.split(/\n/);
   const elements: ReturnType<typeof renderLine>[] = [];
@@ -83,7 +83,7 @@ export function parseMarkdown({ content, baseColor = "#cccccc", accentColor = "#
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
-    
+
     // Check for code block start
     if (line.startsWith("```")) {
       if (!inCodeBlock) {
@@ -115,7 +115,7 @@ export function parseMarkdown({ content, baseColor = "#cccccc", accentColor = "#
 
     // Skip empty lines at boundaries
     if (!line && elements.length === 0) continue;
-    
+
     const rendered = renderLine(line, baseColor, accentColor, lineIndex++);
     if (rendered) {
       elements.push(rendered);
@@ -194,7 +194,7 @@ function renderLine(line: string, baseColor: string, accentColor: string, key: n
 
 function renderInline(text: string, baseColor: string, accentColor: string) {
   const segments = parseInlineMarkdown(text);
-  
+
   return segments.map((seg, i) => {
     if (seg.type === "code") {
       return <span key={i} fg={accentColor} bg="#1c1c1c">{` ${seg.content} `}</span>;

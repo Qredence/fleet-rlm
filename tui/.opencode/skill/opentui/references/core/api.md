@@ -54,14 +54,14 @@ All renderables extend the base `Renderable` class and share common properties.
 ```typescript
 interface CommonProps {
   id?: string                    // Unique identifier
-  
+
   // Positioning
   position?: "relative" | "absolute"
   left?: number | string
   top?: number | string
   right?: number | string
   bottom?: number | string
-  
+
   // Dimensions
   width?: number | string | "auto"
   height?: number | string | "auto"
@@ -69,7 +69,7 @@ interface CommonProps {
   minHeight?: number
   maxWidth?: number
   maxHeight?: number
-  
+
   // Flexbox
   flexDirection?: "row" | "column" | "row-reverse" | "column-reverse"
   flexGrow?: number
@@ -80,7 +80,7 @@ interface CommonProps {
   alignItems?: "flex-start" | "flex-end" | "center" | "stretch" | "baseline"
   alignSelf?: "auto" | "flex-start" | "flex-end" | "center" | "stretch" | "baseline"
   alignContent?: "flex-start" | "flex-end" | "center" | "stretch" | "space-between" | "space-around"
-  
+
   // Spacing
   padding?: number
   paddingTop?: number
@@ -93,7 +93,7 @@ interface CommonProps {
   marginBottom?: number
   marginLeft?: number
   gap?: number
-  
+
   // Display
   display?: "flex" | "none"
   overflow?: "visible" | "hidden" | "scroll"
@@ -434,7 +434,7 @@ import { RGBA } from "@opentui/core"
 function ThemedBox() {
   const bg = RGBA.fromHex("#1a1a2e")
   const border = RGBA.fromInts(122, 162, 247, 255)
-  
+
   return (
     <box backgroundColor={bg} borderColor={border} border>
       <text fg={RGBA.fromHex("#c0caf5")}>Works everywhere!</text>

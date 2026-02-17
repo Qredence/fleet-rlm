@@ -32,10 +32,10 @@ bun install @opentui/react @opentui/core react
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    
+
     "jsx": "react-jsx",
     "jsxImportSource": "@opentui/react",
-    
+
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
@@ -143,17 +143,17 @@ import { createCliRenderer, ConsolePosition } from "@opentui/core"
 const renderer = await createCliRenderer({
   // Rendering
   targetFPS: 60,
-  
+
   // Behavior
   exitOnCtrlC: true,        // Set false to handle Ctrl+C yourself
-  
+
   // Debug console
   consoleOptions: {
     position: ConsolePosition.BOTTOM,
     sizePercent: 30,
     startInDebugMode: false,
   },
-  
+
   // Cleanup
   onDestroy: () => {
     // Cleanup code

@@ -50,15 +50,15 @@ test("renders text", async () => {
     width: 40,
     height: 10,
   })
-  
+
   const text = new TextRenderable(testSetup.renderer, {
     id: "greeting",
     content: "Hello, World!",
   })
-  
+
   testSetup.renderer.root.add(text)
   await testSetup.renderOnce()
-  
+
   expect(testSetup.captureCharFrame()).toContain("Hello, World!")
 })
 ```
@@ -83,7 +83,7 @@ test("component matches snapshot", async () => {
     width: 40,
     height: 10,
   })
-  
+
   const box = new BoxRenderable(testSetup.renderer, {
     id: "box",
     border: true,
@@ -93,10 +93,10 @@ test("component matches snapshot", async () => {
   box.add(new TextRenderable(testSetup.renderer, {
     content: "Content",
   }))
-  
+
   testSetup.renderer.root.add(box)
   await testSetup.renderOnce()
-  
+
   expect(testSetup.captureCharFrame()).toMatchSnapshot()
 })
 ```
@@ -132,10 +132,10 @@ test("Greeting renders name", async () => {
     <Greeting name="World" />,
     { width: 80, height: 24 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
-  
+
   expect(frame).toContain("Hello, World!")
 })
 ```
@@ -161,10 +161,10 @@ test("component matches snapshot", async () => {
     </box>,
     { width: 25, height: 8 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
-  
+
   expect(frame).toMatchSnapshot()
 })
 ```
@@ -198,10 +198,10 @@ test("Counter shows initial value", async () => {
     <Counter />,
     { width: 20, height: 5 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
-  
+
   expect(frame).toContain("Count: 0")
 })
 ```
@@ -280,10 +280,10 @@ test("Greeting renders name", async () => {
     () => <Greeting name="World" />,
     { width: 80, height: 24 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
-  
+
   expect(frame).toContain("Hello, World!")
 })
 ```
@@ -311,10 +311,10 @@ test("component matches snapshot", async () => {
     ),
     { width: 25, height: 8 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
-  
+
   expect(frame).toMatchSnapshot()
 })
 ```
@@ -357,10 +357,10 @@ test("responds to keyboard", async () => {
     width: 40,
     height: 10,
   })
-  
+
   // Create component that responds to keys
   // ...
-  
+
   // Simulate keypress
   testSetup.renderer.keyInput.emit("keypress", {
     name: "enter",
@@ -372,10 +372,10 @@ test("responds to keyboard", async () => {
     eventType: "press",
     repeated: false,
   })
-  
+
   // Render after the keypress
   await testSetup.renderOnce()
-  
+
   expect(testSetup.captureCharFrame()).toContain("Selected")
 })
 ```
@@ -400,15 +400,15 @@ test("input receives focus", async () => {
     width: 40,
     height: 10,
   })
-  
+
   const input = new InputRenderable(testSetup.renderer, {
     id: "test-input",
     placeholder: "Type here",
   })
   testSetup.renderer.root.add(input)
-  
+
   input.focus()
-  
+
   expect(input.isFocused()).toBe(true)
 })
 ```
@@ -465,7 +465,7 @@ test("shows loading state", async () => {
     <DataLoader loading={true} />,
     { width: 40, height: 10 }
   )
-  
+
   await testSetup.renderOnce()
   expect(testSetup.captureCharFrame()).toContain("Loading...")
 })
@@ -475,7 +475,7 @@ test("shows data when loaded", async () => {
     <DataLoader loading={false} data={["Item 1", "Item 2"]} />,
     { width: 40, height: 10 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
   expect(frame).toContain("Item 1")
@@ -488,15 +488,15 @@ test("shows data when loaded", async () => {
 ```tsx
 test("renders all items", async () => {
   const items = ["Apple", "Banana", "Cherry"]
-  
+
   testSetup = await testRender(
     <ItemList items={items} />,
     { width: 40, height: 10 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
-  
+
   items.forEach(item => {
     expect(frame).toContain(item)
   })
@@ -511,7 +511,7 @@ test("matches layout snapshot", async () => {
     <AppLayout />,
     { width: 120, height: 40 }  // Larger viewport
   )
-  
+
   await testSetup.renderOnce()
   expect(testSetup.captureCharFrame()).toMatchSnapshot()
 })
@@ -529,13 +529,13 @@ test("debug output", async () => {
     <MyComponent />,
     { width: 40, height: 10 }
   )
-  
+
   await testSetup.renderOnce()
   const frame = testSetup.captureCharFrame()
-  
+
   // Print to see what's rendered
   console.log(frame)
-  
+
   expect(frame).toContain("expected")
 })
 ```

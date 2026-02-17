@@ -3,7 +3,7 @@
  * Surface background, role badges, and styled message bubbles.
  */
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
 import { useAppContext } from "../context/AppContext";
 import { useKeyboard } from "@opentui/react";
 import { bg, border, fg, accent, semantic } from "../theme";
@@ -12,9 +12,11 @@ import { Spinner } from "./Spinner";
 import { parseMarkdown, hasMarkdown } from "../utils/markdown";
 import { copyToClipboard } from "../hooks/useClipboard";
 
-function MessageBubble({ event }: { event: TranscriptEvent }) {
+function MessageBubbleInner({ event }: { event: TranscriptEvent }) {
   const isError = event.role === "system" && event.content.startsWith("Error:");
   const hasMd = event.role === "assistant" && hasMarkdown(event.content);
+  const displayTime = event.timestamp ? new Date(event.timestamp) : null;
+  const timeStr = displayTime ? formatTimeAgo(displayTime) : null;
 
   if (event.role === "user") {
     return (
@@ -45,7 +47,8 @@ function MessageBubble({ event }: { event: TranscriptEvent }) {
         flexDirection="column"
       >
         <text>
-          <span fg={fg.muted}>{" ◆ "}</span>
+          <span fg={fg.muted}>{`◆ `}</span>
+          {timeStr && <span fg={fg.muted}>{timeStr}</span>}
         </text>
         {hasMd ? (
           <box paddingLeft={3} flexDirection="column">
@@ -94,15 +97,20 @@ function MessageBubble({ event }: { event: TranscriptEvent }) {
   return null;
 }
 
+const MessageBubble = memo(MessageBubbleInner);
+
 export function ChatPane() {
   const { state } = useAppContext();
   const scrollRef = useRef<any>(null);
   const prevMessageCount = useRef(0);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const elapsedInterval = useRef<NodeJS.Timeout | null>(null);
 
   const messages: TranscriptEvent[] = [...state.transcript];
 
   const isProcessing = state.isProcessing;
+  const processingStartTime = state.processingStartTime;
   const hasNewMessage = messages.length > prevMessageCount.current;
   prevMessageCount.current = messages.length;
 
@@ -146,6 +154,24 @@ export function ChatPane() {
       content: `Error: ${state.currentTurn.errorMessage}`,
     });
   }
+
+  useEffect(() => {
+    if (isProcessing && processingStartTime) {
+      elapsedInterval.current = setInterval(() => {
+        setElapsedTime(Math.floor((Date.now() - processingStartTime) / 1000));
+      }, 1000);
+    } else {
+      if (elapsedInterval.current) {
+        clearInterval(elapsedInterval.current);
+      }
+      setElapsedTime(0);
+    }
+    return () => {
+      if (elapsedInterval.current) {
+        clearInterval(elapsedInterval.current);
+      }
+    };
+  }, [isProcessing, processingStartTime]);
 
   useEffect(() => {
     if (hasNewMessage && scrollRef.current?.scrollToBottom) {
@@ -192,6 +218,15 @@ export function ChatPane() {
         flexGrow={1}
         focused
         padding={1}
+        style={{
+          scrollbarOptions: {
+            showArrows: true,
+            trackOptions: {
+              foregroundColor: accent.base,
+              backgroundColor: bg.highlight,
+            },
+          },
+        }}
       >
         {messages.map((event, i) => (
           <MessageBubble key={i} event={event} />
@@ -199,9 +234,32 @@ export function ChatPane() {
         {isProcessing && (
           <box paddingTop={1} paddingBottom={1} paddingLeft={2}>
             <Spinner name="dots" interval={80} color={accent.base} />
+            <text fg={fg.secondary} paddingLeft={1}>
+              Processing... {state.currentTurn.tokenCount} tokens
+              {elapsedTime > 0 && ` \u2022 ${formatElapsed(elapsedTime)}`}
+            </text>
           </box>
         )}
       </scrollbox>
     </box>
   );
+}
+
+function formatTimeAgo(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+
+  if (diffSec < 60) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHour < 24) return `${diffHour}h ago`;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatElapsed(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }

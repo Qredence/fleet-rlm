@@ -23,11 +23,11 @@ import { useEffect, useState } from "react"
 
 function AnimatedBox() {
   const [width, setWidth] = useState(0)
-  
+
   const timeline = useTimeline({
     duration: 2000,
   })
-  
+
   useEffect(() => {
     timeline.add(
       { width: 0 },
@@ -41,7 +41,7 @@ function AnimatedBox() {
       }
     )
   }, [])
-  
+
   return (
     <box
       width={width}
@@ -60,11 +60,11 @@ import { createSignal, onMount } from "solid-js"
 
 function AnimatedBox() {
   const [width, setWidth] = createSignal(0)
-  
+
   const timeline = useTimeline({
     duration: 2000,
   })
-  
+
   onMount(() => {
     timeline.add(
       { width: 0 },
@@ -78,7 +78,7 @@ function AnimatedBox() {
       }
     )
   })
-  
+
   return (
     <box
       width={width()}
@@ -241,9 +241,9 @@ Available easing functions:
 function ProgressBar({ progress }: { progress: number }) {
   const [width, setWidth] = useState(0)
   const maxWidth = 50
-  
+
   const timeline = useTimeline()
-  
+
   useEffect(() => {
     timeline.add(
       { value: width },
@@ -257,7 +257,7 @@ function ProgressBar({ progress }: { progress: number }) {
       }
     )
   }, [progress])
-  
+
   return (
     <box flexDirection="column" gap={1}>
       <text>Progress: {progress}%</text>
@@ -274,9 +274,9 @@ function ProgressBar({ progress }: { progress: number }) {
 ```tsx
 function FadeIn({ children }) {
   const [opacity, setOpacity] = useState(0)
-  
+
   const timeline = useTimeline()
-  
+
   useEffect(() => {
     timeline.add(
       { opacity: 0 },
@@ -290,7 +290,7 @@ function FadeIn({ children }) {
       }
     )
   }, [])
-  
+
   return (
     <box style={{ opacity }}>
       {children}
@@ -305,15 +305,15 @@ function FadeIn({ children }) {
 function Spinner() {
   const [frame, setFrame] = useState(0)
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-  
+
   useEffect(() => {
     const interval = setInterval(() => {
       setFrame(f => (f + 1) % frames.length)
     }, 80)
-    
+
     return () => clearInterval(interval)
   }, [])
-  
+
   return <text>{frames[frame]} Loading...</text>
 }
 ```
@@ -323,7 +323,7 @@ function Spinner() {
 ```tsx
 function StaggeredList({ items }) {
   const [visibleCount, setVisibleCount] = useState(0)
-  
+
   useEffect(() => {
     let count = 0
     const interval = setInterval(() => {
@@ -333,10 +333,10 @@ function StaggeredList({ items }) {
         clearInterval(interval)
       }
     }, 100)
-    
+
     return () => clearInterval(interval)
   }, [items.length])
-  
+
   return (
     <box flexDirection="column">
       {items.slice(0, visibleCount).map((item, i) => (
@@ -352,9 +352,9 @@ function StaggeredList({ items }) {
 ```tsx
 function SlideIn({ children, from = "left" }) {
   const [offset, setOffset] = useState(from === "left" ? -20 : 20)
-  
+
   const timeline = useTimeline()
-  
+
   useEffect(() => {
     timeline.add(
       { offset: from === "left" ? -20 : 20 },
@@ -368,7 +368,7 @@ function SlideIn({ children, from = "left" }) {
       }
     )
   }, [])
-  
+
   return (
     <box position="relative" left={offset}>
       {children}

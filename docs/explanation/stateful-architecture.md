@@ -8,7 +8,7 @@ This design integrates `dspy.RLM` as the core orchestration layer for stateful a
 
 1. **dspy.RLM as Primary Interface**: Agents use `dspy.RLM` for reasoning and code generation
 2. **ModalInterpreter as Backend**: The interpreter provides the `CodeInterpreter` interface for RLM
-3. **Volume-Based Persistence**: All state persists to Modal Volume at `/data/workspace/`
+3. **Volume-Based Persistence**: All state persists to Modal Volume at `/data/workspaces/<workspace_id>/users/<user_id>/`
 4. **Session Continuity**: Agents can retrieve, modify, and improve previous work across sessions
 
 ## Architecture Components
@@ -23,7 +23,7 @@ class StatefulSandboxManager:
 
     Wraps ModalInterpreter to provide:
     - Session persistence across RLM iterations
-    - Workspace state management at /data/workspace/
+    - Workspace state management at /data/workspaces/<workspace_id>/users/<user_id>/
     - Automatic checkpoint/restore functionality
     """
 
@@ -70,7 +70,7 @@ class StatefulSandboxManager:
 import os
 import json
 
-WORKSPACE_ROOT = "/data/workspace"
+WORKSPACE_ROOT = "/data/workspaces/default/users/default"
 SESSION_DIR = os.path.join(WORKSPACE_ROOT, "{self.session_id}")
 CHECKPOINTS_DIR = os.path.join(SESSION_DIR, "checkpoints")
 ARTIFACTS_DIR = os.path.join(SESSION_DIR, "artifacts")
@@ -104,7 +104,7 @@ import os
 import json
 import pickle
 
-SESSION_DIR = "/data/workspace/{self.session_id}"
+SESSION_DIR = "/data/workspaces/default/users/default/{self.session_id}"
 CHECKPOINTS_DIR = os.path.join(SESSION_DIR, "checkpoints")
 checkpoint_id = "checkpoint_{{:04d}}".format({self._iteration_count})
 checkpoint_path = os.path.join(CHECKPOINTS_DIR, checkpoint_id)
@@ -141,7 +141,7 @@ Final = {{"checkpoint_id": checkpoint_id, "state_keys": list(state.keys())}}
 import os
 import json
 
-SESSION_DIR = "/data/workspace/{self.session_id}"
+SESSION_DIR = "/data/workspaces/default/users/default/{self.session_id}"
 METADATA_FILE = os.path.join(SESSION_DIR, "session.json")
 
 if os.path.exists(METADATA_FILE):
@@ -248,7 +248,7 @@ Final = state
 import os
 import json
 
-ARTIFACTS_DIR = "/data/workspace/{self.sandbox.session_id}/artifacts"
+ARTIFACTS_DIR = "/data/workspaces/default/users/default/{self.sandbox.session_id}/artifacts"
 artifact_path = os.path.join(ARTIFACTS_DIR, "{name}")
 
 with open(artifact_path, "w") as f:
@@ -280,7 +280,7 @@ Final = {{"artifact_id": "{name}", "path": artifact_path}}
         """Load a code artifact."""
         result = self.sandbox.execute(f'''
 import os
-artifact_path = "/data/workspace/{self.sandbox.session_id}/artifacts/{name}"
+artifact_path = "/data/workspaces/default/users/default/{self.sandbox.session_id}/artifacts/{name}"
 with open(artifact_path, "r") as f:
     content = f.read()
 Final = content
@@ -390,7 +390,7 @@ Add these helpers to the sandbox driver for workspace operations:
 def _workspace_path(session_id: str, *paths: str) -> str:
     """Get path within workspace for a session."""
     import os as _os
-    base = _os.path.join("/data/workspace", session_id)
+    base = _os.path.join("/data/workspaces/default/users/default", session_id)
     return _os.path.join(base, *paths) if paths else base
 
 def save_workspace_file(session_id: str, filename: str, content: str) -> str:

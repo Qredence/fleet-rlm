@@ -28,12 +28,12 @@ function AppLayout() {
       <box height={3} borderStyle="single" borderBottom>
         <text>Header</text>
       </box>
-      
+
       {/* Content - fills remaining space */}
       <box flexGrow={1}>
         <text>Main Content</text>
       </box>
-      
+
       {/* Footer - fixed height */}
       <box height={1}>
         <text>Status: Ready</text>
@@ -53,7 +53,7 @@ function SidebarLayout() {
       <box width={25} borderStyle="single" borderRight>
         <text>Sidebar</text>
       </box>
-      
+
       {/* Main - fills remaining space */}
       <box flexGrow={1}>
         <text>Main Content</text>
@@ -72,7 +72,7 @@ function ResponsiveSidebar() {
   const dims = useTerminalDimensions()  // React: useTerminalDimensions()
   const showSidebar = dims.width > 60
   const sidebarWidth = Math.min(30, Math.floor(dims.width * 0.3))
-  
+
   return (
     <box flexDirection="row" width="100%" height="100%">
       {showSidebar && (
@@ -130,7 +130,7 @@ Centered overlay:
 ```tsx
 function Modal({ children, visible }) {
   if (!visible) return null
-  
+
   return (
     <box
       position="absolute"
@@ -164,7 +164,7 @@ Using flexWrap:
 ```tsx
 function Grid({ items, columns = 3 }) {
   const itemWidth = `${Math.floor(100 / columns)}%`
-  
+
   return (
     <box flexDirection="row" flexWrap="wrap" width="100%">
       {items.map((item, i) => (
@@ -286,7 +286,7 @@ function StickyFooterLayout() {
         {/* Your content here */}
         <text>Content that might be short</text>
       </box>
-      
+
       {/* Footer pushed to bottom */}
       <box height={1}>
         <text fg="#888">Press ? for help | q to quit</text>
@@ -325,12 +325,12 @@ Different layouts based on terminal size:
 ```tsx
 function ResponsiveApp() {
   const { width, height } = useTerminalDimensions()
-  
+
   // Define breakpoints
   const isSmall = width < 60
   const isMedium = width >= 60 && width < 100
   const isLarge = width >= 100
-  
+
   if (isSmall) {
     // Mobile-like: stacked layout
     return (
@@ -340,7 +340,7 @@ function ResponsiveApp() {
       </box>
     )
   }
-  
+
   if (isMedium) {
     // Tablet-like: sidebar + content
     return (
@@ -350,7 +350,7 @@ function ResponsiveApp() {
       </box>
     )
   }
-  
+
   // Large: full layout
   return (
     <box flexDirection="row">

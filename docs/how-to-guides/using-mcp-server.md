@@ -4,7 +4,7 @@ The **Model Context Protocol (MCP)** allows you to connect `fleet-rlm` directly 
 
 ## What is MCP?
 
-MCP provides a standard way for AI models to discover and call extenral tools. `fleet-rlm` exposes its core long-context and code-execution capabilities as MCP tools.
+MCP provides a standard way for AI models to discover and call external tools. `fleet-rlm` exposes its core long-context and code-execution capabilities as MCP tools.
 
 ## Configuration for Claude Desktop
 
@@ -28,6 +28,14 @@ To use `fleet-rlm` with Claude Desktop, add the following to your config file:
 }
 ```
 
+You can tune runtime behavior with Hydra overrides when launching the server, for example:
+
+```bash
+uv run fleet-rlm serve-mcp --transport stdio \
+  interpreter.async_execute=true \
+  agent.guardrail_mode=warn
+```
+
 ## Available Tools
 
 Once connected, Claude will have access to:
@@ -37,6 +45,7 @@ Once connected, Claude will have access to:
 Executes a single turn of the RLM ReAct loop.
 
 - **Use case**: "Write Python code to calculate the orbital period of Mars."
+- **Output**: Includes `assistant_response`, optional `trajectory`, and additive `guardrail_warnings`.
 
 ### `analyze_long_document`
 

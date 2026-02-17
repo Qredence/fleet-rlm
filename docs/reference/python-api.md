@@ -54,9 +54,11 @@ The main interface for executing code in a Modal sandbox.
 ```python
 ModalInterpreter(
     image: modal.Image | None = None,
+  image_python_version: str = "3.13",
     timeout: int = 600,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+  async_execute: bool = True,
     # ...
 )
 ```
@@ -65,8 +67,10 @@ ModalInterpreter(
 
 - `start()`: Boots the remote sandbox. Must be called before `execute`.
 - `execute(code: str) -> str`: Runs Python code in the sandbox. Returns stdout/stderr or metadata summary.
+- `aexecute(code: str) -> str`: Async wrapper for `execute`; non-blocking when `async_execute=True`.
 - `shutdown()`: Terminates the sandbox.
 - `__enter__ / __exit__`: Context manager support for automatic startup/shutdown.
+- `__aenter__ / __aexit__`: Async context manager support for startup/shutdown in async workflows.
 
 ### `fleet_rlm.runners`
 
@@ -76,6 +80,7 @@ High-level functions that orchestrate the entire RLM workflow (Config -> Init In
 
 - **`build_react_chat_agent(...)`**: Configures and returns an `RLMReActChatAgent` instance.
 - **`run_react_chat_once(...)`**: Runs a single turn of the interactive ReAct chat agent.
+- **`arun_react_chat_once(...)`**: Async single-turn ReAct helper for FastAPI/WebSocket flows.
 - **`run_basic(question: str) -> dict`**: Runs a simple RLM query (e.g., math, fibonacci).
 - **`run_architecture(docs_path: str, query: str) -> dict`**: Extracts architecture info from a doc file.
 - **`run_api_endpoints(docs_path: str) -> dict`**: Extracts API endpoints from documentation.
@@ -85,6 +90,13 @@ High-level functions that orchestrate the entire RLM workflow (Config -> Init In
 - **`run_long_context(docs_path: str, query: str, mode: str) -> dict`**: Runs the long-context RLM strategy (chunking + subagents).
 - **`check_secret_presence(secret_name: str) -> dict`**: Checks if DSPy env vars are present in a Modal secret.
 - **`check_secret_key(secret_name: str, key: str) -> dict`**: Checks if a specific env var key exists in a Modal secret.
+
+`build_react_chat_agent`, `run_react_chat_once`, and `arun_react_chat_once` also accept these runtime controls:
+
+- `interpreter_async_execute: bool = True`
+- `guardrail_mode: Literal["off", "warn", "strict"] = "off"`
+- `max_output_chars: int = 10000`
+- `min_substantive_chars: int = 20`
 
 ### Trajectory Defaults
 

@@ -124,7 +124,7 @@ export class File {
     for (const file of files) {
       const fullPath = dir === "." ? file : `${dir}/${file}`;
       const stats = await Bun.file(fullPath).stat().catch(() => null);
-      
+
       if (stats) {
         nodes.push({
           path: fullPath,

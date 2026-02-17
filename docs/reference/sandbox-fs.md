@@ -7,10 +7,17 @@ This document defines the Virtual File System (VFS) structure for the `fleet-rlm
 ```text
 / (Root)
 ├── data/                     # [Persistent] Modal Volume Mount
-│   ├── knowledge/            # Documentation & Context
+│   ├── knowledge/            # Shared documentation & context
 │   │   ├── dspy/
 │   │   └── rlm/
-│   ├── memory/               # Long-term Agent Memory
+│   ├── memory/               # Shared long-term memory (tool-facing)
+│   ├── workspaces/           # Session-scoped state (workspace/user isolation)
+│   │   └── <workspace_id>/
+│   │       └── users/
+│   │           └── <user_id>/
+│   │               ├── memory/
+│   │               │   └── react-session.json
+│   │               └── artifacts/
 │   └── output/               # Saved Artifacts
 ├── src/                      # [Read-Only] Application Code
 │   └── fleet_rlm/            # The injected library
@@ -41,6 +48,9 @@ Mounted using Modal Volumes V2. This is the primary location for data that must 
   - `/data/knowledge/rlm/`: RLM research papers and implementation notes.
   - `/data/knowledge/skills/`: Agent skills and tools documentation.
 - `/data/memory/`: Persistent state/memory for RLM agents (e.g., JSON files storing learned patterns).
+- `/data/workspaces/<workspace_id>/users/<user_id>/`: Session identity-scoped state used by server/chat runtime.
+  - `memory/react-session.json`: persisted conversation/session manifest.
+  - `artifacts/`: user-scoped generated outputs.
 - `/data/cache/`: Shared cache for heavy computations or LLM response caching.
 - `/data/output/`: Long-term storage for extracted structured data.
 
@@ -71,4 +81,5 @@ When using `ModalInterpreter`, the following conventions should be applied:
 
 - **Consistency**: Agents can rely on fixed paths (e.g., always looking for docs in `/data/knowledge`).
 - **Isolation**: Ephemeral task data in `/workspace` doesn't clutter persistent storage.
+- **Multi-tenant safety**: Session state is isolated by `workspace_id` + `user_id` under `/data/workspaces`.
 - **Scalability**: New data categories can be added under `/data` without breaking existing RLM signatures.

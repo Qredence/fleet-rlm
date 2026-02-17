@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.4.1"
+version = "0.4.4"
 description = "Recursive Language Models with DSPy + Modal for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,12 +20,17 @@ classifiers = [
 ]
 dependencies = [
     "dspy==3.1.3",
+    "hydra-core>=1.3,<2",
     "markitdown[all]>=0.1.0,<1",
+    "omegaconf>=2.3,<3",
     "modal>=1.3.2",
     "pypdf>=6,<7",
     "pydantic>=2.12.5,<3",
+    "prompt-toolkit>=3.0.50,<4",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3,<7",
+    "rich>=13.9,<14",
+    "structlog>=24.1.0,<25",
     "tomli>=2.0.0; python_version < '3.11'",
     "typer>=0.21.1,<1",
 ]
@@ -65,8 +70,9 @@ full = [
 ]
 
 [project.scripts]
-fleet-rlm = "fleet_rlm.cli:app"
-rlm-modal = "fleet_rlm.cli:app"
+fleet = "fleet_rlm.fleet_cli:main"
+fleet-rlm = "fleet_rlm.cli:main"
+rlm-modal = "fleet_rlm.cli:main"
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
@@ -74,14 +80,18 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 "fleet_rlm._scaffold" = ["**/*.md", "**/*.py", "**/*.json"]
+"fleet_rlm.conf" = ["*.yaml", "*.yml"]
+"fleet_rlm" = ["py.typed"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["benchmark: performance/throughput benchmark tests"]

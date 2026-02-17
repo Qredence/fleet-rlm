@@ -248,7 +248,7 @@ function CodeEditor() {
   const [code, setCode] = useState(`function hello() {
   console.log("Hello!");
 }`)
-  
+
   return (
     <box flexDirection="column" height="100%">
       <box height={1}>
@@ -294,7 +294,7 @@ function CodeReview({ oldCode, newCode }) {
 function MarkdownPreview({ content }) {
   // Extract code blocks from markdown
   const codeBlocks = extractCodeBlocks(content)
-  
+
   return (
     <scrollbox height={20}>
       {codeBlocks.map((block, i) => (
@@ -319,7 +319,7 @@ function ErrorView({ errors, code }) {
     severity: "error",
     message: err.message,
   }))
-  
+
   return (
     <line-number
       code={code}

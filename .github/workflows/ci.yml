@@ -1,41 +1,44 @@
 name: CI
 
 on:
-    push:
-        branches: [main, master]
-    pull_request:
-        branches: [main, master]
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
 
 jobs:
-    test:
-        name: Test and Lint
-        runs-on: ubuntu-latest
+  test:
+    name: Test and Lint
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-              with:
-                  fetch-depth: 1
-                  fetch-tags: false
-                  submodules: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          submodules: false
 
-            - name: Install uv
-              uses: astral-sh/setup-uv@v5
-              with:
-                  version: "latest"
-                  enable-cache: true
-                  cache-dependency-glob: "uv.lock"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
-            - name: Set up Python
-              run: uv python install 3.12
+      - name: Set up Python
+        run: uv python install 3.12
 
-            - name: Install dependencies
-              run: uv sync --all-extras --dev
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
 
-            - name: Lint with Ruff
-              run: |
-                  uv run ruff check src tests config/test_responses_endpoint.py
-                  uv run ruff format --check src tests config/test_responses_endpoint.py
+      - name: Lint with Ruff
+        run: |
+          uv run ruff check src tests config/test_responses_endpoint.py
+          uv run ruff format --check src tests config/test_responses_endpoint.py
 
-            - name: Run tests
-              run: uv run pytest
+      - name: Type-check with ty
+        run: uv run ty check src
+
+      - name: Run tests
+        run: uv run pytest
