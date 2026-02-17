@@ -104,10 +104,8 @@ def build_event(
 def write_payload(stream: TextIO, payload: JsonObject) -> None:
     """Write one payload as JSON line and flush."""
     # stdout is the bridge IPC transport channel (not human-readable logging).
-    stream.write(
-        json.dumps(payload, ensure_ascii=False)
-        + "\n"  # codeql[py/clear-text-logging-sensitive-data]
-    )
+    # codeql[py/clear-text-logging-sensitive-data]
+    stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
     stream.flush()
 
 
