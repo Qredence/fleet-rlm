@@ -100,3 +100,20 @@ def test_app_config_includes_rlm_settings():
         rlm_settings=RlmSettings(max_depth=3),
     )
     assert config.rlm_settings.max_depth == 3
+
+
+def test_interpreter_config_async_execute_default():
+    """InterpreterConfig should default async_execute to True."""
+    from fleet_rlm.config import InterpreterConfig
+
+    interpreter = InterpreterConfig()
+    assert interpreter.async_execute is True
+
+
+def test_agent_config_guardrail_defaults():
+    """AgentConfig should expose guardrail defaults with safe values."""
+    from fleet_rlm.config import AgentConfig
+
+    agent = AgentConfig()
+    assert agent.guardrail_mode == "off"
+    assert agent.min_substantive_chars == 20

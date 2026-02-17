@@ -22,7 +22,7 @@ All runners automatically:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import dspy
 
@@ -121,6 +121,10 @@ def build_react_chat_agent(
     extra_tools: list | None = None,
     env_file: Path | None = None,
     planner_lm: Any | None = None,
+    interpreter_async_execute: bool = True,
+    guardrail_mode: Literal["off", "warn", "strict"] = "off",
+    max_output_chars: int = 10000,
+    min_substantive_chars: int = 20,
 ) -> RLMReActChatAgent:
     """Build an interactive DSPy ReAct chat agent for RLM workflows.
 
@@ -140,6 +144,11 @@ def build_react_chat_agent(
         planner_lm: Optional pre-configured LM. When provided, skips the
             global ``dspy.configure()`` call, allowing the caller to use
             ``dspy.context()`` for async-safe configuration.
+        interpreter_async_execute: Whether to use non-blocking async execution
+            for interpreter ``aexecute``.
+        guardrail_mode: Guardrail behavior for assistant responses.
+        max_output_chars: Maximum allowed assistant response length.
+        min_substantive_chars: Soft warning threshold for brief responses.
 
     Returns:
         A configured ``RLMReActChatAgent`` instance.
@@ -158,6 +167,10 @@ def build_react_chat_agent(
         verbose=verbose,
         history_max_turns=history_max_turns,
         extra_tools=extra_tools,
+        interpreter_async_execute=interpreter_async_execute,
+        guardrail_mode=guardrail_mode,
+        max_output_chars=max_output_chars,
+        min_substantive_chars=min_substantive_chars,
     )
 
     if docs_path is not None:
@@ -180,6 +193,10 @@ def run_react_chat_once(
     verbose: bool = False,
     include_trajectory: bool = True,
     env_file: Path | None = None,
+    interpreter_async_execute: bool = True,
+    guardrail_mode: Literal["off", "warn", "strict"] = "off",
+    max_output_chars: int = 10000,
+    min_substantive_chars: int = 20,
 ) -> dict[str, Any]:
     """Run a single prompt through the interactive ReAct chat agent."""
     with build_react_chat_agent(
@@ -193,6 +210,10 @@ def run_react_chat_once(
         volume_name=volume_name,
         verbose=verbose,
         env_file=env_file,
+        interpreter_async_execute=interpreter_async_execute,
+        guardrail_mode=guardrail_mode,
+        max_output_chars=max_output_chars,
+        min_substantive_chars=min_substantive_chars,
     ) as agent:
         result = agent.chat_turn(message)
         if not include_trajectory:
@@ -215,6 +236,10 @@ async def arun_react_chat_once(
     include_trajectory: bool = True,
     env_file: Path | None = None,
     planner_lm: Any | None = None,
+    interpreter_async_execute: bool = True,
+    guardrail_mode: Literal["off", "warn", "strict"] = "off",
+    max_output_chars: int = 10000,
+    min_substantive_chars: int = 20,
 ) -> dict[str, Any]:
     """Async version of ``run_react_chat_once`` using ``achat_turn``."""
     agent = build_react_chat_agent(
@@ -229,6 +254,10 @@ async def arun_react_chat_once(
         verbose=verbose,
         env_file=env_file,
         planner_lm=planner_lm,
+        interpreter_async_execute=interpreter_async_execute,
+        guardrail_mode=guardrail_mode,
+        max_output_chars=max_output_chars,
+        min_substantive_chars=min_substantive_chars,
     )
     try:
         with dspy.context(lm=planner_lm) if planner_lm else _nullcontext():

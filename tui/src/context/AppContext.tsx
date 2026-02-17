@@ -10,6 +10,9 @@ import type {
   TraceMode,
   TranscriptEvent,
   ConnectionState,
+  RecentDoc,
+  PaletteCommand,
+  CommandPaletteState,
 } from "../types/protocol";
 import { createEmptyTurnState, applyStreamEvent } from "../types/state";
 
@@ -30,9 +33,13 @@ export interface AppState {
   // Current turn
   currentTurn: TurnState;
   isProcessing: boolean;
+  processingStartTime: number | null; // elapsed time display
 
   // Transcript history
   transcript: TranscriptEvent[];
+
+  // Recent documents (for command palette)
+  recentDocs: RecentDoc[];
 
   // Command result
   lastCommandResult: {
@@ -44,8 +51,10 @@ export interface AppState {
   activeTab: "reasoning" | "tools" | "stats";
   reasoningVisible: boolean;
   toolsVisible: boolean;
+  sidebarCollapsed: boolean;
   inputValue: string;
   statusMessage: string;
+  commandPalette: CommandPaletteState;
 }
 
 /** Action types */
@@ -64,9 +73,15 @@ export type AppAction =
   | { type: "SET_ACTIVE_TAB"; payload: "reasoning" | "tools" | "stats" }
   | { type: "TOGGLE_REASONING" }
   | { type: "TOGGLE_TOOLS" }
+  | { type: "TOGGLE_SIDEBAR" }
   | { type: "SET_INPUT_VALUE"; payload: string }
   | { type: "SET_STATUS_MESSAGE"; payload: string }
   | { type: "RESET_TURN" }
+  | { type: "OPEN_COMMAND_PALETTE" }
+  | { type: "CLOSE_COMMAND_PALETTE" }
+  | { type: "SET_PALETTE_QUERY"; payload: string }
+  | { type: "SET_PALETTE_SELECTED"; payload: number }
+  | { type: "ADD_RECENT_DOC"; payload: RecentDoc }
   | {
       type: "APPLY_COMMAND_RESULT";
       payload: { command: string; result: Record<string, unknown> };
@@ -84,6 +99,7 @@ const initialState: AppState = {
   sessionId: getDefaultSessionId(),
   currentTurn: createEmptyTurnState(),
   isProcessing: false,
+  processingStartTime: null,
   transcript: [],
   lastCommandResult: null,
   activeTab: "reasoning",
@@ -91,6 +107,14 @@ const initialState: AppState = {
   toolsVisible: true,
   inputValue: "",
   statusMessage: "Disconnected",
+  recentDocs: [],
+  sidebarCollapsed: false,
+  commandPalette: {
+    isOpen: false,
+    query: "",
+    selectedIndex: 0,
+    category: null,
+  },
 };
 
 /** Reducer function */
@@ -126,6 +150,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         isProcessing: true,
+        processingStartTime: Date.now(),
         currentTurn: createEmptyTurnState(),
         statusMessage: "Processing...",
       };
@@ -142,11 +167,13 @@ function appReducer(state: AppState, action: AppAction): AppState {
         role: "assistant",
         content: state.currentTurn.finalText || state.currentTurn.transcriptText,
         payload: state.currentTurn.trajectory,
+        timestamp: now(),
       };
 
       return {
         ...state,
         isProcessing: false,
+        processingStartTime: null,
         transcript: [...state.transcript, transcriptEvent],
         statusMessage: state.currentTurn.errored
           ? "Error occurred"
@@ -160,6 +187,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         isProcessing: false,
+        processingStartTime: null,
         statusMessage: "Cancelled",
       };
 
@@ -168,12 +196,16 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         currentTurn: createEmptyTurnState(),
         isProcessing: false,
+        processingStartTime: null,
       };
 
     case "ADD_TRANSCRIPT":
       return {
         ...state,
-        transcript: [...state.transcript, action.payload],
+        transcript: [
+          ...state.transcript,
+          { ...action.payload, timestamp: action.payload.timestamp || now() },
+        ],
       };
 
     case "CLEAR_TRANSCRIPT":
@@ -192,11 +224,54 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case "TOGGLE_TOOLS":
       return { ...state, toolsVisible: !state.toolsVisible };
 
+    case "TOGGLE_SIDEBAR":
+      return { ...state, sidebarCollapsed: !state.sidebarCollapsed };
+
     case "SET_INPUT_VALUE":
       return { ...state, inputValue: action.payload };
 
     case "SET_STATUS_MESSAGE":
       return { ...state, statusMessage: action.payload };
+
+    case "OPEN_COMMAND_PALETTE":
+      return {
+        ...state,
+        commandPalette: { ...initialCommandPalette, isOpen: true },
+      };
+
+    case "CLOSE_COMMAND_PALETTE":
+      return {
+        ...state,
+        commandPalette: { ...state.commandPalette, isOpen: false },
+      };
+
+    case "SET_PALETTE_QUERY":
+      return {
+        ...state,
+        commandPalette: { ...state.commandPalette, query: action.payload, selectedIndex: 0 },
+      };
+
+    case "SET_PALETTE_SELECTED":
+      return {
+        ...state,
+        commandPalette: { ...state.commandPalette, selectedIndex: action.payload },
+      };
+
+    case "ADD_RECENT_DOC":
+      const newDoc = {
+        ...action.payload,
+        loadedAt: action.payload.loadedAt || now(),
+      };
+      const existingIdx = state.recentDocs.findIndex((d) => d.path === newDoc.path);
+      let recentDocs: RecentDoc[];
+      if (existingIdx >= 0) {
+        const updated = [...state.recentDocs];
+        updated[existingIdx] = newDoc;
+        recentDocs = updated.sort((a, b) => b.loadedAt.localeCompare(a.loadedAt));
+      } else {
+        recentDocs = [newDoc, ...state.recentDocs].slice(0, 10);
+      }
+      return { ...state, recentDocs };
 
     case "APPLY_COMMAND_RESULT": {
       const { command, result } = action.payload;
@@ -214,6 +289,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
             role: "system" as const,
             content: message,
             payload: result,
+            timestamp: now(),
           },
         ],
       };
@@ -327,4 +403,15 @@ function getDefaultSessionId(): string {
     return crypto.randomUUID();
   }
   return `session-${Date.now()}`;
+}
+
+const initialCommandPalette: CommandPaletteState = {
+  isOpen: false,
+  query: "",
+  selectedIndex: 0,
+  category: null,
+};
+
+function now(): string {
+  return new Date().toISOString();
 }

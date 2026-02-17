@@ -298,6 +298,41 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
     assert len(agent.history.messages) == 1
 
 
+def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    def _fake_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            yield StreamResponse(
+                predict_name="react",
+                signature_field_name="assistant_response",
+                chunk="ok",
+                is_last_chunk=True,
+            )
+            yield dspy.Prediction(
+                assistant_response="ok",
+                trajectory={"tool_name_0": "finish"},
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        guardrail_mode="warn",
+        min_substantive_chars=20,
+    )
+    events = list(agent.iter_chat_turn_stream("say hi", trace=False))
+
+    final_event = events[-1]
+    assert final_event.kind == "final"
+    warnings = list(final_event.payload.get("guardrail_warnings", []) or [])
+    assert warnings
+    assert any("brief" in warning for warning in warnings)
+
+
 # ---------------------------------------------------------------------------
 # _normalize_trajectory tests
 # ---------------------------------------------------------------------------

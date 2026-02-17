@@ -4,6 +4,7 @@ This module provides a Typer-based CLI for running RLM demonstrations
 and diagnostics. Commands are organized by use case:
 
 Core commands:
+    - chat: Standalone in-process interactive terminal chat
     - code-chat: Interactive DSPy ReAct + RLM terminal UI
     - run-react-chat: Backward-compatible alias for code-chat
     - serve-api: Optional FastAPI server surface
@@ -31,6 +32,7 @@ from omegaconf import OmegaConf
 from . import scaffold
 from .config import AppConfig
 from .cli_demos import register_demo_commands
+from .terminal_chat import TerminalChatOptions, run_terminal_chat
 
 # We use a global variable to store the hydra config so Typer commands can access it
 # This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)
@@ -222,6 +224,42 @@ def code_chat(
         _handle_error(exc)
 
 
+@app.command("chat")
+def chat(
+    docs_path: Path | None = typer.Option(
+        None,
+        "--docs-path",
+        help="Optional document path to preload as active context",
+    ),
+    trace: bool | None = typer.Option(
+        None, "--trace/--no-trace", help="Enable verbose thought/status display"
+    ),
+    trace_mode: str | None = typer.Option(
+        None,
+        "--trace-mode",
+        help="Trace display mode: compact, verbose, or off",
+    ),
+) -> None:
+    """Start standalone in-process interactive terminal chat."""
+    global _CONFIG
+    if _CONFIG is None:
+        typer.echo(
+            "Error: Config not initialized. Run via python -m fleet_rlm.cli", err=True
+        )
+        raise typer.Exit(code=1)
+
+    resolved_trace_mode = trace_mode
+    if resolved_trace_mode is None:
+        resolved_trace_mode = "verbose" if trace else "compact"
+    run_terminal_chat(
+        config=_CONFIG,
+        options=TerminalChatOptions(
+            docs_path=docs_path,
+            trace_mode=resolved_trace_mode,  # type: ignore[arg-type]
+        ),
+    )
+
+
 @app.command("run-react-chat")
 def run_react_chat(
     # Arguments identical to code-chat, delegating to it
@@ -281,6 +319,10 @@ def serve_api(
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
                 rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
                 rlm_max_depth=_CONFIG.rlm_settings.max_depth,
+                interpreter_async_execute=_CONFIG.interpreter.async_execute,
+                agent_guardrail_mode=_CONFIG.agent.guardrail_mode,
+                agent_min_substantive_chars=_CONFIG.agent.min_substantive_chars,
+                agent_max_output_chars=_CONFIG.rlm_settings.max_output_chars,
                 agent_model=_CONFIG.agent.model,
             )
         )
@@ -327,6 +369,10 @@ def serve_mcp(
                 rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
                 rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
                 rlm_max_depth=_CONFIG.rlm_settings.max_depth,
+                interpreter_async_execute=_CONFIG.interpreter.async_execute,
+                agent_guardrail_mode=_CONFIG.agent.guardrail_mode,
+                agent_min_substantive_chars=_CONFIG.agent.min_substantive_chars,
+                agent_max_output_chars=_CONFIG.rlm_settings.max_output_chars,
             )
         )
 

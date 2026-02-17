@@ -42,9 +42,13 @@ uv run modal volume create rlm-volume-dspy
 
 ### Usage in RLM
 
-When running the agent, pass the volume name:
+When running interactive chat, pass the volume name:
 
 ```bash
+# Standalone launcher
+fleet --volume-name rlm-volume-dspy
+
+# OpenTUI runtime
 uv run fleet-rlm code-chat --volume-name rlm-volume-dspy
 ```
 

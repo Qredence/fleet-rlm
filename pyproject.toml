@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.4.3"
+version = "0.4.4"
 description = "Recursive Language Models with DSPy + Modal for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,8 +26,10 @@ dependencies = [
     "modal>=1.3.2",
     "pypdf>=6,<7",
     "pydantic>=2.12.5,<3",
+    "prompt-toolkit>=3.0.50,<4",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3,<7",
+    "rich>=13.9,<14",
     "structlog>=24.1.0,<25",
     "tomli>=2.0.0; python_version < '3.11'",
     "typer>=0.21.1,<1",
@@ -68,6 +70,7 @@ full = [
 ]
 
 [project.scripts]
+fleet = "fleet_rlm.fleet_cli:main"
 fleet-rlm = "fleet_rlm.cli:main"
 rlm-modal = "fleet_rlm.cli:main"
 

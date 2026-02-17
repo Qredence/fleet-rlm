@@ -4,19 +4,29 @@ This tutorial guides you through the interactive "Code Chat" mode, a Research-Ac
 
 ## Overview
 
-The Interactive Chat (`code-chat`) provides a Terminal User Interface (TUI) optimized for monitoring the agent's thought process. Unlike a standard chatbot, this interface separates the conversation from the code execution and internal reasoning.
+Interactive chat supports two runtime surfaces:
+
+- `fleet`: standalone launcher (Ink-first with Python fallback)
+- `fleet-rlm code-chat`: OpenTUI runtime
+
+Both are optimized for monitoring the agent's thought process. Unlike a standard chatbot, these interfaces separate conversation from tool execution and internal reasoning.
 
 ## Starting the Chat
 
-Run the following command to launch the TUI:
+Run one of the following commands:
 
 ```bash
+# Standalone interactive launcher (Ink-first, Python fallback)
+fleet
+
+# OpenTUI runtime
 uv run fleet-rlm code-chat
 ```
 
 Optional arguments:
 
-- `--opentui/--no-opentui`: OpenTUI is the supported runtime (`--opentui` default).
+- `fleet --ui auto|ink|python`: Select standalone runtime behavior.
+- `code-chat --opentui/--no-opentui`: OpenTUI runtime toggle (`--opentui` default).
 - `--docs-path <path>`: Preload a document into context.
 
 ## The User Interface

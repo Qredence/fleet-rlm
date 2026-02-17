@@ -37,7 +37,7 @@ class SessionConfig(BaseModel):
     react_max_iters: int = 10
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
-    trace: bool = False
+    trace: bool = True
     trace_mode: TraceMode = "compact"
     stream: bool = True
     stream_refresh_ms: int = 40
@@ -81,6 +81,8 @@ class StreamEvent:
     text: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Control signal: flush any batched tokens before emitting this event
+    flush_tokens: bool = False
 
 
 @dataclass(slots=True)

@@ -8,6 +8,14 @@ The `fleet-rlm` application uses [Typer](https://typer.tiangolo.com/) to provide
 uv run fleet-rlm [COMMAND] [OPTIONS]
 ```
 
+The package also installs a standalone interactive launcher:
+
+```bash
+fleet [--ui auto|ink|python] [OPTIONS] [hydra-overrides]
+```
+
+Use this when you want bridge-powered chat from a single command without starting the OpenTUI runtime manually.
+
 ## Optional Extras
 
 ```bash
@@ -28,19 +36,51 @@ uv sync --extra dev --extra mcp --extra server
 
 ### RLM Execution Commands
 
-| Command              | Description                                                    | Key Options                                                                                                                                                                      |
-| :------------------- | :------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run-basic`          | Run a simple Q&A task with code generation.                    | `--question`: The prompt<br>`--volume-name`: Optional persistent volume                                                                                                          |
-| `run-architecture`   | Extract architecture/concepts from a document.                 | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Info to extract                                                                                                 |
-| `run-api-endpoints`  | Extract API endpoints from documentation.                      | `--docs-path`: Path to document file (text or PDF)                                                                                                                               |
-| `run-error-patterns` | Analyze error patterns in documentation.                       | `--docs-path`: Path to document file (text or PDF)                                                                                                                               |
-| `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to document file (text or PDF)<br>`--chars`: Limit input size                                                                                                |
-| `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to document file (text or PDF)                                                                                                                               |
-| `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize`                                                            |
-| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`: Path to document file (text or PDF)<br>`--react-max-iters`<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
-| `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                                                                                                      |
-| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`<br>`--react-max-iters`                                                                                                                                      |
-| `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                                                                                            |
+| Command              | Description                                                    | Key Options                                                                                                                                                                                    |
+| :------------------- | :------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run-basic`          | Run a simple Q&A task with code generation.                    | `--question`: The prompt<br>`--volume-name`: Optional persistent volume                                                                                                                        |
+| `run-architecture`   | Extract architecture/concepts from a document.                 | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Info to extract                                                                                                               |
+| `run-api-endpoints`  | Extract API endpoints from documentation.                      | `--docs-path`: Path to document file (text or PDF)                                                                                                                                             |
+| `run-error-patterns` | Analyze error patterns in documentation.                       | `--docs-path`: Path to document file (text or PDF)                                                                                                                                             |
+| `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to document file (text or PDF)<br>`--chars`: Limit input size                                                                                                              |
+| `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to document file (text or PDF)                                                                                                                                             |
+| `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize`                                                                          |
+| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`: Path to document file (text or PDF)<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
+| `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                                                                                                                    |
+| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`                                                                                                                                                                           |
+| `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                                                                                                          |
+
+## Standalone `fleet` launcher
+
+The `fleet` entrypoint is a standalone chat launcher installed with the package scripts.
+
+- `--ui auto` (default): prefer Ink (`tui-ink`) and fall back to Python UI
+- `--ui ink`: require Ink runtime
+- `--ui python`: force Python UI
+
+Examples:
+
+```bash
+fleet
+fleet --ui ink
+fleet --ui python --trace-mode compact
+```
+
+## Runtime Overrides (Hydra)
+
+Use Hydra-style overrides (`key=value`) with CLI commands to tune runtime behavior.
+
+Examples:
+
+```bash
+uv run fleet-rlm serve-api --port 8000 \
+    interpreter.async_execute=true \
+    agent.guardrail_mode=warn \
+    rlm_settings.max_iters=8
+
+uv run fleet-rlm serve-mcp --transport stdio \
+    agent.guardrail_mode=strict
+```
 
 ## Trajectory Metadata
 
@@ -149,6 +189,8 @@ uv run fleet-rlm init --help
 `code-chat` is the primary interactive coding runtime for the ReAct agent.
 OpenTUI is the only supported runtime.
 
+Note: this OpenTUI-only statement applies to `fleet-rlm code-chat`. The standalone `fleet` launcher supports Ink-first with Python fallback as documented above.
+
 ### Slash Commands
 
 - `/exit`
@@ -172,7 +214,6 @@ OpenTUI is the only supported runtime.
 ```bash
 uv run fleet-rlm code-chat \
   --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-  --react-max-iters 10 \
   --trace-mode compact
 
 # Explicit OpenTUI mode
@@ -181,6 +222,14 @@ uv run fleet-rlm code-chat --opentui
 # Alias command (kept for compatibility)
 uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
 ```
+
+### WebSocket command aliases
+
+The backend command dispatcher also supports these command names for interactive clients:
+
+- `process_document`
+- `write_to_file`
+- `edit_core_memory`
 
 ## `run-long-context` Details
 

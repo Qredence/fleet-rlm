@@ -8,6 +8,7 @@ into the main tool list by :func:`~fleet_rlm.react.tools.build_tool_list`.
 from __future__ import annotations
 
 import logging
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import dspy
@@ -250,6 +251,41 @@ else:
 
     # -- Buffer & volume management ------------------------------------------
 
+    def _resolve_volume_path(
+        path: str,
+        *,
+        default_root: str = "/data/memory",
+        allowed_root: str = "/data",
+    ) -> str:
+        """Resolve *path* to a normalized path inside the mounted Modal volume.
+
+        Rules:
+        - Absolute paths must already be within ``allowed_root``.
+        - Relative paths are rooted under ``default_root``.
+        - Parent traversal escaping ``allowed_root`` is rejected.
+        """
+        import posixpath
+
+        raw = str(path or "").strip()
+        if not raw:
+            raise ValueError("Path cannot be empty.")
+
+        allowed = str(PurePosixPath(allowed_root))
+        default = str(PurePosixPath(default_root))
+        candidate = PurePosixPath(raw)
+
+        normalized = str(
+            candidate if candidate.is_absolute() else PurePosixPath(default) / candidate
+        )
+        normalized = posixpath.normpath(normalized)
+        normalized = str(PurePosixPath(normalized))
+
+        if normalized != allowed and not normalized.startswith(allowed + "/"):
+            raise ValueError(
+                f"Path must stay within mounted volume root '{allowed}'. Got: {path}"
+            )
+        return normalized
+
     def read_buffer(name: str) -> dict[str, Any]:
         """Read the full contents of a sandbox buffer."""
         result = execute_submit(
@@ -270,6 +306,15 @@ else:
 
     def save_buffer_to_volume(name: str, path: str) -> dict[str, Any]:
         """Persist a sandbox buffer to Modal Volume storage as JSON."""
+        try:
+            resolved_path = _resolve_volume_path(
+                path,
+                default_root="/data/workspace/buffers",
+                allowed_root="/data",
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+
         code = """
 import json
 items = get_buffer(name)
@@ -277,23 +322,67 @@ payload = json.dumps(items, indent=2, ensure_ascii=False, default=str)
 saved_path = save_to_volume(path, payload)
 SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 """
-        return execute_submit(agent, code, variables={"name": name, "path": path})
+        result = execute_submit(
+            agent,
+            code,
+            variables={"name": name, "path": resolved_path},
+        )
+        if result.get("status") == "ok" and agent.interpreter._volume:
+            try:
+                agent.interpreter.commit()
+            except Exception:
+                pass
+        return result
 
     def load_text_from_volume(path: str, alias: str = "active") -> dict[str, Any]:
         """Load text from Modal Volume into host-side document memory."""
+        try:
+            resolved_path = _resolve_volume_path(
+                path,
+                default_root="/data/workspace",
+                allowed_root="/data",
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        if agent.interpreter._volume:
+            try:
+                # Pull latest writes from other containers before reading.
+                agent.interpreter.reload()
+            except Exception:
+                pass
+
         result = execute_submit(
             agent,
             'text = load_from_volume(path)\nSUBMIT(status="ok", text=text)',
-            variables={"path": path},
+            variables={"path": resolved_path},
         )
         text = str(result.get("text", ""))
+        if text.startswith("[error:"):
+            return {"status": "error", "error": text, "path": resolved_path}
         agent._set_document(alias, text)
         agent.active_alias = alias
         return {
             "status": "ok",
             "alias": alias,
+            "path": resolved_path,
             "chars": len(text),
             "lines": len(text.splitlines()),
+        }
+
+    def process_document(path: str, alias: str = "active") -> dict[str, Any]:
+        """Load a document from volume and register it for downstream analysis."""
+        loaded = load_text_from_volume(path, alias=alias)
+        if loaded.get("status") != "ok":
+            return loaded
+        text = resolve_document(agent, alias)
+        return {
+            "status": "ok",
+            "alias": alias,
+            "path": loaded.get("path", path),
+            "chars": len(text),
+            "lines": len(text.splitlines()),
+            "hint": "Use analyze_long_document or summarize_long_document for semantic processing.",
         }
 
     # -- Persistent memory management ----------------------------------------
@@ -302,8 +391,21 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 
     def memory_read(path: str) -> dict[str, Any]:
         """Read a file from persistent memory (Modal Volume)."""
-        # Ensure path is relative to volume root if possible, or absolute.
-        # Ideally, we should enforce a /data/memory root, but for now we trust the mount path.
+        try:
+            resolved_path = _resolve_volume_path(
+                path,
+                default_root="/data/memory",
+                allowed_root="/data",
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        if agent.interpreter._volume:
+            try:
+                agent.interpreter.reload()
+            except Exception:
+                pass
+
         code = """
 try:
     with open(path, "r", encoding="utf-8") as f:
@@ -314,12 +416,22 @@ except FileNotFoundError:
 except Exception as e:
     SUBMIT(status="error", error=f"{type(e).__name__}: {e}")
 """
-        return execute_submit(agent, code, variables={"path": path})
+        return execute_submit(agent, code, variables={"path": resolved_path})
 
     def memory_write(path: str, content: str) -> dict[str, Any]:
         """Write content to a file in persistent memory (Modal Volume)."""
+        try:
+            resolved_path = _resolve_volume_path(
+                path,
+                default_root="/data/memory",
+                allowed_root="/data",
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+
         code = """
 import os
+import subprocess
 try:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -329,14 +441,22 @@ try:
         os.sync()
     except AttributeError:
         pass
-    SUBMIT(status="ok", path=path, chars=len(content))
+    sync_rc = 0
+    try:
+        proc = subprocess.run(["sync", "/data"], check=False, capture_output=True)
+        sync_rc = int(proc.returncode)
+    except Exception:
+        sync_rc = -1
+    SUBMIT(status="ok", path=path, chars=len(content), sync_rc=sync_rc)
 except Exception as e:
     SUBMIT(status="error", error=f"{type(e).__name__}: {e}")
 """
         # Note: Modal volumes are eventually consistent, but os.sync() helps.
         # The Interpreter also exposes a .commit() method if needed on the host side.
         result = execute_submit(
-            agent, code, variables={"path": path, "content": content}
+            agent,
+            code,
+            variables={"path": resolved_path, "content": content},
         )
 
         # Trigger explicit commit on the host side for immediate persistence
@@ -348,8 +468,103 @@ except Exception as e:
                     pass  # Ignore commit errors, best effort
         return result
 
+    def write_to_file(path: str, content: str, append: bool = False) -> dict[str, Any]:
+        """Write/append text to a file in Modal Volume with safe path handling."""
+        if not append:
+            return memory_write(path=path, content=content)
+
+        try:
+            resolved_path = _resolve_volume_path(
+                path,
+                default_root="/data/memory",
+                allowed_root="/data",
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        code = """
+import os
+import subprocess
+try:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(content)
+    try:
+        os.sync()
+    except AttributeError:
+        pass
+    sync_rc = 0
+    try:
+        proc = subprocess.run(["sync", "/data"], check=False, capture_output=True)
+        sync_rc = int(proc.returncode)
+    except Exception:
+        sync_rc = -1
+    SUBMIT(status="ok", path=path, chars=len(content), mode="append", sync_rc=sync_rc)
+except Exception as e:
+    SUBMIT(status="error", error=f"{type(e).__name__}: {e}")
+"""
+        result = execute_submit(
+            agent,
+            code,
+            variables={"path": resolved_path, "content": content},
+        )
+        if result.get("status") == "ok" and agent.interpreter._volume:
+            try:
+                agent.interpreter.commit()
+            except Exception:
+                pass
+        return result
+
+    def edit_core_memory(
+        section: str,
+        content: str,
+        mode: str = "append",
+    ) -> dict[str, Any]:
+        """Edit core memory via append/replace operations with validation."""
+        mode_norm = mode.strip().lower()
+        if mode_norm not in {"append", "replace"}:
+            return {
+                "status": "error",
+                "error": "mode must be one of: append, replace",
+            }
+
+        message = (
+            agent.core_memory_append(section, content)
+            if mode_norm == "append"
+            else agent.core_memory_replace(section, content)
+        )
+        if message.startswith("Error:"):
+            return {"status": "error", "error": message}
+
+        return {
+            "status": "ok",
+            "section": section,
+            "mode": mode_norm,
+            "message": message,
+            "chars": len(agent._core_memory.get(section, "")),
+        }
+
     def memory_list(path: str = ".") -> dict[str, Any]:
         """List files and directories in persistent memory."""
+        try:
+            resolved_path = (
+                _resolve_volume_path(
+                    path,
+                    default_root="/data/memory",
+                    allowed_root="/data",
+                )
+                if path.strip() not in {"", ".", "./"}
+                else "/data/memory"
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        if agent.interpreter._volume:
+            try:
+                agent.interpreter.reload()
+            except Exception:
+                pass
+
         code = """
 import os
 try:
@@ -362,7 +577,7 @@ try:
 except Exception as e:
     SUBMIT(status="error", error=f"{type(e).__name__}: {e}")
 """
-        return execute_submit(agent, code, variables={"path": path})
+        return execute_submit(agent, code, variables={"path": resolved_path})
 
     # -- Assemble tool list --------------------------------------------------
 
@@ -420,6 +635,11 @@ except Exception as e:
             desc="Load text from Modal Volume into host-side document memory",
         ),
         Tool(
+            process_document,
+            name="process_document",
+            desc="Load a document from Modal Volume and register it for analysis",
+        ),
+        Tool(
             memory_read,
             name="memory_read",
             desc="Read a file from persistent memory (Modal Volume)",
@@ -428,6 +648,16 @@ except Exception as e:
             memory_write,
             name="memory_write",
             desc="Write content to a file in persistent memory (Modal Volume)",
+        ),
+        Tool(
+            write_to_file,
+            name="write_to_file",
+            desc="Write or append text to a file in persistent memory (Modal Volume)",
+        ),
+        Tool(
+            edit_core_memory,
+            name="edit_core_memory",
+            desc="Edit core memory blocks using append or replace mode",
         ),
         Tool(
             memory_list,
