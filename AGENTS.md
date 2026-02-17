@@ -53,6 +53,10 @@ uv run ruff check src tests
 uv run ruff format src tests
 uv run ty check src
 uv run pytest
+
+# Performance baseline workflow (credential-gated)
+uv run python scripts/perf/compare_baseline.py --update-baseline --baseline scripts/perf/baseline/rlm_benchmarks_baseline.json
+uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/rlm_benchmarks_baseline.json --threshold 0.20
 ```
 
 ## Interactive Surface

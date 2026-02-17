@@ -9,6 +9,15 @@ from typing import Any
 from dotenv import set_key
 
 _SECRET_KEYS = {"DSPY_LLM_API_KEY", "DSPY_LM_API_KEY", "MODAL_TOKEN_SECRET"}
+_SENSITIVE_KEY_MARKERS = (
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "TOKEN",
+    "API_KEY",
+    "PRIVATE_KEY",
+    "ACCESS_KEY",
+)
 
 
 def get_settings(params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -18,7 +27,7 @@ def get_settings(params: dict[str, Any] | None = None) -> dict[str, Any]:
     keys = _requested_keys(payload)
     raw_values = {key: os.environ.get(key, "") for key in keys}
     masked = {
-        key: _mask_secret(value) if key in _SECRET_KEYS else value
+        key: _mask_secret(value) if _should_mask_key(key) else value
         for key, value in raw_values.items()
     }
     return {
@@ -79,3 +88,10 @@ def _mask_secret(value: str) -> str:
     if len(value) <= 6:
         return "*" * len(value)
     return f"{value[:3]}...{value[-2:]}"
+
+
+def _should_mask_key(key: str) -> bool:
+    normalized = key.upper()
+    return key in _SECRET_KEYS or any(
+        marker in normalized for marker in _SENSITIVE_KEY_MARKERS
+    )

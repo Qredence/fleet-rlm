@@ -217,6 +217,24 @@ def test_settings_get_always_masks_secret_values(tmp_path, monkeypatch):
     )
 
 
+def test_settings_get_masks_sensitive_key_patterns(tmp_path, monkeypatch):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / "pyproject.toml").write_text("[project]\nname='demo'\n")
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv("CUSTOM_PASSWORD", "my-very-secret-password")
+    monkeypatch.setenv("SERVICE_TOKEN", "token-super-secret-value")
+    monkeypatch.setenv("SAFE_NAME", "openai/gpt-4")
+
+    snapshot = handlers_settings.get_settings(
+        {"keys": ["CUSTOM_PASSWORD", "SERVICE_TOKEN", "SAFE_NAME"]}
+    )
+
+    assert snapshot["values"]["CUSTOM_PASSWORD"] != "my-very-secret-password"
+    assert snapshot["values"]["SERVICE_TOKEN"] != "token-super-secret-value"
+    assert snapshot["values"]["SAFE_NAME"] == "openai/gpt-4"
+
+
 @pytest.mark.asyncio
 async def test_commands_execute_uses_delegate_profile_when_available(monkeypatch):
     entered_profiles: list[ExecutionProfile] = []
@@ -284,6 +302,76 @@ def test_mentions_search_handles_large_repo(tmp_path):
     assert result["count"] >= 1
     assert result["count"] <= 20  # Should be bounded
     assert any("file_5" in item["path"] for item in result["items"])
+
+
+def test_mentions_search_reuses_cache_for_repeated_queries(tmp_path, monkeypatch):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "alpha.py").write_text("print('alpha')")
+    (tmp_path / "src" / "beta.py").write_text("print('beta')")
+
+    handlers_mentions._INDEX_CACHE.clear()
+    calls = {"count": 0}
+    original = handlers_mentions._build_index
+
+    def counting_build_index(root):
+        calls["count"] += 1
+        return original(root)
+
+    monkeypatch.setattr(handlers_mentions, "_build_index", counting_build_index)
+
+    first = handlers_mentions.search_mentions({"query": "alp", "root": str(tmp_path)})
+    second = handlers_mentions.search_mentions({"query": "alp", "root": str(tmp_path)})
+
+    assert first["count"] >= 1
+    assert second["count"] >= 1
+    assert calls["count"] == 1
+
+
+def test_mentions_search_ignores_common_large_directories(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "visible.py").write_text("print('ok')")
+
+    ignored = [".git", "node_modules", ".venv", "__pycache__"]
+    for name in ignored:
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "secret_match.py").write_text("print('hidden')")
+
+    handlers_mentions._INDEX_CACHE.clear()
+    result = handlers_mentions.search_mentions(
+        {"query": "secret_match", "root": str(tmp_path)}
+    )
+
+    assert result["count"] == 0
+
+
+def test_mentions_search_empty_query_returns_only_top_level(tmp_path):
+    (tmp_path / "top.py").write_text("print('top')")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "deep.py").write_text("print('deep')")
+
+    result = handlers_mentions.search_mentions({"query": "", "root": str(tmp_path)})
+
+    paths = [item["path"] for item in result["items"]]
+    assert "top.py" in paths
+    assert "nested/" in paths
+    assert all("/" not in path.rstrip("/") for path in paths)
+
+
+def test_mentions_search_path_prefix_scopes_to_subtree(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "src" / "server.py").write_text("print('src')")
+    (tmp_path / "docs" / "server.py").write_text("print('docs')")
+
+    result = handlers_mentions.search_mentions(
+        {"query": "src/serv", "root": str(tmp_path)}
+    )
+
+    assert result["count"] >= 1
+    assert all(item["path"].startswith("src/") for item in result["items"])
+    assert all(not item["path"].startswith("docs/") for item in result["items"])
 
 
 def test_commands_list_returns_all_commands():
