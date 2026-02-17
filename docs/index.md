@@ -24,6 +24,7 @@ _Problem-oriented steps for specific goals._
 - [Deploying the API Server](how-to-guides/deploying-server.md)
 - [Using with Claude Desktop (MCP)](how-to-guides/using-mcp-server.md)
 - [Using with Claude Code (Skills/Agents/Teams)](how-to-guides/using-claude-code-agents.md)
+- [Performance Regression Guardrail](how-to-guides/performance-regression-guardrail.md)
 
 ### 📖 [Reference](reference/index.md)
 

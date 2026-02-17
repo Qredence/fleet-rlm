@@ -4,23 +4,30 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- **Change:** Added Ink mention-input debouncing via `MentionDebounceController` plus focused unit coverage for burst suppression and stale-response token invalidation.
+  **Outcome:** `@` mention search now avoids request storms during typing and remains stable under rapid input changes.
+
+### Changed
+
+- **Change:** Reworked `mentions.search` indexing/ranking with short-lived caching, scoped subtree lookup for path-prefix queries (for example `src/serv`), top-level suggestions on empty query, and common large-directory filtering (`.git`, `node_modules`, `.venv`, caches).
+  **Outcome:** Mention suggestions are faster and more relevant on large repositories while reducing noisy/expensive scans.
+- **Change:** Expanded mention-search regression coverage in bridge runtime and handler tests (cache reuse, ignore-list behavior, top-level empty-query behavior, scoped subtree routing, stdio method routing).
+  **Outcome:** Higher confidence against mention-search regressions across bridge server and Ink clients.
+- **Change:** Refreshed architecture/docs surfacing with updated diagrams and indexing, including performance-regression guide links and AGENTS quality/perf baseline command references.
+  **Outcome:** Operators get clearer system topology context and easier discovery of performance guardrail workflows.
+
 ### Fixed
 
-- **Change:** Aligned Ink bridge RPC method calls with bridge server namespaces (`commands.execute`, `mentions.search`).
-  **Outcome:** Slash command execution and mention-search requests from Ink now resolve to valid bridge handlers instead of unknown-method failures.
+- **Change:** Routed `mentions.search` through synchronous bridge dispatch (instead of async-only method handling) while keeping Ink RPC method alignment with bridge namespaces.
+  **Outcome:** Mention-search requests reliably resolve to a valid handler in stdio bridge runtime instead of intermittent unknown-method behavior.
 - **Change:** Corrected standalone terminal mention completion pattern to match non-whitespace suffixes after `@`.
   **Outcome:** `@` path suggestions now trigger reliably for common prefixes.
 - **Change:** Updated bridge settings snapshot behavior to mask secret values by default in `values`, with explicit opt-in to include raw secrets.
   **Outcome:** Reduced accidental secret exposure in interactive settings payloads while preserving intentional debugging access.
-
-### Changed
-
-- **Change:** Bridge command execution now enters `ExecutionProfile.RLM_DELEGATE` when interpreter profile context is available.
-  **Outcome:** Command execution behavior is now consistent with the websocket runtime profile boundary.
-- **Change:** Added regression tests for RPC contract method names, mention completion behavior, delegate-profile command execution, and secret masking semantics.
-  **Outcome:** Higher confidence against regressions across Ink, bridge, and standalone terminal surfaces.
-- **Change:** Clarified runtime surface documentation for `fleet` (Ink-first/Python-fallback) versus `fleet-rlm code-chat` (OpenTUI-only).
-  **Outcome:** Reduced operator confusion about which interactive runtime is expected in each entrypoint.
+- **Change:** Stabilized `notebooks/rlm-dspy-modal.ipynb` execution flow: canonical `fleet_rlm` imports, consolidated live-prerequisite gating, safer optional secret checks, and self-contained long-context analysis setup.
+  **Outcome:** Notebook runs cleanly without stale import failures and no longer depends on cross-cell interpreter state.
 
 ## 0.4.4
 

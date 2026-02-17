@@ -17,24 +17,71 @@
 
 ## Architecture
 
+```mermaid
+graph TB
+    subgraph entry ["🚪 Entry Points"]
+        CLI["CLI (Typer)"]
+        API["FastAPI<br/>(WS/REST)"]
+        TUI["Ink TUI<br/>(stdio bridge)"]
+        MCP["MCP Server"]
+    end
+
+    subgraph orchestration ["🧠 Orchestration Layer"]
+        Agent["RLMReActChatAgent<br/>(dspy.Module)"]
+        History["Chat History"]
+        Memory["Core Memory<br/>(Persona/Human/Scratchpad)"]
+        DocCache["Document Cache"]
+    end
+
+    subgraph tools ["🔧 ReAct Tools"]
+        DocTools["📄 load_document<br/>read_file_slice<br/>chunk_by_*"]
+        RecursiveTools["🔄 rlm_query<br/>llm_query<br/>(recursive delegation)"]
+        ExecTools["⚡ execute_code<br/>edit_file<br/>search_code"]
+    end
+
+    subgraph execution ["⚙️ Execution Layer"]
+        Interpreter["ModalInterpreter<br/>(JSON protocol)"]
+        Profiles["Execution Profiles:<br/>ROOT | DELEGATE | MAINTENANCE"]
+    end
+
+    subgraph cloud ["☁️ Modal Cloud"]
+        Sandbox["Sandbox Driver<br/>(Python REPL)"]
+        Volume[("💾 Persistent Volume<br/>/data/<br/>• workspaces<br/>• artifacts<br/>• memory<br/>• session state")]
+    end
+
+    CLI --> Agent
+    API --> Agent
+    TUI --> Agent
+    MCP --> Agent
+
+    Agent --> History
+    Agent --> Memory
+    Agent --> DocCache
+
+    Agent --> DocTools
+    Agent --> RecursiveTools
+    Agent --> ExecTools
+
+    DocTools --> Interpreter
+    RecursiveTools --> Interpreter
+    ExecTools --> Interpreter
+
+    Interpreter --> Profiles
+    Interpreter -->|"stdin/stdout<br/>JSON commands"| Sandbox
+    Sandbox -->|"read/write"| Volume
+
+    style entry fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style orchestration fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style tools fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    style execution fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style cloud fill:#fce4ec,stroke:#c2185b,stroke-width:2px
 ```
-User ─── CLI / API / WebSocket ─── RLMReActChatAgent (dspy.Module)
-                                        │
-                          ┌──────────────┼──────────────┐
-                          │              │              │
-                     load_document  rlm_query      edit_file
-                     list_files     (recursive)    search_code
-                     read_file_slice ...            ...
-                          │              │
-                          ▼              ▼
-                   ModalInterpreter ── dspy.RLM
-                          │              │
-                          ▼              ▼
-                   Modal Sandbox (isolated Python REPL)
-                   ├── Persistent Volume (/data/)
-                   ├── Execution Profiles (ROOT / DELEGATE / MAINTENANCE)
-                   └── Session State (per workspace/user)
-```
+
+
+**Layers:**
+
+🚪 **Entry Points** → 🧠 **Orchestration** → 🔧 **Tools** → ⚙️ **Execution** → ☁️ **Modal Cloud**
+
 
 ## Features
 
@@ -52,15 +99,15 @@ User ─── CLI / API / WebSocket ─── RLMReActChatAgent (dspy.Module)
 ### 1. Install
 
 ```bash
-pip install fleet-rlm
+uv pip install fleet-rlm
 ```
 
 Optional extras for server and MCP support:
 
 ```bash
-pip install fleet-rlm[server]   # FastAPI server + WebSocket
-pip install fleet-rlm[mcp]      # MCP server
-pip install fleet-rlm[full]     # All extras
+uv pip install fleet-rlm[server]   # FastAPI server + WebSocket
+uv pip install fleet-rlm[mcp]      # MCP server
+uv pip install fleet-rlm[full]     # All extras
 ```
 
 ### 2. Configure
@@ -70,40 +117,44 @@ Set up your Modal and LLM credentials:
 ```bash
 modal setup
 modal volume create rlm-volume-dspy
-modal secret create LITELLM DSPY_LM_MODEL=openai/gpt-4o DSPY_LLM_API_KEY=sk-...
+modal secret create LITELLM DSPY_LM_MODEL=openai/gemini-3-pro-preview DSPY_LLM_API_KEY=sk-...
 ```
 
 ### 3. Run
 
+**Interactive Chat (OpenTUI):**
+
 ```bash
-# Standalone interactive chat (prefers Ink UI; falls back to Python UI)
+# Requires OpenTUI / Bun
+fleet-rlm code-chat --opentui
+```
+
+**Standalone Interactive Chat (Ink):**
+
+```bash
+# Prefers Ink UI; falls back to Python UI
 fleet
 
 # Force a specific runtime
 fleet --ui ink
 fleet --ui python
+```
 
-# In chat:
-#   / = command palette (level-2 settings submenu via Enter)
-#   @ = file/path mention search
-#   ? = shortcut hints
-#   Esc = back/close menus
-#   Ctrl+L = clear transcript
-#   /events verbose = show detailed thinking and reasoning (default)
-#   /events compact = condensed event summary
-#   /events off = hide all events
+**One-shot Tasks:**
 
-# Interactive chat (requires OpenTUI / Bun)
-fleet-rlm code-chat --opentui
-
-# One-shot task
+```bash
+# Basic question
 fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
 
 # Document analysis
 fleet-rlm run-architecture --docs-path docs/architecture.md --query "Extract all components"
+```
 
+**Servers:**
+
+```bash
 # API server (FastAPI + WebSocket)
-fleet-rlm serve-api --port 8000
+uv run fleet-rlm serve-api --port 8000
 
 # MCP server
 fleet-rlm serve-mcp --transport stdio

@@ -13,6 +13,7 @@ Guides are directions that take you through the steps required to solve a real-w
 - **[Using with Claude Code (Skills/Agents/Teams)](using-claude-code-agents.md)**: Run workflows through packaged scaffold assets.
 - **[Using Notebooks](using-notebooks.md)**: Working with Jupyter notebooks.
 - **[Using with Claude Desktop](using-mcp-server.md)**: Connect `fleet-rlm` to Claude via MCP.
+- **[Performance Regression Guardrail](performance-regression-guardrail.md)**: Create and compare benchmark baselines.
 
 ## Deployment
 
