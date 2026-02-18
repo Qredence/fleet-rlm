@@ -6,25 +6,31 @@ from pathlib import Path
 
 from prompt_toolkit.document import Document
 
-from fleet_rlm import terminal_chat as tc
+from fleet_rlm.terminal import (
+    _FleetCompleter,
+    _coerce_value,
+    _iter_mention_paths,
+    _parse_command_payload,
+    _write_env_updates,
+)
 
 
 def test_coerce_value_basic_types() -> None:
-    assert tc._coerce_value("true") is True
-    assert tc._coerce_value("false") is False
-    assert tc._coerce_value("null") is None
-    assert tc._coerce_value("42") == 42
-    assert tc._coerce_value("3.14") == 3.14
-    assert tc._coerce_value("abc") == "abc"
+    assert _coerce_value("true") is True
+    assert _coerce_value("false") is False
+    assert _coerce_value("null") is None
+    assert _coerce_value("42") == 42
+    assert _coerce_value("3.14") == 3.14
+    assert _coerce_value("abc") == "abc"
 
 
 def test_parse_command_payload_from_json() -> None:
-    payload = tc._parse_command_payload('{"path":"README.md","size":20,"append":false}')
+    payload = _parse_command_payload('{"path":"README.md","size":20,"append":false}')
     assert payload == {"path": "README.md", "size": 20, "append": False}
 
 
 def test_parse_command_payload_from_key_values() -> None:
-    payload = tc._parse_command_payload("path=README.md size=20 append=true")
+    payload = _parse_command_payload("path=README.md size=20 append=true")
     assert payload == {"path": "README.md", "size": 20, "append": True}
 
 
@@ -33,15 +39,18 @@ def test_iter_mention_paths_lists_matching_entries(tmp_path: Path, monkeypatch) 
     (tmp_path / "src").mkdir()
     monkeypatch.chdir(tmp_path)
 
-    matches = tc._iter_mention_paths("R")
+    matches = _iter_mention_paths("R")
     assert "README.md" in matches
 
-    dir_matches = tc._iter_mention_paths("s")
+    dir_matches = _iter_mention_paths("s")
     assert "src/" in dir_matches
 
 
 def test_fleet_completer_suggests_slash_commands() -> None:
-    completer = tc._FleetCompleter()
+    completer = _FleetCompleter(
+        command_specs=[("/settings", "Configure settings"), ("/status", "Show status")],
+        command_dispatch_names=[],
+    )
     completions = list(
         completer.get_completions(Document(text="/set", cursor_position=4), None)
     )
@@ -53,7 +62,10 @@ def test_fleet_completer_suggests_mentions(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "src").mkdir()
     monkeypatch.chdir(tmp_path)
 
-    completer = tc._FleetCompleter()
+    completer = _FleetCompleter(
+        command_specs=[],
+        command_dispatch_names=[],
+    )
     completions = list(
         completer.get_completions(Document(text="@s", cursor_position=2), None)
     )
@@ -65,7 +77,7 @@ def test_write_env_updates_persists_values(tmp_path: Path, monkeypatch) -> None:
     env_path = tmp_path / ".env"
     monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
 
-    tc._write_env_updates(
+    _write_env_updates(
         env_path=env_path,
         updates={"DSPY_LM_MODEL": "openai/gpt-4o-mini"},
     )

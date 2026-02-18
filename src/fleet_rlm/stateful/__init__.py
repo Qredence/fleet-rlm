@@ -7,7 +7,8 @@ Provides persistent state management for RLM workflows:
 
 from __future__ import annotations
 
-from .agent import AgentStateManager, AnalysisResult, CodeScript
+from .agent import AgentStateManager
+from .models import AnalysisResult, CodeScript
 from .sandbox import ExecutionRecord, SandboxResult, StatefulSandboxManager
 
 __all__ = [

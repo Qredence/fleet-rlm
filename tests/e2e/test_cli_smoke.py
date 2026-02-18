@@ -238,6 +238,51 @@ def test_code_chat_opentui_flag_accepted(monkeypatch):
     assert "Bun runtime not found" in out
 
 
+def test_code_chat_opentui_launches_from_repo_tui_dir(monkeypatch):
+    """OpenTUI launcher should resolve repo-root tui/ in src-layout repos."""
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_which(cmd: str):
+        if cmd == "bun":
+            return "/usr/bin/bun"
+        return None
+
+    def fake_urlopen(url: str, timeout: int = 0):
+        assert url == "http://localhost:8000/health"
+        assert timeout == 2
+        return _FakeResponse()
+
+    def fake_run(cmd, cwd=None, env=None, check=False):
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        captured["check"] = check
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    monkeypatch.setattr("shutil.which", fake_which)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["code-chat", "--opentui"])
+    assert result.exit_code == 0
+
+    assert str(captured["cwd"]).endswith("/tui")
+    entry = str(captured["cmd"][2])
+    assert entry.endswith("/tui/src/index.tsx")
+
+
 def test_run_react_chat_opentui_flag_passes_through(monkeypatch):
     """Test that run-react-chat passes --opentui to _run_code_chat_session."""
     calls = []

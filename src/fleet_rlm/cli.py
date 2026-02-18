@@ -22,16 +22,20 @@ Usage:
 from __future__ import annotations
 
 import json
-from importlib.util import find_spec
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import typer
 from omegaconf import OmegaConf
 
-from . import scaffold
-from .config import AppConfig
+from .cli_commands.init_cmd import register_init_command
+from .cli_commands.serve_cmds import register_serve_commands
 from .cli_demos import register_demo_commands
+from .config import AppConfig
 from .terminal_chat import TerminalChatOptions, run_terminal_chat
 
 # We use a global variable to store the hydra config so Typer commands can access it
@@ -42,7 +46,35 @@ DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 app = typer.Typer(help="Run DSPy RLM demos backed by a Modal sandbox.")
 
 
+def _find_opentui_frontend() -> tuple[Path, Path]:
+    """Locate the OpenTUI directory and entrypoint.
+
+    Searches from both the current working directory and this module location so
+    standard ``src/`` repo layouts resolve correctly.
+    """
+    module_path = Path(__file__).resolve()
+    search_roots: list[Path] = []
+    for root in [
+        Path.cwd(),
+        *Path.cwd().parents,
+        module_path.parent,
+        *module_path.parents,
+    ]:
+        if root not in search_roots:
+            search_roots.append(root)
+
+    for root in search_roots:
+        tui_dir = root / "tui"
+        tui_entry = tui_dir / "src" / "index.tsx"
+        if tui_entry.is_file():
+            return tui_dir, tui_entry
+
+    fallback_dir = module_path.parents[2] / "tui"
+    return fallback_dir, fallback_dir / "src" / "index.tsx"
+
+
 def _resolve_server_volume_name(config: AppConfig) -> str | None:
+    """Resolve the volume name from config, falling back to default."""
     volume_name = config.interpreter.volume_name
     return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
 
@@ -53,11 +85,6 @@ def _print_result(result: dict[str, Any], *, verbose: bool) -> None:
     Formats the output based on verbosity level. In verbose mode,
     outputs pretty-printed JSON. In non-verbose mode, outputs a
     simplified key-value format.
-
-    Args:
-        result: The result dictionary to print.
-        verbose: If True, print pretty-printed JSON. If False, print
-            simplified key-value pairs.
     """
     if verbose:
         typer.echo(json.dumps(result, indent=2, sort_keys=True))
@@ -71,14 +98,7 @@ def _print_result(result: dict[str, Any], *, verbose: bool) -> None:
 
 
 def _handle_error(exc: Exception) -> None:
-    """Handle an exception by printing an error message and exiting.
-
-    Args:
-        exc: The exception that occurred.
-
-    Raises:
-        typer.Exit: Always raised with exit code 1 after printing the error.
-    """
+    """Handle an exception by printing an error message and exiting."""
     if isinstance(exc, typer.Exit):
         raise exc
     typer.echo(f"Error: {exc}", err=True)
@@ -95,12 +115,8 @@ def _run_code_chat_session(
     stream_refresh_ms: int,
     opentui: bool,
 ) -> None:
-    # Handle OpenTUI mode
+    """Run the code-chat session, optionally with OpenTUI frontend."""
     if opentui:
-        import shutil
-        import subprocess
-        from pathlib import Path as StdPath
-
         # Check for Bun availability
         bun_path = shutil.which("bun")
         if not bun_path:
@@ -110,10 +126,8 @@ def _run_code_chat_session(
             )
             raise typer.Exit(code=2)
 
-        # Locate tui/ directory relative to package root
-        package_root = StdPath(__file__).parent.parent.parent
-        tui_dir = package_root / "tui"
-        tui_entry = tui_dir / "src" / "index.tsx"
+        # Locate OpenTUI frontend in standard repo layouts.
+        tui_dir, tui_entry = _find_opentui_frontend()
 
         if not tui_entry.exists():
             typer.echo(
@@ -142,10 +156,7 @@ def _run_code_chat_session(
         env = {"WS_URL": "ws://localhost:8000/ws/chat"}
 
         try:
-            # Spawn Bun subprocess
             typer.echo(f"Starting OpenTUI frontend from {tui_dir}...")
-            import os
-
             result = subprocess.run(
                 [bun_path, "run", str(tui_entry)],
                 cwd=str(tui_dir),
@@ -156,6 +167,8 @@ def _run_code_chat_session(
         except KeyboardInterrupt:
             typer.echo("\nOpenTUI session interrupted.", err=True)
             raise typer.Exit(code=130)
+        except typer.Exit:
+            raise
         except Exception as exc:
             typer.echo(f"Error running OpenTUI: {exc}", err=True)
             raise typer.Exit(code=1) from exc
@@ -167,8 +180,13 @@ def _run_code_chat_session(
     raise typer.Exit(code=2)
 
 
-# --- Demo and diagnostic commands (registered from cli_demos) ---
+# --- Register extracted commands ---
 register_demo_commands(app, _print_result=_print_result, _handle_error=_handle_error)
+register_init_command(app, _handle_error=_handle_error)
+register_serve_commands(app, get_config=lambda: _CONFIG, _handle_error=_handle_error)
+
+
+# --- Chat commands (remain inline for simplicity) ---
 
 
 @app.command("code-chat")
@@ -262,7 +280,6 @@ def chat(
 
 @app.command("run-react-chat")
 def run_react_chat(
-    # Arguments identical to code-chat, delegating to it
     docs_path: Path | None = typer.Option(None, "--docs-path"),
     trace: bool | None = typer.Option(None, "--trace/--no-trace"),
     trace_mode: str | None = typer.Option(None, "--trace-mode"),
@@ -281,287 +298,9 @@ def run_react_chat(
     )
 
 
-@app.command("serve-api")
-def serve_api(
-    host: str = typer.Option("127.0.0.1", help="Bind host"),
-    port: int = typer.Option(8000, help="Bind port"),
-) -> None:
-    """Run optional FastAPI server surface (requires `--extra server`)."""
-    global _CONFIG
-    if _CONFIG is None:
-        raise typer.Exit(code=1)
-
-    try:
-        missing = [pkg for pkg in ("fastapi", "uvicorn") if find_spec(pkg) is None]
-        if missing:
-            typer.echo(
-                "Server dependencies missing: "
-                + ", ".join(missing)
-                + "\nInstall with:\n  uv sync --extra dev --extra server",
-                err=True,
-            )
-            raise typer.Exit(code=2)
-
-        import uvicorn
-
-        from .server.config import ServerRuntimeConfig
-        from .server.main import create_app
-
-        # Bridge Hydra config to Server config
-        app_obj = create_app(
-            config=ServerRuntimeConfig(
-                secret_name=_CONFIG.interpreter.secrets[0]
-                if _CONFIG.interpreter.secrets
-                else "LITELLM",
-                volume_name=_resolve_server_volume_name(_CONFIG),
-                timeout=_CONFIG.interpreter.timeout,
-                react_max_iters=_CONFIG.rlm_settings.max_iters,
-                rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
-                rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
-                rlm_max_depth=_CONFIG.rlm_settings.max_depth,
-                interpreter_async_execute=_CONFIG.interpreter.async_execute,
-                agent_guardrail_mode=_CONFIG.agent.guardrail_mode,
-                agent_min_substantive_chars=_CONFIG.agent.min_substantive_chars,
-                agent_max_output_chars=_CONFIG.rlm_settings.max_output_chars,
-                agent_model=_CONFIG.agent.model,
-            )
-        )
-        uvicorn.run(app_obj, host=host, port=port)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("serve-mcp")
-def serve_mcp(
-    transport: str = typer.Option(
-        "stdio",
-        help="FastMCP transport: stdio, sse, streamable-http",
-    ),
-    host: str = typer.Option("127.0.0.1", help="Host for HTTP transports"),
-    port: int = typer.Option(8001, help="Port for HTTP transports"),
-) -> None:
-    """Run optional FastMCP server surface (requires `--extra mcp`)."""
-    global _CONFIG
-    if _CONFIG is None:
-        raise typer.Exit(code=1)
-
-    try:
-        missing = [pkg for pkg in ("fastmcp",) if find_spec(pkg) is None]
-        if missing:
-            typer.echo(
-                "MCP dependencies missing: "
-                + ", ".join(missing)
-                + "\nInstall with:\n  uv sync --extra dev --extra mcp",
-                err=True,
-            )
-            raise typer.Exit(code=2)
-
-        from .mcp.server import MCPRuntimeConfig, create_mcp_server
-
-        server = create_mcp_server(
-            config=MCPRuntimeConfig(
-                secret_name=_CONFIG.interpreter.secrets[0]
-                if _CONFIG.interpreter.secrets
-                else "LITELLM",
-                volume_name=_CONFIG.interpreter.volume_name,
-                timeout=_CONFIG.interpreter.timeout,
-                react_max_iters=_CONFIG.rlm_settings.max_iters,
-                rlm_max_iterations=_CONFIG.agent.rlm_max_iterations,
-                rlm_max_llm_calls=_CONFIG.rlm_settings.max_llm_calls,
-                rlm_max_depth=_CONFIG.rlm_settings.max_depth,
-                interpreter_async_execute=_CONFIG.interpreter.async_execute,
-                agent_guardrail_mode=_CONFIG.agent.guardrail_mode,
-                agent_min_substantive_chars=_CONFIG.agent.min_substantive_chars,
-                agent_max_output_chars=_CONFIG.rlm_settings.max_output_chars,
-            )
-        )
-
-        transport_norm = transport.strip().lower()
-        if transport_norm == "stdio":
-            server.run(transport="stdio")
-        elif transport_norm in {"sse", "streamable-http"}:
-            server.run(transport=transport_norm, host=host, port=port)
-        else:
-            typer.echo(
-                "transport must be one of: stdio, sse, streamable-http", err=True
-            )
-            raise typer.Exit(code=2)
-    except Exception as exc:
-        _handle_error(exc)
-
-
-@app.command("init")
-def init(
-    target: Path | None = typer.Option(
-        None,
-        help="Target directory (defaults to ~/.claude)",
-    ),
-    force: bool = typer.Option(False, "--force", help="Overwrite existing files"),
-    skills_only: bool = typer.Option(
-        False, "--skills-only", help="Install only skills, not agents"
-    ),
-    agents_only: bool = typer.Option(
-        False, "--agents-only", help="Install only agents, not skills"
-    ),
-    teams_only: bool = typer.Option(
-        False, "--teams-only", help="Install only team templates"
-    ),
-    hooks_only: bool = typer.Option(
-        False, "--hooks-only", help="Install only hook templates"
-    ),
-    no_teams: bool = typer.Option(
-        False, "--no-teams", help="Skip installing team templates"
-    ),
-    no_hooks: bool = typer.Option(
-        False, "--no-hooks", help="Skip installing hook templates"
-    ),
-    list_available: bool = typer.Option(
-        False, "--list", help="List available scaffold assets (no install)"
-    ),
-) -> None:
-    """Bootstrap Claude Code scaffold assets to user-level directory.
-
-    Copies the bundled RLM skills, agents, teams, and hooks from the installed
-    fleet-rlm package to ~/.claude/ (or a custom target).
-    """
-    try:
-        # Default to ~/.claude if no target specified
-        if target is None:
-            target = Path.home() / ".claude"
-
-        # List mode: just show what's available
-        if list_available:
-            typer.echo("Available Skills:")
-            for skill in scaffold.list_skills():
-                typer.echo(
-                    f"  - {skill['name']}: {skill['description']} ({skill['files']} files)"
-                )
-            typer.echo("\nAvailable Agents:")
-            for agent in scaffold.list_agents():
-                typer.echo(
-                    f"  - {agent['name']}: {agent['description']} "
-                    f"(model: {agent['model']})"
-                )
-            typer.echo("\nAvailable Teams:")
-            for team in scaffold.list_teams():
-                typer.echo(
-                    f"  - {team['name']}: {team['description']} ({team['files']} files)"
-                )
-            typer.echo("\nAvailable Hooks:")
-            for hook in scaffold.list_hooks():
-                event = f", event: {hook['event']}" if hook["event"] else ""
-                typer.echo(f"  - {hook['name']}: {hook['description']}{event}")
-            return
-
-        # Install mode
-        only_modes = [
-            ("skills", skills_only),
-            ("agents", agents_only),
-            ("teams", teams_only),
-            ("hooks", hooks_only),
-        ]
-        active_only_modes = [name for name, enabled in only_modes if enabled]
-
-        if len(active_only_modes) > 1:
-            typer.echo(
-                "Error: Only one --*-only mode can be specified at a time.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-        if active_only_modes and (no_teams or no_hooks):
-            typer.echo(
-                "Error: --*-only modes cannot be combined with --no-teams/--no-hooks.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-        if agents_only:
-            installed = scaffold.install_agents(target, force=force)
-            total = scaffold.list_agents()
-            typer.echo(
-                f"Installed {len(installed)} of {len(total)} agents to {target}/agents/"
-            )
-        elif skills_only:
-            installed = scaffold.install_skills(target, force=force)
-            total = scaffold.list_skills()
-            typer.echo(
-                f"Installed {len(installed)} of {len(total)} skills to {target}/skills/"
-            )
-        elif teams_only:
-            installed = scaffold.install_teams(target, force=force)
-            total = scaffold.list_teams()
-            typer.echo(
-                f"Installed {len(installed)} of {len(total)} teams to {target}/teams/"
-            )
-        elif hooks_only:
-            installed = scaffold.install_hooks(target, force=force)
-            total = scaffold.list_hooks()
-            typer.echo(
-                f"Installed {len(installed)} of {len(total)} hooks to {target}/hooks/"
-            )
-            # ... (Existing logging logic) ...
-        else:
-            # Install all categories (with optional exclusions).
-            result = scaffold.install_all(
-                target,
-                force=force,
-                include_teams=not no_teams,
-                include_hooks=not no_hooks,
-            )
-
-            summary_parts = [
-                f"{len(result['skills_installed'])} of {result['skills_total']} skills",
-                f"{len(result['agents_installed'])} of {result['agents_total']} agents",
-            ]
-            if not no_teams:
-                summary_parts.append(
-                    f"{len(result['teams_installed'])} of {result['teams_total']} teams"
-                )
-            if not no_hooks:
-                summary_parts.append(
-                    f"{len(result['hooks_installed'])} of {result['hooks_total']} hooks"
-                )
-
-            typer.echo(f"Installed {', '.join(summary_parts)} to {target}/")
-            if result["skills_installed"]:
-                typer.echo(f"  Skills: {', '.join(result['skills_installed'])}")
-            if result["agents_installed"]:
-                typer.echo(f"  Agents: {', '.join(result['agents_installed'])}")
-            if not no_teams and result["teams_installed"]:
-                typer.echo(f"  Teams: {', '.join(result['teams_installed'])}")
-            if not no_hooks and result["hooks_installed"]:
-                typer.echo(f"  Hooks: {', '.join(result['hooks_installed'])}")
-
-            total_skipped = (
-                result["skills_total"]
-                - len(result["skills_installed"])
-                + result["agents_total"]
-                - len(result["agents_installed"])
-            )
-            if not no_teams:
-                total_skipped += result["teams_total"] - len(result["teams_installed"])
-            if not no_hooks:
-                total_skipped += result["hooks_total"] - len(result["hooks_installed"])
-            if total_skipped > 0:
-                typer.echo(
-                    f"  Skipped {total_skipped} existing (use --force to overwrite)"
-                )
-
-    except Exception as exc:
-        _handle_error(exc)
-
-
 def _initialize_config(overrides: list[str] | None = None) -> AppConfig:
-    """Initialize Hydra config manually without taking over argument parsing.
-
-    Args:
-        overrides: Optional list of Hydra config overrides (e.g., ["agent.model=gpt-4"])
-
-    Returns:
-        Validated AppConfig instance
-    """
-    from hydra import initialize_config_module, compose
+    """Initialize Hydra config manually without taking over argument parsing."""
+    from hydra import compose, initialize_config_module
 
     with initialize_config_module(config_module="fleet_rlm.conf", version_base=None):
         cfg = compose(config_name="config", overrides=overrides or [])
@@ -577,14 +316,11 @@ def main() -> None:
     global _CONFIG
 
     # Parse args to find Hydra overrides (key=value) and separate from Typer args
-    import sys
-
     hydra_overrides: list[str] = []
     typer_args: list[str] = []
 
     for arg in sys.argv[1:]:
         if "=" in arg and not arg.startswith("-"):
-            # This looks like a Hydra override: key=value
             hydra_overrides.append(arg)
         else:
             typer_args.append(arg)
