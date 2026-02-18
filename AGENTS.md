@@ -45,14 +45,22 @@ uv run fleet-rlm serve-api --port 8000
 uv run fleet-rlm serve-api interpreter.volume_name=my-volume --port 8000
 uv run fleet-rlm serve-mcp --transport stdio
 
-# Quality gate (run all three before pushing)
-uv run ruff check src tests && uv run ty check src && uv run pytest -q
+# Quality gate (run all four before pushing)
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run ty check src
+uv run pytest -q
 
 # Individual checks
 uv run ruff check src tests
+uv run ruff format --check src tests
 uv run ruff format src tests
 uv run ty check src
 uv run pytest
+
+# Performance baseline workflow (credential-gated)
+uv run python scripts/perf/compare_baseline.py --update-baseline --baseline scripts/perf/baseline/rlm_benchmarks_baseline.json
+uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/rlm_benchmarks_baseline.json --threshold 0.20
 ```
 
 ## Interactive Surface
@@ -72,6 +80,7 @@ uv run pytest
 - `src/fleet_rlm/react/agent.py`: `RLMReActChatAgent` (`dspy.Module` subclass)
 - `src/fleet_rlm/react/tools.py`: ReAct tool definitions (wrapped with `dspy.Tool`)
 - `src/fleet_rlm/react/tools_sandbox.py`: sandbox-specific tools (`rlm_query`, `edit_file`) with depth enforcement
+- `src/fleet_rlm/react/rlm_runtime_modules.py`: canonical reusable DSPy runtime wrappers for long-context ReAct tools
 - `src/fleet_rlm/react/streaming.py`: async/streaming ReAct execution with trajectory normalization
 - `src/fleet_rlm/react/commands.py`: WebSocket command dispatch → tool mapping
 - `src/fleet_rlm/runners.py`: high-level task runners
@@ -101,6 +110,17 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Prefer `uv run ...` for commands
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
+- ReAct long-context tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`) should reuse cached runtime wrappers from `react/rlm_runtime_modules.py` instead of constructing ad-hoc `dspy.RLM(...)` instances per tool call
+- Additive signature tools are available for advanced workflows:
+  - `grounded_answer` (returns structured citations with keys `source`, `chunk_id`, `evidence`, `reason`)
+  - `triage_incident_logs`
+  - `plan_code_change`
+  - `propose_core_memory_update`
+- Memory/volume enrichment tools are available for management workflows:
+  - `memory_tree` (bounded recursive tree for Modal volume paths)
+  - `memory_action_intent` (risk + confirmation-oriented action planning)
+  - `memory_structure_audit` and `memory_structure_migration_plan` (non-mutating structure governance)
+  - `clarification_questions` (safe clarification generation for ambiguous/high-risk operations)
 - WebSocket interactive chat should carry identity envelope fields (`workspace_id`, `user_id`, `session_id`) so per-user/per-workspace state can be restored
 - `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through `RLM_DELEGATE`
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`

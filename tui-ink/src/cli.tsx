@@ -10,6 +10,7 @@ import {
   parseBridgeSettingsSnapshot,
   parseBridgeStatusPayload,
 } from "./bridge-schemas.js";
+import { MentionDebounceController } from "./mention-debounce.js";
 import { Composer } from "./components/Composer.js";
 import { HeaderBar } from "./components/HeaderBar.js";
 import { MentionPanel } from "./components/MentionPanel.js";
@@ -47,6 +48,7 @@ import type {
 } from "./types.js";
 
 const PLACEHOLDER = "Type @ to mention files, / for commands, or ? for shortcuts";
+const MENTION_DEBOUNCE_MS = 120;
 const DEFAULT_COMMANDS = [
   "help",
   "status",
@@ -219,6 +221,7 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
   const streamingRef = useRef("");
   const pendingFinalTextRef = useRef("");
   const turnInFlightRef = useRef(false);
+  const mentionDebounceRef = useRef(new MentionDebounceController(MENTION_DEBOUNCE_MS));
   useEffect(() => {
     streamingRef.current = streamingText;
   }, [streamingText]);
@@ -608,38 +611,44 @@ function FleetInkApp({ options }: { options: CliOptions }): React.JSX.Element {
   }, [appendEvent, appendLine, client, fetchSettings]);
 
   useEffect(() => {
+    const debounce = mentionDebounceRef.current;
     if (overlayView !== "none") {
+      debounce.clear();
       setMentionItems([]);
       return;
     }
     if (mentionQuery === null) {
+      debounce.clear();
       setMentionItems([]);
       setMentionIndex(0);
       return;
     }
-    let alive = true;
-    void (async () => {
-      try {
-        const response = parseBridgeMentionSearch(
-          await client.request("mentions.search", {
-            query: mentionQuery,
-            limit: 16,
-          }),
-        );
-        if (!alive) {
-          return;
-        }
-        setMentionItems(response.items);
-        setMentionIndex(0);
-      } catch {
-        if (alive) {
-          setMentionItems([]);
+
+    debounce.schedule((requestToken) => {
+      void (async () => {
+        try {
+          const response = parseBridgeMentionSearch(
+            await client.request("mentions.search", {
+              query: mentionQuery,
+              limit: 16,
+            }),
+          );
+          if (!debounce.isCurrent(requestToken)) {
+            return;
+          }
+          setMentionItems(response.items);
           setMentionIndex(0);
+        } catch {
+          if (debounce.isCurrent(requestToken)) {
+            setMentionItems([]);
+            setMentionIndex(0);
+          }
         }
-      }
-    })();
+      })();
+    });
+
     return () => {
-      alive = false;
+      debounce.clear();
     };
   }, [client, mentionQuery, overlayView]);
 

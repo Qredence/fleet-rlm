@@ -50,7 +50,7 @@ from .protocol import (
     write_payload,
 )
 
-ASYNC_METHODS = {"chat.submit", "chat.cancel", "commands.execute", "mentions.search"}
+ASYNC_METHODS = {"chat.submit", "chat.cancel", "commands.execute"}
 DEFAULT_BRIDGE_SECRET_NAME = "LITELLM"
 DEFAULT_BRIDGE_VOLUME_NAME = "rlm-volume-dspy"
 
@@ -258,6 +258,9 @@ class BridgeRuntime:
         if request.method == "commands.list":
             return list_commands(params)
 
+        if request.method == "mentions.search":
+            return search_mentions(params)
+
         if request.method == "commands.set_policy":
             cmd = str(params.get("command", "")).strip()
             if not cmd:
@@ -352,8 +355,6 @@ class BridgeRuntime:
             return cancel_chat(self, params)
         if request.method == "commands.execute":
             return await execute_command(self, params)
-        if request.method == "mentions.search":
-            return search_mentions(params)
 
         # Fallback for non-async methods.
         return self.dispatch(request)

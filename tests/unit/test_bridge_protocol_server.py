@@ -121,6 +121,40 @@ def test_run_stdio_server_returns_error_for_unknown_method() -> None:
     assert messages[0]["error"]["code"] == "UNKNOWN_METHOD"
 
 
+def test_run_stdio_server_routes_mentions_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_search_mentions(params: dict[str, object]) -> dict[str, object]:
+        captured.update(params)
+        return {
+            "items": [],
+            "query": str(params.get("query", "")),
+            "root": "/tmp",
+            "count": 0,
+        }
+
+    monkeypatch.setattr(bridge_server, "search_mentions", fake_search_mentions)
+    input_stream = io.StringIO(
+        '{"id":"1","method":"mentions.search","params":{"query":"src/"}}\n'
+        '{"id":"2","method":"session.shutdown","params":{}}\n'
+    )
+    output_stream = io.StringIO()
+
+    run_stdio_server(
+        config=AppConfig(),
+        input_stream=input_stream,
+        output_stream=output_stream,
+        trace_mode="compact",
+    )
+
+    messages = _json_lines(output_stream.getvalue())
+    assert messages[0]["id"] == "1"
+    assert messages[0]["result"]["query"] == "src/"
+    assert captured["query"] == "src/"
+
+
 def test_runtime_dispatch_memory_read_uses_runtime_volume_when_omitted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
