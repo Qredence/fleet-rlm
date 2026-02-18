@@ -206,12 +206,25 @@ SUBMIT(
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
         """Answer a query with explicit machine-readable citations."""
+        try:
+            max_chunks_int = int(max_chunks)
+        except (TypeError, ValueError):
+            return {
+                "status": "error",
+                "error": "Invalid max_chunks value. It must be a positive integer.",
+            }
+        if max_chunks_int <= 0:
+            return {
+                "status": "error",
+                "error": "max_chunks must be a positive integer.",
+            }
+
         agent.start()
         document = resolve_document(agent, alias)
         chunks = chunk_text(
             document, chunk_strategy, size=80_000, overlap=1_000, pattern=""
         )
-        evidence_chunks = [chunk_to_text(chunk) for chunk in chunks][:max_chunks]
+        evidence_chunks = [chunk_to_text(chunk) for chunk in chunks][:max_chunks_int]
         if not evidence_chunks:
             return {
                 "status": "error",
