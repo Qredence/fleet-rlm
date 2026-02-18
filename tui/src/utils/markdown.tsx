@@ -1,6 +1,7 @@
 /**
  * Simple markdown parser for terminal output.
  * Converts markdown to OpenTUI-compatible styled elements.
+ * Uses <code> component for syntax highlighting.
  */
 
 type MarkdownSegment =

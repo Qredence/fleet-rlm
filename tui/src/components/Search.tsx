@@ -383,12 +383,24 @@ export function SearchInput({
           flexGrow={1}
         />
         <box flexDirection="row" gap={1}>
-          <button onClick={() => setCaseSensitive(!caseSensitive)}>
-            {caseSensitive ? "Aa" : "aa"}
-          </button>
-          <button onClick={() => setRegex(!regex)}>
-            {regex ? ".*" : "ab"}
-          </button>
+          <box
+            border
+            paddingX={1}
+            onMouseDown={() => setCaseSensitive(!caseSensitive)}
+          >
+            <text fg={caseSensitive ? "#7aa2f7" : "#555555"}>
+              {caseSensitive ? "Aa" : "aa"}
+            </text>
+          </box>
+          <box
+            border
+            paddingX={1}
+            onMouseDown={() => setRegex(!regex)}
+          >
+            <text fg={regex ? "#7aa2f7" : "#555555"}>
+              {regex ? ".*" : "ab"}
+            </text>
+          </box>
         </box>
       </box>
     </box>

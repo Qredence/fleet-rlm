@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
-import { useKeyboard } from "@opentui/react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useRegisterKeyHandler, PRIORITY } from "../context/KeyboardContext";
 import { getAllCommands, getCommandAction } from "../commands/registry";
 import { fuzzySearch } from "../utils/fuzzy";
 import { bg, border, fg, accent } from "../theme";
@@ -42,17 +42,21 @@ export function CommandPalette({
     setSelectedIndex(0);
   }, [query]);
 
-  useKeyboard((key) => {
-    if (!isOpen) return;
+  const handlePaletteKeys = useCallback((key: { name: string }) => {
+    if (!isOpen) return false;
+
     if (key.name === "escape") {
       onClose();
       setQuery("");
+      return true;
     }
     if (key.name === "arrowup") {
       setSelectedIndex((i) => Math.max(0, i - 1));
+      return true;
     }
     if (key.name === "arrowdown") {
       setSelectedIndex((i) => Math.min(filteredCommands.length - 1, i + 1));
+      return true;
     }
     if (key.name === "return") {
       const cmd = filteredCommands[selectedIndex];
@@ -79,8 +83,12 @@ export function CommandPalette({
         onClose();
         setQuery("");
       }
+      return true;
     }
-  });
+    return false;
+  }, [isOpen, onClose, filteredCommands, selectedIndex, onSlashCommand, onClearChat, onToggleSidebar, onCopyLast, onCancel]);
+
+  useRegisterKeyHandler("commandPalette", handlePaletteKeys, PRIORITY.PALETTE);
 
   if (!isOpen) return null;
 

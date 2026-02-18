@@ -149,74 +149,6 @@ export function createWave(colors: ColorInput[]): ColorGenerator {
   };
 }
 
-// Helper to convert color to ANSI
-function colorToAnsi(color: ColorInput): string {
-  if (typeof color === "string") {
-    // Named colors mapping
-    const namedColors: Record<string, string> = {
-      black: "\x1b[30m",
-      red: "\x1b[31m",
-      green: "\x1b[32m",
-      yellow: "\x1b[33m",
-      blue: "\x1b[34m",
-      magenta: "\x1b[35m",
-      cyan: "\x1b[36m",
-      white: "\x1b[37m",
-      gray: "\x1b[90m",
-      brightRed: "\x1b[91m",
-      brightGreen: "\x1b[92m",
-      brightYellow: "\x1b[93m",
-      brightBlue: "\x1b[94m",
-      brightMagenta: "\x1b[95m",
-      brightCyan: "\x1b[96m",
-      brightWhite: "\x1b[97m",
-    };
-
-    if (namedColors[color]) {
-      return namedColors[color];
-    }
-
-    // Hex color
-    if (color.startsWith("#")) {
-      const hex = color.slice(1);
-      const r = parseInt(hex.slice(0, 2), 16);
-      const g = parseInt(hex.slice(2, 4), 16);
-      const b = parseInt(hex.slice(4, 6), 16);
-      return `\x1b[38;2;${r};${g};${b}m`;
-    }
-
-    return "";
-  }
-
-  if ("r" in color) {
-    // RGB
-    return `\x1b[38;2;${color.r};${color.g};${color.b}m`;
-  }
-
-  // HSL - convert to RGB (simplified)
-  const { h, s, l } = color;
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-  const m = l - c / 2;
-
-  let r, g, b;
-  if (h < 60) {
-    [r, g, b] = [c, x, 0];
-  } else if (h < 120) {
-    [r, g, b] = [x, c, 0];
-  } else if (h < 180) {
-    [r, g, b] = [0, c, x];
-  } else if (h < 240) {
-    [r, g, b] = [0, x, c];
-  } else if (h < 300) {
-    [r, g, b] = [x, 0, c];
-  } else {
-    [r, g, b] = [c, 0, x];
-  }
-
-  return `\x1b[38;2;${Math.round((r + m) * 255)};${Math.round((g + m) * 255)};${Math.round((b + m) * 255)}m`;
-}
-
 export function Spinner({
   name = "dots",
   frames: customFrames,
@@ -240,27 +172,21 @@ export function Spinner({
     return () => clearInterval(timer);
   }, [autoplay, interval, frames.length]);
 
-  // Calculate color for current frame
-  let frameColor: string;
-  const colorStr = color as ColorInput;
+  const resolvedColor = typeof color === "function"
+    ? color(frame, 0, frames.length, 1)
+    : color;
 
-  if (typeof color === "function") {
-    // If it's a color generator, apply to each char
-    const colorFn = color as ColorGenerator;
-    const coloredChars = currentFrame.split("").map((char, i) => {
-      const c = colorFn(frame, i, frames.length, currentFrame.length);
-      const ansi = colorToAnsi(c);
-      return `${ansi}${char}\x1b[0m`;
-    });
-    frameColor = coloredChars.join("");
-  } else {
-    const ansi = colorToAnsi(colorStr);
-    frameColor = `${ansi}${currentFrame}\x1b[0m`;
-  }
+  const colorStr = typeof resolvedColor === "string"
+    ? resolvedColor
+    : resolvedColor && "r" in resolvedColor
+      ? `rgb(${resolvedColor.r}, ${resolvedColor.g}, ${resolvedColor.b})`
+      : resolvedColor && "h" in resolvedColor
+        ? `hsl(${resolvedColor.h}, ${resolvedColor.s * 100}%, ${resolvedColor.l * 100}%)`
+        : "white";
 
   return (
-    <text>
-      {frameColor}
+    <text fg={colorStr} bg={backgroundColor}>
+      {currentFrame}
       {text && <span> {text}</span>}
     </text>
   );

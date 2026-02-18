@@ -16,6 +16,9 @@ import type {
 } from "../types/protocol";
 import { createEmptyTurnState, applyStreamEvent } from "../types/state";
 
+/** Focus pane type for keyboard navigation */
+export type FocusPane = "input" | "chat" | "sidebar";
+
 /** Application state */
 export interface AppState {
   // Connection
@@ -53,6 +56,8 @@ export interface AppState {
   toolsVisible: boolean;
   sidebarCollapsed: boolean;
   inputValue: string;
+  inputDraft: string; // Saved when navigating away from input
+  focusedPane: FocusPane;
   statusMessage: string;
   commandPalette: CommandPaletteState;
 }
@@ -75,6 +80,9 @@ export type AppAction =
   | { type: "TOGGLE_TOOLS" }
   | { type: "TOGGLE_SIDEBAR" }
   | { type: "SET_INPUT_VALUE"; payload: string }
+  | { type: "SET_INPUT_DRAFT"; payload: string }
+  | { type: "CLEAR_INPUT_DRAFT" }
+  | { type: "SET_FOCUSED_PANE"; payload: FocusPane }
   | { type: "SET_STATUS_MESSAGE"; payload: string }
   | { type: "RESET_TURN" }
   | { type: "OPEN_COMMAND_PALETTE" }
@@ -106,6 +114,8 @@ const initialState: AppState = {
   reasoningVisible: true,
   toolsVisible: true,
   inputValue: "",
+  inputDraft: "",
+  focusedPane: "input",
   statusMessage: "Disconnected",
   recentDocs: [],
   sidebarCollapsed: false,
@@ -229,6 +239,15 @@ function appReducer(state: AppState, action: AppAction): AppState {
 
     case "SET_INPUT_VALUE":
       return { ...state, inputValue: action.payload };
+
+    case "SET_INPUT_DRAFT":
+      return { ...state, inputDraft: action.payload };
+
+    case "CLEAR_INPUT_DRAFT":
+      return { ...state, inputDraft: "" };
+
+    case "SET_FOCUSED_PANE":
+      return { ...state, focusedPane: action.payload };
 
     case "SET_STATUS_MESSAGE":
       return { ...state, statusMessage: action.payload };
