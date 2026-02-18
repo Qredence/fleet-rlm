@@ -147,7 +147,11 @@ def main() -> None:
     print("Summary")
     print("=" * 40)
     for name, passed in results.items():
-        print(f"  {name:15s}: {'OK' if passed else 'FAIL'}")
+        if name == "secret":
+            label = "LITELLM secret"
+        else:
+            label = name
+        print(f"  {label:15s}: {'OK' if passed else 'FAIL'}")
 
     if all(results.values()):
         print("\nAll checks passed.")
