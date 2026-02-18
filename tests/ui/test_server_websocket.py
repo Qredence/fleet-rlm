@@ -165,6 +165,7 @@ def test_app(monkeypatch, fake_agent):
     return app
 
 
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
 def test_websocket_basic_message_flow(test_app, fake_agent):
     """Test basic message sending and event receiving."""
     fake_agent.set_events(

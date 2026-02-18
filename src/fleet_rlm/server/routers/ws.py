@@ -730,7 +730,15 @@ async def chat_streaming(websocket: WebSocket):
                             "payload": event.payload,
                             "timestamp": event.timestamp.isoformat(),
                         }
-                        await websocket.send_json({"type": "event", "data": event_dict})
+                        is_terminal_event = event.kind in {
+                            "final",
+                            "cancelled",
+                            "error",
+                        }
+                        if not is_terminal_event:
+                            await websocket.send_json(
+                                {"type": "event", "data": event_dict}
+                            )
 
                         step = step_builder.from_stream_event(
                             kind=event.kind,
@@ -747,6 +755,9 @@ async def chat_streaming(websocket: WebSocket):
                                 include_volume_save=True, latest_user_message=message
                             )
                             await lifecycle.complete_run(RunStatus.COMPLETED, step=step)
+                            await websocket.send_json(
+                                {"type": "event", "data": event_dict}
+                            )
                         elif event.kind in {"cancelled", "error"}:
                             status = (
                                 RunStatus.CANCELLED
@@ -760,6 +771,9 @@ async def chat_streaming(websocket: WebSocket):
                             )
                             await lifecycle.complete_run(
                                 status, step=step, error_json=error_json
+                            )
+                            await websocket.send_json(
+                                {"type": "event", "data": event_dict}
                             )
 
                     if not lifecycle.run_completed:
