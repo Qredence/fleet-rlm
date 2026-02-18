@@ -8,6 +8,8 @@ Run with: uv run pytest tests/test_context_manager.py -v
 
 from __future__ import annotations
 
+import json
+import queue
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -227,3 +229,110 @@ async def test_async_context_manager_calls_start_and_shutdown(mock_modal):
             mock_shutdown.assert_not_called()
 
     mock_shutdown.assert_called_once()
+
+
+def test_start_bundles_driver_dependencies_in_exec_command(mock_modal, monkeypatch):
+    """start() should embed helper module sources so sandbox needn't import fleet_rlm."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+    import modal
+
+    captured: dict[str, object] = {}
+
+    class _CaptureSandbox(_FakeSandbox):
+        def exec(self, *args, **kwargs):
+            captured["args"] = args
+            return super().exec(*args, **kwargs)
+
+    monkeypatch.setattr(
+        modal.Sandbox, "create", MagicMock(return_value=_CaptureSandbox())
+    )
+
+    interp = ModalInterpreter(timeout=10)
+    interp.start()
+    try:
+        cmd = str((captured.get("args") or ("", "", "", ""))[3])
+        assert "def make_send(" in cmd
+        assert "def peek(" in cmd
+        assert "def reset_session_history(" in cmd
+        assert "def save_to_volume(" in cmd
+        assert "def sandbox_driver(" in cmd
+        assert "sandbox_driver()" in cmd
+    finally:
+        interp.shutdown()
+
+
+def test_execute_retries_once_on_modal_exec_stdin_failure(mock_modal, monkeypatch):
+    """execute() should restart sandbox and retry once on transient stdin channel errors."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    starts = {"count": 0}
+    writes = {"count": 0}
+    shutdowns = {"count": 0}
+
+    def fake_start():
+        starts["count"] += 1
+        interp._sandbox = object()
+        interp._stderr_iter = iter([])
+        interp._stdout_queue = queue.Queue()
+        if starts["count"] == 2:
+            interp._stdout_queue.put(json.dumps({"final": {"status": "ok"}}))
+
+    def fake_shutdown():
+        shutdowns["count"] += 1
+        interp._sandbox = None
+        interp._stdin = None
+        interp._stdout_queue = None
+        interp._stderr_iter = None
+
+    def fake_write_line(_payload):
+        writes["count"] += 1
+        if writes["count"] == 1:
+            raise RuntimeError(
+                "Failed to write to exec stdin: please contact support@modal.com"
+            )
+
+    monkeypatch.setattr(interp, "start", fake_start)
+    monkeypatch.setattr(interp, "shutdown", fake_shutdown)
+    monkeypatch.setattr(interp, "_write_line", fake_write_line)
+
+    result = interp.execute("print('hi')")
+    assert result.output["status"] == "ok"
+    assert starts["count"] == 2
+    assert shutdowns["count"] == 1
+    assert writes["count"] == 2
+
+
+def test_execute_does_not_retry_non_channel_errors(mock_modal, monkeypatch):
+    """execute() should surface non-transport failures immediately."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    starts = {"count": 0}
+    writes = {"count": 0}
+    shutdowns = {"count": 0}
+
+    def fake_start():
+        starts["count"] += 1
+        interp._sandbox = object()
+        interp._stderr_iter = iter([])
+        interp._stdout_queue = queue.Queue()
+
+    def fake_shutdown():
+        shutdowns["count"] += 1
+        interp._sandbox = None
+
+    def fake_write_line(_payload):
+        writes["count"] += 1
+        raise RuntimeError("Permission denied")
+
+    monkeypatch.setattr(interp, "start", fake_start)
+    monkeypatch.setattr(interp, "shutdown", fake_shutdown)
+    monkeypatch.setattr(interp, "_write_line", fake_write_line)
+
+    with pytest.raises(RuntimeError, match="Permission denied"):
+        interp.execute("print('hi')")
+
+    assert starts["count"] == 1
+    assert shutdowns["count"] == 0
+    assert writes["count"] == 1
