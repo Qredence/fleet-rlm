@@ -171,7 +171,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
         loaded = load_text_from_volume(path, alias=alias)
         if loaded.get("status") != "ok":
             return loaded
-        text = agent._documents.get(alias, "")
+        text = agent.documents.get(alias, "")
         return {
             "status": "ok",
             "alias": alias,

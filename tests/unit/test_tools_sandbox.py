@@ -55,6 +55,25 @@ class _FakeInterpreter:
         pass
 
 
+class _VolumeTextInterpreter(_FakeInterpreter):
+    """Fake interpreter that returns text for load_from_volume submit calls."""
+
+    def __init__(self, text: str):
+        super().__init__()
+        self._text = text
+
+    def execute(
+        self, code: str, variables: dict[str, Any], execution_profile: Any = None
+    ):
+        self.last_code = code
+        self.last_vars = variables
+        if "load_from_volume(path)" in code:
+            return dspy.primitives.code_interpreter.FinalOutput(
+                output={"status": "ok", "text": self._text}
+            )
+        return super().execute(code, variables, execution_profile)
+
+
 @pytest.fixture
 def mock_agent():
     agent = MagicMock(spec=RLMReActChatAgent)
@@ -105,6 +124,41 @@ def test_edit_file_generates_correct_code(mock_agent):
     assert "elif count > 1:" in code
     assert "content.replace(old_snippet, new_snippet)" in code
     assert 'with open(path, "w", encoding="utf-8") as f:' in code
+
+
+def test_process_document_uses_cached_document_text(mock_agent):
+    """process_document should report metadata from the loaded document cache."""
+    tools = build_tool_list(mock_agent)
+    process_tool = next(t for t in tools if t.name == "process_document")
+
+    result = process_tool(path="/data/workspace/doc.txt", alias="active")
+
+    assert result["status"] == "ok"
+    assert result["alias"] == "active"
+    assert result["path"] == "/data/workspace/doc.txt"
+    assert result["chars"] == 0
+    assert result["lines"] == 0
+
+
+def test_process_document_with_non_empty_volume_payload(mock_agent):
+    """process_document should report chars/lines for loaded volume text."""
+    mock_agent.interpreter = _VolumeTextInterpreter("alpha\nbeta\ngamma")
+
+    def _set_document(alias: str, content: str) -> None:
+        mock_agent.documents[alias] = content
+
+    mock_agent._set_document = MagicMock(side_effect=_set_document)
+
+    tools = build_tool_list(mock_agent)
+    process_tool = next(t for t in tools if t.name == "process_document")
+
+    result = process_tool(path="/data/workspace/doc.txt", alias="report")
+
+    assert result["status"] == "ok"
+    assert result["alias"] == "report"
+    assert result["path"] == "/data/workspace/doc.txt"
+    assert result["chars"] == len("alpha\nbeta\ngamma")
+    assert result["lines"] == 3
 
 
 def test_rlm_query_spawns_sub_agent(mock_agent):
