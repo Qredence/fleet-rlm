@@ -33,6 +33,7 @@ dependencies = [
     "structlog>=24.1.0,<25",
     "tomli>=2.0.0; python_version < '3.11'",
     "typer>=0.21.1,<1",
+    "posthog>=7.9.1",
 ]
 
 [project.urls]
