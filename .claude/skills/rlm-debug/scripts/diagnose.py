@@ -146,8 +146,17 @@ def main() -> None:
     print("\n" + "=" * 40)
     print("Summary")
     print("=" * 40)
-    for name, passed in results.items():
-        print(f"  {name:15s}: {'OK' if passed else 'FAIL'}")
+    summary_labels = {
+        "fleet-rlm": "fleet-rlm",
+        "modal": "modal",
+        "environment": "environment",
+        "secret": "LITELLM secret",
+        "volumes": "volumes",
+    }
+    for key in ("fleet-rlm", "modal", "environment", "secret", "volumes"):
+        passed = results[key]
+        label = summary_labels[key]
+        print(f"  {label:15s}: {'OK' if passed else 'FAIL'}")
 
     if all(results.values()):
         print("\nAll checks passed.")
