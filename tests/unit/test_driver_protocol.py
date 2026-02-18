@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import io
+import inspect
 import json
 import sys
 
@@ -108,3 +109,40 @@ def test_root_profile_blocks_helper_access(monkeypatch):
         "Helper 'peek' is not available in ROOT_INTERLOCUTOR profile"
         in messages[0]["stderr"]
     )
+
+
+def test_extracted_driver_source_runs_standalone(monkeypatch):
+    """Regression: inspect-extracted sandbox_driver source must be self-contained."""
+    ns: dict[str, object] = {}
+    exec(inspect.getsource(sandbox_driver), ns)
+    extracted = ns["sandbox_driver"]
+
+    iterator = iter(
+        [
+            json.dumps(
+                {
+                    "code": "SUBMIT(status='ok')",
+                    "variables": {},
+                    "tool_names": [],
+                    "output_names": [],
+                }
+            )
+        ]
+    )
+
+    def fake_input() -> str:
+        try:
+            return next(iterator)
+        except StopIteration as exc:
+            raise EOFError from exc
+
+    proto_out = io.StringIO()
+    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr(sys, "__stdout__", proto_out)
+
+    extracted()
+
+    raw_lines = [line for line in proto_out.getvalue().splitlines() if line.strip()]
+    messages = [json.loads(line) for line in raw_lines]
+    assert len(messages) == 1
+    assert messages[0]["final"] == {"status": "ok"}
