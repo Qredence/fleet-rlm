@@ -9,6 +9,7 @@ All non-health HTTP routes and all WebSocket routes require auth.
 - `AUTH_MODE=dev`:
   - Debug headers (`X-Debug-Tenant-Id`, `X-Debug-User-Id`, `X-Debug-Email`, `X-Debug-Name`), or
   - `Authorization: Bearer <HS256 token>` with `tid`/`oid`/`email`/`name`.
+  - WebSocket-only fallback query auth: `debug_tenant_id` + `debug_user_id` (optional `debug_email`/`debug_name`) or `access_token=<HS256 token>`.
 - `AUTH_MODE=entra`: scaffolded and currently fail-closed until JWKS validation wiring is added.
 
 Identity is normalized to:
@@ -70,6 +71,14 @@ WebSocket endpoint for real-time streaming and command dispatch.
   "session_id": "session-123"
 }
 ```
+
+**WebSocket auth-only query params (dev mode):**
+
+- `debug_tenant_id`
+- `debug_user_id`
+- `debug_email`
+- `debug_name`
+- `access_token`
 
 - Cancel:
 

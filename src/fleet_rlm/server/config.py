@@ -24,6 +24,7 @@ class ServerRuntimeConfig(BaseModel):
     ws_default_user_id: str = "anonymous"
     ws_enforce_react_interlocutor: bool = True
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
+    sandbox_provider: str = "modal"  # "modal", "local", "daytona"
     agent_model: str | None = None  # Model identifier to use for the agent
     database_url: str | None = Field(
         default_factory=lambda: os.getenv("DATABASE_URL") or None

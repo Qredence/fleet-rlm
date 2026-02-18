@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     SmallInteger,
     String,
     Text,
@@ -153,6 +154,32 @@ class SubscriptionStatus(str, enum.Enum):
     PAST_DUE = "past_due"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
+
+
+class SkillSource(str, enum.Enum):
+    SCAFFOLD = "scaffold"
+    IMPORTED = "imported"
+    USER_DEFINED = "user_defined"
+    SYSTEM = "system"
+
+
+class SkillStatus(str, enum.Enum):
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    DISABLED = "disabled"
+
+
+class SkillLinkSource(str, enum.Enum):
+    MANUAL = "manual"
+    INFERRED = "inferred"
+    IMPORTED = "imported"
+
+
+class SkillUsageStatus(str, enum.Enum):
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class Tenant(Base):
@@ -605,4 +632,369 @@ class TenantSubscription(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class SkillTaxonomy(Base):
+    __tablename__ = "skill_taxonomies"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "created_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            ondelete="SET NULL",
+            name="fk_skill_taxonomies_tenant_created_by_user__users_tenant_id_id",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_skill_taxonomies_tenant_id_id"),
+        UniqueConstraint("tenant_id", "key", name="uq_skill_taxonomies_tenant_key"),
+        Index("ix_skill_taxonomies_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_skill_taxonomies_tenant_key", "tenant_id", "key"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class TaxonomyTerm(Base):
+    __tablename__ = "taxonomy_terms"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "taxonomy_id"],
+            ["skill_taxonomies.tenant_id", "skill_taxonomies.id"],
+            ondelete="CASCADE",
+            name="fk_tax_terms_tenant_taxonomy",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "parent_term_id"],
+            ["taxonomy_terms.tenant_id", "taxonomy_terms.id"],
+            ondelete="SET NULL",
+            name="fk_taxonomy_terms_tenant_parent__taxonomy_terms_tenant_id_id",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_taxonomy_terms_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "taxonomy_id",
+            "slug",
+            name="uq_taxonomy_terms_tenant_taxonomy_slug",
+        ),
+        CheckConstraint(
+            "id <> parent_term_id", name="ck_taxonomy_terms_parent_not_self"
+        ),
+        Index(
+            "ix_taxonomy_terms_tenant_taxonomy_parent_sort",
+            "tenant_id",
+            "taxonomy_id",
+            "parent_term_id",
+            "sort_order",
+        ),
+        Index("ix_taxonomy_terms_tenant_slug", "tenant_id", "slug"),
+        Index("ix_taxonomy_terms_synonyms", "synonyms", postgresql_using="gin"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    taxonomy_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    parent_term_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    slug: Mapped[str] = mapped_column(String(128), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synonyms: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Skill(Base):
+    __tablename__ = "skills"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "created_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            ondelete="SET NULL",
+            name="fk_skills_tenant_created_by_user__users_tenant_id_id",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_skills_tenant_id_id"),
+        UniqueConstraint("tenant_id", "stable_key", name="uq_skills_tenant_stable_key"),
+        Index("ix_skills_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_skills_tenant_status", "tenant_id", "status"),
+        Index("ix_skills_tenant_display_name", "tenant_id", "display_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    stable_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[SkillSource] = mapped_column(
+        _pg_enum(SkillSource, name="skill_source"),
+        nullable=False,
+        server_default=SkillSource.SCAFFOLD.value,
+    )
+    status: Mapped[SkillStatus] = mapped_column(
+        _pg_enum(SkillStatus, name="skill_status"),
+        nullable=False,
+        server_default=SkillStatus.ACTIVE.value,
+    )
+    latest_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SkillVersion(Base):
+    __tablename__ = "skill_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "skill_id"],
+            ["skills.tenant_id", "skills.id"],
+            ondelete="CASCADE",
+            name="fk_skill_versions_tenant_skill__skills_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "created_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            ondelete="SET NULL",
+            name="fk_skill_versions_tenant_created_by_user__users_tenant_id_id",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_skill_versions_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "skill_id",
+            "version_num",
+            name="uq_skill_versions_tenant_skill_version_num",
+        ),
+        CheckConstraint("version_num > 0", name="ck_skill_versions_version_positive"),
+        Index(
+            "ix_skill_versions_tenant_skill_version_num",
+            "tenant_id",
+            "skill_id",
+            "version_num",
+        ),
+        Index(
+            "uq_skill_versions_tenant_skill_current",
+            "tenant_id",
+            "skill_id",
+            unique=True,
+            postgresql_where=text("is_current"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    skill_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    version_num: Mapped[int] = mapped_column(Integer, nullable=False)
+    semver: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    manifest_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    checksum: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_current: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class SkillTermLink(Base):
+    __tablename__ = "skill_term_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "skill_id"],
+            ["skills.tenant_id", "skills.id"],
+            ondelete="CASCADE",
+            name="fk_skill_term_links_tenant_skill__skills_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "term_id"],
+            ["taxonomy_terms.tenant_id", "taxonomy_terms.id"],
+            ondelete="CASCADE",
+            name="fk_skill_term_links_tenant_term__taxonomy_terms_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "created_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            ondelete="SET NULL",
+            name="fk_skill_term_links_tenant_created_by_user__users_tenant_id_id",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_skill_term_links_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "skill_id",
+            "term_id",
+            name="uq_skill_term_links_tenant_skill_term",
+        ),
+        CheckConstraint(
+            "confidence >= 0.0 AND confidence <= 1.0",
+            name="ck_skill_term_links_confidence_range",
+        ),
+        Index("ix_skill_term_links_tenant_skill", "tenant_id", "skill_id"),
+        Index("ix_skill_term_links_tenant_term", "tenant_id", "term_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    skill_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    term_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    confidence: Mapped[float] = mapped_column(
+        Numeric(5, 4), nullable=False, server_default=text("1.0")
+    )
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    source: Mapped[SkillLinkSource] = mapped_column(
+        _pg_enum(SkillLinkSource, name="skill_link_source"),
+        nullable=False,
+        server_default=SkillLinkSource.MANUAL.value,
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RunSkillUsage(Base):
+    __tablename__ = "run_skill_usages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"],
+            ["runs.tenant_id", "runs.id"],
+            ondelete="CASCADE",
+            name="fk_run_skill_usages_tenant_run__runs_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "step_id"],
+            ["run_steps.tenant_id", "run_steps.id"],
+            ondelete="SET NULL",
+            name="fk_run_skill_usages_tenant_step__run_steps_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "skill_id"],
+            ["skills.tenant_id", "skills.id"],
+            ondelete="RESTRICT",
+            name="fk_run_skill_usages_tenant_skill__skills_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "skill_version_id"],
+            ["skill_versions.tenant_id", "skill_versions.id"],
+            ondelete="SET NULL",
+            name="fk_run_skill_usages_tenant_skill_ver",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_run_skill_usages_tenant_id_id"),
+        CheckConstraint(
+            "completed_at IS NULL OR completed_at >= started_at",
+            name="ck_run_skill_usages_time_order",
+        ),
+        Index(
+            "ix_run_skill_usages_tenant_run_started_at",
+            "tenant_id",
+            "run_id",
+            "started_at",
+        ),
+        Index(
+            "ix_run_skill_usages_tenant_skill_started_at",
+            "tenant_id",
+            "skill_id",
+            "started_at",
+        ),
+        Index("ix_run_skill_usages_tenant_step", "tenant_id", "step_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    step_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    skill_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    skill_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    status: Mapped[SkillUsageStatus] = mapped_column(
+        _pg_enum(SkillUsageStatus, name="skill_usage_status"),
+        nullable=False,
+        server_default=SkillUsageStatus.STARTED.value,
+    )
+    invocation_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

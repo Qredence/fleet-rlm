@@ -201,6 +201,32 @@ def test_websocket_basic_message_flow(test_app, fake_agent):
             assert received_events[2]["data"]["payload"]["history_turns"] == 1
 
 
+def test_websocket_accepts_query_auth_in_dev_mode(test_app, fake_agent):
+    """WebSocket auth should accept query debug identity without custom headers."""
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="ok",
+                payload={"history_turns": 1},
+                timestamp=_ts(1.0),
+            ),
+        ]
+    )
+
+    url = (
+        "/ws/chat?debug_tenant_id=tenant-query&debug_user_id=user-query"
+        "&debug_email=query%40example.com&debug_name=Query%20User"
+    )
+    with TestClient(test_app) as client:
+        with client.websocket_connect(url) as websocket:
+            websocket.send_json({"type": "message", "content": "hello from query auth"})
+            data = websocket.receive_json()
+            assert data["type"] == "event"
+            assert data["data"]["kind"] == "final"
+            assert data["data"]["text"] == "ok"
+
+
 def test_websocket_with_docs_path(test_app, fake_agent):
     """Test message with docs_path parameter."""
     fake_agent.set_events(

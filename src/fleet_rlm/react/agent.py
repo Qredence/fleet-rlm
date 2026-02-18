@@ -123,6 +123,10 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self.react_tools: list[Callable[..., Any]] = []
         self.react = self._build_agent()
 
+    @property
+    def current_depth(self) -> int:
+        return self._current_depth
+
     # -----------------------------------------------------------------
     # Lifecycle
     # -----------------------------------------------------------------

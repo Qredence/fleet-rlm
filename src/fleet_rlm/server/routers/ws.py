@@ -30,7 +30,6 @@ from fleet_rlm.db.models import (
     MemorySource,
     RunStatus,
     RunStepType,
-    SandboxProvider,
 )
 from fleet_rlm.db.types import (
     ArtifactCreateRequest,
@@ -42,6 +41,7 @@ from fleet_rlm.db.types import (
 
 from ..auth import AuthError
 from ..deps import server_state, session_key
+from ..utils import parse_model_identity, resolve_sandbox_provider
 from ..execution_events import (
     ExecutionEvent,
     ExecutionEventType,
@@ -144,15 +144,6 @@ async def _authenticate_websocket(
         return None
 
 
-def _parse_model_identity(raw_model: object) -> tuple[str | None, str | None]:
-    if not isinstance(raw_model, str):
-        return None, None
-    if "/" in raw_model:
-        provider, name = raw_model.split("/", 1)
-        return provider, name
-    return None, raw_model
-
-
 def _map_execution_step_type(step_type: str) -> RunStepType:
     return EXECUTION_TO_RUN_STEP_TYPE.get(step_type, RunStepType.STATUS)
 
@@ -206,6 +197,130 @@ async def _emit_execution_event(
         step=step,
     )
     await _get_execution_emitter().emit(event)
+
+
+class ExecutionLifecycleManager:
+    """Encapsulates run lifecycle operations: DB persistence and event emission."""
+
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        workspace_id: str,
+        user_id: str,
+        session_id: str,
+        execution_emitter,
+        step_builder: ExecutionStepBuilder,
+        repository: FleetRepository | None = None,
+        identity_rows: IdentityUpsertResult | None = None,
+        active_run_db_id: uuid.UUID | None = None,
+        step_lock: asyncio.Lock,
+        session_record: dict[str, Any] | None = None,
+    ) -> None:
+        self.run_id = run_id
+        self.workspace_id = workspace_id
+        self.user_id = user_id
+        self.session_id = session_id
+        self.execution_emitter = execution_emitter
+        self.step_builder = step_builder
+        self.repository = repository
+        self.identity_rows = identity_rows
+        self.active_run_db_id = active_run_db_id
+        self._step_lock = step_lock
+        self._session_record = session_record
+        self._step_index = 0
+        self._last_step_db_id: uuid.UUID | None = None
+        self.run_completed = False
+
+    def _build_event(
+        self,
+        event_type: ExecutionEventType,
+        step: ExecutionStep | None = None,
+    ) -> ExecutionEvent:
+        return _build_execution_event(
+            event_type=event_type,
+            run_id=self.run_id,
+            workspace_id=self.workspace_id,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            step=step,
+        )
+
+    @property
+    def _can_persist(self) -> bool:
+        return (
+            self.repository is not None
+            and self.identity_rows is not None
+            and self.active_run_db_id is not None
+        )
+
+    async def emit_started(self) -> None:
+        await self.execution_emitter.emit(self._build_event("execution_started"))
+
+    async def persist_step(self, step: ExecutionStep | None) -> None:
+        if step is None or not self._can_persist:
+            return
+        assert self.repository is not None
+        assert self.identity_rows is not None
+        assert self.active_run_db_id is not None
+        async with self._step_lock:
+            self._step_index += 1
+            try:
+                persisted = await self.repository.append_step(
+                    RunStepCreateRequest(
+                        tenant_id=self.identity_rows.tenant_id,
+                        run_id=self.active_run_db_id,
+                        step_index=self._step_index,
+                        step_type=_map_execution_step_type(step.type),
+                        input_json=step.input
+                        if isinstance(step.input, dict)
+                        else {"value": step.input}
+                        if step.input is not None
+                        else None,
+                        output_json=step.output
+                        if isinstance(step.output, dict)
+                        else {"value": step.output}
+                        if step.output is not None
+                        else None,
+                    )
+                )
+                self._last_step_db_id = persisted.id
+                if self._session_record is not None:
+                    self._session_record["last_step_db_id"] = str(persisted.id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to persist run step: %s",
+                    _sanitize_for_log(exc),
+                )
+
+    async def emit_step(self, step: ExecutionStep) -> None:
+        await self.execution_emitter.emit(
+            self._build_event("execution_step", step=step)
+        )
+
+    async def complete_run(
+        self,
+        status: RunStatus,
+        *,
+        step: ExecutionStep | None = None,
+        error_json: dict | None = None,
+    ) -> None:
+        if self.run_completed:
+            return
+        if self._can_persist:
+            assert self.repository is not None
+            assert self.identity_rows is not None
+            assert self.active_run_db_id is not None
+            await self.repository.update_run_status(
+                tenant_id=self.identity_rows.tenant_id,
+                run_id=self.active_run_db_id,
+                status=status,
+                error_json=error_json,
+            )
+        await self.execution_emitter.emit(
+            self._build_event("execution_completed", step=step)
+        )
+        self.run_completed = True
 
 
 @router.websocket("/ws/execution")
@@ -316,9 +431,8 @@ async def chat_streaming(websocket: WebSocket):
         canonical_user_id = _sanitize_id(identity.user_claim, cfg.ws_default_user_id)
         session_record: dict[str, Any] | None = None
         active_run_db_id: uuid.UUID | None = None
-        active_step_index = 0
         active_step_lock = asyncio.Lock()
-        active_last_step_db_id: uuid.UUID | None = None
+        lifecycle: ExecutionLifecycleManager | None = None
         execution_emitter = _get_execution_emitter()
         ws_loop = asyncio.get_running_loop()
 
@@ -534,13 +648,10 @@ async def chat_streaming(websocket: WebSocket):
                 turn_index = agent.history_turns() + 1
                 run_id = f"{workspace_id}:{user_id}:{sess_id}:{turn_index}"
                 step_builder = ExecutionStepBuilder(run_id=run_id)
-                run_completed = False
                 active_run_db_id = None
-                active_step_index = 0
-                active_last_step_db_id = None
 
                 if repository is not None and identity_rows is not None:
-                    model_provider, model_name = _parse_model_identity(
+                    model_provider, model_name = parse_model_identity(
                         getattr(_planner_lm, "model", None)
                     )
                     try:
@@ -552,7 +663,9 @@ async def chat_streaming(websocket: WebSocket):
                                 status=RunStatus.RUNNING,
                                 model_provider=model_provider,
                                 model_name=model_name,
-                                sandbox_provider=SandboxProvider.MODAL,
+                                sandbox_provider=resolve_sandbox_provider(
+                                    cfg.sandbox_provider
+                                ),
                             )
                         )
                         active_run_db_id = run_row.id
@@ -564,79 +677,37 @@ async def chat_streaming(websocket: WebSocket):
                             _sanitize_for_log(exc),
                         )
 
+                lifecycle = ExecutionLifecycleManager(
+                    run_id=run_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    session_id=sess_id,
+                    execution_emitter=execution_emitter,
+                    step_builder=step_builder,
+                    repository=repository,
+                    identity_rows=identity_rows,
+                    active_run_db_id=active_run_db_id,
+                    step_lock=active_step_lock,
+                    session_record=session_record,
+                )
+
                 def cancel_check() -> bool:
                     return cancel_flag["cancelled"]
 
-                async def persist_execution_step(step: ExecutionStep | None) -> None:
-                    nonlocal active_step_index, active_last_step_db_id
-                    if (
-                        step is None
-                        or repository is None
-                        or identity_rows is None
-                        or active_run_db_id is None
-                    ):
-                        return
-                    async with active_step_lock:
-                        active_step_index += 1
-                        try:
-                            persisted = await repository.append_step(
-                                RunStepCreateRequest(
-                                    tenant_id=identity_rows.tenant_id,
-                                    run_id=active_run_db_id,
-                                    step_index=active_step_index,
-                                    step_type=_map_execution_step_type(step.type),
-                                    input_json=step.input
-                                    if isinstance(step.input, dict)
-                                    else {"value": step.input}
-                                    if step.input is not None
-                                    else None,
-                                    output_json=step.output
-                                    if isinstance(step.output, dict)
-                                    else {"value": step.output}
-                                    if step.output is not None
-                                    else None,
-                                )
-                            )
-                            active_last_step_db_id = persisted.id
-                            if session_record is not None:
-                                session_record["last_step_db_id"] = str(persisted.id)
-                        except Exception as exc:
-                            logger.warning(
-                                "Failed to persist run step: %s",
-                                _sanitize_for_log(exc),
-                            )
-
-                await execution_emitter.emit(
-                    _build_execution_event(
-                        event_type="execution_started",
-                        run_id=run_id,
-                        workspace_id=workspace_id,
-                        user_id=user_id,
-                        session_id=sess_id,
-                        step=None,
-                    )
-                )
+                await lifecycle.emit_started()
 
                 previous_execution_hook = None
 
                 def _interpreter_hook(payload: dict[str, Any]) -> None:
-                    if run_completed:
+                    if lifecycle.run_completed:
                         return
                     repl_step = step_builder.from_interpreter_hook(payload)
                     if repl_step is None:
                         return
-                    event = _build_execution_event(
-                        event_type="execution_step",
-                        run_id=run_id,
-                        workspace_id=workspace_id,
-                        user_id=user_id,
-                        session_id=sess_id,
-                        step=repl_step,
-                    )
                     ws_loop.call_soon_threadsafe(
-                        lambda evt=event, step_data=repl_step: (
-                            ws_loop.create_task(execution_emitter.emit(evt)),
-                            ws_loop.create_task(persist_execution_step(step_data)),
+                        lambda step_data=repl_step: (
+                            ws_loop.create_task(lifecycle.emit_step(step_data)),
+                            ws_loop.create_task(lifecycle.persist_step(step_data)),
                         )
                     )
 
@@ -668,94 +739,32 @@ async def chat_streaming(websocket: WebSocket):
                             timestamp=event.timestamp.timestamp(),
                         )
                         if step is not None:
-                            await execution_emitter.emit(
-                                _build_execution_event(
-                                    event_type="execution_step",
-                                    run_id=run_id,
-                                    workspace_id=workspace_id,
-                                    user_id=user_id,
-                                    session_id=sess_id,
-                                    step=step,
-                                )
-                            )
-                            await persist_execution_step(step)
+                            await lifecycle.emit_step(step)
+                            await lifecycle.persist_step(step)
 
                         if event.kind == "final":
                             await persist_session_state(
                                 include_volume_save=True, latest_user_message=message
                             )
-                            if (
-                                repository is not None
-                                and identity_rows is not None
-                                and active_run_db_id is not None
-                            ):
-                                await repository.update_run_status(
-                                    tenant_id=identity_rows.tenant_id,
-                                    run_id=active_run_db_id,
-                                    status=RunStatus.COMPLETED,
-                                )
-                            await execution_emitter.emit(
-                                _build_execution_event(
-                                    event_type="execution_completed",
-                                    run_id=run_id,
-                                    workspace_id=workspace_id,
-                                    user_id=user_id,
-                                    session_id=sess_id,
-                                    step=step,
-                                )
-                            )
-                            run_completed = True
+                            await lifecycle.complete_run(RunStatus.COMPLETED, step=step)
                         elif event.kind in {"cancelled", "error"}:
-                            if (
-                                repository is not None
-                                and identity_rows is not None
-                                and active_run_db_id is not None
-                            ):
-                                await repository.update_run_status(
-                                    tenant_id=identity_rows.tenant_id,
-                                    run_id=active_run_db_id,
-                                    status=RunStatus.CANCELLED
-                                    if event.kind == "cancelled"
-                                    else RunStatus.FAILED,
-                                    error_json=(
-                                        {"error": event.text, "kind": event.kind}
-                                        if event.kind == "error"
-                                        else None
-                                    ),
-                                )
-                            await execution_emitter.emit(
-                                _build_execution_event(
-                                    event_type="execution_completed",
-                                    run_id=run_id,
-                                    workspace_id=workspace_id,
-                                    user_id=user_id,
-                                    session_id=sess_id,
-                                    step=step,
-                                )
+                            status = (
+                                RunStatus.CANCELLED
+                                if event.kind == "cancelled"
+                                else RunStatus.FAILED
                             )
-                            run_completed = True
-                    if not run_completed:
-                        if (
-                            repository is not None
-                            and identity_rows is not None
-                            and active_run_db_id is not None
-                        ):
-                            await repository.update_run_status(
-                                tenant_id=identity_rows.tenant_id,
-                                run_id=active_run_db_id,
-                                status=RunStatus.COMPLETED,
+                            error_json = (
+                                {"error": event.text, "kind": event.kind}
+                                if event.kind == "error"
+                                else None
                             )
-                        await execution_emitter.emit(
-                            _build_execution_event(
-                                event_type="execution_completed",
-                                run_id=run_id,
-                                workspace_id=workspace_id,
-                                user_id=user_id,
-                                session_id=sess_id,
-                                step=None,
+                            await lifecycle.complete_run(
+                                status, step=step, error_json=error_json
                             )
-                        )
-                        run_completed = True
+
+                    if not lifecycle.run_completed:
+                        await lifecycle.complete_run(RunStatus.COMPLETED)
+
                 except Exception as exc:
                     logger.error(
                         "Streaming error: %s",
@@ -766,7 +775,7 @@ async def chat_streaming(websocket: WebSocket):
                     await websocket.send_json(
                         {"type": "error", "message": f"Streaming error: {exc}"}
                     )
-                    if not run_completed:
+                    if not lifecycle.run_completed:
                         error_step = step_builder.from_stream_event(
                             kind="error",
                             text=f"Streaming error: {exc}",
@@ -774,41 +783,15 @@ async def chat_streaming(websocket: WebSocket):
                             timestamp=time.time(),
                         )
                         if error_step is not None:
-                            await execution_emitter.emit(
-                                _build_execution_event(
-                                    event_type="execution_step",
-                                    run_id=run_id,
-                                    workspace_id=workspace_id,
-                                    user_id=user_id,
-                                    session_id=sess_id,
-                                    step=error_step,
-                                )
-                            )
-                        await execution_emitter.emit(
-                            _build_execution_event(
-                                event_type="execution_completed",
-                                run_id=run_id,
-                                workspace_id=workspace_id,
-                                user_id=user_id,
-                                session_id=sess_id,
-                                step=error_step,
-                            )
+                            await lifecycle.emit_step(error_step)
+                        await lifecycle.complete_run(
+                            RunStatus.FAILED,
+                            step=error_step,
+                            error_json={
+                                "error": str(exc),
+                                "error_type": type(exc).__name__,
+                            },
                         )
-                        if (
-                            repository is not None
-                            and identity_rows is not None
-                            and active_run_db_id is not None
-                        ):
-                            await repository.update_run_status(
-                                tenant_id=identity_rows.tenant_id,
-                                run_id=active_run_db_id,
-                                status=RunStatus.FAILED,
-                                error_json={
-                                    "error": str(exc),
-                                    "error_type": type(exc).__name__,
-                                },
-                            )
-                        run_completed = True
                 finally:
                     if interpreter is not None:
                         interpreter.execution_event_callback = previous_execution_hook
@@ -816,30 +799,16 @@ async def chat_streaming(websocket: WebSocket):
         except WebSocketDisconnect:
             cancel_flag["cancelled"] = True
             await persist_session_state(include_volume_save=True)
-            if (
-                repository is not None
-                and identity_rows is not None
-                and active_run_db_id is not None
-            ):
-                await repository.update_run_status(
-                    tenant_id=identity_rows.tenant_id,
-                    run_id=active_run_db_id,
-                    status=RunStatus.CANCELLED,
-                )
+            if lifecycle is not None:
+                await lifecycle.complete_run(RunStatus.CANCELLED)
         except Exception as exc:
             await websocket.send_json(
                 {"type": "error", "message": f"Server error: {str(exc)}"}
             )
             await persist_session_state(include_volume_save=True)
-            if (
-                repository is not None
-                and identity_rows is not None
-                and active_run_db_id is not None
-            ):
-                await repository.update_run_status(
-                    tenant_id=identity_rows.tenant_id,
-                    run_id=active_run_db_id,
-                    status=RunStatus.FAILED,
+            if lifecycle is not None:
+                await lifecycle.complete_run(
+                    RunStatus.FAILED,
                     error_json={
                         "error": str(exc),
                         "error_type": type(exc).__name__,

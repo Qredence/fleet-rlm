@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from fleet_rlm import runners
 from fleet_rlm.db import FleetRepository
-from fleet_rlm.db.models import Run, RunStatus, SandboxProvider
+from fleet_rlm.db.models import Run, RunStatus
 from fleet_rlm.db.types import RunCreateRequest
 
 from ..config import ServerRuntimeConfig
 from ..deps import get_config, get_planner_lm, get_repository, get_request_identity
+from ..utils import parse_model_identity, resolve_sandbox_provider
 from ..schemas import TaskRequest, TaskResponse
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -22,6 +23,7 @@ async def _start_task_run(
     task_label: str,
     request: Request,
     planner_lm,
+    config: ServerRuntimeConfig,
 ) -> tuple[FleetRepository | None, Run | None]:
     repository = get_repository()
     identity = get_request_identity(request)
@@ -35,11 +37,9 @@ async def _start_task_run(
         full_name=identity.name,
     )
 
-    planner_model = getattr(planner_lm, "model", None)
-    model_provider = None
-    model_name = planner_model
-    if isinstance(planner_model, str) and "/" in planner_model:
-        model_provider, model_name = planner_model.split("/", 1)
+    model_provider, model_name = parse_model_identity(
+        getattr(planner_lm, "model", None)
+    )
 
     run_row = await repository.create_run(
         RunCreateRequest(
@@ -49,7 +49,7 @@ async def _start_task_run(
             status=RunStatus.RUNNING,
             model_provider=model_provider,
             model_name=model_name,
-            sandbox_provider=SandboxProvider.MODAL,
+            sandbox_provider=resolve_sandbox_provider(config.sandbox_provider),
         )
     )
     return repository, run_row
@@ -89,6 +89,7 @@ async def run_basic(
         task_label="basic",
         request=http_request,
         planner_lm=planner_lm,
+        config=config,
     )
     try:
         result = await asyncio.to_thread(
@@ -130,6 +131,7 @@ async def run_architecture(
         task_label="architecture",
         request=http_request,
         planner_lm=planner_lm,
+        config=config,
     )
     try:
         result = await asyncio.to_thread(
@@ -173,6 +175,7 @@ async def run_long_context(
         task_label="long-context",
         request=http_request,
         planner_lm=planner_lm,
+        config=config,
     )
     try:
         result = await asyncio.to_thread(
@@ -210,6 +213,7 @@ async def check_secret(
         task_label="check-secret",
         request=http_request,
         planner_lm=get_planner_lm(),
+        config=config,
     )
     try:
         result = await asyncio.to_thread(

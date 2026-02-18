@@ -14,6 +14,16 @@ class _FakeRequest:
         self.headers = headers
 
 
+class _FakeWebSocket:
+    def __init__(
+        self,
+        headers: dict[str, str] | None = None,
+        query_params: dict[str, str] | None = None,
+    ):
+        self.headers = headers or {}
+        self.query_params = query_params or {}
+
+
 @pytest.mark.asyncio
 async def test_dev_auth_accepts_debug_headers():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET)
@@ -64,6 +74,50 @@ async def test_dev_auth_rejects_missing_auth():
     with pytest.raises(AuthError) as exc:
         await provider.authenticate_http(_FakeRequest({}))
     assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_dev_auth_accepts_websocket_query_debug_identity():
+    provider = DevAuthProvider(jwt_secret=TEST_SECRET)
+    identity = await provider.authenticate_websocket(
+        _FakeWebSocket(
+            query_params={
+                "debug_tenant_id": "tenant-query",
+                "debug_user_id": "user-query",
+                "debug_email": "query@example.com",
+                "debug_name": "Query User",
+            }
+        )
+    )
+
+    assert identity.tenant_claim == "tenant-query"
+    assert identity.user_claim == "user-query"
+    assert identity.email == "query@example.com"
+    assert identity.name == "Query User"
+
+
+@pytest.mark.asyncio
+async def test_dev_auth_accepts_websocket_query_access_token():
+    provider = DevAuthProvider(jwt_secret=TEST_SECRET)
+    token = jwt.encode(
+        {
+            "tid": "tenant-ws",
+            "oid": "user-ws",
+            "email": "ws@example.com",
+            "name": "WS User",
+        },
+        TEST_SECRET,
+        algorithm="HS256",
+    )
+
+    identity = await provider.authenticate_websocket(
+        _FakeWebSocket(query_params={"access_token": token})
+    )
+
+    assert identity.tenant_claim == "tenant-ws"
+    assert identity.user_claim == "user-ws"
+    assert identity.email == "ws@example.com"
+    assert identity.name == "WS User"
 
 
 @pytest.mark.asyncio

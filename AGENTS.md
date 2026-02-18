@@ -146,9 +146,9 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Prefer `uv run ...` for commands
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
-- Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, etc.)
+- Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, `skill_taxonomies`, `taxonomy_terms`, `skills`, `skill_versions`, `skill_term_links`, `run_skill_usages`, etc.)
 - Tenant isolation uses Postgres RLS with transaction-local tenant context via `set_config('app.tenant_id', ..., true)` in repository methods
-- Server auth defaults to `AUTH_MODE=dev` and supports either debug headers or local HS256 bearer JWT
+- Server auth defaults to `AUTH_MODE=dev` and supports debug headers or local HS256 bearer JWT; WebSocket clients may also use dev query auth (`debug_tenant_id`, `debug_user_id`, optional `debug_email`, `debug_name`, or `access_token`)
 - `AUTH_MODE=entra` is scaffolded and fail-closed until JWKS verification wiring is implemented
 - ReAct long-context delegate tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`, etc.) use true recursive sub-agents via `spawn_delegate_sub_agent()` — each spawns a new `RLMReActChatAgent` at `depth + 1` with full tool access
 - Additive signature tools are available for advanced workflows:

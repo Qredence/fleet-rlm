@@ -5,11 +5,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from fleet_rlm import runners
-from fleet_rlm.db.models import RunStatus, SandboxProvider
+from fleet_rlm.db.models import RunStatus
 from fleet_rlm.db.types import RunCreateRequest
 
 from ..config import ServerRuntimeConfig
 from ..deps import get_config, get_planner_lm, get_repository, get_request_identity
+from ..utils import parse_model_identity, resolve_sandbox_provider
 from ..schemas import ChatRequest
 
 router = APIRouter(tags=["chat"])
@@ -35,11 +36,9 @@ async def chat(
             email=identity.email,
             full_name=identity.name,
         )
-        planner_model = getattr(planner_lm, "model", None)
-        model_provider = None
-        model_name = planner_model
-        if isinstance(planner_model, str) and "/" in planner_model:
-            model_provider, model_name = planner_model.split("/", 1)
+        model_provider, model_name = parse_model_identity(
+            getattr(planner_lm, "model", None)
+        )
 
         run_row = await repository.create_run(
             RunCreateRequest(
@@ -49,7 +48,7 @@ async def chat(
                 status=RunStatus.RUNNING,
                 model_provider=model_provider,
                 model_name=model_name,
-                sandbox_provider=SandboxProvider.MODAL,
+                sandbox_provider=resolve_sandbox_provider(config.sandbox_provider),
             )
         )
 

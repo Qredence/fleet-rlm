@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Highlights (User Impact)
+
+- Neon Postgres is now the canonical multi-tenant persistence layer for server runtime state (runs, steps, artifacts, memory, jobs), with migration and smoke-test workflows ready for operators.
+- Backend auth is now Entra-ready with a practical bootstrap path: `AUTH_MODE=dev` supports debug headers or local JWTs today, while `AUTH_MODE=entra` fails closed until JWKS verification is wired.
+- Execution observability improved with a dedicated `/ws/execution` stream for structured lifecycle events, while preserving compatibility on `/ws/chat`.
+
+### Added
+
+- **Change:** Added a complete NeonDB/Alembic foundation with initial schema migration (`0001_neon_core_schema`) and tenant-integrity hardening migration (`0002_tenant_fk_hardening`), plus typed DB repository and DTO layers.
+  **Outcome:** Operators can provision a production-style Postgres data model for multi-tenant SaaS state with first-class migration support.
+- **Change:** Added DB operational scripts: `scripts/db_init.py`, `scripts/db_smoke.py`, and `scripts/dev_issue_token.py`.
+  **Outcome:** Teams can bootstrap schema, validate connectivity, and issue local dev auth tokens with repeatable commands.
+- **Change:** Added auth abstraction modules (`dev` + Entra stub), normalized identity contract, and `/auth/me` identity introspection endpoint.
+  **Outcome:** Server routes now share a single tenant/user authority model, reducing auth drift across HTTP and WebSocket surfaces.
+- **Change:** Added structured execution-event infrastructure and `/ws/execution` subscription support with corresponding tests/docs.
+  **Outcome:** Artifact-canvas and monitoring consumers can follow run lifecycle events without parsing mixed chat traffic.
+
+### Changed
+
+- **Change:** `/ws/chat`, `/chat`, and `/tasks/*` now integrate identity-backed Neon writes for run lifecycle, step persistence, and artifact/memory metadata capture.
+  **Outcome:** Operational traces are persisted for replay, debugging, and downstream evaluation workflows.
+- **Change:** Tenant isolation now layers Postgres RLS with tenant-aware composite foreign keys across key relationships.
+  **Outcome:** Cross-tenant linkage mistakes are blocked at the database boundary, not only at query policy time.
+- **Change:** Queue leasing behavior now supports stale-lease reclaim via `JobLeaseRequest.lease_timeout_seconds` (default `300`) while retaining `FOR UPDATE SKIP LOCKED` concurrency semantics.
+  **Outcome:** Lost worker leases can be safely recovered without giving up high-concurrency job acquisition.
+- **Change:** Release automation now skips tag creation when the target tag already exists on remote.
+  **Outcome:** Release jobs are more robust when local/manual tagging happens before CI runs.
+
+### Fixed
+
+- **Change:** Fixed tenant/user upserts so optional fields (`display_name`, `domain`, `email`, `full_name`) are not overwritten with null values during conflict updates.
+  **Outcome:** Identity/profile metadata remains stable across repeated syncs.
+- **Change:** Fixed job idempotency conflict handling to be non-destructive (`create_job` returns the existing row instead of mutating active lock/status state).
+  **Outcome:** Retries do not accidentally corrupt in-flight queue state.
+- **Change:** Fixed sandbox document processing to read cached document content through the public `agent.documents` path, with expanded regression tests.
+  **Outcome:** Document metadata reporting (`chars`, `lines`) is reliable after volume loads and cache updates.
+
 ## 0.4.5
 
 ### Highlights (User Impact)

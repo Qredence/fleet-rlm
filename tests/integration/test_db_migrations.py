@@ -44,7 +44,13 @@ async def test_migrations_apply_and_core_tables_exist():
                             'run_steps',
                             'artifacts',
                             'memory_items',
-                            'jobs'
+                            'jobs',
+                            'skill_taxonomies',
+                            'taxonomy_terms',
+                            'skills',
+                            'skill_versions',
+                            'skill_term_links',
+                            'run_skill_usages'
                           )
                         order by table_name
                         """
@@ -55,8 +61,14 @@ async def test_migrations_apply_and_core_tables_exist():
             "artifacts",
             "jobs",
             "memory_items",
+            "run_skill_usages",
             "run_steps",
             "runs",
+            "skill_taxonomies",
+            "skill_term_links",
+            "skill_versions",
+            "skills",
+            "taxonomy_terms",
             "tenants",
             "users",
         ]

@@ -31,6 +31,22 @@ All server logic consumes this normalized shape.
 - `email`
 - `name`
 
+For WebSocket clients that cannot set custom headers, `AUTH_MODE=dev` also accepts query parameters:
+
+- `debug_tenant_id`
+- `debug_user_id`
+- `debug_email`
+- `debug_name`
+- `access_token` (HS256 token with `tid`/`oid` claims)
+
+WebSocket evaluation order in dev mode is:
+
+1. Header debug identity
+2. Header bearer token
+3. Query debug identity
+4. Query `access_token`
+5. Reject with `401`
+
 Issue a token:
 
 ```bash

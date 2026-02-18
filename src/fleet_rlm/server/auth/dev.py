@@ -22,9 +22,17 @@ class DevAuthProvider:
         return self._authenticate(dict(request.headers))
 
     async def authenticate_websocket(self, websocket: WebSocket) -> NormalizedIdentity:
-        return self._authenticate(dict(websocket.headers))
+        return self._authenticate(
+            dict(websocket.headers),
+            query_params=dict(websocket.query_params),
+        )
 
-    def _authenticate(self, headers: Mapping[str, str]) -> NormalizedIdentity:
+    def _authenticate(
+        self,
+        headers: Mapping[str, str],
+        *,
+        query_params: Mapping[str, str] | None = None,
+    ) -> NormalizedIdentity:
         normalized_headers = {k.lower(): v for k, v in headers.items()}
 
         debug_tenant = normalized_headers.get("x-debug-tenant-id")
@@ -40,16 +48,37 @@ class DevAuthProvider:
             )
 
         authorization = normalized_headers.get("authorization", "")
-        if not authorization.lower().startswith("bearer "):
-            raise AuthError(
-                "Missing dev auth. Provide debug headers or Bearer token.",
-                status_code=401,
+        if authorization.lower().startswith("bearer "):
+            token = authorization.split(" ", 1)[1].strip()
+            if not token:
+                raise AuthError("Empty bearer token", status_code=401)
+            return self._decode_token(token)
+
+        if query_params is not None:
+            debug_tenant = str(query_params.get("debug_tenant_id", "")).strip()
+            debug_user = str(query_params.get("debug_user_id", "")).strip()
+            if debug_tenant and debug_user:
+                return self._normalize_claims(
+                    {
+                        "tid": debug_tenant,
+                        "oid": debug_user,
+                        "email": query_params.get("debug_email"),
+                        "name": query_params.get("debug_name"),
+                    }
+                )
+            access_token = str(query_params.get("access_token", "")).strip()
+            if access_token:
+                return self._decode_token(access_token)
+
+        message = "Missing dev auth. Provide debug headers or Bearer token."
+        if query_params is not None:
+            message = (
+                "Missing dev auth. Provide debug headers or Bearer token "
+                "(headers or query: debug_tenant_id/debug_user_id/access_token)."
             )
+        raise AuthError(message, status_code=401)
 
-        token = authorization.split(" ", 1)[1].strip()
-        if not token:
-            raise AuthError("Empty bearer token", status_code=401)
-
+    def _decode_token(self, token: str) -> NormalizedIdentity:
         try:
             claims = jwt.decode(
                 token,
@@ -59,7 +88,6 @@ class DevAuthProvider:
             )
         except InvalidTokenError as exc:
             raise AuthError(f"Invalid dev JWT: {exc}", status_code=401) from exc
-
         return self._normalize_claims(claims)
 
     @staticmethod
