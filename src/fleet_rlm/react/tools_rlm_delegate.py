@@ -28,6 +28,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _resolve_depth_hint(result: dict[str, Any], *, fallback_depth: int) -> int:
+    raw_depth = result.get("depth", fallback_depth)
+    if isinstance(raw_depth, bool):
+        return fallback_depth
+    if isinstance(raw_depth, (int, float)):
+        return int(raw_depth)
+    if isinstance(raw_depth, str):
+        stripped = raw_depth.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return fallback_depth
+
+
+def _parent_step_hint(result: dict[str, Any]) -> str | None:
+    raw_parent = result.get("parent_step_id")
+    if isinstance(raw_parent, str) and raw_parent:
+        return raw_parent
+    return None
+
+
 def build_rlm_delegate_tools(agent: "RLMReActChatAgent") -> list[Any]:
     """Build RLM delegation tools bound to *agent*.
 
@@ -119,6 +139,10 @@ SUBMIT(
 
         response_text = result.get("assistant_response", "")
         trajectory = result.get("trajectory", {})
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        parent_step_id = _parent_step_hint(result)
 
         response: dict[str, Any] = {
             "status": "ok",
@@ -126,11 +150,20 @@ SUBMIT(
             "answer": response_text,
             "sections_examined": 0,
             "doc_chars": len(document),
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
             "sub_agent_history": result.get("sub_agent_history", 0),
         }
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
         if include_trajectory:
-            response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+            response.update(
+                _rlm_trajectory_payload_from_dict(
+                    trajectory,
+                    include=True,
+                    depth=depth_hint,
+                    parent_step_id=parent_step_id,
+                )
+            )
         return response
 
     def summarize_long_document(
@@ -163,6 +196,10 @@ SUBMIT(
 
         response_text = result.get("assistant_response", "")
         trajectory = result.get("trajectory", {})
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        parent_step_id = _parent_step_hint(result)
 
         response: dict[str, Any] = {
             "status": "ok",
@@ -170,11 +207,20 @@ SUBMIT(
             "key_points": [],
             "coverage_pct": 0,
             "doc_chars": len(document),
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
             "sub_agent_history": result.get("sub_agent_history", 0),
         }
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
         if include_trajectory:
-            response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+            response.update(
+                _rlm_trajectory_payload_from_dict(
+                    trajectory,
+                    include=True,
+                    depth=depth_hint,
+                    parent_step_id=parent_step_id,
+                )
+            )
         return response
 
     def extract_from_logs(
@@ -207,17 +253,30 @@ SUBMIT(
 
         response_text = result.get("assistant_response", "")
         trajectory = result.get("trajectory", {})
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        parent_step_id = _parent_step_hint(result)
 
         response: dict[str, Any] = {
             "status": "ok",
             "matches": [response_text] if response_text else [],
             "patterns": [],
             "time_range": "unknown",
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
             "sub_agent_history": result.get("sub_agent_history", 0),
         }
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
         if include_trajectory:
-            response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+            response.update(
+                _rlm_trajectory_payload_from_dict(
+                    trajectory,
+                    include=True,
+                    depth=depth_hint,
+                    parent_step_id=parent_step_id,
+                )
+            )
         return response
 
     def grounded_answer(
@@ -294,6 +353,10 @@ SUBMIT(
         answer_value = structured.get("answer", response_text)
         answer_text = str(answer_value) if answer_value is not None else ""
         trajectory = result.get("trajectory", {})
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        parent_step_id = _parent_step_hint(result)
 
         response: dict[str, Any] = {
             "status": "ok",
@@ -302,11 +365,20 @@ SUBMIT(
             "confidence": confidence,
             "coverage_notes": coverage_notes,
             "doc_chars": len(document),
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
             "sub_agent_history": result.get("sub_agent_history", 0),
         }
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
         if include_trajectory:
-            response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+            response.update(
+                _rlm_trajectory_payload_from_dict(
+                    trajectory,
+                    include=True,
+                    depth=depth_hint,
+                    parent_step_id=parent_step_id,
+                )
+            )
         return response
 
     def triage_incident_logs(
@@ -343,6 +415,10 @@ SUBMIT(
 
         response_text = result.get("assistant_response", "")
         trajectory = result.get("trajectory", {})
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        parent_step_id = _parent_step_hint(result)
 
         response: dict[str, Any] = {
             "status": "ok",
@@ -351,11 +427,20 @@ SUBMIT(
             "impacted_components": [],
             "recommended_actions": [],
             "time_range": "unknown",
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
             "sub_agent_history": result.get("sub_agent_history", 0),
         }
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
         if include_trajectory:
-            response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+            response.update(
+                _rlm_trajectory_payload_from_dict(
+                    trajectory,
+                    include=True,
+                    depth=depth_hint,
+                    parent_step_id=parent_step_id,
+                )
+            )
         return response
 
     def plan_code_change(
@@ -390,6 +475,10 @@ SUBMIT(
 
         response_text = result.get("assistant_response", "")
         trajectory = result.get("trajectory", {})
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        parent_step_id = _parent_step_hint(result)
 
         response: dict[str, Any] = {
             "status": "ok",
@@ -397,11 +486,20 @@ SUBMIT(
             "files_to_touch": [],
             "validation_commands": [],
             "risks": [],
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
             "sub_agent_history": result.get("sub_agent_history", 0),
         }
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
         if include_trajectory:
-            response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+            response.update(
+                _rlm_trajectory_payload_from_dict(
+                    trajectory,
+                    include=True,
+                    depth=depth_hint,
+                    parent_step_id=parent_step_id,
+                )
+            )
         return response
 
     def propose_core_memory_update(
@@ -442,6 +540,10 @@ SUBMIT(
 
         response_text = result.get("assistant_response", "")
         trajectory = result.get("trajectory", {})
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        parent_step_id = _parent_step_hint(result)
 
         response: dict[str, Any] = {
             "status": "ok",
@@ -449,11 +551,20 @@ SUBMIT(
             "update": [response_text] if response_text else [],
             "remove": [],
             "rationale": response_text,
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
             "sub_agent_history": result.get("sub_agent_history", 0),
         }
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
         if include_trajectory:
-            response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+            response.update(
+                _rlm_trajectory_payload_from_dict(
+                    trajectory,
+                    include=True,
+                    depth=depth_hint,
+                    parent_step_id=parent_step_id,
+                )
+            )
         return response
 
     def rlm_query(query: str, context: str = "") -> dict[str, Any]:
@@ -470,12 +581,19 @@ SUBMIT(
         if result.get("status") == "error":
             return result
 
-        return {
+        depth_hint = _resolve_depth_hint(
+            result, fallback_depth=agent._current_depth + 1
+        )
+        response = {
             "status": "ok",
             "answer": result.get("assistant_response", ""),
             "sub_agent_history": result.get("sub_agent_history", 0),
-            "depth": result.get("depth", agent._current_depth + 1),
+            "depth": depth_hint,
         }
+        parent_step_id = _parent_step_hint(result)
+        if parent_step_id:
+            response["parent_step_id"] = parent_step_id
+        return response
 
     # -- Assemble tool list --------------------------------------------------
 
@@ -531,7 +649,11 @@ SUBMIT(
 
 
 def _rlm_trajectory_payload_from_dict(
-    trajectory: Any, *, include: bool
+    trajectory: Any,
+    *,
+    include: bool,
+    depth: int | None = None,
+    parent_step_id: str | None = None,
 ) -> dict[str, Any]:
     """Build trajectory payload from a sub-agent trajectory dict."""
     if not include:
@@ -548,4 +670,8 @@ def _rlm_trajectory_payload_from_dict(
         "trajectory_steps": len(steps),
         "trajectory": steps,
     }
+    if depth is not None:
+        payload["depth"] = depth
+    if parent_step_id:
+        payload["parent_step_id"] = parent_step_id
     return payload

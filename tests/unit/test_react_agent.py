@@ -282,7 +282,7 @@ def test_forward_warn_mode_reports_tool_error_trajectory(monkeypatch):
         def __call__(self, **kwargs):
             return SimpleNamespace(
                 assistant_response="This is a sufficiently detailed response.",
-                trajectory={"output_0": "RuntimeError: boom"},
+                trajectory={"steps": [{"index": 0, "output": "RuntimeError: boom"}]},
             )
 
     agent = RLMReActChatAgent(

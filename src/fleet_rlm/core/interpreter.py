@@ -17,6 +17,7 @@ enabling bidirectional communication for tool calls and structured output.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import queue
@@ -195,6 +196,27 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         self._stdout_reader_thread: threading.Thread | None = None
         self._stderr_iter: Iterator[str] | None = None
         self._tools: dict[str, Callable[..., Any]] = {}
+        self.execution_event_callback: Callable[[dict[str, Any]], None] | None = None
+
+    @staticmethod
+    def _summarize_code(code: str) -> tuple[str, str]:
+        """Return deterministic code hash and compact preview text."""
+        digest = hashlib.sha256((code or "").encode("utf-8")).hexdigest()[:16]
+        compact = " ".join((code or "").split())
+        if len(compact) > 240:
+            compact = f"{compact[:240]}...[truncated]"
+        return digest, compact
+
+    def _emit_execution_event(self, payload: dict[str, Any]) -> None:
+        """Best-effort execution hook dispatch for observability callbacks."""
+        callback = self.execution_event_callback
+        if callback is None:
+            return
+        try:
+            callback(payload)
+        except Exception:
+            # Hook errors must not interfere with interpreter execution.
+            return
 
     def _start_stdout_reader(self) -> None:
         """Start a background thread to read sandbox stdout."""
@@ -368,6 +390,18 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
                 execution_profile or self.default_execution_profile
             ).value,
         }
+        profile_value = str(request_payload["execution_profile"])
+        code_hash, code_preview = self._summarize_code(code)
+        started_at = time.time()
+        self._emit_execution_event(
+            {
+                "phase": "start",
+                "timestamp": started_at,
+                "execution_profile": profile_value,
+                "code_hash": code_hash,
+                "code_preview": code_preview,
+            }
+        )
 
         # Modal exec channels can occasionally flap; retry once after a clean restart
         # for known transport failures.
@@ -457,15 +491,63 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
                         final_obj = message.get("final")
 
                         if final_obj is not None:
+                            output_keys = (
+                                list(final_obj.keys())[:50]
+                                if isinstance(final_obj, dict)
+                                else None
+                            )
+                            self._emit_execution_event(
+                                {
+                                    "phase": "complete",
+                                    "timestamp": time.time(),
+                                    "duration_ms": int(
+                                        (time.time() - started_at) * 1000
+                                    ),
+                                    "execution_profile": profile_value,
+                                    "code_hash": code_hash,
+                                    "code_preview": code_preview,
+                                    "success": True,
+                                    "result_kind": "final_output",
+                                    "output_keys": output_keys,
+                                }
+                            )
                             return FinalOutput(final_obj)
 
                         if stderr:
                             summarized_stdout = self._summarize_stdout(stdout)
+                            self._emit_execution_event(
+                                {
+                                    "phase": "complete",
+                                    "timestamp": time.time(),
+                                    "duration_ms": int(
+                                        (time.time() - started_at) * 1000
+                                    ),
+                                    "execution_profile": profile_value,
+                                    "code_hash": code_hash,
+                                    "code_preview": code_preview,
+                                    "success": False,
+                                    "result_kind": "stderr",
+                                    "stderr_preview": _redact_sensitive_text(stderr),
+                                }
+                            )
                             return (
                                 summarized_stdout
                                 + ("\n" if summarized_stdout else "")
                                 + stderr
                             )
+                        self._emit_execution_event(
+                            {
+                                "phase": "complete",
+                                "timestamp": time.time(),
+                                "duration_ms": int((time.time() - started_at) * 1000),
+                                "execution_profile": profile_value,
+                                "code_hash": code_hash,
+                                "code_preview": code_preview,
+                                "success": True,
+                                "result_kind": "stdout",
+                                "stdout_preview": self._summarize_stdout(stdout),
+                            }
+                        )
                         return self._summarize_stdout(stdout)
             except Exception as exc:
                 can_retry = attempt == 0 and self._is_recoverable_exec_channel_error(
@@ -474,8 +556,34 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
                 if can_retry:
                     self.shutdown()
                     continue
+                self._emit_execution_event(
+                    {
+                        "phase": "complete",
+                        "timestamp": time.time(),
+                        "duration_ms": int((time.time() - started_at) * 1000),
+                        "execution_profile": profile_value,
+                        "code_hash": code_hash,
+                        "code_preview": code_preview,
+                        "success": False,
+                        "result_kind": "exception",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                )
                 raise
 
+        self._emit_execution_event(
+            {
+                "phase": "complete",
+                "timestamp": time.time(),
+                "duration_ms": int((time.time() - started_at) * 1000),
+                "execution_profile": profile_value,
+                "code_hash": code_hash,
+                "code_preview": code_preview,
+                "success": False,
+                "result_kind": "retry_exhausted",
+            }
+        )
         raise CodeInterpreterError("Unexpected execute retry exhaustion")
 
     async def aexecute(

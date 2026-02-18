@@ -6,9 +6,11 @@
 # that introspection, causing WebSocket endpoints to reject connections
 # with HTTP 403 ("Field required" for a query param named ``websocket``).
 
+import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +24,13 @@ from fleet_rlm import runners
 from fleet_rlm.core.interpreter import ExecutionProfile
 
 from ..deps import server_state, session_key
+from ..execution_events import (
+    ExecutionEvent,
+    ExecutionEventType,
+    ExecutionStep,
+    ExecutionStepBuilder,
+    ExecutionSubscription,
+)
 from ..schemas import WSMessage
 
 router = APIRouter(tags=["websocket"])
@@ -90,6 +99,106 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _get_execution_emitter():
+    emitter = server_state.execution_event_emitter
+    if emitter is not None:
+        return emitter
+
+    from ..execution_events import ExecutionEventEmitter
+
+    emitter = ExecutionEventEmitter()
+    server_state.execution_event_emitter = emitter
+    return emitter
+
+
+def _build_execution_event(
+    *,
+    event_type: ExecutionEventType,
+    run_id: str,
+    workspace_id: str,
+    user_id: str,
+    session_id: str,
+    step: ExecutionStep | None = None,
+) -> ExecutionEvent:
+    return ExecutionEvent(
+        type=event_type,
+        run_id=run_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        session_id=session_id,
+        step=step,
+    )
+
+
+async def _emit_execution_event(
+    *,
+    event_type: ExecutionEventType,
+    run_id: str,
+    workspace_id: str,
+    user_id: str,
+    session_id: str,
+    step: ExecutionStep | None = None,
+) -> None:
+    event = _build_execution_event(
+        event_type=event_type,
+        run_id=run_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        session_id=session_id,
+        step=step,
+    )
+    await _get_execution_emitter().emit(event)
+
+
+@router.websocket("/ws/execution")
+async def execution_stream(
+    websocket: WebSocket,
+    workspace_id: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+):
+    """Dedicated execution stream for Artifact Canvas consumers."""
+    if not workspace_id or not user_id or not session_id:
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "type": "error",
+                "message": (
+                    "Missing required query params: workspace_id, user_id, session_id"
+                ),
+            }
+        )
+        await websocket.close(code=1008)
+        return
+
+    subscription = ExecutionSubscription(
+        workspace_id=_sanitize_id(workspace_id, "default"),
+        user_id=_sanitize_id(user_id, "anonymous"),
+        session_id=str(session_id).strip(),
+    )
+    if not subscription.session_id:
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "type": "error",
+                "message": "session_id cannot be empty",
+            }
+        )
+        await websocket.close(code=1008)
+        return
+    emitter = _get_execution_emitter()
+    await emitter.connect(websocket, subscription)
+
+    try:
+        while True:
+            # Keep the socket alive for heartbeat/ping frames.
+            await websocket.receive()
+    except WebSocketDisconnect:
+        await emitter.disconnect(websocket)
+    except Exception:
+        await emitter.disconnect(websocket)
+
+
 @router.websocket("/ws/chat")
 async def chat_streaming(websocket: WebSocket):
     """Streaming WebSocket endpoint with native DSPy async streaming."""
@@ -143,6 +252,8 @@ async def chat_streaming(websocket: WebSocket):
         # so unauthenticated clients never share session state.
         connection_user_id = f"anon-{uuid.uuid4().hex[:12]}"
         session_record: dict[str, Any] | None = None
+        execution_emitter = _get_execution_emitter()
+        ws_loop = asyncio.get_running_loop()
 
         async def persist_session_state(
             *, include_volume_save: bool = True, latest_user_message: str = ""
@@ -324,9 +435,52 @@ async def chat_streaming(websocket: WebSocket):
                     continue
 
                 cancel_flag["cancelled"] = False
+                turn_index = agent.history_turns() + 1
+                run_id = f"{workspace_id}:{user_id}:{sess_id}:{turn_index}"
+                step_builder = ExecutionStepBuilder(run_id=run_id)
+                run_completed = False
 
                 def cancel_check() -> bool:
                     return cancel_flag["cancelled"]
+
+                await execution_emitter.emit(
+                    _build_execution_event(
+                        event_type="execution_started",
+                        run_id=run_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        session_id=sess_id,
+                        step=None,
+                    )
+                )
+
+                previous_execution_hook = None
+
+                def _interpreter_hook(payload: dict[str, Any]) -> None:
+                    if run_completed:
+                        return
+                    repl_step = step_builder.from_interpreter_hook(payload)
+                    if repl_step is None:
+                        return
+                    event = _build_execution_event(
+                        event_type="execution_step",
+                        run_id=run_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        session_id=sess_id,
+                        step=repl_step,
+                    )
+                    ws_loop.call_soon_threadsafe(
+                        lambda evt=event: ws_loop.create_task(
+                            execution_emitter.emit(evt)
+                        )
+                    )
+
+                if interpreter is not None:
+                    previous_execution_hook = getattr(
+                        interpreter, "execution_event_callback", None
+                    )
+                    interpreter.execution_event_callback = _interpreter_hook
 
                 if docs_path:
                     agent.load_document(docs_path)
@@ -342,10 +496,64 @@ async def chat_streaming(websocket: WebSocket):
                             "timestamp": event.timestamp.isoformat(),
                         }
                         await websocket.send_json({"type": "event", "data": event_dict})
+
+                        step = step_builder.from_stream_event(
+                            kind=event.kind,
+                            text=event.text,
+                            payload=event.payload,
+                            timestamp=event.timestamp.timestamp(),
+                        )
+                        if step is not None:
+                            await execution_emitter.emit(
+                                _build_execution_event(
+                                    event_type="execution_step",
+                                    run_id=run_id,
+                                    workspace_id=workspace_id,
+                                    user_id=user_id,
+                                    session_id=sess_id,
+                                    step=step,
+                                )
+                            )
+
                         if event.kind == "final":
                             await persist_session_state(
                                 include_volume_save=True, latest_user_message=message
                             )
+                            await execution_emitter.emit(
+                                _build_execution_event(
+                                    event_type="execution_completed",
+                                    run_id=run_id,
+                                    workspace_id=workspace_id,
+                                    user_id=user_id,
+                                    session_id=sess_id,
+                                    step=step,
+                                )
+                            )
+                            run_completed = True
+                        elif event.kind in {"cancelled", "error"}:
+                            await execution_emitter.emit(
+                                _build_execution_event(
+                                    event_type="execution_completed",
+                                    run_id=run_id,
+                                    workspace_id=workspace_id,
+                                    user_id=user_id,
+                                    session_id=sess_id,
+                                    step=step,
+                                )
+                            )
+                            run_completed = True
+                    if not run_completed:
+                        await execution_emitter.emit(
+                            _build_execution_event(
+                                event_type="execution_completed",
+                                run_id=run_id,
+                                workspace_id=workspace_id,
+                                user_id=user_id,
+                                session_id=sess_id,
+                                step=None,
+                            )
+                        )
+                        run_completed = True
                 except Exception as exc:
                     logger.error(
                         "Streaming error: %s",
@@ -356,6 +564,38 @@ async def chat_streaming(websocket: WebSocket):
                     await websocket.send_json(
                         {"type": "error", "message": f"Streaming error: {exc}"}
                     )
+                    if not run_completed:
+                        error_step = step_builder.from_stream_event(
+                            kind="error",
+                            text=f"Streaming error: {exc}",
+                            payload={"error_type": type(exc).__name__},
+                            timestamp=time.time(),
+                        )
+                        if error_step is not None:
+                            await execution_emitter.emit(
+                                _build_execution_event(
+                                    event_type="execution_step",
+                                    run_id=run_id,
+                                    workspace_id=workspace_id,
+                                    user_id=user_id,
+                                    session_id=sess_id,
+                                    step=error_step,
+                                )
+                            )
+                        await execution_emitter.emit(
+                            _build_execution_event(
+                                event_type="execution_completed",
+                                run_id=run_id,
+                                workspace_id=workspace_id,
+                                user_id=user_id,
+                                session_id=sess_id,
+                                step=error_step,
+                            )
+                        )
+                        run_completed = True
+                finally:
+                    if interpreter is not None:
+                        interpreter.execution_event_callback = previous_execution_hook
 
         except WebSocketDisconnect:
             cancel_flag["cancelled"] = True

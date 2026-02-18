@@ -103,6 +103,52 @@ Session identity notes:
 - Session cache key: `workspace_id:user_id`.
 - If `user_id` is not provided, the server assigns a per-connection anonymous ID.
 
+### `WS /ws/execution`
+
+Dedicated execution graph stream for Artifact Canvas and observability clients.
+
+**Subscription query params (required):**
+
+- `workspace_id`
+- `user_id`
+- `session_id`
+
+If any filter is missing, the server returns an error payload and closes with policy
+violation (`1008`).
+
+**Server -> Client `ExecutionEvent` shape:**
+
+```json
+{
+  "type": "execution_step",
+  "run_id": "default:alice:session-123:1",
+  "workspace_id": "default",
+  "user_id": "alice",
+  "session_id": "session-123",
+  "step": {
+    "id": "default:alice:session-123:1:s3",
+    "parent_id": "default:alice:session-123:1:root",
+    "type": "tool",
+    "label": "load_document",
+    "input": { "tool_name": "load_document", "tool_args": "path='docs/a.md'" },
+    "output": null,
+    "timestamp": 1739916000.123
+  }
+}
+```
+
+Event lifecycle:
+
+- `execution_started` (one per chat turn)
+- `execution_step` (live LLM/tool/repl/memory/output graph updates)
+- `execution_completed` (terminal event for the run)
+
+Notes:
+
+- `run_id` is deterministic per turn: `{workspace_id}:{user_id}:{session_id}:{turn_index}`.
+- Step payload fields are best-effort and sanitized (truncated + sensitive key redaction).
+- `/ws/chat` remains unchanged and backward compatible.
+
 ## Task Endpoints (`/tasks/{type}`)
 
 These endpoints wrap specific `fleet_rlm.runners` functions.

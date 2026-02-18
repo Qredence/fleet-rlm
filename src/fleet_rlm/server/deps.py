@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .config import ServerRuntimeConfig
+from .execution_events import ExecutionEventEmitter
 
 
 class ServerState:
@@ -14,6 +15,7 @@ class ServerState:
         self.config = ServerRuntimeConfig()
         self.planner_lm: Any | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
+        self.execution_event_emitter = ExecutionEventEmitter()
 
     @property
     def is_ready(self) -> bool:

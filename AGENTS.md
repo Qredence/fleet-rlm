@@ -155,6 +155,8 @@ Tests mock Modal APIs and should run without cloud credentials.
   - `clarification_questions` (safe clarification generation for ambiguous/high-risk operations)
 - WebSocket interactive chat should carry identity envelope fields (`workspace_id`, `user_id`, `session_id`) so per-user/per-workspace state can be restored
 - `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through recursive sub-agents
+- `/ws/execution` is a dedicated filtered execution stream for Artifact Canvas consumers; clients must subscribe with matching `workspace_id`, `user_id`, and `session_id` query params
+- Execution observability is additive: preserve `/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/ws/execution`
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
 
 ## Import Verification

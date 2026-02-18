@@ -33,6 +33,7 @@ class _FakeChatAgent:
             def __init__(self):
                 self.default_execution_profile = "ROOT_INTERLOCUTOR"
                 self._volume_store: dict[str, str] = {}
+                self.execution_event_callback = None
 
             @contextmanager
             def execution_profile(self, profile):
@@ -104,6 +105,11 @@ class _FakeChatAgent:
     def set_events(self, events: list[StreamEvent]):
         """Configure events to yield during streaming."""
         self._events = events
+
+    def history_turns(self) -> int:
+        """Return stored history turn count."""
+        messages = getattr(self.history, "messages", [])
+        return len(messages)
 
     def reset(self, *, clear_sandbox_buffers: bool = True):
         self.history = SimpleNamespace(messages=[])
@@ -442,3 +448,75 @@ def test_websocket_command_empty_name(test_app):
             data = websocket.receive_json()
             assert data["type"] == "error"
             assert "empty" in data["message"].lower()
+
+
+def test_execution_websocket_requires_identity_filters(test_app):
+    """Test /ws/execution rejects missing subscription filters."""
+    with TestClient(test_app) as client:
+        with client.websocket_connect("/ws/execution") as websocket:
+            data = websocket.receive_json()
+            assert data["type"] == "error"
+            assert "workspace_id" in data["message"]
+            assert "session_id" in data["message"]
+
+
+def test_execution_websocket_streams_execution_events_for_matching_session(
+    test_app, fake_agent
+):
+    """Test /ws/execution receives started/step/completed events for matching chat."""
+    fake_agent.set_events(
+        [
+            StreamEvent(kind="reasoning_step", text="Thinking...", timestamp=_ts(1.0)),
+            StreamEvent(
+                kind="final",
+                text="Done",
+                payload={"trajectory": {}, "history_turns": 1},
+                timestamp=_ts(2.0),
+            ),
+        ]
+    )
+
+    with TestClient(test_app) as client:
+        with client.websocket_connect(
+            "/ws/execution?workspace_id=default&user_id=alice&session_id=session-123"
+        ) as execution_ws:
+            with client.websocket_connect("/ws/chat") as chat_ws:
+                chat_ws.send_json(
+                    {
+                        "type": "message",
+                        "content": "test execution events",
+                        "workspace_id": "default",
+                        "user_id": "alice",
+                        "session_id": "session-123",
+                    }
+                )
+
+                # Drain chat events to complete the turn.
+                while True:
+                    chat_data = chat_ws.receive_json()
+                    if (
+                        chat_data["type"] == "event"
+                        and chat_data["data"]["kind"] == "final"
+                    ):
+                        break
+
+                execution_events = []
+                while True:
+                    event = execution_ws.receive_json()
+                    execution_events.append(event)
+                    if event["type"] == "execution_completed":
+                        break
+
+                assert execution_events[0]["type"] == "execution_started"
+                assert execution_events[0]["run_id"].endswith(":1")
+                assert execution_events[0]["workspace_id"] == "default"
+                assert execution_events[0]["user_id"] == "alice"
+                assert execution_events[0]["session_id"] == "session-123"
+
+                step_events = [
+                    e for e in execution_events if e["type"] == "execution_step"
+                ]
+                assert step_events
+                assert any(step["step"]["type"] == "llm" for step in step_events)
+                assert any(step["step"]["type"] == "output" for step in step_events)
+                assert execution_events[-1]["type"] == "execution_completed"

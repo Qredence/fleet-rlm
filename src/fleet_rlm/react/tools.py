@@ -123,9 +123,21 @@ def execute_submit(
     if isinstance(result, FinalOutput):
         output = result.output
         if isinstance(output, dict):
-            return output
-        return {"output": output}
-    return {"output": str(result)}
+            enriched = dict(output)
+            enriched.setdefault("depth", getattr(agent, "_current_depth", 0))
+            parent_step_id = (variables or {}).get("parent_step_id")
+            if (
+                isinstance(parent_step_id, str)
+                and parent_step_id
+                and "parent_step_id" not in enriched
+            ):
+                enriched["parent_step_id"] = parent_step_id
+            return enriched
+        return {
+            "output": output,
+            "depth": getattr(agent, "_current_depth", 0),
+        }
+    return {"output": str(result), "depth": getattr(agent, "_current_depth", 0)}
 
 
 def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[str, Any]:
@@ -141,6 +153,12 @@ def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[st
     final_reasoning = getattr(result, "final_reasoning", None)
     if final_reasoning:
         payload["final_reasoning"] = final_reasoning
+    depth = getattr(result, "depth", None)
+    if isinstance(depth, (int, float)):
+        payload["depth"] = int(depth)
+    parent_step_id = getattr(result, "parent_step_id", None)
+    if isinstance(parent_step_id, str) and parent_step_id:
+        payload["parent_step_id"] = parent_step_id
     return payload
 
 
