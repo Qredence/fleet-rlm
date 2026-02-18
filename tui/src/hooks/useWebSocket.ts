@@ -15,6 +15,54 @@ import type {
   TraceMode,
 } from "../types/protocol";
 
+function isServerPayload(data: unknown): data is ServerPayload {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+  const maybe = data as { type?: unknown };
+  return (
+    maybe.type === "event" ||
+    maybe.type === "error" ||
+    maybe.type === "command_result"
+  );
+}
+
+async function decodeIncomingMessage(data: unknown): Promise<string> {
+  if (typeof data === "string") {
+    return data;
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(data));
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    return new TextDecoder().decode(
+      new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
+    );
+  }
+
+  if (typeof Blob !== "undefined" && data instanceof Blob) {
+    return await data.text();
+  }
+
+  return String(data ?? "");
+}
+
+async function parseIncomingPayload(data: unknown): Promise<ServerPayload> {
+  if (isServerPayload(data)) {
+    return data;
+  }
+
+  const raw = await decodeIncomingMessage(data);
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isServerPayload(parsed)) {
+    throw new Error("Unsupported server payload shape");
+  }
+  return parsed;
+}
+
 export interface UseWebSocketOptions {
   url: string;
   autoConnect?: boolean;
@@ -104,9 +152,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         updateConnectionState("connected");
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
-          const message: ServerPayload = JSON.parse(event.data.toString());
+          const message = await parseIncomingPayload(event.data);
 
           if (message.type === "event" && "data" in message && message.data) {
             onEventRef.current?.(message.data);

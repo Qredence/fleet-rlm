@@ -37,6 +37,14 @@ function AppContent() {
     },
     onError: (error) => {
       dispatch({ type: "SET_STATUS_MESSAGE", payload: `Error: ${error}` });
+      dispatch({
+        type: "ADD_TRANSCRIPT",
+        payload: {
+          role: "system",
+          content: `Error: ${error}`,
+        },
+      });
+      dispatch({ type: "RESET_TURN" });
 
       // Show helpful message for connection errors
       if (error.includes("WebSocket") || error.includes("Connection")) {
