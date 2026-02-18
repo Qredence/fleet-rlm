@@ -413,6 +413,41 @@ def test_get_tool_raises_on_unknown_name(monkeypatch):
         agent._get_tool("nonexistent_tool")
 
 
+def test_get_runtime_module_caches_instances(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+    from fleet_rlm.react import rlm_runtime_modules as runtime_mod
+
+    created: list[tuple[object, int, int, bool]] = []
+
+    class _FakeGroundedModule:
+        def __init__(
+            self, *, interpreter, max_iterations: int, max_llm_calls: int, verbose: bool
+        ) -> None:
+            created.append((interpreter, max_iterations, max_llm_calls, verbose))
+
+    monkeypatch.setattr(
+        runtime_mod, "GroundedAnswerWithCitationsModule", _FakeGroundedModule
+    )
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter(), verbose=True)
+    first = agent.get_runtime_module("grounded_answer")
+    second = agent.get_runtime_module("grounded_answer")
+
+    assert first is second
+    assert len(created) == 1
+    assert created[0][1:] == (agent.rlm_max_iterations, agent.rlm_max_llm_calls, True)
+
+
+def test_get_runtime_module_raises_on_unknown_name(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    with pytest.raises(ValueError, match="Unknown runtime module: does_not_exist"):
+        agent.get_runtime_module("does_not_exist")
+
+
 def test_list_react_tool_names_handles_dspy_tool(monkeypatch):
     """list_react_tool_names should work with dspy.Tool wrappers."""
     records = []

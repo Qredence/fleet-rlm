@@ -260,6 +260,38 @@ def test_grounded_answer_returns_structured_citations(mock_agent):
     assert "trajectory_steps" in result
 
 
+@pytest.mark.parametrize(
+    ("raw_confidence", "expected_confidence"),
+    [
+        ("91", 91),
+        ("high", 0),
+        (-4, 0),
+        (151, 100),
+    ],
+)
+def test_grounded_answer_normalizes_confidence_values(
+    mock_agent, raw_confidence, expected_confidence
+):
+    class _FakeGroundedModule:
+        def __call__(self, **kwargs):
+            return MagicMock(
+                answer="grounded",
+                citations=[],
+                confidence=raw_confidence,
+                coverage_notes="ok",
+            )
+
+    mock_agent._get_document.return_value = "# H1\nA"
+    mock_agent.get_runtime_module = MagicMock(return_value=_FakeGroundedModule())
+
+    tools = build_tool_list(mock_agent)
+    grounded_tool = next(t for t in tools if t.name == "grounded_answer")
+    result = grounded_tool(query="q", include_trajectory=False)
+
+    assert result["status"] == "ok"
+    assert result["confidence"] == expected_confidence
+
+
 def test_triage_incident_logs_returns_expected_shape(mock_agent):
     class _FakeTriageModule:
         def __call__(self, **kwargs):
@@ -381,6 +413,33 @@ def test_memory_action_intent_schema_and_confirmation(mock_agent):
     assert result["requires_confirmation"] is True
 
 
+def test_memory_action_intent_parses_string_boolean_confirmation(mock_agent):
+    class _FakeTreeModule:
+        def __call__(self, **kwargs):
+            return MagicMock(nodes=[], total_files=0, total_dirs=1, truncated=False)
+
+    class _FakeIntentModule:
+        def __call__(self, **kwargs):
+            return MagicMock(
+                action_type="delete",
+                target_paths=[],
+                content_plan=[],
+                risk_level="high",
+                requires_confirmation="false",
+                rationale="explicitly not required",
+            )
+
+    mock_agent.get_runtime_module = MagicMock(
+        side_effect=[_FakeTreeModule(), _FakeIntentModule()]
+    )
+    tools = build_tool_list(mock_agent)
+    intent_tool = next(t for t in tools if t.name == "memory_action_intent")
+    result = intent_tool(user_request="delete tmp")
+
+    assert result["status"] == "ok"
+    assert result["requires_confirmation"] is False
+
+
 def test_memory_structure_audit_schema(mock_agent):
     class _FakeTreeModule:
         def __call__(self, **kwargs):
@@ -482,3 +541,37 @@ def test_clarification_questions_schema_and_high_risk_block(mock_agent):
     assert result["status"] == "ok"
     assert result["questions"]
     assert result["proceed_without_answer"] is False
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected_value"),
+    [
+        ("false", False),
+        ("true", True),
+    ],
+)
+def test_clarification_questions_parses_string_boolean_medium_risk(
+    mock_agent, raw_value, expected_value
+):
+    class _FakeTreeModule:
+        def __call__(self, **kwargs):
+            return MagicMock(nodes=[], total_files=0, total_dirs=1, truncated=False)
+
+    class _FakeClarifyModule:
+        def __call__(self, **kwargs):
+            return MagicMock(
+                questions=["Need one detail"],
+                blocking_unknowns=["target"],
+                safe_default="no-op",
+                proceed_without_answer=raw_value,
+            )
+
+    mock_agent.get_runtime_module = MagicMock(
+        side_effect=[_FakeTreeModule(), _FakeClarifyModule()]
+    )
+    tools = build_tool_list(mock_agent)
+    clarify_tool = next(t for t in tools if t.name == "clarification_questions")
+    result = clarify_tool(request="clean memory", operation_risk="medium")
+
+    assert result["status"] == "ok"
+    assert result["proceed_without_answer"] is expected_value

@@ -26,6 +26,46 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _coerce_bool(value: Any, *, default: bool = False) -> bool:
+    """Coerce common model output variants into booleans safely."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _coerce_int(
+    value: Any,
+    *,
+    default: int = 0,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
+    """Coerce model outputs into bounded ints with a safe fallback."""
+    if value is None:
+        parsed = default
+    else:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+
+    if min_value is not None:
+        parsed = max(min_value, parsed)
+    if max_value is not None:
+        parsed = min(max_value, parsed)
+    return parsed
+
+
 # ---------------------------------------------------------------------------
 # Tool factory
 # ---------------------------------------------------------------------------
@@ -202,7 +242,12 @@ SUBMIT(
             "status": "ok",
             "answer": str(getattr(result, "answer", "")),
             "citations": citations,
-            "confidence": int(getattr(result, "confidence", 0) or 0),
+            "confidence": _coerce_int(
+                getattr(result, "confidence", 0),
+                default=0,
+                min_value=0,
+                max_value=100,
+            ),
             "coverage_notes": str(getattr(result, "coverage_notes", "")),
             "doc_chars": len(document),
         }
@@ -408,8 +453,9 @@ SUBMIT(
         if risk_level not in {"low", "medium", "high"}:
             risk_level = "medium"
 
-        requires_confirmation = bool(
-            getattr(result, "requires_confirmation", risk_level == "high")
+        requires_confirmation = _coerce_bool(
+            getattr(result, "requires_confirmation", risk_level == "high"),
+            default=risk_level == "high",
         )
 
         return {
@@ -511,7 +557,10 @@ SUBMIT(
                 operation_risk=risk_norm,
             )
 
-        proceed_without_answer = bool(getattr(result, "proceed_without_answer", False))
+        proceed_without_answer = _coerce_bool(
+            getattr(result, "proceed_without_answer", False),
+            default=False,
+        )
         if risk_norm == "high":
             proceed_without_answer = False
 
