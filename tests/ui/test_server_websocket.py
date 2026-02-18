@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
+import time
 from typing import Any
+import uuid
 
 import pytest
 
@@ -129,6 +132,37 @@ class _FakeChatAgent:
         self._session_state = dict(state)
 
 
+class _DelayedRepository:
+    """Minimal async repository stub with delayed run completion."""
+
+    def __init__(self, completion_delay_seconds: float = 0.05) -> None:
+        self.completion_delay_seconds = completion_delay_seconds
+        self.tenant_id = uuid.uuid4()
+        self.user_id = uuid.uuid4()
+        self.run_id = uuid.uuid4()
+        self.update_run_status_calls = 0
+
+    async def upsert_identity(self, **kwargs) -> SimpleNamespace:
+        return SimpleNamespace(tenant_id=self.tenant_id, user_id=self.user_id)
+
+    async def create_run(self, request) -> SimpleNamespace:
+        return SimpleNamespace(id=self.run_id)
+
+    async def append_step(self, request) -> SimpleNamespace:
+        return SimpleNamespace(id=uuid.uuid4())
+
+    async def update_run_status(self, **kwargs) -> SimpleNamespace:
+        await asyncio.sleep(self.completion_delay_seconds)
+        self.update_run_status_calls += 1
+        return SimpleNamespace(id=self.run_id)
+
+    async def store_memory_item(self, request) -> SimpleNamespace:
+        return SimpleNamespace(id=uuid.uuid4())
+
+    async def store_artifact(self, request) -> SimpleNamespace:
+        return SimpleNamespace(id=uuid.uuid4())
+
+
 @pytest.fixture
 def fake_agent():
     """Provide a fake chat agent."""
@@ -226,6 +260,36 @@ def test_websocket_accepts_query_auth_in_dev_mode(test_app, fake_agent):
             assert data["type"] == "event"
             assert data["data"]["kind"] == "final"
             assert data["data"]["text"] == "ok"
+
+
+def test_websocket_final_event_waits_for_run_completion(test_app, fake_agent):
+    """Terminal events should be sent only after run completion persistence."""
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="done",
+                payload={"history_turns": 1},
+                timestamp=_ts(1.0),
+            ),
+        ]
+    )
+    delayed_repo = _DelayedRepository(completion_delay_seconds=0.05)
+
+    with TestClient(test_app) as client:
+        from fleet_rlm.server.deps import server_state
+
+        server_state.repository = delayed_repo
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
+            websocket.send_json({"type": "message", "content": "hello"})
+            started = time.perf_counter()
+            data = websocket.receive_json()
+            elapsed = time.perf_counter() - started
+
+            assert data["type"] == "event"
+            assert data["data"]["kind"] == "final"
+            assert delayed_repo.update_run_status_calls == 1
+            assert elapsed >= delayed_repo.completion_delay_seconds * 0.8
 
 
 def test_websocket_with_docs_path(test_app, fake_agent):

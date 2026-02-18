@@ -4,9 +4,9 @@
  */
 
 import { useAppContext } from "../context/AppContext";
+import { useRegisterKeyHandler, PRIORITY } from "../context/KeyboardContext";
 import { bg, border, fg, accent, semantic } from "../theme";
-import { useKeyboard } from "@opentui/react";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useCallback } from "react";
 
 function ReasoningPane() {
   const { state } = useAppContext();
@@ -175,30 +175,35 @@ function StatsPane() {
 const TABS = ["reasoning", "tools", "stats"] as const;
 const TAB_NAMES = ["Reasoning", "Tools", "Stats"];
 
-export function TabPanel() {
+interface TabPanelProps {
+  focused?: boolean;
+  onFocus?: () => void;
+}
+
+export function TabPanel({ focused = false, onFocus }: TabPanelProps) {
   const { state, dispatch } = useAppContext();
   const activeTab = state.activeTab;
   const activeIndex = TABS.indexOf(activeTab);
 
-  useKeyboard((key) => {
+  const handleTabKeys = useCallback((key: { ctrl: boolean; shift: boolean; name: string }) => {
+    if (state.sidebarCollapsed) return false;
+
     if (key.ctrl && key.name === "1") {
       dispatch({ type: "SET_ACTIVE_TAB", payload: "reasoning" });
+      return true;
     }
     if (key.ctrl && key.name === "2") {
       dispatch({ type: "SET_ACTIVE_TAB", payload: "tools" });
+      return true;
     }
     if (key.ctrl && key.name === "3") {
       dispatch({ type: "SET_ACTIVE_TAB", payload: "stats" });
+      return true;
     }
-    if (key.name === "tab" || key.name === "right") {
-      const nextIndex = (activeIndex + 1) % TABS.length;
-      dispatch({ type: "SET_ACTIVE_TAB", payload: TABS[nextIndex]! });
-    }
-    if ((key.name === "tab" && key.shift) || key.name === "left") {
-      const prevIndex = (activeIndex - 1 + TABS.length) % TABS.length;
-      dispatch({ type: "SET_ACTIVE_TAB", payload: TABS[prevIndex]! });
-    }
-  });
+    return false;
+  }, [state.sidebarCollapsed, dispatch]);
+
+  useRegisterKeyHandler("tabPanel", handleTabKeys, PRIORITY.PANE);
 
   return (
     <box
@@ -207,9 +212,10 @@ export function TabPanel() {
       backgroundColor={bg.surface}
       border
       borderStyle="rounded"
-      borderColor={border.dim}
+      borderColor={focused ? accent.base : border.dim}
       title=" Inspector "
       titleAlignment="center"
+      onMouseDown={onFocus}
     >
       {/* Tab headers */}
       <box

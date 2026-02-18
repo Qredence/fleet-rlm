@@ -1,11 +1,12 @@
 /**
  * ChatPane - scrollable conversation transcript with polished styling.
  * Surface background, role badges, and styled message bubbles.
+ * Supports copying last assistant message with Ctrl+C.
  */
 
-import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
+import { useRef, useEffect, useState, memo, useCallback } from "react";
 import { useAppContext } from "../context/AppContext";
-import { useKeyboard } from "@opentui/react";
+import { useRegisterKeyHandler, PRIORITY } from "../context/KeyboardContext";
 import { bg, border, fg, accent, semantic } from "../theme";
 import type { TranscriptEvent } from "../types/protocol";
 import { Spinner } from "./Spinner";
@@ -99,11 +100,15 @@ function MessageBubbleInner({ event }: { event: TranscriptEvent }) {
 
 const MessageBubble = memo(MessageBubbleInner);
 
-export function ChatPane() {
+interface ChatPaneProps {
+  focused?: boolean;
+  onFocus?: () => void;
+}
+
+export function ChatPane({ focused = false, onFocus }: ChatPaneProps) {
   const { state } = useAppContext();
   const scrollRef = useRef<any>(null);
   const prevMessageCount = useRef(0);
-  const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const elapsedInterval = useRef<NodeJS.Timeout | null>(null);
 
@@ -113,33 +118,6 @@ export function ChatPane() {
   const processingStartTime = state.processingStartTime;
   const hasNewMessage = messages.length > prevMessageCount.current;
   prevMessageCount.current = messages.length;
-
-  // Copy last assistant message to clipboard
-  const copyLastMessage = useCallback(() => {
-    // Find last assistant message
-    let lastAssistantContent: string | null = null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === "assistant") {
-        lastAssistantContent = messages[i]?.content || null;
-        break;
-      }
-    }
-
-    if (lastAssistantContent) {
-      const success = copyToClipboard(lastAssistantContent);
-      if (success) {
-        setCopiedFeedback(true);
-        setTimeout(() => setCopiedFeedback(false), 1500);
-      }
-    }
-  }, [messages]);
-
-  // Handle Ctrl+Y to copy
-  useKeyboard((key) => {
-    if (key.ctrl && key.name === "y") {
-      copyLastMessage();
-    }
-  });
 
   if (isProcessing && state.currentTurn.transcriptText) {
     messages.push({
@@ -179,6 +157,24 @@ export function ChatPane() {
     }
   }, [messages.length, hasNewMessage]);
 
+  // Copy handler - copy last assistant message when focused and Ctrl+C pressed
+  const handleCopy = useCallback((key: { ctrl: boolean; name: string }) => {
+    if (!focused) return false;
+
+    if (key.ctrl && key.name === "c") {
+      const lastAssistant = [...messages].reverse().find(m => m.role === "assistant");
+      if (lastAssistant) {
+        copyToClipboard(lastAssistant.content);
+        // Could show toast here if we had access to toast context
+        return true;
+      }
+    }
+
+    return false;
+  }, [focused, messages]);
+
+  useRegisterKeyHandler("chatCopy", handleCopy, PRIORITY.PANE);
+
   if (messages.length === 0) {
     return (
       <box
@@ -186,11 +182,12 @@ export function ChatPane() {
         backgroundColor={bg.surface}
         border
         borderStyle="rounded"
-        borderColor={border.dim}
+        borderColor={focused ? accent.base : border.dim}
         title=" Chat "
         titleAlignment="center"
         alignItems="center"
         justifyContent="center"
+        onMouseDown={onFocus}
       >
         <text fg={fg.muted}>Type a message to start chatting...</text>
       </box>
@@ -204,15 +201,11 @@ export function ChatPane() {
       backgroundColor={bg.surface}
       border
       borderStyle="rounded"
-      borderColor={border.dim}
+      borderColor={focused ? accent.base : border.dim}
       title=" Chat "
       titleAlignment="center"
+      onMouseDown={onFocus}
     >
-      {copiedFeedback && (
-        <box height={1} backgroundColor={semantic.success} paddingLeft={2}>
-          <text fg="#000000">Copied to clipboard!</text>
-        </box>
-      )}
       <scrollbox
         ref={scrollRef}
         flexGrow={1}

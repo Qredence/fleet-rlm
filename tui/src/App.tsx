@@ -2,23 +2,121 @@
  * Main App component - layout shell for the fleet-rlm TUI.
  * Layout: StatusBar + main split (ChatPane + TabPanel) + InputBar + HintsBar
  * Polished with base background and proper spacing.
+ * Responsive layout adapts to terminal width.
  */
 
-import { useCallback } from "react";
-import { AppProvider, useAppContext } from "./context/AppContext";
+import { useCallback, useEffect, useMemo } from "react";
+import { AppProvider, useAppContext, type FocusPane } from "./context/AppContext";
+import { KeyboardProvider, useRegisterKeyHandler, useFocusNavigation, getNextFocusOnSidebarToggle, PRIORITY } from "./context/KeyboardContext";
+import { ToastProvider, useToast } from "./context/ToastContext";
+import { ToastContainer } from "./components/Toast";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { useResponsiveLayout } from "./hooks/useResponsiveLayout";
 import { StatusBar } from "./components/StatusBar";
 import { HintsBar } from "./components/HintsBar";
 import { ChatPane } from "./components/ChatPane";
 import { TabPanel } from "./components/TabPanel";
 import { InputBar } from "./components/InputBar";
 import { CommandPalette } from "./components/CommandPalette";
-import { useKeyboard, useRenderer } from "@opentui/react";
-import { bg } from "./theme";
+import { useRenderer } from "@opentui/react";
+import { bg, accent, border } from "./theme";
+import { copyToClipboard } from "./hooks/useClipboard";
+
+function GlobalKeyHandler() {
+  const { state, dispatch } = useAppContext();
+  useRenderer();
+  const { showToast } = useToast();
+
+  const handleGlobalKeys = useCallback((key: { ctrl: boolean; name: string }) => {
+    if (key.ctrl && key.name === "c") {
+      if (state.isProcessing) {
+        return false;
+      }
+    }
+
+    if (key.ctrl && key.name === "l") {
+      dispatch({ type: "CLEAR_TRANSCRIPT" });
+      showToast({ type: "info", message: "Chat cleared" });
+      return true;
+    }
+
+    if (key.ctrl && key.name === "b") {
+      dispatch({ type: "TOGGLE_SIDEBAR" });
+      return true;
+    }
+
+    if (key.ctrl && key.name === "p") {
+      dispatch({ type: "OPEN_COMMAND_PALETTE" });
+      return true;
+    }
+
+    if (key.ctrl && key.name === "y") {
+      const lastMsg = [...state.transcript].reverse().find(m => m.role === "assistant");
+      if (lastMsg) {
+        copyToClipboard(lastMsg.content);
+        showToast({ type: "success", message: "Copied to clipboard!" });
+      }
+      return true;
+    }
+
+    return false;
+  }, [state.isProcessing, state.transcript, dispatch, showToast]);
+
+  useRegisterKeyHandler("global", handleGlobalKeys, PRIORITY.GLOBAL);
+
+  return null;
+}
+
+function CancelHandler({ ws }: { ws: ReturnType<typeof useWebSocket> }) {
+  const { state, dispatch } = useAppContext();
+
+  const handleCancel = useCallback(() => {
+    if (state.isProcessing && state.connectionState === "connected") {
+      ws.sendCancel();
+      dispatch({ type: "CANCEL_TURN" });
+      return true;
+    }
+    return false;
+  }, [state.isProcessing, state.connectionState, ws, dispatch]);
+
+  useRegisterKeyHandler("cancel", handleCancel, PRIORITY.GLOBAL + 1);
+
+  return null;
+}
+
+function FocusManager({ sidebarVisible }: { sidebarVisible: boolean }) {
+  const { state, dispatch } = useAppContext();
+
+  useFocusNavigation(
+    state.focusedPane,
+    useCallback((pane: FocusPane) => {
+      dispatch({ type: "SET_FOCUSED_PANE", payload: pane });
+    }, [dispatch]),
+    sidebarVisible,
+    state.isProcessing
+  );
+
+  return null;
+}
 
 function AppContent() {
   const { state, dispatch } = useAppContext();
   const renderer = useRenderer();
+  const layout = useResponsiveLayout();
+
+  // Auto-collapse sidebar on narrow terminals
+  const sidebarVisible = !state.sidebarCollapsed && !layout.shouldCollapseSidebar;
+
+  // Handle focus when sidebar toggles
+  const prevSidebarVisible = useMemo(() => !state.sidebarCollapsed, [state.sidebarCollapsed]);
+  useEffect(() => {
+    if (prevSidebarVisible !== sidebarVisible) {
+      const newFocus = getNextFocusOnSidebarToggle(state.focusedPane, sidebarVisible);
+      if (newFocus !== state.focusedPane) {
+        dispatch({ type: "SET_FOCUSED_PANE", payload: newFocus });
+      }
+    }
+  }, [sidebarVisible, state.focusedPane, dispatch]);
 
   // WebSocket connection
   const ws = useWebSocket({
@@ -373,30 +471,6 @@ Buffers & Storage:
     [renderer, dispatch, ws]
   );
 
-  // Keyboard shortcuts
-  useKeyboard((key) => {
-    if (key.ctrl && key.name === "c") {
-      if (state.isProcessing) {
-        ws.sendCancel();
-        dispatch({ type: "CANCEL_TURN" });
-      }
-    }
-
-    if (key.ctrl && key.name === "l") {
-      dispatch({ type: "CLEAR_TRANSCRIPT" });
-    }
-
-    // Ctrl+B: Toggle sidebar
-    if (key.ctrl && key.name === "b") {
-      dispatch({ type: "TOGGLE_SIDEBAR" });
-    }
-
-    // Ctrl+P: Open command palette
-    if (key.ctrl && key.name === "p") {
-      dispatch({ type: "OPEN_COMMAND_PALETTE" });
-    }
-  });
-
   return (
     <box
       flexDirection="column"
@@ -404,26 +478,46 @@ Buffers & Storage:
       height="100%"
       backgroundColor={bg.base}
     >
+      <GlobalKeyHandler />
+      <CancelHandler ws={ws} />
+      <FocusManager sidebarVisible={sidebarVisible} />
       {/* Top status bar */}
       <StatusBar />
 
-      {/* Main content area */}
-      <box flexGrow={1} flexDirection="row" paddingLeft={1} paddingRight={1} gap={1}>
-        {/* Left: Chat transcript (70%) */}
-        <box flexGrow={7}>
-          <ChatPane />
+      {/* Main content area - responsive layout */}
+      <box
+        flexGrow={1}
+        flexDirection={layout.layout === "stacked" ? "column" : "row"}
+        paddingLeft={1}
+        paddingRight={1}
+        gap={1}
+      >
+        {/* Chat transcript */}
+        <box flexGrow={layout.chatFlex}>
+          <ChatPane
+            focused={state.focusedPane === "chat"}
+            onFocus={() => dispatch({ type: "SET_FOCUSED_PANE", payload: "chat" })}
+          />
         </box>
 
-        {/* Right: Tabbed panel (30%) - collapsible */}
-        {!state.sidebarCollapsed && (
-          <box flexGrow={3}>
-            <TabPanel />
+        {/* Sidebar - collapsible and responsive */}
+        {sidebarVisible && (
+          <box flexGrow={layout.sidebarFlex}>
+            <TabPanel
+              focused={state.focusedPane === "sidebar"}
+              onFocus={() => dispatch({ type: "SET_FOCUSED_PANE", payload: "sidebar" })}
+            />
           </box>
         )}
       </box>
 
       {/* Input bar */}
-      <InputBar onSubmit={handleSubmit} onSlashCommand={handleSlashCommand} />
+      <InputBar
+        onSubmit={handleSubmit}
+        onSlashCommand={handleSlashCommand}
+        focused={state.focusedPane === "input"}
+        onFocus={() => dispatch({ type: "SET_FOCUSED_PANE", payload: "input" })}
+      />
 
       {/* Command palette overlay */}
       <CommandPalette
@@ -455,10 +549,20 @@ Buffers & Storage:
   );
 }
 
+function ToastConnector() {
+  const { toasts, dismissToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+}
+
 export function App() {
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <KeyboardProvider>
+      <ToastProvider>
+        <AppProvider>
+          <ToastConnector />
+          <AppContent />
+        </AppProvider>
+      </ToastProvider>
+    </KeyboardProvider>
   );
 }
