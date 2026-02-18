@@ -83,7 +83,7 @@ def parse_json_from_response(text: str) -> dict[str, Any] | None:
         if isinstance(obj, dict):
             return obj
     except (json.JSONDecodeError, ValueError):
-        pass
+        pass  # not valid JSON; fall through to fenced-block / plain-text heuristics
 
     # Try fenced code block
     for marker in ("```json", "```"):
