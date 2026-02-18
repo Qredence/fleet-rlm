@@ -53,6 +53,8 @@ Final Variable Convention:
 
 from __future__ import annotations
 
+from .driver_factories import FinalOutput  # noqa: F401 — public re-export
+
 
 def sandbox_driver() -> None:
     """Run the long-lived JSON protocol driver for Modal Sandbox execution.
@@ -72,576 +74,141 @@ def sandbox_driver() -> None:
     The loop terminates on EOFError (stdin closed) or when ``Final`` is set
     (if the caller stops sending commands after receiving a Final response).
     """
-
+    # Keep these imports inside the function so the source extracted by
+    # ``inspect.getsource(sandbox_driver)`` is self-contained when executed
+    # in the Modal sandbox process.
     import json
-    import re as _re
     import sys
     from contextlib import redirect_stderr, redirect_stdout
     from io import StringIO
-    from typing import Any
+    from typing import Any, Callable, cast
+
+    try:
+        from fleet_rlm.core.driver_factories import (
+            FinalOutput,
+            inject_sandbox_helpers,
+            make_llm_query,
+            make_llm_query_batched,
+            make_send,
+            make_submit,
+            make_tool_call,
+            register_tools,
+            wrap_helper,
+        )
+        from fleet_rlm.core.sandbox_tools import (
+            add_buffer,
+            chunk_by_headers,
+            chunk_by_json_keys,
+            chunk_by_size,
+            chunk_by_timestamps,
+            clear_buffer,
+            get_buffer,
+            grep,
+            peek,
+            reset_buffers,
+        )
+        from fleet_rlm.core.session_history import (
+            get_last_execution,
+            get_session_history,
+            log_execution,
+            reset_session_history,
+        )
+        from fleet_rlm.core.volume_tools import (
+            load_from_volume,
+            save_to_volume,
+            workspace_append,
+            workspace_list,
+            workspace_read,
+            workspace_write,
+        )
+    except ModuleNotFoundError:
+        # In Modal, interpreter may execute a bundled script that already
+        # defines these symbols in globals without an installed fleet_rlm package.
+        # Access them from globals() instead.
+        g: dict[str, Any] = globals()
+        FinalOutput = cast(Any, g.get("FinalOutput"))
+        inject_sandbox_helpers = cast(Any, g.get("inject_sandbox_helpers"))
+        make_llm_query = cast(Any, g.get("make_llm_query"))
+        make_llm_query_batched = cast(Any, g.get("make_llm_query_batched"))
+        make_send = cast(Any, g.get("make_send"))
+        make_submit = cast(Any, g.get("make_submit"))
+        make_tool_call = cast(Any, g.get("make_tool_call"))
+        register_tools = cast(Any, g.get("register_tools"))
+        wrap_helper = cast(Any, g.get("wrap_helper"))
+        add_buffer = cast(Any, g.get("add_buffer"))
+        chunk_by_headers = cast(Any, g.get("chunk_by_headers"))
+        chunk_by_json_keys = cast(Any, g.get("chunk_by_json_keys"))
+        chunk_by_size = cast(Any, g.get("chunk_by_size"))
+        chunk_by_timestamps = cast(Any, g.get("chunk_by_timestamps"))
+        clear_buffer = cast(Any, g.get("clear_buffer"))
+        get_buffer = cast(Any, g.get("get_buffer"))
+        grep = cast(Any, g.get("grep"))
+        peek = cast(Any, g.get("peek"))
+        reset_buffers = cast(Any, g.get("reset_buffers"))
+        get_last_execution = cast(Any, g.get("get_last_execution"))
+        get_session_history = cast(Any, g.get("get_session_history"))
+        log_execution = cast(Any, g.get("log_execution"))
+        reset_session_history = cast(Any, g.get("reset_session_history"))
+        load_from_volume = cast(Any, g.get("load_from_volume"))
+        save_to_volume = cast(Any, g.get("save_to_volume"))
+        workspace_append = cast(Any, g.get("workspace_append"))
+        workspace_list = cast(Any, g.get("workspace_list"))
+        workspace_read = cast(Any, g.get("workspace_read"))
+        workspace_write = cast(Any, g.get("workspace_write"))
+
+    # Reset module-level state for fresh start (each driver instance is independent)
+    reset_session_history()
+    reset_buffers()
 
     # Persistent globals that survive across code execution calls
     sandbox_globals: dict[str, Any] = {}
     proto_out = sys.__stdout__
-    current_execution_profile = "RLM_DELEGATE"
+
+    # Use list for mutable reference in closure
+    current_execution_profile = ["RLM_DELEGATE"]
     _dynamic_tool_names: set[str] = set()
 
     output_names: list[str] = []
 
-    class _FinalOutput(BaseException):
-        """Exception to signal final output from SUBMIT call.
+    # Create protocol functions
+    _send = make_send(proto_out)
+    _tool_call = make_tool_call(_send)
 
-        Used internally to transfer structured output from the sandboxed
-        code back to the driver without using normal return mechanisms.
-        """
+    # Create wrapped helper injector
+    def _wrap(fn: Callable) -> Callable:
+        return wrap_helper(fn, current_execution_profile)
 
-        pass
-
-    def _send(obj: dict) -> None:
-        """Send a JSON object to the parent process via stdout."""
-        if proto_out is None:
-            return
-        proto_out.write(json.dumps(obj) + "\n")
-        proto_out.flush()
-
-    def _tool_call(name: str, *args, **kwargs):
-        """Make a tool call and wait for response from parent process.
-
-        Sends a tool_call message and blocks waiting for a JSON response
-        from stdin. Raises RuntimeError if the response contains an error.
-        """
-        _send({"tool_call": {"name": name, "args": list(args), "kwargs": kwargs}})
-        reply = json.loads(input())
-        if reply.get("tool_error"):
-            raise RuntimeError(reply["tool_error"])
-        return reply.get("tool_result")
-
-    # Reserved tool names that conflict with built-in sandbox functions
-    _RESERVED_TOOL_NAMES = frozenset(
-        {"llm_query", "llm_query_batched", "SUBMIT", "print"}
+    # Inject sandbox helpers into globals
+    inject_sandbox_helpers(
+        sandbox_globals,
+        _wrap,
+        {
+            "peek": peek,
+            "grep": grep,
+            "chunk_by_size": chunk_by_size,
+            "chunk_by_headers": chunk_by_headers,
+            "chunk_by_timestamps": chunk_by_timestamps,
+            "chunk_by_json_keys": chunk_by_json_keys,
+            "add_buffer": add_buffer,
+            "get_buffer": get_buffer,
+            "clear_buffer": clear_buffer,
+        },
+        {
+            "save_to_volume": save_to_volume,
+            "load_from_volume": load_from_volume,
+            "workspace_write": workspace_write,
+            "workspace_read": workspace_read,
+            "workspace_list": workspace_list,
+            "workspace_append": workspace_append,
+        },
+        {
+            "log_execution": log_execution,
+            "get_session_history": get_session_history,
+            "get_last_execution": get_last_execution,
+        },
     )
 
-    def _wrap_helper(fn):
-        """Guard helper availability by execution profile."""
-
-        def _wrapped(*args, **kwargs):
-            if current_execution_profile == "ROOT_INTERLOCUTOR":
-                raise RuntimeError(
-                    f"Helper '{fn.__name__}' is not available in ROOT_INTERLOCUTOR profile. "
-                    "Delegate tool-heavy work via llm_query/llm_query_batched."
-                )
-            return fn(*args, **kwargs)
-
-        _wrapped.__name__ = fn.__name__
-        _wrapped.__doc__ = fn.__doc__
-        return _wrapped
-
-    def _register_tools(names: list[str]) -> None:
-        """Register tool functions in the sandbox globals.
-
-        Creates wrapper functions for each tool name that communicate
-        back to the parent process via the JSON protocol.
-
-        Args:
-            names: List of tool names to register.
-        """
-        if current_execution_profile == "ROOT_INTERLOCUTOR":
-            for dyn_name in list(_dynamic_tool_names):
-                sandbox_globals.pop(dyn_name, None)
-            _dynamic_tool_names.clear()
-            return
-
-        for name in names:
-            if not name.isidentifier() or name in _RESERVED_TOOL_NAMES:
-                continue
-            if name in sandbox_globals:
-                continue
-
-            def _make(name_: str):
-                def _fn(*args, **kwargs):
-                    return _tool_call(name_, *args, **kwargs)
-
-                return _fn
-
-            sandbox_globals[name] = _make(name)
-            _dynamic_tool_names.add(name)
-
-    def SUBMIT(*args, **kwargs):
-        """Return structured final output from sandboxed code.
-
-        This function is injected into the sandbox globals and allows
-        executed code to return structured data back to the parent process.
-
-        Args:
-            *args: Positional values to return. If output_names was specified
-                in the command, args must match the number of output names.
-            **kwargs: Keyword arguments to return as a dict.
-
-        Raises:
-            _FinalOutput: Always raised with the structured output to
-                break out of exec() and return control to the driver.
-        """
-        if kwargs:
-            raise _FinalOutput(kwargs)
-
-        if not output_names:
-            if len(args) == 1:
-                raise _FinalOutput({"output": args[0]})
-            raise _FinalOutput({"output": list(args)})
-
-        if len(args) != len(output_names):
-            raise _FinalOutput(
-                {
-                    "error": f"SUBMIT expected {len(output_names)} positional values ({output_names}), got {len(args)}"
-                }
-            )
-
-        raise _FinalOutput(dict(zip(output_names, args)))
-
-    sandbox_globals["SUBMIT"] = SUBMIT
-
-    # ------------------------------------------------------------------
-    # Built-in RLM tools: llm_query and llm_query_batched
-    # ------------------------------------------------------------------
-    # These tools enable recursive LLM calls from within sandboxed code.
-    # They use _tool_call() to communicate back to the parent interpreter
-    # which handles the actual LLM queries and call counting.
-    # ------------------------------------------------------------------
-
-    def llm_query(prompt: str) -> str:
-        """Query a sub-LLM for semantic analysis.
-
-        Args:
-            prompt: The prompt to send to the sub-LLM.
-
-        Returns:
-            The response text from the sub-LLM.
-
-        Raises:
-            RuntimeError: If the LLM call fails or max_llm_calls exceeded.
-        """
-        return _tool_call("llm_query", prompt)
-
-    def llm_query_batched(prompts: list[str]) -> list[str]:
-        """Query the sub-LLM with multiple prompts concurrently.
-
-        Args:
-            prompts: List of prompts to send to the sub-LLM.
-
-        Returns:
-            List of response texts, in the same order as prompts.
-
-        Raises:
-            RuntimeError: If any LLM call fails or max_llm_calls exceeded.
-        """
-        return _tool_call("llm_query_batched", prompts)
-
-    sandbox_globals["llm_query"] = llm_query
-    sandbox_globals["llm_query_batched"] = llm_query_batched
-
-    # ------------------------------------------------------------------
-    # Sandbox-side helpers
-    # ------------------------------------------------------------------
-    # These helpers are injected into sandbox_globals so the LLM-generated
-    # code can call them directly.  They use only the stdlib (no external
-    # deps) because they execute inside the Modal sandbox image.
-    # ------------------------------------------------------------------
-
-    def peek(text: str, start: int = 0, length: int = 2000) -> str:
-        """Return a slice of *text* starting at *start* for *length* chars.
-
-        Useful for inspecting a portion of a long document without
-        exceeding context limits.
-        """
-        return text[start : start + length]
-
-    sandbox_globals["peek"] = _wrap_helper(peek)
-
-    def grep(text: str, pattern: str, *, context: int = 0) -> list[str]:
-        """Return all lines in *text* that contain *pattern* (case-insensitive).
-
-        Args:
-            text: The text to search.
-            pattern: Substring to match (case-insensitive).
-            context: Number of surrounding lines to include (0 = matched line only).
-
-        Returns:
-            A list of matching lines (or line groups with context).
-        """
-        lines = text.splitlines()
-        pat = _re.compile(_re.escape(pattern), _re.IGNORECASE)
-        hits: list[str] = []
-        for idx, line in enumerate(lines):
-            if pat.search(line):
-                lo = max(0, idx - context)
-                hi = min(len(lines), idx + context + 1)
-                hits.append("\n".join(lines[lo:hi]))
-        return hits
-
-    sandbox_globals["grep"] = _wrap_helper(grep)
-
-    # NOTE: These functions mirror fleet_rlm.chunking (the canonical source).
-    # Keep defaults and logic in sync with chunking.py.
-    def chunk_by_size(text: str, size: int = 200_000, overlap: int = 0) -> list[str]:
-        """Split *text* into fixed-size chunks with optional overlap."""
-        if not text:
-            return []
-        if size <= 0:
-            raise ValueError("size must be positive")
-        if overlap < 0:
-            raise ValueError("overlap must be non-negative")
-        if overlap >= size:
-            raise ValueError("overlap must be less than size")
-
-        chunks: list[str] = []
-        step = size - overlap
-        for start in range(0, len(text), step):
-            chunk = text[start : start + size]
-            if chunk:
-                chunks.append(chunk)
-            if start + size >= len(text):
-                break
-        return chunks
-
-    sandbox_globals["chunk_by_size"] = _wrap_helper(chunk_by_size)
-
-    def chunk_by_headers(
-        text: str,
-        pattern: str = r"^#{1,3} ",
-        flags: int = _re.MULTILINE,
-    ) -> list[dict]:
-        """Split *text* at lines matching *pattern* (regex)."""
-        if not text:
-            return []
-
-        compiled = _re.compile(pattern, flags | _re.MULTILINE)
-        matches = list(compiled.finditer(text))
-
-        if not matches:
-            return [{"header": "", "content": text.strip(), "start_pos": 0}]
-
-        parts: list[dict] = []
-
-        if matches[0].start() > 0:
-            preamble = text[: matches[0].start()].strip()
-            if preamble:
-                parts.append({"header": "", "content": preamble, "start_pos": 0})
-
-        for i, match in enumerate(matches):
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            section = text[match.start() : end]
-
-            newline_pos = section.find("\n")
-            if newline_pos == -1:
-                header = section.strip()
-                content = ""
-            else:
-                header = section[:newline_pos].strip()
-                content = section[newline_pos + 1 :].strip()
-
-            parts.append(
-                {"header": header, "content": content, "start_pos": match.start()}
-            )
-        return parts
-
-    sandbox_globals["chunk_by_headers"] = _wrap_helper(chunk_by_headers)
-
-    def chunk_by_timestamps(
-        text: str,
-        pattern: str = r"^\d{4}-\d{2}-\d{2}[T ]",
-        flags: int = _re.MULTILINE,
-    ) -> list[dict]:
-        """Split log-style text by timestamp boundaries."""
-        if not text:
-            return []
-
-        compiled = _re.compile(pattern, flags)
-        matches = list(compiled.finditer(text))
-
-        if not matches:
-            return [{"timestamp": "", "content": text, "start_pos": 0}]
-
-        chunks: list[dict] = []
-
-        if matches[0].start() > 0:
-            preamble = text[: matches[0].start()].strip()
-            if preamble:
-                chunks.append({"timestamp": "", "content": preamble, "start_pos": 0})
-
-        for i, match in enumerate(matches):
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            content = text[match.start() : end].strip()
-            timestamp = match.group(0).strip()
-            chunks.append(
-                {
-                    "timestamp": timestamp,
-                    "content": content,
-                    "start_pos": match.start(),
-                }
-            )
-
-        return chunks
-
-    sandbox_globals["chunk_by_timestamps"] = _wrap_helper(chunk_by_timestamps)
-
-    def chunk_by_json_keys(text: str) -> list[dict]:
-        """Split a JSON object into per-key chunks."""
-        if not text or not text.strip():
-            return []
-
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON: {exc}") from exc
-
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected JSON object, got {type(data).__name__}")
-
-        chunks: list[dict] = []
-        for key, value in data.items():
-            chunks.append(
-                {
-                    "key": key,
-                    "content": json.dumps(value, indent=2, default=str),
-                    "value_type": type(value).__name__,
-                }
-            )
-        return chunks
-
-    sandbox_globals["chunk_by_json_keys"] = _wrap_helper(chunk_by_json_keys)
-
-    # ------ Stateful buffers ------
-    _buffers: dict[str, list] = {}
-
-    def add_buffer(name: str, value) -> None:
-        """Append *value* to the named buffer."""
-        _buffers.setdefault(name, []).append(value)
-
-    def get_buffer(name: str) -> list:
-        """Return the contents of the named buffer (empty list if missing)."""
-        return list(_buffers.get(name, []))
-
-    def clear_buffer(name: str | None = None) -> None:
-        """Clear one or all buffers."""
-        if name is None:
-            _buffers.clear()
-        else:
-            _buffers.pop(name, None)
-
-    sandbox_globals["add_buffer"] = _wrap_helper(add_buffer)
-    sandbox_globals["get_buffer"] = _wrap_helper(get_buffer)
-    sandbox_globals["clear_buffer"] = _wrap_helper(clear_buffer)
-
-    # ------ Volume persistence helpers ------
-
-    def _resolve_volume_path(path: str) -> tuple[str | None, str | None]:
-        """Resolve and validate a path stays under ``/data``."""
-        import os as _os
-
-        base = "/data"
-        base_real = _os.path.realpath(base)
-        raw = str(path or "").strip()
-        if not raw:
-            return None, "[error: volume path cannot be empty]"
-
-        # Relative paths are rooted at /data, absolute paths must already
-        # be under /data.
-        joined = (
-            _os.path.normpath(raw)
-            if _os.path.isabs(raw)
-            else _os.path.normpath(_os.path.join(base, raw))
-        )
-        resolved = _os.path.realpath(joined)
-        if resolved != base_real and not resolved.startswith(base_real + _os.sep):
-            return None, f"[error: invalid volume path: {raw}]"
-        return resolved, None
-
-    def save_to_volume(path: str, content: str) -> str:
-        """Write *content* to ``/data/<path>`` if volume is mounted.
-
-        Returns the full path written, or an error string.
-        """
-        import os as _os
-        import subprocess as _subprocess
-
-        base = "/data"
-        if not _os.path.isdir(base):
-            return "[error: no volume mounted at /data]"
-
-        full, path_error = _resolve_volume_path(path)
-        if path_error is not None or full is None:
-            return path_error or "[error: invalid volume path]"
-
-        _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
-        with open(full, "w", encoding="utf-8") as fh:
-            fh.write(content)
-
-        # Best-effort flush hints for mounted volumes.
-        try:
-            _os.sync()
-        except AttributeError:
-            pass
-        try:
-            _subprocess.run(["sync", "/data"], check=False, capture_output=True)
-        except Exception:
-            pass
-
-        return full
-
-    def load_from_volume(path: str) -> str:
-        """Read text from ``/data/<path>``.
-
-        Returns the file contents, or an error string.
-        """
-        import os as _os
-
-        full, path_error = _resolve_volume_path(path)
-        if path_error is not None or full is None:
-            return path_error or "[error: invalid volume path]"
-
-        if not _os.path.isfile(full):
-            return f"[error: file not found: {full}]"
-        with open(full, encoding="utf-8") as fh:
-            return fh.read()
-
-    sandbox_globals["save_to_volume"] = _wrap_helper(save_to_volume)
-    sandbox_globals["load_from_volume"] = _wrap_helper(load_from_volume)
-
-    # ------ Workspace helpers for stateful agent sessions ------
-
-    def _resolve_workspace_path(path: str) -> tuple[str | None, str | None]:
-        """Resolve and validate a workspace path stays under /data/workspace."""
-        import os as _os
-
-        base = "/data/workspace"
-        base_real = _os.path.realpath(base)
-        raw = str(path or "").strip()
-        if not raw:
-            return None, "[error: workspace path cannot be empty]"
-
-        resolved = _os.path.realpath(_os.path.normpath(_os.path.join(base, raw)))
-        if resolved != base_real and not resolved.startswith(base_real + _os.sep):
-            return None, f"[error: invalid workspace path: {raw}]"
-
-        return resolved, None
-
-    def workspace_write(path: str, content: str) -> str:
-        """Write *content* to ``/data/workspace/<path>``.
-
-        Creates parent directories if needed. Returns full path or error.
-        """
-        import os as _os
-
-        full, path_error = _resolve_workspace_path(path)
-        if path_error is not None:
-            return path_error
-
-        base = "/data/workspace"
-        if not _os.path.isdir("/data"):
-            return "[error: no volume mounted at /data]"
-        _os.makedirs(base, exist_ok=True)
-        if full is None:
-            return "[error: invalid workspace path]"
-        _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
-        with open(full, "w", encoding="utf-8") as fh:
-            fh.write(content)
-        return full
-
-    def workspace_read(path: str) -> str:
-        """Read text from ``/data/workspace/<path>``.
-
-        Returns file contents or error message.
-        """
-        import os as _os
-
-        full, path_error = _resolve_workspace_path(path)
-        if path_error is not None:
-            return path_error
-        if full is None:
-            return "[error: invalid workspace path]"
-        if not _os.path.isfile(full):
-            return f"[error: file not found: {full}]"
-        with open(full, encoding="utf-8") as fh:
-            return fh.read()
-
-    def workspace_list(pattern: str = "*") -> list[str]:
-        """List files in workspace matching glob *pattern*."""
-        import glob as _glob
-        import os as _os
-
-        base = "/data/workspace"
-        if not _os.path.isdir(base):
-            return []
-        search_path = _os.path.join(base, "**", pattern)
-        files = _glob.glob(search_path, recursive=True)
-        base_real = _os.path.realpath(base)
-
-        rel_paths: list[str] = []
-        for found in files:
-            if not _os.path.isfile(found):
-                continue
-            found_real = _os.path.realpath(found)
-            if found_real != base_real and not found_real.startswith(
-                base_real + _os.sep
-            ):
-                continue
-            rel_paths.append(_os.fsdecode(_os.path.relpath(found_real, base_real)))
-        return rel_paths
-
-    def workspace_append(path: str, content: str) -> str:
-        """Append *content* to ``/data/workspace/<path>`` (creates if missing)."""
-        import os as _os
-
-        full, path_error = _resolve_workspace_path(path)
-        if path_error is not None:
-            return path_error
-
-        base = "/data/workspace"
-        if not _os.path.isdir("/data"):
-            return "[error: no volume mounted at /data]"
-        _os.makedirs(base, exist_ok=True)
-        if full is None:
-            return "[error: invalid workspace path]"
-        _os.makedirs(_os.path.dirname(full) or base, exist_ok=True)
-        with open(full, "a", encoding="utf-8") as fh:
-            fh.write(content)
-        return full
-
-    sandbox_globals["workspace_write"] = _wrap_helper(workspace_write)
-    sandbox_globals["workspace_read"] = _wrap_helper(workspace_read)
-    sandbox_globals["workspace_list"] = _wrap_helper(workspace_list)
-    sandbox_globals["workspace_append"] = _wrap_helper(workspace_append)
-
-    # ------ Session execution history ------
-
-    _session_history: list[dict] = []
-
-    def log_execution(code: str, result: dict, metadata: dict | None = None) -> None:
-        """Log code execution to session history for tracking and learning."""
-        import time as _time
-
-        entry = {
-            "timestamp": _time.time(),
-            "code_preview": code[:200] + "..." if len(code) > 200 else code,
-            "stdout_preview": result.get("stdout", "")[:200],
-            "stderr_preview": result.get("stderr", "")[:200],
-            "had_final": result.get("final") is not None,
-            "metadata": metadata or {},
-        }
-        _session_history.append(entry)
-
-    def get_session_history() -> list[dict]:
-        """Return all logged executions in this session."""
-        return list(_session_history)
-
-    def get_last_execution() -> dict | None:
-        """Return the most recent execution entry, or None if empty."""
-        return _session_history[-1] if _session_history else None
-
-    sandbox_globals["log_execution"] = _wrap_helper(log_execution)
-    sandbox_globals["get_session_history"] = _wrap_helper(get_session_history)
-    sandbox_globals["get_last_execution"] = _wrap_helper(get_last_execution)
-
+    # Main execution loop
     while True:
         try:
             line = input()
@@ -669,14 +236,30 @@ def sandbox_driver() -> None:
             "MAINTENANCE",
         }:
             execution_profile = "RLM_DELEGATE"
-        current_execution_profile = execution_profile
+        current_execution_profile[0] = execution_profile
 
         if code is None:
             _send({"stdout": "", "stderr": "[Error] No code provided", "final": None})
             continue
 
+        # Create SUBMIT for this execution
+        SUBMIT = make_submit(output_names)
+        sandbox_globals["SUBMIT"] = SUBMIT
+
+        # Create LLM query functions
+        llm_query = make_llm_query(_tool_call)
+        llm_query_batched = make_llm_query_batched(_tool_call)
+        sandbox_globals["llm_query"] = llm_query
+        sandbox_globals["llm_query_batched"] = llm_query_batched
+
         sandbox_globals.update(variables)
-        _register_tools(tool_names)
+        register_tools(
+            tool_names,
+            sandbox_globals,
+            _dynamic_tool_names,
+            _tool_call,
+            current_execution_profile,
+        )
 
         stdout_io = StringIO()
         stderr_io = StringIO()
@@ -686,7 +269,7 @@ def sandbox_driver() -> None:
         with redirect_stdout(stdout_io), redirect_stderr(stderr_io):
             try:
                 exec(code, sandbox_globals)
-            except _FinalOutput as exc:
+            except FinalOutput as exc:
                 final_obj = exc.args[0] if exc.args else None
             except Exception as exc:  # pragma: no cover
                 had_exec_error = True

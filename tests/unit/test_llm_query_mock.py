@@ -173,7 +173,7 @@ class TestLLMQueryMock:
         mock_default_lm = MagicMock()
         mock_default_lm.return_value = [{"text": "default lm response"}]
 
-        with patch("fleet_rlm.core.interpreter.dspy.settings") as mock_settings:
+        with patch("fleet_rlm.core.llm_tools.dspy.settings") as mock_settings:
             mock_settings.lm = mock_default_lm
 
             with patch.object(ModalInterpreter, "start"):
@@ -255,7 +255,7 @@ class TestLLMQueryMock:
         """Test that RuntimeError is raised when no LM is configured."""
         from fleet_rlm.core.interpreter import ModalInterpreter
 
-        with patch("fleet_rlm.core.interpreter.dspy.settings") as mock_settings:
+        with patch("fleet_rlm.core.llm_tools.dspy.settings") as mock_settings:
             mock_settings.lm = None
 
             with patch.object(ModalInterpreter, "start"):
