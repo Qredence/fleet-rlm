@@ -2,6 +2,23 @@
 
 The `fleet-rlm` server exposes both conversational and task-oriented endpoints via FastAPI.
 
+## Authentication
+
+All non-health HTTP routes and all WebSocket routes require auth.
+
+- `AUTH_MODE=dev`:
+  - Debug headers (`X-Debug-Tenant-Id`, `X-Debug-User-Id`, `X-Debug-Email`, `X-Debug-Name`), or
+  - `Authorization: Bearer <HS256 token>` with `tid`/`oid`/`email`/`name`.
+  - WebSocket-only fallback query auth: `debug_tenant_id` + `debug_user_id` (optional `debug_email`/`debug_name`) or `access_token=<HS256 token>`.
+- `AUTH_MODE=entra`: scaffolded and currently fail-closed until JWKS validation wiring is added.
+
+Identity is normalized to:
+
+- `tenant_claim` (`tid`)
+- `user_claim` (`oid`)
+- `email`
+- `name`
+
 ## Chat Endpoints
 
 ### `POST /chat`
@@ -55,6 +72,14 @@ WebSocket endpoint for real-time streaming and command dispatch.
 }
 ```
 
+**WebSocket auth-only query params (dev mode):**
+
+- `debug_tenant_id`
+- `debug_user_id`
+- `debug_email`
+- `debug_name`
+- `access_token`
+
 - Cancel:
 
 ```json
@@ -100,8 +125,9 @@ WebSocket endpoint for real-time streaming and command dispatch.
 
 Session identity notes:
 
-- Session cache key: `workspace_id:user_id`.
-- If `user_id` is not provided, the server assigns a per-connection anonymous ID.
+- Auth claims are canonical tenant/user authority.
+- `workspace_id` and `user_id` in payloads are accepted for compatibility but non-authoritative.
+- Session cache key is still tracked as `workspace_id:user_id` internally, populated from auth claims.
 
 ### `WS /ws/execution`
 
@@ -197,3 +223,9 @@ Common input schema for task endpoints:
   "error": "string (if ok=false)"
 }
 ```
+
+## Auth Introspection
+
+### `GET /auth/me`
+
+Returns normalized identity and, when DB is configured, resolved tenant/user UUIDs.

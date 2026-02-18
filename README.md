@@ -120,6 +120,24 @@ modal volume create rlm-volume-dspy
 modal secret create LITELLM DSPY_LM_MODEL=openai/gemini-3-pro-preview DSPY_LLM_API_KEY=sk-...
 ```
 
+Set up NeonDB + backend auth bootstrap:
+
+```bash
+# from repo root
+cp .env.example .env
+# Edit .env and set:
+#   DATABASE_URL=postgresql://... (direct Neon endpoint)
+#   AUTH_MODE=dev
+#   DEV_JWT_SECRET=...
+```
+
+Initialize DB schema:
+
+```bash
+# from repo root
+uv run python scripts/db_init.py
+```
+
 ### 3. Run
 
 **Interactive Chat (OpenTUI):**
@@ -158,6 +176,41 @@ uv run fleet-rlm serve-api --port 8000
 
 # MCP server
 fleet-rlm serve-mcp --transport stdio
+```
+
+Issue a dev token:
+
+```bash
+# from repo root
+uv run python scripts/dev_issue_token.py \
+  --tid "00000000-0000-0000-0000-000000000123" \
+  --oid "00000000-0000-0000-0000-000000000456" \
+  --email dev@example.com \
+  --name "Dev User"
+```
+
+Call an authenticated endpoint (debug headers):
+
+```bash
+curl -s http://127.0.0.1:8000/auth/me \
+  -H "X-Debug-Tenant-Id: 00000000-0000-0000-0000-000000000123" \
+  -H "X-Debug-User-Id: 00000000-0000-0000-0000-000000000456" \
+  -H "X-Debug-Email: dev@example.com" \
+  -H "X-Debug-Name: Dev User"
+```
+
+Call an authenticated endpoint (JWT):
+
+```bash
+curl -s http://127.0.0.1:8000/auth/me \
+  -H "Authorization: Bearer ${DEV_TOKEN}"
+```
+
+Run DB smoke test:
+
+```bash
+# from repo root
+uv run python scripts/db_smoke.py
 ```
 
 `fleet` and `fleet-rlm code-chat` serve different interactive paths:

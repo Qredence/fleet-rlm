@@ -75,6 +75,7 @@ def register_serve_commands(
                     agent_min_substantive_chars=config.agent.min_substantive_chars,
                     agent_max_output_chars=config.rlm_settings.max_output_chars,
                     agent_model=config.agent.model,
+                    db_validate_on_startup=True,
                 )
             )
             uvicorn.run(app_obj, host=host, port=port)

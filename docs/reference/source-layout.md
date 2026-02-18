@@ -20,7 +20,9 @@ This reference describes the package directory layout and what each area is resp
 ## Optional Service Surfaces
 
 - `src/fleet_rlm/server/`: FastAPI application, routers, schemas, middleware
+  - `src/fleet_rlm/server/auth/`: auth abstraction (`dev` + Entra stub) and normalized identity
 - `src/fleet_rlm/mcp/`: MCP server runtime and tool surface
+- `src/fleet_rlm/db/`: Neon/Postgres models, engine/session management, repository layer
 
 ## Utilities
 

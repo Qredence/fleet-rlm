@@ -215,7 +215,6 @@ def iter_chat_turn_stream(
     assistant_chunks: list[str] = []
     final_prediction: dspy.Prediction | None = None
     last_tool_name: str | None = None
-    last_tool_name: str | None = None
 
     try:
         stream = stream_program(

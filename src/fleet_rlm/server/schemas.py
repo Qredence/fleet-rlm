@@ -31,6 +31,15 @@ class ReadyResponse(BaseModel):
     planner_configured: bool
 
 
+class AuthMeResponse(BaseModel):
+    tenant_claim: str
+    user_claim: str
+    email: str | None = None
+    name: str | None = None
+    tenant_id: str | None = None
+    user_id: str | None = None
+
+
 class TaskRequest(BaseModel):
     task_type: Literal[
         "basic",

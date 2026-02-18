@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from fastapi import HTTPException, Request
+
+from fleet_rlm.db import DatabaseManager, FleetRepository
+
+from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .execution_events import ExecutionEventEmitter
 
@@ -16,6 +21,9 @@ class ServerState:
         self.planner_lm: Any | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
         self.execution_event_emitter = ExecutionEventEmitter()
+        self.db_manager: DatabaseManager | None = None
+        self.repository: FleetRepository | None = None
+        self.auth_provider: AuthProvider | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -31,6 +39,47 @@ def get_config() -> ServerRuntimeConfig:
 
 def get_planner_lm() -> Any:
     return server_state.planner_lm
+
+
+def get_db_manager() -> DatabaseManager | None:
+    return server_state.db_manager
+
+
+def get_repository() -> FleetRepository | None:
+    return server_state.repository
+
+
+def get_auth_provider() -> AuthProvider | None:
+    return server_state.auth_provider
+
+
+def require_repository() -> FleetRepository:
+    repository = get_repository()
+    if repository is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database repository unavailable. Configure DATABASE_URL for server runtime.",
+        )
+    return repository
+
+
+async def require_http_identity(request: Request) -> NormalizedIdentity:
+    provider = get_auth_provider()
+    if provider is None:
+        raise HTTPException(status_code=503, detail="Auth provider is not configured")
+    try:
+        identity = await provider.authenticate_http(request)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    request.state.identity = identity
+    return identity
+
+
+def get_request_identity(request: Request) -> NormalizedIdentity | None:
+    identity = getattr(request.state, "identity", None)
+    if isinstance(identity, NormalizedIdentity):
+        return identity
+    return None
 
 
 def session_key(workspace_id: str, user_id: str) -> str:

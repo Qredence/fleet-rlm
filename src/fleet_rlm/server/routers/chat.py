@@ -1,11 +1,16 @@
 """Chat endpoint using native DSPy async."""
 
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from fleet_rlm import runners
+from fleet_rlm.db.models import RunStatus
+from fleet_rlm.db.types import RunCreateRequest
 
 from ..config import ServerRuntimeConfig
-from ..deps import get_config, get_planner_lm
+from ..deps import get_config, get_planner_lm, get_repository, get_request_identity
+from ..utils import parse_model_identity, resolve_sandbox_provider
 from ..schemas import ChatRequest
 
 router = APIRouter(tags=["chat"])
@@ -14,11 +19,38 @@ router = APIRouter(tags=["chat"])
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
+    http_request: Request,
     config: ServerRuntimeConfig = Depends(get_config),
 ):
     planner_lm = get_planner_lm()
     if planner_lm is None:
         raise HTTPException(503, "Planner LM not configured")
+
+    repository = get_repository()
+    identity = get_request_identity(http_request)
+    run_row = None
+    if repository is not None and identity is not None:
+        identity_rows = await repository.upsert_identity(
+            entra_tenant_id=identity.tenant_claim,
+            entra_user_id=identity.user_claim,
+            email=identity.email,
+            full_name=identity.name,
+        )
+        model_provider, model_name = parse_model_identity(
+            getattr(planner_lm, "model", None)
+        )
+
+        run_row = await repository.create_run(
+            RunCreateRequest(
+                tenant_id=identity_rows.tenant_id,
+                created_by_user_id=identity_rows.user_id,
+                external_run_id=f"chat:{uuid.uuid4()}",
+                status=RunStatus.RUNNING,
+                model_provider=model_provider,
+                model_name=model_name,
+                sandbox_provider=resolve_sandbox_provider(config.sandbox_provider),
+            )
+        )
 
     try:
         result = await runners.arun_react_chat_once(
@@ -37,6 +69,28 @@ async def chat(
             include_trajectory=request.trace,
             planner_lm=planner_lm,
         )
+        if repository is not None and run_row is not None and identity is not None:
+            await repository.update_run_status(
+                tenant_id=run_row.tenant_id,
+                run_id=run_row.id,
+                status=RunStatus.COMPLETED,
+            )
         return result
     except (FileNotFoundError, ValueError) as exc:
+        if repository is not None and run_row is not None and identity is not None:
+            await repository.update_run_status(
+                tenant_id=run_row.tenant_id,
+                run_id=run_row.id,
+                status=RunStatus.FAILED,
+                error_json={"error": str(exc), "error_type": type(exc).__name__},
+            )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        if repository is not None and run_row is not None and identity is not None:
+            await repository.update_run_status(
+                tenant_id=run_row.tenant_id,
+                run_id=run_row.id,
+                status=RunStatus.FAILED,
+                error_json={"error": str(exc), "error_type": type(exc).__name__},
+            )
+        raise

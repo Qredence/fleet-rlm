@@ -124,7 +124,7 @@ def execute_submit(
         output = result.output
         if isinstance(output, dict):
             enriched = dict(output)
-            enriched.setdefault("depth", getattr(agent, "_current_depth", 0))
+            enriched.setdefault("depth", agent.current_depth)
             parent_step_id = (variables or {}).get("parent_step_id")
             if (
                 isinstance(parent_step_id, str)
@@ -135,9 +135,9 @@ def execute_submit(
             return enriched
         return {
             "output": output,
-            "depth": getattr(agent, "_current_depth", 0),
+            "depth": agent.current_depth,
         }
-    return {"output": str(result), "depth": getattr(agent, "_current_depth", 0)}
+    return {"output": str(result), "depth": agent.current_depth}
 
 
 def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[str, Any]:
