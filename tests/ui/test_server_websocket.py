@@ -19,6 +19,13 @@ from fleet_rlm.models import StreamEvent
 from fleet_rlm.server.config import ServerRuntimeConfig
 from fleet_rlm.server.main import create_app
 
+AUTH_HEADERS = {
+    "X-Debug-Tenant-Id": "default",
+    "X-Debug-User-Id": "alice",
+    "X-Debug-Email": "alice@example.com",
+    "X-Debug-Name": "Alice",
+}
+
 
 def _ts(epoch: float = 1_234_567_890.0) -> datetime:
     """Helper: build a UTC datetime from an epoch float."""
@@ -174,7 +181,7 @@ def test_websocket_basic_message_flow(test_app, fake_agent):
     )
 
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json({"type": "message", "content": "test message"})
 
             received_events = []
@@ -207,7 +214,7 @@ def test_websocket_with_docs_path(test_app, fake_agent):
     )
 
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json(
                 {
                     "type": "message",
@@ -240,7 +247,7 @@ def test_websocket_with_trace_flag(test_app, fake_agent):
     )
 
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json({"type": "message", "content": "test", "trace": True})
 
             data1 = websocket.receive_json()
@@ -275,7 +282,7 @@ def test_websocket_tool_events(test_app, fake_agent):
     )
 
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json({"type": "message", "content": "run code"})
 
             # Tool call
@@ -309,7 +316,7 @@ def test_websocket_error_event(test_app, fake_agent):
     )
 
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json({"type": "message", "content": "trigger error"})
 
             data = websocket.receive_json()
@@ -335,7 +342,7 @@ def test_websocket_cancel_message(test_app, fake_agent):
     )
 
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json({"type": "message", "content": "long task"})
 
             # Receive a few events
@@ -359,7 +366,7 @@ def test_websocket_cancel_message(test_app, fake_agent):
 def test_websocket_invalid_message_type(test_app):
     """Test handling of invalid message type."""
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json({"type": "invalid_type", "content": "test"})
 
             data = websocket.receive_json()
@@ -370,7 +377,7 @@ def test_websocket_invalid_message_type(test_app):
 def test_websocket_empty_message(test_app):
     """Test handling of empty message content."""
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json({"type": "message", "content": ""})
 
             data = websocket.receive_json()
@@ -387,7 +394,7 @@ def test_websocket_multiple_messages_sequential(test_app, fake_agent):
     )
 
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             # First message
             websocket.send_json({"type": "message", "content": "message 1"})
             data1 = websocket.receive_json()
@@ -418,7 +425,7 @@ def test_health_endpoint(test_app):
 def test_websocket_command_dispatch(test_app, fake_agent):
     """Test command message type dispatches to execute_command."""
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json(
                 {
                     "type": "command",
@@ -436,7 +443,7 @@ def test_websocket_command_dispatch(test_app, fake_agent):
 def test_websocket_command_empty_name(test_app):
     """Test command with empty name returns error."""
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/chat") as websocket:
+        with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as websocket:
             websocket.send_json(
                 {
                     "type": "command",
@@ -453,10 +460,11 @@ def test_websocket_command_empty_name(test_app):
 def test_execution_websocket_requires_identity_filters(test_app):
     """Test /ws/execution rejects missing subscription filters."""
     with TestClient(test_app) as client:
-        with client.websocket_connect("/ws/execution") as websocket:
+        with client.websocket_connect(
+            "/ws/execution", headers=AUTH_HEADERS
+        ) as websocket:
             data = websocket.receive_json()
             assert data["type"] == "error"
-            assert "workspace_id" in data["message"]
             assert "session_id" in data["message"]
 
 
@@ -478,9 +486,10 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
 
     with TestClient(test_app) as client:
         with client.websocket_connect(
-            "/ws/execution?workspace_id=default&user_id=alice&session_id=session-123"
+            "/ws/execution?workspace_id=default&user_id=alice&session_id=session-123",
+            headers=AUTH_HEADERS,
         ) as execution_ws:
-            with client.websocket_connect("/ws/chat") as chat_ws:
+            with client.websocket_connect("/ws/chat", headers=AUTH_HEADERS) as chat_ws:
                 chat_ws.send_json(
                     {
                         "type": "message",

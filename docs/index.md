@@ -33,6 +33,8 @@ _Information-oriented technical descriptions._
 - [CLI Commands](reference/cli.md)
 - [Python API](reference/python-api.md)
 - [HTTP API](reference/http-api.md)
+- [Neon DB Schema](db.md)
+- [Auth Modes](auth.md)
 - [Sandbox File System](reference/sandbox-fs.md)
 - [Source Layout](reference/source-layout.md)
 

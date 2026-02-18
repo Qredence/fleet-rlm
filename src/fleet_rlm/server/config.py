@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ServerRuntimeConfig(BaseModel):
@@ -24,3 +25,23 @@ class ServerRuntimeConfig(BaseModel):
     ws_enforce_react_interlocutor: bool = True
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
     agent_model: str | None = None  # Model identifier to use for the agent
+    database_url: str | None = Field(
+        default_factory=lambda: os.getenv("DATABASE_URL") or None
+    )
+    db_echo: bool = False
+    db_validate_on_startup: bool = False
+    auth_mode: Literal["dev", "entra"] = Field(
+        default_factory=lambda: (os.getenv("AUTH_MODE") or "dev").strip().lower()
+    )
+    dev_jwt_secret: str = Field(
+        default_factory=lambda: os.getenv("DEV_JWT_SECRET") or "change-me"
+    )
+    entra_jwks_url: str | None = Field(
+        default_factory=lambda: os.getenv("ENTRA_JWKS_URL") or None
+    )
+    entra_issuer: str | None = Field(
+        default_factory=lambda: os.getenv("ENTRA_ISSUER") or None
+    )
+    entra_audience: str | None = Field(
+        default_factory=lambda: os.getenv("ENTRA_AUDIENCE") or None
+    )

@@ -5,6 +5,13 @@ import pytest
 
 from fleet_rlm.server.main import create_app
 
+AUTH_HEADERS = {
+    "X-Debug-Tenant-Id": "tenant-a",
+    "X-Debug-User-Id": "user-a",
+    "X-Debug-Email": "alice@example.com",
+    "X-Debug-Name": "Alice",
+}
+
 
 @pytest.fixture
 def client(monkeypatch):
@@ -29,6 +36,7 @@ def test_chat_invalid_docs_path_maps_to_400(client, monkeypatch):
     response = client.post(
         "/chat",
         json={"message": "analyze", "docs_path": "string", "trace": False},
+        headers=AUTH_HEADERS,
     )
     assert response.status_code == 400
     assert "Document not found" in response.json()["detail"]
@@ -46,6 +54,7 @@ def test_chat_value_error_maps_to_400(client, monkeypatch):
     response = client.post(
         "/chat",
         json={"message": " ", "trace": False},
+        headers=AUTH_HEADERS,
     )
     assert response.status_code == 400
     assert "cannot be empty" in response.json()["detail"]
@@ -55,6 +64,7 @@ def test_tasks_basic_rejects_empty_question(client):
     response = client.post(
         "/tasks/basic",
         json={"task_type": "basic", "question": "   "},
+        headers=AUTH_HEADERS,
     )
     assert response.status_code == 400
     assert response.json()["detail"] == "question is required"
@@ -69,6 +79,7 @@ def test_tasks_basic_accepts_non_empty_question(client, monkeypatch):
     response = client.post(
         "/tasks/basic",
         json={"task_type": "basic", "question": "What is 2+2?"},
+        headers=AUTH_HEADERS,
     )
     assert response.status_code == 200
     body = response.json()
