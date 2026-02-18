@@ -379,8 +379,9 @@ SUBMIT(
         if agent.interpreter._volume:
             try:
                 agent.interpreter.reload()
-            except Exception:
-                pass
+            except Exception as exc:
+                # Reload failures are non-fatal for memory_tree; log and continue.
+                logger.warning("Failed to reload interpreter volume for memory_tree: %s", exc)
 
         rlm = agent.get_runtime_module("memory_tree")
         with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
