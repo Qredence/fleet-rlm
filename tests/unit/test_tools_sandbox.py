@@ -46,6 +46,14 @@ class _FakeInterpreter:
     def execution_profile(self, profile):
         return nullcontext()
 
+    def start(self):
+        """Mock start method for interpreter lifecycle."""
+        pass
+
+    def shutdown(self):
+        """Mock shutdown method for interpreter lifecycle."""
+        pass
+
 
 @pytest.fixture
 def mock_agent():
@@ -190,388 +198,204 @@ def test_rlm_query_extracts_answer_correctly(mock_agent):
     assert result["answer"] == "The answer is 42"
 
 
-def test_analyze_long_document_uses_runtime_module_and_keeps_response_shape(mock_agent):
-    """Long-document analysis should use cached runtime module and keep top-level keys."""
+def _setup_sub_agent_mock(mock_agent, response_text="sub-agent response"):
+    """Configure mock_agent so spawn_delegate_sub_agent works.
 
-    class _FakeAnalyzeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                findings=["f1"],
-                answer="answer",
-                sections_examined=2,
-                trajectory=[{"reasoning": "r"}],
-                final_reasoning="done",
-            )
+    Sets ``__class__`` to a callable mock whose instances have
+    ``_set_document``, ``chat_turn``, and ``history_turns`` stubs.
+    Returns the mock sub-agent instance for further assertions.
+    """
+    MockAgentClass = MagicMock()
+    mock_instance = MockAgentClass.return_value
+    mock_instance.chat_turn.return_value = {"assistant_response": response_text}
+    mock_instance.history_turns.return_value = 1
+    mock_instance._set_document = MagicMock()
+    # Set up interpreter mock with start/shutdown methods
+    mock_instance.interpreter = _FakeInterpreter()
+    mock_agent.__class__ = MockAgentClass
+    return mock_instance
 
-    mock_agent.get_runtime_module = MagicMock(return_value=_FakeAnalyzeModule())
+
+def test_analyze_long_document_spawns_sub_agent_and_keeps_response_shape(mock_agent):
+    """Long-document analysis should spawn a sub-agent and keep top-level keys."""
+    sub = _setup_sub_agent_mock(mock_agent, "analysis result")
 
     tools = build_tool_list(mock_agent)
     analyze_tool = next(t for t in tools if t.name == "analyze_long_document")
     result = analyze_tool(query="q", alias="active", include_trajectory=True)
 
-    mock_agent.get_runtime_module.assert_called_once_with("analyze_long_document")
+    # Sub-agent was spawned and received the document
+    sub._set_document.assert_called_once()
+    sub.chat_turn.assert_called_once()
+    assert result["status"] == "ok"
     assert set(result).issuperset(
-        {
-            "status",
-            "findings",
-            "answer",
-            "sections_examined",
-            "doc_chars",
-            "trajectory_steps",
-            "trajectory",
-            "final_reasoning",
-        }
+        {"status", "findings", "answer", "doc_chars", "depth", "sub_agent_history"}
     )
+    assert result["answer"] == "analysis result"
 
 
-def test_grounded_answer_returns_structured_citations(mock_agent):
-    class _FakeGroundedModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                answer="grounded",
-                citations=[
-                    {
-                        "source": "active",
-                        "chunk_id": "0",
-                        "evidence": "fact",
-                        "reason": "supports",
-                    }
-                ],
-                confidence=91,
-                coverage_notes="good",
-                trajectory=[{"reasoning": "r"}],
-                final_reasoning="done",
-            )
-
+def test_grounded_answer_spawns_sub_agent_with_citations(mock_agent):
+    sub = _setup_sub_agent_mock(
+        mock_agent,
+        (
+            '{"answer":"grounded answer","citations":[{"source":"doc.md","chunk_id":1,'
+            '"evidence":"text","reason":"match"}],"confidence":87,'
+            '"coverage_notes":"covered"}'
+        ),
+    )
     mock_agent._get_document.return_value = "# H1\nA\n\n# H2\nB"
-    mock_agent.get_runtime_module = MagicMock(return_value=_FakeGroundedModule())
 
     tools = build_tool_list(mock_agent)
     grounded_tool = next(t for t in tools if t.name == "grounded_answer")
     result = grounded_tool(query="q", include_trajectory=True)
 
-    mock_agent.get_runtime_module.assert_called_once_with("grounded_answer")
+    sub.chat_turn.assert_called_once()
     assert result["status"] == "ok"
-    assert result["answer"] == "grounded"
-    assert result["confidence"] == 91
-    assert "citations" in result and result["citations"]
-    citation = result["citations"][0]
-    assert set(citation.keys()) == {"source", "chunk_id", "evidence", "reason"}
-    assert "trajectory_steps" in result
+    assert result["answer"] == "grounded answer"
+    assert result["citations"] == [
+        {"source": "doc.md", "chunk_id": 1, "evidence": "text", "reason": "match"}
+    ]
+    assert result["confidence"] == 87
+    assert result["coverage_notes"] == "covered"
+    assert "depth" in result
 
 
-@pytest.mark.parametrize(
-    ("raw_confidence", "expected_confidence"),
-    [
-        ("91", 91),
-        ("high", 0),
-        (-4, 0),
-        (151, 100),
-    ],
-)
-def test_grounded_answer_normalizes_confidence_values(
-    mock_agent, raw_confidence, expected_confidence
-):
-    class _FakeGroundedModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                answer="grounded",
-                citations=[],
-                confidence=raw_confidence,
-                coverage_notes="ok",
-            )
-
+def test_grounded_answer_rejects_invalid_max_chunks(mock_agent):
+    """grounded_answer should reject non-positive max_chunks."""
+    _setup_sub_agent_mock(mock_agent)
     mock_agent._get_document.return_value = "# H1\nA"
-    mock_agent.get_runtime_module = MagicMock(return_value=_FakeGroundedModule())
 
     tools = build_tool_list(mock_agent)
     grounded_tool = next(t for t in tools if t.name == "grounded_answer")
-    result = grounded_tool(query="q", include_trajectory=False)
+    result = grounded_tool(query="q", max_chunks=0)
 
-    assert result["status"] == "ok"
-    assert result["confidence"] == expected_confidence
+    assert result["status"] == "error"
 
 
-def test_triage_incident_logs_returns_expected_shape(mock_agent):
-    class _FakeTriageModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                severity="critical",
-                probable_root_causes=["db saturation"],
-                impacted_components=["api"],
-                recommended_actions=["scale db"],
-                time_range="10:00-10:05",
-            )
+def test_triage_incident_logs_spawns_sub_agent(mock_agent):
+    sub = _setup_sub_agent_mock(mock_agent, "triage result")
 
-    mock_agent.get_runtime_module = MagicMock(return_value=_FakeTriageModule())
     tools = build_tool_list(mock_agent)
     triage_tool = next(t for t in tools if t.name == "triage_incident_logs")
     result = triage_tool(query="why 500s?", service_context="prod")
 
+    sub._set_document.assert_called_once()
+    sub.chat_turn.assert_called_once()
     assert result["status"] == "ok"
-    assert result["severity"] == "critical"
-    assert result["probable_root_causes"] == ["db saturation"]
+    assert "severity" in result
+    assert "depth" in result
 
 
-def test_plan_code_change_returns_expected_shape(mock_agent):
-    class _FakePlanModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                plan_steps=["step1"],
-                files_to_touch=["src/a.py"],
-                validation_commands=["uv run pytest -q"],
-                risks=["regression"],
-            )
+def test_plan_code_change_spawns_sub_agent(mock_agent):
+    sub = _setup_sub_agent_mock(mock_agent, "plan result")
 
-    mock_agent.get_runtime_module = MagicMock(return_value=_FakePlanModule())
     tools = build_tool_list(mock_agent)
     plan_tool = next(t for t in tools if t.name == "plan_code_change")
     result = plan_tool(task="add feature", repo_context="ctx", constraints="c")
 
+    sub.chat_turn.assert_called_once()
     assert result["status"] == "ok"
-    assert result["plan_steps"] == ["step1"]
-    assert result["files_to_touch"] == ["src/a.py"]
+    assert "plan_steps" in result
+    assert "depth" in result
 
 
-def test_propose_core_memory_update_returns_expected_shape(mock_agent):
-    class _FakeMemoryModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                keep=["persona"],
-                update=["scratchpad"],
-                remove=[],
-                rationale="latest user intent changed",
-            )
+def test_propose_core_memory_update_spawns_sub_agent(mock_agent):
+    sub = _setup_sub_agent_mock(mock_agent, "memory update proposal")
 
-    mock_agent.get_runtime_module = MagicMock(return_value=_FakeMemoryModule())
     tools = build_tool_list(mock_agent)
     memory_tool = next(t for t in tools if t.name == "propose_core_memory_update")
     result = memory_tool()
 
+    sub.chat_turn.assert_called_once()
     assert result["status"] == "ok"
-    assert result["keep"] == ["persona"]
-    assert result["update"] == ["scratchpad"]
+    assert "keep" in result
+    assert "update" in result
+    assert "depth" in result
 
 
-def test_memory_tree_returns_bounded_nodes(mock_agent):
-    class _FakeTreeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                nodes=[
-                    {
-                        "path": "/data/memory/a.txt",
-                        "type": "file",
-                        "size_bytes": "10",
-                        "depth": "1",
-                    }
-                ],
-                total_files=1,
-                total_dirs=1,
-                truncated=False,
-            )
+def test_memory_tree_spawns_sub_agent(mock_agent):
+    sub = _setup_sub_agent_mock(
+        mock_agent,
+        (
+            '{"nodes":[{"path":"/data/memory/a.txt","type":"file","size_bytes":4,'
+            '"depth":1}],"total_files":1,"total_dirs":0,"truncated":false}'
+        ),
+    )
 
-    mock_agent.get_runtime_module = MagicMock(return_value=_FakeTreeModule())
     tools = build_tool_list(mock_agent)
     tree_tool = next(t for t in tools if t.name == "memory_tree")
     result = tree_tool()
 
+    sub.chat_turn.assert_called_once()
     assert result["status"] == "ok"
+    assert result["nodes"] == [
+        {"path": "/data/memory/a.txt", "type": "file", "size_bytes": 4, "depth": 1}
+    ]
     assert result["total_files"] == 1
-    assert result["nodes"][0]["path"] == "/data/memory/a.txt"
+    assert result["total_dirs"] == 0
+    assert result["truncated"] is False
+    assert "depth" in result
 
 
-def test_memory_action_intent_schema_and_confirmation(mock_agent):
-    class _FakeTreeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                nodes=[{"path": "/data/memory/tmp.txt", "type": "file"}],
-                total_files=1,
-                total_dirs=1,
-                truncated=False,
-            )
+def test_memory_action_intent_spawns_sub_agent(mock_agent):
+    _setup_sub_agent_mock(mock_agent, "intent classification")
 
-    class _FakeIntentModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                action_type="delete",
-                target_paths=["/data/memory/tmp.txt"],
-                content_plan=[],
-                risk_level="high",
-                requires_confirmation=True,
-                rationale="destructive",
-            )
-
-    mock_agent.get_runtime_module = MagicMock(
-        side_effect=[_FakeTreeModule(), _FakeIntentModule()]
-    )
     tools = build_tool_list(mock_agent)
     intent_tool = next(t for t in tools if t.name == "memory_action_intent")
     result = intent_tool(user_request="delete tmp")
 
     assert result["status"] == "ok"
-    assert result["action_type"] == "delete"
-    assert result["requires_confirmation"] is True
+    assert "action_type" in result
+    assert "requires_confirmation" in result
+    assert "depth" in result
 
 
-def test_memory_action_intent_parses_string_boolean_confirmation(mock_agent):
-    class _FakeTreeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(nodes=[], total_files=0, total_dirs=1, truncated=False)
+def test_memory_structure_audit_spawns_sub_agent(mock_agent):
+    _setup_sub_agent_mock(mock_agent, "audit result")
 
-    class _FakeIntentModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                action_type="delete",
-                target_paths=[],
-                content_plan=[],
-                risk_level="high",
-                requires_confirmation="false",
-                rationale="explicitly not required",
-            )
-
-    mock_agent.get_runtime_module = MagicMock(
-        side_effect=[_FakeTreeModule(), _FakeIntentModule()]
-    )
-    tools = build_tool_list(mock_agent)
-    intent_tool = next(t for t in tools if t.name == "memory_action_intent")
-    result = intent_tool(user_request="delete tmp")
-
-    assert result["status"] == "ok"
-    assert result["requires_confirmation"] is False
-
-
-def test_memory_structure_audit_schema(mock_agent):
-    class _FakeTreeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                nodes=[{"path": "/data/memory", "type": "dir"}],
-                total_files=0,
-                total_dirs=1,
-                truncated=False,
-            )
-
-    class _FakeAuditModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                issues=["flat"],
-                recommended_layout=["/data/memory/projects"],
-                naming_conventions=["snake_case"],
-                retention_rules=["archive >30d"],
-                priority_fixes=["group files"],
-            )
-
-    mock_agent.get_runtime_module = MagicMock(
-        side_effect=[_FakeTreeModule(), _FakeAuditModule()]
-    )
     tools = build_tool_list(mock_agent)
     audit_tool = next(t for t in tools if t.name == "memory_structure_audit")
     result = audit_tool(usage_goals="organized")
 
     assert result["status"] == "ok"
-    assert result["issues"] == ["flat"]
-    assert result["priority_fixes"] == ["group files"]
+    assert "issues" in result
+    assert "priority_fixes" in result
+    assert "depth" in result
 
 
-def test_memory_structure_migration_plan_schema(mock_agent):
-    class _FakeTreeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(nodes=[], total_files=0, total_dirs=1, truncated=False)
+def test_memory_structure_migration_plan_spawns_sub_agent(mock_agent):
+    _setup_sub_agent_mock(mock_agent, "migration plan")
 
-    class _FakeAuditModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                issues=["flat"],
-                recommended_layout=[],
-                naming_conventions=[],
-                retention_rules=[],
-                priority_fixes=[],
-            )
-
-    class _FakeMigrationModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                operations=[
-                    {
-                        "op": "move",
-                        "src": "/data/memory/a.txt",
-                        "dst": "/data/memory/archive/a.txt",
-                        "reason": "organize",
-                    }
-                ],
-                rollback_steps=["move back"],
-                verification_checks=["exists"],
-                estimated_risk="medium",
-            )
-
-    # first call for audit, second for migration
-    mock_agent.get_runtime_module = MagicMock(
-        side_effect=[_FakeTreeModule(), _FakeAuditModule(), _FakeMigrationModule()]
-    )
     tools = build_tool_list(mock_agent)
     migrate_tool = next(t for t in tools if t.name == "memory_structure_migration_plan")
     result = migrate_tool(approved_constraints="safe")
 
     assert result["status"] == "ok"
-    assert result["operations"][0]["op"] == "move"
-    assert result["estimated_risk"] == "medium"
+    assert "operations" in result
+    assert "estimated_risk" in result
+    assert "depth" in result
 
 
-def test_clarification_questions_schema_and_high_risk_block(mock_agent):
-    class _FakeTreeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(nodes=[], total_files=0, total_dirs=1, truncated=False)
+def test_clarification_questions_high_risk_blocks_proceed(mock_agent):
+    _setup_sub_agent_mock(mock_agent, "clarification")
 
-    class _FakeClarifyModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                questions=["Which folder exactly?"],
-                blocking_unknowns=["target folder"],
-                safe_default="no-op",
-                proceed_without_answer=True,
-            )
-
-    # first call for tree, second call for clarify
-    mock_agent.get_runtime_module = MagicMock(
-        side_effect=[_FakeTreeModule(), _FakeClarifyModule()]
-    )
     tools = build_tool_list(mock_agent)
     clarify_tool = next(t for t in tools if t.name == "clarification_questions")
     result = clarify_tool(request="clean everything", operation_risk="high")
 
     assert result["status"] == "ok"
-    assert result["questions"]
     assert result["proceed_without_answer"] is False
+    assert "depth" in result
 
 
-@pytest.mark.parametrize(
-    ("raw_value", "expected_value"),
-    [
-        ("false", False),
-        ("true", True),
-    ],
-)
-def test_clarification_questions_parses_string_boolean_medium_risk(
-    mock_agent, raw_value, expected_value
-):
-    class _FakeTreeModule:
-        def __call__(self, **kwargs):
-            return MagicMock(nodes=[], total_files=0, total_dirs=1, truncated=False)
+def test_delegate_tools_block_at_max_depth(mock_agent):
+    """All delegate tools should return error when max depth is reached."""
+    mock_agent._max_depth = 2
+    mock_agent._current_depth = 2  # Already at max
 
-    class _FakeClarifyModule:
-        def __call__(self, **kwargs):
-            return MagicMock(
-                questions=["Need one detail"],
-                blocking_unknowns=["target"],
-                safe_default="no-op",
-                proceed_without_answer=raw_value,
-            )
-
-    mock_agent.get_runtime_module = MagicMock(
-        side_effect=[_FakeTreeModule(), _FakeClarifyModule()]
-    )
     tools = build_tool_list(mock_agent)
-    clarify_tool = next(t for t in tools if t.name == "clarification_questions")
-    result = clarify_tool(request="clean memory", operation_risk="medium")
+    analyze_tool = next(t for t in tools if t.name == "analyze_long_document")
+    result = analyze_tool(query="q")
 
-    assert result["status"] == "ok"
-    assert result["proceed_without_answer"] is expected_value
+    assert result["status"] == "error"
+    assert "max recursion depth" in result["error"].lower()

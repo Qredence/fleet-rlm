@@ -15,7 +15,7 @@ import pytest
 from dspy.primitives.code_interpreter import FinalOutput
 
 from fleet_rlm.react import RLMReActChatAgent
-from fleet_rlm.react import tools as react_tools
+from fleet_rlm.react.document_tools import _read_document_content
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +163,7 @@ def test_load_document_pdf_includes_extraction_metadata(monkeypatch, tmp_path):
     pdf_file.write_bytes(b"%PDF-1.4 test bytes")
 
     monkeypatch.setattr(
-        "fleet_rlm.react.tools._read_document_content",
+        "fleet_rlm.react.document_tools._read_document_content",
         lambda _path: (
             "Page one\nPage two",
             {
@@ -211,7 +211,7 @@ def test_pdf_extraction_falls_back_to_pypdf_when_markitdown_fails(
     )
     monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=_PdfReader))
 
-    text, meta = react_tools._read_document_content(pdf_file)
+    text, meta = _read_document_content(pdf_file)
 
     assert "Alpha" in text
     assert meta["source_type"] == "pdf"
@@ -242,7 +242,7 @@ def test_pdf_extraction_returns_ocr_guidance_when_no_text(monkeypatch, tmp_path)
     monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=_PdfReader))
 
     with pytest.raises(ValueError, match="OCR is required"):
-        react_tools._read_document_content(pdf_file)
+        _read_document_content(pdf_file)
 
 
 def test_read_file_slice_pdf_uses_extracted_text(monkeypatch, tmp_path):
@@ -252,7 +252,7 @@ def test_read_file_slice_pdf_uses_extracted_text(monkeypatch, tmp_path):
     pdf_file = tmp_path / "slice.pdf"
     pdf_file.write_bytes(b"%PDF-1.4 slice bytes")
     monkeypatch.setattr(
-        "fleet_rlm.react.tools._read_document_content",
+        "fleet_rlm.react.document_tools._read_document_content",
         lambda _path: ("Line 1\nLine 2\nLine 3\nLine 4", {"source_type": "pdf"}),
     )
 
@@ -290,20 +290,17 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
-    class _FakeRLM:
-        def __init__(self, **kwargs):
-            pass
+    def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
+        return {
+            "assistant_response": "analysis answer",
+            "trajectory": [{"reasoning": "step1", "code": "pass", "output": "ok"}],
+            "depth": 1,
+            "sub_agent_history": 1,
+        }
 
-        def __call__(self, **kwargs):
-            return SimpleNamespace(
-                findings=["f1"],
-                answer="a1",
-                sections_examined=2,
-                trajectory=[{"reasoning": "step1", "code": "pass", "output": "ok"}],
-                final_reasoning="done",
-            )
-
-    monkeypatch.setattr("fleet_rlm.react.rlm_runtime_modules.dspy.RLM", _FakeRLM)
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools_rlm_delegate.spawn_delegate_sub_agent", _fake_spawn
+    )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
@@ -311,27 +308,24 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
     result = agent.analyze_long_document("question")
     assert result["trajectory_steps"] == 1
     assert result["trajectory"][0]["reasoning"] == "step1"
-    assert result["final_reasoning"] == "done"
+    assert result["answer"] == "analysis answer"
 
 
 def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
-    class _FakeRLM:
-        def __init__(self, **kwargs):
-            pass
+    def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
+        return {
+            "assistant_response": "analysis answer",
+            "trajectory": [{"reasoning": "step1"}],
+            "depth": 1,
+            "sub_agent_history": 1,
+        }
 
-        def __call__(self, **kwargs):
-            return SimpleNamespace(
-                findings=["f1"],
-                answer="a1",
-                sections_examined=2,
-                trajectory=[{"reasoning": "step1"}],
-                final_reasoning="done",
-            )
-
-    monkeypatch.setattr("fleet_rlm.react.rlm_runtime_modules.dspy.RLM", _FakeRLM)
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools_rlm_delegate.spawn_delegate_sub_agent", _fake_spawn
+    )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
@@ -339,7 +333,6 @@ def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
     result = agent.analyze_long_document("question", include_trajectory=False)
     assert "trajectory_steps" not in result
     assert "trajectory" not in result
-    assert "final_reasoning" not in result
 
 
 def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
@@ -348,26 +341,17 @@ def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
-    class _FakeRLM:
-        def __init__(self, **kwargs):
-            pass
+    def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
+        return {
+            "assistant_response": "sub-agent response",
+            "trajectory": [{"reasoning": "step"}],
+            "depth": 1,
+            "sub_agent_history": 1,
+        }
 
-        def __call__(self, **kwargs):
-            if "focus" in kwargs:
-                return SimpleNamespace(
-                    summary="s1",
-                    key_points=["k1"],
-                    coverage_pct=90,
-                    trajectory=[{"reasoning": "sum"}],
-                )
-            return SimpleNamespace(
-                matches=[{"k": "v"}],
-                patterns=["p1"],
-                time_range="all",
-                trajectory=[{"reasoning": "logs"}],
-            )
-
-    monkeypatch.setattr("fleet_rlm.react.rlm_runtime_modules.dspy.RLM", _FakeRLM)
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools_rlm_delegate.spawn_delegate_sub_agent", _fake_spawn
+    )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"

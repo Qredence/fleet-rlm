@@ -22,6 +22,11 @@ from ..core.interpreter import ModalInterpreter
 from .tools import build_tool_list
 from .streaming import aiter_chat_turn_stream as _aiter_stream
 from .streaming import iter_chat_turn_stream as _iter_stream
+from .validation import ValidationConfig, validate_assistant_response
+from .core_memory import CoreMemoryMixin
+from .document_cache import DocumentCacheMixin
+from .tool_delegation import TOOL_DELEGATE_NAMES, get_tool_by_name
+from .runtime_factory import get_runtime_module
 
 
 class RLMReActChatSignature(dspy.Signature):
@@ -37,7 +42,7 @@ class RLMReActChatSignature(dspy.Signature):
     assistant_response: str = dspy.OutputField(desc="Final assistant response to user")
 
 
-class RLMReActChatAgent(dspy.Module):
+class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     """Interactive ReAct agent that can orchestrate RLM workflows via tools.
 
     Subclasses ``dspy.Module`` so the agent is:
@@ -49,6 +54,9 @@ class RLMReActChatAgent(dspy.Module):
         - Conversation memory is stored as ``dspy.History``.
         - Sandbox state is preserved in one long-lived Modal interpreter session.
         - Optional Modal volume persistence survives across runs.
+
+    Tool delegation is handled dynamically via ``__getattr__`` - see
+    :mod:`fleet_rlm.react.tool_delegation` for details.
     """
 
     def __init__(
@@ -79,6 +87,14 @@ class RLMReActChatAgent(dspy.Module):
         self.history_max_turns = history_max_turns
         self._max_depth = max_depth
         self._current_depth = current_depth
+
+        # Validation configuration
+        self._validation_config = ValidationConfig(
+            guardrail_mode=guardrail_mode,
+            max_output_chars=max_output_chars,
+            min_substantive_chars=min_substantive_chars,
+        )
+        # Backward-compatible property access
         self.guardrail_mode = guardrail_mode
         self.max_output_chars = max_output_chars
         self.min_substantive_chars = min_substantive_chars
@@ -92,25 +108,10 @@ class RLMReActChatAgent(dspy.Module):
         )
 
         self.history = dspy.History(messages=[])
-        # LRU cache for documents to prevent unbounded growth
-        self._document_cache: dict[str, str] = {}
-        self._document_access_order: list[str] = []
-        self._max_documents = 100
-        self.active_alias: str | None = None
-
-        # -- Core Memory (Tier 1) --
-        # Host-side only. Persistence via export_session_state.
-        self._core_memory: dict[str, str] = {
-            "persona": "I am a helpful AI assistant focused on writing high-quality code.",
-            "human": "The user is a developer working on this project.",
-            "scratchpad": "No current active task.",
-        }
-        # Character limits per block to prevent context window explosion
-        self._core_memory_limits: dict[str, int] = {
-            "persona": 2000,
-            "human": 2000,
-            "scratchpad": 1000,
-        }
+        # Initialize document cache from mixin
+        self._init_document_cache()
+        # Initialize core memory from mixin
+        self._init_core_memory()
 
         self._started = False
         self._extra_tools: list[Callable[..., Any]] = list(extra_tools or [])
@@ -121,81 +122,6 @@ class RLMReActChatAgent(dspy.Module):
 
         self.react_tools: list[Callable[..., Any]] = []
         self.react = self._build_agent()
-
-    # -----------------------------------------------------------------
-    # Core Memory Management
-    # -----------------------------------------------------------------
-
-    def core_memory_append(self, section: str, content: str) -> str:
-        """Append text to a specific Core Memory block (e.g. 'scratchpad', 'human')."""
-        if section not in self._core_memory:
-            return f"Error: Core memory block '{section}' does not exist. Available: {list(self._core_memory.keys())}"
-
-        current_len = len(self._core_memory[section])
-        new_len = current_len + len(content) + 1  # +1 for newline
-        limit = self._core_memory_limits.get(section, 1000)
-
-        if new_len > limit:
-            return f"Error: Appending content would exceed limit for '{section}' ({new_len} > {limit}). Please summarize or replace."
-
-        self._core_memory[section] += f"\n{content}"
-        return f"Appended to '{section}'. New content length: {len(self._core_memory[section])} chars."
-
-    def core_memory_replace(self, section: str, content: str) -> str:
-        """Replace the entire content of a Core Memory block."""
-        if section not in self._core_memory:
-            return f"Error: Core memory block '{section}' does not exist. Available: {list(self._core_memory.keys())}"
-
-        if len(content) > self._core_memory_limits.get(section, 1000):
-            return f"Error: Content exceeds limit for '{section}' ({len(content)} > {self._core_memory_limits.get(section, 1000)})."
-
-        self._core_memory[section] = content
-        return f"Updated block '{section}'."
-
-    def fmt_core_memory(self) -> str:
-        """Format the core memory blocks for the prompt."""
-        blocks = []
-        for key, value in self._core_memory.items():
-            blocks.append(f"<{key}>\n{value}\n</{key}>")
-        return "\n\n".join(blocks)
-
-    # -----------------------------------------------------------------
-    # Document cache management
-    # -----------------------------------------------------------------
-
-    def _get_document(self, alias: str) -> str:
-        """Get document with LRU cache tracking."""
-        if alias not in self._document_cache:
-            raise KeyError(f"Document alias '{alias}' not found")
-        if alias in self._document_access_order:
-            self._document_access_order.remove(alias)
-        self._document_access_order.append(alias)
-        return self._document_cache[alias]
-
-    def _set_document(self, alias: str, content: str) -> None:
-        """Set document with LRU eviction if needed."""
-        if (
-            alias not in self._document_cache
-            and len(self._document_cache) >= self._max_documents
-        ):
-            oldest = self._document_access_order.pop(0)
-            del self._document_cache[oldest]
-        self._document_cache[alias] = content
-        if alias in self._document_access_order:
-            self._document_access_order.remove(alias)
-        self._document_access_order.append(alias)
-
-    def _delete_document(self, alias: str) -> None:
-        """Delete document from cache."""
-        if alias in self._document_cache:
-            del self._document_cache[alias]
-        if alias in self._document_access_order:
-            self._document_access_order.remove(alias)
-
-    @property
-    def documents(self) -> dict[str, str]:
-        """Backward-compatible document access."""
-        return self._document_cache
 
     # -----------------------------------------------------------------
     # Lifecycle
@@ -216,9 +142,6 @@ class RLMReActChatAgent(dspy.Module):
         self.interpreter.start()
         self._started = True
 
-        # Ideally try to load existing memory here
-        # self._load_core_memory()
-
     def shutdown(self) -> None:
         """Shutdown the interpreter and mark this agent session as stopped."""
         self.interpreter.shutdown()
@@ -227,11 +150,7 @@ class RLMReActChatAgent(dspy.Module):
     def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
         """Reset chat history, document cache, and (optionally) sandbox buffers."""
         self.history = dspy.History(messages=[])
-        # Clear host-side document state to prevent cross-session leakage.
-        docs_count = len(self._document_cache)
-        self._document_cache.clear()
-        self._document_access_order.clear()
-        self.active_alias = None
+        docs_count = self.clear_document_cache()
         if clear_sandbox_buffers:
             # Find clear_buffer tool and call it
             for tool in self.react_tools:
@@ -252,9 +171,7 @@ class RLMReActChatAgent(dspy.Module):
         """Export serializable session state for persistence."""
         return {
             "history": self.history_messages(),
-            "documents": dict(self._document_cache),
-            "active_alias": self.active_alias,
-            "document_access_order": list(self._document_access_order),
+            **self.get_document_cache_state(),
             "core_memory": self._core_memory,
         }
 
@@ -265,45 +182,17 @@ class RLMReActChatAgent(dspy.Module):
             history = []
         self.history = dspy.History(messages=history)
 
-        documents = state.get("documents", {})
-        if isinstance(documents, dict):
-            self._document_cache = {
-                str(alias): str(content) for alias, content in documents.items()
-            }
-        else:
-            self._document_cache = {}
-
-        access_order = state.get("document_access_order", [])
-        if isinstance(access_order, list):
-            self._document_access_order = [
-                str(alias)
-                for alias in access_order
-                if str(alias) in self._document_cache
-            ]
-        else:
-            self._document_access_order = []
-
-        # Ensure all cached docs appear in order, even if absent in saved LRU list.
-        for alias in self._document_cache:
-            if alias not in self._document_access_order:
-                self._document_access_order.append(alias)
-
-        active_alias = state.get("active_alias")
-        if isinstance(active_alias, str) and active_alias in self._document_cache:
-            self.active_alias = active_alias
-        else:
-            self.active_alias = None
+        self.restore_document_cache_state(state)
 
         core_memory = state.get("core_memory")
-        if isinstance(core_memory, dict):
-            self._core_memory = core_memory
+        self.set_core_memory(core_memory)
 
         return {
             "status": "ok",
             "history_turns": self.history_turns(),
             "documents": len(self._document_cache),
             "active_alias": self.active_alias,
-            "core_memory_keys": list(self._core_memory.keys()),
+            "core_memory_keys": self.get_core_memory_keys(),
         }
 
     # -----------------------------------------------------------------
@@ -337,7 +226,7 @@ class RLMReActChatAgent(dspy.Module):
         return prediction
 
     # -----------------------------------------------------------------
-    # Public chat API — synchronous
+    # Public chat API - synchronous
     # -----------------------------------------------------------------
 
     def chat_turn(self, message: str) -> dict[str, Any]:
@@ -354,7 +243,7 @@ class RLMReActChatAgent(dspy.Module):
             "assistant_response": assistant_response,
             "trajectory": getattr(prediction, "trajectory", {}),
             "history_turns": self.history_turns(),
-            "core_memory_snapshot": self._core_memory.copy(),
+            "core_memory_snapshot": self.get_core_memory_snapshot(),
             "guardrail_warnings": guardrail_warnings,
         }
 
@@ -412,7 +301,7 @@ class RLMReActChatAgent(dspy.Module):
         }
 
     # -----------------------------------------------------------------
-    # Public chat API — async (native DSPy async)
+    # Public chat API - async (native DSPy async)
     # -----------------------------------------------------------------
 
     async def achat_turn(self, message: str) -> dict[str, Any]:
@@ -478,11 +367,10 @@ class RLMReActChatAgent(dspy.Module):
         return {"status": "ok", "tool_name": getattr(tool, "__name__", str(tool))}
 
     # -----------------------------------------------------------------
-    # Backward-compatible tool delegators
+    # Dynamic tool delegation
     #
-    # These methods delegate to the closure-based tools in react_tools
-    # so that existing code calling ``agent.load_document(...)`` etc.
-    # continues to work.
+    # Tool methods (load_document, list_files, etc.) are handled via
+    # __getattr__ for names in TOOL_DELEGATE_NAMES. See tool_delegation.py.
     # -----------------------------------------------------------------
 
     def _get_tool(self, name: str) -> Callable[..., Any]:
@@ -490,267 +378,28 @@ class RLMReActChatAgent(dspy.Module):
 
         Handles both raw callables (via ``__name__``) and ``dspy.Tool``
         wrappers (via ``.name``).
+
+        Args:
+            name: The tool name to look up
+
+        Returns:
+            The underlying callable for the tool
+
+        Raises:
+            AttributeError: If no tool with the given name exists
         """
-        for tool in self.react_tools:
-            tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
-            if tool_name == name:
-                # Return the underlying callable for dspy.Tool wrappers
-                return tool.func if isinstance(tool, dspy.Tool) else tool
-        raise AttributeError(f"No tool named {name!r}")
+        return get_tool_by_name(self, name)
 
-    def load_document(self, path: str, alias: str = "active") -> dict[str, Any]:
-        """Delegate to the ``load_document`` tool."""
-        return self._get_tool("load_document")(path, alias=alias)
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        """Dynamically dispatch to tool methods.
 
-    def set_active_document(self, alias: str) -> dict[str, Any]:
-        """Delegate to the ``set_active_document`` tool."""
-        return self._get_tool("set_active_document")(alias)
-
-    def list_documents(self) -> dict[str, Any]:
-        """Delegate to the ``list_documents`` tool."""
-        return self._get_tool("list_documents")()
-
-    def list_files(self, path: str = ".", pattern: str = "**/*") -> dict[str, Any]:
-        """Delegate to the ``list_files`` tool."""
-        return self._get_tool("list_files")(path=path, pattern=pattern)
-
-    def read_file_slice(
-        self, path: str, start_line: int = 1, num_lines: int = 100
-    ) -> dict[str, Any]:
-        """Delegate to the ``read_file_slice`` tool."""
-        return self._get_tool("read_file_slice")(
-            path, start_line=start_line, num_lines=num_lines
-        )
-
-    def find_files(
-        self, pattern: str, path: str = ".", include: str = ""
-    ) -> dict[str, Any]:
-        """Delegate to the ``find_files`` tool."""
-        return self._get_tool("find_files")(pattern, path=path, include=include)
-
-    def chunk_host(
-        self,
-        strategy: str,
-        alias: str = "active",
-        size: int = 200_000,
-        overlap: int = 0,
-        pattern: str = "",
-    ) -> dict[str, Any]:
-        """Delegate to the ``chunk_host`` tool."""
-        return self._get_tool("chunk_host")(
-            strategy, alias=alias, size=size, overlap=overlap, pattern=pattern
-        )
-
-    def chunk_sandbox(
-        self,
-        strategy: str,
-        variable_name: str = "active_document",
-        buffer_name: str = "chunks",
-        size: int = 200_000,
-        overlap: int = 0,
-        pattern: str = "",
-    ) -> dict[str, Any]:
-        """Delegate to the ``chunk_sandbox`` tool."""
-        return self._get_tool("chunk_sandbox")(
-            strategy,
-            variable_name=variable_name,
-            buffer_name=buffer_name,
-            size=size,
-            overlap=overlap,
-            pattern=pattern,
-        )
-
-    def parallel_semantic_map(
-        self,
-        query: str,
-        chunk_strategy: str = "headers",
-        max_chunks: int = 24,
-        buffer_name: str = "findings",
-    ) -> dict[str, Any]:
-        """Delegate to the ``parallel_semantic_map`` tool."""
-        return self._get_tool("parallel_semantic_map")(
-            query,
-            chunk_strategy=chunk_strategy,
-            max_chunks=max_chunks,
-            buffer_name=buffer_name,
-        )
-
-    def analyze_long_document(
-        self,
-        query: str,
-        alias: str = "active",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Delegate to the ``analyze_long_document`` tool."""
-        return self._get_tool("analyze_long_document")(
-            query, alias=alias, include_trajectory=include_trajectory
-        )
-
-    def summarize_long_document(
-        self,
-        focus: str,
-        alias: str = "active",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Delegate to the ``summarize_long_document`` tool."""
-        return self._get_tool("summarize_long_document")(
-            focus, alias=alias, include_trajectory=include_trajectory
-        )
-
-    def extract_from_logs(
-        self,
-        query: str,
-        alias: str = "active",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Delegate to the ``extract_from_logs`` tool."""
-        return self._get_tool("extract_from_logs")(
-            query, alias=alias, include_trajectory=include_trajectory
-        )
-
-    def read_buffer(self, name: str) -> dict[str, Any]:
-        """Delegate to the ``read_buffer`` tool."""
-        return self._get_tool("read_buffer")(name)
-
-    def clear_buffer(self, name: str = "") -> dict[str, Any]:
-        """Delegate to the ``clear_buffer`` tool."""
-        return self._get_tool("clear_buffer")(name)
-
-    def save_buffer_to_volume(self, name: str, path: str) -> dict[str, Any]:
-        """Delegate to the ``save_buffer_to_volume`` tool."""
-        return self._get_tool("save_buffer_to_volume")(name, path)
-
-    def load_text_from_volume(self, path: str, alias: str = "active") -> dict[str, Any]:
-        """Delegate to the ``load_text_from_volume`` tool."""
-        return self._get_tool("load_text_from_volume")(path, alias=alias)
-
-    def process_document(self, path: str, alias: str = "active") -> dict[str, Any]:
-        """Delegate to the ``process_document`` volume tool."""
-        return self._get_tool("process_document")(path, alias=alias)
-
-    def write_to_file(
-        self,
-        path: str,
-        content: str,
-        append: bool = False,
-    ) -> dict[str, Any]:
-        """Delegate to the ``write_to_file`` volume tool."""
-        return self._get_tool("write_to_file")(path, content, append=append)
-
-    def edit_core_memory(
-        self,
-        section: str,
-        content: str,
-        mode: str = "append",
-    ) -> dict[str, Any]:
-        """Delegate to the ``edit_core_memory`` tool."""
-        return self._get_tool("edit_core_memory")(section, content, mode=mode)
-
-    def grounded_answer(
-        self,
-        query: str,
-        alias: str = "active",
-        chunk_strategy: str = "headers",
-        max_chunks: int = 24,
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Delegate to the ``grounded_answer`` tool."""
-        return self._get_tool("grounded_answer")(
-            query,
-            alias=alias,
-            chunk_strategy=chunk_strategy,
-            max_chunks=max_chunks,
-            include_trajectory=include_trajectory,
-        )
-
-    def triage_incident_logs(
-        self,
-        query: str,
-        alias: str = "active",
-        service_context: str = "",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Delegate to the ``triage_incident_logs`` tool."""
-        return self._get_tool("triage_incident_logs")(
-            query,
-            alias=alias,
-            service_context=service_context,
-            include_trajectory=include_trajectory,
-        )
-
-    def plan_code_change(
-        self,
-        task: str,
-        repo_context: str = "",
-        constraints: str = "",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Delegate to the ``plan_code_change`` tool."""
-        return self._get_tool("plan_code_change")(
-            task,
-            repo_context=repo_context,
-            constraints=constraints,
-            include_trajectory=include_trajectory,
-        )
-
-    def propose_core_memory_update(
-        self,
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        """Delegate to the ``propose_core_memory_update`` tool."""
-        return self._get_tool("propose_core_memory_update")(
-            include_trajectory=include_trajectory
-        )
-
-    def memory_tree(
-        self,
-        root_path: str = "/data/memory",
-        max_depth: int = 4,
-        include_hidden: bool = False,
-    ) -> dict[str, Any]:
-        """Delegate to the ``memory_tree`` tool."""
-        return self._get_tool("memory_tree")(
-            root_path=root_path,
-            max_depth=max_depth,
-            include_hidden=include_hidden,
-        )
-
-    def memory_action_intent(
-        self,
-        user_request: str,
-        policy_constraints: str = "",
-    ) -> dict[str, Any]:
-        """Delegate to the ``memory_action_intent`` tool."""
-        return self._get_tool("memory_action_intent")(
-            user_request,
-            policy_constraints=policy_constraints,
-        )
-
-    def memory_structure_audit(
-        self,
-        usage_goals: str = "",
-    ) -> dict[str, Any]:
-        """Delegate to the ``memory_structure_audit`` tool."""
-        return self._get_tool("memory_structure_audit")(usage_goals=usage_goals)
-
-    def memory_structure_migration_plan(
-        self,
-        approved_constraints: str = "",
-    ) -> dict[str, Any]:
-        """Delegate to the ``memory_structure_migration_plan`` tool."""
-        return self._get_tool("memory_structure_migration_plan")(
-            approved_constraints=approved_constraints
-        )
-
-    def clarification_questions(
-        self,
-        request: str,
-        operation_risk: str = "medium",
-    ) -> dict[str, Any]:
-        """Delegate to the ``clarification_questions`` tool."""
-        return self._get_tool("clarification_questions")(
-            request,
-            operation_risk=operation_risk,
+        This enables backward-compatible access like `agent.load_document(...)`
+        without defining 25+ boilerplate delegator methods.
+        """
+        if name in TOOL_DELEGATE_NAMES:
+            return get_tool_by_name(self, name)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
         )
 
     # -----------------------------------------------------------------
@@ -766,108 +415,11 @@ class RLMReActChatAgent(dspy.Module):
         )
 
     def get_runtime_module(self, name: str) -> dspy.Module:
-        """Return a cached long-context runtime module by name."""
-        module = self._runtime_modules.get(name)
-        if module is not None:
-            return module
+        """Return a cached long-context runtime module by name.
 
-        from .rlm_runtime_modules import (
-            AnalyzeLongDocumentModule,
-            ClarificationQuestionModule,
-            CodeChangePlanModule,
-            CoreMemoryUpdateProposalModule,
-            ExtractFromLogsModule,
-            GroundedAnswerWithCitationsModule,
-            IncidentTriageFromLogsModule,
-            MemoryActionIntentModule,
-            MemoryStructureAuditModule,
-            MemoryStructureMigrationPlanModule,
-            SummarizeLongDocumentModule,
-            VolumeFileTreeModule,
-        )
-
-        constructors: dict[str, Callable[[], dspy.Module]] = {
-            "analyze_long_document": lambda: AnalyzeLongDocumentModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "summarize_long_document": lambda: SummarizeLongDocumentModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "extract_from_logs": lambda: ExtractFromLogsModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "grounded_answer": lambda: GroundedAnswerWithCitationsModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "triage_incident_logs": lambda: IncidentTriageFromLogsModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "plan_code_change": lambda: CodeChangePlanModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "propose_core_memory_update": lambda: CoreMemoryUpdateProposalModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "memory_tree": lambda: VolumeFileTreeModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "memory_action_intent": lambda: MemoryActionIntentModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "memory_structure_audit": lambda: MemoryStructureAuditModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-            "memory_structure_migration_plan": lambda: (
-                MemoryStructureMigrationPlanModule(
-                    interpreter=self.interpreter,
-                    max_iterations=self.rlm_max_iterations,
-                    max_llm_calls=self.rlm_max_llm_calls,
-                    verbose=self.verbose,
-                )
-            ),
-            "clarification_questions": lambda: ClarificationQuestionModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
-            ),
-        }
-        if name not in constructors:
-            raise ValueError(f"Unknown runtime module: {name}")
-
-        module = constructors[name]()
-        self._runtime_modules[name] = module
-        return module
+        Delegates to :func:`fleet_rlm.react.runtime_factory.get_runtime_module`.
+        """
+        return get_runtime_module(self, name)
 
     def history_messages(self) -> list[Any]:
         """Return chat history messages as a defensive list copy."""
@@ -905,49 +457,11 @@ class RLMReActChatAgent(dspy.Module):
 
         Returns sanitized response text and warning messages.
         Raises ``ValueError`` in strict mode for hard guardrail violations.
+
+        Delegates to :func:`fleet_rlm.react.validation.validate_assistant_response`.
         """
-        response = str(assistant_response or "").strip()
-        mode = self.guardrail_mode
-
-        hard_issues: list[str] = []
-        warnings: list[str] = []
-
-        if not response:
-            hard_issues.append("empty assistant response")
-
-        if len(response) > self.max_output_chars:
-            hard_issues.append(
-                f"assistant response length {len(response)} exceeds max_output_chars={self.max_output_chars}"
-            )
-
-        if response and len(response) < self.min_substantive_chars:
-            warnings.append(
-                "assistant response appears brief; consider adding more substantive detail"
-            )
-
-        if self._trajectory_has_tool_errors(trajectory):
-            warnings.append(
-                "trajectory indicates at least one tool error; consider retrying or recovering before final response"
-            )
-
-        if hard_issues and mode == "strict":
-            raise ValueError("guardrail violation: " + "; ".join(hard_issues))
-
-        if hard_issues and mode == "warn":
-            warnings.extend([f"guardrail warning: {issue}" for issue in hard_issues])
-
-        return response, warnings if mode in {"warn", "strict"} else []
-
-    @staticmethod
-    def _trajectory_has_tool_errors(trajectory: dict[str, Any] | None) -> bool:
-        """Best-effort detector for tool error traces in trajectory payloads."""
-        if not trajectory or not isinstance(trajectory, dict):
-            return False
-
-        for key, value in trajectory.items():
-            if not key.startswith("output_"):
-                continue
-            text = str(value).lower()
-            if any(token in text for token in ("error", "exception", "traceback")):
-                return True
-        return False
+        return validate_assistant_response(
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+            config=self._validation_config,
+        )
