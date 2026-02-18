@@ -24,7 +24,7 @@ import { copyToClipboard } from "./hooks/useClipboard";
 
 function GlobalKeyHandler() {
   const { state, dispatch } = useAppContext();
-  const renderer = useRenderer();
+  useRenderer();
   const { showToast } = useToast();
 
   const handleGlobalKeys = useCallback((key: { ctrl: boolean; name: string }) => {
