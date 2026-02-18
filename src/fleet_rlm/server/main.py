@@ -9,6 +9,7 @@ from fleet_rlm.core.config import get_planner_lm_from_env
 
 from .config import ServerRuntimeConfig
 from .deps import server_state
+from .execution_events import ExecutionEventEmitter
 from .middleware import add_middlewares
 from .routers import chat, health, sessions, tasks, ws
 
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     cfg = config or ServerRuntimeConfig()
     server_state.config = cfg
+    server_state.execution_event_emitter = ExecutionEventEmitter()
 
     app = FastAPI(
         title="fleet-rlm",

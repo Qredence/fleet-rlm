@@ -190,6 +190,36 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
     assert len(agent.history.messages) == 1
 
 
+def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    def _fake_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            yield StatusMessage(message="Calling tool: memory_write(path='/tmp/x')")
+            yield StatusMessage(message="Tool finished.")
+            yield dspy.Prediction(
+                assistant_response="done",
+                trajectory={"tool_name_0": "memory_write"},
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    events = list(agent.iter_chat_turn_stream("store memory", trace=False))
+
+    tool_call_event = next(event for event in events if event.kind == "tool_call")
+    assert tool_call_event.payload["tool_name"] == "memory_write"
+    assert tool_call_event.payload["raw_status"].startswith("Calling tool:")
+    assert "path='/tmp/x'" in tool_call_event.payload["tool_args"]
+
+    tool_result_event = next(event for event in events if event.kind == "tool_result")
+    assert tool_result_event.payload["tool_name"] == "memory_write"
+    assert tool_result_event.payload["raw_status"] == "Tool finished."
+
+
 @pytest.mark.asyncio
 async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
     records = []

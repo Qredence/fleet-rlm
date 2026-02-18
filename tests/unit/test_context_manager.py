@@ -303,6 +303,34 @@ def test_execute_retries_once_on_modal_exec_stdin_failure(mock_modal, monkeypatc
     assert writes["count"] == 2
 
 
+def test_execute_emits_repl_hook_start_and_complete(mock_modal, monkeypatch):
+    """execute() should emit start/complete hook payloads for REPL observability."""
+    from dspy.primitives.code_interpreter import FinalOutput
+
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    hook_events: list[dict[str, object]] = []
+
+    def fake_start():
+        interp._sandbox = object()
+        interp._stderr_iter = iter([])
+        interp._stdout_queue = queue.Queue()
+        interp._stdout_queue.put(json.dumps({"final": {"status": "ok"}}))
+
+    monkeypatch.setattr(interp, "start", fake_start)
+    monkeypatch.setattr(interp, "_write_line", lambda payload: None)
+    interp.execution_event_callback = hook_events.append
+
+    result = interp.execute("print('hi')")
+    assert isinstance(result, FinalOutput)
+    assert hook_events
+    assert hook_events[0]["phase"] == "start"
+    assert hook_events[-1]["phase"] == "complete"
+    assert hook_events[-1]["success"] is True
+    assert hook_events[-1]["result_kind"] == "final_output"
+
+
 def test_execute_does_not_retry_non_channel_errors(mock_modal, monkeypatch):
     """execute() should surface non-transport failures immediately."""
     from fleet_rlm.core.interpreter import ModalInterpreter

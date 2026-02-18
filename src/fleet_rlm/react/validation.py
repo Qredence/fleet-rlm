@@ -43,12 +43,33 @@ def trajectory_has_tool_errors(trajectory: dict[str, Any] | None) -> bool:
     if not trajectory or not isinstance(trajectory, dict):
         return False
 
+    # Legacy DSPy ReAct flat keys: output_0, output_1, ...
     for key, value in trajectory.items():
         if not key.startswith("output_"):
             continue
         text = str(value).lower()
         if any(token in text for token in ("error", "exception", "traceback")):
             return True
+
+    # Structured trajectory variants: {"steps": [...]} or {"trajectory": [...]}
+    structured_steps: list[Any] = []
+    maybe_steps = trajectory.get("steps")
+    if isinstance(maybe_steps, list):
+        structured_steps.extend(maybe_steps)
+    maybe_trajectory = trajectory.get("trajectory")
+    if isinstance(maybe_trajectory, list):
+        structured_steps.extend(maybe_trajectory)
+
+    for step in structured_steps:
+        if not isinstance(step, dict):
+            continue
+        for field_name in ("output", "observation", "error"):
+            field_value = step.get(field_name)
+            if field_value is None:
+                continue
+            text = str(field_value).lower()
+            if any(token in text for token in ("error", "exception", "traceback")):
+                return True
     return False
 
 

@@ -36,11 +36,58 @@ def parse_tool_call_status(message: str) -> str | None:
     return f"tool call: {match.group(1).strip()}"
 
 
+def parse_tool_call_payload(message: str) -> dict[str, Any] | None:
+    """Extract structured tool-call metadata from a status message."""
+    match = re.match(r"^Calling tool:\s*(.+)$", message.strip())
+    if not match:
+        return None
+
+    raw_call = match.group(1).strip()
+    tool_name = raw_call.split("(", 1)[0].strip() if raw_call else ""
+    args_snippet = ""
+    if "(" in raw_call:
+        args_snippet = raw_call.split("(", 1)[1].rsplit(")", 1)[0].strip()
+
+    payload: dict[str, Any] = {
+        "raw_status": message,
+        "raw_call": raw_call,
+    }
+    if tool_name:
+        payload["tool_name"] = tool_name
+    if args_snippet:
+        payload["tool_args"] = args_snippet
+        payload["tool_input"] = args_snippet
+    return payload
+
+
 def parse_tool_result_status(message: str) -> str | None:
     """Detect a tool-finished status message."""
-    if message.strip() == "Tool finished.":
+    stripped = message.strip()
+    if stripped == "Tool finished.":
         return "tool result: finished"
+    if stripped.startswith("Tool result:"):
+        return "tool result: completed"
     return None
+
+
+def parse_tool_result_payload(
+    message: str, *, tool_name: str | None
+) -> dict[str, Any] | None:
+    """Extract structured tool-result metadata from a status message."""
+    stripped = message.strip()
+    if stripped != "Tool finished." and not stripped.startswith("Tool result:"):
+        return None
+
+    payload: dict[str, Any] = {
+        "raw_status": message,
+    }
+    if tool_name:
+        payload["tool_name"] = tool_name
+    if stripped.startswith("Tool result:"):
+        result_text = stripped.removeprefix("Tool result:").strip()
+        if result_text:
+            payload["tool_output"] = result_text
+    return payload
 
 
 def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -167,6 +214,8 @@ def iter_chat_turn_stream(
 
     assistant_chunks: list[str] = []
     final_prediction: dspy.Prediction | None = None
+    last_tool_name: str | None = None
+    last_tool_name: str | None = None
 
     try:
         stream = stream_program(
@@ -203,10 +252,25 @@ def iter_chat_turn_stream(
                 yield StreamEvent(kind="status", text=text)
                 tool_call = parse_tool_call_status(text)
                 if tool_call:
-                    yield StreamEvent(kind="tool_call", text=tool_call)
+                    tool_payload = parse_tool_call_payload(text) or {}
+                    parsed_name = tool_payload.get("tool_name")
+                    if isinstance(parsed_name, str) and parsed_name:
+                        last_tool_name = parsed_name
+                    yield StreamEvent(
+                        kind="tool_call",
+                        text=tool_call,
+                        payload=tool_payload,
+                    )
                 tool_result = parse_tool_result_status(text)
                 if tool_result:
-                    yield StreamEvent(kind="tool_result", text=tool_result)
+                    result_payload = (
+                        parse_tool_result_payload(text, tool_name=last_tool_name) or {}
+                    )
+                    yield StreamEvent(
+                        kind="tool_result",
+                        text=tool_result,
+                        payload=result_payload,
+                    )
             elif isinstance(value, dspy.Prediction):
                 final_prediction = value
                 # Emit trajectory steps as they're captured
@@ -400,10 +464,25 @@ async def aiter_chat_turn_stream(
                 yield StreamEvent(kind="status", text=text)
                 tool_call = parse_tool_call_status(text)
                 if tool_call:
-                    yield StreamEvent(kind="tool_call", text=tool_call)
+                    tool_payload = parse_tool_call_payload(text) or {}
+                    parsed_name = tool_payload.get("tool_name")
+                    if isinstance(parsed_name, str) and parsed_name:
+                        last_tool_name = parsed_name
+                    yield StreamEvent(
+                        kind="tool_call",
+                        text=tool_call,
+                        payload=tool_payload,
+                    )
                 tool_result = parse_tool_result_status(text)
                 if tool_result:
-                    yield StreamEvent(kind="tool_result", text=tool_result)
+                    result_payload = (
+                        parse_tool_result_payload(text, tool_name=last_tool_name) or {}
+                    )
+                    yield StreamEvent(
+                        kind="tool_result",
+                        text=tool_result,
+                        payload=result_payload,
+                    )
             elif isinstance(value, dspy.Prediction):
                 final_prediction = value
                 # Emit trajectory steps as they're captured
