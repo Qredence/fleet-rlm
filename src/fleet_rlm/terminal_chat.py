@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import getpass
 import json
-import os
-import re
-import shlex
 import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -15,35 +11,35 @@ from pathlib import Path
 from typing import Any
 
 import dspy
-from dotenv import set_key
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
-from prompt_toolkit.shortcuts import input_dialog, radiolist_dialog, yes_no_dialog
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from rich.console import Console
-from rich.layout import Layout
-from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from . import runners
 from .config import AppConfig
 from .core.config import get_planner_lm_from_env
 from .models import TraceMode
 from .react.commands import COMMAND_DISPATCH
-from .utils.modal import get_default_volume_name, load_modal_config
-
-_TRACE_MODES: set[str] = {"compact", "verbose", "off"}
-_SETTINGS_KEYS = (
-    "DSPY_LM_MODEL",
-    "DSPY_LLM_API_KEY",
-    "DSPY_LM_API_BASE",
-    "DSPY_LM_MAX_TOKENS",
+from .terminal import (
+    _FleetCompleter,
+    _badge,
+    _bottom_toolbar,
+    _history_path,
+    _normalize_trace_mode,
+    _print_banner,
+    _prompt_label,
+    handle_slash_command,
+    run_long_context,
+    run_settings,
+    settings_llm,
+    settings_modal,
 )
+from .utils.modal import get_default_volume_name, load_modal_config
 
 
 @dataclass(slots=True)
@@ -111,7 +107,16 @@ def run_terminal_chat(*, config: AppConfig, options: TerminalChatOptions) -> Non
     session.run()
 
 
+def _build_completer() -> _FleetCompleter:
+    """Build a fleet completer with command specs."""
+    specs = [(spec.name, spec.summary) for spec in _COMMAND_SPECS]
+    dispatch_names = list(COMMAND_DISPATCH.keys())
+    return _FleetCompleter(command_specs=specs, command_dispatch_names=dispatch_names)
+
+
 class _TerminalChatSession:
+    """Terminal chat session handling user interaction and agent communication."""
+
     def __init__(self, *, config: AppConfig, options: TerminalChatOptions) -> None:
         self.config = config
         self.options = options
@@ -131,7 +136,7 @@ class _TerminalChatSession:
         history_path.parent.mkdir(parents=True, exist_ok=True)
         self.prompt_session = PromptSession(
             history=FileHistory(str(history_path)),
-            completer=_FleetCompleter(),
+            completer=_build_completer(),
             complete_while_typing=True,
             auto_suggest=AutoSuggestFromHistory(),
             style=Style.from_dict(
@@ -175,7 +180,7 @@ class _TerminalChatSession:
                 self._render_shell()
                 try:
                     line = self.prompt_session.prompt(
-                        self._prompt_label(),
+                        _prompt_label(),
                         complete_style=CompleteStyle.MULTI_COLUMN,
                         bottom_toolbar=self._bottom_toolbar(),
                     ).strip()
@@ -189,7 +194,7 @@ class _TerminalChatSession:
                 if not line:
                     continue
                 if line.startswith("/"):
-                    should_exit = self._handle_slash(agent, line)
+                    should_exit = handle_slash_command(self, agent, line)
                     if should_exit:
                         return
                     continue
@@ -208,6 +213,7 @@ class _TerminalChatSession:
                     self._print_error(str(exc))
 
     async def _run_chat_turn(self, agent: Any, message: str) -> None:
+        """Run a single chat turn with streaming output."""
         trace_enabled = self.trace_mode != "off"
         assistant_chunks: list[str] = []
         tool_calls: list[str] = []
@@ -247,12 +253,12 @@ class _TerminalChatSession:
                     tool_calls.append(stripped)
                     self.last_status = stripped
                     if self.trace_mode != "off":
-                        self._append_transcript("tool", f"↳ {stripped}")
+                        self._append_transcript("tool", f"-> {stripped}")
                         self._render_shell(draft_assistant="".join(assistant_chunks))
                     continue
 
                 if kind == "tool_result" and stripped and self.trace_mode == "verbose":
-                    self._append_transcript("tool", f"✓ {stripped}")
+                    self._append_transcript("tool", f"* {stripped}")
                     self._render_shell(draft_assistant="".join(assistant_chunks))
                     continue
 
@@ -289,7 +295,7 @@ class _TerminalChatSession:
         if self.trace_mode == "compact" and tool_calls:
             self._append_transcript(
                 "status",
-                f"{len(tool_calls)} tool actions · use /trace verbose for details",
+                f"{len(tool_calls)} tool actions - use /trace verbose for details",
             )
         self._append_transcript("assistant", assistant_response)
         self.last_status = "ready"
@@ -300,217 +306,41 @@ class _TerminalChatSession:
             self._print_warning(str(warning))
 
     def _handle_slash(self, agent: Any, line: str) -> bool:
-        command, arg_text = _split_slash_command(line)
+        """Handle slash commands (delegates to terminal.commands module)."""
+        return handle_slash_command(self, agent, line)
 
-        if command in {"/", "/help", "/commands"}:
-            return self._print_command_palette(agent)
-        if command == "/?":
-            self._show_shortcuts()
-            return False
+    def _run_settings(self, section: str) -> None:
+        """Run settings configuration (delegates to terminal.settings module)."""
+        run_settings(self, section)
 
-        if command in {"/exit", "/quit"}:
-            self.console.print("[dim]bye[/dim]")
-            return True
+    def _settings_llm(self, *, model_only: bool) -> None:
+        """Configure LLM settings (delegates to terminal.settings module)."""
+        settings_llm(self, model_only=model_only)
 
-        if command == "/clear":
-            self.console.clear()
-            self._print_banner(planner_ready=True)
-            return False
+    def _settings_modal(self) -> None:
+        """Configure Modal credentials (delegates to terminal.settings module)."""
+        settings_modal(self)
 
-        if command == "/reset":
-            if not _confirm("Reset agent history and clear sandbox buffers?"):
-                self._print_warning("Reset cancelled.")
-                return False
-            result = agent.reset(clear_sandbox_buffers=True)
-            self._print_result(result, title="reset")
-            return False
+    def _run_long_context(self, arg_text: str) -> None:
+        """Run long-context task (delegates to terminal.settings module)."""
+        run_long_context(self, arg_text)
 
-        if command == "/trace":
-            mode = arg_text.strip().lower()
-            if mode not in _TRACE_MODES:
-                self._print_error("usage: /trace <compact|verbose|off>")
-                return False
-            self.trace_mode = _normalize_trace_mode(mode)
-            self.console.print(f"[green]Trace mode set to {self.trace_mode}[/]")
-            return False
+    def _check_secret(self) -> None:
+        """Check Modal secret (delegates to terminal.settings module)."""
+        from .terminal import check_secret
 
-        if command == "/status":
-            self._print_status(agent)
-            return False
+        check_secret(self)
 
-        if command == "/settings":
-            self._run_settings(arg_text.strip().lower())
-            return False
-        if command == "/model":
-            self._run_settings("model")
-            return False
-        if command == "/permissions":
-            self._print_permissions()
-            return False
-        if command == "/permissions-reset":
-            self.command_permissions.clear()
-            self._print_warning("Permission policy reset.")
-            return False
+    def _check_secret_key(self, *, key: str) -> None:
+        """Check Modal secret key (delegates to terminal.settings module)."""
+        from .terminal import check_secret_key
 
-        if command == "/run-long-context":
-            self._run_long_context(arg_text)
-            return False
-
-        if command == "/check-secret":
-            self._check_secret()
-            return False
-
-        if command == "/check-secret-key":
-            key = arg_text.strip() or "DSPY_LLM_API_KEY"
-            self._check_secret_key(key=key)
-            return False
-
-        alias_result = self._handle_alias_command(agent, command, arg_text)
-        if alias_result is not None:
-            return alias_result
-
-        canonical = command.lstrip("/")
-        if canonical in COMMAND_DISPATCH:
-            try:
-                payload = _parse_command_payload(arg_text)
-            except Exception as exc:
-                self._print_error(str(exc))
-                return False
-            self._execute_agent_command(agent, canonical, payload)
-            return False
-
-        self._print_unknown_command(command)
-        return False
-
-    def _handle_alias_command(
-        self, agent: Any, command: str, arg_text: str
-    ) -> bool | None:
-        args = _safe_split(arg_text)
-
-        if command in {"/docs", "/load"}:
-            if not args:
-                self._print_error("usage: /docs <path> [alias]")
-                return False
-            payload: dict[str, Any] = {"path": args[0]}
-            if len(args) > 1:
-                payload["alias"] = args[1]
-            self._execute_agent_command(agent, "load_document", payload)
-            return False
-
-        if command == "/active":
-            if not args:
-                self._print_error("usage: /active <alias>")
-                return False
-            self._execute_agent_command(
-                agent, "set_active_document", {"alias": args[0]}
-            )
-            return False
-
-        if command == "/list":
-            self._execute_agent_command(agent, "list_documents", {})
-            return False
-
-        if command == "/chunk":
-            if not args:
-                self._print_error(
-                    "usage: /chunk <size|headers|timestamps|json> [chunk_size]"
-                )
-                return False
-            payload: dict[str, Any] = {"strategy": args[0]}
-            if len(args) > 1 and args[1].isdigit():
-                payload["size"] = int(args[1])
-            self._execute_agent_command(agent, "chunk_host", payload)
-            return False
-
-        if command == "/analyze":
-            query = arg_text.strip()
-            if not query:
-                self._print_error("usage: /analyze <query>")
-                return False
-            self._execute_agent_command(agent, "analyze_document", {"query": query})
-            return False
-
-        if command == "/summarize":
-            focus = arg_text.strip()
-            if not focus:
-                self._print_error("usage: /summarize <focus>")
-                return False
-            self._execute_agent_command(agent, "summarize_document", {"focus": focus})
-            return False
-
-        if command == "/extract":
-            query = arg_text.strip()
-            if not query:
-                self._print_error("usage: /extract <query>")
-                return False
-            self._execute_agent_command(agent, "extract_logs", {"query": query})
-            return False
-
-        if command == "/semantic":
-            query = arg_text.strip()
-            if not query:
-                self._print_error("usage: /semantic <query>")
-                return False
-            self._execute_agent_command(
-                agent, "parallel_semantic_map", {"query": query}
-            )
-            return False
-
-        if command == "/buffer":
-            if not args:
-                self._print_error("usage: /buffer <name>")
-                return False
-            self._execute_agent_command(agent, "read_buffer", {"name": args[0]})
-            return False
-
-        if command == "/clear-buffer":
-            payload: dict[str, Any] = {"name": args[0]} if args else {}
-            if not args and not _confirm("Clear all buffers?"):
-                self._print_warning("clear-buffer cancelled.")
-                return False
-            self._execute_agent_command(agent, "clear_buffer", payload)
-            return False
-
-        if command == "/save-buffer":
-            if len(args) < 2:
-                self._print_error("usage: /save-buffer <buffer_name> <volume_path>")
-                return False
-            self._execute_agent_command(
-                agent,
-                "save_buffer",
-                {"name": args[0], "path": args[1]},
-            )
-            return False
-
-        if command == "/load-volume":
-            if not args:
-                self._print_error("usage: /load-volume <path> [alias]")
-                return False
-            payload: dict[str, Any] = {"path": args[0]}
-            if len(args) > 1:
-                payload["alias"] = args[1]
-            self._execute_agent_command(agent, "load_volume", payload)
-            return False
-
-        return None
-
-    def _execute_agent_command(
-        self, agent: Any, command: str, args: dict[str, Any]
-    ) -> None:
-        if not self._authorize_command(command=command):
-            return
-        confirm_message = _confirmation_message(command=command, args=args)
-        if confirm_message and not _confirm(confirm_message):
-            self._print_warning("Command cancelled.")
-            return
-
-        try:
-            result = asyncio.run(agent.execute_command(command, args))
-            self._print_result(result, title=command)
-        except Exception as exc:  # pragma: no cover - runtime path
-            self._print_error(str(exc))
+        check_secret_key(self, key=key)
 
     def _print_status(self, agent: Any) -> None:
+        """Print the current session and agent status."""
+        import os
+
         has_model = bool(os.environ.get("DSPY_LM_MODEL"))
         has_api_key = bool(
             os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
@@ -599,307 +429,53 @@ class _TerminalChatSession:
                 title="status payload",
             )
 
-    def _run_settings(self, section: str) -> None:
-        section_norm = section.strip().lower()
-        if not section_norm:
-            section_norm = (
-                _prompt_choice(
-                    "Settings section:",
-                    ["llm", "model", "modal"],
-                    allow_freeform=True,
-                )
-                .strip()
-                .lower()
-            )
-
-        if section_norm in {"llm", "model"}:
-            self._settings_llm(model_only=section_norm == "model")
-            return
-
-        if section_norm == "modal":
-            self._settings_modal()
-            return
-
-        self._print_error("unknown settings section. try: /settings llm|model|modal")
-
-    def _settings_llm(self, *, model_only: bool) -> None:
-        env_path = _resolve_env_path()
-        updates: dict[str, str] = {}
-
-        self.console.print(
-            Panel("Update LLM configuration in local .env", title="settings")
-        )
-
-        model_value = _prompt_value(
-            key="DSPY_LM_MODEL",
-            default=os.environ.get("DSPY_LM_MODEL", ""),
-            secret=False,
-        )
-        if model_value:
-            updates["DSPY_LM_MODEL"] = model_value
-
-        if not model_only:
-            api_key = _prompt_value(
-                key="DSPY_LLM_API_KEY",
-                default="",
-                secret=True,
-            )
-            if api_key:
-                updates["DSPY_LLM_API_KEY"] = api_key
-
-            api_base = _prompt_value(
-                key="DSPY_LM_API_BASE",
-                default=os.environ.get("DSPY_LM_API_BASE", ""),
-                secret=False,
-            )
-            if api_base:
-                updates["DSPY_LM_API_BASE"] = api_base
-
-            max_tokens = _prompt_value(
-                key="DSPY_LM_MAX_TOKENS",
-                default=os.environ.get("DSPY_LM_MAX_TOKENS", ""),
-                secret=False,
-            )
-            if max_tokens:
-                updates["DSPY_LM_MAX_TOKENS"] = max_tokens
-
-        if not updates:
-            self._print_warning("No changes made.")
-            return
-
-        if not _confirm(f"Write {len(updates)} update(s) to {env_path}?"):
-            self._print_warning("Settings update cancelled.")
-            return
-
-        _write_env_updates(env_path=env_path, updates=updates)
-        self.console.print(
-            f"[green]Updated[/] {', '.join(sorted(updates))} in [bold]{env_path}[/]"
-        )
-
-    def _settings_modal(self) -> None:
-        env_path = _resolve_env_path()
-        updates: dict[str, str] = {}
-
-        self.console.print(
-            Panel(
-                "Store Modal credentials in local .env (optional for this CLI).",
-                title="settings modal",
-            )
-        )
-
-        token_id = _prompt_value(
-            key="MODAL_TOKEN_ID",
-            default="",
-            secret=False,
-        )
-        if token_id:
-            updates["MODAL_TOKEN_ID"] = token_id
-
-        token_secret = _prompt_value(
-            key="MODAL_TOKEN_SECRET",
-            default="",
-            secret=True,
-        )
-        if token_secret:
-            updates["MODAL_TOKEN_SECRET"] = token_secret
-
-        if updates:
-            if _confirm(f"Write {len(updates)} Modal value(s) to {env_path}?"):
-                _write_env_updates(env_path=env_path, updates=updates)
-                self.console.print(
-                    f"[green]Updated[/] {', '.join(sorted(updates))} in [bold]{env_path}[/]"
-                )
-            else:
-                self._print_warning("Settings update cancelled.")
-        else:
-            self._print_warning("No changes made.")
-
-        self.console.print("\n[bold]next steps:[/]")
-        self.console.print("  uv run modal setup")
-        self.console.print("  uv run modal volume create rlm-volume-dspy")
-        self.console.print("  uv run modal secret create LITELLM ...")
-
-    def _run_long_context(self, arg_text: str) -> None:
-        if not self._authorize_command(command="run-long-context"):
-            return
-        args = _safe_split(arg_text)
-        if not args:
-            docs_path = _prompt_value(key="docs_path", default="", secret=False)
-            query = _prompt_value(key="query", default="", secret=False)
-            mode = _prompt_choice(
-                "Mode:",
-                ["analyze", "summarize"],
-                allow_freeform=False,
-            )
-        else:
-            docs_path = args[0]
-            mode = "analyze"
-            query_parts = args[1:]
-            if query_parts and query_parts[-1] in {"analyze", "summarize"}:
-                mode = query_parts[-1]
-                query_parts = query_parts[:-1]
-            query = " ".join(query_parts)
-
-        if not docs_path or not query:
-            self._print_error(
-                "usage: /run-long-context <docs_path> <query> [analyze|summarize]"
-            )
-            return
-
-        with self.console.status(
-            "[cyan]Running long-context task...[/]", spinner="line"
-        ):
-            try:
-                result = runners.run_long_context(
-                    docs_path=docs_path,
-                    query=query,
-                    mode=mode,
-                    max_iterations=self.config.rlm_settings.max_iterations,
-                    max_llm_calls=self.config.rlm_settings.max_llm_calls,
-                    verbose=self.config.rlm_settings.verbose,
-                    timeout=self.config.interpreter.timeout,
-                    secret_name=self.secret_name,
-                    volume_name=self.volume_name,
-                )
-            except Exception as exc:  # pragma: no cover - runtime path
-                self._print_error(str(exc))
-                return
-
-        self._print_result(result, title="run-long-context")
-
-    def _check_secret(self) -> None:
-        if not self._authorize_command(command="check-secret"):
-            return
-        with self.console.status("[cyan]Checking secret...[/]", spinner="line"):
-            try:
-                result = runners.check_secret_presence(secret_name=self.secret_name)
-            except Exception as exc:  # pragma: no cover - runtime path
-                self._print_error(str(exc))
-                return
-        self._print_result(result, title="check-secret")
-
-    def _check_secret_key(self, *, key: str) -> None:
-        if not self._authorize_command(command="check-secret-key"):
-            return
-        with self.console.status("[cyan]Checking secret key...[/]", spinner="line"):
-            try:
-                result = runners.check_secret_key(secret_name=self.secret_name, key=key)
-            except Exception as exc:  # pragma: no cover - runtime path
-                self._print_error(str(exc))
-                return
-        self._print_result(result, title=f"check-secret-key ({key})")
-
     def _print_command_palette(self, agent: Any) -> bool:
-        query = input_dialog(
-            title="Command palette",
-            text="Filter commands (optional):",
-            style=_dialog_style(),
-            default="",
-        ).run()
-        if query is None:
-            return False
+        """Print command palette (delegates to terminal.commands module)."""
+        from .terminal import print_command_palette
 
-        query_norm = query.strip().lower()
-        specs = [
-            spec
-            for spec in sorted(
-                _COMMAND_SPECS, key=lambda item: (item.category, item.name)
-            )
-            if (
-                not query_norm
-                or query_norm in spec.name.lower()
-                or query_norm in spec.summary.lower()
-                or query_norm in spec.category.lower()
-            )
-        ]
-        if not specs:
-            self._print_warning("No commands match that filter.")
-            return False
-
-        values = [
-            (spec.name, f"{spec.name:<20} {spec.summary}  [{spec.category}]")
-            for spec in specs
-        ]
-        selected = radiolist_dialog(
-            title="Slash command palette",
-            text="Select a command (↑/↓, Enter):",
-            values=values,
-            style=_dialog_style(),
-        ).run()
-        if not selected:
-            return False
-
-        template = _COMMAND_TEMPLATES.get(selected, "")
-        quick = input_dialog(
-            title=f"{selected} arguments",
-            text=f"Arguments (template: {template or 'none'}):",
-            style=_dialog_style(),
-            default=template,
-        ).run()
-        if quick is None:
-            return False
-        quick_line = selected if not quick.strip() else f"{selected} {quick.strip()}"
-        return self._handle_slash(agent, quick_line)
+        return print_command_palette(self, agent)
 
     def _print_unknown_command(self, command: str) -> None:
-        options = sorted({spec.name for spec in _COMMAND_SPECS})
-        options.extend(f"/{name}" for name in sorted(COMMAND_DISPATCH))
-        suggestions = [opt for opt in options if opt.startswith(command)][:6]
-        if suggestions:
-            self._print_error(
-                f"Unknown command: {command}. Did you mean: {', '.join(suggestions)}"
-            )
-            return
-        self._print_error(f"Unknown command: {command}. Type /help for commands.")
+        """Print unknown command error (delegates to terminal.commands module)."""
+        from .terminal import _print_unknown_command
+
+        _print_unknown_command(self, command)
 
     def _print_result(self, result: dict[str, Any], *, title: str) -> None:
+        """Print a result dictionary as JSON."""
         rendered = json.dumps(result, indent=2, sort_keys=True, default=str)
         self._append_transcript("result", f"{title}\n{rendered}")
         self.last_status = f"{title} complete"
         self._render_shell()
 
     def _print_banner(self, *, planner_ready: bool) -> None:
-        planner_text = (
-            "[green]ready[/]" if planner_ready else "[yellow]not configured[/]"
+        """Print the startup banner."""
+        _print_banner(
+            console=self.console,
+            session_id=self.session_id,
+            model=self.config.agent.model,
+            planner_ready=planner_ready,
+            workspace=Path.cwd(),
         )
-        content = (
-            "[bold cyan]fleet[/]  [dim]Copilot-style mode[/]\n"
-            "Describe a task to get started.\n\n"
-            "Use [bold]/model[/], [bold]/settings[/], [bold]/status[/], and "
-            "[bold]/[/] for the command palette.\n"
-            f"[dim]session={self.session_id}  planner={planner_text}[/]"
-        )
-        self.console.print(
-            Panel(content, title="fleet chat", border_style="cyan", expand=False)
-        )
-        self.console.print(
-            f"[dim]• workspace:[/] {Path.cwd()}    "
-            f"[dim]model:[/] {self.config.agent.model}"
-        )
-
-    def _prompt_label(self) -> HTML:
-        return HTML("<prompt>❯ </prompt>")
 
     def _bottom_toolbar(self) -> HTML:
-        mode = "thinking" if self.is_processing else "idle"
-        return HTML(
-            "<trace>"
-            " Type @ to mention files, / for commands, or ? for shortcuts "
-            f" · mode={mode}"
-            "</trace>"
-        )
+        """Return the bottom toolbar HTML."""
+        return _bottom_toolbar(is_processing=self.is_processing)
 
     def _print_warning(self, message: str) -> None:
+        """Print a warning message."""
         self._append_transcript("warning", message)
         self.last_status = "warning"
         self._render_shell()
 
     def _print_error(self, message: str) -> None:
+        """Print an error message."""
         self._append_transcript("error", message)
         self.last_status = "error"
         self._render_shell()
 
     def _print_permissions(self) -> None:
+        """Print the current permission policies."""
         table = Table(title="command permissions")
         table.add_column("Command", style="cyan")
         table.add_column("Policy", style="bold")
@@ -911,6 +487,9 @@ class _TerminalChatSession:
         self.console.print(table)
 
     def _authorize_command(self, *, command: str) -> bool:
+        """Authorize a command based on session policy."""
+        from .terminal import _prompt_choice
+
         policy = self.command_permissions.get(command, "ask")
         if policy == "deny":
             self._print_error(f"Command denied by session policy: {command}")
@@ -935,16 +514,18 @@ class _TerminalChatSession:
         return False
 
     def _show_shortcuts(self) -> None:
+        """Show keyboard shortcuts."""
         self._append_transcript(
             "status",
             (
-                "Shortcuts: / opens command palette · @ mentions files · "
-                "Ctrl+C interrupts · /trace compact|verbose|off"
+                "Shortcuts: / opens command palette - @ mentions files - "
+                "Ctrl+C interrupts - /trace compact|verbose|off"
             ),
         )
         self._render_shell()
 
     def _append_transcript(self, role: str, content: str) -> None:
+        """Append a message to the transcript."""
         text = content.strip()
         if not text:
             return
@@ -953,343 +534,16 @@ class _TerminalChatSession:
             self.transcript = self.transcript[-200:]
 
     def _render_shell(self, *, draft_assistant: str = "") -> None:
-        header = Panel(
-            Text.from_markup(
-                f"[bold]fleet[/]  "
-                f"[dim]session[/]={self.session_id}  "
-                f"[dim]model[/]={self.config.agent.model}  "
-                f"[dim]trace[/]={self.trace_mode}  "
-                f"[dim]status[/]={self.last_status}"
-            ),
-            border_style="cyan",
-            padding=(0, 1),
+        """Render the shell UI layout."""
+        from .terminal import _render_shell
+
+        _render_shell(
+            console=self.console,
+            session_id=self.session_id,
+            model=self.config.agent.model,
+            trace_mode=self.trace_mode,
+            last_status=self.last_status,
+            transcript=self.transcript,
+            is_processing=self.is_processing,
+            draft_assistant=draft_assistant,
         )
-
-        body_text = Text()
-        for role, content in self.transcript[-30:]:
-            role_style = {
-                "you": "bold white",
-                "assistant": "bold cyan",
-                "status": "dim",
-                "tool": "magenta",
-                "thinking": "dim",
-                "warning": "yellow",
-                "error": "red",
-                "result": "blue",
-            }.get(role, "white")
-            body_text.append(f"{role}> ", style=role_style)
-            body_text.append(content + "\n\n")
-
-        if self.is_processing and draft_assistant:
-            body_text.append("assistant> ", style="bold cyan")
-            body_text.append(draft_assistant + "\n")
-
-        transcript_panel = Panel(
-            body_text
-            if body_text.plain.strip()
-            else Text("No messages yet.", style="dim"),
-            border_style="bright_black",
-            title="chat",
-        )
-
-        hint = (
-            "Enter=send • Shift+Enter=newline • /=command palette • "
-            "Ctrl+C=interrupt • /help=commands"
-        )
-        footer = Panel(Text(hint, style="dim"), border_style="bright_black")
-
-        layout = Layout()
-        layout.split_column(
-            Layout(header, size=3),
-            Layout(transcript_panel, ratio=1),
-            Layout(footer, size=3),
-        )
-
-        self.console.clear()
-        self.console.print(layout)
-
-
-class _FleetCompleter(Completer):
-    """Slash + file mention completer used by the chat composer."""
-
-    def __init__(self) -> None:
-        self._slash_entries: list[tuple[str, str]] = sorted(
-            [(spec.name, spec.summary) for spec in _COMMAND_SPECS]
-            + [(f"/{name}", "tool command") for name in sorted(COMMAND_DISPATCH)],
-            key=lambda item: item[0],
-        )
-
-    def get_completions(self, document: Any, complete_event: Any):
-        text = document.text_before_cursor
-
-        if text.startswith("/"):
-            token = text.split(maxsplit=1)[0]
-            for command, summary in self._slash_entries:
-                if command.startswith(token):
-                    yield Completion(
-                        command,
-                        start_position=-len(token),
-                        display=command,
-                        display_meta=summary,
-                    )
-            if text.startswith("/settings "):
-                sub = (
-                    text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""
-                )
-                for choice in ("llm", "model", "modal"):
-                    if choice.startswith(sub):
-                        yield Completion(
-                            choice,
-                            start_position=-len(sub),
-                            display=choice,
-                            display_meta="settings scope",
-                        )
-            return
-
-        mention = re.search(r"@(\S*)$", text)
-        if not mention:
-            return
-        prefix = mention.group(1)
-        for candidate in _iter_mention_paths(prefix):
-            yield Completion(
-                candidate,
-                start_position=-len(prefix),
-                display=f"@{candidate}",
-                display_meta="file path",
-            )
-
-
-def _history_path() -> Path:
-    return Path.home() / ".fleet" / "history.txt"
-
-
-def _badge(ok: bool) -> str:
-    return "[green]OK[/]" if ok else "[yellow]WARN[/]"
-
-
-def _confirmation_message(*, command: str, args: dict[str, Any]) -> str | None:
-    if command == "write_to_file" and not bool(args.get("append")):
-        path = str(args.get("path", "<unknown>"))
-        return f"Overwrite file at {path}?"
-    if command == "clear_buffer" and not args.get("name"):
-        return "Clear all sandbox buffers?"
-    return None
-
-
-def _confirm(question: str) -> bool:
-    try:
-        answer = yes_no_dialog(
-            title="Confirmation",
-            text=question,
-            style=_dialog_style(),
-        ).run()
-        return bool(answer)
-    except Exception:
-        answer = _prompt_choice(question, ["yes", "no"], allow_freeform=False)
-        return answer == "yes"
-
-
-def _normalize_trace_mode(value: str) -> TraceMode:
-    return value if value in _TRACE_MODES else "compact"  # type: ignore[return-value]
-
-
-def _split_slash_command(line: str) -> tuple[str, str]:
-    stripped = line.strip()
-    if not stripped:
-        return "/", ""
-    parts = stripped.split(maxsplit=1)
-    command = parts[0].lower()
-    arg_text = parts[1] if len(parts) > 1 else ""
-    return command, arg_text
-
-
-def _safe_split(arg_text: str) -> list[str]:
-    try:
-        return shlex.split(arg_text)
-    except ValueError:
-        return arg_text.split()
-
-
-def _iter_mention_paths(prefix: str, *, limit: int = 40) -> list[str]:
-    base = Path.cwd()
-    query = prefix.strip()
-    prefix_dir = ""
-    name_prefix = query
-    root = base
-
-    if query:
-        as_path = Path(query)
-        if as_path.is_absolute():
-            parent = as_path.parent if as_path.parent.as_posix() else Path("/")
-            root = parent if parent.exists() else Path("/")
-            prefix_dir = (
-                f"{as_path.parent.as_posix().rstrip('/')}/"
-                if as_path.parent.as_posix()
-                else ""
-            )
-            name_prefix = as_path.name
-        elif "/" in query:
-            maybe_dir, name_prefix = query.rsplit("/", 1)
-            resolved = (base / maybe_dir).resolve()
-            if resolved.exists() and resolved.is_dir():
-                root = resolved
-                prefix_dir = maybe_dir.rstrip("/") + "/"
-
-    suggestions: list[str] = []
-    try:
-        entries = sorted(
-            root.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower())
-        )
-    except Exception:
-        return suggestions
-
-    if not query:
-        suggestions.append(str(base))
-
-    lowered = name_prefix.lower()
-    for entry in entries:
-        if lowered and not entry.name.lower().startswith(lowered):
-            continue
-        suffix = "/" if entry.is_dir() else ""
-        suggestion = f"{prefix_dir}{entry.name}{suffix}"
-        suggestions.append(suggestion)
-        if len(suggestions) >= limit:
-            break
-    return suggestions
-
-
-def _parse_command_payload(arg_text: str) -> dict[str, Any]:
-    text = arg_text.strip()
-    if not text:
-        return {}
-
-    if text.startswith("{"):
-        payload = json.loads(text)
-        if not isinstance(payload, dict):
-            raise ValueError("JSON payload must be an object.")
-        return payload
-
-    payload: dict[str, Any] = {}
-    for token in _safe_split(text):
-        if "=" not in token:
-            raise ValueError(
-                "Use key=value pairs or JSON object payload for canonical commands."
-            )
-        key, value = token.split("=", 1)
-        payload[key] = _coerce_value(value)
-    return payload
-
-
-def _coerce_value(value: str) -> Any:
-    lowered = value.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    if lowered == "null":
-        return None
-    if lowered.isdigit():
-        return int(lowered)
-    try:
-        return float(value)
-    except ValueError:
-        return value
-
-
-def _resolve_env_path() -> Path:
-    for parent in [Path.cwd(), *Path.cwd().parents]:
-        if (parent / "pyproject.toml").exists():
-            return parent / ".env"
-    return Path.cwd() / ".env"
-
-
-def _write_env_updates(*, env_path: Path, updates: dict[str, str]) -> None:
-    env_path.touch(exist_ok=True)
-    for key, value in updates.items():
-        if key in _SETTINGS_KEYS and not value:
-            continue
-        set_key(str(env_path), key, value)
-        os.environ[key] = value
-
-
-def _mask_secret(value: str) -> str:
-    if not value:
-        return ""
-    if len(value) <= 6:
-        return "*" * len(value)
-    return f"{value[:3]}...{value[-2:]}"
-
-
-def _prompt_value(*, key: str, default: str, secret: bool) -> str:
-    shown_default = _mask_secret(default) if secret else default
-    suffix = f" [{shown_default}]" if shown_default else ""
-    try:
-        if secret:
-            raw = getpass.getpass(f"{key}{suffix}: ").strip()
-        else:
-            raw = input(f"{key}{suffix}: ").strip()
-    except (EOFError, KeyboardInterrupt):  # pragma: no cover - interactive path
-        return ""
-    return raw
-
-
-def _prompt_choice(
-    prompt: str,
-    choices: list[str],
-    *,
-    allow_freeform: bool,
-) -> str:
-    try:
-        values = [(str(index), choice) for index, choice in enumerate(choices, start=1)]
-        if allow_freeform:
-            values.append(("0", "Custom input"))
-        picked = radiolist_dialog(
-            title="Select option",
-            text=prompt,
-            values=values,
-            style=_dialog_style(),
-        ).run()
-        if picked is None:
-            return ""
-        if picked == "0":
-            custom = input_dialog(
-                title="Custom input",
-                text=prompt,
-                style=_dialog_style(),
-            ).run()
-            return (custom or "").strip()
-        if picked.isdigit():
-            number = int(picked)
-            if 1 <= number <= len(choices):
-                return choices[number - 1]
-    except Exception:
-        pass
-
-    print(prompt)
-    for index, choice in enumerate(choices, start=1):
-        print(f"  {index}) {choice}")
-    if allow_freeform:
-        print("  0) custom input")
-    while True:
-        selection = input("Select option: ").strip()
-        if selection.isdigit():
-            number = int(selection)
-            if 1 <= number <= len(choices):
-                return choices[number - 1]
-            if allow_freeform and number == 0:
-                return input("Custom value: ").strip()
-        if allow_freeform and selection:
-            return selection
-        print("Invalid selection.")
-
-
-def _dialog_style() -> Style:
-    return Style.from_dict(
-        {
-            "dialog": "bg:#101114",
-            "dialog frame.label": "fg:#77d6ff bold",
-            "dialog.body": "fg:#f0f3f7",
-            "dialog shadow": "bg:#050607",
-            "button.focused": "bg:#2d7ff9 #ffffff",
-        }
-    )
