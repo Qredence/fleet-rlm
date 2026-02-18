@@ -22,7 +22,7 @@ All notable changes to this project are documented in this file.
 
 - **Change:** Routed `mentions.search` through synchronous bridge dispatch (instead of async-only method handling) while keeping Ink RPC method alignment with bridge namespaces.
   **Outcome:** Mention-search requests reliably resolve to a valid handler in stdio bridge runtime instead of intermittent unknown-method behavior.
-- **Change:** Reformatted `src/fleet_rlm/react/agent.py` (with `src/fleet_rlm/react/tools_sandbox.py` verified clean) to match Ruff formatter output.
+- **Change:** Reformatted `src/fleet_rlm/react/agent.py` and `src/fleet_rlm/react/tools_sandbox.py` to match Ruff formatter output.
   **Outcome:** CI `ruff format --check` passes consistently for the ReAct agent/tooling surface.
 - **Change:** Corrected standalone terminal mention completion pattern to match non-whitespace suffixes after `@`.
   **Outcome:** `@` path suggestions now trigger reliably for common prefixes.
