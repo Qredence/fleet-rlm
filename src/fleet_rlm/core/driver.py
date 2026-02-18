@@ -53,10 +53,7 @@ Final Variable Convention:
 
 from __future__ import annotations
 
-from .driver_factories import FinalOutput
-
-# Public re-export for backward compatibility
-_FinalOutput = FinalOutput
+from .driver_factories import FinalOutput  # noqa: F401 — public re-export
 
 
 def sandbox_driver() -> None:
