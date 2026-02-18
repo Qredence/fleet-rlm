@@ -114,6 +114,7 @@ class RLMReActChatAgent(dspy.Module):
 
         self._started = False
         self._extra_tools: list[Callable[..., Any]] = list(extra_tools or [])
+        self._runtime_modules: dict[str, dspy.Module] = {}
 
         # Register Core Memory tools
         self._extra_tools.extend([self.core_memory_append, self.core_memory_replace])
@@ -645,6 +646,113 @@ class RLMReActChatAgent(dspy.Module):
         """Delegate to the ``edit_core_memory`` tool."""
         return self._get_tool("edit_core_memory")(section, content, mode=mode)
 
+    def grounded_answer(
+        self,
+        query: str,
+        alias: str = "active",
+        chunk_strategy: str = "headers",
+        max_chunks: int = 24,
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Delegate to the ``grounded_answer`` tool."""
+        return self._get_tool("grounded_answer")(
+            query,
+            alias=alias,
+            chunk_strategy=chunk_strategy,
+            max_chunks=max_chunks,
+            include_trajectory=include_trajectory,
+        )
+
+    def triage_incident_logs(
+        self,
+        query: str,
+        alias: str = "active",
+        service_context: str = "",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Delegate to the ``triage_incident_logs`` tool."""
+        return self._get_tool("triage_incident_logs")(
+            query,
+            alias=alias,
+            service_context=service_context,
+            include_trajectory=include_trajectory,
+        )
+
+    def plan_code_change(
+        self,
+        task: str,
+        repo_context: str = "",
+        constraints: str = "",
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Delegate to the ``plan_code_change`` tool."""
+        return self._get_tool("plan_code_change")(
+            task,
+            repo_context=repo_context,
+            constraints=constraints,
+            include_trajectory=include_trajectory,
+        )
+
+    def propose_core_memory_update(
+        self,
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
+        """Delegate to the ``propose_core_memory_update`` tool."""
+        return self._get_tool("propose_core_memory_update")(
+            include_trajectory=include_trajectory
+        )
+
+    def memory_tree(
+        self,
+        root_path: str = "/data/memory",
+        max_depth: int = 4,
+        include_hidden: bool = False,
+    ) -> dict[str, Any]:
+        """Delegate to the ``memory_tree`` tool."""
+        return self._get_tool("memory_tree")(
+            root_path=root_path,
+            max_depth=max_depth,
+            include_hidden=include_hidden,
+        )
+
+    def memory_action_intent(
+        self,
+        user_request: str,
+        policy_constraints: str = "",
+    ) -> dict[str, Any]:
+        """Delegate to the ``memory_action_intent`` tool."""
+        return self._get_tool("memory_action_intent")(
+            user_request,
+            policy_constraints=policy_constraints,
+        )
+
+    def memory_structure_audit(
+        self,
+        usage_goals: str = "",
+    ) -> dict[str, Any]:
+        """Delegate to the ``memory_structure_audit`` tool."""
+        return self._get_tool("memory_structure_audit")(usage_goals=usage_goals)
+
+    def memory_structure_migration_plan(
+        self,
+        approved_constraints: str = "",
+    ) -> dict[str, Any]:
+        """Delegate to the ``memory_structure_migration_plan`` tool."""
+        return self._get_tool("memory_structure_migration_plan")(
+            approved_constraints=approved_constraints
+        )
+
+    def clarification_questions(
+        self,
+        request: str,
+        operation_risk: str = "medium",
+    ) -> dict[str, Any]:
+        """Delegate to the ``clarification_questions`` tool."""
+        return self._get_tool("clarification_questions")(
+            request,
+            operation_risk=operation_risk,
+        )
+
     # -----------------------------------------------------------------
     # Internal helpers
     # -----------------------------------------------------------------
@@ -656,6 +764,110 @@ class RLMReActChatAgent(dspy.Module):
             tools=list(self.react_tools),
             max_iters=self.react_max_iters,
         )
+
+    def get_runtime_module(self, name: str) -> dspy.Module:
+        """Return a cached long-context runtime module by name."""
+        module = self._runtime_modules.get(name)
+        if module is not None:
+            return module
+
+        from .rlm_runtime_modules import (
+            AnalyzeLongDocumentModule,
+            ClarificationQuestionModule,
+            CodeChangePlanModule,
+            CoreMemoryUpdateProposalModule,
+            ExtractFromLogsModule,
+            GroundedAnswerWithCitationsModule,
+            IncidentTriageFromLogsModule,
+            MemoryActionIntentModule,
+            MemoryStructureAuditModule,
+            MemoryStructureMigrationPlanModule,
+            SummarizeLongDocumentModule,
+            VolumeFileTreeModule,
+        )
+
+        constructors: dict[str, Callable[[], dspy.Module]] = {
+            "analyze_long_document": lambda: AnalyzeLongDocumentModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "summarize_long_document": lambda: SummarizeLongDocumentModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "extract_from_logs": lambda: ExtractFromLogsModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "grounded_answer": lambda: GroundedAnswerWithCitationsModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "triage_incident_logs": lambda: IncidentTriageFromLogsModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "plan_code_change": lambda: CodeChangePlanModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "propose_core_memory_update": lambda: CoreMemoryUpdateProposalModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "memory_tree": lambda: VolumeFileTreeModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "memory_action_intent": lambda: MemoryActionIntentModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "memory_structure_audit": lambda: MemoryStructureAuditModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+            "memory_structure_migration_plan": lambda: (
+                MemoryStructureMigrationPlanModule(
+                    interpreter=self.interpreter,
+                    max_iterations=self.rlm_max_iterations,
+                    max_llm_calls=self.rlm_max_llm_calls,
+                    verbose=self.verbose,
+                )
+            ),
+            "clarification_questions": lambda: ClarificationQuestionModule(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+        }
+        if name not in constructors:
+            raise ValueError(f"Unknown runtime module: {name}")
+
+        module = constructors[name]()
+        self._runtime_modules[name] = module
+        return module
 
     def history_messages(self) -> list[Any]:
         """Return chat history messages as a defensive list copy."""
