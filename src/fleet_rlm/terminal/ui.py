@@ -190,7 +190,7 @@ def _iter_mention_paths(prefix: str, *, limit: int = 40) -> list[str]:
         entries = sorted(
             root.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower())
         )
-    except Exception:
+    except Exception:  # directory may not exist or be unreadable
         return suggestions
 
     if not query:
@@ -270,7 +270,9 @@ def _prompt_choice(
             number = int(picked)
             if 1 <= number <= len(choices):
                 return choices[number - 1]
-    except Exception:
+    except (
+        Exception
+    ):  # prompt_toolkit dialog unavailable; fall back to plain print-based menu
         pass
 
     print(prompt)
