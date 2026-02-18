@@ -65,11 +65,11 @@ def save_to_volume(path: str, content: str) -> str:
     # Best-effort flush hints for mounted volumes.
     try:
         os.sync()
-    except AttributeError:
+    except AttributeError:  # os.sync() not available on all platforms
         pass
     try:
         subprocess.run(["sync", "/data"], check=False, capture_output=True)
-    except Exception:
+    except Exception:  # sync binary may not exist in sandbox
         pass
 
     return full
