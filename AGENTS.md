@@ -65,28 +65,59 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 
 ## Interactive Surface
 
-- OpenTUI under `tui/` is the active and only supported interactive runtime.
+- OpenTUI under `tui/` and Ink TUI under `tui-ink/` are the supported interactive runtimes.
 - Python Textual and legacy prompt-toolkit UI runtimes have been removed (v0.4.0).
-- `src/fleet_rlm/interactive/models.py` is retained — it contains streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`, not UI code.
+- `src/fleet_rlm/models.py` contains streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`, not UI code.
 
 ## Architecture Highlights
+
+### Config & Core
 
 - `src/fleet_rlm/config.py`: top-level Hydra `AppConfig` loader and runtime settings
 - `src/fleet_rlm/conf/`: Hydra config YAML directory
 - `src/fleet_rlm/core/config.py`: env loading + planner LM configuration
 - `src/fleet_rlm/core/interpreter.py`: `ModalInterpreter` lifecycle + JSON bridge + execution profiles (`ROOT_INTERLOCUTOR`, `RLM_DELEGATE`, `MAINTENANCE`)
-- `src/fleet_rlm/core/driver.py`: sandbox-side execution driver, profile-aware helper/tool gating, and Final/SUBMIT extraction
+- `src/fleet_rlm/core/driver.py`: sandbox-side execution driver and main protocol loop
+- `src/fleet_rlm/core/driver_factories.py`: sandbox helper factories (`SUBMIT`, `llm_query`, tool registration)
+- `src/fleet_rlm/core/sandbox_tools.py`: sandbox-side buffer/chunking/grep helpers
+- `src/fleet_rlm/core/volume_tools.py`: sandbox-side volume read/write helpers
+- `src/fleet_rlm/core/volume_ops.py`: host-side volume operations
+- `src/fleet_rlm/core/llm_tools.py`: host-side LLM query helpers
+- `src/fleet_rlm/core/session_history.py`: sandbox-side execution history tracking
+- `src/fleet_rlm/core/output_utils.py`: output formatting utilities
 - `src/fleet_rlm/logging.py`: structured logging helper
-- `src/fleet_rlm/react/agent.py`: `RLMReActChatAgent` (`dspy.Module` subclass)
-- `src/fleet_rlm/react/tools.py`: ReAct tool definitions (wrapped with `dspy.Tool`)
+
+### ReAct Agent & Tools
+
+- `src/fleet_rlm/react/agent.py`: `RLMReActChatAgent` (`dspy.Module` subclass) — uses mixins and `__getattr__` delegation
+- `src/fleet_rlm/react/core_memory.py`: `CoreMemoryMixin` (persona/human/scratchpad memory)
+- `src/fleet_rlm/react/document_cache.py`: `DocumentCacheMixin` (document storage and alias management)
+- `src/fleet_rlm/react/validation.py`: response guardrail validation
+- `src/fleet_rlm/react/tool_delegation.py`: dynamic `__getattr__` tool dispatch (replaces 25+ boilerplate methods)
+- `src/fleet_rlm/react/tools.py`: ReAct tool assembly and host-side tool definitions
+- `src/fleet_rlm/react/document_tools.py`: document loading/reading tools
+- `src/fleet_rlm/react/filesystem_tools.py`: file listing/search tools
+- `src/fleet_rlm/react/chunking_tools.py`: text chunking tools
 - `src/fleet_rlm/react/tools_sandbox.py`: sandbox-specific tools (`rlm_query`, `edit_file`) with depth enforcement
-- `src/fleet_rlm/react/rlm_runtime_modules.py`: canonical reusable DSPy runtime wrappers for long-context ReAct tools
+- `src/fleet_rlm/react/tools_sandbox_helpers.py`: shared sandbox tool helpers
+- `src/fleet_rlm/react/delegate_sub_agent.py`: `spawn_delegate_sub_agent()` — shared true-recursion helper
+- `src/fleet_rlm/react/tools_rlm_delegate.py`: RLM delegate tools (all use true recursive sub-agents)
+- `src/fleet_rlm/react/tools_memory_intelligence.py`: memory intelligence tools (tree, audit, migration, clarification)
+- `src/fleet_rlm/react/runtime_factory.py`: lazy-loading runtime module factory
+- `src/fleet_rlm/react/rlm_runtime_modules.py`: canonical reusable DSPy runtime wrappers for long-context tasks
 - `src/fleet_rlm/react/streaming.py`: async/streaming ReAct execution with trajectory normalization
 - `src/fleet_rlm/react/commands.py`: WebSocket command dispatch → tool mapping
-- `src/fleet_rlm/runners.py`: high-level task runners
+
+### Surfaces
+
 - `src/fleet_rlm/cli.py`: Typer CLI entrypoint
+- `src/fleet_rlm/cli_commands/`: CLI subcommand modules (`init_cmd.py`, `serve_cmds.py`)
+- `src/fleet_rlm/terminal/`: terminal chat helpers (`commands.py`, `settings.py`, `ui.py`)
+- `src/fleet_rlm/runners.py`: high-level task runners
 - `src/fleet_rlm/server/`: optional FastAPI server (`/ws/chat`, `/chat`, `/tasks/basic`)
 - `src/fleet_rlm/mcp/`: optional FastMCP server
+- `src/fleet_rlm/bridge/`: stdio JSON-RPC bridge for Ink TUI
+- `src/fleet_rlm/stateful/`: stateful agent and sandbox models
 
 ## Testing Notes
 
@@ -94,13 +125,14 @@ Tests mock Modal APIs and should run without cloud credentials.
 
 - `tests/e2e/test_cli_smoke.py`
 - `tests/integration/test_rlm_integration.py`
-- `tests/unit/test_driver_protocol.py`
+- `tests/unit/test_driver_protocol.py`, `test_driver_helpers.py`, `test_llm_query_mock.py`
 - `tests/unit/test_config.py`
-- `tests/unit/test_react_agent.py`
-- `tests/unit/test_react_streaming.py`
-- `tests/unit/test_tools_sandbox.py`
-- `tests/ui/server/*`
-- `tests/ui/server/test_router_chat_tasks.py`
+- `tests/unit/test_react_agent.py`, `test_react_tools.py`, `test_react_streaming.py`
+- `tests/unit/test_tools_sandbox.py`, `test_tools.py`, `test_memory_tools.py`
+- `tests/unit/test_context_manager.py`
+- `tests/unit/test_terminal_chat_helpers.py`
+- `tests/unit/test_bridge_handlers.py`, `test_bridge_protocol_server.py`
+- `tests/ui/server/test_router_*.py`, `test_server_*.py`
 
 ## Conventions
 
@@ -110,7 +142,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Prefer `uv run ...` for commands
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
-- ReAct long-context tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`) should reuse cached runtime wrappers from `react/rlm_runtime_modules.py` instead of constructing ad-hoc `dspy.RLM(...)` instances per tool call
+- ReAct long-context delegate tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`, etc.) use true recursive sub-agents via `spawn_delegate_sub_agent()` — each spawns a new `RLMReActChatAgent` at `depth + 1` with full tool access
 - Additive signature tools are available for advanced workflows:
   - `grounded_answer` (returns structured citations with keys `source`, `chunk_id`, `evidence`, `reason`)
   - `triage_incident_logs`
@@ -122,7 +154,7 @@ Tests mock Modal APIs and should run without cloud credentials.
   - `memory_structure_audit` and `memory_structure_migration_plan` (non-mutating structure governance)
   - `clarification_questions` (safe clarification generation for ambiguous/high-risk operations)
 - WebSocket interactive chat should carry identity envelope fields (`workspace_id`, `user_id`, `session_id`) so per-user/per-workspace state can be restored
-- `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through `RLM_DELEGATE`
+- `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through recursive sub-agents
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
 
 ## Import Verification

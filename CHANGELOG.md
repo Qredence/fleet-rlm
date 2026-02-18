@@ -4,10 +4,30 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.4.5
+
+### Highlights (User Impact)
+
+- Major internal modularization: core driver/interpreter, ReAct agent, CLI, and terminal layers are now cleanly separated into focused modules.
+- All delegate tools (`analyze_long_document`, `grounded_answer`, `triage_incident_logs`, etc.) now use true recursive sub-agents instead of single-shot RLM invocations, giving them full tool access and unified depth enforcement.
+- TUI WebSocket robustness: binary frame handling and error propagation to transcript.
+
 ### Added
 
 - **Change:** Added Ink mention-input debouncing via `MentionDebounceController` plus focused unit coverage for burst suppression and stale-response token invalidation.
   **Outcome:** `@` mention search now avoids request storms during typing and remains stable under rapid input changes.
+- **Change:** Extracted `delegate_sub_agent.py` with shared `spawn_delegate_sub_agent()` helper for true recursive sub-agent spawning.
+  **Outcome:** All delegate tools now use a single, consistent recursion pattern with depth enforcement.
+- **Change:** Extracted agent mixins: `CoreMemoryMixin`, `DocumentCacheMixin`, `ValidationConfig`, and `ToolDelegationMixin` with dynamic `__getattr__` dispatch.
+  **Outcome:** Agent class reduced from ~1000 to ~467 lines; 25+ boilerplate delegator methods replaced by dynamic dispatch.
+- **Change:** Extracted core helpers into focused modules: `driver_factories.py`, `sandbox_tools.py`, `volume_tools.py`, `llm_tools.py`, `session_history.py`, `output_utils.py`, `volume_ops.py`.
+  **Outcome:** Interpreter and driver are now focused on lifecycle/protocol; business logic lives in dedicated modules.
+- **Change:** Extracted ReAct tools into focused modules: `document_tools.py`, `filesystem_tools.py`, `chunking_tools.py`, `tools_rlm_delegate.py`, `tools_memory_intelligence.py`, `tools_sandbox_helpers.py`.
+  **Outcome:** Tool definitions are organized by domain instead of monolithic files.
+- **Change:** Extracted CLI subcommands into `cli_commands/` and terminal helpers into `terminal/` subpackage.
+  **Outcome:** CLI and terminal chat code is modular and easier to maintain.
+- **Change:** Added `test_context_manager.py` for agent `__enter__`/`__exit__` lifecycle testing.
+  **Outcome:** Context manager behavior is now covered by dedicated tests.
 
 ### Changed
 
@@ -17,6 +37,12 @@ All notable changes to this project are documented in this file.
   **Outcome:** Higher confidence against mention-search regressions across bridge server and Ink clients.
 - **Change:** Refreshed architecture/docs surfacing with updated diagrams and indexing, including performance-regression guide links and AGENTS quality/perf baseline command references.
   **Outcome:** Operators get clearer system topology context and easier discovery of performance guardrail workflows.
+- **Change:** All RLM delegate tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`, `grounded_answer`, `triage_incident_logs`, `plan_code_change`, `propose_core_memory_update`) and memory intelligence tools (`memory_tree`, `memory_action_intent`, `memory_structure_audit`, `memory_structure_migration_plan`, `clarification_questions`) now spawn true recursive sub-agents instead of single-shot `dspy.RLM` invocations.
+  **Outcome:** Delegate tools have full ReAct tool access, unified depth tracking, and consistent delegation semantics.
+- **Change:** TUI WebSocket handler (`useWebSocket.ts`) now handles binary/Blob frames with `decodeIncomingMessage` and `parseIncomingPayload` type guards.
+  **Outcome:** WebSocket connections no longer crash on non-text frames.
+- **Change:** TUI error events (`App.tsx`) now propagate to transcript as system messages and trigger `RESET_TURN`.
+  **Outcome:** Errors are visible in the chat transcript and the input is re-enabled after failures.
 
 ### Fixed
 
@@ -30,6 +56,8 @@ All notable changes to this project are documented in this file.
   **Outcome:** Reduced accidental secret exposure in interactive settings payloads while preserving intentional debugging access.
 - **Change:** Stabilized `notebooks/rlm-dspy-modal.ipynb` execution flow: canonical `fleet_rlm` imports, consolidated live-prerequisite gating, safer optional secret checks, and self-contained long-context analysis setup.
   **Outcome:** Notebook runs cleanly without stale import failures and no longer depends on cross-cell interpreter state.
+- **Change:** Fixed all 15 pre-existing `ty check` type errors across 6 files (driver_factories, core_memory, runtime_factory, terminal/commands, terminal/settings).
+  **Outcome:** `ty check src` passes with zero diagnostics.
 
 ## 0.4.4
 

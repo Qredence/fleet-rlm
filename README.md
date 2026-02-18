@@ -88,7 +88,7 @@ graph TB
 - **Interactive Agent**: `RLMReActChatAgent` (a `dspy.Module`) combines fast, interactive chat with deep, recursive task execution via `rlm_query`.
 - **DSPy Aligned**: Implements `dspy.RLM`, `dspy.Module`, and `dspy.Tool` interfaces — compatible with DSPy optimizers (`BootstrapFewShot`, `MIPROv2`).
 - **Secure Sandbox**: Code runs in isolated **Modal** containers with persistent storage volumes, execution profiles, and sensitive data redaction.
-- **Recursive Delegation**: Large tasks are broken down via `rlm_query` sub-agents with depth enforcement to prevent infinite recursion.
+- **Recursive Delegation**: All delegate tools (`rlm_query`, `analyze_long_document`, `grounded_answer`, etc.) spawn true recursive sub-agents via `spawn_delegate_sub_agent()` with unified depth enforcement.
 - **PDF Ingestion**: Native document loading via MarkItDown with pypdf fallback; OCR guidance for scanned PDFs.
 - **Session State**: Per-workspace, per-user session persistence with manifests stored on Modal volumes.
 - **MCP Server**: Expose fleet-rlm capabilities as an MCP tool server via `serve-mcp`.
