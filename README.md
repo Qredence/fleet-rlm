@@ -128,6 +128,7 @@ cp .env.example .env
 # Edit .env and set:
 #   DATABASE_URL=postgresql://... (direct Neon endpoint)
 #   AUTH_MODE=dev
+#   AUTH_REQUIRED=false   # dev default; auth optional until Entra is wired
 #   DEV_JWT_SECRET=...
 ```
 

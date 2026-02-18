@@ -4,12 +4,15 @@ The `fleet-rlm` server exposes both conversational and task-oriented endpoints v
 
 ## Authentication
 
-All non-health HTTP routes and all WebSocket routes require auth.
-
 - `AUTH_MODE=dev`:
+  - Default behavior is `AUTH_REQUIRED=false` (auth optional).
+  - Optional fallback identity when auth is omitted/invalid:
+    - `tenant_claim=default` (or `ws_default_workspace_id`)
+    - `user_claim=anonymous` (or `ws_default_user_id`)
   - Debug headers (`X-Debug-Tenant-Id`, `X-Debug-User-Id`, `X-Debug-Email`, `X-Debug-Name`), or
   - `Authorization: Bearer <HS256 token>` with `tid`/`oid`/`email`/`name`.
   - WebSocket-only fallback query auth: `debug_tenant_id` + `debug_user_id` (optional `debug_email`/`debug_name`) or `access_token=<HS256 token>`.
+  - Set `AUTH_REQUIRED=true` to enforce auth on all non-health HTTP + all WS routes.
 - `AUTH_MODE=entra`: scaffolded and currently fail-closed until JWKS validation wiring is added.
 
 Identity is normalized to:

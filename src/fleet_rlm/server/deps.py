@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -11,6 +12,8 @@ from fleet_rlm.db import DatabaseManager, FleetRepository
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .execution_events import ExecutionEventEmitter
+
+logger = logging.getLogger(__name__)
 
 
 class ServerState:
@@ -53,6 +56,18 @@ def get_auth_provider() -> AuthProvider | None:
     return server_state.auth_provider
 
 
+def build_unauthenticated_identity(
+    config: ServerRuntimeConfig | None = None,
+) -> NormalizedIdentity:
+    cfg = config or server_state.config
+    return NormalizedIdentity(
+        tenant_claim=cfg.ws_default_workspace_id,
+        user_claim=cfg.ws_default_user_id,
+        name="Dev Anonymous",
+        raw_claims={"auth": "disabled"},
+    )
+
+
 def require_repository() -> FleetRepository:
     repository = get_repository()
     if repository is None:
@@ -65,12 +80,24 @@ def require_repository() -> FleetRepository:
 
 async def require_http_identity(request: Request) -> NormalizedIdentity:
     provider = get_auth_provider()
+    cfg = server_state.config
     if provider is None:
-        raise HTTPException(status_code=503, detail="Auth provider is not configured")
+        if cfg.auth_required:
+            raise HTTPException(
+                status_code=503, detail="Auth provider is not configured"
+            )
+        identity = build_unauthenticated_identity(cfg)
+        request.state.identity = identity
+        return identity
     try:
         identity = await provider.authenticate_http(request)
     except AuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        if cfg.auth_required:
+            raise HTTPException(
+                status_code=exc.status_code, detail=exc.message
+            ) from exc
+        logger.debug("HTTP auth optional; continuing without auth: %s", exc.message)
+        identity = build_unauthenticated_identity(cfg)
     request.state.identity = identity
     return identity
 

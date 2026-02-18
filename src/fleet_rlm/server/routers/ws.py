@@ -40,7 +40,7 @@ from fleet_rlm.db.types import (
 )
 
 from ..auth import AuthError
-from ..deps import server_state, session_key
+from ..deps import build_unauthenticated_identity, server_state, session_key
 from ..utils import parse_model_identity, resolve_sandbox_provider
 from ..execution_events import (
     ExecutionEvent,
@@ -128,20 +128,28 @@ def _now_iso() -> str:
 async def _authenticate_websocket(
     websocket: WebSocket,
 ):
+    cfg = server_state.config
     provider = server_state.auth_provider
     if provider is None:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "message": "Auth provider missing"})
-        await websocket.close(code=1011)
-        return None
+        if cfg.auth_required:
+            await websocket.accept()
+            await websocket.send_json(
+                {"type": "error", "message": "Auth provider missing"}
+            )
+            await websocket.close(code=1011)
+            return None
+        return build_unauthenticated_identity(cfg)
 
     try:
         return await provider.authenticate_websocket(websocket)
     except AuthError as exc:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "message": exc.message})
-        await websocket.close(code=1008)
-        return None
+        if cfg.auth_required:
+            await websocket.accept()
+            await websocket.send_json({"type": "error", "message": exc.message})
+            await websocket.close(code=1008)
+            return None
+        logger.debug("WS auth optional; continuing without auth: %s", exc.message)
+        return build_unauthenticated_identity(cfg)
 
 
 def _map_execution_step_type(step_type: str) -> RunStepType:

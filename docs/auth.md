@@ -12,6 +12,7 @@ All server logic consumes this normalized shape.
 ## Configuration
 
 - `AUTH_MODE=dev|entra` (default `dev`)
+- `AUTH_REQUIRED=true|false` (default: `false` in `dev`, `true` in `entra`)
 - `DEV_JWT_SECRET=...`
 - Future placeholders: `ENTRA_JWKS_URL`, `ENTRA_ISSUER`, `ENTRA_AUDIENCE`
 
@@ -47,6 +48,14 @@ WebSocket evaluation order in dev mode is:
 4. Query `access_token`
 5. Reject with `401`
 
+When `AUTH_REQUIRED=false` in dev mode:
+
+- Missing/invalid auth does not block requests.
+- HTTP/WS routes run with fallback identity:
+  - `tenant_claim=default` (or `ws_default_workspace_id`)
+  - `user_claim=anonymous` (or `ws_default_user_id`)
+- If valid debug headers/token are provided, those still take precedence.
+
 Issue a token:
 
 ```bash
@@ -70,9 +79,9 @@ Next step is JWKS validation wiring for real Entra OIDC access tokens.
 
 ## Route Enforcement
 
-- Non-health HTTP routes require auth.
-- WebSocket routes (`/ws/chat`, `/ws/execution`) require auth at handshake.
-- Missing/invalid auth is rejected (`401` for HTTP, `1008` close for WS).
+- `AUTH_REQUIRED=true`: non-health HTTP routes and WS routes enforce auth.
+- `AUTH_REQUIRED=false` (dev default): routes accept unauthenticated requests and use fallback identity.
+- Missing/invalid auth is rejected (`401` for HTTP, `1008` close for WS) only when auth is required.
 
 ## Identity Authority
 

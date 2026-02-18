@@ -8,6 +8,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+def _env_bool(value: str | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+    candidate = value.strip().lower()
+    if candidate in {"1", "true", "yes", "on"}:
+        return True
+    if candidate in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 class ServerRuntimeConfig(BaseModel):
     secret_name: str = "LITELLM"
     volume_name: str | None = None
@@ -33,6 +44,12 @@ class ServerRuntimeConfig(BaseModel):
     db_validate_on_startup: bool = False
     auth_mode: Literal["dev", "entra"] = Field(
         default_factory=lambda: (os.getenv("AUTH_MODE") or "dev").strip().lower()
+    )
+    auth_required: bool = Field(
+        default_factory=lambda: _env_bool(
+            os.getenv("AUTH_REQUIRED"),
+            default=((os.getenv("AUTH_MODE") or "dev").strip().lower() == "entra"),
+        )
     )
     dev_jwt_secret: str = Field(
         default_factory=lambda: os.getenv("DEV_JWT_SECRET") or "change-me"
