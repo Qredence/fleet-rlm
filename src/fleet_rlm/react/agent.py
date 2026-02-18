@@ -847,11 +847,13 @@ class RLMReActChatAgent(dspy.Module):
                 max_llm_calls=self.rlm_max_llm_calls,
                 verbose=self.verbose,
             ),
-            "memory_structure_migration_plan": lambda: MemoryStructureMigrationPlanModule(
-                interpreter=self.interpreter,
-                max_iterations=self.rlm_max_iterations,
-                max_llm_calls=self.rlm_max_llm_calls,
-                verbose=self.verbose,
+            "memory_structure_migration_plan": lambda: (
+                MemoryStructureMigrationPlanModule(
+                    interpreter=self.interpreter,
+                    max_iterations=self.rlm_max_iterations,
+                    max_llm_calls=self.rlm_max_llm_calls,
+                    verbose=self.verbose,
+                )
             ),
             "clarification_questions": lambda: ClarificationQuestionModule(
                 interpreter=self.interpreter,

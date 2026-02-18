@@ -45,11 +45,15 @@ uv run fleet-rlm serve-api --port 8000
 uv run fleet-rlm serve-api interpreter.volume_name=my-volume --port 8000
 uv run fleet-rlm serve-mcp --transport stdio
 
-# Quality gate (run all three before pushing)
-uv run ruff check src tests && uv run ty check src && uv run pytest -q
+# Quality gate (run all four before pushing)
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run ty check src
+uv run pytest -q
 
 # Individual checks
 uv run ruff check src tests
+uv run ruff format --check src tests
 uv run ruff format src tests
 uv run ty check src
 uv run pytest
