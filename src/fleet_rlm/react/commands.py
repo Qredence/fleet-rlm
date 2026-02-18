@@ -53,6 +53,51 @@ COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
         ["query"],
         ["alias", "include_trajectory"],
     ),
+    "grounded_answer": (
+        "grounded_answer",
+        ["query"],
+        ["alias", "chunk_strategy", "max_chunks", "include_trajectory"],
+    ),
+    "triage_logs": (
+        "triage_incident_logs",
+        ["query"],
+        ["alias", "service_context", "include_trajectory"],
+    ),
+    "plan_code_change": (
+        "plan_code_change",
+        ["task"],
+        ["repo_context", "constraints", "include_trajectory"],
+    ),
+    "memory_tree": (
+        "memory_tree",
+        [],
+        ["root_path", "max_depth", "include_hidden"],
+    ),
+    "memory_action_intent": (
+        "memory_action_intent",
+        ["user_request"],
+        ["policy_constraints"],
+    ),
+    "memory_structure_audit": (
+        "memory_structure_audit",
+        [],
+        ["usage_goals"],
+    ),
+    "memory_structure_migration_plan": (
+        "memory_structure_migration_plan",
+        [],
+        ["approved_constraints"],
+    ),
+    "clarification_questions": (
+        "clarification_questions",
+        ["request"],
+        ["operation_risk"],
+    ),
+    "propose_memory_update": (
+        "propose_core_memory_update",
+        [],
+        ["include_trajectory"],
+    ),
     "read_buffer": ("read_buffer", ["name"], []),
     "clear_buffer": ("clear_buffer", [], ["name"]),
     "save_buffer": ("save_buffer_to_volume", ["name", "path"], []),
@@ -69,6 +114,15 @@ _BLOCKING_COMMANDS = frozenset(
         "analyze_document",
         "summarize_document",
         "extract_logs",
+        "grounded_answer",
+        "triage_logs",
+        "plan_code_change",
+        "memory_tree",
+        "memory_action_intent",
+        "memory_structure_audit",
+        "memory_structure_migration_plan",
+        "clarification_questions",
+        "propose_memory_update",
         "parallel_semantic_map",
         "chunk_sandbox",
         "save_buffer",
@@ -127,8 +181,10 @@ async def execute_command(
 
 def _resolve_tool(agent: RLMReActChatAgent, tool_name: str) -> Any:
     """Find a tool by name in the agent's tool list or as a method."""
-    for tool in agent.react_tools:
-        if getattr(tool, "__name__", None) == tool_name:
-            return tool
+    for tool in getattr(agent, "react_tools", []):
+        name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+        if name != tool_name:
+            continue
+        return getattr(tool, "func", tool)
     # Fallback: direct method (e.g. reset)
     return getattr(agent, tool_name)

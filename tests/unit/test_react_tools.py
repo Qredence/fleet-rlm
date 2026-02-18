@@ -303,7 +303,7 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
                 final_reasoning="done",
             )
 
-    monkeypatch.setattr("fleet_rlm.react.tools_sandbox.dspy.RLM", _FakeRLM)
+    monkeypatch.setattr("fleet_rlm.react.rlm_runtime_modules.dspy.RLM", _FakeRLM)
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
@@ -331,7 +331,7 @@ def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
                 final_reasoning="done",
             )
 
-    monkeypatch.setattr("fleet_rlm.react.tools_sandbox.dspy.RLM", _FakeRLM)
+    monkeypatch.setattr("fleet_rlm.react.rlm_runtime_modules.dspy.RLM", _FakeRLM)
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
@@ -367,7 +367,7 @@ def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
                 trajectory=[{"reasoning": "logs"}],
             )
 
-    monkeypatch.setattr("fleet_rlm.react.tools_sandbox.dspy.RLM", _FakeRLM)
+    monkeypatch.setattr("fleet_rlm.react.rlm_runtime_modules.dspy.RLM", _FakeRLM)
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
@@ -419,6 +419,15 @@ def test_new_tools_in_tool_registry(monkeypatch):
     assert "list_files" in tool_names
     assert "read_file_slice" in tool_names
     assert "find_files" in tool_names
+    assert "grounded_answer" in tool_names
+    assert "triage_incident_logs" in tool_names
+    assert "plan_code_change" in tool_names
+    assert "propose_core_memory_update" in tool_names
+    assert "memory_tree" in tool_names
+    assert "memory_action_intent" in tool_names
+    assert "memory_structure_audit" in tool_names
+    assert "memory_structure_migration_plan" in tool_names
+    assert "clarification_questions" in tool_names
 
 
 def test_load_document_directory_recovery_workflow(monkeypatch, tmp_path):

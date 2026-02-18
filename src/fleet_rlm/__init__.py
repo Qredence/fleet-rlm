@@ -66,12 +66,21 @@ from .stateful import (
 )
 from .signatures import (
     AnalyzeLongDocument,
+    CodeChangePlan,
+    ClarificationQuestionSignature,
+    CoreMemoryUpdateProposal,
     ExtractAPIEndpoints,
     ExtractArchitecture,
     ExtractFromLogs,
     ExtractWithCustomTool,
     FindErrorPatterns,
+    GroundedAnswerWithCitations,
+    IncidentTriageFromLogs,
+    MemoryActionIntentSignature,
+    MemoryStructureAuditSignature,
+    MemoryStructureMigrationPlanSignature,
     SummarizeLongDocument,
+    VolumeFileTreeSignature,
 )
 
 __all__ = [
@@ -99,6 +108,15 @@ __all__ = [
     "AnalyzeLongDocument",
     "SummarizeLongDocument",
     "ExtractFromLogs",
+    "GroundedAnswerWithCitations",
+    "IncidentTriageFromLogs",
+    "CodeChangePlan",
+    "CoreMemoryUpdateProposal",
+    "VolumeFileTreeSignature",
+    "MemoryActionIntentSignature",
+    "MemoryStructureAuditSignature",
+    "MemoryStructureMigrationPlanSignature",
+    "ClarificationQuestionSignature",
     "regex_extract",
     "chunk_by_size",
     "chunk_by_headers",

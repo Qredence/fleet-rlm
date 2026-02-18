@@ -187,7 +187,13 @@ cd ..
 cp .env.example .env
 
 # Quality gate
-uv run ruff check src tests && uv run ty check src && uv run pytest -q
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run ty check src
+uv run pytest -q
+
+# Auto-fix formatting when needed
+uv run ruff format src tests
 ```
 
 ## Documentation
@@ -206,7 +212,10 @@ uv run ruff check src tests && uv run ty check src && uv run pytest -q
 We welcome contributions! Please see our [Contribution Guide](CONTRIBUTING.md) and run the quality gate before submitting:
 
 ```bash
-uv run ruff check src tests && uv run ty check src && uv run pytest -q
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run ty check src
+uv run pytest -q
 ```
 
 ## License
