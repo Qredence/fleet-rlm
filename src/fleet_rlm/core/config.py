@@ -61,6 +61,70 @@ def _load_dotenv(path: Path) -> None:
             os.environ[key] = value
 
 
+def _env_bool(value: str | None, *, default: bool) -> bool:
+    """Parse a boolean value from common environment string forms."""
+    if value is None:
+        return default
+    candidate = value.strip().lower()
+    if candidate in {"1", "true", "yes", "on"}:
+        return True
+    if candidate in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def load_posthog_settings_from_env() -> dict[str, object]:
+    """Load PostHog analytics settings from environment variables."""
+    return {
+        "enabled": _env_bool(os.getenv("POSTHOG_ENABLED"), default=False),
+        "api_key": os.getenv("POSTHOG_API_KEY") or None,
+        "host": os.getenv("POSTHOG_HOST") or "https://us.i.posthog.com",
+        "flush_interval": float(os.getenv("POSTHOG_FLUSH_INTERVAL", "10.0")),
+        "flush_at": max(1, int(os.getenv("POSTHOG_FLUSH_AT", "10"))),
+        "enable_dspy_optimization": _env_bool(
+            os.getenv("POSTHOG_ENABLE_DSPY_OPTIMIZATION"), default=False
+        ),
+        "input_truncation_chars": max(
+            1, int(os.getenv("POSTHOG_INPUT_TRUNCATION", "10000"))
+        ),
+        "output_truncation_chars": max(
+            1, int(os.getenv("POSTHOG_OUTPUT_TRUNCATION", "5000"))
+        ),
+        "redact_sensitive": _env_bool(
+            os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True
+        ),
+        "distinct_id": os.getenv("POSTHOG_DISTINCT_ID") or None,
+    }
+
+
+def configure_posthog_analytics_from_env() -> object | None:
+    """Best-effort env-driven analytics setup (non-blocking and idempotent)."""
+    settings = load_posthog_settings_from_env()
+    if not settings.get("enabled") or not settings.get("api_key"):
+        return None
+
+    try:
+        from fleet_rlm.analytics import configure_analytics
+    except Exception:
+        return None
+
+    try:
+        return configure_analytics(
+            api_key=settings["api_key"]
+            if isinstance(settings["api_key"], str)
+            else None,
+            host=settings["host"]
+            if isinstance(settings["host"], str)
+            else "https://us.i.posthog.com",
+            distinct_id=settings["distinct_id"]
+            if isinstance(settings["distinct_id"], str)
+            else None,
+            enabled=True,
+        )
+    except Exception:
+        return None
+
+
 def _guard_modal_shadowing() -> None:
     """Guard against module shadowing that can break Modal imports.
 
@@ -138,6 +202,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
 
     _load_dotenv(dotenv_path)
     _guard_modal_shadowing()
+    configure_posthog_analytics_from_env()
 
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
     model = os.environ.get("DSPY_LM_MODEL")
@@ -178,6 +243,7 @@ def get_planner_lm_from_env(
 
     _load_dotenv(dotenv_path)
     _guard_modal_shadowing()
+    configure_posthog_analytics_from_env()
 
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
     model = model_name or os.environ.get("DSPY_LM_MODEL")

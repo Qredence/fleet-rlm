@@ -48,6 +48,7 @@ uv run python scripts/db_init.py
 uv run alembic upgrade head
 uv run python scripts/dev_issue_token.py --tid <tid> --oid <oid> --email dev@example.com --name "Dev User"
 uv run python scripts/db_smoke.py
+uv run python -c "from fleet_rlm import configure_analytics; configure_analytics()"
 
 # Quality gate (run all four before pushing)
 uv run ruff check src tests
@@ -71,6 +72,7 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 
 - OpenTUI under `tui/` and Ink TUI under `tui-ink/` are the supported interactive runtimes.
 - Python Textual and legacy prompt-toolkit UI runtimes have been removed (v0.4.0).
+- TUI keyboard interactions are centralized through shared shortcut/focus plumbing (global + pane-specific shortcuts) instead of ad-hoc handlers per component.
 - `src/fleet_rlm/models.py` contains streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`, not UI code.
 
 ## Architecture Highlights
@@ -80,6 +82,7 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 - `src/fleet_rlm/config.py`: top-level Hydra `AppConfig` loader and runtime settings
 - `src/fleet_rlm/conf/`: Hydra config YAML directory
 - `src/fleet_rlm/core/config.py`: env loading + planner LM configuration
+- `src/fleet_rlm/analytics/`: PostHog DSPy callback stack (`config.py`, `client.py`, `posthog_callback.py`, `trace_context.py`, `sanitization.py`)
 - `src/fleet_rlm/core/interpreter.py`: `ModalInterpreter` lifecycle + JSON bridge + execution profiles (`ROOT_INTERLOCUTOR`, `RLM_DELEGATE`, `MAINTENANCE`)
 - `src/fleet_rlm/core/driver.py`: sandbox-side execution driver and main protocol loop
 - `src/fleet_rlm/core/driver_factories.py`: sandbox helper factories (`SUBMIT`, `llm_query`, tool registration)
@@ -118,7 +121,7 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 - `src/fleet_rlm/cli_commands/`: CLI subcommand modules (`init_cmd.py`, `serve_cmds.py`)
 - `src/fleet_rlm/terminal/`: terminal chat helpers (`commands.py`, `settings.py`, `ui.py`)
 - `src/fleet_rlm/runners.py`: high-level task runners
-- `src/fleet_rlm/server/`: optional FastAPI server (`/ws/chat`, `/chat`, `/tasks/basic`)
+- `src/fleet_rlm/server/`: optional FastAPI server (`/ws/chat`, `/ws/execution`, `/chat`, `/tasks/basic`, `/auth/me`)
 - `src/fleet_rlm/mcp/`: optional FastMCP server
 - `src/fleet_rlm/bridge/`: stdio JSON-RPC bridge for Ink TUI
 - `src/fleet_rlm/stateful/`: stateful agent and sandbox models
@@ -129,7 +132,9 @@ Tests mock Modal APIs and should run without cloud credentials.
 
 - `tests/e2e/test_cli_smoke.py`
 - `tests/integration/test_rlm_integration.py`
+- `tests/integration/test_analytics_integration.py`
 - `tests/unit/test_driver_protocol.py`, `test_driver_helpers.py`, `test_llm_query_mock.py`
+- `tests/unit/test_analytics_sanitization.py`, `test_analytics_callback.py`
 - `tests/unit/test_config.py`
 - `tests/unit/test_react_agent.py`, `test_react_tools.py`, `test_react_streaming.py`
 - `tests/unit/test_tools_sandbox.py`, `test_tools.py`, `test_memory_tools.py`
@@ -166,7 +171,10 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through recursive sub-agents
 - `/ws/execution` is a dedicated filtered execution stream for Artifact Canvas consumers; clients must subscribe with matching `workspace_id`, `user_id`, and `session_id` query params
 - Execution observability is additive: preserve `/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/ws/execution`
+- Keep WebSocket auth/runtime documentation synchronized with implementation whenever auth flow behavior changes (`AUTH_MODE`, `AUTH_REQUIRED`, debug identity, and bearer token paths).
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
+- PostHog LLM analytics is opt-in and env-driven (`POSTHOG_ENABLED=true` + `POSTHOG_API_KEY`); use `configure_analytics()` for explicit setup and keep payload redaction/truncation enabled by default
+- Runtime analytics distinct-id precedence is: websocket/runtime identity context, then `POSTHOG_DISTINCT_ID`, then `anonymous`
 
 ## Import Verification
 

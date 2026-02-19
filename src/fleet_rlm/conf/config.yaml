@@ -37,3 +37,15 @@ rlm_settings:
   stdout_summary_threshold: 10000
   stdout_summary_prefix_len: 200
   verbose: True
+
+analytics:
+  posthog:
+    enabled: ${oc.env:POSTHOG_ENABLED,false}
+    api_key: ${oc.env:POSTHOG_API_KEY,null}
+    host: ${oc.env:POSTHOG_HOST,https://us.i.posthog.com}
+    flush_interval: ${oc.env:POSTHOG_FLUSH_INTERVAL,10.0}
+    flush_at: ${oc.env:POSTHOG_FLUSH_AT,10}
+    enable_dspy_optimization: ${oc.env:POSTHOG_ENABLE_DSPY_OPTIMIZATION,false}
+    input_truncation_chars: ${oc.env:POSTHOG_INPUT_TRUNCATION,10000}
+    output_truncation_chars: ${oc.env:POSTHOG_OUTPUT_TRUNCATION,5000}
+    redact_sensitive: ${oc.env:POSTHOG_REDACT_SENSITIVE,true}

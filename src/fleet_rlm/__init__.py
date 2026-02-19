@@ -21,7 +21,7 @@ Example:
     >>> rlm = dspy.RLM(signature=ExtractArchitecture, interpreter=interpreter)
 """
 
-__version__ = "0.4.5"
+__version__ = "0.4.6"
 
 from .chunking import (
     chunk_by_headers,
@@ -82,6 +82,7 @@ from .signatures import (
     SummarizeLongDocument,
     VolumeFileTreeSignature,
 )
+from .analytics import configure_analytics, PostHogConfig, PostHogLLMCallback
 
 __all__ = [
     "__version__",
@@ -128,4 +129,7 @@ __all__ = [
     "install_skills",
     "list_agents",
     "list_skills",
+    "configure_analytics",
+    "PostHogConfig",
+    "PostHogLLMCallback",
 ]

@@ -8,6 +8,8 @@ configuration management (YAML -> Dict -> Pydantic).
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
+from .analytics.config import PostHogConfig
+
 
 class MemoryConfig(BaseModel):
     """Configuration for agent memory systems."""
@@ -117,6 +119,12 @@ class RlmSettings(BaseModel):
     )
 
 
+class AnalyticsConfig(BaseModel):
+    """Configuration for runtime analytics integrations."""
+
+    posthog: PostHogConfig = Field(default_factory=PostHogConfig)
+
+
 class AppConfig(BaseModel):
     """Root configuration for the fleet-rlm application."""
 
@@ -124,3 +132,4 @@ class AppConfig(BaseModel):
     interpreter: InterpreterConfig = Field(default_factory=InterpreterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     rlm_settings: RlmSettings = Field(default_factory=RlmSettings)
+    analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)

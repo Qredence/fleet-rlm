@@ -6,40 +6,71 @@ All notable changes to this project are documented in this file.
 
 ### Highlights (User Impact)
 
-- Neon Postgres is now the canonical multi-tenant persistence layer for server runtime state (runs, steps, artifacts, memory, jobs), with migration and smoke-test workflows ready for operators.
-- Backend auth is now Entra-ready with a practical bootstrap path: `AUTH_MODE=dev` supports debug headers or local JWTs today, while `AUTH_MODE=entra` fails closed until JWKS verification is wired.
-- Execution observability improved with a dedicated `/ws/execution` stream for structured lifecycle events, while preserving compatibility on `/ws/chat`.
+- Added opt-in PostHog LLM analytics for DSPy LM calls with trace correlation and safe payload handling.
+- Added env-driven analytics activation so operators can enable observability without changing runtime call sites.
 
 ### Added
 
-- **Change:** Added a complete NeonDB/Alembic foundation with initial schema migration (`0001_neon_core_schema`) and tenant-integrity hardening migration (`0002_tenant_fk_hardening`), plus typed DB repository and DTO layers.
-  **Outcome:** Operators can provision a production-style Postgres data model for multi-tenant SaaS state with first-class migration support.
-- **Change:** Added DB operational scripts: `scripts/db_init.py`, `scripts/db_smoke.py`, and `scripts/dev_issue_token.py`.
-  **Outcome:** Teams can bootstrap schema, validate connectivity, and issue local dev auth tokens with repeatable commands.
-- **Change:** Added auth abstraction modules (`dev` + Entra stub), normalized identity contract, and `/auth/me` identity introspection endpoint.
-  **Outcome:** Server routes now share a single tenant/user authority model, reducing auth drift across HTTP and WebSocket surfaces.
-- **Change:** Added structured execution-event infrastructure and `/ws/execution` subscription support with corresponding tests/docs.
-  **Outcome:** Artifact-canvas and monitoring consumers can follow run lifecycle events without parsing mixed chat traffic.
+- **Change:** Added new analytics package under `src/fleet_rlm/analytics/` with:
+  - `PostHogLLMCallback` DSPy callback emission (`$ai_generation`)
+  - `PostHogConfig` model and env loading
+  - PostHog client singleton lifecycle helpers
+  - callback-level trace context propagation (`contextvars`)
+  - sanitization + truncation utilities for prompt/output payloads
+  **Outcome:** First-class LLM analytics is now available with minimal integration overhead.
+- **Change:** Added analytics test coverage:
+  - `tests/unit/test_analytics_sanitization.py`
+  - `tests/unit/test_analytics_callback.py`
+  - `tests/integration/test_analytics_integration.py` (mocked)
+  **Outcome:** Analytics behavior is validated without requiring live PostHog services.
 
 ### Changed
 
-- **Change:** `/ws/chat`, `/chat`, and `/tasks/*` now integrate identity-backed Neon writes for run lifecycle, step persistence, and artifact/memory metadata capture.
-  **Outcome:** Operational traces are persisted for replay, debugging, and downstream evaluation workflows.
-- **Change:** Tenant isolation now layers Postgres RLS with tenant-aware composite foreign keys across key relationships.
-  **Outcome:** Cross-tenant linkage mistakes are blocked at the database boundary, not only at query policy time.
-- **Change:** Queue leasing behavior now supports stale-lease reclaim via `JobLeaseRequest.lease_timeout_seconds` (default `300`) while retaining `FOR UPDATE SKIP LOCKED` concurrency semantics.
-  **Outcome:** Lost worker leases can be safely recovered without giving up high-concurrency job acquisition.
-- **Change:** Release automation now skips tag creation when the target tag already exists on remote.
-  **Outcome:** Release jobs are more robust when local/manual tagging happens before CI runs.
+- **Change:** Updated `AppConfig`/Hydra config to include `analytics.posthog` defaults and added env helpers in `core/config.py` for env-driven analytics bootstrap.
+  **Outcome:** Analytics settings are centrally configurable and consistent with existing runtime config patterns.
+- **Change:** Wired websocket runtime identity into analytics distinct-id context.
+  **Outcome:** Event attribution prefers authenticated runtime identity and falls back safely.
+- **Change:** Updated project docs (`README.md`, `docs/concepts.md`, `.env.example`, `AGENTS.md`) with PostHog setup and event schema notes.
+  **Outcome:** Operators and contributors have explicit enablement and usage guidance.
+
+## [0.4.6] - 2026-02-19
+
+### Highlights (User Impact)
+
+- Introduced a dedicated `/ws/execution` channel for structured execution lifecycle events while preserving `/ws/chat` compatibility for existing clients.
+- Improved terminal operator productivity with centralized keyboard shortcuts, better pane focus handling, and responsive layout behavior.
+- Tightened WebSocket auth/runtime behavior and aligned docs so deployment expectations are clearer and safer.
+- Aligned Neon data model docs/migrations/runtime guidance to reduce onboarding drift and improve operator setup consistency.
+
+### Added
+
+- **Change:** Added execution-event infrastructure and `/ws/execution` subscription support for structured lifecycle updates (`execution_started`, `execution_step`, `execution_completed`).
+  **Outcome:** Artifact-canvas and observability consumers can track runs without parsing mixed chat traffic.
+- **Change:** Added and documented NeonDB migration/bootstrap workflows across schema, scripts, and setup docs.
+  **Outcome:** Teams have a repeatable path for provisioning and validating multi-tenant runtime persistence.
+
+### Changed
+
+- **Change:** Refined TUI interaction patterns with shared keyboard shortcut/focus handling plus improved input ergonomics.
+  **Outcome:** Faster keyboard-driven operation and more predictable behavior across chat, sidebar, and input panes.
+- **Change:** Updated WebSocket auth flow wiring and synchronized runtime docs (`README`, auth/API guides, contributor docs).
+  **Outcome:** Lower auth configuration ambiguity between development and deployment environments.
+- **Change:** Realigned server/runtime docs and migration references around the current Neon data model.
+  **Outcome:** Reduced documentation drift between implementation and operator guidance.
 
 ### Fixed
 
-- **Change:** Fixed tenant/user upserts so optional fields (`display_name`, `domain`, `email`, `full_name`) are not overwritten with null values during conflict updates.
-  **Outcome:** Identity/profile metadata remains stable across repeated syncs.
-- **Change:** Fixed job idempotency conflict handling to be non-destructive (`create_job` returns the existing row instead of mutating active lock/status state).
-  **Outcome:** Retries do not accidentally corrupt in-flight queue state.
-- **Change:** Fixed sandbox document processing to read cached document content through the public `agent.documents` path, with expanded regression tests.
-  **Outcome:** Document metadata reporting (`chars`, `lines`) is reliable after volume loads and cache updates.
+- **Change:** Resolved WebSocket auth flow inconsistencies and related runtime expectation mismatches.
+  **Outcome:** More reliable authenticated WebSocket sessions across clients.
+- **Change:** Improved run-completion/event-sequencing coverage for WebSocket flows.
+  **Outcome:** Lower regression risk for event ordering during execution streaming.
+
+### Merged Pull Requests
+
+- [#43](https://github.com/Qredence/fleet-rlm/pull/43): Add execution event streaming endpoints.
+- [#44](https://github.com/Qredence/fleet-rlm/pull/44): Align Neon data model docs and migrations.
+- [#46](https://github.com/Qredence/fleet-rlm/pull/46): Enhance chat/input UX with keyboard shortcuts and interaction improvements.
+- [#47](https://github.com/Qredence/fleet-rlm/pull/47): Fix WebSocket auth flows and update docs.
 
 ## 0.4.5
 
