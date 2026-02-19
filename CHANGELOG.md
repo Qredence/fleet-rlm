@@ -4,7 +4,34 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-No unreleased changes yet.
+### Highlights (User Impact)
+
+- Added opt-in PostHog LLM analytics for DSPy LM calls with trace correlation and safe payload handling.
+- Added env-driven analytics activation so operators can enable observability without changing runtime call sites.
+
+### Added
+
+- **Change:** Added new analytics package under `src/fleet_rlm/analytics/` with:
+  - `PostHogLLMCallback` DSPy callback emission (`$ai_generation`)
+  - `PostHogConfig` model and env loading
+  - PostHog client singleton lifecycle helpers
+  - callback-level trace context propagation (`contextvars`)
+  - sanitization + truncation utilities for prompt/output payloads
+  **Outcome:** First-class LLM analytics is now available with minimal integration overhead.
+- **Change:** Added analytics test coverage:
+  - `tests/unit/test_analytics_sanitization.py`
+  - `tests/unit/test_analytics_callback.py`
+  - `tests/integration/test_analytics_integration.py` (mocked)
+  **Outcome:** Analytics behavior is validated without requiring live PostHog services.
+
+### Changed
+
+- **Change:** Updated `AppConfig`/Hydra config to include `analytics.posthog` defaults and added env helpers in `core/config.py` for env-driven analytics bootstrap.
+  **Outcome:** Analytics settings are centrally configurable and consistent with existing runtime config patterns.
+- **Change:** Wired websocket runtime identity into analytics distinct-id context.
+  **Outcome:** Event attribution prefers authenticated runtime identity and falls back safely.
+- **Change:** Updated project docs (`README.md`, `docs/concepts.md`, `.env.example`, `AGENTS.md`) with PostHog setup and event schema notes.
+  **Outcome:** Operators and contributors have explicit enablement and usage guidance.
 
 ## [0.4.6] - 2026-02-19
 
