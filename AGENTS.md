@@ -71,6 +71,7 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 
 - OpenTUI under `tui/` and Ink TUI under `tui-ink/` are the supported interactive runtimes.
 - Python Textual and legacy prompt-toolkit UI runtimes have been removed (v0.4.0).
+- TUI keyboard interactions are centralized through shared shortcut/focus plumbing (global + pane-specific shortcuts) instead of ad-hoc handlers per component.
 - `src/fleet_rlm/models.py` contains streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`, not UI code.
 
 ## Architecture Highlights
@@ -118,7 +119,7 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 - `src/fleet_rlm/cli_commands/`: CLI subcommand modules (`init_cmd.py`, `serve_cmds.py`)
 - `src/fleet_rlm/terminal/`: terminal chat helpers (`commands.py`, `settings.py`, `ui.py`)
 - `src/fleet_rlm/runners.py`: high-level task runners
-- `src/fleet_rlm/server/`: optional FastAPI server (`/ws/chat`, `/chat`, `/tasks/basic`)
+- `src/fleet_rlm/server/`: optional FastAPI server (`/ws/chat`, `/ws/execution`, `/chat`, `/tasks/basic`, `/auth/me`)
 - `src/fleet_rlm/mcp/`: optional FastMCP server
 - `src/fleet_rlm/bridge/`: stdio JSON-RPC bridge for Ink TUI
 - `src/fleet_rlm/stateful/`: stateful agent and sandbox models
@@ -166,6 +167,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through recursive sub-agents
 - `/ws/execution` is a dedicated filtered execution stream for Artifact Canvas consumers; clients must subscribe with matching `workspace_id`, `user_id`, and `session_id` query params
 - Execution observability is additive: preserve `/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/ws/execution`
+- Keep WebSocket auth/runtime documentation synchronized with implementation whenever auth flow behavior changes (`AUTH_MODE`, `AUTH_REQUIRED`, debug identity, and bearer token paths).
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
 
 ## Import Verification

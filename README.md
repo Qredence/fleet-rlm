@@ -92,6 +92,7 @@ graph TB
 - **PDF Ingestion**: Native document loading via MarkItDown with pypdf fallback; OCR guidance for scanned PDFs.
 - **Session State**: Per-workspace, per-user session persistence with manifests stored on Modal volumes.
 - **MCP Server**: Expose fleet-rlm capabilities as an MCP tool server via `serve-mcp`.
+- **Execution Streams**: `/ws/chat` remains the primary interactive stream while `/ws/execution` provides structured execution lifecycle events for Artifact Canvas and observability clients.
 - **Observability**: Real-time streaming of thoughts, tool execution, trajectory normalization, and structured logging.
 
 ## Quick Start
@@ -151,12 +152,11 @@ fleet-rlm code-chat --opentui
 **Standalone Interactive Chat (Ink):**
 
 ```bash
-# Prefers Ink UI; falls back to Python UI
+# Ink runtime (supported standalone path)
 fleet
 
-# Force a specific runtime
+# Force Ink explicitly
 fleet --ui ink
-fleet --ui python
 ```
 
 **One-shot Tasks:**
@@ -178,6 +178,11 @@ uv run fleet-rlm serve-api --port 8000
 # MCP server
 fleet-rlm serve-mcp --transport stdio
 ```
+
+WebSocket endpoints:
+
+- `/ws/chat` for interactive conversation and tool orchestration events.
+- `/ws/execution` for filtered execution lifecycle events (`execution_started`, `execution_step`, `execution_completed`) scoped by `workspace_id`, `user_id`, and `session_id`.
 
 Issue a dev token:
 
@@ -216,7 +221,7 @@ uv run python scripts/db_smoke.py
 
 `fleet` and `fleet-rlm code-chat` serve different interactive paths:
 
-- `fleet` = standalone bridge chat launcher (Ink preferred, Python fallback)
+- `fleet` = standalone bridge chat launcher (Ink runtime)
 - `fleet-rlm code-chat` = OpenTUI runtime (OpenTUI/Bun required)
 
 ## Development Setup
