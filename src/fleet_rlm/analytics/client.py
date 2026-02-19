@@ -42,7 +42,9 @@ def get_posthog_client(config: PostHogConfig) -> Posthog | None:
                 _CLIENT.shutdown()
             except Exception as exc:
                 # Best-effort shutdown; ignore errors to avoid impacting callers, but log for diagnostics.
-                _LOGGER.warning("Failed to shutdown existing PostHog client", exc_info=exc)
+                _LOGGER.warning(
+                    "Failed to shutdown existing PostHog client", exc_info=exc
+                )
 
         _CLIENT = Posthog(
             project_api_key=config.api_key,
