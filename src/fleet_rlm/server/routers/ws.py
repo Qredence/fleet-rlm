@@ -21,6 +21,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from fleet_rlm import runners
+from fleet_rlm.analytics.trace_context import runtime_distinct_id_context
 from fleet_rlm.core.interpreter import ExecutionProfile
 from fleet_rlm.db import FleetRepository
 from fleet_rlm.db.models import (
@@ -417,7 +418,12 @@ async def chat_streaming(websocket: WebSocket):
         planner_lm=_planner_lm,
     )
 
-    with dspy.context(lm=_planner_lm), agent_context as agent:
+    analytics_distinct_id = (identity.user_claim or "").strip() or None
+    with (
+        runtime_distinct_id_context(analytics_distinct_id),
+        dspy.context(lm=_planner_lm),
+        agent_context as agent,
+    ):
         interpreter = getattr(agent, "interpreter", None)
         # Interlocutor path defaults to strict root profile.
         if interpreter is not None:

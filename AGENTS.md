@@ -48,6 +48,7 @@ uv run python scripts/db_init.py
 uv run alembic upgrade head
 uv run python scripts/dev_issue_token.py --tid <tid> --oid <oid> --email dev@example.com --name "Dev User"
 uv run python scripts/db_smoke.py
+uv run python -c "from fleet_rlm import configure_analytics; configure_analytics()"
 
 # Quality gate (run all four before pushing)
 uv run ruff check src tests
@@ -169,6 +170,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Execution observability is additive: preserve `/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/ws/execution`
 - Keep WebSocket auth/runtime documentation synchronized with implementation whenever auth flow behavior changes (`AUTH_MODE`, `AUTH_REQUIRED`, debug identity, and bearer token paths).
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
+- PostHog LLM analytics is opt-in and env-driven (`POSTHOG_ENABLED=true` + `POSTHOG_API_KEY`); use `configure_analytics()` for explicit setup and keep payload redaction/truncation enabled by default
 
 ## Import Verification
 

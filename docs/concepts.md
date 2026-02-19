@@ -77,6 +77,20 @@ Tools are the bridge between the Agent/RLM and the Sandbox.
 
 ---
 
+## 5. LLM Observability (PostHog)
+
+`fleet-rlm` can attach a DSPy callback that emits PostHog `$ai_generation` events for every DSPy LM call.
+
+- **Default**: disabled (`POSTHOG_ENABLED=false`)
+- **Activation**: set `POSTHOG_ENABLED=true` and `POSTHOG_API_KEY`
+- **Safety**: payloads are redacted and truncated before emission
+- **Tracing**: callback-level parent/child trace IDs are correlated via `contextvars`
+- **Determinism**: optimization traffic is excluded by default (`POSTHOG_ENABLE_DSPY_OPTIMIZATION=false`)
+
+The callback captures model/provider, latency, token usage (best effort), and sanitized prompt/output snippets without changing the RLM execution contract.
+
+---
+
 ## Key Workflows
 
 ### The "Thinking" Chat

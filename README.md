@@ -94,6 +94,40 @@ graph TB
 - **MCP Server**: Expose fleet-rlm capabilities as an MCP tool server via `serve-mcp`.
 - **Execution Streams**: `/ws/chat` remains the primary interactive stream while `/ws/execution` provides structured execution lifecycle events for Artifact Canvas and observability clients.
 - **Observability**: Real-time streaming of thoughts, tool execution, trajectory normalization, and structured logging.
+- **LLM Analytics (Opt-in)**: PostHog `$ai_generation` events for DSPy LM calls with trace correlation, token metadata, latency, and payload redaction/truncation.
+
+## PostHog LLM Analytics
+
+PostHog analytics is disabled by default. To enable it, set both:
+
+```bash
+POSTHOG_ENABLED=true
+POSTHOG_API_KEY=phc_...
+```
+
+Optional settings:
+
+- `POSTHOG_HOST` (default: `https://us.i.posthog.com`)
+- `POSTHOG_DISTINCT_ID` (runtime user identity takes precedence in `/ws/chat`)
+- `POSTHOG_FLUSH_INTERVAL` / `POSTHOG_FLUSH_AT`
+- `POSTHOG_ENABLE_DSPY_OPTIMIZATION` (default: `false`)
+- `POSTHOG_INPUT_TRUNCATION` / `POSTHOG_OUTPUT_TRUNCATION`
+- `POSTHOG_REDACT_SENSITIVE` (default: `true`)
+
+Programmatic setup:
+
+```python
+from fleet_rlm import configure_analytics
+
+configure_analytics()  # reads POSTHOG_* environment variables
+```
+
+Each DSPy LM call emits `$ai_generation` with:
+
+- `$ai_trace_id`, `$ai_parent_trace_id`
+- `$ai_model`, `$ai_provider`, `$ai_latency`
+- `$ai_input`, `$ai_output_choices` (sanitized + truncated)
+- `$ai_input_tokens`, `$ai_output_tokens`, `$ai_total_tokens`
 
 ## Quick Start
 
