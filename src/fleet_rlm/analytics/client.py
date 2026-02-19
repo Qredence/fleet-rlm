@@ -59,12 +59,14 @@ def flush_posthog_client() -> None:
     """Flush pending events to PostHog."""
     with _CLIENT_LOCK:
         client = _CLIENT
-    if client is None:
-        return
-    try:
-        client.flush()
-    except Exception:
-        return
+        if client is None:
+            return
+        try:
+            # Holding _CLIENT_LOCK while flushing avoids races with shutdown_posthog_client
+            # that could otherwise call shutdown() concurrently on the same client instance.
+            client.flush()
+        except Exception:
+            return
 
 
 def shutdown_posthog_client() -> None:
