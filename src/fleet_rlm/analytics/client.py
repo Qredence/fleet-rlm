@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from threading import Lock
 from typing import Any
+import logging
 
 from posthog import Posthog
 
 from .config import PostHogConfig
 
+_LOGGER = logging.getLogger(__name__)
 _CLIENT_LOCK = Lock()
 _CLIENT: Posthog | None = None
 _CLIENT_KEY: tuple[Any, ...] | None = None
@@ -38,8 +40,9 @@ def get_posthog_client(config: PostHogConfig) -> Posthog | None:
         if _CLIENT is not None:
             try:
                 _CLIENT.shutdown()
-            except Exception:
-                pass
+            except Exception as exc:
+                # Best-effort shutdown; ignore errors to avoid impacting callers, but log for diagnostics.
+                _LOGGER.warning("Failed to shutdown existing PostHog client", exc_info=exc)
 
         _CLIENT = Posthog(
             project_api_key=config.api_key,
