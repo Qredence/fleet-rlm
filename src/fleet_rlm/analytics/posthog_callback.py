@@ -88,8 +88,10 @@ class PostHogLLMCallback(BaseCallback):
         if token is not None:
             try:
                 pop_current_trace(token)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Errors while cleaning up trace context must never affect LLM execution.
+                # We intentionally ignore these, but keep a minimal diagnostic for debugging.
+                print(f"[PostHogLLMCallback] Failed to pop trace context: {exc}")
 
         if trace is None:
             return
