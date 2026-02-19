@@ -17,6 +17,8 @@ _SENSITIVE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
             r"((?:api[_-]?key|token|secret|password)\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,}\]]+)",
             re.IGNORECASE,
         ),
+        r"\1***REDACTED***",
+    ),
 )
 
 
