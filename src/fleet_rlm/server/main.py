@@ -103,16 +103,9 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(full_path: str):
-            if full_path:
-                candidate = (ui_root / full_path).resolve()
-                try:
-                    candidate.relative_to(ui_root)
-                except ValueError:
-                    candidate = ui_root / "__invalid__"
-
-                if candidate.exists() and candidate.is_file():
-                    return FileResponse(candidate)
-
+            # Assets are mounted at /assets via StaticFiles above.
+            # All non-asset routes should return index.html for SPA routing.
+            _ = full_path
             index_path = ui_root / "index.html"
             if index_path.exists():
                 return FileResponse(index_path)
