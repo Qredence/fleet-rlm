@@ -36,9 +36,12 @@ def read_init_version() -> str:
 
 
 def changelog_has_version(version: str) -> bool:
-    needle = f"## {version} - "
     text = CHANGELOG_PATH.read_text(encoding="utf-8")
-    return needle in text
+    patterns = (
+        f"## {version} - ",
+        f"## [{version}] - ",
+    )
+    return any(pattern in text for pattern in patterns)
 
 
 def main() -> int:
