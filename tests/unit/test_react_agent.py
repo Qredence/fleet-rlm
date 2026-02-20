@@ -17,7 +17,7 @@ import pytest
 
 try:
     from dspy.primitives.code_interpreter import FinalOutput
-except Exception:
+except ImportError:
 
     class FinalOutput(dict):
         """Minimal compatibility shim when DSPy FinalOutput import is unavailable."""
@@ -25,6 +25,11 @@ except Exception:
         def __init__(self, output):
             super().__init__(output if isinstance(output, dict) else {"output": output})
             self.output = output
+
+        def __eq__(self, other):
+            if not isinstance(other, FinalOutput):
+                return NotImplemented
+            return dict.__eq__(self, other) and self.output == other.output
 
 
 from fleet_rlm.react import RLMReActChatAgent, RLMReActChatSignature
