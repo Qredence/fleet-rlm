@@ -53,8 +53,25 @@ All commands below assume zsh and are run from the repository root.
 ```bash
 # from repo root
 uv run pytest
-make lint
-make format
+uv run ruff check src tests config/test_responses_endpoint.py
+uv run ruff format --check src tests config/test_responses_endpoint.py
+uv run ty check src
+uv run python scripts/check_release_hygiene.py
+uv run python scripts/check_release_metadata.py
+```
+
+If the frontend app is present in your checkout, run its gate too:
+
+```bash
+# from repo root
+if [ -f src/frontend/package.json ]; then
+  cd src/frontend
+  bun install
+  bun run lint
+  bun run type-check
+  bun run test:e2e
+  cd ..
+fi
 ```
 
 Confirm package name availability before first public upload:
