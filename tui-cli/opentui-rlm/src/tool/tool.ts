@@ -1,4 +1,4 @@
-import { z, type ZodTypeAny, type infer as ZodInfer } from "zod";
+import type { ZodTypeAny, infer as ZodInfer } from "zod";
 
 export interface ToolContext {
   abort: AbortSignal;

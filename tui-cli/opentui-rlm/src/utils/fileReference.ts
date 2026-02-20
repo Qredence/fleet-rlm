@@ -190,7 +190,6 @@ export async function expandFileReferences(input: string): Promise<string> {
   // Replace @mentions with expanded content
   const regex = /@([a-zA-Z0-9_/.\-]+)/g;
   let match;
-  let offset = 0;
 
   while ((match = regex.exec(input)) !== null) {
     const precedingChar = input[match.index - 1];
@@ -208,7 +207,6 @@ export async function expandFileReferences(input: string): Promise<string> {
     parts.push(formatFileReference(result));
 
     lastIndex = match.index + match[0].length;
-    offset = match.index + match[0].length;
   }
 
   // Add remaining text

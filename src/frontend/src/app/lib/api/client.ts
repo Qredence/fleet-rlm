@@ -143,7 +143,7 @@ function buildUrl(
   let url: URL;
   try {
     url = new URL(path, baseUrl || "http://localhost");
-  } catch (e) {
+  } catch {
     url = new URL(path, "http://localhost");
   }
 

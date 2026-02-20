@@ -149,7 +149,6 @@ function renderLine(line: string, baseColor: string, accentColor: string, key: n
   const listMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
   if (listMatch) {
     const indent = listMatch[1]?.length || 0;
-    const text = listMatch[2] || "";
     return (
       <text key={key}>
         {" ".repeat(indent)}

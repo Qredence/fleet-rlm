@@ -4,7 +4,7 @@
  */
 
 import { useAppContext } from "../context/AppContext";
-import { bg, border, fg, accent, semantic } from "../theme";
+import { bg, fg, accent, semantic } from "../theme";
 
 export function StatusBar() {
   const { state } = useAppContext();

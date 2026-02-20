@@ -1,5 +1,4 @@
 import { rlmApiConfig } from "./config";
-import { getAccessToken } from "../api/client";
 
 export type WsTraceMode = "compact" | "verbose" | "off";
 
@@ -343,7 +342,7 @@ async function createReconnectingWs(
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
       const wsUrlObj = new URL(rlmApiConfig.wsUrl!);
-      const token = getAccessToken();
+      const token = typeof localStorage !== "undefined" ? localStorage.getItem("fleet_access_token") : null;
       if (token) {
         wsUrlObj.searchParams.set("access_token", token);
       }

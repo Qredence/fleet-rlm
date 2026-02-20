@@ -202,10 +202,6 @@ function normalizeWhitespace(str: string): string {
 function matchesWithFlexibleIndentation(contentLines: string[], targetLines: string[]): boolean {
   if (contentLines.length !== targetLines.length) return false;
 
-  const baseIndent = getIndentLevel(contentLines[0]!);
-  const targetBaseIndent = getIndentLevel(targetLines[0]!);
-  const indentDiff = baseIndent - targetBaseIndent;
-
   for (let i = 0; i < contentLines.length; i++) {
     const contentLine = contentLines[i]!.trim();
     const targetLine = targetLines[i]!.trim();
@@ -213,11 +209,6 @@ function matchesWithFlexibleIndentation(contentLines: string[], targetLines: str
   }
 
   return true;
-}
-
-function getIndentLevel(line: string): number {
-  const match = line.match(/^(\s*)/);
-  return match ? match[1]!.length : 0;
 }
 
 function applyIndentation(text: string, referenceLine: string): string {

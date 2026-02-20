@@ -7,7 +7,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   ClientMessage,
   ClientCommandMessage,
-  ServerMessage,
   ServerCommandResult,
   ServerPayload,
   StreamEvent,

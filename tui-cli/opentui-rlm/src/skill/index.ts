@@ -11,12 +11,6 @@ export const InfoSchema = z.object({
 
 export type Info = z.infer<typeof InfoSchema>;
 
-interface SkillFile {
-  path: string;
-  dir: string;
-  name: string;
-}
-
 export class Skill {
   private static skillDirs = [
     ".claude/skills",

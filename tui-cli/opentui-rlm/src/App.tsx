@@ -19,7 +19,7 @@ import { TabPanel } from "./components/TabPanel";
 import { InputBar } from "./components/InputBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { useRenderer } from "@opentui/react";
-import { bg, accent, border } from "./theme";
+import { bg } from "./theme";
 import { copyToClipboard } from "./hooks/useClipboard";
 
 function GlobalKeyHandler() {

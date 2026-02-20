@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { z } from "zod";
-import { Ripgrep, type RipgrepResult } from "../file/ripgrep";
+import { Ripgrep } from "../file/ripgrep";
 
 // Zod schema for search options
 export const SearchOptionsSchema = z.object({
@@ -54,102 +54,6 @@ export interface SearchProps {
   onResult?: (result: SearchResult) => void;
   onComplete?: (results: SearchResult[]) => void;
   onError?: (error: string) => void;
-}
-
-// Escape regex special characters
-function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$\u0026");
-}
-
-// Build search regex from options
-function buildSearchRegex(options: SearchOptions): RegExp {
-  let pattern = options.pattern;
-
-  if (!options.regex) {
-    pattern = escapeRegExp(pattern);
-  }
-
-  if (options.wholeWord) {
-    pattern = `\\b${pattern}\\b`;
-  }
-
-  const flags = options.caseSensitive ? "g" : "gi";
-
-  return new RegExp(pattern, flags);
-}
-
-// Check if file matches include/exclude patterns
-function shouldIncludeFile(filePath: string, include?: string[], exclude?: string[]): boolean {
-  if (exclude) {
-    for (const pattern of exclude) {
-      const regex = new RegExp(pattern.replace(/\*/g, ".*").replace(/\?/g, "."));
-      if (regex.test(filePath)) {
-        return false;
-      }
-    }
-  }
-
-  if (include) {
-    for (const pattern of include) {
-      const regex = new RegExp(pattern.replace(/\*/g, ".*").replace(/\?/g, "."));
-      if (regex.test(filePath)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  return true;
-}
-
-// Search in text content
-function searchInText(
-  content: string,
-  filePath: string,
-  regex: RegExp,
-  contextLines: number = 0
-): SearchResult[] {
-  const results: SearchResult[] = [];
-  const lines = content.split("\n");
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    const matches: SearchResult["matches"] = [];
-
-    let match;
-    while ((match = regex.exec(line)) !== null) {
-      matches.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        text: match[0],
-      });
-    }
-
-    if (matches.length > 0) {
-      const firstMatch = matches[0]!;
-      const result: SearchResult = {
-        filePath,
-        lineNumber: i + 1,
-        column: (firstMatch?.start ?? 0) + 1,
-        line,
-        matches,
-      };
-
-      if (contextLines > 0) {
-        result.context = {
-          before: lines.slice(Math.max(0, i - contextLines), i).filter((l): l is string => l !== undefined),
-          after: lines.slice(i + 1, Math.min(lines.length, i + 1 + contextLines)).filter((l): l is string => l !== undefined),
-        };
-      }
-
-      results.push(result);
-    }
-
-    // Reset regex lastIndex for next line
-    regex.lastIndex = 0;
-  }
-
-  return results;
 }
 
 // Highlight matches in a line

@@ -11,7 +11,6 @@ import type {
   TranscriptEvent,
   ConnectionState,
   RecentDoc,
-  PaletteCommand,
   CommandPaletteState,
 } from "../types/protocol";
 import { createEmptyTurnState, applyStreamEvent } from "../types/state";

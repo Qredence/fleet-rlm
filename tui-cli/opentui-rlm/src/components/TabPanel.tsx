@@ -173,7 +173,6 @@ function StatsPane() {
 }
 
 const TABS = ["reasoning", "tools", "stats"] as const;
-const TAB_NAMES = ["Reasoning", "Tools", "Stats"];
 
 interface TabPanelProps {
   focused?: boolean;
@@ -183,7 +182,6 @@ interface TabPanelProps {
 export function TabPanel({ focused = false, onFocus }: TabPanelProps) {
   const { state, dispatch } = useAppContext();
   const activeTab = state.activeTab;
-  const activeIndex = TABS.indexOf(activeTab);
 
   const handleTabKeys = useCallback((key: { ctrl: boolean; shift: boolean; name: string }) => {
     if (state.sidebarCollapsed) return false;

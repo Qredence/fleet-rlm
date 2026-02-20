@@ -7,7 +7,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRegisterKeyHandler, PRIORITY } from "../context/KeyboardContext";
 import { useAppContext } from "../context/AppContext";
-import { bg, fg, accent, semantic, border } from "../theme";
+import { bg, fg, accent, semantic } from "../theme";
 import { loadHistory, addToHistory } from "../hooks/useCommandHistory";
 import { hasFileReferences, expandFileReferences } from "../utils/fileReference";
 import { useCommandAutocomplete } from "../hooks/useCommandAutocomplete";
