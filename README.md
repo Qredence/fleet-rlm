@@ -21,6 +21,7 @@
 graph TB
     subgraph entry ["🚪 Entry Points"]
         CLI["CLI (Typer)"]
+        WebUI["Web UI<br/>(React SPA)"]
         API["FastAPI<br/>(WS/REST)"]
         TUI["Ink TUI<br/>(stdio bridge)"]
         MCP["MCP Server"]
@@ -49,6 +50,7 @@ graph TB
         Volume[("💾 Persistent Volume<br/>/data/<br/>• workspaces<br/>• artifacts<br/>• memory<br/>• session state")]
     end
 
+    WebUI -->|"REST / WS"| API
     CLI --> Agent
     API --> Agent
     TUI --> Agent
@@ -85,6 +87,7 @@ graph TB
 
 ## Features
 
+- **Web UI First (0.4.6)**: Integrated React SPA (`src/frontend`) is now the primary interactive surface for chat, execution timeline, and artifact workflows.
 - **Interactive Agent**: `RLMReActChatAgent` (a `dspy.Module`) combines fast, interactive chat with deep, recursive task execution via `rlm_query`.
 - **DSPy Aligned**: Implements `dspy.RLM`, `dspy.Module`, and `dspy.Tool` interfaces — compatible with DSPy optimizers (`BootstrapFewShot`, `MIPROv2`).
 - **Secure Sandbox**: Code runs in isolated **Modal** containers with persistent storage volumes, execution profiles, and sensitive data redaction.
@@ -176,6 +179,28 @@ uv run python scripts/db_init.py
 
 ### 3. Run
 
+**Web UI (React SPA):**
+
+`0.4.6` treats the React SPA as the primary interface. The backend serves the built frontend automatically.
+
+```bash
+# 1. Build the frontend (requires Bun)
+cd src/frontend
+bun install
+bun run build
+cd ../..
+
+# 2. Build the Python package (bundles the UI into the wheel)
+uv build
+
+# 3. Install with server dependencies and run the Web UI server
+uv pip install -e ".[server]"
+uv run fleet web
+```
+Then navigate to `http://localhost:8000` in your browser.
+
+OpenAPI source-of-truth is `openapi.yaml` at repository root. Frontend API types are generated from `src/frontend/openapi/fleet-rlm.openapi.yaml`, which should be synced from the root spec via frontend scripts.
+
 **Interactive Chat (OpenTUI):**
 
 ```bash
@@ -206,7 +231,7 @@ fleet-rlm run-architecture --docs-path docs/architecture.md --query "Extract all
 **Servers:**
 
 ```bash
-# API server (FastAPI + WebSocket)
+# API server (FastAPI + WebSocket) via explicit command
 uv run fleet-rlm serve-api --port 8000
 
 # MCP server
@@ -215,8 +240,8 @@ fleet-rlm serve-mcp --transport stdio
 
 WebSocket endpoints:
 
-- `/ws/chat` for interactive conversation and tool orchestration events.
-- `/ws/execution` for filtered execution lifecycle events (`execution_started`, `execution_step`, `execution_completed`) scoped by `workspace_id`, `user_id`, and `session_id`.
+- `/api/v1/ws/chat` for interactive conversation and tool orchestration events.
+- `/api/v1/ws/execution` for filtered execution lifecycle events (`execution_started`, `execution_step`, `execution_completed`) scoped by `workspace_id`, `user_id`, and `session_id`.
 
 Issue a dev token:
 
@@ -232,7 +257,7 @@ uv run python scripts/dev_issue_token.py \
 Call an authenticated endpoint (debug headers):
 
 ```bash
-curl -s http://127.0.0.1:8000/auth/me \
+curl -s http://127.0.0.1:8000/api/v1/auth/me \
   -H "X-Debug-Tenant-Id: 00000000-0000-0000-0000-000000000123" \
   -H "X-Debug-User-Id: 00000000-0000-0000-0000-000000000456" \
   -H "X-Debug-Email: dev@example.com" \
@@ -242,7 +267,7 @@ curl -s http://127.0.0.1:8000/auth/me \
 Call an authenticated endpoint (JWT):
 
 ```bash
-curl -s http://127.0.0.1:8000/auth/me \
+curl -s http://127.0.0.1:8000/api/v1/auth/me \
   -H "Authorization: Bearer ${DEV_TOKEN}"
 ```
 
@@ -269,11 +294,17 @@ uv sync --extra dev
 # With server/MCP support
 uv sync --extra dev --extra server --extra mcp
 
+# Build React frontend bundle for web UI
+cd src/frontend
+bun install
+bun run check
+cd ../..
+
 # Build Ink frontend bundle for `fleet --ui ink`
-cd tui-ink
-npm install
-npm run build
-npm run test
+cd tui-cli/tui-ink
+bun install
+bun run build
+bun run test
 cd ..
 
 # Copy environment template
@@ -282,7 +313,7 @@ cp .env.example .env
 # Quality gate
 uv run ruff check src tests
 uv run ruff format --check src tests
-uv run ty check src
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run pytest -q
 
 # Auto-fix formatting when needed
@@ -307,7 +338,7 @@ We welcome contributions! Please see our [Contribution Guide](CONTRIBUTING.md) a
 ```bash
 uv run ruff check src tests
 uv run ruff format --check src tests
-uv run ty check src
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run pytest -q
 ```
 

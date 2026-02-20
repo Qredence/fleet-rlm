@@ -13,7 +13,7 @@ AUTH_HEADERS = {
 def test_sessions_state_endpoint_exists():
     app = create_app()
     with TestClient(app) as client:
-        resp = client.get("/sessions/state", headers=AUTH_HEADERS)
+        resp = client.get("/api/v1/sessions/state", headers=AUTH_HEADERS)
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True

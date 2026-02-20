@@ -13,7 +13,8 @@ The system is built on four main pillars:
 
 ```mermaid
 graph TD
-    User([User]) <--> API[Data API / WebSocket]
+    User([User]) <--> UI[Web UI / CLI]
+    UI <--> API[FastAPI / WebSocket]
     API <--> Agent[RLMReActChatAgent]
 
     subgraph "Reasoning Loop (ReAct)"

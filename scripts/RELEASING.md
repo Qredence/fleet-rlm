@@ -15,6 +15,7 @@ Use the GitHub Actions workflow for a fully automated release:
 The workflow will:
 
 - Run all preflight checks (tests, linting)
+- Run dependency/code security checks
 - Build and verify distributions
 - Upload to TestPyPI and run smoke tests
 - Upload to PyPI after approval
@@ -55,9 +56,11 @@ All commands below assume zsh and are run from the repository root.
 uv run pytest
 uv run ruff check src tests config/test_responses_endpoint.py
 uv run ruff format --check src tests config/test_responses_endpoint.py
-uv run ty check src
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run python scripts/check_release_hygiene.py
 uv run python scripts/check_release_metadata.py
+uvx pip-audit
+uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
 ```
 
 If the frontend app is present in your checkout, run its gate too:
@@ -66,10 +69,8 @@ If the frontend app is present in your checkout, run its gate too:
 # from repo root
 if [ -f src/frontend/package.json ]; then
   cd src/frontend
-  bun install
-  bun run lint
-  bun run type-check
-  bun run test:e2e
+  bun install --frozen-lockfile
+  bun run check
   cd ..
 fi
 ```
@@ -94,8 +95,8 @@ uvx twine check dist/*
 
 Expected outputs:
 
-- `dist/fleet_rlm-0.4.2.tar.gz`
-- `dist/fleet_rlm-0.4.2-py3-none-any.whl`
+- `dist/fleet_rlm-0.4.6.tar.gz`
+- `dist/fleet_rlm-0.4.6-py3-none-any.whl`
 
 ## 3) Upload to TestPyPI
 
@@ -122,7 +123,7 @@ uv venv .venv-release-smoke
 uv pip install --python .venv-release-smoke/bin/python \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple \
-  fleet-rlm==0.4.2
+  fleet-rlm==0.4.6
 source .venv-release-smoke/bin/activate
 fleet-rlm --help
 deactivate
@@ -150,8 +151,8 @@ uvx twine upload dist/*
 
 ```bash
 # from repo root
-git tag v0.4.2
-git push origin v0.4.2
+git tag v0.4.6
+git push origin v0.4.6
 ```
 
 Then update changelog/release notes with:

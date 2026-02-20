@@ -5,6 +5,7 @@ This project is developed and maintained by the Qredence team.
 ## Core Contributors
 
 - Qredence - Project lead and architecture
+- Zachary BENSALEM - Founder
 
 ## Acknowledgments
 

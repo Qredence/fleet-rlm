@@ -64,12 +64,12 @@ def _find_opentui_frontend() -> tuple[Path, Path]:
             search_roots.append(root)
 
     for root in search_roots:
-        tui_dir = root / "tui"
-        tui_entry = tui_dir / "src" / "index.tsx"
-        if tui_entry.is_file():
-            return tui_dir, tui_entry
+        for tui_dir in (root / "tui-cli" / "opentui-rlm", root / "tui"):
+            tui_entry = tui_dir / "src" / "index.tsx"
+            if tui_entry.is_file():
+                return tui_dir, tui_entry
 
-    fallback_dir = module_path.parents[2] / "tui"
+    fallback_dir = module_path.parents[2] / "tui-cli" / "opentui-rlm"
     return fallback_dir, fallback_dir / "src" / "index.tsx"
 
 

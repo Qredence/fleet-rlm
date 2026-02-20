@@ -24,3 +24,5 @@ pnpm-debug.log*
 .vscode/
 node_modules/
 dist/
+
+test-results/

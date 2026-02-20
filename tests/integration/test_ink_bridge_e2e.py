@@ -172,12 +172,12 @@ def test_bridge_server_module_runnable():
 
 
 @pytest.mark.skipif(
-    not Path("tui-ink/dist/cli.js").exists(),
+    not Path("tui-cli/tui-ink/dist/cli.js").exists(),
     reason="Ink bundle not built",
 )
 def test_ink_bundle_exists():
     """Verify Ink frontend bundle is available."""
-    bundle = Path("tui-ink/dist/cli.js")
+    bundle = Path("tui-cli/tui-ink/dist/cli.js")
     assert bundle.exists()
     assert bundle.stat().st_size > 0
 
@@ -191,7 +191,7 @@ def test_fleet_cli_launcher_imports():
 
 def test_ink_cli_uses_plural_bridge_rpc_methods():
     """Guard Ink↔bridge method-name contract for command + mention paths."""
-    source = Path("tui-ink/src/cli.tsx").read_text(encoding="utf-8")
+    source = Path("tui-cli/tui-ink/src/cli.tsx").read_text(encoding="utf-8")
 
     assert "commands.execute" in source
     assert "mentions.search" in source

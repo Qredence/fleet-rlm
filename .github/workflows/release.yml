@@ -65,13 +65,18 @@ jobs:
           uv run python scripts/check_release_hygiene.py
           uv run python scripts/check_release_metadata.py
 
+      - name: Security checks
+        run: |
+          uvx pip-audit
+          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+
       - name: Lint with Ruff
         run: |
           uv run ruff check src tests config/test_responses_endpoint.py
           uv run ruff format --check src tests config/test_responses_endpoint.py
 
       - name: Type-check with ty
-        run: uv run ty check src
+        run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 
       - name: Run tests
         run: uv run pytest

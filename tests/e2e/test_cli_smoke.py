@@ -239,7 +239,7 @@ def test_code_chat_opentui_flag_accepted(monkeypatch):
 
 
 def test_code_chat_opentui_launches_from_repo_tui_dir(monkeypatch):
-    """OpenTUI launcher should resolve repo-root tui/ in src-layout repos."""
+    """OpenTUI launcher should resolve repo-root tui-cli/opentui-rlm/."""
     captured: dict[str, object] = {}
 
     class _FakeResponse:
@@ -278,9 +278,9 @@ def test_code_chat_opentui_launches_from_repo_tui_dir(monkeypatch):
     result = runner.invoke(app, ["code-chat", "--opentui"])
     assert result.exit_code == 0
 
-    assert str(captured["cwd"]).endswith("/tui")
+    assert str(captured["cwd"]).endswith("/tui-cli/opentui-rlm")
     entry = str(captured["cmd"][2])
-    assert entry.endswith("/tui/src/index.tsx")
+    assert entry.endswith("/tui-cli/opentui-rlm/src/index.tsx")
 
 
 def test_run_react_chat_opentui_flag_passes_through(monkeypatch):

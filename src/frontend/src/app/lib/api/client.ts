@@ -134,7 +134,19 @@ function buildUrl(
   path: string,
   params?: Record<string, string | number | boolean | undefined>,
 ): string {
-  const url = new URL(path, apiConfig.baseUrl);
+  // If baseUrl is empty, we must use a relative URL or window.location.origin
+  // new URL(path, "") throws a TypeError.
+  const baseUrl = apiConfig.baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+
+  // If we still don't have a base URL (e.g., SSR environment with empty config),
+  // we fallback to just the path, but URL parsing requires a base.
+  let url: URL;
+  try {
+    url = new URL(path, baseUrl || "http://localhost");
+  } catch (e) {
+    url = new URL(path, "http://localhost");
+  }
+
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined) {
@@ -142,6 +154,12 @@ function buildUrl(
       }
     }
   }
+
+  // If we used a dummy base URL, strip it out to return a relative path
+  if (!baseUrl && url.origin === "http://localhost") {
+    return url.pathname + url.search;
+  }
+
   return url.toString();
 }
 
