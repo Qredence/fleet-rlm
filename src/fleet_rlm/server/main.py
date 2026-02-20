@@ -99,13 +99,21 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
+        ui_root = ui_dir.resolve()
+
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(full_path: str):
-            file_path = ui_dir / full_path
-            if full_path and file_path.exists() and file_path.is_file():
-                return FileResponse(file_path)
+            if full_path:
+                candidate = (ui_root / full_path).resolve()
+                try:
+                    candidate.relative_to(ui_root)
+                except ValueError:
+                    candidate = ui_root / "__invalid__"
 
-            index_path = ui_dir / "index.html"
+                if candidate.exists() and candidate.is_file():
+                    return FileResponse(candidate)
+
+            index_path = ui_root / "index.html"
             if index_path.exists():
                 return FileResponse(index_path)
 
