@@ -1,91 +1,34 @@
-import { typo } from "../components/config/typo";
-import { springs } from "../components/config/motion-config";
 import { useState, useMemo, useCallback, useRef } from "react";
-import {
-  motion,
-  LayoutGroup,
-  AnimatePresence,
-  useReducedMotion,
-} from "motion/react";
-import { Search, RefreshCw, ArrowUpDown, TriangleAlert } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
+import { Search, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { usePostHog } from "@posthog/react";
-import { useSkills } from "../components/hooks/useSkills";
+import { springs } from "../components/config/motion-config";
+import { typo } from "../components/config/typo";
 import type { Skill } from "../components/data/types";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { useAppNavigate } from "../components/hooks/useAppNavigate";
-import { useIsMobile } from "../components/ui/use-mobile";
+import { SkillLibraryHeaderControls } from "../components/features/skill-library/SkillLibraryHeaderControls";
+import { PullToRefreshIndicator } from "../components/features/skill-library/PullToRefreshIndicator";
 import { SkillCard } from "../components/features/SkillCard";
+import { useNavigation } from "../components/hooks/useNavigation";
+import { useSkills } from "../components/hooks/useSkills";
+import { useAppNavigate } from "../components/hooks/useAppNavigate";
 import { SkillCardSkeleton } from "../components/shared/SkillCardSkeleton";
 import { LargeTitleHeader } from "../components/shared/LargeTitleHeader";
-import { AnimatedIndicator } from "../components/ui/animated-indicator";
-import { Input } from "../components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../components/ui/select";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
 import { cn } from "../components/ui/utils";
+import { useIsMobile } from "../components/ui/use-mobile";
+import {
+  buildDomainCounts,
+  domains,
+  filterSkills,
+  matchesSkillSearch,
+  MAX_PULL,
+  PULL_THRESHOLD,
+  type SortKey,
+  sortSkills,
+} from "../lib/skills/library";
 
-const domains = ["All", "analytics", "development", "nlp", "devops"];
-
-// ── Sort definitions ──────────────────────────────────────────────────
-type SortKey =
-  | "name-asc"
-  | "name-desc"
-  | "quality-desc"
-  | "usage-desc"
-  | "last-used"
-  | "created";
-
-const sortOptions: { key: SortKey; label: string }[] = [
-  { key: "name-asc", label: "Name (A\u2013Z)" },
-  { key: "name-desc", label: "Name (Z\u2013A)" },
-  { key: "quality-desc", label: "Quality (High\u2013Low)" },
-  { key: "usage-desc", label: "Most Used" },
-  { key: "last-used", label: "Recently Used" },
-  { key: "created", label: "Newest First" },
-];
-
-function sortSkills(skills: Skill[], key: SortKey): Skill[] {
-  const sorted = [...skills];
-  switch (key) {
-    case "name-asc":
-      return sorted.sort((a, b) => a.displayName.localeCompare(b.displayName));
-    case "name-desc":
-      return sorted.sort((a, b) => b.displayName.localeCompare(a.displayName));
-    case "quality-desc":
-      return sorted.sort((a, b) => b.qualityScore - a.qualityScore);
-    case "usage-desc":
-      return sorted.sort((a, b) => b.usageCount - a.usageCount);
-    case "last-used":
-      return sorted.sort(
-        (a, b) =>
-          new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime(),
-      );
-    case "created":
-      return sorted.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
-    default:
-      return sorted;
-  }
-}
-
-// Pull-to-refresh config
-const PULL_THRESHOLD = 80; // px to trigger refresh
-const MAX_PULL = 120; // max visual displacement
-
-/**
- * SkillLibrary — browsable, filterable skill catalogue.
- *
- * All shared state consumed from NavigationContext — zero props.
- */
 export function SkillLibrary() {
   const { selectedSkillId, openCanvas } = useNavigation();
   const { navigateToSkill } = useAppNavigate();
@@ -113,11 +56,8 @@ export function SkillLibrary() {
         searchTimerRef.current = setTimeout(() => {
           posthog?.capture("skill_search_performed", {
             search_term: value,
-            results_count: allSkills.filter(
-              (s) =>
-                s.displayName.toLowerCase().includes(value.toLowerCase()) ||
-                s.tags.some((t) => t.includes(value.toLowerCase())),
-            ).length,
+            results_count: allSkills.filter((s) => matchesSkillSearch(s, value))
+              .length,
           });
         }, 500);
       }
@@ -162,33 +102,15 @@ export function SkillLibrary() {
   const isLoading = isSkillsLoading;
   const isDegradedData = dataSource === "fallback";
 
-  const domainCounts = useMemo(() => {
-    const searchMatched = allSkills.filter((s) => {
-      return (
-        !search ||
-        s.displayName.toLowerCase().includes(search.toLowerCase()) ||
-        s.tags.some((t) => t.includes(search.toLowerCase()))
-      );
-    });
-    const counts: Record<string, number> = {
-      All: searchMatched.length,
-    };
-    for (const s of searchMatched) {
-      counts[s.domain] = (counts[s.domain] || 0) + 1;
-    }
-    return counts;
-  }, [search, allSkills]);
+  const domainCounts = useMemo(
+    () => buildDomainCounts(allSkills, search),
+    [allSkills, search],
+  );
 
-  const filtered = useMemo(() => {
-    return allSkills.filter((s) => {
-      const matchSearch =
-        !search ||
-        s.displayName.toLowerCase().includes(search.toLowerCase()) ||
-        s.tags.some((t) => t.includes(search.toLowerCase()));
-      const matchDomain = activeDomain === "All" || s.domain === activeDomain;
-      return matchSearch && matchDomain;
-    });
-  }, [search, activeDomain, allSkills]);
+  const filtered = useMemo(
+    () => filterSkills(allSkills, search, activeDomain),
+    [allSkills, search, activeDomain],
+  );
 
   const sorted = useMemo(() => {
     return sortSkills(filtered, sortKey);
@@ -260,109 +182,19 @@ export function SkillLibrary() {
     }
   }, [pullDistance, isRefreshing, refetchSkills]);
 
-  /* ── Search + domain filters ─────────────────────────────────────── */
   const headerChildren = (
-    <>
-      {/* Search — min 44px touch target on mobile */}
-      <div className={cn("relative mb-3", isMobile && "mx-4")}>
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-        <Input
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder="Search skills\u2026"
-          aria-label="Search skills"
-          className={cn("pl-9", isMobile && "touch-target")}
-          style={typo.label}
-        />
-      </div>
-
-      {/* Domain filters — Apple HIG: 44px min touch height on mobile */}
-      <LayoutGroup id="domainFilters">
-        <div
-          className={cn(
-            "flex items-center gap-1 overflow-x-auto no-scrollbar",
-            isMobile && "px-4",
-          )}
-        >
-          {domains.map((d) => {
-            const isActive = activeDomain === d;
-            const count = domainCounts[d] || 0;
-            return (
-              <button
-                key={d}
-                onClick={() => handleDomainChange(d)}
-                className={cn(
-                  "relative flex items-center justify-center px-3 gap-1.5 shrink-0 rounded-lg transition-colors",
-                  isMobile ? "touch-target" : "h-8",
-                  isActive
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
-                )}
-              >
-                <span className="relative z-10" style={typo.helper}>
-                  {d === "All" ? "All" : d.charAt(0).toUpperCase() + d.slice(1)}
-                </span>
-                <span
-                  className={cn(
-                    "relative z-10 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full overflow-hidden",
-                    isActive ? "bg-foreground/10" : "bg-muted",
-                  )}
-                  style={typo.micro}
-                >
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    <motion.span
-                      key={count}
-                      initial={{
-                        y: prefersReduced ? 0 : 8,
-                        opacity: 0,
-                      }}
-                      animate={{ y: 0, opacity: 1 }}
-                      exit={{
-                        y: prefersReduced ? 0 : -8,
-                        opacity: 0,
-                      }}
-                      transition={
-                        prefersReduced ? springs.instant : springs.snappy
-                      }
-                    >
-                      {count}
-                    </motion.span>
-                  </AnimatePresence>
-                </span>
-                {isActive && <AnimatedIndicator layoutId="domainFilter" />}
-              </button>
-            );
-          })}
-
-          {/* Sort — inline with domain filters, pushed to the end */}
-          <div className="ml-auto shrink-0">
-            <Select
-              value={sortKey}
-              onValueChange={(value) => setSortKey(value as SortKey)}
-            >
-              <SelectTrigger
-                className={cn(
-                  "w-auto gap-1.5 border-0 bg-transparent shadow-none rounded-lg transition-colors",
-                  isMobile ? "touch-target" : "h-8",
-                  "text-muted-foreground hover:text-foreground hover:bg-muted",
-                )}
-                aria-label="Sort skills"
-              >
-                <ArrowUpDown className="size-3.5 shrink-0" />
-                <SelectValue placeholder="Sort" />
-              </SelectTrigger>
-              <SelectContent align="end" className="w-48">
-                {sortOptions.map((option) => (
-                  <SelectItem key={option.key} value={option.key}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </LayoutGroup>
-    </>
+    <SkillLibraryHeaderControls
+      search={search}
+      onSearchChange={handleSearchChange}
+      domains={domains}
+      activeDomain={activeDomain}
+      onDomainChange={handleDomainChange}
+      domainCounts={domainCounts}
+      sortKey={sortKey}
+      onSortChange={setSortKey}
+      isMobile={isMobile}
+      prefersReduced={prefersReduced}
+    />
   );
 
   return (
@@ -379,43 +211,13 @@ export function SkillLibrary() {
         </LargeTitleHeader>
       )}
 
-      {/* Pull-to-refresh indicator (mobile only) */}
-      {isMobile && pullDistance > 0 && (
-        <div
-          className="flex items-center justify-center shrink-0 overflow-hidden"
-          style={{
-            height: pullDistance,
-            transition: isPullingActive
-              ? "none"
-              : "height 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-          }}
-        >
-          <motion.div
-            animate={{
-              rotate: isRefreshing
-                ? 360
-                : (pullDistance / (MAX_PULL * 0.45)) * 270,
-            }}
-            transition={
-              isRefreshing
-                ? {
-                    repeat: Infinity,
-                    duration: prefersReduced ? 0.01 : 0.8,
-                    ease: "linear",
-                  }
-                : prefersReduced
-                  ? springs.instant
-                  : springs.default
-            }
-          >
-            <RefreshCw
-              className="w-5 h-5 text-muted-foreground"
-              style={{
-                opacity: Math.min(pullDistance / (PULL_THRESHOLD * 0.45), 1),
-              }}
-            />
-          </motion.div>
-        </div>
+      {isMobile && (
+        <PullToRefreshIndicator
+          pullDistance={pullDistance}
+          isPullingActive={isPullingActive}
+          isRefreshing={isRefreshing}
+          prefersReduced={prefersReduced}
+        />
       )}
 
       {/* Scrollable content */}

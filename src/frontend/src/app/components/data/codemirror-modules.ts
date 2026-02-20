@@ -10,7 +10,7 @@
  *
  * Why this pattern?
  *   - `import('@codemirror/state')` (string-literal dynamic) fails because
- *     Vite's `import-analysis` plugin can't resolve bare npm specifiers
+ *     Vite's `import-analysis` plugin can't resolve bare package specifiers
  *     in dynamic imports within the Figma Make pnpm strict environment.
  *   - `import(variable)` (opaque dynamic) fails because the browser
  *     receives a bare specifier it can't resolve (no import map).

@@ -33,10 +33,23 @@ import { createLocalId } from "../../lib/id";
 import {
   phase1ClarificationQuestions,
   phase2ClarificationQuestions,
-  mockReasoningPhase1,
-  mockReasoningPhase2,
-  mockReasoningPhase3,
 } from "../../components/data/mock-skills";
+import {
+  buildPhase1ClarificationPlan,
+  buildPhase1ExecutionPlan,
+} from "../../lib/skill-creation/simulation/phase1";
+import {
+  buildPhase2ClarificationPlan,
+  buildPhase2ExecutionPlan,
+} from "../../lib/skill-creation/simulation/phase2";
+import {
+  buildPhase3ExecutionPlan,
+} from "../../lib/skill-creation/simulation/phase3";
+import { clarificationIntro } from "../../lib/skill-creation/simulation/messages";
+import type {
+  ClarificationFollowUpPlan,
+  PhaseExecutionPlan,
+} from "../../lib/skill-creation/simulation/types";
 
 // ── Return type ─────────────────────────────────────────────────────
 
@@ -159,6 +172,124 @@ export function useChatSimulation(): ChatSimulation {
     ]);
   }, []);
 
+  const maybeOpenCanvas = useCallback(
+    (shouldOpen?: boolean) => {
+      if (shouldOpen && !isCanvasOpen) {
+        openCanvas();
+      }
+    },
+    [isCanvasOpen, openCanvas],
+  );
+
+  const runPhaseExecutionPlan = useCallback(
+    (plan: PhaseExecutionPlan) => {
+      addMessage({
+        type: "system",
+        content: plan.systemMessage,
+        phase: plan.phase,
+      });
+
+      const reasoningId = createLocalId(`reason${plan.phase}`);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: reasoningId,
+          type: "reasoning",
+          content: "",
+          phase: plan.phase,
+          reasoningData: {
+            parts: plan.reasoningParts,
+            isThinking: true,
+          },
+        },
+      ]);
+
+      setIsTyping(true);
+
+      safeTimeout(() => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === reasoningId
+              ? {
+                  ...m,
+                  reasoningData: {
+                    parts: plan.reasoningParts,
+                    isThinking: false,
+                    duration: plan.reasoningDuration,
+                  },
+                }
+              : m,
+          ),
+        );
+
+        setIsTyping(false);
+        addMessage({
+          type: "assistant",
+          phase: plan.phase,
+          streaming: true,
+          content: plan.assistantMessage,
+        });
+
+        maybeOpenCanvas(plan.ensureCanvasOpen);
+
+        if (!plan.followUpHitl && !plan.followUpSystemMessage && !plan.markComplete) {
+          return;
+        }
+
+        safeTimeout(() => {
+          if (plan.followUpHitl) {
+            addMessage({
+              type: "hitl",
+              phase: plan.phase,
+              content: "",
+              hitlData: plan.followUpHitl,
+            });
+          }
+
+          if (plan.followUpSystemMessage) {
+            addMessage({
+              type: "system",
+              phase: plan.phase,
+              content: plan.followUpSystemMessage,
+            });
+          }
+
+          if (plan.markComplete) {
+            updatePhase("complete");
+          }
+        }, plan.followUpDelayMs ?? 0);
+      }, plan.reasoningDelayMs);
+    },
+    [addMessage, maybeOpenCanvas, safeTimeout, updatePhase],
+  );
+
+  const runClarificationPlan = useCallback(
+    (plan: ClarificationFollowUpPlan) => {
+      setIsTyping(true);
+
+      safeTimeout(() => {
+        setIsTyping(false);
+        addMessage({
+          type: "assistant",
+          phase: plan.phase,
+          content: plan.summaryMessage,
+        });
+
+        maybeOpenCanvas(plan.ensureCanvasOpen);
+
+        safeTimeout(() => {
+          addMessage({
+            type: "hitl",
+            phase: plan.phase,
+            content: "",
+            hitlData: plan.followUpHitl,
+          });
+        }, plan.followUpDelayMs);
+      }, plan.typingDelayMs);
+    },
+    [addMessage, maybeOpenCanvas, safeTimeout],
+  );
+
   // ── Clarification helpers ───────────────────────────────────────
 
   const addClarificationQuestion = useCallback(
@@ -198,10 +329,7 @@ export function useChatSimulation(): ChatSimulation {
       };
       addMessage({
         type: "assistant",
-        content:
-          phaseNum === 1
-            ? "I have a few questions to refine the plan. This helps me generate a more targeted skill."
-            : "Let me understand what changes you need. A couple of quick questions:",
+        content: clarificationIntro(phaseNum),
         phase: phaseNum,
       });
       safeTimeout(() => addClarificationQuestion(phaseNum, 0), 400);
@@ -211,69 +339,13 @@ export function useChatSimulation(): ChatSimulation {
 
   const runClarificationFollowUp = useCallback(
     (phaseNum: 1 | 2, answers: string[]) => {
-      setIsTyping(true);
-      if (phaseNum === 1) {
-        safeTimeout(() => {
-          setIsTyping(false);
-          addMessage({
-            type: "assistant",
-            phase: 1,
-            content: `Thanks for clarifying! I've refined the plan based on your inputs:\n\n**Updated Scope:** ${answers[0]}\n**Language Support:** ${answers[1]}\n**Coverage Model:** ${answers[2]}\n\n**Revised Intent Analysis:**\n• **Purpose:** Automated test suite generation\n• **Problem:** Manual testing cannot keep up with CI/CD velocity\n• **Value:** Reduce testing overhead by 70% with targeted coverage`,
-          });
-          safeTimeout(() => {
-            addMessage({
-              type: "hitl",
-              phase: 1,
-              content: "",
-              hitlData: {
-                question: "Approve the revised plan?",
-                actions: [
-                  {
-                    label: "Approve & Continue",
-                    variant: "primary",
-                  },
-                  {
-                    label: "Clarify Further",
-                    variant: "secondary",
-                  },
-                ],
-              },
-            });
-          }, 400);
-        }, 1800);
-      } else {
-        safeTimeout(() => {
-          setIsTyping(false);
-          addMessage({
-            type: "assistant",
-            phase: 2,
-            content: `I've updated the generated content based on your feedback:\n\n• **Changes applied:** ${answers[0]}\n• **Format updates:** ${answers[1]}\n\nThe canvas panel now reflects these changes.`,
-          });
-          if (!isCanvasOpen) openCanvas();
-          safeTimeout(() => {
-            addMessage({
-              type: "hitl",
-              phase: 2,
-              content: "",
-              hitlData: {
-                question: "Content updated. Ready to validate now?",
-                actions: [
-                  {
-                    label: "Run Validation",
-                    variant: "primary",
-                  },
-                  {
-                    label: "Request More Changes",
-                    variant: "secondary",
-                  },
-                ],
-              },
-            });
-          }, 400);
-        }, 2000);
-      }
+      const plan =
+        phaseNum === 1
+          ? buildPhase1ClarificationPlan(answers)
+          : buildPhase2ClarificationPlan(answers);
+      runClarificationPlan(plan);
     },
-    [addMessage, isCanvasOpen, openCanvas, safeTimeout],
+    [runClarificationPlan],
   );
 
   const resolveClarification = useCallback(
@@ -316,191 +388,20 @@ export function useChatSimulation(): ChatSimulation {
   const runPhase1 = useCallback(
     (userTask: string) => {
       updatePhase("understanding");
-      addMessage({
-        type: "system",
-        content: "Phase 1: Understanding & Planning",
-        phase: 1,
-      });
-      const reasoningId = `msg-${Date.now()}-reason1`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: reasoningId,
-          type: "reasoning" as const,
-          content: "",
-          phase: 1,
-          reasoningData: {
-            parts: mockReasoningPhase1.parts,
-            isThinking: true,
-          },
-        },
-      ]);
-      setIsTyping(true);
-      safeTimeout(() => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === reasoningId
-              ? {
-                  ...m,
-                  reasoningData: {
-                    parts: mockReasoningPhase1.parts,
-                    isThinking: false,
-                    duration: mockReasoningPhase1.duration,
-                  },
-                }
-              : m,
-          ),
-        );
-        setIsTyping(false);
-        addMessage({
-          type: "assistant",
-          phase: 1,
-          streaming: true,
-          content: `I've analyzed your request and identified the following:\n\n**Domain:** Development\n**Category:** Testing / Quality Assurance\n\n**Intent Analysis:**\n• **Purpose:** ${userTask}\n• **Problem:** Manual test writing is time-consuming and often incomplete\n• **Value:** Reduce testing overhead by 60% while improving coverage\n\n**Suggested Taxonomy Path:**\n\`/development/testing/test-generation\``,
-        });
-        safeTimeout(() => {
-          addMessage({
-            type: "hitl",
-            phase: 1,
-            content: "",
-            hitlData: {
-              question: "Does this plan align with your requirements?",
-              actions: [
-                {
-                  label: "Approve & Continue",
-                  variant: "primary",
-                },
-                { label: "Clarify", variant: "secondary" },
-              ],
-            },
-          });
-        }, 400);
-      }, 2200);
+      runPhaseExecutionPlan(buildPhase1ExecutionPlan(userTask));
     },
-    [addMessage, updatePhase, safeTimeout],
+    [runPhaseExecutionPlan, updatePhase],
   );
 
   const runPhase2 = useCallback(() => {
     updatePhase("generating");
-    addMessage({
-      type: "system",
-      content: "Phase 2: Content Generation",
-      phase: 2,
-    });
-    const reasoningId = `msg-${Date.now()}-reason2`;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: reasoningId,
-        type: "reasoning" as const,
-        content: "",
-        phase: 2,
-        reasoningData: {
-          parts: mockReasoningPhase2.parts,
-          isThinking: true,
-        },
-      },
-    ]);
-    setIsTyping(true);
-    safeTimeout(() => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === reasoningId
-            ? {
-                ...m,
-                reasoningData: {
-                  parts: mockReasoningPhase2.parts,
-                  isThinking: false,
-                  duration: mockReasoningPhase2.duration,
-                },
-              }
-            : m,
-        ),
-      );
-      setIsTyping(false);
-      addMessage({
-        type: "assistant",
-        phase: 2,
-        streaming: true,
-        content:
-          "Content generation complete. I've created the full documentation and working demonstrations in the canvas.",
-      });
-      if (!isCanvasOpen) openCanvas();
-      safeTimeout(() => {
-        addMessage({
-          type: "hitl",
-          phase: 2,
-          content: "",
-          hitlData: {
-            question: "Review complete. Ready for validation?",
-            actions: [
-              { label: "Run Validation", variant: "primary" },
-              {
-                label: "Request Changes",
-                variant: "secondary",
-              },
-            ],
-          },
-        });
-      }, 400);
-    }, 2800);
-  }, [addMessage, updatePhase, isCanvasOpen, openCanvas, safeTimeout]);
+    runPhaseExecutionPlan(buildPhase2ExecutionPlan());
+  }, [runPhaseExecutionPlan, updatePhase]);
 
   const runPhase3 = useCallback(() => {
     updatePhase("validating");
-    addMessage({
-      type: "system",
-      content: "Phase 3: Validation & Quality Assurance",
-      phase: 3,
-    });
-    const reasoningId = `msg-${Date.now()}-reason3`;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: reasoningId,
-        type: "reasoning" as const,
-        content: "",
-        phase: 3,
-        reasoningData: {
-          parts: mockReasoningPhase3.parts,
-          isThinking: true,
-        },
-      },
-    ]);
-    setIsTyping(true);
-    safeTimeout(() => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === reasoningId
-            ? {
-                ...m,
-                reasoningData: {
-                  parts: mockReasoningPhase3.parts,
-                  isThinking: false,
-                  duration: mockReasoningPhase3.duration,
-                },
-              }
-            : m,
-        ),
-      );
-      setIsTyping(false);
-      addMessage({
-        type: "assistant",
-        phase: 3,
-        streaming: true,
-        content:
-          "**Validation Results:**\n• Compliance: Passed\n• Quality Score: 94/100\n• Edge Cases: 100% verified\n\nSkill successfully registered.",
-      });
-      safeTimeout(() => {
-        addMessage({
-          type: "system",
-          content: "Skill creation complete.",
-          phase: 3,
-        });
-        updatePhase("complete");
-      }, 600);
-    }, 2400);
-  }, [addMessage, updatePhase, safeTimeout]);
+    runPhaseExecutionPlan(buildPhase3ExecutionPlan());
+  }, [runPhaseExecutionPlan, updatePhase]);
 
   // ── HITL resolution ─────────────────────────────────────────────
 
