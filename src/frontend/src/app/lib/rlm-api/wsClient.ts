@@ -1,4 +1,5 @@
 import { rlmApiConfig } from "./config";
+import { getAccessToken } from "../api/client";
 
 export type WsTraceMode = "compact" | "verbose" | "off";
 
@@ -341,7 +342,12 @@ async function createReconnectingWs(
 
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
-      const socket = new WebSocket(rlmApiConfig.wsUrl!);
+      const wsUrlObj = new URL(rlmApiConfig.wsUrl!);
+      const token = getAccessToken();
+      if (token) {
+        wsUrlObj.searchParams.set("access_token", token);
+      }
+      const socket = new WebSocket(wsUrlObj.toString());
 
       const finish = (fn: () => void) => {
         if (settled) return;

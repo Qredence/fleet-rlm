@@ -17,8 +17,16 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="fleet",
         description=(
             "Start standalone fleet interactive chat. "
-            "Hydra overrides are supported as key=value tokens."
+            "Hydra overrides are supported as key=value tokens.\n"
+            "Use 'fleet web' to launch the Web UI server."
         ),
+    )
+    # Support optional subcommands loosely
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["web"],
+        help="Optional subcommand (e.g., 'web' to launch the Web UI).",
     )
     parser.add_argument(
         "--docs-path",
@@ -58,8 +66,15 @@ def _repo_root() -> Path:
 
 
 def _find_ink_cli() -> Path | None:
-    candidate = _repo_root() / "tui-ink" / "dist" / "cli.js"
-    return candidate if candidate.is_file() else None
+    root = _repo_root()
+    candidates = [
+        root / "tui-cli" / "tui-ink" / "dist" / "cli.js",
+        root / "tui-ink" / "dist" / "cli.js",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _run_ink_ui(
@@ -90,6 +105,41 @@ def _run_ink_ui(
 
 
 def main() -> None:
+    # Quick check for 'web' subcommand before strict parsing
+    if len(sys.argv) > 1 and sys.argv[1] == "web":
+        # Check if the server extra is installed
+        try:
+            import uvicorn  # noqa: F401
+            import fastapi  # noqa: F401
+        except ImportError:
+            print(
+                'Error: Server dependencies not found. Please install with: uv pip install -e ".[server]"',
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+        print("Starting Web UI and API server on http://0.0.0.0:8000 ...")
+        # Delegate to the fleet-rlm CLI's serve-api command
+        # This reuses all the existing config initialization and uvicorn setup
+        from .cli import main as cli_main
+
+        # Rewrite sys.argv to simulate running `fleet-rlm serve-api --host 0.0.0.0`
+        # Keep any hydra overrides that might have been passed
+        hydra_args = [
+            arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")
+        ]
+        sys.argv = [
+            "fleet-rlm",
+            "serve-api",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8000",
+        ] + hydra_args
+
+        cli_main()
+        return
+
     parser = _build_parser()
     args, remainder = parser.parse_known_args(sys.argv[1:])
 
@@ -135,7 +185,7 @@ def main() -> None:
                 )
         elif args.ui == "ink":
             print(
-                "UI Error: Ink bundle not found at tui-ink/dist/cli.js.",
+                "UI Error: Ink bundle not found at tui-cli/tui-ink/dist/cli.js.",
                 file=sys.stderr,
             )
             raise SystemExit(2)

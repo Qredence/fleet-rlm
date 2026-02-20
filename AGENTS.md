@@ -40,6 +40,7 @@ uv run modal secret create LITELLM \
 uv run fleet-rlm --help
 uv run fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
 uv run fleet-rlm run-architecture --docs-path rlm_content/dspy-knowledge/dspy-doc.txt --query "Extract all modules and optimizers"
+uv run fleet web
 uv run fleet-rlm code-chat --opentui
 uv run fleet-rlm serve-api --port 8000
 uv run fleet-rlm serve-api interpreter.volume_name=my-volume --port 8000
@@ -50,10 +51,10 @@ uv run python scripts/dev_issue_token.py --tid <tid> --oid <oid> --email dev@exa
 uv run python scripts/db_smoke.py
 uv run python -c "from fleet_rlm import configure_analytics; configure_analytics()"
 
-# Quality gate (run all four before pushing)
+# Quality gate (run before pushing)
 uv run ruff check src tests
 uv run ruff format --check src tests
-uv run ty check src
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run pytest -q
 uv run python scripts/check_release_hygiene.py
 uv run python scripts/check_release_metadata.py
@@ -62,17 +63,22 @@ uv run python scripts/check_release_metadata.py
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ruff format src tests
-uv run ty check src
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run pytest
 uv run python scripts/check_release_hygiene.py
 uv run python scripts/check_release_metadata.py
 
 # Optional frontend checks (when src/frontend/package.json exists)
 cd src/frontend
-bun install
-bun run lint
-bun run type-check
-bun run test:e2e
+bun install --frozen-lockfile
+bun run check
+cd ../..
+
+# Ink UI checks
+cd tui-cli/tui-ink
+bun install --frozen-lockfile
+bun run build
+bun run test
 
 # Performance baseline workflow (credential-gated)
 uv run python scripts/perf/compare_baseline.py --update-baseline --baseline scripts/perf/baseline/rlm_benchmarks_baseline.json
@@ -81,7 +87,8 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 
 ## Interactive Surface
 
-- OpenTUI under `tui/` and Ink TUI under `tui-ink/` are the supported interactive runtimes.
+- Web UI (`uv run fleet web`) is the primary interactive interface for release `0.4.6`.
+- OpenTUI under `tui-cli/opentui-rlm/` and Ink TUI under `tui-cli/tui-ink/` are supported terminal runtimes.
 - Python Textual and legacy prompt-toolkit UI runtimes have been removed (v0.4.0).
 - TUI keyboard interactions are centralized through shared shortcut/focus plumbing (global + pane-specific shortcuts) instead of ad-hoc handlers per component.
 - `src/fleet_rlm/models.py` contains streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`, not UI code.
@@ -132,7 +139,7 @@ uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/
 - `src/fleet_rlm/cli_commands/`: CLI subcommand modules (`init_cmd.py`, `serve_cmds.py`)
 - `src/fleet_rlm/terminal/`: terminal chat helpers (`commands.py`, `settings.py`, `ui.py`)
 - `src/fleet_rlm/runners.py`: high-level task runners
-- `src/fleet_rlm/server/`: optional FastAPI server (`/ws/chat`, `/ws/execution`, `/chat`, `/tasks/basic`, `/auth/me`)
+- `src/fleet_rlm/server/`: optional FastAPI server (`/api/v1/ws/chat`, `/api/v1/ws/execution`, `/api/v1/chat`, `/api/v1/tasks/basic`, `/api/v1/auth/me`)
 - `src/fleet_rlm/mcp/`: optional FastMCP server
 - `src/fleet_rlm/bridge/`: stdio JSON-RPC bridge for Ink TUI
 - `src/fleet_rlm/stateful/`: stateful agent and sandbox models
@@ -161,6 +168,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Format/lint with `ruff`
 - Prefer `uv run ...` for commands
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
+- Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
 - Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, `skill_taxonomies`, `taxonomy_terms`, `skills`, `skill_versions`, `skill_term_links`, `run_skill_usages`, etc.)
 - Tenant isolation uses Postgres RLS with transaction-local tenant context via `set_config('app.tenant_id', ..., true)` in repository methods
@@ -179,9 +187,9 @@ Tests mock Modal APIs and should run without cloud credentials.
   - `memory_structure_audit` and `memory_structure_migration_plan` (non-mutating structure governance)
   - `clarification_questions` (safe clarification generation for ambiguous/high-risk operations)
 - WebSocket interactive chat should carry identity envelope fields (`workspace_id`, `user_id`, `session_id`) so per-user/per-workspace state can be restored
-- `/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through recursive sub-agents
-- `/ws/execution` is a dedicated filtered execution stream for Artifact Canvas consumers; clients must subscribe with matching `workspace_id`, `user_id`, and `session_id` query params
-- Execution observability is additive: preserve `/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/ws/execution`
+- `/api/v1/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through recursive sub-agents
+- `/api/v1/ws/execution` is a dedicated filtered execution stream for Artifact Canvas consumers; clients must subscribe with matching `workspace_id`, `user_id`, and `session_id` query params
+- Execution observability is additive: preserve `/api/v1/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/api/v1/ws/execution`
 - Keep WebSocket auth/runtime documentation synchronized with implementation whenever auth flow behavior changes (`AUTH_MODE`, `AUTH_REQUIRED`, debug identity, and bearer token paths).
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
 - PostHog LLM analytics is opt-in and env-driven (`POSTHOG_ENABLED=true` + `POSTHOG_API_KEY`); use `configure_analytics()` for explicit setup and keep payload redaction/truncation enabled by default

@@ -9,11 +9,12 @@
 ## Required developer workflows
 
 - Use `uv` for env/dependencies (`uv sync --extra dev`, plus `--extra server` or `--extra mcp` per surface).
-- Primary quality gate in this repo: `uv run ruff check src tests && uv run ty check src && uv run pytest -q`.
+- Primary quality gate in this repo: `uv run ruff check src tests && uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" && uv run pytest -q`.
 - Use `ty` for types (not mypy), `ruff` for lint/format, and `pytest` for tests.
 - Use Make shortcuts when useful: `make sync-scaffold`, `make precommit-install`, `make precommit-run`, `make release-check`.
 - Before debugging type/lint failures, clear stale caches (`.ruff_cache`, `__pycache__`, `.pytest_cache`, `.mypy_cache`) and run `pre-commit clean`.
-- Interactive runtime is OpenTUI only: `code-chat` expects Bun and a running backend (`serve-api`).
+- Web UI is the primary interactive surface for `0.4.6` (`uv run fleet web`).
+- Terminal runtime remains supported: `fleet-rlm code-chat --opentui` expects Bun and a running backend (`serve-api`).
 
 ## Project-specific conventions
 
@@ -27,7 +28,7 @@
 
 ## Stateful server/session contracts
 
-- `/ws/chat` is the primary interactive endpoint (`src/fleet_rlm/server/routers/ws.py`).
+- `/api/v1/ws/chat` is the primary interactive endpoint (`src/fleet_rlm/server/routers/ws.py`).
 - WS payload identity envelope should include `workspace_id`, `user_id`, `session_id` (`src/fleet_rlm/server/schemas.py`).
 - Session keys are `workspace_id:user_id`; persisted manifests live at `workspaces/<workspace_id>/users/<user_id>/memory/react-session.json` on the Modal volume.
 - Use `/sessions/state` for server-side session introspection.
@@ -38,4 +39,5 @@
 - Planner LM comes from `.env` via `src/fleet_rlm/core/config.py`: `DSPY_LM_MODEL` + (`DSPY_LLM_API_KEY` or `DSPY_LM_API_KEY`), optional `DSPY_LM_API_BASE`, `DSPY_LM_MAX_TOKENS`.
 - Modal secret naming defaults to `LITELLM`; keep this unless intentionally changing infra conventions.
 - `serve-api` defaults to persistent volume `rlm-volume-dspy` when `interpreter.volume_name` is unset.
+- Canonical API contract file is `openapi.yaml` at repo root; frontend generated types are derived from `src/frontend/openapi/fleet-rlm.openapi.yaml`.
 - For Modal sandbox work, verify volume availability and credentials (`modal setup` + volume/secret readiness) before running tests.

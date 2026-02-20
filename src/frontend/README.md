@@ -17,8 +17,8 @@ bun run dev
 ## FastAPI Backend Integration (fleet-rlm)
 
 This frontend is FastAPI-only and targets the current backend surface:
-- REST: `/health`, `/ready`, `/chat`, `/tasks/*`, `/sessions/state`
-- WebSocket: `/ws/chat`
+- REST: `/health`, `/ready`, `/api/v1/chat`, `/api/v1/tasks/*`, `/api/v1/sessions/state`
+- WebSocket: `/api/v1/ws/chat`, `/api/v1/ws/execution`
 
 Unsupported sections remain visible in navigation but are intentionally disabled:
 - `skills`
@@ -56,6 +56,8 @@ bun run api:sync-spec
 bun run api:types
 bun run api:sync
 ```
+
+`api:sync-spec` defaults to the canonical root spec at `../../openapi.yaml` unless `OPENAPI_SPEC_PATH` is set.
 
 Generated file:
 - `src/app/lib/rlm-api/generated/openapi.ts` (do not edit manually)

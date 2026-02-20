@@ -37,14 +37,20 @@ function parseBool(value: string | undefined, fallback: boolean): boolean {
 // ── Configuration Object ────────────────────────────────────────────
 
 export const apiConfig = {
-  /** Base REST API URL. Empty string when not configured. */
+  /** Base REST API URL. Empty string implies relative paths (same origin). */
   baseUrl: (import.meta.env.VITE_FLEET_API_URL as string | undefined) ?? "",
 
-  /** WebSocket base URL for real-time features. */
+  /** WebSocket base URL for real-time features. Empty string implies relative/same-origin WebSocket. */
   wsUrl: (import.meta.env.VITE_FLEET_WS_URL as string | undefined) ?? "",
 
   /** Optional API key for authenticated requests. */
   apiKey: (import.meta.env.VITE_FLEET_API_KEY as string | undefined) ?? "",
+
+  /** Explicitly toggle mock mode. If true, the data layer uses local mock data. */
+  mockMode: parseBool(
+    import.meta.env.VITE_MOCK_MODE as string | undefined,
+    false,
+  ),
 
   /** Opt-in probing for legacy `/api/v1/*` endpoints. */
   enableLegacyApiProbes: parseBool(
@@ -65,16 +71,17 @@ export const apiConfig = {
 // ── Mode Detection ──────────────────────────────────────────────────
 
 /**
- * Returns `true` when no backend URL is configured.
+ * Returns `true` when mock mode is explicitly enabled.
  * All data hooks use this to decide between real API calls and mock data.
  */
 export function isMockMode(): boolean {
-  return !apiConfig.baseUrl;
+  return apiConfig.mockMode;
 }
 
 /**
- * Returns `true` when WebSocket URL is configured.
+ * Returns `true` when WebSocket URL is configured or when we are not in mock mode.
+ * If not in mock mode and no wsUrl is provided, it will use a relative WebSocket connection.
  */
 export function isWsAvailable(): boolean {
-  return !!apiConfig.wsUrl;
+  return !!apiConfig.wsUrl || !apiConfig.mockMode;
 }

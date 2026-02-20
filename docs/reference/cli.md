@@ -54,7 +54,7 @@ uv sync --extra dev --extra mcp --extra server
 
 The `fleet` entrypoint is a standalone chat launcher installed with the package scripts.
 
-- `--ui auto` (default): prefer Ink (`tui-ink`) and fall back to Python UI
+- `--ui auto` (default): prefer Ink (`tui-cli/tui-ink`) and fall back to Python UI
 - `--ui ink`: require Ink runtime
 - `--ui python`: force Python UI
 

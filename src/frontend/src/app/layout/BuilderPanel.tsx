@@ -167,10 +167,10 @@ export function BuilderPanel() {
             />
           </ErrorBoundary>
         ) : !coreReady ? (
-          <ErrorBoundary name="Backend Not Configured">
+          <ErrorBoundary name="Mock Mode Active">
             <BackendCapabilityPage
               sectionLabel="Chat"
-              reason="FastAPI chat runtime is not configured. Set VITE_FLEET_API_URL and VITE_FLEET_WS_URL."
+              reason="FastAPI chat runtime is not available in mock mode. Disable VITE_MOCK_MODE to connect to the backend."
             />
           </ErrorBoundary>
         ) : showCreation ? (

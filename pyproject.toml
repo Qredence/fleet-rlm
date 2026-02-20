@@ -1,7 +1,7 @@
 [project]
 name = "fleet-rlm"
 version = "0.4.6"
-description = "Recursive Language Models with DSPy + Modal for secure long-context code execution"
+description = "Recursive Language Models with DSPy + Modal and an integrated Web UI for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -36,6 +36,10 @@ dependencies = [
     "tomli>=2.0.0; python_version < '3.11'",
     "typer>=0.21.1,<1",
     "posthog>=7.9.1",
+    "asyncpg>=0.31.0",
+    "sqlalchemy>=2.0.46",
+    "greenlet>=3.3.1",
+    "psycopg>=3.3.2",
 ]
 
 [project.urls]
@@ -104,6 +108,7 @@ where = ["src"]
 "fleet_rlm._scaffold" = ["**/*.md", "**/*.py", "**/*.json"]
 "fleet_rlm.conf" = ["*.yaml", "*.yml"]
 "fleet_rlm" = ["py.typed"]
+"fleet_rlm.ui" = ["dist/**/*", "dist/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

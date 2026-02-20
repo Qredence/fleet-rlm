@@ -24,7 +24,7 @@ Identity is normalized to:
 
 ## Chat Endpoints
 
-### `POST /chat`
+### `POST /api/v1/chat`
 
 Run a single ReAct chat turn.
 
@@ -54,7 +54,7 @@ Notes:
 - `trajectory` is omitted when `trace=false`.
 - `guardrail_warnings` is additive and may be an empty array.
 
-### `WS /ws/chat`
+### `WS /api/v1/ws/chat`
 
 WebSocket endpoint for real-time streaming and command dispatch.
 
@@ -132,7 +132,7 @@ Session identity notes:
 - `workspace_id` and `user_id` in payloads are accepted for compatibility but non-authoritative.
 - Session cache key is still tracked as `workspace_id:user_id` internally, populated from auth claims.
 
-### `WS /ws/execution`
+### `WS /api/v1/ws/execution`
 
 Dedicated execution graph stream for Artifact Canvas and observability clients.
 
@@ -176,21 +176,21 @@ Notes:
 
 - `run_id` is deterministic per turn: `{workspace_id}:{user_id}:{session_id}:{turn_index}`.
 - Step payload fields are best-effort and sanitized (truncated + sensitive key redaction).
-- `/ws/chat` remains unchanged and backward compatible.
+- `/api/v1/ws/chat` remains unchanged and backward compatible.
 
-## Task Endpoints (`/tasks/{type}`)
+## Task Endpoints (`/api/v1/tasks/{type}`)
 
 These endpoints wrap specific `fleet_rlm.runners` functions.
 
-### `POST /tasks/basic`
+### `POST /api/v1/tasks/basic`
 
 Runs the `run_basic` runner loop.
 
-### `POST /tasks/architecture`
+### `POST /api/v1/tasks/architecture`
 
 Runs `run_architecture` (Analysis of docs). Requires `docs_path`.
 
-### `POST /tasks/long-context`
+### `POST /api/v1/tasks/long-context`
 
 Runs the Long-Context RLM strategy.
 **Params:**
@@ -229,6 +229,6 @@ Common input schema for task endpoints:
 
 ## Auth Introspection
 
-### `GET /auth/me`
+### `GET /api/v1/auth/me`
 
 Returns normalized identity and, when DB is configured, resolved tenant/user UUIDs.

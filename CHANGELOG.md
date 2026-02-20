@@ -37,6 +37,7 @@ All notable changes to this project are documented in this file.
 
 ### Highlights (User Impact)
 
+- Promoted the React Web UI to the primary interface for `fleet-rlm`, with backend-served frontend assets and end-to-end realtime chat/execution streaming.
 - Introduced a dedicated `/ws/execution` channel for structured execution lifecycle events while preserving `/ws/chat` compatibility for existing clients.
 - Improved terminal operator productivity with centralized keyboard shortcuts, better pane focus handling, and responsive layout behavior.
 - Tightened WebSocket auth/runtime behavior and aligned docs so deployment expectations are clearer and safer.
@@ -44,6 +45,8 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **Change:** Added integrated frontend packaging/serving flow so built React assets are available directly from the backend runtime.
+  **Outcome:** Users can run `uv run fleet web` for a browser-first experience without separate frontend hosting.
 - **Change:** Added execution-event infrastructure and `/ws/execution` subscription support for structured lifecycle updates (`execution_started`, `execution_step`, `execution_completed`).
   **Outcome:** Artifact-canvas and observability consumers can track runs without parsing mixed chat traffic.
 - **Change:** Added and documented NeonDB migration/bootstrap workflows across schema, scripts, and setup docs.

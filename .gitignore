@@ -9,15 +9,20 @@ __pycache__/
 dist/
 build/
 archive/
+.coverage
+*.sqlite
+*.db
 # Virtual environments
 .venv/
 venv/
 .test_venv/
+.venv-release-smoke/
 
 # Environment and secrets
 .env
 .env.*
 !.env.example
+!.env.sample
 
 # Jupyter
 .ipynb_checkpoints/
@@ -59,3 +64,14 @@ plans/walkthrough.md
 
 src/frontend/node_modules/
 src/frontend/dist/
+src/frontend/playwright-report/
+src/frontend/.vite/
+
+src/frontend/test-results/
+archive/
+docs/archive/
+docs/plans/
+
+# Local runtime artifacts
+fleet_rlm.db
+server.log

@@ -15,7 +15,7 @@ function deriveWsUrl(apiUrl: string): string {
   try {
     const url = new URL(apiUrl);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.pathname = "/ws/chat";
+    url.pathname = "/api/v1/ws/chat";
     url.search = "";
     url.hash = "";
     return url.toString().replace(/\/$/, "");
@@ -40,10 +40,28 @@ const baseUrl = trimOrEmpty(
 const explicitWsUrl = trimOrEmpty(
   import.meta.env.VITE_FLEET_WS_URL as string | undefined,
 );
+const mockMode = parseBool(
+  import.meta.env.VITE_MOCK_MODE as string | undefined,
+  false,
+);
+
+// If baseUrl is empty, we derive a relative/same-origin wsUrl
+function getActiveWsUrl() {
+  if (explicitWsUrl) return explicitWsUrl;
+  if (baseUrl) return deriveWsUrl(baseUrl);
+
+  // If no baseUrl, derive from current origin if in browser
+  if (typeof window !== "undefined") {
+    const loc = window.location;
+    return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/v1/ws/chat`;
+  }
+  return "";
+}
 
 export const rlmApiConfig = {
   baseUrl,
-  wsUrl: explicitWsUrl || deriveWsUrl(baseUrl),
+  wsUrl: getActiveWsUrl(),
+  mockMode,
   timeoutMs: 30_000,
   workspaceId:
     trimOrEmpty(
@@ -59,12 +77,12 @@ export const rlmApiConfig = {
 } as const;
 
 /**
- * Core backend mode is enabled when we have both an API base URL and WS URL.
+ * Core backend mode is enabled when we are not in mock mode.
  */
 export function isRlmCoreEnabled(): boolean {
-  return Boolean(rlmApiConfig.baseUrl && rlmApiConfig.wsUrl);
+  return !rlmApiConfig.mockMode;
 }
 
 export function isRlmWsEnabled(): boolean {
-  return Boolean(rlmApiConfig.wsUrl);
+  return !rlmApiConfig.mockMode;
 }

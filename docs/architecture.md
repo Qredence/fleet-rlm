@@ -8,7 +8,7 @@ Visualizing the structural components and relationships within `fleet-rlm`.
                         ┌─────────────────────────────────────────┐
                         │           Entry Points                  │
                         │                                         │
-                        │  CLI   FastAPI  Ink TUI  MCP   Web UI  │
+                        │  CLI   FastAPI  Ink TUI  MCP   Web UI   │
                         │ (Typer)(WS/REST)(bridge)(stdio)(React)  │
                         └────────────┬────────────────────────────┘
                                      │
@@ -50,7 +50,7 @@ Visualizing the structural components and relationships within `fleet-rlm`.
 
 | Layer         | Components                          | Responsibility                                        |
 | ------------- | ----------------------------------- | ----------------------------------------------------- |
-| Entry Points  | CLI, FastAPI, Ink TUI (bridge), MCP, Web UI (React) | User-facing surfaces — all converge on the same agent |
+| Entry Points  | CLI, FastAPI, Ink TUI, MCP, Web UI  | User-facing surfaces — all converge on the same agent |
 | Orchestration | `RLMReActChatAgent` + ReAct tools   | DSPy reasoning loop, tool dispatch, history & memory  |
 | Execution     | `ModalInterpreter`                  | JSON protocol to sandbox, execution profile gating    |
 | Sandbox       | Driver + Volume                     | Isolated Python exec, persistent `/data/` storage     |
@@ -75,14 +75,18 @@ graph TD
     Edit -->|uses| Interpreter
 ```
 
-## 2. Component Architecture
+## 2. Component Architecture (Web UI & Backend)
 
-Top-level system components and data flow relative to the user and cloud infrastructure.
+Top-level system components and data flow relative to the user and the local backend.
 
 ```mermaid
 graph LR
-    User([User]) <-->|WebSocket| Server[Litellm Proxy / API]
-    Server <-->|Stream| Agent[RLMReActChatAgent]
+    User([User]) <-->|Browser| React[Vite / React Web UI]
+    React <-->|WebSocket /api/v1/ws/chat| FastAPI[FastAPI Backend]
+    React <-->|HTTP REST /api/v1/*| FastAPI
+
+    FastAPI <-->|SQLite| DB[(fleet_rlm.db)]
+    FastAPI <-->|Stream| Agent[RLMReActChatAgent]
 
     Agent <-->|Context| History[dspy.History]
     Agent <-->|LLM Calls| Model[Language Model]
@@ -94,17 +98,17 @@ graph LR
     end
 ```
 
-## 3. Network Topology
+## 3. Deployment Topology
 
-Physical/Network view of the deployment.
+Physical/Network view of the deployment. `fleet-rlm` runs locally, serving a built React frontend via FastAPI, and executes computational workloads in Modal.
 
 ```mermaid
 graph TD
-    Client[Client App] -->|HTTPS/WSS| LB[Load Balancer]
-    LB -->|Traffic| Service[Cloud Run Service]
+    Client[Browser] -->|HTTP / WS| App[FastAPI App (Local)]
 
-    subgraph "Cloud Run"
-        Service -->|Runs| App[FastAPI App]
+    subgraph "Local Environment"
+        App -->|Serves Static Files| Dist[Frontend Dist]
+        App -->|Reads/Writes| DB[(SQLite DB)]
         App -->|Host| Agent[RLMAgent Instance]
     end
 

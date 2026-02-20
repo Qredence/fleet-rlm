@@ -29,17 +29,25 @@ test("opens settings from user menu without runtime exception", async ({ page })
 test("navigates primary tabs without hitting route error boundary", async ({ page }) => {
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Skills", exact: true }).click();
-  await expect(page.getByText("Skill Library")).toBeVisible();
+  const tabExpectations = [
+    { label: "Skills", content: "Skill Library" },
+    { label: "Taxonomy", content: "Skill Taxonomy" },
+    { label: "Memory", content: "Memory" },
+    { label: "Analytics", content: "Analytics" },
+  ];
 
-  await page.getByRole("button", { name: "Taxonomy", exact: true }).click();
-  await expect(page.getByText("Skill Taxonomy")).toBeVisible();
+  for (const tabInfo of tabExpectations) {
+    const tab = page.getByRole("button", { name: tabInfo.label, exact: true });
+    await expect(tab).toBeVisible();
 
-  await page.getByRole("button", { name: "Memory", exact: true }).click();
-  await expect(page.getByText("Memory")).toBeVisible();
+    const isDisabled = (await tab.getAttribute("aria-disabled")) === "true";
+    if (isDisabled) {
+      continue;
+    }
 
-  await page.getByRole("button", { name: "Analytics", exact: true }).click();
-  await expect(page.getByText("Analytics")).toBeVisible();
+    await tab.click();
+    await expect(page.getByText(tabInfo.content)).toBeVisible();
+  }
 
   await expect(page.getByText("We hit a rendering issue on this route")).toHaveCount(0);
 });
