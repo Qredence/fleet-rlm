@@ -56,3 +56,6 @@ plans/task.md
 plans/user_flows.md
 plans/walkthrough.md
 .superset/config.json
+
+src/frontend/node_modules/
+src/frontend/dist/
