@@ -85,7 +85,6 @@ def get_runtime_module(agent: "RLMReActChatAgent", name: str) -> dspy.Module:
     if name not in signatures:
         raise ValueError(f"Unknown runtime module: {name}")
 
-    module: dspy.Module
     wrapper_class = None
     try:
         from . import rlm_runtime_modules as runtime_mod

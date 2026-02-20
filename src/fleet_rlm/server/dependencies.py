@@ -52,7 +52,7 @@ async def get_react_agent(
     happens after the request completes.
     """
     from fleet_rlm.core.config import get_planner_lm_from_env
-    from fleet_rlm.react.interpreter import ModalInterpreter
+    from fleet_rlm.core.interpreter import ModalInterpreter
     from fleet_rlm.react.tools_rlm_delegate import build_rlm_delegate_tools
     from .deps import server_state
     import dspy
@@ -69,7 +69,7 @@ async def get_react_agent(
     dspy.settings.configure(lm=planner_lm)
 
     # Build Agent instance
-    agent = RLMReActChatAgent(interpreter=interpreter, max_depth=config.agent_max_depth)
+    agent = RLMReActChatAgent(interpreter=interpreter, max_depth=config.rlm_max_depth)
 
     # Lazily mount tools to prevent circular module dependencies during import
     from fleet_rlm.react import tools_sandbox
