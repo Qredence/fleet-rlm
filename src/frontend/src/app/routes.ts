@@ -44,27 +44,27 @@ export const router = createBrowserRouter([
       },
       {
         path: "skills",
-        Component: LazyRouteComponents.SkillLibrary,
+        Component: LazyRouteComponents.UnsupportedSkillsPage,
       },
       {
         path: "skills/:skillId",
-        Component: LazyRouteComponents.SkillLibrary,
+        Component: LazyRouteComponents.UnsupportedSkillsPage,
       },
       {
         path: "taxonomy",
-        Component: LazyRouteComponents.TaxonomyBrowser,
+        Component: LazyRouteComponents.UnsupportedTaxonomyPage,
       },
       {
         path: "taxonomy/:skillId",
-        Component: LazyRouteComponents.TaxonomyBrowser,
+        Component: LazyRouteComponents.UnsupportedTaxonomyPage,
       },
       {
         path: "memory",
-        Component: LazyRouteComponents.MemoryPage,
+        Component: LazyRouteComponents.UnsupportedMemoryPage,
       },
       {
         path: "analytics",
-        Component: LazyRouteComponents.AnalyticsDashboard,
+        Component: LazyRouteComponents.UnsupportedAnalyticsPage,
       },
       {
         path: "settings",

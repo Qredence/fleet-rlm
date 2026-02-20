@@ -24,11 +24,11 @@ import {
   Search,
 } from "lucide-react";
 import { typo } from "../config/typo";
-import { useSkills } from "../hooks/useSkills";
 import type { PromptFeature, PromptMode } from "../data/types";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { ScrollArea } from "./scroll-area";
 import { cn } from "./utils";
+import { UNSUPPORTED_SECTION_REASON } from "../../lib/rlm-api";
 
 // ── Re-export for consumers ─────────────────────────────────────────
 
@@ -290,13 +290,10 @@ function WebSearchChip() {
 
 function SkillsChip({
   selectedSkills,
-  onToggleSkill,
 }: {
   selectedSkills: string[];
-  onToggleSkill: (skillId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { skills: allSkills } = useSkills();
   const selectedCount = selectedSkills.length;
   const chipLabel = selectedCount > 0 ? `Apps (${selectedCount})` : "Apps";
 
@@ -325,53 +322,10 @@ function SkillsChip({
         </div>
 
         <ScrollArea className="max-h-[240px]">
-          <div className="space-y-0.5">
-            {allSkills.map((skill) => {
-              const isSelected = selectedSkills.includes(skill.id);
-
-              return (
-                <button
-                  key={skill.id}
-                  type="button"
-                  className={cn(
-                    "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-colors",
-                    "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
-                    isSelected
-                      ? "bg-accent/8 text-accent"
-                      : "text-foreground hover:bg-muted",
-                  )}
-                  onClick={() => onToggleSkill(skill.id)}
-                >
-                  <div
-                    className={cn(
-                      "flex items-center justify-center w-6 h-6 rounded-md shrink-0",
-                      isSelected ? "bg-accent/15" : "bg-muted",
-                    )}
-                  >
-                    <Zap
-                      className={cn(
-                        "size-3.5",
-                        isSelected ? "text-accent" : "text-muted-foreground",
-                      )}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0 text-left">
-                    <span className="block truncate" style={typo.label}>
-                      {skill.displayName}
-                    </span>
-                    <span
-                      className="text-muted-foreground block truncate"
-                      style={typo.micro}
-                    >
-                      {skill.taxonomyPath}
-                    </span>
-                  </div>
-                  {isSelected && (
-                    <Check className="size-4 text-accent shrink-0" />
-                  )}
-                </button>
-              );
-            })}
+          <div className="px-2.5 py-3">
+            <span className="text-muted-foreground block" style={typo.caption}>
+              Skills selection is unavailable. {UNSUPPORTED_SECTION_REASON}
+            </span>
           </div>
         </ScrollArea>
       </PopoverContent>
@@ -386,7 +340,7 @@ export function PromptToolbar({
   mode,
   onSetMode,
   selectedSkills,
-  onToggleSkill,
+  onToggleSkill: _onToggleSkill,
 }: PromptToolbarProps) {
   const showContextMemory = activeFeatures.has("contextMemory");
   const showSkills = activeFeatures.has("skills");
@@ -405,10 +359,7 @@ export function PromptToolbar({
 
       {/* Skills / Apps selector */}
       {showSkills && (
-        <SkillsChip
-          selectedSkills={selectedSkills}
-          onToggleSkill={onToggleSkill}
-        />
+        <SkillsChip selectedSkills={selectedSkills} />
       )}
     </div>
   );

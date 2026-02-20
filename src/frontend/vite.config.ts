@@ -96,9 +96,4 @@ export default defineConfig({
       'crelt',
     ],
   },
-
-  test: {
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
-    exclude: ['tests/e2e/**'],
-  },
 })

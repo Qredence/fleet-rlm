@@ -9,6 +9,12 @@ import type { NavItem } from "../data/types";
 import { useNavigation } from "../hooks/useNavigation";
 import { useAppNavigate } from "../hooks/useAppNavigate";
 import { preloadNavRoute } from "../../lib/perf/routePreload";
+import { toast } from "sonner";
+import {
+  BACKEND_CAPABILITY_TOAST,
+  BACKEND_CAPABILITY_TOOLTIP,
+  isSectionSupported,
+} from "../../lib/rlm-api";
 import { cn } from "./utils";
 
 const tabs: { key: NavItem; label: string; icon: typeof MessageSquare }[] = [
@@ -66,6 +72,7 @@ export function MobileTabBar() {
         <div className="flex items-stretch h-full px-2">
           {tabs.map((tab) => {
             const isActive = activeNav === tab.key;
+            const isSupported = isSectionSupported(tab.key);
             const Icon = tab.icon;
 
             return (
@@ -74,17 +81,30 @@ export function MobileTabBar() {
                 role="tab"
                 aria-selected={isActive}
                 aria-label={tab.label}
-                onClick={() => navigateTo(tab.key)}
+                aria-disabled={!isSupported}
+                title={isSupported ? undefined : BACKEND_CAPABILITY_TOOLTIP}
+                onClick={() => {
+                  if (!isSupported) {
+                    toast.info(BACKEND_CAPABILITY_TOAST);
+                    return;
+                  }
+                  navigateTo(tab.key);
+                }}
                 onPointerEnter={() => {
-                  void preloadNavRoute(tab.key);
+                  if (isSupported) {
+                    void preloadNavRoute(tab.key);
+                  }
                 }}
                 onFocus={() => {
-                  void preloadNavRoute(tab.key);
+                  if (isSupported) {
+                    void preloadNavRoute(tab.key);
+                  }
                 }}
                 className={cn(
                   "relative flex-1 flex flex-col items-center justify-center gap-0.5",
                   "touch-target min-w-[52px]",
                   "transition-colors",
+                  !isSupported && "opacity-50",
                 )}
                 style={{ fontFamily: "var(--font-family)" }}
               >
