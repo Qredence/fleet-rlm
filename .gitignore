@@ -77,3 +77,5 @@ fleet_rlm.db
 server.log
 src/frontend/test-results/
 tui/
+tui-cli/tui-ink/node_modules/
+tui-cli/opentui-rlm/node_modules/
