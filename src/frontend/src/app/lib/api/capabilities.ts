@@ -113,6 +113,16 @@ function allAvailableCapabilities(
   };
 }
 
+function allUnavailableCapabilities(reason: string): ApiCapabilities {
+  return {
+    skills: { available: false, path: CAPABILITY_PATHS.skills, reason },
+    memory: { available: false, path: CAPABILITY_PATHS.memory, reason },
+    taxonomy: { available: false, path: CAPABILITY_PATHS.taxonomy, reason },
+    analytics: { available: false, path: CAPABILITY_PATHS.analytics, reason },
+    filesystem: { available: false, path: CAPABILITY_PATHS.filesystem, reason },
+  };
+}
+
 function buildFallbackReason(
   feature: ApiCapabilityKey,
   status: ApiCapabilityStatus,
@@ -140,6 +150,15 @@ export async function getApiCapabilities(options?: {
     cachedCapabilities = mockCaps;
     cacheExpiryMs = Date.now() + MIN_CACHE_TTL_MS;
     return mockCaps;
+  }
+
+  if (!apiConfig.enableLegacyApiProbes) {
+    const disabledCaps = allUnavailableCapabilities(
+      "Legacy API probing is disabled by default. Set VITE_FLEET_ENABLE_LEGACY_API_PROBES=true to enable /api/v1 capability probes.",
+    );
+    cachedCapabilities = disabledCaps;
+    cacheExpiryMs = Date.now() + MIN_CACHE_TTL_MS;
+    return disabledCaps;
   }
 
   const now = Date.now();

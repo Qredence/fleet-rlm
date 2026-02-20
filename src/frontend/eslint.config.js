@@ -36,4 +36,56 @@ export default tseslint.config(
       '@typescript-eslint/no-empty-object-type': 'off',
     },
   },
+  {
+    files: ['src/app/lib/api/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/lib/rlm-api',
+                '**/lib/rlm-api/*',
+                './rlm-api',
+                './rlm-api/*',
+                '../rlm-api',
+                '../rlm-api/*',
+                '../../lib/rlm-api',
+                '../../lib/rlm-api/*',
+              ],
+              message:
+                'lib/api must not import from lib/rlm-api. Keep legacy/fallback surfaces isolated.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/app/lib/rlm-api/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/lib/api',
+                '**/lib/api/*',
+                './api',
+                './api/*',
+                '../api',
+                '../api/*',
+                '../../lib/api',
+                '../../lib/api/*',
+              ],
+              message:
+                'lib/rlm-api must not import from lib/api. Keep core backend contracts isolated.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );
