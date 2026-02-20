@@ -13,18 +13,25 @@
   - [x] `rlm_runtime_modules.py` has 12+ `dspy.RLM` wrappers
   - [x] `delegate_sub_agent.py` handles depth-tracked recursive sub-agents
   - [x] `runtime_factory.py` provides lazy-cached module construction
-  - [/] Wire `search_evolutive_memory` into `build_tool_list()` (~5 LOC)
-  - [ ] Verify truncation guard covers `dspy.RLM` → `ModalInterpreter.execute()` path
+  - [x] Wire `search_evolutive_memory` into `build_tool_list()` (~5 LOC)
+  - [x] Verify truncation guard covers `dspy.RLM` → `ModalInterpreter.execute()` path
+  - [x] **Verify:** Write `tests/test_tools.py` to confirm memory tool registration
+  - [x] **Verify:** Write `tests/test_rlm_state.py` to ensure Modal session ID sharing
+  - [x] **Verify:** Write `tests/test_guard.py` to test 5000-char `dspy.RLM` truncation
 - [ ] **Phase 4: API & Multiplexed WebSockets**
   - [ ] Review `src/fleet_rlm/server/routers/` and `execution_events.py`
   - [ ] Expand `StreamEvent` with `rlm_executing`, `plan_update`, `memory_update` types
   - [ ] Add WebSocket endpoint broadcasting multiplexed JSON
   - [ ] Ensure `tui-cli` and `tui-ink` backwards compatibility
+  - [ ] **Verify:** Write `tests/test_events.py` for discriminated union serialization
+  - [ ] **Verify:** E2E test `tui-cli` locally to ensure it doesn't crash on new events
 - [ ] **Phase 5: The Frontend**
-  - [ ] Scaffold Vite + React app in `frontend/`
+  - [ ] Scaffold Vite + React app in `src/frontend/`
   - [ ] Build Zustand stores consuming WebSocket stream
   - [ ] Build Dual-Pane UI (Chat left, Workspace right)
   - [ ] Connect TanStack Query for Neon taxonomy cache
+  - [ ] **Verify:** Write Vitest unit tests for Zustand WebSocket reconnection
+  - [ ] **Verify:** Write Vitest unit tests for TanStack Query caching logic
 
 ## Planning Artifacts
 
@@ -34,4 +41,5 @@
 - [x] Generate codebase assessment
 - [x] Generate concept, user flow, architecture diagram artifacts
 - [x] Create master `INDEX.md`
+- [x] Generate `verification_matrix.md` with testing plan
 - [x] Copy all artifacts to `docs/` folder

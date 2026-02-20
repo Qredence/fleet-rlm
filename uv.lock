@@ -972,6 +972,18 @@ wheels = [
 ]
 
 [[package]]
+name = "dspy-ai"
+version = "3.1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dspy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bf/56/fc26b51a10b360255e957e4af95286ec0677707e0bfed29dad1a0cc49d45/dspy_ai-3.1.3.tar.gz", hash = "sha256:ad414555bcd5a57b6d135736876256cfeb93ddf735455d173e5f3b875c1c00d0", size = 1113, upload-time = "2026-02-05T16:24:27.096Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/d9/96671e96cae106ad7ecf4809be906925cd67401e7eee31b4f28bb4641fa4/dspy_ai-3.1.3-py3-none-any.whl", hash = "sha256:128ab0c0aef1386491a704f16823faf93da165674f9cf1fa7165f4f2d1ec9e67", size = 1096, upload-time = "2026-02-05T16:24:26.363Z" },
+]
+
+[[package]]
 name = "email-validator"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1330,11 +1342,15 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "asyncpg" },
     { name = "dspy" },
+    { name = "dspy-ai" },
+    { name = "fastapi", extra = ["standard"] },
     { name = "greenlet" },
     { name = "hydra-core" },
+    { name = "litellm" },
     { name = "markitdown", extra = ["all"] },
     { name = "modal" },
     { name = "omegaconf" },
+    { name = "pgvector" },
     { name = "posthog" },
     { name = "prompt-toolkit" },
     { name = "psycopg" },
@@ -1348,6 +1364,8 @@ dependencies = [
     { name = "structlog" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typer" },
+    { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -1404,6 +1422,8 @@ requires-dist = [
     { name = "asyncpg", marker = "extra == 'server'", specifier = ">=0.29,<1" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "dspy", specifier = "==3.1.3" },
+    { name = "dspy-ai", specifier = ">=3.1.3" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.128.7" },
     { name = "fastapi", extras = ["standard"], marker = "extra == 'full'", specifier = ">=0.115,<1" },
     { name = "fastapi", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.115,<1" },
     { name = "fastmcp", marker = "extra == 'full'", specifier = ">=2.14.0,<3" },
@@ -1414,9 +1434,11 @@ requires-dist = [
     { name = "httpx", extras = ["socks"], marker = "extra == 'full'", specifier = ">=0.28.1,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'mcp'", specifier = ">=0.28.1,<1" },
     { name = "hydra-core", specifier = ">=1.3,<2" },
+    { name = "litellm", specifier = ">=1.81.10" },
     { name = "markitdown", extras = ["all"], specifier = ">=0.1.0,<1" },
     { name = "modal", specifier = ">=1.3.2" },
     { name = "omegaconf", specifier = ">=2.3,<3" },
+    { name = "pgvector", specifier = ">=0.4.2" },
     { name = "posthog", specifier = ">=7.9.1" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "prompt-toolkit", specifier = ">=3.0.50,<4" },
@@ -1447,8 +1469,10 @@ requires-dist = [
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.1" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1a16" },
     { name = "typer", specifier = ">=0.21.1,<1" },
+    { name = "uvicorn", specifier = ">=0.40.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'full'", specifier = ">=0.32,<1" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.32,<1" },
+    { name = "websockets", specifier = ">=15.0.1" },
     { name = "websockets", marker = "extra == 'full'", specifier = ">=14,<17" },
     { name = "websockets", marker = "extra == 'server'", specifier = ">=14,<17" },
 ]
@@ -3395,6 +3419,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/34/a4/5cec1112009f0439a5ca6afa8ace321f0ab2f48da3255b7a1c8953014670/pdfminer_six-20260107.tar.gz", hash = "sha256:96bfd431e3577a55a0efd25676968ca4ce8fd5b53f14565f85716ff363889602", size = 8512094, upload-time = "2026-01-07T13:29:12.937Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/8b/28c4eaec9d6b036a52cb44720408f26b1a143ca9bce76cc19e8f5de00ab4/pdfminer_six-20260107-py3-none-any.whl", hash = "sha256:366585ba97e80dffa8f00cebe303d2f381884d8637af4ce422f1df3ef38111a9", size = 6592252, upload-time = "2026-01-07T13:29:10.742Z" },
+]
+
+[[package]]
+name = "pgvector"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/25/6c/6d8b4b03b958c02fa8687ec6063c49d952a189f8c91ebbe51e877dfab8f7/pgvector-0.4.2.tar.gz", hash = "sha256:322cac0c1dc5d41c9ecf782bd9991b7966685dee3a00bc873631391ed949513a", size = 31354, upload-time = "2025-12-05T01:07:17.87Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/26/6cee8a1ce8c43625ec561aff19df07f9776b7525d9002c86bceb3e0ac970/pgvector-0.4.2-py3-none-any.whl", hash = "sha256:549d45f7a18593783d5eec609ea1684a724ba8405c4cb182a0b2b08aeff04e08", size = 27441, upload-time = "2025-12-05T01:07:16.536Z" },
 ]
 
 [[package]]

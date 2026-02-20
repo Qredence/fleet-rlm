@@ -229,7 +229,15 @@ print(f"Workspace ready at {self.workspace_path}")
             if isinstance(result, FinalOutput):
                 output = result.output
             else:
-                output = result
+                output = str(result)
+
+            # CRITICAL: Truncation Guard to prevent Context Rot
+            MAX_CHARS = 2000
+            if isinstance(output, str) and len(output) > MAX_CHARS:
+                output = (
+                    output[:MAX_CHARS]
+                    + "\n\nWARNING: Output truncated. Context window protected. Write scripts to filter (e.g., df.head()) or save heavy output to files instead."
+                )
 
             # Record successful execution
             record = ExecutionRecord(

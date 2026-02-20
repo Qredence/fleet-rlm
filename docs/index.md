@@ -54,8 +54,11 @@
 
 ## 🔬 Phase Completion Artifacts
 
-| Document                                                                                                                                                                                        | Description                                     |
-| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
-| [phase_1_database_schema_artifact.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_1_database_schema_artifact.md) | Phase 1 verification trace + schema definitions |
-| [phase_2_tool_registry_artifact.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_2_tool_registry_artifact.md)     | Phase 2 truncation guard + memory tools         |
-| [phase_3_pre_walkthrough.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_3_pre_walkthrough.md)                   | Phase 3 pre-implementation walkthrough          |
+| Document                                                                                                                                                                                        | Description                                             |
+| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------ |
+| [phase_1_database_schema_artifact.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_1_database_schema_artifact.md) | Phase 1 verification trace + schema definitions         |
+| [phase_2_tool_registry_artifact.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_2_tool_registry_artifact.md)     | Phase 2 truncation guard + memory tools                 |
+| [phase_3_pre_walkthrough.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_3_pre_walkthrough.md)                   | Phase 3 pre-implementation walkthrough                  |
+| [phase_3_analysis.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_3_analysis.md)                                 | Critical gap analysis showing Phase 3 pre-built         |
+| [verification_matrix.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/verification_matrix.md)                           | Unit and integration testing protocols for all phases   |
+| [final_expected_outcomes.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/final_expected_outcomes.md)                   | End-state code tree diff, feature list, and LOC changes |
