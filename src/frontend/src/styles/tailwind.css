@@ -1,0 +1,19 @@
+@import "tailwindcss" source(none);
+@source '../**/*.{js,ts,jsx,tsx}';
+
+@import "tw-animate-css";
+
+/* Utility: hide scrollbar on horizontal overflow */
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Utility: 44pt minimum touch target (iOS HIG / WCAG 2.5.8) */
+@utility touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
