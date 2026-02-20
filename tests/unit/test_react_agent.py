@@ -14,7 +14,23 @@ from types import SimpleNamespace
 
 import dspy
 import pytest
-from dspy.primitives.code_interpreter import FinalOutput
+
+try:
+    from dspy.primitives.code_interpreter import FinalOutput
+except ImportError:
+
+    class FinalOutput(dict):
+        """Minimal compatibility shim when DSPy FinalOutput import is unavailable."""
+
+        def __init__(self, output):
+            super().__init__(output if isinstance(output, dict) else {"output": output})
+            self.output = output
+
+        def __eq__(self, other):
+            if not isinstance(other, FinalOutput):
+                return NotImplemented
+            return dict.__eq__(self, other) and self.output == other.output
+
 
 from fleet_rlm.react import RLMReActChatAgent, RLMReActChatSignature
 from fleet_rlm.react import tools as react_tools
@@ -222,15 +238,30 @@ def test_forward_accepts_custom_history(monkeypatch):
     assert len(agent.history.messages) == 0
 
 
-def test_chat_turn_uses_forward_internally(monkeypatch):
-    """chat_turn() should delegate to forward() and append history."""
+def test_chat_turn_uses_module_call_semantics(monkeypatch):
+    """chat_turn() should invoke the DSPy module call path (`self(...)`)."""
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    called: dict[str, object] = {"used": False, "kwargs": {}}
+
+    def _fake_module_call(self, *args, **kwargs):
+        called["used"] = True
+        called["kwargs"] = kwargs
+        request = str(kwargs.get("user_request", ""))
+        return SimpleNamespace(
+            assistant_response=f"module-call:{request}",
+            trajectory={"tool_name_0": "finish"},
+        )
+
+    monkeypatch.setattr(RLMReActChatAgent, "__call__", _fake_module_call)
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     result = agent.chat_turn("hello")
 
-    assert result["assistant_response"] == "echo:hello"
+    assert called["used"] is True
+    assert called["kwargs"] == {"user_request": "hello"}
+    assert result["assistant_response"] == "module-call:hello"
     assert result["history_turns"] == 1
     assert agent.history.messages[0]["user_request"] == "hello"
 

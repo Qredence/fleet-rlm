@@ -238,7 +238,9 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         if not message or not message.strip():
             raise ValueError("message cannot be empty")
 
-        prediction = self.forward(user_request=message)
+        # Invoke the DSPy module call path (`self(...)`) instead of calling
+        # `forward(...)` directly to preserve DSPy module semantics.
+        prediction = self(user_request=message)
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         guardrail_warnings = list(getattr(prediction, "guardrail_warnings", []) or [])
         self._append_history(message, assistant_response)
