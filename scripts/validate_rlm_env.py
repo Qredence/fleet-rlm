@@ -27,14 +27,14 @@ def load_modal_config():
 
             # Find active profile
             active_profile = None
-            for profile_name, profile_data in config.items():
+            for _, profile_data in config.items():
                 if isinstance(profile_data, dict) and profile_data.get("active"):
                     active_profile = profile_data
                     break
 
             # Fallback to first profile if no active one found
             if not active_profile:
-                for profile_name, profile_data in config.items():
+                for _, profile_data in config.items():
                     if isinstance(profile_data, dict) and "token_id" in profile_data:
                         active_profile = profile_data
                         break
