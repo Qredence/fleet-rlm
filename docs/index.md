@@ -1,55 +1,61 @@
-# fleet-rlm Documentation
+# 📚 fleet-rlm Documentation Index
 
-Welcome to **fleet-rlm**, an agent framework for running Recursive Language Models (RLM) in secure Modal sandboxes, featuring a local Web UI for interactive chat and deep task execution.
+> Master reference for navigating all project documentation artifacts.
 
-## Documentation Structure
+---
 
-Our documentation follows the [Diátaxis](https://diataxis.fr/) framework:
+## 🧠 Concept & Vision
 
-### 🎓 [Tutorials](tutorials/index.md)
+| Document                                                                                                                                                                   | Description                                                      |
+| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------- |
+| [concept.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/concept.md)                          | Vision, core principles, target users                            |
+| [codebase_assessment.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/references/codebase_assessment.md) | LOC analysis, what to retain/edit/clean, maintainability metrics |
 
-_Learning-oriented lessons to get you started._
+---
 
-- [Basic Usage](tutorials/01-basic-usage.md) - Run your first agent.
-- [Document Analysis](tutorials/02-doc-analysis.md) - Extract data from files.
-- [Interactive Chat](tutorials/03-interactive-chat.md) - Use the `fleet web` React UI, or `fleet` (Ink/Python CLI).
+## 🏗️ Architecture
 
-### 🗺️ [How-to Guides](how-to-guides/index.md)
+| Document                                                                                                                                                                    | Description                                                       |
+| :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------- |
+| [architecture.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/architecture.md)                 | High-level Mermaid system component diagram                       |
+| [architecture_diagram.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/architecture_diagram.md) | Full system topology, module dependency graph, 7-layer data flow  |
+| [user_flow.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/user_flow.md)                       | End-to-end sequence diagrams (chat, RLM delegation, memory query) |
+| [frontend_state.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/frontend_state.md)             | Zustand / TanStack Query state flow for the React frontend        |
+| [evolutive_memory.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/evolutive_memory.md)         | Neon pgvector memory architecture                                 |
+| [rlm_machine.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/rlm_machine.md)                   | RLM state machine and execution loop detail                       |
+| [sequence.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/artifacts/sequence.md)                         | WebSocket message sequence diagram                                |
+| [ARCHITECTURE_BIBLE.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/references/ARCHITECTURE_BIBLE.md)    | Original architecture reference                                   |
 
-_Problem-oriented steps for specific goals._
+---
 
-- [Installation](how-to-guides/installation.md)
-- [Configuring Modal (Secrets & Volumes)](how-to-guides/configuring-modal.md)
-- [Managing Skills](how-to-guides/managing-skills.md)
-- [Deploying the API Server & Web UI](how-to-guides/deploying-server.md)
-- [Using with Claude Desktop (MCP)](how-to-guides/using-mcp-server.md)
-- [Using with Claude Code (Skills/Agents/Teams)](how-to-guides/using-claude-code-agents.md)
-- [Performance Regression Guardrail](how-to-guides/performance-regression-guardrail.md)
+## 📊 Comparison Matrices
 
-### 📖 [Reference](reference/index.md)
+| Document                                                                                                                                                                                             | Description                                                             |
+| :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- |
+| [dspy_alignment_matrix.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/references/dspy_alignment_matrix.md)                       | Parameter-by-parameter mapping of `dspy.RLM` API → fleet-rlm            |
+| [industry_comparison_matrix.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/references/industry_comparison_matrix.md)             | 6-column comparison: DSPy, 2× Daytona, Prime Intellect, fleet v0.4/v0.5 |
+| [feature_matrix_current_vs_target.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/references/feature_matrix_current_vs_target.md) | Current baseline vs. hyper-advanced target architecture                 |
 
-_Information-oriented technical descriptions._
+---
 
-- [CLI Commands](reference/cli.md)
-- [Python API](reference/python-api.md)
-- [HTTP API](reference/http-api.md)
-- [Database Architecture](db.md)
-- [Auth Modes](auth.md)
-- [Sandbox File System](reference/sandbox-fs.md)
-- [Source Layout](reference/source-layout.md)
+## 📋 Implementation Plans
 
-### 🧠 [Explanation](explanation/index.md)
+| Document                                                                                                                                                              | Status  | Description                                     |
+| :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------ | :---------------------------------------------- |
+| [implementation_plan.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/implementation_plan.md) | —       | Master surgical integration plan (all 5 phases) |
+| [detailed_plan.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/detailed_plan.md)             | —       | Contextual analysis & detailed roadmap          |
+| [phase_1_plan.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_1_plan.md)               | ✅ Done | Infrastructure Scaffolding & Database Schema    |
+| [phase_2_plan.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_2_plan.md)               | ✅ Done | Execution Engine & DSPy Tools                   |
+| [phase_3_plan.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_3_plan.md)               | 🔜 Next | Upgrading Agent Core (ReAct + RLM)              |
+| [phase_4_plan.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_4_plan.md)               | ⏳      | API & Multiplexed WebSockets                    |
+| [phase_5_plan.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_5_plan.md)               | ⏳      | Dual-Pane React Frontend                        |
 
-_Understanding-oriented background and concepts._
+---
 
-- [RLM Concepts](explanation/rlm-concepts.md)
-- [Architecture](explanation/architecture.md)
-- [Stateful Architecture](explanation/stateful-architecture.md)
-- [Memory Topology Notes](explanation/memory-topology.md)
+## 🔬 Phase Completion Artifacts
 
-## Key Features
-
-- **Multi-Interface**: Modern React Web UI, plus CLI, TUI, FastAPI, and MCP for Claude.
-- **Secure Cloud Execution**: Code and commands run safely in isolated Modal Sandboxes.
-- **DSPy Integration**: Powerful programmatic planning and sub-agent generation.
-- **Long Contexts**: Process massive files and tasks via RLM recursion.
+| Document                                                                                                                                                                                        | Description                                     |
+| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
+| [phase_1_database_schema_artifact.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_1_database_schema_artifact.md) | Phase 1 verification trace + schema definitions |
+| [phase_2_tool_registry_artifact.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_2_tool_registry_artifact.md)     | Phase 2 truncation guard + memory tools         |
+| [phase_3_pre_walkthrough.md](file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/_WORLD/_RLM/fleet-rlm-dspy/docs/plans/phase_3_pre_walkthrough.md)                   | Phase 3 pre-implementation walkthrough          |
