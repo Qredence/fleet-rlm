@@ -1,6 +1,7 @@
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
 import type { ChatMessage } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
+import { QueryClient } from "@tanstack/react-query";
 
 const DEFAULT_PHASE = 1 as const;
 
@@ -184,6 +185,7 @@ function readGuardrailWarnings(
 function applyEvent(
   messages: ChatMessage[],
   frame: WsServerEvent,
+  queryClient?: QueryClient,
 ): ApplyFrameResult {
   const { kind, text, payload } = frame.data;
 
@@ -223,6 +225,67 @@ function applyEvent(
     case "tool_result": {
       return {
         messages: appendReasoning(messages, `Tool Result: ${text}`),
+        terminal: false,
+        errored: false,
+      };
+    }
+
+    case "plan_update": {
+      let next = finishReasoning(messages);
+      next = [
+        ...next,
+        {
+          id: nextId("plan"),
+          type: "plan_update",
+          content: text || "Running plan...",
+          phase: DEFAULT_PHASE,
+        },
+      ];
+      return {
+        messages: next,
+        terminal: false,
+        errored: false,
+      };
+    }
+
+    case "rlm_executing": {
+      let next = finishReasoning(messages);
+      const toolName = payload?.tool_name || "Sub-agent iteration";
+      next = [
+        ...next,
+        {
+          id: nextId("rlm"),
+          type: "rlm_executing",
+          content: `Executing ${toolName}...`,
+          phase: DEFAULT_PHASE,
+        },
+      ];
+      return {
+        messages: next,
+        terminal: false,
+        errored: false,
+      };
+    }
+
+    case "memory_update": {
+      let next = finishReasoning(messages);
+      next = [
+        ...next,
+        {
+          id: nextId("memory"),
+          type: "memory_update",
+          content: text || "Updating memory...",
+          phase: DEFAULT_PHASE,
+        },
+      ];
+
+      // Attempt to invalidate TanStack query if queryClient is passed
+      if (queryClient) {
+        queryClient.invalidateQueries({ queryKey: ["memory"] });
+      }
+
+      return {
+        messages: next,
         terminal: false,
         errored: false,
       };
@@ -293,6 +356,7 @@ function applyEvent(
 export function applyWsFrameToMessages(
   messages: ChatMessage[],
   frame: WsServerMessage,
+  queryClient?: QueryClient,
 ): ApplyFrameResult {
   if (frame.type === "error") {
     const next = appendSystem(messages, `Backend error: ${frame.message}`);
@@ -303,5 +367,5 @@ export function applyWsFrameToMessages(
     };
   }
 
-  return applyEvent(messages, frame);
+  return applyEvent(messages, frame, queryClient);
 }

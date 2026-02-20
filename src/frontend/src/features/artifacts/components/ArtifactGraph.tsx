@@ -17,9 +17,11 @@ import type {
   ExecutionStep,
 } from "@/stores/artifactStore";
 import {
-  GraphStepNode,
   NODE_WIDTH,
   STEP_TYPE_META,
+} from "@/features/artifacts/components/GraphStepNode.constants";
+import {
+  GraphStepNode,
   type GraphStepNodeData,
 } from "@/features/artifacts/components/GraphStepNode";
 

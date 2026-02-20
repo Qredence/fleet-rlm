@@ -12,7 +12,10 @@ import {
   SuggestionIconTune,
   SuggestionIconSparkle,
 } from "@/components/shared/SuggestionIcons";
-import { fadeUp, fadeUpReduced } from "@/app/pages/skill-creation/animation-presets";
+import {
+  fadeUp,
+  fadeUpReduced,
+} from "@/app/pages/skill-creation/animation-presets";
 import { AssistantMessage } from "@/app/pages/skill-creation/AssistantMessage";
 import { UserMessage } from "@/app/pages/skill-creation/UserMessage";
 import { HitlCard } from "@/app/pages/skill-creation/HitlCard";
@@ -231,6 +234,39 @@ export function ChatMessageList({
                     isThinking={msg.reasoningData.isThinking}
                     duration={msg.reasoningData.duration}
                   />
+                </div>
+              )}
+
+              {msg.type === "plan_update" && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
+                    <div className="size-2 rounded-full bg-accent animate-pulse" />
+                    <span className="text-accent" style={typo.label}>
+                      {msg.content}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {msg.type === "rlm_executing" && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                    <div className="size-2 rounded-full bg-primary animate-pulse" />
+                    <span className="text-primary" style={typo.label}>
+                      {msg.content}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {msg.type === "memory_update" && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                    <div className="size-2 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-green-500" style={typo.label}>
+                      {msg.content}
+                    </span>
+                  </div>
                 </div>
               )}
             </motion.div>

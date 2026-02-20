@@ -40,7 +40,10 @@ export type WsEventKind =
   | "trajectory_step"
   | "final"
   | "error"
-  | "cancelled";
+  | "cancelled"
+  | "plan_update"
+  | "rlm_executing"
+  | "memory_update";
 
 export interface WsEventPayload {
   kind: WsEventKind;
@@ -78,6 +81,9 @@ function isWsEventKind(value: string): value is WsEventKind {
     "final",
     "error",
     "cancelled",
+    "plan_update",
+    "rlm_executing",
+    "memory_update",
   ].includes(value);
 }
 
@@ -342,7 +348,10 @@ async function createReconnectingWs(
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
       const wsUrlObj = new URL(rlmApiConfig.wsUrl!);
-      const token = typeof localStorage !== "undefined" ? localStorage.getItem("fleet_access_token") : null;
+      const token =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("fleet_access_token")
+          : null;
       if (token) {
         wsUrlObj.searchParams.set("access_token", token);
       }

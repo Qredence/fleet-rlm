@@ -8,6 +8,7 @@ import {
 } from "@/lib/rlm-api";
 import type { ChatMessage } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
+import { QueryClient } from "@tanstack/react-query";
 
 interface ChatStore {
   // State
@@ -30,6 +31,7 @@ interface ChatStore {
   streamMessage: (
     text: string,
     onFrameCallback?: (frame: WsServerMessage) => void,
+    queryClient?: QueryClient,
   ) => Promise<void>;
   stopStreaming: () => void;
 }
@@ -74,6 +76,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   streamMessage: async (
     text: string,
     onFrameCallback?: (frame: WsServerMessage) => void,
+    queryClient?: QueryClient,
   ) => {
     const { sessionId, isStreaming } = get();
 
@@ -102,7 +105,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         signal: controller.signal,
         onFrame: (frame) => {
           set((state) => ({
-            messages: applyWsFrameToMessages(state.messages, frame).messages,
+            messages: applyWsFrameToMessages(state.messages, frame, queryClient)
+              .messages,
           }));
 
           if (onFrameCallback) {

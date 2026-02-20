@@ -62,7 +62,10 @@ export interface ChatMessage {
     | "system"
     | "hitl"
     | "clarification"
-    | "reasoning";
+    | "reasoning"
+    | "plan_update"
+    | "rlm_executing"
+    | "memory_update";
   content: string;
   phase?: 1 | 2 | 3;
   /** When true, the Streamdown component will animate text streaming in */

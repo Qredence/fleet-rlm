@@ -1,27 +1,11 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import {
-  Brain,
-  Terminal,
-  Wrench,
-  Database,
-  FileOutput,
-} from "lucide-react";
 import type { ArtifactStepType } from "@/stores/artifactStore";
 import { cn } from "@/components/ui/utils";
-
-// ── Shared constants (re-exported for legend + edges) ───────────────
-
-export const STEP_TYPE_META: Record<
-  ArtifactStepType,
-  { color: string; label: string; Icon: typeof Brain }
-> = {
-  llm: { color: "var(--chart-3)", label: "LLM", Icon: Brain },
-  repl: { color: "var(--chart-4)", label: "REPL", Icon: Terminal },
-  tool: { color: "var(--chart-2)", label: "Tool", Icon: Wrench },
-  memory: { color: "var(--chart-1)", label: "Memory", Icon: Database },
-  output: { color: "var(--accent)", label: "Output", Icon: FileOutput },
-};
+import {
+  NODE_WIDTH,
+  STEP_TYPE_META,
+} from "@/features/artifacts/components/GraphStepNode.constants";
 
 // ── Node data shape ─────────────────────────────────────────────────
 
@@ -47,8 +31,6 @@ function formatElapsed(ms: number): string {
 }
 
 // ── Component ───────────────────────────────────────────────────────
-
-const NODE_WIDTH = 220;
 
 const GraphStepNode = memo(function GraphStepNode({
   data,
@@ -179,4 +161,3 @@ const GraphStepNode = memo(function GraphStepNode({
 });
 
 export { GraphStepNode };
-export { NODE_WIDTH };

@@ -9,6 +9,7 @@ import type { ChatSimulation } from "@/app/pages/skill-creation/useChatSimulatio
 import { useArtifactStore } from "@/stores/artifactStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import type { WsServerMessage } from "@/lib/rlm-api";
+import { useQueryClient } from "@tanstack/react-query";
 
 function isTerminalFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
@@ -59,6 +60,8 @@ export function useBackendChatRuntime(): ChatSimulation {
     setMessages,
     addMessage,
   } = useChatStore();
+
+  const queryClient = useQueryClient();
 
   const [inputValue, setInputValue] = useState("");
   const [phase, setPhase] = useState<CreationPhase>("idle");
@@ -120,10 +123,14 @@ export function useBackendChatRuntime(): ChatSimulation {
     let terminalSeen = false;
 
     try {
-      await streamMessage(text, (frame) => {
-        if (isTerminalFrame(frame)) terminalSeen = true;
-        onFrame(frame);
-      });
+      await streamMessage(
+        text,
+        (frame) => {
+          if (isTerminalFrame(frame)) terminalSeen = true;
+          onFrame(frame);
+        },
+        queryClient,
+      );
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown streaming error";
@@ -157,6 +164,7 @@ export function useBackendChatRuntime(): ChatSimulation {
     isStreaming,
     onFrame,
     openCanvas,
+    queryClient,
     setCreationPhase,
     addMessage,
     streamMessage,

@@ -137,8 +137,6 @@ export function useCodeMirror({
       viewRef.current = null;
       setEditorReady(false);
     };
-    // Only mount/unmount on readOnly change — value sync is handled below
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly]);
 
   // Sync value from React state → CodeMirror (when file changes externally)

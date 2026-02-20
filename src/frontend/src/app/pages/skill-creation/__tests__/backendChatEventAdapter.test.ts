@@ -4,10 +4,11 @@
  * Tests the `applyWsFrameToMessages` function which transforms raw WebSocket
  * server frames into the frontend's `ChatMessage[]` list.
  */
-import { describe, expect, it } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
 import type { ChatMessage } from "@/lib/data/types";
 import type { WsServerMessage } from "@/lib/rlm-api";
+import { QueryClient } from "@tanstack/react-query";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 function makeEvent(
@@ -80,9 +81,10 @@ describe("applyWsFrameToMessages", () => {
       const msg = messages[0];
       expect(msg?.type).toBe("assistant");
       expect(msg?.content).toContain("Hello");
-      expect(
-        (msg as Extract<ChatMessage, { type: "assistant" }>).streaming,
-      ).toBe(true);
+      if (msg?.type !== "assistant") {
+        throw new Error("Expected assistant message");
+      }
+      expect(msg.streaming).toBe(true);
     });
 
     it("accumulates multiple tokens into the same bubble", () => {
@@ -154,9 +156,10 @@ describe("applyWsFrameToMessages", () => {
 
       expect(terminal).toBe(true);
       const assistant = messages.find((m) => m.type === "assistant");
-      expect(
-        (assistant as Extract<ChatMessage, { type: "assistant" }>)?.streaming,
-      ).toBe(false);
+      if (!assistant) {
+        throw new Error("Expected assistant message");
+      }
+      expect(assistant.streaming).toBe(false);
       expect(assistant?.content).toBe("Hello, how can I help?");
     });
 
@@ -222,5 +225,70 @@ describe("applyWsFrameToMessages", () => {
         expect(messages).toHaveLength(1);
       },
     );
+  });
+
+  // ── plan_update ───────────────────────────────────────────────────────────────
+  describe("plan_update event", () => {
+    it("creates a plan_update message and closes open reasoning bubbles", () => {
+      let msgs: ChatMessage[] = [];
+      msgs = applyWsFrameToMessages(
+        msgs,
+        makeEvent("reasoning_step", "Thinking..."),
+      ).messages;
+
+      const { messages, terminal, errored } = applyWsFrameToMessages(
+        msgs,
+        makeEvent("plan_update", "Moving to step 2"),
+      );
+
+      expect(terminal).toBe(false);
+      expect(errored).toBe(false);
+
+      const planMsg = messages.find((m) => m.type === "plan_update");
+      expect(planMsg).toBeDefined();
+      expect(planMsg?.content).toBe("Moving to step 2");
+
+      const reasoning = messages.find((m) => m.type === "reasoning");
+      expect(reasoning?.reasoningData?.isThinking).toBe(false);
+    });
+  });
+
+  // ── rlm_executing ─────────────────────────────────────────────────────────────
+  describe("rlm_executing event", () => {
+    it("creates an rlm_executing message with the tool name", () => {
+      const { messages, terminal } = applyWsFrameToMessages(
+        [],
+        makeEvent("rlm_executing", "", { tool_name: "PythonInterpreter" }),
+      );
+
+      expect(terminal).toBe(false);
+      const rlmMsg = messages.find((m) => m.type === "rlm_executing");
+      expect(rlmMsg).toBeDefined();
+      expect(rlmMsg?.content).toBe("Executing PythonInterpreter...");
+    });
+  });
+
+  // ── memory_update ─────────────────────────────────────────────────────────────
+  describe("memory_update event", () => {
+    it("creates a memory_update message and invalidates TanStack queries if queryClient provided", () => {
+      const mockQueryClient = {
+        invalidateQueries: vi.fn(),
+      } as unknown as QueryClient;
+
+      const { messages, terminal } = applyWsFrameToMessages(
+        [],
+        makeEvent("memory_update", "Saved semantic relationship"),
+        mockQueryClient,
+      );
+
+      expect(terminal).toBe(false);
+      const memMsg = messages.find((m) => m.type === "memory_update");
+      expect(memMsg).toBeDefined();
+      expect(memMsg?.content).toBe("Saved semantic relationship");
+
+      expect(mockQueryClient.invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ["memory"],
+      });
+    });
   });
 });

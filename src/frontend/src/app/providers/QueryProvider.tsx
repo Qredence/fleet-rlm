@@ -41,4 +41,4 @@ function QueryProvider({ children }: Props) {
   );
 }
 
-export { QueryProvider, queryClient };
+export { QueryProvider };
