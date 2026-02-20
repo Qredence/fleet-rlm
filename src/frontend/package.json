@@ -11,7 +11,7 @@
     "type-check": "tsc -p tsconfig.app.json --noEmit",
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",
     "lint": "eslint src/",
-    "lint:robustness": "eslint src/app/components/shared/ToggleSwitch.tsx src/app/lib/api/capabilities.ts src/app/components/hooks/useSkills.ts src/app/components/hooks/useMemory.ts src/app/components/hooks/useTaxonomy.ts src/app/components/hooks/useAnalytics.ts src/app/components/hooks/useFilesystem.ts src/app/pages/SkillLibrary.tsx src/app/pages/MemoryPage.tsx src/app/pages/TaxonomyBrowser.tsx src/app/pages/AnalyticsDashboard.tsx src/app/pages/RouteErrorPage.tsx src/app/routes.ts src/app/lib/perf/lazyWithRetry.ts src/app/lib/perf/routePreload.tsx src/app/layout/TopHeader.tsx src/app/components/ui/mobile-tab-bar.tsx src/app/components/ui/nav-tab.tsx src/main.tsx",
+    "lint:robustness": "eslint src/components/shared/ToggleSwitch.tsx src/lib/api/capabilities.ts src/hooks/useSkills.ts src/hooks/useMemory.ts src/hooks/useTaxonomy.ts src/hooks/useAnalytics.ts src/hooks/useFilesystem.ts src/app/pages/SkillLibrary.tsx src/app/pages/MemoryPage.tsx src/app/pages/TaxonomyBrowser.tsx src/app/pages/AnalyticsDashboard.tsx src/app/pages/RouteErrorPage.tsx src/app/routes.ts src/lib/perf/lazyWithRetry.ts src/lib/perf/routePreload.tsx src/app/layout/TopHeader.tsx src/components/ui/mobile-tab-bar.tsx src/components/ui/nav-tab.tsx src/main.tsx",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "test:e2e": "playwright test",

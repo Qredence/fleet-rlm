@@ -1,4 +1,4 @@
-import { Streamdown } from "../../components/ui/streamdown";
+import { Streamdown } from "@/components/ui/streamdown";
 
 interface AssistantMessageProps {
   content: string;

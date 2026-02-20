@@ -1,14 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { usePostHog } from "@posthog/react";
-import { useNavigation } from "../../components/hooks/useNavigation";
-import { useStickToBottom } from "../../components/hooks/useStickToBottom";
-import { useChatHistory } from "../../components/hooks/useChatHistory";
-import { useIsMobile } from "../../components/ui/use-mobile";
-import { PromptInput } from "../../components/ui/prompt-input";
-import { ConversationHistory } from "../../components/features/ConversationHistory";
-import { ChatMessageList } from "./ChatMessageList";
-import { useBackendChatRuntime } from "./useBackendChatRuntime";
-import { isRlmCoreEnabled } from "../../lib/rlm-api";
+import { useNavigation } from "@/hooks/useNavigation";
+import { useStickToBottom } from "@/hooks/useStickToBottom";
+import { useChatHistory } from "@/hooks/useChatHistory";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { PromptInput } from "@/components/ui/prompt-input";
+import { ConversationHistory } from "@/features/ConversationHistory";
+import { ChatMessageList } from "@/app/pages/skill-creation/ChatMessageList";
+import { useBackendChatRuntime } from "@/app/pages/skill-creation/useBackendChatRuntime";
+import { isRlmCoreEnabled } from "@/lib/rlm-api";
 
 /**
  * SkillCreationFlow — chat-based skill creation orchestrator.

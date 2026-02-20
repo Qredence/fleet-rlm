@@ -1,6 +1,6 @@
-import type { WsServerEvent, WsServerMessage } from "../../lib/rlm-api";
-import type { ChatMessage } from "../../components/data/types";
-import { createLocalId } from "../../lib/id";
+import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
+import type { ChatMessage } from "@/lib/data/types";
+import { createLocalId } from "@/lib/id";
 
 const DEFAULT_PHASE = 1 as const;
 

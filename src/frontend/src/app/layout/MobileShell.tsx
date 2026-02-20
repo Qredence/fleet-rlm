@@ -6,11 +6,11 @@
  * NavigationContext — no props drilled to children.
  */
 import { Drawer } from "vaul";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { TopHeader } from "./TopHeader";
-import { ChatPanel } from "./ChatPanel";
-import { BuilderPanel } from "./BuilderPanel";
-import { MobileTabBar } from "../components/ui/mobile-tab-bar";
+import { useNavigation } from "@/hooks/useNavigation";
+import { TopHeader } from "@/app/layout/TopHeader";
+import { ChatPanel } from "@/app/layout/ChatPanel";
+import { BuilderPanel } from "@/app/layout/BuilderPanel";
+import { MobileTabBar } from "@/components/ui/mobile-tab-bar";
 
 function MobileShell() {
   const { isCanvasOpen, setIsCanvasOpen } = useNavigation();

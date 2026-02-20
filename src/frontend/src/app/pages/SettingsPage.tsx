@@ -8,24 +8,24 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft } from "lucide-react";
-import { typo } from "../components/config/typo";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { useIsMobile } from "../components/ui/use-mobile";
-import { IconButton } from "../components/ui/icon-button";
-import { ScrollArea } from "../components/ui/scroll-area";
+import { typo } from "@/lib/config/typo";
+import { useNavigation } from "@/hooks/useNavigation";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { IconButton } from "@/components/ui/icon-button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "../components/ui/tooltip";
-import { cn } from "../components/ui/utils";
+} from "@/components/ui/tooltip";
+import { cn } from "@/components/ui/utils";
 
 import {
   categories,
   type Category,
-} from "../components/features/settings/types";
-import { SettingsNavItem } from "../components/shared/SettingsNavItem";
-import { SettingsPaneContent } from "../components/features/settings/SettingsPaneContent";
+} from "@/features/settings/types";
+import { SettingsNavItem } from "@/components/shared/SettingsNavItem";
+import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
 
 // ── Component ───────────────────────────────────────────────────────
 export function SettingsPage() {

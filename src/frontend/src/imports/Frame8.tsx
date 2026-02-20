@@ -1,4 +1,4 @@
-import svgPaths from "./svg-z9gb50zttr";
+import svgPaths from "@/imports/svg-z9gb50zttr";
 
 function MenuIcon() {
   return (

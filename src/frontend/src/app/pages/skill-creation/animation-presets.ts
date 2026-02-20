@@ -8,7 +8,7 @@
  *   const prefersReduced = useReducedMotion();
  *   <motion.div {...(prefersReduced ? fadeUpReduced : fadeUp)} />
  */
-import { springs } from "../../components/config/motion-config";
+import { springs } from "@/lib/config/motion-config";
 
 export const fadeUp = {
   initial: { opacity: 0, y: 12 },

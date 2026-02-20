@@ -17,11 +17,11 @@ import { useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
-import { typo } from "../components/config/typo";
-import { useMemory } from "../components/hooks/useMemory";
-import type { MemoryType } from "../components/data/types";
-import { LargeTitleHeader } from "../components/shared/LargeTitleHeader";
-import { ScrollArea } from "../components/ui/scroll-area";
+import { typo } from "@/lib/config/typo";
+import { useMemory } from "@/hooks/useMemory";
+import type { MemoryType } from "@/lib/data/types";
+import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -31,18 +31,18 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
-} from "../components/ui/alert-dialog";
-import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { cn } from "../components/ui/utils";
-import { useIsMobile } from "../components/ui/use-mobile";
+} from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from "@/components/ui/utils";
+import { useIsMobile } from "@/components/ui/use-mobile";
 import {
   MemoryEntryCard,
   NewMemoryForm,
   BulkActionToolbar,
   MemoryPageHeaderControls,
   MemoryPageEmptyState,
-} from "../components/features/memory";
-import { formatSize } from "../lib/memory/metadata";
+} from "@/features/memory";
+import { formatSize } from "@/lib/memory/metadata";
 
 export function MemoryPage() {
   const isMobile = useIsMobile();

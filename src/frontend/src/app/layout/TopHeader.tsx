@@ -1,23 +1,23 @@
 import { LayoutGroup } from "motion/react";
-import type { NavItem } from "../components/data/types";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { useAppNavigate } from "../components/hooks/useAppNavigate";
-import { useIsMobile } from "../components/ui/use-mobile";
-import { UserMenu } from "../components/features/UserMenu";
-import { NotificationCenter } from "../components/features/NotificationCenter";
+import type { NavItem } from "@/lib/data/types";
+import { useNavigation } from "@/hooks/useNavigation";
+import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { UserMenu } from "@/features/UserMenu";
+import { NotificationCenter } from "@/features/NotificationCenter";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "../components/ui/tooltip";
-import { IconButton } from "../components/ui/icon-button";
-import { NavTab } from "../components/ui/nav-tab";
-import { cn } from "../components/ui/utils";
-import { preloadNavRoute } from "../lib/perf/routePreload";
+} from "@/components/ui/tooltip";
+import { IconButton } from "@/components/ui/icon-button";
+import { NavTab } from "@/components/ui/nav-tab";
+import { cn } from "@/components/ui/utils";
+import { preloadNavRoute } from "@/lib/perf/routePreload";
 import {
   BACKEND_CAPABILITY_TOOLTIP,
   isSectionSupported,
-} from "../lib/rlm-api";
+} from "@/lib/rlm-api";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 // ── Tab definitions ─────────────────────────────────────────────────

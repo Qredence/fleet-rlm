@@ -12,4 +12,4 @@
  *     ├── useChatSimulation.ts    — Custom hook: mock AI responses, phase transitions
  *     └── animation-presets.ts    — fadeUp, fadeUpReduced spring configs
  */
-export { SkillCreationFlow } from "./skill-creation/SkillCreationFlow";
+export { SkillCreationFlow } from "@/app/pages/skill-creation/SkillCreationFlow";

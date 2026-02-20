@@ -1,30 +1,30 @@
 import { X, Brain } from "lucide-react";
 import { useCallback } from "react";
-import { typo } from "../components/config/typo";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { useAppNavigate } from "../components/hooks/useAppNavigate";
-import { useIsMobile } from "../components/ui/use-mobile";
-import { ErrorBoundary } from "../components/shared/ErrorBoundary";
-import { IconButton } from "../components/ui/icon-button";
+import { typo } from "@/lib/config/typo";
+import { useNavigation } from "@/hooks/useNavigation";
+import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "../components/ui/tooltip";
+} from "@/components/ui/tooltip";
 import svgPaths from "@/imports/svg-z9gb50zttr";
-import { cn } from "../components/ui/utils";
+import { cn } from "@/components/ui/utils";
 import {
   CanvasSwitcher,
   type CanvasMode,
-} from "../components/features/CanvasSwitcher";
-import { CodeArtifact } from "../components/features/CodeArtifact";
-import { ArtifactCanvas } from "../components/artifacts/ArtifactCanvas";
+} from "@/features/CanvasSwitcher";
+import { CodeArtifact } from "@/features/CodeArtifact";
+import { ArtifactCanvas } from "@/features/artifacts/components/ArtifactCanvas";
 import {
   isRlmCoreEnabled,
   isSectionSupported,
   UNSUPPORTED_SECTION_REASON,
-} from "../lib/rlm-api";
-import { BackendCapabilityPage } from "../pages/BackendCapabilityPage";
+} from "@/lib/rlm-api";
+import { BackendCapabilityPage } from "@/app/pages/BackendCapabilityPage";
 
 function EmptyCanvas() {
   return (

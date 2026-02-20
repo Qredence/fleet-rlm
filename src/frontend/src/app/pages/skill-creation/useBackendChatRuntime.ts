@@ -1,20 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import {
-  createBackendSessionId,
-  rlmApiConfig,
-  streamChatOverWs,
-  type WsMessageRequest,
-  type WsServerMessage,
-} from "../../lib/rlm-api";
-import { useNavigation } from "../../components/hooks/useNavigation";
-import type { ChatMessage, CreationPhase } from "../../components/data/types";
-import type { Conversation } from "../../components/hooks/useChatHistory";
-import { applyWsFrameToMessages } from "./backendChatEventAdapter";
-import { applyWsFrameToArtifacts } from "./backendArtifactEventAdapter";
-import type { ChatSimulation } from "./useChatSimulation";
-import { useArtifactStore } from "../../stores/artifactStore";
+import { useNavigation } from "@/hooks/useNavigation";
+import type { ChatMessage, CreationPhase } from "@/lib/data/types";
+import type { Conversation } from "@/hooks/useChatHistory";
+import { applyWsFrameToArtifacts } from "@/app/pages/skill-creation/backendArtifactEventAdapter";
+import type { ChatSimulation } from "@/app/pages/skill-creation/useChatSimulation";
+import { useArtifactStore } from "@/stores/artifactStore";
+import { useChatStore } from "@/features/chat/stores/chatStore";
+import type { WsServerMessage } from "@/lib/rlm-api";
 
 function isTerminalFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
@@ -48,36 +42,39 @@ function toUserMessage(content: string): ChatMessage {
 }
 
 export function useBackendChatRuntime(): ChatSimulation {
-  const { setCreationPhase, sessionId, isCanvasOpen, openCanvas } =
-    useNavigation();
+  const {
+    setCreationPhase,
+    sessionId: navSessionId,
+    isCanvasOpen,
+    openCanvas,
+  } = useNavigation();
   const clearArtifactSteps = useArtifactStore((state) => state.clear);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const {
+    messages,
+    isStreaming,
+    streamMessage,
+    stopStreaming,
+    resetSession,
+    setMessages,
+    addMessage,
+  } = useChatStore();
+
   const [inputValue, setInputValue] = useState("");
   const [phase, setPhase] = useState<CreationPhase>("idle");
   const [isTyping, setIsTyping] = useState(false);
 
   const isFirstMount = useRef(true);
-  const streamControllerRef = useRef<AbortController | null>(null);
-  const streamInFlightRef = useRef(false);
-  const backendSessionIdRef = useRef<string>(createBackendSessionId());
-
-  const stopStreaming = useCallback(() => {
-    streamInFlightRef.current = false;
-    streamControllerRef.current?.abort();
-    streamControllerRef.current = null;
-    setIsTyping(false);
-  }, []);
 
   const resetRuntime = useCallback(() => {
     stopStreaming();
-    backendSessionIdRef.current = createBackendSessionId();
-    setMessages([]);
+    resetSession();
     setInputValue("");
     setPhase("idle");
     setCreationPhase("idle");
+    setIsTyping(false);
     clearArtifactSteps();
-  }, [clearArtifactSteps, setCreationPhase, stopStreaming]);
+  }, [clearArtifactSteps, setCreationPhase, stopStreaming, resetSession]);
 
   useEffect(() => {
     if (isFirstMount.current) {
@@ -86,7 +83,7 @@ export function useBackendChatRuntime(): ChatSimulation {
     }
 
     resetRuntime();
-  }, [sessionId, resetRuntime]);
+  }, [navSessionId, resetRuntime]);
 
   const onFrame = useCallback(
     (frame: WsServerMessage) => {
@@ -94,7 +91,6 @@ export function useBackendChatRuntime(): ChatSimulation {
       setIsTyping(false);
 
       applyWsFrameToArtifacts(frame);
-      setMessages((prev) => applyWsFrameToMessages(prev, frame).messages);
 
       if (isTerminalFrame(frame)) {
         if (isErrorFrame(frame)) {
@@ -111,45 +107,24 @@ export function useBackendChatRuntime(): ChatSimulation {
 
   const handleSubmit = useCallback(async () => {
     const text = inputValue.trim();
-    if (!text || isTyping || streamInFlightRef.current) return;
+    if (!text || isTyping || isStreaming) return;
 
     setInputValue("");
-    setMessages((prev) => [...prev, toUserMessage(text)]);
+    addMessage(toUserMessage(text));
     setPhase("understanding");
     setCreationPhase("understanding");
     setIsTyping(true);
     clearArtifactSteps();
     if (!isCanvasOpen) openCanvas();
 
-    const controller = new AbortController();
-    streamControllerRef.current = controller;
-    streamInFlightRef.current = true;
-
-    const payload: WsMessageRequest = {
-      type: "message",
-      content: text,
-      trace: rlmApiConfig.trace,
-      workspace_id: rlmApiConfig.workspaceId,
-      user_id: rlmApiConfig.userId,
-      session_id: backendSessionIdRef.current,
-      trace_mode: "compact",
-    };
-
     let terminalSeen = false;
 
     try {
-      await streamChatOverWs(payload, {
-        signal: controller.signal,
-        onFrame: (frame) => {
-          if (isTerminalFrame(frame)) terminalSeen = true;
-          onFrame(frame);
-        },
+      await streamMessage(text, (frame) => {
+        if (isTerminalFrame(frame)) terminalSeen = true;
+        onFrame(frame);
       });
     } catch (error) {
-      if (controller.signal.aborted) {
-        return;
-      }
-
       const message =
         error instanceof Error ? error.message : "Unknown streaming error";
       if (!terminalSeen) {
@@ -168,8 +143,6 @@ export function useBackendChatRuntime(): ChatSimulation {
       }
       toast.error("Backend stream failed", { description: message });
     } finally {
-      streamInFlightRef.current = false;
-      streamControllerRef.current = null;
       setIsTyping(false);
       if (!terminalSeen) {
         setPhase("idle");
@@ -181,9 +154,13 @@ export function useBackendChatRuntime(): ChatSimulation {
     inputValue,
     isCanvasOpen,
     isTyping,
+    isStreaming,
     onFrame,
     openCanvas,
     setCreationPhase,
+    addMessage,
+    streamMessage,
+    setMessages,
   ]);
 
   const resolveHitl = useCallback(() => {
@@ -208,8 +185,9 @@ export function useBackendChatRuntime(): ChatSimulation {
       setInputValue("");
       setPhase(conversation.phase);
       setCreationPhase(conversation.phase);
+      setIsTyping(false);
     },
-    [clearArtifactSteps, setCreationPhase, stopStreaming],
+    [clearArtifactSteps, setCreationPhase, stopStreaming, setMessages],
   );
 
   return {
@@ -217,7 +195,8 @@ export function useBackendChatRuntime(): ChatSimulation {
     inputValue,
     setInputValue,
     phase,
-    isTyping,
+    // combined streaming and typing status
+    isTyping: isTyping || isStreaming,
     handleSubmit,
     resolveHitl,
     resolveClarification,

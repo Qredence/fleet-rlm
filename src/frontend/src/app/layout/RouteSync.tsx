@@ -11,9 +11,9 @@
  */
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router";
-import { pathToNav } from "../components/hooks/useAppNavigate";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { isSectionSupported } from "../lib/rlm-api";
+import { pathToNav } from "@/hooks/useAppNavigate";
+import { useNavigation } from "@/hooks/useNavigation";
+import { isSectionSupported } from "@/lib/rlm-api";
 
 function RouteSync() {
   const location = useLocation();

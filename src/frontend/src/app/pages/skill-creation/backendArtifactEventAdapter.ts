@@ -1,10 +1,10 @@
-import type { WsServerMessage } from "../../lib/rlm-api";
+import type { WsServerMessage } from "@/lib/rlm-api";
 import {
   useArtifactStore,
   type ArtifactStepType,
   type ExecutionStep,
-} from "../../stores/artifactStore";
-import { createLocalId } from "../../lib/id";
+} from "@/stores/artifactStore";
+import { createLocalId } from "@/lib/id";
 
 function nextId(prefix: string): string {
   return createLocalId(prefix);

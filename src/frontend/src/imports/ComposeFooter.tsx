@@ -1,4 +1,4 @@
-import svgPaths from "./svg-er4mz3hmp1";
+import svgPaths from "@/imports/svg-er4mz3hmp1";
 
 function Icon() {
   return (

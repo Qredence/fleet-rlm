@@ -1,21 +1,21 @@
 import { type RefObject, type ReactNode } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import type { ChatMessage } from "../../components/data/types";
-import { typo } from "../../components/config/typo";
-import { cn } from "../../components/ui/utils";
-import { Reasoning } from "../../components/ui/reasoning";
-import { ClarificationCard } from "../../components/features/ClarificationCard";
-import { TypingDots } from "../../components/shared/TypingDots";
-import { SuggestionChip } from "../../components/ui/suggestion-chip";
+import type { ChatMessage } from "@/lib/data/types";
+import { typo } from "@/lib/config/typo";
+import { cn } from "@/components/ui/utils";
+import { Reasoning } from "@/components/ui/reasoning";
+import { ClarificationCard } from "@/features/ClarificationCard";
+import { TypingDots } from "@/components/shared/TypingDots";
+import { SuggestionChip } from "@/components/ui/suggestion-chip";
 import {
   SuggestionIconBolt,
   SuggestionIconTune,
   SuggestionIconSparkle,
-} from "../../components/shared/SuggestionIcons";
-import { fadeUp, fadeUpReduced } from "./animation-presets";
-import { AssistantMessage } from "./AssistantMessage";
-import { UserMessage } from "./UserMessage";
-import { HitlCard } from "./HitlCard";
+} from "@/components/shared/SuggestionIcons";
+import { fadeUp, fadeUpReduced } from "@/app/pages/skill-creation/animation-presets";
+import { AssistantMessage } from "@/app/pages/skill-creation/AssistantMessage";
+import { UserMessage } from "@/app/pages/skill-creation/UserMessage";
+import { HitlCard } from "@/app/pages/skill-creation/HitlCard";
 import { Clock } from "lucide-react";
 
 // ── Suggestion prompts shown in the welcome state ────────────────────
