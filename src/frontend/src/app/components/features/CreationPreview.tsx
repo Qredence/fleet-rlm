@@ -51,13 +51,10 @@ export function CreationPreview({ phase, className }: Props) {
   ];
   const phaseIdx = phaseOrder.indexOf(phase);
 
-  const computeTab = () => {
-    if (phaseIdx >= 3) return "validation";
-    if (phaseIdx >= 2) return "preview";
-    return "plan";
-  };
+  const activeTabFromPhase =
+    phaseIdx >= 3 ? "validation" : phaseIdx >= 2 ? "preview" : "plan";
 
-  const [activeTab, setActiveTab] = useState(computeTab);
+  const [activeTab, setActiveTab] = useState(activeTabFromPhase);
 
   // ── Track when generated content is ready to render ────────────
   // During 'generating' phase the preview tab initially shows a spinner.
@@ -69,8 +66,8 @@ export function CreationPreview({ phase, className }: Props) {
   const prefersReduced = useReducedMotion();
 
   useEffect(() => {
-    setActiveTab(computeTab());
-  }, [phaseIdx]);
+    setActiveTab(activeTabFromPhase);
+  }, [activeTabFromPhase]);
 
   useEffect(() => {
     if (phase === "generating") {

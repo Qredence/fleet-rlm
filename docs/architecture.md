@@ -8,8 +8,8 @@ Visualizing the structural components and relationships within `fleet-rlm`.
                         ┌─────────────────────────────────────────┐
                         │           Entry Points                  │
                         │                                         │
-                        │   CLI    FastAPI   Ink TUI    MCP       │
-                        │  (Typer) (WS/REST) (bridge)  (stdio)   │
+                        │  CLI   FastAPI  Ink TUI  MCP   Web UI  │
+                        │ (Typer)(WS/REST)(bridge)(stdio)(React)  │
                         └────────────┬────────────────────────────┘
                                      │
                         ┌────────────▼────────────────────────────┐
@@ -50,7 +50,7 @@ Visualizing the structural components and relationships within `fleet-rlm`.
 
 | Layer         | Components                          | Responsibility                                        |
 | ------------- | ----------------------------------- | ----------------------------------------------------- |
-| Entry Points  | CLI, FastAPI, Ink TUI (bridge), MCP | User-facing surfaces — all converge on the same agent |
+| Entry Points  | CLI, FastAPI, Ink TUI (bridge), MCP, Web UI (React) | User-facing surfaces — all converge on the same agent |
 | Orchestration | `RLMReActChatAgent` + ReAct tools   | DSPy reasoning loop, tool dispatch, history & memory  |
 | Execution     | `ModalInterpreter`                  | JSON protocol to sandbox, execution profile gating    |
 | Sandbox       | Driver + Volume                     | Isolated Python exec, persistent `/data/` storage     |

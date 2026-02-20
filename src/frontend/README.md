@@ -14,29 +14,30 @@ bun install
 bun run dev
 ```
 
-## Core Backend Integration (fleet-rlm)
+## FastAPI Backend Integration (fleet-rlm)
 
-This repo supports a core backend mode for the skill-creation route (`/`) using:
-- REST endpoints from fleet-rlm OpenAPI
-- WebSocket streaming via `/ws/chat`
+This frontend is FastAPI-only and targets the current backend surface:
+- REST: `/health`, `/ready`, `/chat`, `/tasks/*`, `/sessions/state`
+- WebSocket: `/ws/chat`
+
+Unsupported sections remain visible in navigation but are intentionally disabled:
+- `skills`
+- `taxonomy`
+- `memory`
+- `analytics`
 
 ### Environment
 
 Create a local `.env` file from `.env.example`.
 
-Required values for backend mode:
+Required values:
 - `VITE_FLEET_API_URL=http://localhost:8000`
 - `VITE_FLEET_WS_URL=ws://localhost:8000/ws/chat`
 - `VITE_FLEET_WORKSPACE_ID=default`
 - `VITE_FLEET_USER_ID=fleetwebapp-user`
 - `VITE_FLEET_TRACE=true`
-- `VITE_FLEET_ENABLE_LEGACY_API_PROBES=false` (default)
 
-If these are not configured, the app falls back to mock/simulated chat behavior.
-
-Legacy `/api/v1/*` capability probing is disabled by default to avoid noisy 404s
-against backends that only expose the core fleet-rlm routes. Set
-`VITE_FLEET_ENABLE_LEGACY_API_PROBES=true` to re-enable legacy probe requests.
+If backend values are missing, the app shows backend-capability notices instead of using legacy/mock API surfaces.
 
 ### Backend Startup
 

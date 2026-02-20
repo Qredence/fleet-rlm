@@ -28,35 +28,23 @@ Generated file policy:
 - `src/app/lib/rlm-api/generated/openapi.ts` is generated and must not be edited manually.
 
 ## Frontend API Modules
-- Legacy broad API layer: `src/app/lib/api/*` (mock-first, existing pages)
-- Core fleet-rlm API layer: `src/app/lib/rlm-api/*` (chat + tasks + sessions-state + WS)
+- Sole backend layer: `src/app/lib/rlm-api/*`
+- Legacy layer `src/app/lib/api/*` is removed and must not be reintroduced.
 
 ### API Layer Ownership
-- Use `src/app/lib/rlm-api/*` for core fleet-rlm backend contracts (`/health`, `/ready`, `/chat`, `/tasks/*`, `/sessions/state`, `/ws/chat`).
-- Use `src/app/lib/api/*` for legacy mock/fallback surfaces and resiliency wrappers around optional `/api/v1/*` capabilities.
-- Do not add new core backend endpoint contracts to `src/app/lib/api/*`; keep them in `src/app/lib/rlm-api/*`.
-- These boundaries are lint-enforced via `no-restricted-imports` in `eslint.config.js`.
+- Use `src/app/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/chat`, `/tasks/*`, `/sessions/state`, `/ws/chat`).
+- New frontend data work must map to existing FastAPI endpoints or be gated as unsupported in UI.
+- Unsupported sections (`skills`, `taxonomy`, `memory`, `analytics`) stay visible but disabled with a capability notice.
 
-### Allowed Usage Matrix
-| Producer Layer | Allowed Consumers | Forbidden Dependencies | Correct Import Example |
-| --- | --- | --- | --- |
-| `src/app/lib/rlm-api/*` | `pages/skill-creation/*`, runtime adapters, backend chat integration | `src/app/lib/api/*` | `import { isRlmCoreEnabled } from "../../lib/rlm-api";` |
-| `src/app/lib/api/*` | legacy hooks (`useSkills`, `useMemory`, `useTaxonomy`, etc.), fallback adapters | `src/app/lib/rlm-api/*` | `import { getApiCapabilities } from "../../lib/api/capabilities";` |
-
-### Runtime Resilience Conventions
+### Runtime Conventions
 - Route modules are lazy-loaded through `src/app/lib/perf/lazyWithRetry.ts` and `src/app/lib/perf/routePreload.tsx`.
 - Navigation preloads likely next routes on intent (`TopHeader`, `mobile-tab-bar`) to reduce first-click latency.
 - Router errors must render `RouteErrorPage` (never rely on React Router’s default crash screen).
-- Legacy API hooks (`useSkills`, `useMemory`, `useTaxonomy`, `useAnalytics`, `useFilesystem`) must expose:
-  - `dataSource: 'api' | 'mock' | 'fallback'`
-  - `degradedReason?: string`
-- Endpoint support probing lives in `src/app/lib/api/capabilities.ts`. Legacy `/api/v1/*` probing is disabled by default and can be re-enabled with `VITE_FLEET_ENABLE_LEGACY_API_PROBES=true`.
-- Unsupported `/api/v1/*` endpoints must degrade to local mock data without fatal UI failure.
+- Skill creation chat flow should use backend runtime only (no legacy API fallback path).
 
 ## Environment Variables
 - `VITE_FLEET_API_URL`
 - `VITE_FLEET_WS_URL`
-- `VITE_FLEET_ENABLE_LEGACY_API_PROBES`
 - `VITE_FLEET_WORKSPACE_ID`
 - `VITE_FLEET_USER_ID`
 - `VITE_FLEET_TRACE`
