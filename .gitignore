@@ -81,3 +81,4 @@ tui-cli/tui-ink/node_modules/
 tui-cli/opentui-rlm/node_modules/
 archive/
 tui-ink/package-lock.json
+src/frontend/test-results/.last-run.json
