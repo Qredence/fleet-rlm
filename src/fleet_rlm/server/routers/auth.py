@@ -1,41 +1,21 @@
-"""Identity introspection endpoints."""
+"""Stub router for Authentication."""
 
-from __future__ import annotations
-
-from fastapi import APIRouter, Request
-
-from ..deps import get_repository
-from ..schemas import AuthMeResponse
+from typing import Any
+from fastapi import APIRouter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.get("/me", response_model=AuthMeResponse)
-async def auth_me(request: Request) -> AuthMeResponse:
-    identity = getattr(request.state, "identity", None)
-    if identity is None:
-        # Dependency should already enforce auth, but keep defensive fallback.
-        return AuthMeResponse(tenant_claim="", user_claim="")
+@router.post("/login")
+async def login() -> dict[str, Any]:
+    return {"token": "dummy_token"}
 
-    tenant_id: str | None = None
-    user_id: str | None = None
 
-    repository = get_repository()
-    if repository is not None:
-        upserted = await repository.upsert_identity(
-            entra_tenant_id=identity.tenant_claim,
-            entra_user_id=identity.user_claim,
-            email=identity.email,
-            full_name=identity.name,
-        )
-        tenant_id = str(upserted.tenant_id)
-        user_id = str(upserted.user_id)
+@router.post("/logout")
+async def logout() -> dict[str, Any]:
+    return {"status": "ok"}
 
-    return AuthMeResponse(
-        tenant_claim=identity.tenant_claim,
-        user_claim=identity.user_claim,
-        email=identity.email,
-        name=identity.name,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+
+@router.get("/me")
+async def get_me() -> dict[str, Any]:
+    return {"id": "user-1", "name": "Admin User"}
