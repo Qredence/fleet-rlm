@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from ..deps import server_state
-from ..schemas import HealthResponse, ReadyResponse
+from ..schemas.core import HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
 

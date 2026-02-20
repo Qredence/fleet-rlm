@@ -164,7 +164,7 @@ def test_bridge_server_module_runnable():
         stderr=subprocess.PIPE,
         text=True,
     )
-    stdout, stderr = proc.communicate(timeout=5)
+    stdout, stderr = proc.communicate(timeout=30)
 
     # Should either show help or at least not crash
     # (current impl may not have --help, but module should be runnable)

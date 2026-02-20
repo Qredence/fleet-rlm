@@ -1,18 +1,29 @@
-"""Session state introspection endpoints."""
+"""Router for Session management."""
 
-from __future__ import annotations
+from typing import Sequence
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import server_state
-from ..schemas import SessionStateResponse, SessionStateSummary
+from fleet_rlm.server.deps import server_state
+from fleet_rlm.server.dependencies import get_db
+from fleet_rlm.server.schemas.core import SessionStateResponse, SessionStateSummary
+from fleet_rlm.server.schemas.session import (
+    SessionCreate,
+    SessionResponse,
+    SessionUpdate,
+)
+from fleet_rlm.server.services.session_service import SessionService
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
+def get_session_service(db=Depends(get_db)) -> SessionService:
+    return SessionService(db)
+
+
 @router.get("/state", response_model=SessionStateResponse)
 async def list_session_state() -> SessionStateResponse:
-    """Return lightweight summaries of active/restored session state."""
+    """Return lightweight summaries of active/restored in-memory session state."""
     summaries: list[SessionStateSummary] = []
     for key, payload in server_state.sessions.items():
         manifest = payload.get("manifest", {}) if isinstance(payload, dict) else {}
@@ -41,3 +52,55 @@ async def list_session_state() -> SessionStateResponse:
             )
         )
     return SessionStateResponse(ok=True, sessions=summaries)
+
+
+@router.post("", response_model=SessionResponse, status_code=201)
+async def create_session(
+    session: SessionCreate, service: SessionService = Depends(get_session_service)
+):
+    """Create a new session."""
+    return await service.create_session(session)
+
+
+@router.get("", response_model=Sequence[SessionResponse])
+async def list_sessions(
+    skip: int = 0,
+    limit: int = 100,
+    service: SessionService = Depends(get_session_service),
+):
+    """List all sessions."""
+    return await service.get_sessions(skip=skip, limit=limit)
+
+
+@router.get("/{session_id}", response_model=SessionResponse)
+async def get_session(
+    session_id: str, service: SessionService = Depends(get_session_service)
+):
+    """Get a specific session by ID."""
+    session = await service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@router.patch("/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: str,
+    update_data: SessionUpdate,
+    service: SessionService = Depends(get_session_service),
+):
+    """Update a specific session."""
+    session = await service.update_session(session_id, update_data)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@router.delete("/{session_id}", status_code=204)
+async def delete_session(
+    session_id: str, service: SessionService = Depends(get_session_service)
+):
+    """Delete a specific session."""
+    success = await service.delete_session(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
