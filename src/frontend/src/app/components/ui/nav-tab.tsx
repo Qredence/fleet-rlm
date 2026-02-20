@@ -8,6 +8,7 @@ interface NavTabProps {
   onPointerEnter?: () => void;
   onFocus?: () => void;
   layoutId?: string;
+  disabled?: boolean;
 }
 
 export function NavTab({
@@ -17,15 +18,20 @@ export function NavTab({
   onPointerEnter,
   onFocus,
   layoutId = "navActive",
+  disabled = false,
 }: NavTabProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      onPointerEnter={onPointerEnter}
-      onFocus={onFocus}
+      onPointerEnter={disabled ? undefined : onPointerEnter}
+      onFocus={disabled ? undefined : onFocus}
+      aria-disabled={disabled}
       className={cn(
         "relative flex items-center justify-center h-9 px-2 shrink-0 rounded-lg transition-colors",
-        isActive
+        disabled
+          ? "text-muted-foreground/50 cursor-not-allowed"
+          : isActive
           ? "text-foreground"
           : "text-muted-foreground hover:text-foreground hover:bg-muted",
       )}

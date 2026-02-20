@@ -14,6 +14,10 @@ import { IconButton } from "../components/ui/icon-button";
 import { NavTab } from "../components/ui/nav-tab";
 import { cn } from "../components/ui/utils";
 import { preloadNavRoute } from "../lib/perf/routePreload";
+import {
+  BACKEND_CAPABILITY_TOOLTIP,
+  isSectionSupported,
+} from "../lib/rlm-api";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 // ── Tab definitions ─────────────────────────────────────────────────
@@ -90,19 +94,36 @@ export function TopHeader() {
           <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar">
             {navItems.map((item) => {
               const isActive = activeNav === item.key;
-              return (
+              const isSupported = isSectionSupported(item.key);
+              const tab = (
                 <NavTab
                   key={item.key}
                   onClick={() => navigateTo(item.key)}
                   onPointerEnter={() => {
-                    void preloadNavRoute(item.key);
+                    if (isSupported) {
+                      void preloadNavRoute(item.key);
+                    }
                   }}
                   onFocus={() => {
-                    void preloadNavRoute(item.key);
+                    if (isSupported) {
+                      void preloadNavRoute(item.key);
+                    }
                   }}
                   isActive={isActive}
                   label={item.label}
+                  disabled={!isSupported}
                 />
+              );
+              if (isSupported) return tab;
+              return (
+                <Tooltip key={item.key}>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">{tab}</span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {BACKEND_CAPABILITY_TOOLTIP}
+                  </TooltipContent>
+                </Tooltip>
               );
             })}
           </nav>

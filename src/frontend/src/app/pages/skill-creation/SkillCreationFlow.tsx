@@ -7,14 +7,13 @@ import { useIsMobile } from "../../components/ui/use-mobile";
 import { PromptInput } from "../../components/ui/prompt-input";
 import { ConversationHistory } from "../../components/features/ConversationHistory";
 import { ChatMessageList } from "./ChatMessageList";
-import { useChatSimulation } from "./useChatSimulation";
 import { useBackendChatRuntime } from "./useBackendChatRuntime";
 import { isRlmCoreEnabled } from "../../lib/rlm-api";
 
 /**
  * SkillCreationFlow — chat-based skill creation orchestrator.
  *
- * Chat logic (messages, phases, mock AI) lives in `useChatSimulation`.
+ * Chat logic (messages, phases, backend events) lives in `useBackendChatRuntime`.
  * Prompt feature state (activeFeatures, mode, selectedSkills) lives in
  * `NavigationContext` so it persists across tab navigation.
  *
@@ -26,13 +25,10 @@ export function SkillCreationFlow() {
   const isMobile = useIsMobile();
   const posthog = usePostHog();
   const { scrollRef, contentRef } = useStickToBottom();
+  const backendEnabled = isRlmCoreEnabled();
 
-  // Chat state runtime selection:
-  // - backend core mode => real WebSocket streaming runtime
-  // - default => existing simulation runtime
-  const simulationRuntime = useChatSimulation();
   const backendRuntime = useBackendChatRuntime();
-  const chatRuntime = isRlmCoreEnabled() ? backendRuntime : simulationRuntime;
+  const chatRuntime = backendRuntime;
 
   const {
     messages,
@@ -171,11 +167,13 @@ export function SkillCreationFlow() {
               onChange={setInputValue}
               onSubmit={handleSubmit}
               placeholder={
-                phase === "idle"
+                !backendEnabled
+                  ? "Configure FastAPI backend to start chatting\u2026"
+                  : phase === "idle"
                   ? "Ask anything\u2026"
                   : "Ask a follow-up\u2026"
               }
-              disabled={isTyping}
+              disabled={isTyping || !backendEnabled}
               activeFeatures={activeFeatures}
               onToggleFeature={toggleFeature}
               mode={promptMode}

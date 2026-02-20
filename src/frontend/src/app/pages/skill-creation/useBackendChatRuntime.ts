@@ -196,7 +196,7 @@ export function useBackendChatRuntime(): ChatSimulation {
   const resolveClarification = useCallback(() => {
     toast("Live backend mode", {
       description:
-        "Clarification cards are currently available in mock flow only.",
+        "Clarification cards are currently available when emitted by backend events.",
     });
   }, []);
 

@@ -13,10 +13,12 @@ import { useEffect, useRef } from "react";
 import { useLocation } from "react-router";
 import { pathToNav } from "../components/hooks/useAppNavigate";
 import { useNavigation } from "../components/hooks/useNavigation";
+import { isSectionSupported } from "../lib/rlm-api";
 
 function RouteSync() {
   const location = useLocation();
-  const { setActiveNav, selectSkill, openCanvas, activeNav } = useNavigation();
+  const { setActiveNav, selectSkill, selectFile, openCanvas, activeNav } =
+    useNavigation();
 
   // Track previous section to avoid redundant updates
   const prevSectionRef = useRef("");
@@ -35,16 +37,29 @@ function RouteSync() {
     }
 
     // ── Sync skill deep-linking ──────────────────────────────────
+    const isUnsupportedDataSection =
+      section === "skills" ||
+      section === "taxonomy" ||
+      section === "memory" ||
+      section === "analytics";
+    if (isUnsupportedDataSection) {
+      selectSkill(null);
+      selectFile(null);
+      return;
+    }
+
     if ((section === "skills" || section === "taxonomy") && skillId) {
-      selectSkill(skillId);
-      openCanvas();
+      if (isSectionSupported(section)) {
+        selectSkill(skillId);
+        openCanvas();
+      }
     } else if (
       (section === "skills" || section === "taxonomy") &&
       !skillId &&
       (prevSection === "skills" || prevSection === "taxonomy")
     ) {
-      // Navigated from a skill-detail URL to the section root → deselect
       selectSkill(null);
+      selectFile(null);
     }
   }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
   // ↑ Intentionally omit context deps — we only want to run on URL change,
