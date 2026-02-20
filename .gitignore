@@ -75,3 +75,5 @@ docs/plans/
 # Local runtime artifacts
 fleet_rlm.db
 server.log
+src/frontend/test-results/
+tui/
