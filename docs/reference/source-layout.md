@@ -15,14 +15,13 @@ This reference describes the package directory layout and what each area is resp
 - `src/fleet_rlm/react/`: ReAct agent, tools, command dispatch, streaming events
 - `src/fleet_rlm/chunking/`: pure chunking helpers (size/header/timestamp/json)
 - `src/fleet_rlm/stateful/`: stateful session and persistence-oriented wrappers
-- `src/fleet_rlm/interactive/`: interactive data models used by streaming/runtime surfaces
+- `src/fleet_rlm/models.py`: streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`
+- `src/fleet_rlm/bridge/`: stdio JSON-RPC bridge for Ink TUI
 
 ## Optional Service Surfaces
 
 - `src/fleet_rlm/server/`: FastAPI application, routers, schemas, middleware
-  - `src/fleet_rlm/server/auth/`: auth abstraction (`dev` + Entra stub) and normalized identity
 - `src/fleet_rlm/mcp/`: MCP server runtime and tool surface
-- `src/fleet_rlm/db/`: Neon/Postgres models, engine/session management, repository layer
 
 ## Utilities
 
@@ -46,3 +45,20 @@ uv run fleet-rlm init
 - Library/runtime code should live under importable Python modules (`*.py`) in `src/fleet_rlm/`.
 - Operational configs and non-package docs should live outside `src/` (for example `config/`, `docs/`).
 - Avoid empty placeholder package directories and `__pycache__` directories in source control.
+
+## Frontend (`src/frontend`)
+
+React + TypeScript + Vite single-page application for the Fleet web UI.
+
+- `src/frontend/src/app/App.tsx`: root component (React Router provider)
+- `src/frontend/src/app/routes.ts`: route config with lazy-loaded page modules
+- `src/frontend/src/app/layout/`: `RootLayout`, `DesktopShell`, `MobileShell`, `RouteSync`
+- `src/frontend/src/app/pages/`: page components (`SkillCreationFlow`, `SkillLibrary`, `MemoryPage`, `TaxonomyBrowser`, `AnalyticsDashboard`, `SettingsPage`, auth pages)
+- `src/frontend/src/app/components/hooks/`: React hooks (`useChat`, `useSkills`, `useMemory`, `useAuth`, `useFilesystem`, etc.)
+- `src/frontend/src/app/components/features/`: feature components (artifacts, settings, command palette, notifications)
+- `src/frontend/src/app/components/shared/`: reusable shared components (skeletons, error boundary, toggles)
+- `src/frontend/src/app/components/ui/`: Radix UI primitives (shadcn/ui style)
+- `src/frontend/src/app/lib/api/`: generic HTTP/SSE API client with snake↔camel case conversion
+- `src/frontend/src/app/lib/rlm-api/`: fleet-rlm-specific API layer (WebSocket client, OpenAPI-generated types)
+- `src/frontend/src/app/lib/perf/`: lazy route loading with retry (`lazyWithRetry`, `routePreload`)
+- `src/frontend/src/app/providers/`: context providers (`AppProviders`, `AuthProvider`, `NavigationProvider`)
