@@ -1,0 +1,328 @@
+import { useMemo } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { typo } from "../config/typo";
+
+interface Props {
+  content: string;
+}
+
+// ── Lightweight, zero-dependency Markdown renderer ─────────────────
+// Supports: headings, paragraphs, bold, italic, inline code,
+// fenced code blocks, unordered/ordered lists, blockquotes, links,
+// horizontal rules.  All styling uses the shared `typo` helper and
+// design-system CSS variables — no hardcoded colours or fonts.
+
+// ── Inline token parser ────────────────────────────────────────────
+function parseInline(text: string): ReactNode[] {
+  const result: ReactNode[] = [];
+  // Order matters: longer patterns first to avoid partial matches
+  const inlineRegex =
+    /(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)|(_[^_]+_)|(\[([^\]]+)\]\(([^)]+)\))/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = inlineRegex.exec(text)) !== null) {
+    // Push text before this match
+    if (match.index > lastIndex) {
+      result.push(text.slice(lastIndex, match.index));
+    }
+
+    if (match[1]) {
+      // Inline code
+      const code = match[1].slice(1, -1);
+      result.push(
+        <code
+          key={match.index}
+          className="bg-muted px-1.5 py-0.5 rounded text-foreground"
+          style={typo.mono}
+        >
+          {code}
+        </code>,
+      );
+    } else if (match[2]) {
+      // Bold **text**
+      result.push(
+        <strong
+          key={match.index}
+          className="text-foreground"
+          style={{ fontWeight: "var(--font-weight-semibold)" } as CSSProperties}
+        >
+          {match[2].slice(2, -2)}
+        </strong>,
+      );
+    } else if (match[3]) {
+      // Bold __text__
+      result.push(
+        <strong
+          key={match.index}
+          className="text-foreground"
+          style={{ fontWeight: "var(--font-weight-semibold)" } as CSSProperties}
+        >
+          {match[3].slice(2, -2)}
+        </strong>,
+      );
+    } else if (match[4]) {
+      // Italic *text*
+      result.push(<em key={match.index}>{match[4].slice(1, -1)}</em>);
+    } else if (match[5]) {
+      // Italic _text_
+      result.push(<em key={match.index}>{match[5].slice(1, -1)}</em>);
+    } else if (match[6]) {
+      // Link [text](url)
+      result.push(
+        <a
+          key={match.index}
+          href={match[8]}
+          className="text-accent hover:underline cursor-pointer"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {match[7]}
+        </a>,
+      );
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining text
+  if (lastIndex < text.length) {
+    result.push(text.slice(lastIndex));
+  }
+
+  return result;
+}
+
+// ── Block-level parser ─────────────────────────────────────────────
+interface Block {
+  type: "heading" | "paragraph" | "code" | "blockquote" | "ul" | "ol" | "hr";
+  level?: number; // heading level 1-3
+  content: string;
+  items?: string[]; // list items
+  lang?: string; // code fence language
+}
+
+function parseBlocks(md: string): Block[] {
+  const lines = md.split("\n");
+  const blocks: Block[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+
+    // ── Fenced code block ~~~``` ──
+    if (line.startsWith("```")) {
+      const lang = line.slice(3).trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !(lines[i] ?? "").startsWith("```")) {
+        const codeLine = lines[i];
+        if (codeLine == null) break;
+        codeLines.push(codeLine);
+        i++;
+      }
+      blocks.push({ type: "code", content: codeLines.join("\n"), lang });
+      i++; // skip closing ```
+      continue;
+    }
+
+    // ── Horizontal rule ──
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      blocks.push({ type: "hr", content: "" });
+      i++;
+      continue;
+    }
+
+    // ── Heading ──
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      const hashes = headingMatch[1];
+      const headingContent = headingMatch[2];
+      if (!hashes || !headingContent) {
+        i++;
+        continue;
+      }
+      blocks.push({
+        type: "heading",
+        level: hashes.length,
+        content: headingContent,
+      });
+      i++;
+      continue;
+    }
+
+    // ── Blockquote ──
+    if (line.startsWith("> ")) {
+      const quoteLines: string[] = [];
+      while (i < lines.length && (lines[i] ?? "").startsWith("> ")) {
+        const quoteLine = lines[i];
+        if (quoteLine == null) break;
+        quoteLines.push(quoteLine.slice(2));
+        i++;
+      }
+      blocks.push({ type: "blockquote", content: quoteLines.join("\n") });
+      continue;
+    }
+
+    // ── Unordered list ──
+    if (/^[-*+]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*+]\s+/.test(lines[i] ?? "")) {
+        const itemLine = lines[i];
+        if (itemLine == null) break;
+        items.push(itemLine.replace(/^[-*+]\s+/, ""));
+        i++;
+      }
+      blocks.push({ type: "ul", content: "", items });
+      continue;
+    }
+
+    // ── Ordered list ──
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i] ?? "")) {
+        const itemLine = lines[i];
+        if (itemLine == null) break;
+        items.push(itemLine.replace(/^\d+\.\s+/, ""));
+        i++;
+      }
+      blocks.push({ type: "ol", content: "", items });
+      continue;
+    }
+
+    // ── Empty line (skip) ──
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+
+    // ── Paragraph (accumulate contiguous non-blank lines) ──
+    const paraLines: string[] = [];
+    while (
+      i < lines.length &&
+      (lines[i] ?? "").trim() !== "" &&
+      !(lines[i] ?? "").startsWith("#") &&
+      !(lines[i] ?? "").startsWith("```") &&
+      !(lines[i] ?? "").startsWith("> ") &&
+      !/^[-*+]\s+/.test(lines[i] ?? "") &&
+      !/^\d+\.\s+/.test(lines[i] ?? "") &&
+      !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i] ?? "")
+    ) {
+      const paraLine = lines[i];
+      if (paraLine == null) break;
+      paraLines.push(paraLine);
+      i++;
+    }
+    if (paraLines.length > 0) {
+      blocks.push({ type: "paragraph", content: paraLines.join(" ") });
+    }
+  }
+
+  return blocks;
+}
+
+// ── Renderer ───────────────────────────────────────────────────────
+function renderBlock(block: Block, index: number): ReactNode {
+  switch (block.type) {
+    case "heading": {
+      const styles: Record<
+        number,
+        { style: CSSProperties; className: string }
+      > = {
+        1: { style: typo.h2 ?? {}, className: "mb-4 mt-6 text-foreground" },
+        2: { style: typo.h3 ?? {}, className: "mb-3 mt-5 text-foreground" },
+        3: {
+          style: {
+            ...typo.h4,
+            fontWeight: "var(--font-weight-semibold)",
+          } as CSSProperties,
+          className: "mb-2 mt-4 text-foreground",
+        },
+      };
+      const cfg = styles[block.level ?? 1] ?? styles[3]!;
+      const Tag = `h${block.level ?? 1}` as "h1" | "h2" | "h3";
+      return (
+        <Tag key={index} className={cfg.className} style={cfg.style}>
+          {parseInline(block.content)}
+        </Tag>
+      );
+    }
+
+    case "paragraph":
+      return (
+        <p
+          key={index}
+          className="mb-3 text-muted-foreground"
+          style={typo.labelRegular}
+        >
+          {parseInline(block.content)}
+        </p>
+      );
+
+    case "code":
+      return (
+        <pre key={index} className="mb-4 overflow-x-auto">
+          <code
+            className="block bg-muted p-4 rounded-lg overflow-x-auto text-foreground"
+            style={typo.mono}
+          >
+            {block.content}
+          </code>
+        </pre>
+      );
+
+    case "blockquote":
+      return (
+        <blockquote
+          key={index}
+          className="border-l-4 border-accent pl-4 italic my-4 text-muted-foreground"
+          style={typo.labelRegular}
+        >
+          {parseInline(block.content)}
+        </blockquote>
+      );
+
+    case "ul":
+      return (
+        <ul
+          key={index}
+          className="mb-3 ml-5 list-disc space-y-1.5 text-muted-foreground"
+          style={typo.labelRegular}
+        >
+          {block.items?.map((item, j) => (
+            <li key={j} style={{ lineHeight: "1.6" }}>
+              {parseInline(item)}
+            </li>
+          ))}
+        </ul>
+      );
+
+    case "ol":
+      return (
+        <ol
+          key={index}
+          className="mb-3 ml-5 list-decimal space-y-1.5 text-muted-foreground"
+          style={typo.labelRegular}
+        >
+          {block.items?.map((item, j) => (
+            <li key={j} style={{ lineHeight: "1.6" }}>
+              {parseInline(item)}
+            </li>
+          ))}
+        </ol>
+      );
+
+    case "hr":
+      return <hr key={index} className="my-4 border-border-subtle" />;
+
+    default:
+      return null;
+  }
+}
+
+export function SkillMarkdown({ content }: Props) {
+  const blocks = useMemo(() => parseBlocks(content), [content]);
+
+  return <div>{blocks.map((block, i) => renderBlock(block, i))}</div>;
+}

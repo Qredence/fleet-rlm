@@ -1,0 +1,192 @@
+import { useState, useCallback, useEffect, useRef } from "react";
+import { usePostHog } from "@posthog/react";
+import { useNavigation } from "../../components/hooks/useNavigation";
+import { useStickToBottom } from "../../components/hooks/useStickToBottom";
+import { useChatHistory } from "../../components/hooks/useChatHistory";
+import { useIsMobile } from "../../components/ui/use-mobile";
+import { PromptInput } from "../../components/ui/prompt-input";
+import { ConversationHistory } from "../../components/features/ConversationHistory";
+import { ChatMessageList } from "./ChatMessageList";
+import { useChatSimulation } from "./useChatSimulation";
+import { useBackendChatRuntime } from "./useBackendChatRuntime";
+import { isRlmCoreEnabled } from "../../lib/rlm-api";
+
+/**
+ * SkillCreationFlow — chat-based skill creation orchestrator.
+ *
+ * Chat logic (messages, phases, mock AI) lives in `useChatSimulation`.
+ * Prompt feature state (activeFeatures, mode, selectedSkills) lives in
+ * `NavigationContext` so it persists across tab navigation.
+ *
+ * Conversation history is managed by `useChatHistory` (localStorage-backed).
+ * Auto-saves the current conversation when `sessionId` changes (new session),
+ * and allows loading past conversations from the welcome state.
+ */
+export function SkillCreationFlow() {
+  const isMobile = useIsMobile();
+  const posthog = usePostHog();
+  const { scrollRef, contentRef } = useStickToBottom();
+
+  // Chat state runtime selection:
+  // - backend core mode => real WebSocket streaming runtime
+  // - default => existing simulation runtime
+  const simulationRuntime = useChatSimulation();
+  const backendRuntime = useBackendChatRuntime();
+  const chatRuntime = isRlmCoreEnabled() ? backendRuntime : simulationRuntime;
+
+  const {
+    messages,
+    inputValue,
+    setInputValue,
+    phase,
+    isTyping,
+    handleSubmit: originalHandleSubmit,
+    resolveHitl,
+    resolveClarification,
+    loadConversation,
+  } = chatRuntime;
+
+  // Wrap handleSubmit to capture chat session start event on first message
+  const handleSubmit = useCallback(() => {
+    if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
+      posthog?.capture("chat_session_started", {
+        prompt_length: inputValue.length,
+      });
+    }
+    originalHandleSubmit();
+  }, [phase, messages.length, inputValue, posthog, originalHandleSubmit]);
+
+  // Prompt feature state (persisted in NavigationContext)
+  const {
+    activeFeatures,
+    toggleFeature,
+    promptMode,
+    setPromptMode,
+    selectedPromptSkills,
+    togglePromptSkill,
+    sessionId,
+  } = useNavigation();
+
+  // Chat history
+  const {
+    conversations,
+    saveConversation,
+    loadConversation: loadConv,
+    deleteConversation,
+    clearHistory,
+  } = useChatHistory();
+
+  // ── History panel toggle ─────────────────────────────────────────
+  const [showHistory, setShowHistory] = useState(false);
+
+  // ── Auto-save on session change ──────────────────────────────────
+  // When sessionId increments (newSession() called), save the current
+  // conversation before it gets wiped by useChatSimulation's reset.
+  const prevSessionIdRef = useRef(sessionId);
+  const messagesRef = useRef(messages);
+  const phaseRef = useRef(phase);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+    phaseRef.current = phase;
+  }, [messages, phase]);
+
+  useEffect(() => {
+    let historyResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+    if (prevSessionIdRef.current !== sessionId) {
+      // Save the old conversation (if it had messages)
+      if (messagesRef.current.length > 0) {
+        saveConversation(messagesRef.current, phaseRef.current);
+        // PostHog: Track conversation saved
+        posthog?.capture("conversation_saved", {
+          message_count: messagesRef.current.length,
+        });
+      }
+      prevSessionIdRef.current = sessionId;
+      historyResetTimer = setTimeout(() => setShowHistory(false), 0);
+    }
+
+    return () => {
+      if (historyResetTimer) clearTimeout(historyResetTimer);
+    };
+  }, [sessionId, saveConversation, posthog]);
+
+  const handleSelectConversation = useCallback(
+    (id: string) => {
+      const conv = loadConv(id);
+      if (!conv) return;
+      // Save current conversation first if it has messages
+      if (messages.length > 0) {
+        saveConversation(messages, phase);
+      }
+      loadConversation(conv);
+      setShowHistory(false);
+    },
+    [loadConv, loadConversation, messages, phase, saveConversation],
+  );
+
+  const handleToggleHistory = useCallback(() => {
+    setShowHistory((prev) => !prev);
+  }, []);
+
+  const handleCloseHistory = useCallback(() => {
+    setShowHistory(false);
+  }, []);
+
+  return (
+    <div className="flex flex-col h-full w-full bg-background overflow-hidden">
+      {/* Messages */}
+      <ChatMessageList
+        messages={messages}
+        isTyping={isTyping}
+        isMobile={isMobile}
+        scrollRef={scrollRef}
+        contentRef={contentRef}
+        onSuggestionClick={setInputValue}
+        onResolveHitl={resolveHitl}
+        onResolveClarification={resolveClarification}
+        showHistory={showHistory}
+        onToggleHistory={handleToggleHistory}
+        hasHistory={conversations.length > 0}
+        historyPanel={
+          showHistory ? (
+            <ConversationHistory
+              conversations={conversations}
+              onSelect={handleSelectConversation}
+              onDelete={deleteConversation}
+              onClearAll={clearHistory}
+              onClose={handleCloseHistory}
+            />
+          ) : null
+        }
+      />
+
+      {/* Input composer */}
+      <div className="px-4 md:px-6 pb-6 md:pb-10 shrink-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
+        <div className="max-w-[800px] w-full mx-auto">
+          <div className="flex flex-col gap-4">
+            <PromptInput
+              value={inputValue}
+              onChange={setInputValue}
+              onSubmit={handleSubmit}
+              placeholder={
+                phase === "idle"
+                  ? "Ask anything\u2026"
+                  : "Ask a follow-up\u2026"
+              }
+              disabled={isTyping}
+              activeFeatures={activeFeatures}
+              onToggleFeature={toggleFeature}
+              mode={promptMode}
+              onSetMode={setPromptMode}
+              selectedSkills={selectedPromptSkills}
+              onToggleSkill={togglePromptSkill}
+              className="w-full rounded-full border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

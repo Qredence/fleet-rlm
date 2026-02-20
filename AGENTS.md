@@ -55,6 +55,8 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ty check src
 uv run pytest -q
+uv run python scripts/check_release_hygiene.py
+uv run python scripts/check_release_metadata.py
 
 # Individual checks
 uv run ruff check src tests
@@ -62,6 +64,15 @@ uv run ruff format --check src tests
 uv run ruff format src tests
 uv run ty check src
 uv run pytest
+uv run python scripts/check_release_hygiene.py
+uv run python scripts/check_release_metadata.py
+
+# Optional frontend checks (when src/frontend/package.json exists)
+cd src/frontend
+bun install
+bun run lint
+bun run type-check
+bun run test:e2e
 
 # Performance baseline workflow (credential-gated)
 uv run python scripts/perf/compare_baseline.py --update-baseline --baseline scripts/perf/baseline/rlm_benchmarks_baseline.json
