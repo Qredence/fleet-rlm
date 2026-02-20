@@ -231,8 +231,8 @@ export function sleep(ms: number): Promise<void> {
  * Creates a deferred promise that can be resolved/rejected externally
  */
 export function createDeferred<T>(): Deferred<T> {
-  let resolveFn: (value: T) => void = () => {};
-  let rejectFn: (error: Error) => void = () => {};
+  let resolveFn!: (value: T) => void;
+  let rejectFn!: (error: Error) => void;
 
   const promise = new Promise<T>((resolve, reject) => {
     resolveFn = resolve;
@@ -266,7 +266,11 @@ export const sampleEvents = {
   },
   toolCall: {
     event: "chat.event",
-    params: { kind: "tool_call", text: "tool call: read_file", payload: { path: "/file.txt" } },
+    params: {
+      kind: "tool_call",
+      text: "tool call: read_file",
+      payload: { path: "/file.txt" },
+    },
   },
   toolResult: {
     event: "chat.event",
@@ -286,11 +290,19 @@ export const sampleEvents = {
   },
   reasoningStep: {
     event: "chat.event",
-    params: { kind: "reasoning_step", text: "I need to think about this...", payload: {} },
+    params: {
+      kind: "reasoning_step",
+      text: "I need to think about this...",
+      payload: {},
+    },
   },
   status: {
     event: "chat.event",
-    params: { kind: "status", text: "Running module: Predict", payload: { module: "Predict" } },
+    params: {
+      kind: "status",
+      text: "Running module: Predict",
+      payload: { module: "Predict" },
+    },
   },
 };
 
@@ -312,14 +324,9 @@ export function createMockTranscriptLine(
  * Creates multiple mock transcript lines
  */
 export function createMockTranscript(count: number) {
-  const roles: Array<"system" | "user" | "assistant" | "tool" | "status" | "error"> = [
-    "system",
-    "user",
-    "assistant",
-    "tool",
-    "status",
-    "error",
-  ];
+  const roles: Array<
+    "system" | "user" | "assistant" | "tool" | "status" | "error"
+  > = ["system", "user", "assistant", "tool", "status", "error"];
 
   return Array.from({ length: count }, (_, i) =>
     createMockTranscriptLine(roles[i % roles.length], `Message ${i + 1}`),
