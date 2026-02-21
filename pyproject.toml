@@ -58,7 +58,7 @@ dev = [
     "build>=1.2",
     "twine>=5.1",
 ]
-mcp = ["fastmcp>=2.14.0,<3", "httpx[socks]>=0.28.1,<1", "pydantic>=2.12.5,<3"]
+mcp = ["fastmcp>=2.14.0,<4", "httpx[socks]>=0.28.1,<1", "pydantic>=2.12.5,<3"]
 server = [
     "alembic>=1.13,<2",
     "asyncpg>=0.29,<1",
@@ -75,7 +75,7 @@ server = [
 full = [
     "alembic>=1.13,<2",
     "asyncpg>=0.29,<1",
-    "fastmcp>=2.14.0,<3",
+    "fastmcp>=2.14.0,<4",
     "httpx[socks]>=0.28.1,<1",
     "pydantic>=2.12.5,<3",
     "psycopg[binary]>=3.2,<4",
