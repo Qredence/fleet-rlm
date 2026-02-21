@@ -87,9 +87,9 @@ def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
     )
 
 
-def _volume_load_manifest(agent: "runners.RLMReActChatAgent", path: str) -> dict:
+async def _volume_load_manifest(agent: "runners.RLMReActChatAgent", path: str) -> dict:
     """Best-effort manifest load from Modal volume; returns empty dict if absent."""
-    result = agent.interpreter.execute(
+    result = await agent.interpreter.aexecute(
         "text = load_from_volume(path)\nSUBMIT(text=text)",
         variables={"path": path},
         execution_profile=ExecutionProfile.MAINTENANCE,
@@ -107,12 +107,12 @@ def _volume_load_manifest(agent: "runners.RLMReActChatAgent", path: str) -> dict
         return {}
 
 
-def _volume_save_manifest(
+async def _volume_save_manifest(
     agent: "runners.RLMReActChatAgent", path: str, manifest: dict
 ) -> str | None:
     """Best-effort manifest save to Modal volume."""
     payload = json.dumps(manifest, ensure_ascii=False, default=str)
-    result = agent.interpreter.execute(
+    result = await agent.interpreter.aexecute(
         "saved_path = save_to_volume(path, payload)\nSUBMIT(saved_path=saved_path)",
         variables={"path": path, "payload": payload},
         execution_profile=ExecutionProfile.MAINTENANCE,
@@ -563,543 +563,561 @@ async def chat_streaming(websocket: WebSocket):
     with (
         runtime_distinct_id_context(analytics_distinct_id),
         dspy.context(lm=_planner_lm),
-        agent_context as agent,
     ):
-        interpreter = getattr(agent, "interpreter", None)
-        # Interlocutor path defaults to strict root profile.
-        if interpreter is not None:
-            try:
-                interpreter.default_execution_profile = ExecutionProfile(
-                    cfg.ws_default_execution_profile
-                )
-            except ValueError:
-                interpreter.default_execution_profile = (
-                    ExecutionProfile.ROOT_INTERLOCUTOR
-                )
+        async with agent_context as agent:
+            interpreter = getattr(agent, "interpreter", None)
+            # Interlocutor path defaults to strict root profile.
+            if interpreter is not None:
+                try:
+                    interpreter.default_execution_profile = ExecutionProfile(
+                        cfg.ws_default_execution_profile
+                    )
+                except ValueError:
+                    interpreter.default_execution_profile = (
+                        ExecutionProfile.ROOT_INTERLOCUTOR
+                    )
 
-        cancel_flag = {"cancelled": False}
-        active_key: str | None = None
-        active_manifest_path: str | None = None
-        canonical_workspace_id = _sanitize_id(
-            identity.tenant_claim, cfg.ws_default_workspace_id
-        )
-        canonical_user_id = _sanitize_id(identity.user_claim, cfg.ws_default_user_id)
-        session_record: dict[str, Any] | None = None
-        active_run_db_id: uuid.UUID | None = None
-        lifecycle: ExecutionLifecycleManager | None = None
-        execution_emitter = _get_execution_emitter()
-        ws_loop = asyncio.get_running_loop()
-
-        async def persist_session_state(
-            *, include_volume_save: bool = True, latest_user_message: str = ""
-        ) -> None:
-            nonlocal session_record, active_manifest_path, active_run_db_id
-            if session_record is None:
-                return
-            exported_state = agent.export_session_state()
-            manifest = session_record.get("manifest")
-            if not isinstance(manifest, dict):
-                manifest = {}
-                session_record["manifest"] = manifest
-
-            logs = manifest.get("logs")
-            if not isinstance(logs, list):
-                logs = []
-                manifest["logs"] = logs
-
-            memory = manifest.get("memory")
-            if not isinstance(memory, list):
-                memory = []
-                manifest["memory"] = memory
-
-            generated_docs = manifest.get("generated_docs")
-            if not isinstance(generated_docs, list):
-                generated_docs = []
-                manifest["generated_docs"] = generated_docs
-
-            artifacts = manifest.get("artifacts")
-            if not isinstance(artifacts, list):
-                artifacts = []
-                manifest["artifacts"] = artifacts
-
-            metadata = manifest.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-                manifest["metadata"] = metadata
-
-            if latest_user_message:
-                logs.append(
-                    {
-                        "timestamp": _now_iso(),
-                        "user_message": latest_user_message,
-                        "history_turns": len(exported_state.get("history", [])),
-                    }
-                )
-                # Lightweight conversational memory snapshot.
-                memory.append(
-                    {
-                        "timestamp": _now_iso(),
-                        "content": latest_user_message[:400],
-                    }
-                )
-
-            generated_docs[:] = sorted(list(exported_state.get("documents", {}).keys()))
-            previous_rev_raw = manifest.get("rev", 0)
-            previous_rev_candidate = (
-                previous_rev_raw
-                if isinstance(previous_rev_raw, (int, float, str))
-                else 0
+            cancel_flag = {"cancelled": False}
+            active_key: str | None = None
+            active_manifest_path: str | None = None
+            canonical_workspace_id = _sanitize_id(
+                identity.tenant_claim, cfg.ws_default_workspace_id
             )
-            try:
-                previous_rev = int(previous_rev_candidate)
-            except (TypeError, ValueError):
-                previous_rev = 0
-            manifest["rev"] = previous_rev + 1
-            metadata["updated_at"] = _now_iso()
-            metadata["history_turns"] = len(exported_state.get("history", []))
-            metadata["document_count"] = len(exported_state.get("documents", {}))
-            metadata["artifact_count"] = len(artifacts)
-            manifest["state"] = (
-                exported_state  # Persist full state for volume restore (#24)
+            canonical_user_id = _sanitize_id(
+                identity.user_claim, cfg.ws_default_user_id
             )
-            session_data = session_record.get("session")
-            if not isinstance(session_data, dict):
-                session_data = {}
-                session_record["session"] = session_data
-            session_data["state"] = exported_state
-            session_data["session_id"] = session_record.get("session_id")
+            session_record: dict[str, Any] | None = None
+            active_run_db_id: uuid.UUID | None = None
+            lifecycle: ExecutionLifecycleManager | None = None
+            execution_emitter = _get_execution_emitter()
+            ws_loop = asyncio.get_running_loop()
 
-            record_key = session_record.get("key")
-            if isinstance(record_key, str):
-                server_state.sessions[record_key] = session_record
+            async def persist_session_state(
+                *, include_volume_save: bool = True, latest_user_message: str = ""
+            ) -> None:
+                nonlocal session_record, active_manifest_path, active_run_db_id
+                if session_record is None:
+                    return
+                exported_state = agent.export_session_state()
+                manifest = session_record.get("manifest")
+                if not isinstance(manifest, dict):
+                    manifest = {}
+                    session_record["manifest"] = manifest
 
-            if include_volume_save and active_manifest_path and interpreter is not None:
-                remote_manifest = _volume_load_manifest(agent, active_manifest_path)
-                remote_rev_raw = remote_manifest.get("rev", 0)
-                remote_rev_candidate = (
-                    remote_rev_raw
-                    if isinstance(remote_rev_raw, (int, float, str))
+                logs = manifest.get("logs")
+                if not isinstance(logs, list):
+                    logs = []
+                    manifest["logs"] = logs
+
+                memory = manifest.get("memory")
+                if not isinstance(memory, list):
+                    memory = []
+                    manifest["memory"] = memory
+
+                generated_docs = manifest.get("generated_docs")
+                if not isinstance(generated_docs, list):
+                    generated_docs = []
+                    manifest["generated_docs"] = generated_docs
+
+                artifacts = manifest.get("artifacts")
+                if not isinstance(artifacts, list):
+                    artifacts = []
+                    manifest["artifacts"] = artifacts
+
+                metadata = manifest.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                    manifest["metadata"] = metadata
+
+                if latest_user_message:
+                    logs.append(
+                        {
+                            "timestamp": _now_iso(),
+                            "user_message": latest_user_message,
+                            "history_turns": len(exported_state.get("history", [])),
+                        }
+                    )
+                    # Lightweight conversational memory snapshot.
+                    memory.append(
+                        {
+                            "timestamp": _now_iso(),
+                            "content": latest_user_message[:400],
+                        }
+                    )
+
+                generated_docs[:] = sorted(
+                    list(exported_state.get("documents", {}).keys())
+                )
+                previous_rev_raw = manifest.get("rev", 0)
+                previous_rev_candidate = (
+                    previous_rev_raw
+                    if isinstance(previous_rev_raw, (int, float, str))
                     else 0
                 )
                 try:
-                    remote_rev = int(remote_rev_candidate)
+                    previous_rev = int(previous_rev_candidate)
                 except (TypeError, ValueError):
-                    remote_rev = 0
+                    previous_rev = 0
+                manifest["rev"] = previous_rev + 1
+                metadata["updated_at"] = _now_iso()
+                metadata["history_turns"] = len(exported_state.get("history", []))
+                metadata["document_count"] = len(exported_state.get("documents", {}))
+                metadata["artifact_count"] = len(artifacts)
+                manifest["state"] = (
+                    exported_state  # Persist full state for volume restore (#24)
+                )
+                session_data = session_record.get("session")
+                if not isinstance(session_data, dict):
+                    session_data = {}
+                    session_record["session"] = session_data
+                session_data["state"] = exported_state
+                session_data["session_id"] = session_record.get("session_id")
 
-                if remote_rev > previous_rev:
-                    message = (
-                        "Session manifest revision conflict detected "
-                        f"(remote_rev={remote_rev}, local_rev={previous_rev})"
+                record_key = session_record.get("key")
+                if isinstance(record_key, str):
+                    server_state.sessions[record_key] = session_record
+
+                if (
+                    include_volume_save
+                    and active_manifest_path
+                    and interpreter is not None
+                ):
+                    remote_manifest = await _volume_load_manifest(
+                        agent, active_manifest_path
                     )
-                    if persistence_required:
-                        raise PersistenceRequiredError("manifest_conflict", message)
-                    logger.warning(message)
-                else:
-                    saved_path = _volume_save_manifest(
-                        agent, active_manifest_path, manifest
+                    remote_rev_raw = remote_manifest.get("rev", 0)
+                    remote_rev_candidate = (
+                        remote_rev_raw
+                        if isinstance(remote_rev_raw, (int, float, str))
+                        else 0
                     )
-                    if saved_path is None:
+                    try:
+                        remote_rev = int(remote_rev_candidate)
+                    except (TypeError, ValueError):
+                        remote_rev = 0
+
+                    if remote_rev > previous_rev:
                         message = (
-                            "Failed to save session manifest to volume "
-                            f"(path={active_manifest_path})"
+                            "Session manifest revision conflict detected "
+                            f"(remote_rev={remote_rev}, local_rev={previous_rev})"
                         )
                         if persistence_required:
-                            raise PersistenceRequiredError(
-                                "manifest_write_failed", message
-                            )
+                            raise PersistenceRequiredError("manifest_conflict", message)
                         logger.warning(message)
-
-            if (
-                latest_user_message
-                and repository is not None
-                and identity_rows is not None
-            ):
-                try:
-                    await repository.store_memory_item(
-                        MemoryItemCreateRequest(
-                            tenant_id=identity_rows.tenant_id,
-                            scope=MemoryScope.RUN
-                            if active_run_db_id is not None
-                            else MemoryScope.USER,
-                            scope_id=str(active_run_db_id or identity_rows.user_id),
-                            kind=MemoryKind.NOTE,
-                            source=MemorySource.USER_INPUT,
-                            content_text=latest_user_message[:1000],
-                            tags=["ws", "chat"],
+                    else:
+                        saved_path = await _volume_save_manifest(
+                            agent, active_manifest_path, manifest
                         )
-                    )
-                except Exception as exc:
-                    if persistence_required:
-                        raise PersistenceRequiredError(
-                            "memory_item_persist_failed",
-                            f"Failed to persist memory item: {exc}",
-                        ) from exc
-                    logger.warning(
-                        "Failed to persist memory item: %s",
-                        _sanitize_for_log(exc),
-                    )
+                        if saved_path is None:
+                            message = (
+                                "Failed to save session manifest to volume "
+                                f"(path={active_manifest_path})"
+                            )
+                            if persistence_required:
+                                raise PersistenceRequiredError(
+                                    "manifest_write_failed", message
+                                )
+                            logger.warning(message)
 
-        try:
-            while True:
-                raw_payload = await websocket.receive_json()
-                try:
-                    msg = WSMessage(**raw_payload)
-                except ValidationError as exc:
-                    raw_type = str(raw_payload.get("type", "")).strip()
-                    if raw_type:
+                if (
+                    latest_user_message
+                    and repository is not None
+                    and identity_rows is not None
+                ):
+                    try:
+                        await repository.store_memory_item(
+                            MemoryItemCreateRequest(
+                                tenant_id=identity_rows.tenant_id,
+                                scope=MemoryScope.RUN
+                                if active_run_db_id is not None
+                                else MemoryScope.USER,
+                                scope_id=str(active_run_db_id or identity_rows.user_id),
+                                kind=MemoryKind.NOTE,
+                                source=MemorySource.USER_INPUT,
+                                content_text=latest_user_message[:1000],
+                                tags=["ws", "chat"],
+                            )
+                        )
+                    except Exception as exc:
+                        if persistence_required:
+                            raise PersistenceRequiredError(
+                                "memory_item_persist_failed",
+                                f"Failed to persist memory item: {exc}",
+                            ) from exc
+                        logger.warning(
+                            "Failed to persist memory item: %s",
+                            _sanitize_for_log(exc),
+                        )
+
+            try:
+                while True:
+                    raw_payload = await websocket.receive_json()
+                    try:
+                        msg = WSMessage(**raw_payload)
+                    except ValidationError as exc:
+                        raw_type = str(raw_payload.get("type", "")).strip()
+                        if raw_type:
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "message": f"Unknown message type: {raw_type}",
+                                }
+                            )
+                            continue
+                        await websocket.send_json(
+                            {"type": "error", "message": f"Invalid payload: {exc}"}
+                        )
+                        continue
+
+                    # Auth claims are canonical tenant/user authority for WS routes.
+                    workspace_id = canonical_workspace_id
+                    user_id = canonical_user_id
+                    sess_id = msg.session_id or str(uuid.uuid4())
+                    key = session_key(workspace_id, user_id, sess_id)
+                    manifest_path = _manifest_path(workspace_id, user_id, sess_id)
+
+                    # Switch/reload session identity if needed.
+                    if active_key != key:
+                        if session_record is not None:
+                            await persist_session_state(include_volume_save=True)
+
+                        cached = server_state.sessions.get(key)
+                        if cached is None:
+                            manifest = (
+                                await _volume_load_manifest(agent, manifest_path)
+                                if interpreter is not None
+                                else {}
+                            )
+                            cached = {
+                                "key": key,
+                                "workspace_id": workspace_id,
+                                "user_id": user_id,
+                                "session_id": sess_id,
+                                "manifest": manifest
+                                if isinstance(manifest, dict)
+                                else {},
+                                "session": {"state": {}, "session_id": sess_id},
+                            }
+                        cached["session_id"] = sess_id
+                        server_state.sessions[key] = cached
+                        active_key = key
+                        active_manifest_path = manifest_path
+                        session_record = cached
+                        session_data = cached.get("session")
+                        restored_state: Any = (
+                            session_data.get("state", {})
+                            if isinstance(session_data, dict)
+                            else {}
+                        )
+                        manifest_data = cached.get("manifest")
+                        if not restored_state and isinstance(manifest_data, dict):
+                            restored_state = manifest_data.get("state", {})
+                        if isinstance(restored_state, dict) and restored_state:
+                            agent.import_session_state(restored_state)
+                        else:
+                            # No saved state — reset agent to prevent leaking
+                            # prior session's history/docs across boundaries (#23).
+                            agent.reset(clear_sandbox_buffers=True)
+
+                    msg_type = msg.type
+
+                    if msg_type == "cancel":
+                        cancel_flag["cancelled"] = True
+                        continue
+
+                    if msg_type == "command":
+                        await _handle_command(
+                            websocket,
+                            agent,
+                            msg.model_dump(),
+                            session_record,
+                            repository=repository,
+                            identity_rows=identity_rows,
+                            persistence_required=persistence_required,
+                        )
+                        await persist_session_state(include_volume_save=True)
+                        continue
+
+                    if msg_type != "message":
                         await websocket.send_json(
                             {
                                 "type": "error",
-                                "message": f"Unknown message type: {raw_type}",
+                                "message": f"Unknown message type: {msg_type}",
                             }
                         )
                         continue
-                    await websocket.send_json(
-                        {"type": "error", "message": f"Invalid payload: {exc}"}
-                    )
-                    continue
 
-                # Auth claims are canonical tenant/user authority for WS routes.
-                workspace_id = canonical_workspace_id
-                user_id = canonical_user_id
-                sess_id = msg.session_id or str(uuid.uuid4())
-                key = session_key(workspace_id, user_id, sess_id)
-                manifest_path = _manifest_path(workspace_id, user_id, sess_id)
+                    message = str(msg.content or "").strip()
+                    docs_path = msg.docs_path
+                    trace = bool(msg.trace)
 
-                # Switch/reload session identity if needed.
-                if active_key != key:
-                    if session_record is not None:
-                        await persist_session_state(include_volume_save=True)
-
-                    cached = server_state.sessions.get(key)
-                    if cached is None:
-                        manifest = (
-                            _volume_load_manifest(agent, manifest_path)
-                            if interpreter is not None
-                            else {}
+                    if not message:
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "message": "Message content cannot be empty",
+                            }
                         )
-                        cached = {
-                            "key": key,
-                            "workspace_id": workspace_id,
-                            "user_id": user_id,
-                            "session_id": sess_id,
-                            "manifest": manifest if isinstance(manifest, dict) else {},
-                            "session": {"state": {}, "session_id": sess_id},
-                        }
-                    cached["session_id"] = sess_id
-                    server_state.sessions[key] = cached
-                    active_key = key
-                    active_manifest_path = manifest_path
-                    session_record = cached
-                    session_data = cached.get("session")
-                    restored_state: Any = (
-                        session_data.get("state", {})
-                        if isinstance(session_data, dict)
-                        else {}
+                        continue
+
+                    await persist_session_state(
+                        include_volume_save=True, latest_user_message=message
                     )
-                    manifest_data = cached.get("manifest")
-                    if not restored_state and isinstance(manifest_data, dict):
-                        restored_state = manifest_data.get("state", {})
-                    if isinstance(restored_state, dict) and restored_state:
-                        agent.import_session_state(restored_state)
-                    else:
-                        # No saved state — reset agent to prevent leaking
-                        # prior session's history/docs across boundaries (#23).
-                        agent.reset(clear_sandbox_buffers=True)
+                    cancel_flag["cancelled"] = False
+                    turn_index = agent.history_turns() + 1
+                    run_id = f"{workspace_id}:{user_id}:{sess_id}:{turn_index}"
+                    step_builder = ExecutionStepBuilder(run_id=run_id)
+                    active_run_db_id = None
 
-                msg_type = msg.type
+                    if repository is None:
+                        logger.warning(
+                            "runtime_persistence_disabled_for_run",
+                            extra={
+                                "run_id": run_id,
+                                "workspace_id": workspace_id,
+                                "user_id": user_id,
+                                "session_id": sess_id,
+                                "code": "persistence_disabled",
+                            },
+                        )
 
-                if msg_type == "cancel":
-                    cancel_flag["cancelled"] = True
-                    continue
+                    if repository is not None and identity_rows is not None:
+                        model_provider, model_name = parse_model_identity(
+                            getattr(_planner_lm, "model", None)
+                        )
+                        try:
+                            run_row = await repository.create_run(
+                                RunCreateRequest(
+                                    tenant_id=identity_rows.tenant_id,
+                                    created_by_user_id=identity_rows.user_id,
+                                    external_run_id=run_id,
+                                    status=RunStatus.RUNNING,
+                                    model_provider=model_provider,
+                                    model_name=model_name,
+                                    sandbox_provider=resolve_sandbox_provider(
+                                        cfg.sandbox_provider
+                                    ),
+                                )
+                            )
+                            active_run_db_id = run_row.id
+                            if session_record is not None:
+                                session_record["last_run_db_id"] = str(run_row.id)
+                        except Exception as exc:
+                            if persistence_required:
+                                raise PersistenceRequiredError(
+                                    "run_start_persist_failed",
+                                    f"Failed to persist run start: {exc}",
+                                ) from exc
+                            logger.warning(
+                                "Failed to persist run start: %s",
+                                _sanitize_for_log(exc),
+                            )
 
-                if msg_type == "command":
-                    await _handle_command(
-                        websocket,
-                        agent,
-                        msg.model_dump(),
-                        session_record,
+                    lifecycle = ExecutionLifecycleManager(
+                        run_id=run_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        session_id=sess_id,
+                        execution_emitter=execution_emitter,
+                        step_builder=step_builder,
                         repository=repository,
                         identity_rows=identity_rows,
-                        persistence_required=persistence_required,
-                    )
-                    await persist_session_state(include_volume_save=True)
-                    continue
-
-                if msg_type != "message":
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "message": f"Unknown message type: {msg_type}",
-                        }
-                    )
-                    continue
-
-                message = str(msg.content or "").strip()
-                docs_path = msg.docs_path
-                trace = bool(msg.trace)
-
-                if not message:
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "message": "Message content cannot be empty",
-                        }
-                    )
-                    continue
-
-                await persist_session_state(
-                    include_volume_save=True, latest_user_message=message
-                )
-                cancel_flag["cancelled"] = False
-                turn_index = agent.history_turns() + 1
-                run_id = f"{workspace_id}:{user_id}:{sess_id}:{turn_index}"
-                step_builder = ExecutionStepBuilder(run_id=run_id)
-                active_run_db_id = None
-
-                if repository is None:
-                    logger.warning(
-                        "runtime_persistence_disabled_for_run",
-                        extra={
-                            "run_id": run_id,
-                            "workspace_id": workspace_id,
-                            "user_id": user_id,
-                            "session_id": sess_id,
-                            "code": "persistence_disabled",
-                        },
+                        active_run_db_id=active_run_db_id,
+                        strict_persistence=persistence_required,
+                        session_record=session_record,
                     )
 
-                if repository is not None and identity_rows is not None:
-                    model_provider, model_name = parse_model_identity(
-                        getattr(_planner_lm, "model", None)
-                    )
-                    try:
-                        run_row = await repository.create_run(
-                            RunCreateRequest(
-                                tenant_id=identity_rows.tenant_id,
-                                created_by_user_id=identity_rows.user_id,
-                                external_run_id=run_id,
-                                status=RunStatus.RUNNING,
-                                model_provider=model_provider,
-                                model_name=model_name,
-                                sandbox_provider=resolve_sandbox_provider(
-                                    cfg.sandbox_provider
-                                ),
+                    def cancel_check() -> bool:
+                        return cancel_flag["cancelled"]
+
+                    await lifecycle.emit_started()
+
+                    previous_execution_hook = None
+
+                    async def _emit_and_persist_repl_step(
+                        step_data: ExecutionStep,
+                    ) -> None:
+                        try:
+                            await lifecycle.emit_step(step_data)
+                            await lifecycle.persist_step(step_data)
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to emit/persist REPL execution step: %s",
+                                _sanitize_for_log(exc),
+                            )
+                            lifecycle._persistence_error = exc
+
+                    def _interpreter_hook(payload: dict[str, Any]) -> None:
+                        if lifecycle.run_completed:
+                            return
+                        repl_step = step_builder.from_interpreter_hook(payload)
+                        if repl_step is None:
+                            return
+                        ws_loop.call_soon_threadsafe(
+                            lambda step_data=repl_step: ws_loop.create_task(
+                                _emit_and_persist_repl_step(step_data)
                             )
                         )
-                        active_run_db_id = run_row.id
-                        if session_record is not None:
-                            session_record["last_run_db_id"] = str(run_row.id)
-                    except Exception as exc:
-                        if persistence_required:
-                            raise PersistenceRequiredError(
-                                "run_start_persist_failed",
-                                f"Failed to persist run start: {exc}",
-                            ) from exc
-                        logger.warning(
-                            "Failed to persist run start: %s",
-                            _sanitize_for_log(exc),
+
+                    if interpreter is not None:
+                        previous_execution_hook = getattr(
+                            interpreter, "execution_event_callback", None
                         )
+                        interpreter.execution_event_callback = _interpreter_hook
 
-                lifecycle = ExecutionLifecycleManager(
-                    run_id=run_id,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    session_id=sess_id,
-                    execution_emitter=execution_emitter,
-                    step_builder=step_builder,
-                    repository=repository,
-                    identity_rows=identity_rows,
-                    active_run_db_id=active_run_db_id,
-                    strict_persistence=persistence_required,
-                    session_record=session_record,
-                )
+                    if docs_path:
+                        agent.load_document(docs_path)
 
-                def cancel_check() -> bool:
-                    return cancel_flag["cancelled"]
-
-                await lifecycle.emit_started()
-
-                previous_execution_hook = None
-
-                async def _emit_and_persist_repl_step(step_data: ExecutionStep) -> None:
                     try:
-                        await lifecycle.emit_step(step_data)
-                        await lifecycle.persist_step(step_data)
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to emit/persist REPL execution step: %s",
-                            _sanitize_for_log(exc),
-                        )
-                        lifecycle._persistence_error = exc
-
-                def _interpreter_hook(payload: dict[str, Any]) -> None:
-                    if lifecycle.run_completed:
-                        return
-                    repl_step = step_builder.from_interpreter_hook(payload)
-                    if repl_step is None:
-                        return
-                    ws_loop.call_soon_threadsafe(
-                        lambda step_data=repl_step: ws_loop.create_task(
-                            _emit_and_persist_repl_step(step_data)
-                        )
-                    )
-
-                if interpreter is not None:
-                    previous_execution_hook = getattr(
-                        interpreter, "execution_event_callback", None
-                    )
-                    interpreter.execution_event_callback = _interpreter_hook
-
-                if docs_path:
-                    agent.load_document(docs_path)
-
-                try:
-                    async for event in agent.aiter_chat_turn_stream(
-                        message=message, trace=trace, cancel_check=cancel_check
-                    ):
-                        lifecycle.raise_if_persistence_error()
-                        event_dict = {
-                            "kind": event.kind,
-                            "text": event.text,
-                            "payload": event.payload,
-                            "timestamp": event.timestamp.isoformat(),
-                        }
-                        is_terminal_event = event.kind in {
-                            "final",
-                            "cancelled",
-                            "error",
-                        }
-                        if not is_terminal_event:
-                            await websocket.send_json(
-                                {"type": "event", "data": event_dict}
-                            )
-
-                        step = step_builder.from_stream_event(
-                            kind=event.kind,
-                            text=event.text,
-                            payload=event.payload,
-                            timestamp=event.timestamp.timestamp(),
-                        )
-                        if step is not None:
-                            await lifecycle.emit_step(step)
-                            await lifecycle.persist_step(step)
+                        async for event in agent.aiter_chat_turn_stream(
+                            message=message, trace=trace, cancel_check=cancel_check
+                        ):
                             lifecycle.raise_if_persistence_error()
+                            event_dict = {
+                                "kind": event.kind,
+                                "text": event.text,
+                                "payload": event.payload,
+                                "timestamp": event.timestamp.isoformat(),
+                            }
+                            is_terminal_event = event.kind in {
+                                "final",
+                                "cancelled",
+                                "error",
+                            }
+                            if not is_terminal_event:
+                                await websocket.send_json(
+                                    {"type": "event", "data": event_dict}
+                                )
 
-                        if event.kind == "final":
-                            await persist_session_state(include_volume_save=True)
-                            await lifecycle.complete_run(RunStatus.COMPLETED, step=step)
-                            await websocket.send_json(
-                                {"type": "event", "data": event_dict}
+                            step = step_builder.from_stream_event(
+                                kind=event.kind,
+                                text=event.text,
+                                payload=event.payload,
+                                timestamp=event.timestamp.timestamp(),
                             )
-                        elif event.kind in {"cancelled", "error"}:
-                            status = (
-                                RunStatus.CANCELLED
-                                if event.kind == "cancelled"
-                                else RunStatus.FAILED
-                            )
-                            error_json = (
-                                {"error": event.text, "kind": event.kind}
-                                if event.kind == "error"
-                                else None
-                            )
-                            await lifecycle.complete_run(
-                                status, step=step, error_json=error_json
-                            )
-                            await websocket.send_json(
-                                {"type": "event", "data": event_dict}
-                            )
+                            if step is not None:
+                                await lifecycle.emit_step(step)
+                                await lifecycle.persist_step(step)
+                                lifecycle.raise_if_persistence_error()
 
-                    if not lifecycle.run_completed:
-                        lifecycle.raise_if_persistence_error()
-                        await lifecycle.complete_run(RunStatus.COMPLETED)
+                            if event.kind == "final":
+                                await persist_session_state(include_volume_save=True)
+                                await lifecycle.complete_run(
+                                    RunStatus.COMPLETED, step=step
+                                )
+                                await websocket.send_json(
+                                    {"type": "event", "data": event_dict}
+                                )
+                            elif event.kind in {"cancelled", "error"}:
+                                status = (
+                                    RunStatus.CANCELLED
+                                    if event.kind == "cancelled"
+                                    else RunStatus.FAILED
+                                )
+                                error_json = (
+                                    {"error": event.text, "kind": event.kind}
+                                    if event.kind == "error"
+                                    else None
+                                )
+                                await lifecycle.complete_run(
+                                    status, step=step, error_json=error_json
+                                )
+                                await websocket.send_json(
+                                    {"type": "event", "data": event_dict}
+                                )
 
-                except Exception as exc:
-                    error_code = _classify_stream_failure(exc)
-                    logger.error(
-                        "Streaming error: %s",
-                        _sanitize_for_log(exc),
-                        exc_info=True,
-                        extra={
-                            "error_type": type(exc).__name__,
-                            "error_code": error_code,
-                        },
-                    )
-                    await websocket.send_json(
-                        _error_envelope(
-                            code=error_code,
-                            message=f"Streaming error: {exc}",
-                            details={"error_type": type(exc).__name__},
-                        )
-                    )
-                    if not lifecycle.run_completed:
-                        error_step = step_builder.from_stream_event(
-                            kind="error",
-                            text=f"Streaming error: {exc}",
-                            payload={
+                        if not lifecycle.run_completed:
+                            lifecycle.raise_if_persistence_error()
+                            await lifecycle.complete_run(RunStatus.COMPLETED)
+
+                    except Exception as exc:
+                        error_code = _classify_stream_failure(exc)
+                        logger.error(
+                            "Streaming error: %s",
+                            _sanitize_for_log(exc),
+                            exc_info=True,
+                            extra={
                                 "error_type": type(exc).__name__,
                                 "error_code": error_code,
                             },
-                            timestamp=time.time(),
                         )
-                        if error_step is not None:
-                            await lifecycle.emit_step(error_step)
+                        await websocket.send_json(
+                            _error_envelope(
+                                code=error_code,
+                                message=f"Streaming error: {exc}",
+                                details={"error_type": type(exc).__name__},
+                            )
+                        )
+                        if not lifecycle.run_completed:
+                            error_step = step_builder.from_stream_event(
+                                kind="error",
+                                text=f"Streaming error: {exc}",
+                                payload={
+                                    "error_type": type(exc).__name__,
+                                    "error_code": error_code,
+                                },
+                                timestamp=time.time(),
+                            )
+                            if error_step is not None:
+                                await lifecycle.emit_step(error_step)
+                            await lifecycle.complete_run(
+                                RunStatus.FAILED,
+                                step=error_step,
+                                error_json={
+                                    "error": str(exc),
+                                    "error_type": type(exc).__name__,
+                                    "code": error_code,
+                                },
+                            )
+                    finally:
+                        if interpreter is not None:
+                            interpreter.execution_event_callback = (
+                                previous_execution_hook
+                            )
+
+            except WebSocketDisconnect:
+                cancel_flag["cancelled"] = True
+                try:
+                    await persist_session_state(include_volume_save=True)
+                except PersistenceRequiredError as exc:
+                    logger.warning(
+                        "Session persistence failed during disconnect: %s",
+                        _sanitize_for_log(exc),
+                    )
+                    if lifecycle is not None and not lifecycle.run_completed:
                         await lifecycle.complete_run(
                             RunStatus.FAILED,
-                            step=error_step,
                             error_json={
                                 "error": str(exc),
                                 "error_type": type(exc).__name__,
-                                "code": error_code,
+                                "code": exc.code,
                             },
                         )
-                finally:
-                    if interpreter is not None:
-                        interpreter.execution_event_callback = previous_execution_hook
-
-        except WebSocketDisconnect:
-            cancel_flag["cancelled"] = True
-            try:
-                await persist_session_state(include_volume_save=True)
-            except PersistenceRequiredError as exc:
-                logger.warning(
-                    "Session persistence failed during disconnect: %s",
-                    _sanitize_for_log(exc),
+                    return
+                if lifecycle is not None:
+                    await lifecycle.complete_run(RunStatus.CANCELLED)
+            except Exception as exc:
+                error_code = _classify_stream_failure(exc)
+                await websocket.send_json(
+                    _error_envelope(
+                        code=error_code,
+                        message=f"Server error: {str(exc)}",
+                        details={"error_type": type(exc).__name__},
+                    )
                 )
-                if lifecycle is not None and not lifecycle.run_completed:
+                try:
+                    await persist_session_state(include_volume_save=True)
+                except PersistenceRequiredError:
+                    pass
+                if lifecycle is not None:
                     await lifecycle.complete_run(
                         RunStatus.FAILED,
                         error_json={
                             "error": str(exc),
                             "error_type": type(exc).__name__,
-                            "code": exc.code,
+                            "code": error_code,
                         },
                     )
-                return
-            if lifecycle is not None:
-                await lifecycle.complete_run(RunStatus.CANCELLED)
-        except Exception as exc:
-            error_code = _classify_stream_failure(exc)
-            await websocket.send_json(
-                _error_envelope(
-                    code=error_code,
-                    message=f"Server error: {str(exc)}",
-                    details={"error_type": type(exc).__name__},
-                )
-            )
-            try:
-                await persist_session_state(include_volume_save=True)
-            except PersistenceRequiredError:
-                pass
-            if lifecycle is not None:
-                await lifecycle.complete_run(
-                    RunStatus.FAILED,
-                    error_json={
-                        "error": str(exc),
-                        "error_type": type(exc).__name__,
-                        "code": error_code,
-                    },
-                )
 
 
 async def _handle_command(

@@ -254,6 +254,12 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
             return self._app_obj
         return modal.App.lookup(self._app_name, create_if_missing=True)
 
+    async def _aresolve_app(self) -> modal.App:
+        """Return a fresh App handle (async)."""
+        if self._app_obj is not None:
+            return self._app_obj
+        return await modal.App.lookup.aio(self._app_name, create_if_missing=True)
+
     @staticmethod
     def _module_source_for_sandbox(module: Any) -> str:
         """Return module source with future-import lines stripped for embedding."""
@@ -298,6 +304,48 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
 
         self._sandbox = modal.Sandbox.create(**sandbox_kwargs)
         self._proc = self._sandbox.exec(
+            "python", "-u", "-c", driver_command, bufsize=1, timeout=self.timeout
+        )
+
+        self._stdin = self._proc.stdin
+        self._stdout_iter = iter(self._proc.stdout)
+        self._stderr_iter = iter(getattr(self._proc, "stderr", []))
+        self._start_stdout_reader()
+
+    async def astart(self) -> None:
+        """Start the Modal sandbox and initialize the driver process (async)."""
+        if self._sandbox is not None:
+            return
+
+        with self._llm_call_lock:
+            self._llm_call_count = 0
+
+        bundled_sources = [
+            self._module_source_for_sandbox(driver_factories),
+            self._module_source_for_sandbox(sandbox_tools),
+            self._module_source_for_sandbox(session_history),
+            self._module_source_for_sandbox(volume_tools),
+            inspect.getsource(sandbox_driver),
+            "sandbox_driver()",
+        ]
+        driver_command = "\n\n".join(bundled_sources)
+
+        app = await self._aresolve_app()
+
+        sandbox_kwargs: dict[str, Any] = {
+            "app": app,
+            "image": self.image,
+            "secrets": self.secrets,
+            "timeout": self.timeout,
+        }
+        if self.idle_timeout is not None:
+            sandbox_kwargs["idle_timeout"] = self.idle_timeout
+        if self.volume_name:
+            self._volume = self._resolve_volume()
+            sandbox_kwargs["volumes"] = {self.volume_mount_path: self._volume}
+
+        self._sandbox = await modal.Sandbox.create.aio(**sandbox_kwargs)
+        self._proc = await self._sandbox.exec.aio(
             "python", "-u", "-c", driver_command, bufsize=1, timeout=self.timeout
         )
 
@@ -656,6 +704,33 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
                 self._sub_lm_executor.shutdown(wait=False, cancel_futures=True)
                 self._sub_lm_executor = None
 
+    async def ashutdown(self) -> None:
+        """Terminate the sandbox and clean up all resources (async)."""
+        if self._sandbox is not None:
+            try:
+                if hasattr(self._sandbox.terminate, "aio"):
+                    await self._sandbox.terminate.aio()
+                else:
+                    self._sandbox.terminate()
+            except Exception:
+                pass
+
+        if self._stdout_reader_thread is not None:
+            self._stdout_reader_thread.join(timeout=2.0)
+            self._stdout_reader_thread = None
+
+        self._sandbox = None
+        self._proc = None
+        self._stdin = None
+        self._stdout_iter = None
+        self._stdout_queue = None
+        self._stderr_iter = None
+        self._volume = None
+        with self._sub_lm_executor_lock:
+            if self._sub_lm_executor is not None:
+                self._sub_lm_executor.shutdown(wait=False, cancel_futures=True)
+                self._sub_lm_executor = None
+
     def __enter__(self) -> "ModalInterpreter":
         """Start the interpreter and return it for use as a context manager."""
         self.start()
@@ -669,7 +744,7 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
     async def __aenter__(self) -> "ModalInterpreter":
         """Async context manager entrypoint."""
         if self.async_execute:
-            await asyncio.to_thread(self.start)
+            await self.astart()
         else:
             self.start()
         return self
@@ -677,7 +752,7 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         """Async context manager exitpoint."""
         if self.async_execute:
-            await asyncio.to_thread(self.shutdown)
+            await self.ashutdown()
         else:
             self.shutdown()
         return False

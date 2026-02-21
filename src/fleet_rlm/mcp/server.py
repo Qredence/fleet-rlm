@@ -25,7 +25,7 @@ class MCPRuntimeConfig:
 
 def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
     """Create a FastMCP server with chat-oriented tools."""
-    from fastmcp import FastMCP  # type: ignore
+    from fastmcp import FastMCP
 
     cfg = config or MCPRuntimeConfig()
     server = FastMCP(name="fleet-rlm")

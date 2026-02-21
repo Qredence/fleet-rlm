@@ -104,9 +104,9 @@ class ServerRuntimeConfig(BaseModel):
         )
     )
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = Field(
-        default_factory=lambda: (os.getenv("WS_EXECUTION_DROP_POLICY") or "drop_oldest")
-        .strip()
-        .lower()
+        default_factory=lambda: (
+            (os.getenv("WS_EXECUTION_DROP_POLICY") or "drop_oldest").strip().lower()
+        )
     )
     auth_mode: Literal["dev", "entra"] = Field(
         default_factory=lambda: (os.getenv("AUTH_MODE") or "dev").strip().lower()

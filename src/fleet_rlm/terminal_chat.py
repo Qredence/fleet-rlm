@@ -8,7 +8,7 @@ import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import dspy
 from prompt_toolkit import PromptSession
@@ -120,7 +120,9 @@ class _TerminalChatSession:
     def __init__(self, *, config: AppConfig, options: TerminalChatOptions) -> None:
         self.config = config
         self.options = options
-        self.trace_mode: TraceMode = _normalize_trace_mode(options.trace_mode)
+        self.trace_mode: TraceMode = cast(
+            TraceMode, _normalize_trace_mode(options.trace_mode)
+        )
         self.session_id = uuid.uuid4().hex[:8]
         self.secret_name = (
             config.interpreter.secrets[0] if config.interpreter.secrets else "LITELLM"
