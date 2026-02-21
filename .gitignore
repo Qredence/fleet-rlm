@@ -73,7 +73,7 @@ docs/archive/
 docs/plans/
 .junie/
 
-
+docs/artifacts/
 # Local runtime artifacts
 fleet_rlm.db
 server.log
