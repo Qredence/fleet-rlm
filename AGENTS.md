@@ -85,6 +85,66 @@ uv run python scripts/perf/compare_baseline.py --update-baseline --baseline scri
 uv run python scripts/perf/compare_baseline.py --baseline scripts/perf/baseline/rlm_benchmarks_baseline.json --threshold 0.20
 ```
 
+## Workflow Shortcuts (Makefile)
+
+```bash
+# from repo root
+make help
+
+# Dependency workflows
+make sync
+make sync-dev
+make sync-all
+
+# Validation workflows
+make lint
+make format-check
+make typecheck
+make test
+make metadata-check
+make frontend-check
+make security-check
+make quality-gate
+make check
+
+# Release/local packaging workflow
+make release-check
+
+# Developer workflows
+make precommit-install
+make precommit-run
+make sync-scaffold
+make cli-help
+make clean
+```
+
+## New Workflows
+
+### Environment and Connectivity Validation
+
+```bash
+# from repo root
+uv run python scripts/validate_rlm_env.py
+uv run python scripts/test_modal_connection.py
+uv run python scripts/validate_agents.py
+```
+
+### Frontend Build + Package Sync Workflow
+
+```bash
+# from repo root
+cd src/frontend
+bun install --frozen-lockfile
+bun run build
+cd ../..
+uv build
+```
+
+### Release Workflow
+
+- Preferred: GitHub Actions workflow **Release to PyPI** (see `scripts/RELEASING.md`).
+- Local fallback: `make release-check` then publish with `twine` as documented in `scripts/RELEASING.md`.
+
 ## Interactive Surface
 
 - Web UI (`uv run fleet web`) is the primary interactive interface for release `0.4.6`.
