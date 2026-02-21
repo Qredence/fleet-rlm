@@ -524,6 +524,44 @@ def test_websocket_multiple_messages_sequential(test_app, fake_agent):
             assert data2["data"]["text"] == "Response 2"
 
 
+def test_websocket_session_state_isolated_by_session_id(test_app, fake_agent):
+    """Session state keys should include session_id for isolation."""
+    fake_agent.set_events(
+        [
+            StreamEvent(kind="final", text="Response A", timestamp=_ts(1.0)),
+        ]
+    )
+
+    with TestClient(test_app) as client:
+        with client.websocket_connect(
+            "/api/v1/ws/chat", headers=AUTH_HEADERS
+        ) as websocket:
+            websocket.send_json(
+                {"type": "message", "content": "message A", "session_id": "session-a"}
+            )
+            first = websocket.receive_json()
+            assert first["data"]["text"] == "Response A"
+
+            fake_agent.set_events(
+                [
+                    StreamEvent(kind="final", text="Response B", timestamp=_ts(2.0)),
+                ]
+            )
+            websocket.send_json(
+                {"type": "message", "content": "message B", "session_id": "session-b"}
+            )
+            second = websocket.receive_json()
+            assert second["data"]["text"] == "Response B"
+
+    from fleet_rlm.server.deps import server_state
+
+    keys = [
+        key for key in server_state.sessions.keys() if key.startswith("default:alice:")
+    ]
+    assert "default:alice:session-a" in keys
+    assert "default:alice:session-b" in keys
+
+
 def test_health_endpoint(test_app):
     """Test GET /health returns ok."""
     with TestClient(test_app) as client:

@@ -121,3 +121,6 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = ["benchmark: performance/throughput benchmark tests"]
+
+[tool.ty.src]
+exclude = ["tests/", "scripts/", "notebooks/", "test_modal_guard.py"]

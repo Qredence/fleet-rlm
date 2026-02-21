@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from fleet_rlm.server.execution_events import (
@@ -71,11 +73,14 @@ async def test_execution_event_emitter_filters_by_subscription():
         step=None,
     )
     await emitter.emit(event)
+    await asyncio.sleep(0.01)
 
     assert ws_match.accepted is True
     assert len(ws_match.sent) == 1
     assert ws_other.accepted is True
     assert ws_other.sent == []
+    await emitter.disconnect(ws_match)  # type: ignore[arg-type]
+    await emitter.disconnect(ws_other)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -99,6 +104,7 @@ async def test_execution_event_emitter_removes_stale_connections():
             step=None,
         )
     )
+    await asyncio.sleep(0.01)
 
     assert ws_stale not in emitter._connections
 

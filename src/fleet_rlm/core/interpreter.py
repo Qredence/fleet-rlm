@@ -355,6 +355,22 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         )
         return any(sig in text for sig in recoverable_signatures)
 
+    @staticmethod
+    def _is_recoverable_start_error(exc: Exception) -> bool:
+        """Return ``True`` when sandbox startup failures are likely transient."""
+        text = str(exc).lower()
+        recoverable_signatures = (
+            "timed out",
+            "temporarily unavailable",
+            "connection reset",
+            "connection aborted",
+            "service unavailable",
+            "rate limit",
+            "429",
+            "resource exhausted",
+        )
+        return any(sig in text for sig in recoverable_signatures)
+
     @contextmanager
     def execution_profile(self, profile: ExecutionProfile):
         """Temporarily override the default execution profile."""
@@ -403,11 +419,24 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
             }
         )
 
-        # Modal exec channels can occasionally flap; retry once after a clean restart
-        # for known transport failures.
-        for attempt in range(2):
+        # Modal startup/exec channels can occasionally flap; retry with bounded
+        # backoff for known transient startup/transport failures.
+        max_attempts = 3
+        for attempt in range(max_attempts):
             if self._sandbox is None:
-                self.start()
+                try:
+                    self.start()
+                except Exception as exc:
+                    can_retry = attempt < (max_attempts - 1) and (
+                        self._is_recoverable_start_error(exc)
+                    )
+                    if can_retry:
+                        self.shutdown()
+                        time.sleep(0.25 * (2**attempt))
+                        continue
+                    raise CodeInterpreterError(
+                        f"[sandbox_unavailable] Failed to start sandbox: {exc}"
+                    ) from exc
 
             try:
                 self._write_line(request_payload)
@@ -550,11 +579,12 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
                         )
                         return self._summarize_stdout(stdout)
             except Exception as exc:
-                can_retry = attempt == 0 and self._is_recoverable_exec_channel_error(
-                    exc
+                can_retry = attempt < (max_attempts - 1) and (
+                    self._is_recoverable_exec_channel_error(exc)
                 )
                 if can_retry:
                     self.shutdown()
+                    time.sleep(0.25 * (2**attempt))
                     continue
                 self._emit_execution_event(
                     {
@@ -584,7 +614,9 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
                 "result_kind": "retry_exhausted",
             }
         )
-        raise CodeInterpreterError("Unexpected execute retry exhaustion")
+        raise CodeInterpreterError(
+            "[sandbox_unavailable] Unexpected execute retry exhaustion"
+        )
 
     async def aexecute(
         self,

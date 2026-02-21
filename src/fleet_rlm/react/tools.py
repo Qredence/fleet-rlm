@@ -207,7 +207,7 @@ def build_tool_list(
     try:
         from ..core.memory_tools import search_evolutive_memory
 
-        tools.append(search_evolutive_memory)
+        tools.append(Tool(search_evolutive_memory))
     except Exception as e:
         logger.warning(f"Failed to load evolutive memory tools: {e}")
 

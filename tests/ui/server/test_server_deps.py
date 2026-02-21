@@ -13,6 +13,7 @@ def test_server_state_init():
 
 def test_server_state_ready():
     state = ServerState()
+    state.config.database_required = False
     state.planner_lm = "mock_lm"
     assert state.is_ready is True
 
@@ -27,4 +28,5 @@ def test_get_planner_lm_default():
 
 
 def test_session_key():
-    assert session_key("workspace", "user") == "workspace:user"
+    assert session_key("workspace", "user") == "workspace:user:__default__"
+    assert session_key("workspace", "user", "session-1") == "workspace:user:session-1"

@@ -29,6 +29,10 @@ class HealthResponse(BaseModel):
 class ReadyResponse(BaseModel):
     ready: bool
     planner_configured: bool
+    planner: Literal["ready", "missing"]
+    database: Literal["ready", "missing", "disabled", "degraded"]
+    database_required: bool
+    sandbox_provider: str
 
 
 class TaskRequest(BaseModel):

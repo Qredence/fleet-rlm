@@ -172,9 +172,11 @@ Tests mock Modal APIs and should run without cloud credentials.
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
 - Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, `skill_taxonomies`, `taxonomy_terms`, `skills`, `skill_versions`, `skill_term_links`, `run_skill_usages`, etc.)
 - Tenant isolation uses Postgres RLS with transaction-local tenant context via `set_config('app.tenant_id', ..., true)` in repository methods
-- Server auth defaults to `AUTH_MODE=dev` and supports debug headers or local HS256 bearer JWT; WebSocket clients may also use dev query auth (`debug_tenant_id`, `debug_user_id`, optional `debug_email`, `debug_name`, or `access_token`)
+- Runtime guardrails are controlled by `APP_ENV` (`local|staging|production`) plus config toggles (`DATABASE_REQUIRED`, `ALLOW_DEBUG_AUTH`, `ALLOW_QUERY_AUTH_TOKENS`, `CORS_ALLOWED_ORIGINS`); non-local environments should run with strict auth and Neon persistence enabled
+- Server auth defaults to `AUTH_MODE=dev` and supports debug headers or local HS256 bearer JWT only when debug auth toggles are enabled; query auth (`debug_tenant_id`, `debug_user_id`, optional `debug_email`, `debug_name`, or `access_token`) is intended for local development
 - `AUTH_REQUIRED` controls route enforcement in dev (`false` by default for local iteration, `true` for strict enforcement); `entra` remains fail-closed until JWKS verification wiring is implemented
 - `AUTH_MODE=entra` is scaffolded and fail-closed until JWKS verification wiring is implemented
+- Legacy SQLite CRUD routes (`/api/v1/tasks`, `/api/v1/sessions` except `/api/v1/sessions/state`) are compatibility-only and should be gated off outside local development (`LEGACY_SQLITE_ROUTES_ENABLED=false`)
 - ReAct long-context delegate tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`, etc.) use true recursive sub-agents via `spawn_delegate_sub_agent()` — each spawns a new `RLMReActChatAgent` at `depth + 1` with full tool access
 - Additive signature tools are available for advanced workflows:
   - `grounded_answer` (returns structured citations with keys `source`, `chunk_id`, `evidence`, `reason`)
@@ -190,8 +192,9 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `/api/v1/ws/chat` is the primary interactive path; keep ReAct as the user-facing orchestrator and delegate heavy tool execution through recursive sub-agents
 - `/api/v1/ws/execution` is a dedicated filtered execution stream for Artifact Canvas consumers; clients must subscribe with matching `workspace_id`, `user_id`, and `session_id` query params
 - Execution observability is additive: preserve `/api/v1/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/api/v1/ws/execution`
+- Execution stream backpressure is bounded by queue settings (`WS_EXECUTION_MAX_QUEUE`, `WS_EXECUTION_DROP_POLICY`) and should be tuned/observed for high-volume sessions
 - Keep WebSocket auth/runtime documentation synchronized with implementation whenever auth flow behavior changes (`AUTH_MODE`, `AUTH_REQUIRED`, debug identity, and bearer token paths).
-- Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/`
+- Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/` and isolated by `session_id` in manifest filenames
 - PostHog LLM analytics is opt-in and env-driven (`POSTHOG_ENABLED=true` + `POSTHOG_API_KEY`); use `configure_analytics()` for explicit setup and keep payload redaction/truncation enabled by default
 - Runtime analytics distinct-id precedence is: websocket/runtime identity context, then `POSTHOG_DISTINCT_ID`, then `anonymous`
 

@@ -16,7 +16,7 @@ class TaxonomyNode(SQLModel, table=True):
     embedding: Optional[List[float]] = Field(sa_type=Vector(1536))  # type: ignore
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
-        sa_type=DateTime(timezone=True),
+        sa_type=DateTime(timezone=True),  # type: ignore[arg-type]
     )
 
 
@@ -29,7 +29,7 @@ class AgentMemory(SQLModel, table=True):
     embedding: Optional[List[float]] = Field(sa_type=Vector(1536))  # type: ignore
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
-        sa_type=DateTime(timezone=True),
+        sa_type=DateTime(timezone=True),  # type: ignore[arg-type]
     )
 
 

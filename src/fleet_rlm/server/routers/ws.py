@@ -79,8 +79,12 @@ def _sanitize_id(value: str, default_value: str) -> str:
     return cleaned[:128] or default_value
 
 
-def _manifest_path(workspace_id: str, user_id: str) -> str:
-    return f"workspaces/{workspace_id}/users/{user_id}/memory/react-session.json"
+def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
+    safe_session_id = _sanitize_id(session_id, "default-session")
+    return (
+        f"workspaces/{workspace_id}/users/{user_id}/memory/"
+        f"react-session-{safe_session_id}.json"
+    )
 
 
 def _volume_load_manifest(agent: "runners.RLMReActChatAgent", path: str) -> dict:
@@ -135,7 +139,9 @@ async def _authenticate_websocket(
         if cfg.auth_required:
             await websocket.accept()
             await websocket.send_json(
-                {"type": "error", "message": "Auth provider missing"}
+                _error_envelope(
+                    code="auth_provider_missing", message="Auth provider missing"
+                )
             )
             await websocket.close(code=1011)
             return None
@@ -146,7 +152,9 @@ async def _authenticate_websocket(
     except AuthError as exc:
         if cfg.auth_required:
             await websocket.accept()
-            await websocket.send_json({"type": "error", "message": exc.message})
+            await websocket.send_json(
+                _error_envelope(code="auth_failed", message=exc.message)
+            )
             await websocket.close(code=1008)
             return None
         logger.debug("WS auth optional; continuing without auth: %s", exc.message)
@@ -164,9 +172,47 @@ def _get_execution_emitter():
 
     from ..execution_events import ExecutionEventEmitter
 
-    emitter = ExecutionEventEmitter()
+    cfg = server_state.config
+    emitter = ExecutionEventEmitter(
+        max_queue=cfg.ws_execution_max_queue,
+        drop_policy=cfg.ws_execution_drop_policy,
+    )
     server_state.execution_event_emitter = emitter
     return emitter
+
+
+class PersistenceRequiredError(RuntimeError):
+    """Raised when durable writes fail in strict-persistence mode."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def _classify_stream_failure(exc: Exception) -> str:
+    if isinstance(exc, PersistenceRequiredError):
+        return exc.code
+
+    lowered = str(exc).lower()
+    if "planner lm not configured" in lowered:
+        return "planner_missing"
+    if "llm call timed out" in lowered or "timed out" in lowered and "llm" in lowered:
+        return "llm_timeout"
+    if "rate limit" in lowered or "429" in lowered:
+        return "llm_rate_limited"
+    if "sandbox" in lowered or "modal" in lowered:
+        return "sandbox_unavailable"
+    return "internal_error"
+
+
+def _error_envelope(
+    *, code: str, message: str, details: dict[str, Any] | None = None
+) -> dict:
+    payload: dict[str, Any] = {"type": "error", "code": code, "message": message}
+    if details:
+        payload["details"] = details
+    return payload
 
 
 def _build_execution_event(
@@ -223,7 +269,7 @@ class ExecutionLifecycleManager:
         repository: FleetRepository | None = None,
         identity_rows: IdentityUpsertResult | None = None,
         active_run_db_id: uuid.UUID | None = None,
-        step_lock: asyncio.Lock,
+        strict_persistence: bool = False,
         session_record: dict[str, Any] | None = None,
     ) -> None:
         self.run_id = run_id
@@ -235,10 +281,13 @@ class ExecutionLifecycleManager:
         self.repository = repository
         self.identity_rows = identity_rows
         self.active_run_db_id = active_run_db_id
-        self._step_lock = step_lock
+        self.strict_persistence = strict_persistence
         self._session_record = session_record
         self._step_index = 0
         self._last_step_db_id: uuid.UUID | None = None
+        self._persist_queue: asyncio.Queue[ExecutionStep | None] | None = None
+        self._persist_worker_task: asyncio.Task[None] | None = None
+        self._persistence_error: Exception | None = None
         self.run_completed = False
 
     def _build_event(
@@ -263,16 +312,25 @@ class ExecutionLifecycleManager:
             and self.active_run_db_id is not None
         )
 
-    async def emit_started(self) -> None:
-        await self.execution_emitter.emit(self._build_event("execution_started"))
+    def raise_if_persistence_error(self) -> None:
+        if self.strict_persistence and self._persistence_error is not None:
+            raise PersistenceRequiredError(
+                "durable_state_write_failed",
+                f"Durable state write failed: {self._persistence_error}",
+            )
 
-    async def persist_step(self, step: ExecutionStep | None) -> None:
-        if step is None or not self._can_persist:
+    async def _persist_worker(self) -> None:
+        if not self._can_persist or self._persist_queue is None:
             return
+
         assert self.repository is not None
         assert self.identity_rows is not None
         assert self.active_run_db_id is not None
-        async with self._step_lock:
+
+        while True:
+            step = await self._persist_queue.get()
+            if step is None:
+                break
             self._step_index += 1
             try:
                 persisted = await self.repository.append_step(
@@ -297,10 +355,55 @@ class ExecutionLifecycleManager:
                 if self._session_record is not None:
                     self._session_record["last_step_db_id"] = str(persisted.id)
             except Exception as exc:
+                self._persistence_error = exc
                 logger.warning(
                     "Failed to persist run step: %s",
                     _sanitize_for_log(exc),
                 )
+                if self.strict_persistence:
+                    break
+
+    async def _ensure_persist_worker(self) -> None:
+        if not self._can_persist:
+            return
+        if self._persist_worker_task is not None:
+            return
+        self._persist_queue = asyncio.Queue(maxsize=512)
+        self._persist_worker_task = asyncio.create_task(self._persist_worker())
+
+    async def _stop_persist_worker(self) -> None:
+        if self._persist_worker_task is None:
+            return
+        if self._persist_queue is not None:
+            await self._persist_queue.put(None)
+        try:
+            await self._persist_worker_task
+        except asyncio.CancelledError:
+            pass
+        self._persist_worker_task = None
+        self._persist_queue = None
+
+    async def emit_started(self) -> None:
+        await self._ensure_persist_worker()
+        await self.execution_emitter.emit(self._build_event("execution_started"))
+
+    async def persist_step(self, step: ExecutionStep | None) -> None:
+        if step is None or not self._can_persist:
+            return
+        await self._ensure_persist_worker()
+        self.raise_if_persistence_error()
+        if self._persist_queue is None:
+            return
+        try:
+            self._persist_queue.put_nowait(step)
+        except asyncio.QueueFull:
+            if self.strict_persistence:
+                raise PersistenceRequiredError(
+                    "durable_state_backpressure",
+                    "Execution step persistence queue is full",
+                )
+            await self._persist_queue.put(step)
+        self.raise_if_persistence_error()
 
     async def emit_step(self, step: ExecutionStep) -> None:
         await self.execution_emitter.emit(
@@ -316,16 +419,41 @@ class ExecutionLifecycleManager:
     ) -> None:
         if self.run_completed:
             return
+        await self._stop_persist_worker()
+
+        effective_status = status
+        effective_error = dict(error_json or {})
+        if self._persistence_error is not None:
+            effective_error.setdefault(
+                "durable_write_error", str(self._persistence_error)
+            )
+            effective_error.setdefault(
+                "error_type", type(self._persistence_error).__name__
+            )
+            if self.strict_persistence:
+                effective_status = RunStatus.FAILED
+                effective_error.setdefault("code", "durable_state_write_failed")
+
         if self._can_persist:
             assert self.repository is not None
             assert self.identity_rows is not None
             assert self.active_run_db_id is not None
-            await self.repository.update_run_status(
-                tenant_id=self.identity_rows.tenant_id,
-                run_id=self.active_run_db_id,
-                status=status,
-                error_json=error_json,
-            )
+            try:
+                await self.repository.update_run_status(
+                    tenant_id=self.identity_rows.tenant_id,
+                    run_id=self.active_run_db_id,
+                    status=effective_status,
+                    error_json=effective_error or None,
+                )
+            except Exception as exc:
+                if self.strict_persistence:
+                    raise PersistenceRequiredError(
+                        "run_status_persist_failed",
+                        f"Failed to persist run status: {exc}",
+                    ) from exc
+                logger.warning(
+                    "Failed to persist run status: %s", _sanitize_for_log(exc)
+                )
         await self.execution_emitter.emit(
             self._build_event("execution_completed", step=step)
         )
@@ -352,10 +480,10 @@ async def execution_stream(
     if not subscription.session_id:
         await websocket.accept()
         await websocket.send_json(
-            {
-                "type": "error",
-                "message": "Missing required query param: session_id",
-            }
+            _error_envelope(
+                code="missing_session_id",
+                message="Missing required query param: session_id",
+            )
         )
         await websocket.close(code=1008)
         return
@@ -384,6 +512,7 @@ async def chat_streaming(websocket: WebSocket):
     cfg = server_state.config
     _planner_lm = server_state.planner_lm
     repository = server_state.repository
+    persistence_required = cfg.database_required
     identity_rows = None
     if repository is not None:
         identity_rows = await repository.upsert_identity(
@@ -392,13 +521,25 @@ async def chat_streaming(websocket: WebSocket):
             email=identity.email,
             full_name=identity.name,
         )
+    elif persistence_required:
+        await websocket.send_json(
+            _error_envelope(
+                code="durable_state_unavailable",
+                message="Database repository is required but unavailable",
+            )
+        )
+        await websocket.close(code=1011)
+        return
 
     if _planner_lm is None:
         await websocket.send_json(
-            {
-                "type": "error",
-                "message": "Planner LM not configured. Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars.",
-            }
+            _error_envelope(
+                code="planner_missing",
+                message=(
+                    "Planner LM not configured. "
+                    "Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars."
+                ),
+            )
         )
         await websocket.close()
         return
@@ -445,7 +586,6 @@ async def chat_streaming(websocket: WebSocket):
         canonical_user_id = _sanitize_id(identity.user_claim, cfg.ws_default_user_id)
         session_record: dict[str, Any] | None = None
         active_run_db_id: uuid.UUID | None = None
-        active_step_lock = asyncio.Lock()
         lifecycle: ExecutionLifecycleManager | None = None
         execution_emitter = _get_execution_emitter()
         ws_loop = asyncio.get_running_loop()
@@ -504,6 +644,17 @@ async def chat_streaming(websocket: WebSocket):
                 )
 
             generated_docs[:] = sorted(list(exported_state.get("documents", {}).keys()))
+            previous_rev_raw = manifest.get("rev", 0)
+            previous_rev_candidate = (
+                previous_rev_raw
+                if isinstance(previous_rev_raw, (int, float, str))
+                else 0
+            )
+            try:
+                previous_rev = int(previous_rev_candidate)
+            except (TypeError, ValueError):
+                previous_rev = 0
+            manifest["rev"] = previous_rev + 1
             metadata["updated_at"] = _now_iso()
             metadata["history_turns"] = len(exported_state.get("history", []))
             metadata["document_count"] = len(exported_state.get("documents", {}))
@@ -523,7 +674,40 @@ async def chat_streaming(websocket: WebSocket):
                 server_state.sessions[record_key] = session_record
 
             if include_volume_save and active_manifest_path and interpreter is not None:
-                _volume_save_manifest(agent, active_manifest_path, manifest)
+                remote_manifest = _volume_load_manifest(agent, active_manifest_path)
+                remote_rev_raw = remote_manifest.get("rev", 0)
+                remote_rev_candidate = (
+                    remote_rev_raw
+                    if isinstance(remote_rev_raw, (int, float, str))
+                    else 0
+                )
+                try:
+                    remote_rev = int(remote_rev_candidate)
+                except (TypeError, ValueError):
+                    remote_rev = 0
+
+                if remote_rev > previous_rev:
+                    message = (
+                        "Session manifest revision conflict detected "
+                        f"(remote_rev={remote_rev}, local_rev={previous_rev})"
+                    )
+                    if persistence_required:
+                        raise PersistenceRequiredError("manifest_conflict", message)
+                    logger.warning(message)
+                else:
+                    saved_path = _volume_save_manifest(
+                        agent, active_manifest_path, manifest
+                    )
+                    if saved_path is None:
+                        message = (
+                            "Failed to save session manifest to volume "
+                            f"(path={active_manifest_path})"
+                        )
+                        if persistence_required:
+                            raise PersistenceRequiredError(
+                                "manifest_write_failed", message
+                            )
+                        logger.warning(message)
 
             if (
                 latest_user_message
@@ -545,6 +729,11 @@ async def chat_streaming(websocket: WebSocket):
                         )
                     )
                 except Exception as exc:
+                    if persistence_required:
+                        raise PersistenceRequiredError(
+                            "memory_item_persist_failed",
+                            f"Failed to persist memory item: {exc}",
+                        ) from exc
                     logger.warning(
                         "Failed to persist memory item: %s",
                         _sanitize_for_log(exc),
@@ -574,8 +763,8 @@ async def chat_streaming(websocket: WebSocket):
                 workspace_id = canonical_workspace_id
                 user_id = canonical_user_id
                 sess_id = msg.session_id or str(uuid.uuid4())
-                key = session_key(workspace_id, user_id)
-                manifest_path = _manifest_path(workspace_id, user_id)
+                key = session_key(workspace_id, user_id, sess_id)
+                manifest_path = _manifest_path(workspace_id, user_id, sess_id)
 
                 # Switch/reload session identity if needed.
                 if active_key != key:
@@ -632,6 +821,7 @@ async def chat_streaming(websocket: WebSocket):
                         session_record,
                         repository=repository,
                         identity_rows=identity_rows,
+                        persistence_required=persistence_required,
                     )
                     await persist_session_state(include_volume_save=True)
                     continue
@@ -658,11 +848,26 @@ async def chat_streaming(websocket: WebSocket):
                     )
                     continue
 
+                await persist_session_state(
+                    include_volume_save=True, latest_user_message=message
+                )
                 cancel_flag["cancelled"] = False
                 turn_index = agent.history_turns() + 1
                 run_id = f"{workspace_id}:{user_id}:{sess_id}:{turn_index}"
                 step_builder = ExecutionStepBuilder(run_id=run_id)
                 active_run_db_id = None
+
+                if repository is None:
+                    logger.warning(
+                        "runtime_persistence_disabled_for_run",
+                        extra={
+                            "run_id": run_id,
+                            "workspace_id": workspace_id,
+                            "user_id": user_id,
+                            "session_id": sess_id,
+                            "code": "persistence_disabled",
+                        },
+                    )
 
                 if repository is not None and identity_rows is not None:
                     model_provider, model_name = parse_model_identity(
@@ -686,6 +891,11 @@ async def chat_streaming(websocket: WebSocket):
                         if session_record is not None:
                             session_record["last_run_db_id"] = str(run_row.id)
                     except Exception as exc:
+                        if persistence_required:
+                            raise PersistenceRequiredError(
+                                "run_start_persist_failed",
+                                f"Failed to persist run start: {exc}",
+                            ) from exc
                         logger.warning(
                             "Failed to persist run start: %s",
                             _sanitize_for_log(exc),
@@ -701,7 +911,7 @@ async def chat_streaming(websocket: WebSocket):
                     repository=repository,
                     identity_rows=identity_rows,
                     active_run_db_id=active_run_db_id,
-                    step_lock=active_step_lock,
+                    strict_persistence=persistence_required,
                     session_record=session_record,
                 )
 
@@ -712,6 +922,17 @@ async def chat_streaming(websocket: WebSocket):
 
                 previous_execution_hook = None
 
+                async def _emit_and_persist_repl_step(step_data: ExecutionStep) -> None:
+                    try:
+                        await lifecycle.emit_step(step_data)
+                        await lifecycle.persist_step(step_data)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to emit/persist REPL execution step: %s",
+                            _sanitize_for_log(exc),
+                        )
+                        lifecycle._persistence_error = exc
+
                 def _interpreter_hook(payload: dict[str, Any]) -> None:
                     if lifecycle.run_completed:
                         return
@@ -719,9 +940,8 @@ async def chat_streaming(websocket: WebSocket):
                     if repl_step is None:
                         return
                     ws_loop.call_soon_threadsafe(
-                        lambda step_data=repl_step: (
-                            ws_loop.create_task(lifecycle.emit_step(step_data)),
-                            ws_loop.create_task(lifecycle.persist_step(step_data)),
+                        lambda step_data=repl_step: ws_loop.create_task(
+                            _emit_and_persist_repl_step(step_data)
                         )
                     )
 
@@ -738,6 +958,7 @@ async def chat_streaming(websocket: WebSocket):
                     async for event in agent.aiter_chat_turn_stream(
                         message=message, trace=trace, cancel_check=cancel_check
                     ):
+                        lifecycle.raise_if_persistence_error()
                         event_dict = {
                             "kind": event.kind,
                             "text": event.text,
@@ -763,11 +984,10 @@ async def chat_streaming(websocket: WebSocket):
                         if step is not None:
                             await lifecycle.emit_step(step)
                             await lifecycle.persist_step(step)
+                            lifecycle.raise_if_persistence_error()
 
                         if event.kind == "final":
-                            await persist_session_state(
-                                include_volume_save=True, latest_user_message=message
-                            )
+                            await persist_session_state(include_volume_save=True)
                             await lifecycle.complete_run(RunStatus.COMPLETED, step=step)
                             await websocket.send_json(
                                 {"type": "event", "data": event_dict}
@@ -791,23 +1011,35 @@ async def chat_streaming(websocket: WebSocket):
                             )
 
                     if not lifecycle.run_completed:
+                        lifecycle.raise_if_persistence_error()
                         await lifecycle.complete_run(RunStatus.COMPLETED)
 
                 except Exception as exc:
+                    error_code = _classify_stream_failure(exc)
                     logger.error(
                         "Streaming error: %s",
                         _sanitize_for_log(exc),
                         exc_info=True,
-                        extra={"error_type": type(exc).__name__},
+                        extra={
+                            "error_type": type(exc).__name__,
+                            "error_code": error_code,
+                        },
                     )
                     await websocket.send_json(
-                        {"type": "error", "message": f"Streaming error: {exc}"}
+                        _error_envelope(
+                            code=error_code,
+                            message=f"Streaming error: {exc}",
+                            details={"error_type": type(exc).__name__},
+                        )
                     )
                     if not lifecycle.run_completed:
                         error_step = step_builder.from_stream_event(
                             kind="error",
                             text=f"Streaming error: {exc}",
-                            payload={"error_type": type(exc).__name__},
+                            payload={
+                                "error_type": type(exc).__name__,
+                                "error_code": error_code,
+                            },
                             timestamp=time.time(),
                         )
                         if error_step is not None:
@@ -818,6 +1050,7 @@ async def chat_streaming(websocket: WebSocket):
                             error_json={
                                 "error": str(exc),
                                 "error_type": type(exc).__name__,
+                                "code": error_code,
                             },
                         )
                 finally:
@@ -826,20 +1059,45 @@ async def chat_streaming(websocket: WebSocket):
 
         except WebSocketDisconnect:
             cancel_flag["cancelled"] = True
-            await persist_session_state(include_volume_save=True)
+            try:
+                await persist_session_state(include_volume_save=True)
+            except PersistenceRequiredError as exc:
+                logger.warning(
+                    "Session persistence failed during disconnect: %s",
+                    _sanitize_for_log(exc),
+                )
+                if lifecycle is not None and not lifecycle.run_completed:
+                    await lifecycle.complete_run(
+                        RunStatus.FAILED,
+                        error_json={
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                            "code": exc.code,
+                        },
+                    )
+                return
             if lifecycle is not None:
                 await lifecycle.complete_run(RunStatus.CANCELLED)
         except Exception as exc:
+            error_code = _classify_stream_failure(exc)
             await websocket.send_json(
-                {"type": "error", "message": f"Server error: {str(exc)}"}
+                _error_envelope(
+                    code=error_code,
+                    message=f"Server error: {str(exc)}",
+                    details={"error_type": type(exc).__name__},
+                )
             )
-            await persist_session_state(include_volume_save=True)
+            try:
+                await persist_session_state(include_volume_save=True)
+            except PersistenceRequiredError:
+                pass
             if lifecycle is not None:
                 await lifecycle.complete_run(
                     RunStatus.FAILED,
                     error_json={
                         "error": str(exc),
                         "error_type": type(exc).__name__,
+                        "code": error_code,
                     },
                 )
 
@@ -852,6 +1110,7 @@ async def _handle_command(
     *,
     repository: FleetRepository | None = None,
     identity_rows: IdentityUpsertResult | None = None,
+    persistence_required: bool = False,
 ) -> None:
     """Dispatch a command message to the agent and return the result."""
     command = str(payload.get("command", "")).strip()
@@ -918,6 +1177,11 @@ async def _handle_command(
                             )
                         )
                 except Exception as exc:
+                    if persistence_required:
+                        raise PersistenceRequiredError(
+                            "artifact_persist_failed",
+                            f"Failed to persist artifact metadata: {exc}",
+                        ) from exc
                     logger.warning(
                         "Failed to persist artifact metadata: %s",
                         _sanitize_for_log(exc),

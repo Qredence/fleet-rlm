@@ -255,8 +255,27 @@ def iter_chat_turn_stream(
                     parsed_name = tool_payload.get("tool_name")
                     if isinstance(parsed_name, str) and parsed_name:
                         last_tool_name = parsed_name
+
+                    event_kind = "tool_call"
+                    if parsed_name == "plan_code_change":
+                        event_kind = "plan_update"
+                    elif parsed_name in (
+                        "rlm_query",
+                        "analyze_long_document",
+                        "summarize_long_document",
+                        "extract_from_logs",
+                        "grounded_answer",
+                        "triage_incident_logs",
+                        "parallel_semantic_map",
+                    ):
+                        event_kind = "rlm_executing"
+                    elif parsed_name and (
+                        parsed_name.startswith("core_memory") or "memory" in parsed_name
+                    ):
+                        event_kind = "memory_update"
+
                     yield StreamEvent(
-                        kind="tool_call",
+                        kind=event_kind,
                         text=tool_call,
                         payload=tool_payload,
                     )
@@ -467,8 +486,27 @@ async def aiter_chat_turn_stream(
                     parsed_name = tool_payload.get("tool_name")
                     if isinstance(parsed_name, str) and parsed_name:
                         last_tool_name = parsed_name
+
+                    event_kind = "tool_call"
+                    if parsed_name == "plan_code_change":
+                        event_kind = "plan_update"
+                    elif parsed_name in (
+                        "rlm_query",
+                        "analyze_long_document",
+                        "summarize_long_document",
+                        "extract_from_logs",
+                        "grounded_answer",
+                        "triage_incident_logs",
+                        "parallel_semantic_map",
+                    ):
+                        event_kind = "rlm_executing"
+                    elif parsed_name and (
+                        parsed_name.startswith("core_memory") or "memory" in parsed_name
+                    ):
+                        event_kind = "memory_update"
+
                     yield StreamEvent(
-                        kind="tool_call",
+                        kind=event_kind,
                         text=tool_call,
                         payload=tool_payload,
                     )

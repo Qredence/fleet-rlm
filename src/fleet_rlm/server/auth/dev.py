@@ -15,8 +15,16 @@ from .types import NormalizedIdentity
 class DevAuthProvider:
     """Authenticate with debug headers or HS256 bearer token."""
 
-    def __init__(self, *, jwt_secret: str) -> None:
+    def __init__(
+        self,
+        *,
+        jwt_secret: str,
+        allow_debug_auth: bool = True,
+        allow_query_auth_tokens: bool = True,
+    ) -> None:
         self._jwt_secret = jwt_secret
+        self._allow_debug_auth = allow_debug_auth
+        self._allow_query_auth_tokens = allow_query_auth_tokens
 
     async def authenticate_http(self, request: Request) -> NormalizedIdentity:
         return self._authenticate(dict(request.headers))
@@ -37,7 +45,7 @@ class DevAuthProvider:
 
         debug_tenant = normalized_headers.get("x-debug-tenant-id")
         debug_user = normalized_headers.get("x-debug-user-id")
-        if debug_tenant and debug_user:
+        if self._allow_debug_auth and debug_tenant and debug_user:
             return self._normalize_claims(
                 {
                     "tid": debug_tenant,
@@ -57,7 +65,7 @@ class DevAuthProvider:
         if query_params is not None:
             debug_tenant = str(query_params.get("debug_tenant_id", "")).strip()
             debug_user = str(query_params.get("debug_user_id", "")).strip()
-            if debug_tenant and debug_user:
+            if self._allow_debug_auth and debug_tenant and debug_user:
                 return self._normalize_claims(
                     {
                         "tid": debug_tenant,
@@ -67,7 +75,7 @@ class DevAuthProvider:
                     }
                 )
             access_token = str(query_params.get("access_token", "")).strip()
-            if access_token:
+            if self._allow_query_auth_tokens and access_token:
                 return self._decode_token(access_token)
 
         message = "Missing dev auth. Provide debug headers or Bearer token."

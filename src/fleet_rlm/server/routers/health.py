@@ -15,7 +15,25 @@ async def health():
 
 @router.get("/ready", response_model=ReadyResponse)
 async def ready():
+    cfg = server_state.config
+    planner_ready = server_state.planner_lm is not None
+
+    if server_state.repository is not None:
+        database_status = "ready"
+    elif cfg.database_required:
+        database_status = "missing"
+    else:
+        database_status = "disabled"
+
+    overall_ready = planner_ready and (
+        database_status == "ready" or not cfg.database_required
+    )
+
     return ReadyResponse(
-        ready=server_state.is_ready,
-        planner_configured=server_state.planner_lm is not None,
+        ready=overall_ready,
+        planner_configured=planner_ready,
+        planner="ready" if planner_ready else "missing",
+        database=database_status,
+        database_required=cfg.database_required,
+        sandbox_provider=cfg.sandbox_provider,
     )

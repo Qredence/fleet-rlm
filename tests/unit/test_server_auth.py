@@ -127,3 +127,33 @@ async def test_entra_auth_stub_fails_closed():
         await provider.authenticate_http(_FakeRequest({}))
     assert exc.value.status_code == 503
     assert "not implemented" in exc.value.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_dev_auth_blocks_debug_identity_when_disabled():
+    provider = DevAuthProvider(jwt_secret=TEST_SECRET, allow_debug_auth=False)
+    with pytest.raises(AuthError) as exc:
+        await provider.authenticate_http(
+            _FakeRequest(
+                {
+                    "x-debug-tenant-id": "tenant-123",
+                    "x-debug-user-id": "user-456",
+                }
+            )
+        )
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_dev_auth_blocks_query_access_token_when_disabled():
+    provider = DevAuthProvider(jwt_secret=TEST_SECRET, allow_query_auth_tokens=False)
+    token = jwt.encode(
+        {"tid": "tenant-ws", "oid": "user-ws"},
+        TEST_SECRET,
+        algorithm="HS256",
+    )
+    with pytest.raises(AuthError) as exc:
+        await provider.authenticate_websocket(
+            _FakeWebSocket(query_params={"access_token": token})
+        )
+    assert exc.value.status_code == 401

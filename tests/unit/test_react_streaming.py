@@ -210,7 +210,9 @@ def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("store memory", trace=False))
 
-    tool_call_event = next(event for event in events if event.kind == "tool_call")
+    tool_call_event = next(
+        event for event in events if event.kind in ("tool_call", "memory_update")
+    )
     assert tool_call_event.payload["tool_name"] == "memory_write"
     assert tool_call_event.payload["raw_status"].startswith("Calling tool:")
     assert "path='/tmp/x'" in tool_call_event.payload["tool_args"]

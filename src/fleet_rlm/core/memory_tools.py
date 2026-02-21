@@ -32,7 +32,7 @@ async def _async_search(query: str) -> str:
         async for session in get_async_session():
             stmt = (
                 select(AgentMemory)
-                .order_by(AgentMemory.embedding.l2_distance(query_vector))
+                .order_by(AgentMemory.embedding.l2_distance(query_vector))  # type: ignore
                 .limit(5)
             )
             result = await session.execute(stmt)
