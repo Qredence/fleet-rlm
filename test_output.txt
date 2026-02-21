@@ -1,0 +1,5 @@
+........................ssssssssssssssssssssssssssssssssssssssssssssssss [ 13%]
+s............
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/Users/zocho/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/threading.py:355: KeyboardInterrupt
+(to show a full traceback on KeyboardInterrupt use --full-trace)
