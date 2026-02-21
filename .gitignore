@@ -71,6 +71,8 @@ src/frontend/test-results/
 archive/
 docs/archive/
 docs/plans/
+.junie/
+
 
 # Local runtime artifacts
 fleet_rlm.db
