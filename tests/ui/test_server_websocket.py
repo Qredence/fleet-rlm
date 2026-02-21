@@ -69,6 +69,11 @@ class _FakeChatAgent:
                     return FinalOutput({"saved_path": path})
                 return FinalOutput({})
 
+            async def aexecute(
+                self, code: str, variables: dict[str, Any] | None = None, **kwargs
+            ):
+                return self.execute(code, variables, **kwargs)
+
         self.history = SimpleNamespace(messages=[])
         self.react_tools: list[Any] = []
         self._events: list[StreamEvent] = []
@@ -80,6 +85,12 @@ class _FakeChatAgent:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         return False
 
     def iter_chat_turn_stream(
@@ -100,6 +111,7 @@ class _FakeChatAgent:
     ):
         """Simulate streaming events (async)."""
         for event in self._events:
+            await asyncio.sleep(0.01)
             yield event
 
     async def execute_command(
@@ -224,6 +236,8 @@ def test_websocket_basic_message_flow(test_app, fake_agent):
             received_events = []
             while True:
                 data = websocket.receive_json()
+                if data["type"] == "error":
+                    raise AssertionError(f"Received error from websocket: {data}")
                 received_events.append(data)
                 if data["type"] == "event" and data["data"]["kind"] == "final":
                     break
