@@ -1,17 +1,13 @@
 """Router module exports."""
 
 from . import (
-    analytics,
     auth,
     chat,
     health,
-    memory,
+    planned,
     runtime,
-    sandbox,
-    search,
     sessions,
     tasks,
-    taxonomy,
     ws,
 )
 
@@ -22,10 +18,6 @@ __all__ = [
     "ws",
     "tasks",
     "sessions",
-    "taxonomy",
-    "analytics",
-    "search",
-    "memory",
+    "planned",
     "runtime",
-    "sandbox",
 ]

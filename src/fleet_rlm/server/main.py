@@ -21,18 +21,14 @@ from .deps import server_state
 from .execution_events import ExecutionEventEmitter
 from .middleware import add_middlewares
 from .routers import (
+    auth,
     chat,
     health,
+    planned,
+    runtime,
     sessions,
     tasks,
     ws,
-    taxonomy,
-    analytics,
-    auth,
-    search,
-    memory,
-    runtime,
-    sandbox,
 )
 from .database import init_db
 
@@ -147,12 +143,12 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     api_router.include_router(ws.router)
     api_router.include_router(tasks.router)
     api_router.include_router(sessions.router)
-    api_router.include_router(taxonomy.router)
-    api_router.include_router(analytics.router)
-    api_router.include_router(search.router)
-    api_router.include_router(memory.router)
+    api_router.include_router(planned.taxonomy_router)
+    api_router.include_router(planned.analytics_router)
+    api_router.include_router(planned.search_router)
+    api_router.include_router(planned.memory_router)
     api_router.include_router(runtime.router)
-    api_router.include_router(sandbox.router)
+    api_router.include_router(planned.sandbox_router)
 
     app.include_router(api_router)
 
