@@ -52,7 +52,7 @@ async function parseError(response: Response): Promise<never> {
 }
 
 async function requestJson<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   options?: {
     body?: unknown;
@@ -103,5 +103,9 @@ export const rlmApiClient = {
 
   post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     return requestJson<T>("POST", path, { body, signal });
+  },
+
+  patch<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return requestJson<T>("PATCH", path, { body, signal });
   },
 };
