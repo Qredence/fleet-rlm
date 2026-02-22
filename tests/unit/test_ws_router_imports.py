@@ -1,0 +1,30 @@
+"""Regression guards for the split WebSocket router modules.
+
+These imports broke during the ws.py decomposition when ws.py started importing
+helper modules before they existed in the same commit sequence.
+"""
+
+
+def test_ws_router_split_modules_import():
+    import fleet_rlm.server.routers.ws as ws
+    import fleet_rlm.server.routers.ws_commands as ws_commands
+    import fleet_rlm.server.routers.ws_helpers as ws_helpers
+    import fleet_rlm.server.routers.ws_lifecycle as ws_lifecycle
+    import fleet_rlm.server.routers.ws_session as ws_session
+
+    # Basic symbol checks ensure imports resolve to the expected modules.
+    assert ws.router is not None
+    assert ws_commands._handle_command is not None
+    assert ws_helpers._error_envelope is not None
+    assert ws_lifecycle.ExecutionLifecycleManager is not None
+    assert ws_session._manifest_path is not None
+
+
+def test_ws_router_registers_expected_websocket_routes():
+    from fleet_rlm.server.routers.ws import router
+
+    websocket_paths = {
+        route.path for route in router.routes if getattr(route, "path", None)
+    }
+    assert "/ws/chat" in websocket_paths
+    assert "/ws/execution" in websocket_paths

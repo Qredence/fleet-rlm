@@ -43,7 +43,7 @@ from .ws_helpers import (
     _get_execution_emitter,
     _error_envelope,
 )
-from .ws_session import _manifest_path, _volume_load_manifest
+from .ws_session import _manifest_path, _volume_load_manifest, persist_session_state
 from .ws_lifecycle import (
     ExecutionLifecycleManager,
     PersistenceRequiredError,
@@ -55,6 +55,36 @@ from .ws_commands import _handle_command
 router = APIRouter(tags=["websocket"])
 
 logger = logging.getLogger(__name__)
+
+_REPL_HOOK_STEP_QUEUE_MAX = 128
+
+
+def _should_reload_docs_path(last_docs_path: str | None, docs_path: str | None) -> bool:
+    """Return True when a docs path is provided and differs from the last loaded path."""
+    candidate = (docs_path or "").strip()
+    if not candidate:
+        return False
+    return candidate != (last_docs_path or "")
+
+
+def _enqueue_latest_nonblocking(queue: asyncio.Queue, item: object) -> bool:
+    """Enqueue without blocking, dropping the oldest item when the queue is full."""
+    try:
+        queue.put_nowait(item)
+        return True
+    except asyncio.QueueFull:
+        pass
+
+    try:
+        _ = queue.get_nowait()
+    except asyncio.QueueEmpty:
+        return False
+
+    try:
+        queue.put_nowait(item)
+        return True
+    except asyncio.QueueFull:
+        return False
 
 
 @router.websocket("/ws/execution")
@@ -188,11 +218,12 @@ async def chat_streaming(websocket: WebSocket):
             lifecycle: ExecutionLifecycleManager | None = None
             execution_emitter = _get_execution_emitter()
             ws_loop = asyncio.get_running_loop()
+            last_loaded_docs_path: str | None = None
 
             async def local_persist(
                 *, include_volume_save: bool = True, latest_user_message: str = ""
             ) -> None:
-                await local_persist(
+                await persist_session_state(
                     agent=agent,
                     session_record=session_record,
                     active_manifest_path=active_manifest_path,
@@ -258,6 +289,7 @@ async def chat_streaming(websocket: WebSocket):
                         server_state.sessions[key] = cached
                         active_key = key
                         active_manifest_path = manifest_path
+                        last_loaded_docs_path = None
                         session_record = cached
                         session_data = cached.get("session")
                         restored_state: Any = (
@@ -389,10 +421,14 @@ async def chat_streaming(websocket: WebSocket):
                     await lifecycle.emit_started()
 
                     previous_execution_hook = None
+                    repl_step_queue: asyncio.Queue[ExecutionStep | None] | None = None
+                    repl_step_worker_task: asyncio.Task[None] | None = None
 
                     async def _emit_and_persist_repl_step(
                         step_data: ExecutionStep,
                     ) -> None:
+                        if lifecycle.run_completed:
+                            return
                         try:
                             await lifecycle.emit_step(step_data)
                             await lifecycle.persist_step(step_data)
@@ -403,6 +439,22 @@ async def chat_streaming(websocket: WebSocket):
                             )
                             lifecycle._persistence_error = exc
 
+                    async def _repl_step_worker() -> None:
+                        assert repl_step_queue is not None
+                        while True:
+                            step_data = await repl_step_queue.get()
+                            if step_data is None:
+                                break
+                            await _emit_and_persist_repl_step(step_data)
+
+                    def _queue_repl_step(step_data: ExecutionStep) -> None:
+                        if repl_step_queue is None or lifecycle.run_completed:
+                            return
+                        if not _enqueue_latest_nonblocking(repl_step_queue, step_data):
+                            logger.debug(
+                                "Dropped REPL execution step due to queue contention"
+                            )
+
                     def _interpreter_hook(payload: dict[str, Any]) -> None:
                         if lifecycle.run_completed:
                             return
@@ -410,10 +462,11 @@ async def chat_streaming(websocket: WebSocket):
                         if repl_step is None:
                             return
                         ws_loop.call_soon_threadsafe(
-                            lambda step_data=repl_step: ws_loop.create_task(
-                                _emit_and_persist_repl_step(step_data)
-                            )
+                            lambda step_data=repl_step: _queue_repl_step(step_data)
                         )
+
+                    repl_step_queue = asyncio.Queue(maxsize=_REPL_HOOK_STEP_QUEUE_MAX)
+                    repl_step_worker_task = asyncio.create_task(_repl_step_worker())
 
                     if interpreter is not None:
                         previous_execution_hook = getattr(
@@ -421,8 +474,9 @@ async def chat_streaming(websocket: WebSocket):
                         )
                         interpreter.execution_event_callback = _interpreter_hook
 
-                    if docs_path:
-                        agent.load_document(docs_path)
+                    if _should_reload_docs_path(last_loaded_docs_path, docs_path):
+                        agent.load_document(str(docs_path))
+                        last_loaded_docs_path = str(docs_path).strip()
 
                     try:
                         async for event in agent.aiter_chat_turn_stream(
@@ -530,6 +584,13 @@ async def chat_streaming(websocket: WebSocket):
                             interpreter.execution_event_callback = (
                                 previous_execution_hook
                             )
+                        if repl_step_queue is not None:
+                            await repl_step_queue.put(None)
+                        if repl_step_worker_task is not None:
+                            try:
+                                await repl_step_worker_task
+                            except asyncio.CancelledError:
+                                pass
 
             except WebSocketDisconnect:
                 cancel_flag["cancelled"] = True
