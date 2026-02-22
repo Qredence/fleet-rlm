@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { streamChatOverWs } from "../wsClient";
 import type { WsMessageRequest } from "../wsClient";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -13,6 +12,14 @@ MockWebSocket.prototype.close = vi.fn();
 MockWebSocket.prototype.readyState = 0; // CONNECTING
 
 vi.stubGlobal("WebSocket", MockWebSocket);
+vi.stubGlobal("localStorage", {
+  getItem: vi.fn(() => null),
+});
+
+async function loadWsClientModule() {
+  vi.resetModules();
+  return import("../wsClient");
+}
 
 describe("streamChatOverWs - Reconnection & Backoff", () => {
   beforeEach(() => {
@@ -23,6 +30,8 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   afterEach(() => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   const dummyMessage: WsMessageRequest = {
@@ -32,6 +41,9 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   };
 
   it("attempts to reconnect on close until max retries", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const { streamChatOverWs } = await loadWsClientModule();
+
     let wsInstanceCount = 0;
 
     // We capture each newly created ws inside the mock
