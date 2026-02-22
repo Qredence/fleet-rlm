@@ -3,21 +3,21 @@ import { motion, useReducedMotion } from "motion/react";
 import { Search, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { usePostHog } from "@posthog/react";
-import { springs } from "../components/config/motion-config";
-import { typo } from "../components/config/typo";
-import type { Skill } from "../components/data/types";
-import { SkillLibraryHeaderControls } from "../components/features/skill-library/SkillLibraryHeaderControls";
-import { PullToRefreshIndicator } from "../components/features/skill-library/PullToRefreshIndicator";
-import { SkillCard } from "../components/features/SkillCard";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { useSkills } from "../components/hooks/useSkills";
-import { useAppNavigate } from "../components/hooks/useAppNavigate";
-import { SkillCardSkeleton } from "../components/shared/SkillCardSkeleton";
-import { LargeTitleHeader } from "../components/shared/LargeTitleHeader";
-import { ScrollArea } from "../components/ui/scroll-area";
-import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { cn } from "../components/ui/utils";
-import { useIsMobile } from "../components/ui/use-mobile";
+import { springs } from "@/lib/config/motion-config";
+import { typo } from "@/lib/config/typo";
+import type { Skill } from "@/lib/data/types";
+import { SkillLibraryHeaderControls } from "@/features/skill-library/SkillLibraryHeaderControls";
+import { PullToRefreshIndicator } from "@/features/skill-library/PullToRefreshIndicator";
+import { SkillCard } from "@/features/SkillCard";
+import { useNavigation } from "@/hooks/useNavigation";
+import { useSkills } from "@/hooks/useSkills";
+import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { SkillCardSkeleton } from "@/components/shared/SkillCardSkeleton";
+import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from "@/components/ui/utils";
+import { useIsMobile } from "@/components/ui/use-mobile";
 import {
   buildDomainCounts,
   domains,
@@ -27,7 +27,7 @@ import {
   PULL_THRESHOLD,
   type SortKey,
   sortSkills,
-} from "../lib/skills/library";
+} from "@/lib/skills/library";
 
 export function SkillLibrary() {
   const { selectedSkillId, openCanvas } = useNavigation();

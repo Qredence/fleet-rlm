@@ -11,7 +11,7 @@ from __future__ import annotations
 from .agent import RLMReActChatAgent, RLMReActChatSignature
 from .commands import COMMAND_DISPATCH, execute_command
 from .streaming import aiter_chat_turn_stream, iter_chat_turn_stream
-from .tools import build_tool_list, list_react_tool_names
+from .tools import build_tool_list, build_trajectory_payload, list_react_tool_names
 
 __all__ = [
     "RLMReActChatAgent",
@@ -21,5 +21,6 @@ __all__ = [
     "aiter_chat_turn_stream",
     "iter_chat_turn_stream",
     "build_tool_list",
+    "build_trajectory_payload",
     "list_react_tool_names",
 ]

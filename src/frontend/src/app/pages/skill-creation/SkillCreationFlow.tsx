@@ -1,14 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { usePostHog } from "@posthog/react";
-import { useNavigation } from "../../components/hooks/useNavigation";
-import { useStickToBottom } from "../../components/hooks/useStickToBottom";
-import { useChatHistory } from "../../components/hooks/useChatHistory";
-import { useIsMobile } from "../../components/ui/use-mobile";
-import { PromptInput } from "../../components/ui/prompt-input";
-import { ConversationHistory } from "../../components/features/ConversationHistory";
-import { ChatMessageList } from "./ChatMessageList";
-import { useBackendChatRuntime } from "./useBackendChatRuntime";
-import { isRlmCoreEnabled } from "../../lib/rlm-api";
+import { useNavigation } from "@/hooks/useNavigation";
+import { useStickToBottom } from "@/hooks/useStickToBottom";
+import { useChatHistory } from "@/hooks/useChatHistory";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { PromptInput } from "@/components/ui/prompt-input";
+import { ConversationHistory } from "@/features/ConversationHistory";
+import { ChatMessageList } from "@/app/pages/skill-creation/ChatMessageList";
+import { useBackendChatRuntime } from "@/app/pages/skill-creation/useBackendChatRuntime";
+import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
+import { isRlmCoreEnabled } from "@/lib/rlm-api";
 
 /**
  * SkillCreationFlow — chat-based skill creation orchestrator.
@@ -26,6 +27,7 @@ export function SkillCreationFlow() {
   const posthog = usePostHog();
   const { scrollRef, contentRef } = useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
+  const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
   const backendRuntime = useBackendChatRuntime();
   const chatRuntime = backendRuntime;
@@ -130,6 +132,13 @@ export function SkillCreationFlow() {
     setShowHistory(false);
   }, []);
 
+  const runtimeGuidance = runtimeStatus.data?.guidance ?? [];
+  const showRuntimeWarning =
+    backendEnabled &&
+    runtimeStatus.data != null &&
+    runtimeStatus.data.ready === false &&
+    runtimeGuidance.length > 0;
+
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
       {/* Messages */}
@@ -162,6 +171,12 @@ export function SkillCreationFlow() {
       <div className="px-4 md:px-6 pb-6 md:pb-10 shrink-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
         <div className="max-w-[800px] w-full mx-auto">
           <div className="flex flex-col gap-4">
+            {showRuntimeWarning ? (
+              <div className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <span className="font-medium">Runtime warning:</span>{" "}
+                {runtimeGuidance[0]}
+              </div>
+            ) : null}
             <PromptInput
               value={inputValue}
               onChange={setInputValue}

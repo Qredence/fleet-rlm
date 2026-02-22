@@ -5,9 +5,9 @@
  * so that both DesktopShell and MobileShell can consume shared context.
  */
 import type { ReactNode } from "react";
-import { AuthProvider } from "../components/hooks/useAuth";
-import { NavigationProvider } from "../components/hooks/useNavigation";
-import { QueryProvider } from "./QueryProvider";
+import { AuthProvider } from "@/hooks/useAuth";
+import { NavigationProvider } from "@/hooks/useNavigation";
+import { QueryProvider } from "@/app/providers/QueryProvider";
 
 interface Props {
   children: ReactNode;

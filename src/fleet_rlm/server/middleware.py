@@ -8,12 +8,14 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .config import ServerRuntimeConfig
 
-def add_middlewares(app) -> None:
+
+def add_middlewares(app, config: ServerRuntimeConfig) -> None:
     """Register all middleware on the given FastAPI app."""
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=config.cors_allowed_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )

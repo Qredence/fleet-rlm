@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.4.6"
+version = "0.4.7"
 description = "Recursive Language Models with DSPy + Modal and an integrated Web UI for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,6 +40,12 @@ dependencies = [
     "sqlalchemy>=2.0.46",
     "greenlet>=3.3.1",
     "psycopg>=3.3.2",
+    "fastapi[standard]>=0.128.7",
+    "websockets>=15.0.1",
+    "uvicorn>=0.40.0",
+    "dspy-ai>=3.1.3",
+    "litellm>=1.81.10",
+    "pgvector>=0.4.2",
 ]
 
 [project.urls]
@@ -115,3 +121,6 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = ["benchmark: performance/throughput benchmark tests"]
+
+[tool.ty.src]
+exclude = ["tests/", "scripts/", "notebooks/", "test_modal_guard.py"]

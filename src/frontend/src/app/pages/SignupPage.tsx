@@ -14,11 +14,11 @@ import { useNavigate, Link } from "react-router";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { usePostHog } from "@posthog/react";
-import { typo } from "../components/config/typo";
-import { springs } from "../components/config/motion-config";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
+import { typo } from "@/lib/config/typo";
+import { springs } from "@/lib/config/motion-config";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 function SignupPage() {

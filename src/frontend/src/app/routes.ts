@@ -7,9 +7,9 @@
  * chunk-load failures.
  */
 import { createBrowserRouter } from "react-router";
-import { RootLayout, RootHydrateFallback } from "./layout/RootLayout";
-import { RouteErrorPage } from "./pages/RouteErrorPage";
-import { LazyRouteComponents } from "./lib/perf/routePreload";
+import { RootLayout, RootHydrateFallback } from "@/app/layout/RootLayout";
+import { RouteErrorPage } from "@/app/pages/RouteErrorPage";
+import { LazyRouteComponents } from "@/lib/perf/routePreload";
 
 export const router = createBrowserRouter([
   {

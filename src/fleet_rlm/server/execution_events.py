@@ -6,7 +6,9 @@ Artifact Canvas-style visualizations.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -15,6 +17,8 @@ from typing import Any, Literal
 
 from fastapi import WebSocket
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
 ExecutionEventType = Literal[
@@ -131,41 +135,128 @@ def summarize_code_for_event(code: str) -> dict[str, str]:
 class ExecutionEventEmitter:
     """Broadcast ``ExecutionEvent`` payloads to matching websocket subscribers."""
 
-    def __init__(self) -> None:
-        self._connections: dict[WebSocket, ExecutionSubscription] = {}
+    @dataclass(slots=True)
+    class _ConnectionState:
+        subscription: ExecutionSubscription
+        queue: asyncio.Queue[dict[str, Any] | None]
+        sender_task: asyncio.Task[None]
+        dropped_events: int = 0
+
+    def __init__(
+        self,
+        *,
+        max_queue: int = 256,
+        drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest",
+    ) -> None:
+        self._max_queue = max(1, int(max_queue))
+        self._drop_policy = drop_policy
+        self._connections: dict[WebSocket, ExecutionEventEmitter._ConnectionState] = {}
         self._lock = RLock()
 
     async def connect(
         self, websocket: WebSocket, subscription: ExecutionSubscription
     ) -> None:
         await websocket.accept()
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(
+            maxsize=self._max_queue
+        )
+        sender_task = asyncio.create_task(self._sender_loop(websocket))
+        state = self._ConnectionState(
+            subscription=subscription,
+            queue=queue,
+            sender_task=sender_task,
+        )
         with self._lock:
-            self._connections[websocket] = subscription
+            self._connections[websocket] = state
 
     async def disconnect(self, websocket: WebSocket) -> None:
+        state: ExecutionEventEmitter._ConnectionState | None = None
         with self._lock:
-            self._connections.pop(websocket, None)
+            state = self._connections.pop(websocket, None)
+        if state is None:
+            return
+
+        try:
+            state.queue.put_nowait(None)
+        except asyncio.QueueFull:
+            try:
+                _ = state.queue.get_nowait()
+                state.queue.put_nowait(None)
+            except (asyncio.QueueEmpty, asyncio.QueueFull):
+                logger.debug(
+                    "Ignoring execution queue race during disconnect teardown",
+                )
+
+        current_task = asyncio.current_task()
+        if state.sender_task is not current_task:
+            state.sender_task.cancel()
+            try:
+                await state.sender_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+    async def _sender_loop(self, websocket: WebSocket) -> None:
+        state: ExecutionEventEmitter._ConnectionState | None = None
+        while True:
+            with self._lock:
+                state = self._connections.get(websocket)
+            if state is None:
+                return
+
+            payload = await state.queue.get()
+            if payload is None:
+                break
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                break
+
+        await self.disconnect(websocket)
+
+    def _enqueue_payload(
+        self,
+        state: _ConnectionState,
+        payload: dict[str, Any],
+    ) -> None:
+        try:
+            state.queue.put_nowait(payload)
+            return
+        except asyncio.QueueFull:
+            pass
+
+        if self._drop_policy == "drop_newest":
+            state.dropped_events += 1
+            return
+
+        # Default drop policy: keep latest signal and evict the oldest entry.
+        try:
+            _ = state.queue.get_nowait()
+            state.dropped_events += 1
+        except asyncio.QueueEmpty:
+            state.dropped_events += 1
+            return
+
+        try:
+            state.queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            state.dropped_events += 1
 
     async def emit(self, event: ExecutionEvent) -> None:
         payload = event.model_dump(mode="json")
         with self._lock:
             targets = [
-                websocket
-                for websocket, subscription in self._connections.items()
-                if subscription.matches(event)
+                state
+                for state in self._connections.values()
+                if state.subscription.matches(event)
             ]
+        for state in targets:
+            self._enqueue_payload(state, payload)
 
-        stale: list[WebSocket] = []
-        for websocket in targets:
-            try:
-                await websocket.send_json(payload)
-            except Exception:
-                stale.append(websocket)
-
-        if stale:
-            with self._lock:
-                for websocket in stale:
-                    self._connections.pop(websocket, None)
+    def dropped_event_count(self) -> int:
+        with self._lock:
+            return sum(state.dropped_events for state in self._connections.values())
 
 
 def _extract_depth(payload: dict[str, Any]) -> int | None:
@@ -396,6 +487,39 @@ class ExecutionStepBuilder:
             return self._build_step(
                 step_type="output",
                 label=kind,
+                input_payload={"event_kind": kind},
+                output_payload={"text": stripped_text, "payload": payload_obj},
+                timestamp=timestamp,
+                parent_id=self._resolve_parent(payload_obj),
+                raw_payload=payload_obj,
+            )
+
+        if kind == "plan_update":
+            return self._build_step(
+                step_type="llm",
+                label="plan_update",
+                input_payload={"event_kind": kind},
+                output_payload={"text": stripped_text, "payload": payload_obj},
+                timestamp=timestamp,
+                parent_id=self._resolve_parent(payload_obj),
+                raw_payload=payload_obj,
+            )
+
+        if kind == "rlm_executing":
+            return self._build_step(
+                step_type="repl",
+                label="rlm_executing",
+                input_payload={"event_kind": kind},
+                output_payload={"text": stripped_text, "payload": payload_obj},
+                timestamp=timestamp,
+                parent_id=self._resolve_parent(payload_obj),
+                raw_payload=payload_obj,
+            )
+
+        if kind == "memory_update":
+            return self._build_step(
+                step_type="memory",
+                label="memory_update",
                 input_payload={"event_kind": kind},
                 output_payload={"text": stripped_text, "payload": payload_obj},
                 timestamp=timestamp,

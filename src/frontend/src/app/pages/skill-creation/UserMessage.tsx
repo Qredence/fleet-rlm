@@ -1,4 +1,4 @@
-import { typo } from "../../components/config/typo";
+import { typo } from "@/lib/config/typo";
 
 interface UserMessageProps {
   content: string;

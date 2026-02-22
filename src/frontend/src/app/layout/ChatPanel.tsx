@@ -11,10 +11,10 @@
 import { Suspense } from "react";
 import { Outlet, useLocation } from "react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { fades } from "../components/config/motion-config";
-import { useIsMobile } from "../components/ui/use-mobile";
-import { ErrorBoundary } from "../components/shared/ErrorBoundary";
-import { PageSkeleton } from "../components/shared/PageSkeleton";
+import { fades } from "@/lib/config/motion-config";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { PageSkeleton } from "@/components/shared/PageSkeleton";
 
 export function ChatPanel() {
   const location = useLocation();

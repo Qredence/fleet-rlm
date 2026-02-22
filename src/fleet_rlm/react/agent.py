@@ -151,6 +151,36 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self.interpreter.shutdown()
         self._started = False
 
+    async def astart(self) -> None:
+        """Start the underlying Modal interpreter session if needed (async)."""
+        if self._started:
+            return
+        if getattr(self.interpreter, "async_execute", False) and hasattr(
+            self.interpreter, "astart"
+        ):
+            await self.interpreter.astart()
+        else:
+            self.interpreter.start()
+        self._started = True
+
+    async def ashutdown(self) -> None:
+        """Shutdown the interpreter and mark this agent session as stopped (async)."""
+        if getattr(self.interpreter, "async_execute", False) and hasattr(
+            self.interpreter, "ashutdown"
+        ):
+            await self.interpreter.ashutdown()
+        else:
+            self.interpreter.shutdown()
+        self._started = False
+
+    async def __aenter__(self) -> "RLMReActChatAgent":
+        await self.astart()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+        await self.ashutdown()
+        return False
+
     def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
         """Reset chat history, document cache, and (optionally) sandbox buffers."""
         self.history = dspy.History(messages=[])

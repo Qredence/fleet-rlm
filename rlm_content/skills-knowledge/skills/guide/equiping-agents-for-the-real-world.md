@@ -1,1 +1,0 @@
-https://claude.com/blog/equipping-agents-for-the-real-world-with-agent-skills

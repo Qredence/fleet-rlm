@@ -26,30 +26,30 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { usePostHog } from "@posthog/react";
-import { useNavigation } from "../../components/hooks/useNavigation";
-import type { ChatMessage, CreationPhase } from "../../components/data/types";
-import type { Conversation } from "../../components/hooks/useChatHistory";
-import { createLocalId } from "../../lib/id";
+import { useNavigation } from "@/hooks/useNavigation";
+import type { ChatMessage, CreationPhase } from "@/lib/data/types";
+import type { Conversation } from "@/hooks/useChatHistory";
+import { createLocalId } from "@/lib/id";
 import {
   phase1ClarificationQuestions,
   phase2ClarificationQuestions,
-} from "../../components/data/mock-skills";
+} from "@/lib/data/mock-skills";
 import {
   buildPhase1ClarificationPlan,
   buildPhase1ExecutionPlan,
-} from "../../lib/skill-creation/simulation/phase1";
+} from "@/lib/skill-creation/simulation/phase1";
 import {
   buildPhase2ClarificationPlan,
   buildPhase2ExecutionPlan,
-} from "../../lib/skill-creation/simulation/phase2";
+} from "@/lib/skill-creation/simulation/phase2";
 import {
   buildPhase3ExecutionPlan,
-} from "../../lib/skill-creation/simulation/phase3";
-import { clarificationIntro } from "../../lib/skill-creation/simulation/messages";
+} from "@/lib/skill-creation/simulation/phase3";
+import { clarificationIntro } from "@/lib/skill-creation/simulation/messages";
 import type {
   ClarificationFollowUpPlan,
   PhaseExecutionPlan,
-} from "../../lib/skill-creation/simulation/types";
+} from "@/lib/skill-creation/simulation/types";
 
 // ── Return type ─────────────────────────────────────────────────────
 

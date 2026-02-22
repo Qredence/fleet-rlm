@@ -1,15 +1,21 @@
 import { createRoot } from "react-dom/client";
-import App from "./app/App.tsx";
+import App from "@/app/App.tsx";
 import "./styles/index.css";
 
 // PostHog analytics initialization
 import posthog from "posthog-js";
 import { PostHogProvider } from "@posthog/react";
 
-posthog.init(import.meta.env.VITE_PUBLIC_POSTHOG_KEY, {
-  api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-  defaults: "2026-01-30",
-});
+const posthogKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
+const posthogHost =
+  import.meta.env.VITE_PUBLIC_POSTHOG_HOST || "https://eu.i.posthog.com";
+
+if (posthogKey) {
+  posthog.init(posthogKey, {
+    api_host: posthogHost,
+    defaults: "2026-01-30",
+  });
+}
 
 const PRELOAD_RELOAD_KEY = "fleetwebapp:vite-preload-retried";
 

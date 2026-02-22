@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -19,9 +19,37 @@ def _env_bool(value: str | None, *, default: bool) -> bool:
     return default
 
 
+def _env_int(value: str | None, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value.strip())
+        return parsed if parsed > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_csv(value: str | None, *, default: list[str]) -> list[str]:
+    if value is None:
+        return default
+    items = [item.strip() for item in value.split(",")]
+    cleaned = [item for item in items if item]
+    return cleaned or default
+
+
+def _env_app_env() -> str:
+    return (os.getenv("APP_ENV") or "local").strip().lower()
+
+
 class ServerRuntimeConfig(BaseModel):
+    app_env: Literal["local", "staging", "production"] = cast(
+        Literal["local", "staging", "production"],
+        _env_app_env(),
+    )
     secret_name: str = "LITELLM"
-    volume_name: str | None = None
+    volume_name: str | None = Field(
+        default_factory=lambda: os.getenv("VOLUME_NAME") or None
+    )
     timeout: int = 900
     react_max_iters: int = 5
     rlm_max_iterations: int = 30
@@ -40,8 +68,48 @@ class ServerRuntimeConfig(BaseModel):
     database_url: str | None = Field(
         default_factory=lambda: os.getenv("DATABASE_URL") or None
     )
+    database_required: bool = Field(
+        default_factory=lambda: _env_bool(
+            os.getenv("DATABASE_REQUIRED"),
+            default=_env_app_env() in {"staging", "production"},
+        )
+    )
     db_echo: bool = False
     db_validate_on_startup: bool = False
+    enable_legacy_sqlite_routes: bool = Field(
+        default_factory=lambda: _env_bool(
+            os.getenv("LEGACY_SQLITE_ROUTES_ENABLED"),
+            default=_env_app_env() == "local",
+        )
+    )
+    allow_debug_auth: bool = Field(
+        default_factory=lambda: _env_bool(
+            os.getenv("ALLOW_DEBUG_AUTH"),
+            default=_env_app_env() == "local",
+        )
+    )
+    allow_query_auth_tokens: bool = Field(
+        default_factory=lambda: _env_bool(
+            os.getenv("ALLOW_QUERY_AUTH_TOKENS"),
+            default=_env_app_env() == "local",
+        )
+    )
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: _env_csv(
+            os.getenv("CORS_ALLOWED_ORIGINS"),
+            default=["*"] if _env_app_env() == "local" else [],
+        )
+    )
+    ws_execution_max_queue: int = Field(
+        default_factory=lambda: _env_int(
+            os.getenv("WS_EXECUTION_MAX_QUEUE"), default=256
+        )
+    )
+    ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = Field(
+        default_factory=lambda: (
+            (os.getenv("WS_EXECUTION_DROP_POLICY") or "drop_oldest").strip().lower()
+        )
+    )
     auth_mode: Literal["dev", "entra"] = Field(
         default_factory=lambda: (os.getenv("AUTH_MODE") or "dev").strip().lower()
     )
@@ -63,3 +131,33 @@ class ServerRuntimeConfig(BaseModel):
     entra_audience: str | None = Field(
         default_factory=lambda: os.getenv("ENTRA_AUDIENCE") or None
     )
+
+    def validate_startup_or_raise(self) -> None:
+        """Validate environment guardrails before server startup."""
+        if self.ws_execution_max_queue <= 0:
+            raise ValueError("WS execution queue size must be > 0")
+
+        if self.database_required and not self.database_url:
+            raise ValueError("DATABASE_URL is required when database_required=true")
+
+        if self.app_env in {"staging", "production"}:
+            if not self.auth_required:
+                raise ValueError(
+                    "AUTH_REQUIRED must be true when APP_ENV is staging/production"
+                )
+            if self.allow_debug_auth:
+                raise ValueError(
+                    "ALLOW_DEBUG_AUTH must be false when APP_ENV is staging/production"
+                )
+            if self.allow_query_auth_tokens:
+                raise ValueError(
+                    "ALLOW_QUERY_AUTH_TOKENS must be false when APP_ENV is staging/production"
+                )
+            if "*" in self.cors_allowed_origins:
+                raise ValueError(
+                    "CORS_ALLOWED_ORIGINS cannot contain '*' in staging/production"
+                )
+            if self.auth_mode == "dev" and self.dev_jwt_secret == "change-me":
+                raise ValueError(
+                    "DEV_JWT_SECRET must be customized for staging/production in AUTH_MODE=dev"
+                )

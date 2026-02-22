@@ -67,6 +67,9 @@ StreamEventKind = Literal[
     "tool_call",
     "tool_result",
     "trajectory_step",
+    "plan_update",
+    "rlm_executing",
+    "memory_update",
     "final",
     "error",
     "cancelled",
@@ -146,6 +149,13 @@ class TurnState:
                 current_steps = self.trajectory.get("steps", [])
                 current_steps.append(step_data)
                 self.trajectory["steps"] = current_steps
+            return
+
+        if event.kind in ("plan_update", "rlm_executing", "memory_update"):
+            if event.text:
+                # Maintain CLI backward compatibility by casting these as status/timeline noise
+                self.status_lines.append(event.text)
+                self.tool_timeline.append(event.text)
             return
 
         if event.kind == "final":

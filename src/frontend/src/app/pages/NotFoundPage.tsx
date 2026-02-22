@@ -10,9 +10,9 @@
 import { useNavigate, Link } from "react-router";
 import { FileQuestion, ArrowLeft, Home } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { typo } from "../components/config/typo";
-import { springs } from "../components/config/motion-config";
-import { Button } from "../components/ui/button";
+import { typo } from "@/lib/config/typo";
+import { springs } from "@/lib/config/motion-config";
+import { Button } from "@/components/ui/button";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 export function NotFoundPage() {

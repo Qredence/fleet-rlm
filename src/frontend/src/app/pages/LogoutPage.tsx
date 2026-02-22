@@ -13,9 +13,9 @@ import { useNavigate, Link } from "react-router";
 import { LogOut, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { usePostHog } from "@posthog/react";
-import { typo } from "../components/config/typo";
-import { springs, fades } from "../components/config/motion-config";
-import { Button } from "../components/ui/button";
+import { typo } from "@/lib/config/typo";
+import { springs, fades } from "@/lib/config/motion-config";
+import { Button } from "@/components/ui/button";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 type LogoutPhase = "signing-out" | "done";

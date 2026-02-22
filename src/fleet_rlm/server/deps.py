@@ -23,6 +23,7 @@ class ServerState:
         self.config = ServerRuntimeConfig()
         self.planner_lm: Any | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
+        self.runtime_test_results: dict[str, dict[str, Any]] = {}
         self.execution_event_emitter = ExecutionEventEmitter()
         self.db_manager: DatabaseManager | None = None
         self.repository: FleetRepository | None = None
@@ -30,7 +31,9 @@ class ServerState:
 
     @property
     def is_ready(self) -> bool:
-        return self.planner_lm is not None
+        planner_ready = self.planner_lm is not None
+        db_ready = (not self.config.database_required) or self.repository is not None
+        return planner_ready and db_ready
 
 
 server_state = ServerState()
@@ -109,6 +112,7 @@ def get_request_identity(request: Request) -> NormalizedIdentity | None:
     return None
 
 
-def session_key(workspace_id: str, user_id: str) -> str:
+def session_key(workspace_id: str, user_id: str, session_id: str | None = None) -> str:
     """Build a stable in-memory key for a stateful user/workspace session."""
-    return f"{workspace_id}:{user_id}"
+    resolved_session_id = (session_id or "").strip() or "__default__"
+    return f"{workspace_id}:{user_id}:{resolved_session_id}"

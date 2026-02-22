@@ -71,7 +71,9 @@ src/frontend/test-results/
 archive/
 docs/archive/
 docs/plans/
+.junie/
 
+docs/artifacts/
 # Local runtime artifacts
 fleet_rlm.db
 server.log
@@ -80,3 +82,6 @@ tui/
 tui-cli/tui-ink/node_modules/
 tui-cli/opentui-rlm/node_modules/
 archive/
+tui-ink/package-lock.json
+src/frontend/test-results/.last-run.json
+.posthog-events.json

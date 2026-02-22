@@ -1,12 +1,12 @@
 import { Link } from "react-router";
 import { AlertTriangle } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { typo } from "../components/config/typo";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { typo } from "@/lib/config/typo";
 import {
   BACKEND_CAPABILITY_BANNER_TITLE,
   UNSUPPORTED_SECTION_REASON,
-} from "../lib/rlm-api";
+} from "@/lib/rlm-api";
 
 interface BackendCapabilityPageProps {
   sectionLabel: string;

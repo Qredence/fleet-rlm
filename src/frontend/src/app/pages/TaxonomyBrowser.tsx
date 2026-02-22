@@ -10,27 +10,27 @@
 import { useState, useCallback, useMemo } from "react";
 import { useReducedMotion } from "motion/react";
 import { Search, HardDrive, GitFork, TriangleAlert } from "lucide-react";
-import { typo } from "../components/config/typo";
-import type { FsNode } from "../components/data/types";
-import { useSkills } from "../components/hooks/useSkills";
-import { useTaxonomy } from "../components/hooks/useTaxonomy";
-import { useFilesystem } from "../components/hooks/useFilesystem";
-import { useNavigation } from "../components/hooks/useNavigation";
-import { useAppNavigate } from "../components/hooks/useAppNavigate";
-import { useIsMobile } from "../components/ui/use-mobile";
-import { LargeTitleHeader } from "../components/shared/LargeTitleHeader";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { ScrollArea } from "../components/ui/scroll-area";
-import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { cn } from "../components/ui/utils";
-import { FsItem, TaxonomyItem } from "../components/features/taxonomy/TaxonomyBrowserSections";
+import { typo } from "@/lib/config/typo";
+import type { FsNode } from "@/lib/data/types";
+import { useSkills } from "@/hooks/useSkills";
+import { useTaxonomy } from "@/hooks/useTaxonomy";
+import { useFilesystem } from "@/hooks/useFilesystem";
+import { useNavigation } from "@/hooks/useNavigation";
+import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from "@/components/ui/utils";
+import { FsItem, TaxonomyItem } from "@/features/taxonomy/TaxonomyBrowserSections";
 import {
   collectExpandableIds,
   collectTaxonomyIds,
   countFiles,
   filterFs,
-} from "../lib/taxonomy/browser";
+} from "@/lib/taxonomy/browser";
 
 type ViewMode = "taxonomy" | "filesystem";
 

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from .delegate_sub_agent import parse_json_from_response, spawn_delegate_sub_agent
 from .tools import (
+    build_trajectory_payload,
     chunk_text,
     chunk_to_text,
     execute_submit,
@@ -59,29 +60,13 @@ def _handle_sub_agent_response(
     response["sub_agent_history"] = result.get("sub_agent_history", 0)
 
     if include_trajectory:
-        response.update(_rlm_trajectory_payload_from_dict(trajectory, include=True))
+        response.update(
+            build_trajectory_payload(
+                {"trajectory": trajectory}, include_trajectory=True
+            )
+        )
 
     return response
-
-
-def _rlm_trajectory_payload_from_dict(
-    trajectory: Any, *, include: bool
-) -> dict[str, Any]:
-    """Build trajectory payload from a sub-agent trajectory dict."""
-    if not include:
-        return {}
-
-    if isinstance(trajectory, dict):
-        steps = list(trajectory.values()) if trajectory else []
-    elif isinstance(trajectory, list):
-        steps = trajectory
-    else:
-        steps = []
-
-    return {
-        "trajectory_steps": len(steps),
-        "trajectory": steps,
-    }
 
 
 def build_rlm_delegate_tools(agent: "RLMReActChatAgent") -> list[Any]:
@@ -272,12 +257,9 @@ SUBMIT(
             "doc_chars": len(document),
             "depth": result.get("depth", getattr(agent, "_current_depth", 0) + 1),
             "sub_agent_history": result.get("sub_agent_history", 0),
-            **(
-                _rlm_trajectory_payload_from_dict(
-                    result.get("trajectory", {}), include=include_trajectory
-                )
-                if include_trajectory
-                else {}
+            **build_trajectory_payload(
+                {"trajectory": result.get("trajectory", {})},
+                include_trajectory=include_trajectory,
             ),
         }
 

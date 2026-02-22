@@ -11,21 +11,21 @@ import {
   Tooltip,
 } from "recharts";
 import { TrendingUp, Layers, Play, Award } from "lucide-react";
-import { typo } from "../components/config/typo";
-import { useAnalytics } from "../components/hooks/useAnalytics";
-import { springs } from "../components/config/motion-config";
-import { LargeTitleHeader } from "../components/shared/LargeTitleHeader";
-import { AnalyticsSkeleton } from "../components/shared/AnalyticsSkeleton";
+import { typo } from "@/lib/config/typo";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { springs } from "@/lib/config/motion-config";
+import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
+import { AnalyticsSkeleton } from "@/components/shared/AnalyticsSkeleton";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "../components/ui/card";
-import { ScrollArea } from "../components/ui/scroll-area";
-import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { cn } from "../components/ui/utils";
-import { useIsMobile } from "../components/ui/use-mobile";
+} from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from "@/components/ui/utils";
+import { useIsMobile } from "@/components/ui/use-mobile";
 
 // Chart tick style referencing design system variables
 const chartTickStyle = {

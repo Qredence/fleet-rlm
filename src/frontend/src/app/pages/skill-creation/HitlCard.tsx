@@ -1,11 +1,11 @@
 import { motion, useReducedMotion } from "motion/react";
 import { Check, MessageSquare } from "lucide-react";
-import { typo } from "../../components/config/typo";
-import type { ChatMessage } from "../../components/data/types";
-import { Button } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
-import { ResolvedChip } from "../../components/shared/ResolvedChip";
-import { fadeUp, fadeUpReduced } from "./animation-presets";
+import { typo } from "@/lib/config/typo";
+import type { ChatMessage } from "@/lib/data/types";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { ResolvedChip } from "@/components/shared/ResolvedChip";
+import { fadeUp, fadeUpReduced } from "@/app/pages/skill-creation/animation-presets";
 
 interface HitlCardProps {
   data: NonNullable<ChatMessage["hitlData"]>;

@@ -6,6 +6,7 @@ from . import (
     chat,
     health,
     memory,
+    runtime,
     sandbox,
     search,
     sessions,
@@ -25,5 +26,6 @@ __all__ = [
     "analytics",
     "search",
     "memory",
+    "runtime",
     "sandbox",
 ]

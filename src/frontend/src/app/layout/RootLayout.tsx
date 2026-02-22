@@ -14,13 +14,13 @@
  * during initial hydration while lazy route modules are being fetched.
  */
 import { useState } from "react";
-import { AppProviders } from "../providers/AppProviders";
-import { DesktopShell } from "./DesktopShell";
-import { MobileShell } from "./MobileShell";
-import { RouteSync } from "./RouteSync";
-import { CommandPalette } from "../components/features/CommandPalette";
-import { useIsMobile } from "../components/ui/use-mobile";
-import { Toaster } from "../components/ui/sonner";
+import { AppProviders } from "@/app/providers/AppProviders";
+import { DesktopShell } from "@/app/layout/DesktopShell";
+import { MobileShell } from "@/app/layout/MobileShell";
+import { RouteSync } from "@/app/layout/RouteSync";
+import { CommandPalette } from "@/features/CommandPalette";
+import { useIsMobile } from "@/components/ui/use-mobile";
+import { Toaster } from "@/components/ui/sonner";
 
 /**
  * Inner shell selector — must be inside AppProviders so it can use hooks

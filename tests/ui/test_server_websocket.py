@@ -69,6 +69,11 @@ class _FakeChatAgent:
                     return FinalOutput({"saved_path": path})
                 return FinalOutput({})
 
+            async def aexecute(
+                self, code: str, variables: dict[str, Any] | None = None, **kwargs
+            ):
+                return self.execute(code, variables, **kwargs)
+
         self.history = SimpleNamespace(messages=[])
         self.react_tools: list[Any] = []
         self._events: list[StreamEvent] = []
@@ -80,6 +85,12 @@ class _FakeChatAgent:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         return False
 
     def iter_chat_turn_stream(
@@ -100,6 +111,7 @@ class _FakeChatAgent:
     ):
         """Simulate streaming events (async)."""
         for event in self._events:
+            await asyncio.sleep(0.01)
             yield event
 
     async def execute_command(
@@ -224,6 +236,8 @@ def test_websocket_basic_message_flow(test_app, fake_agent):
             received_events = []
             while True:
                 data = websocket.receive_json()
+                if data["type"] == "error":
+                    raise AssertionError(f"Received error from websocket: {data}")
                 received_events.append(data)
                 if data["type"] == "event" and data["data"]["kind"] == "final":
                     break
@@ -522,6 +536,44 @@ def test_websocket_multiple_messages_sequential(test_app, fake_agent):
             websocket.send_json({"type": "message", "content": "message 2"})
             data2 = websocket.receive_json()
             assert data2["data"]["text"] == "Response 2"
+
+
+def test_websocket_session_state_isolated_by_session_id(test_app, fake_agent):
+    """Session state keys should include session_id for isolation."""
+    fake_agent.set_events(
+        [
+            StreamEvent(kind="final", text="Response A", timestamp=_ts(1.0)),
+        ]
+    )
+
+    with TestClient(test_app) as client:
+        with client.websocket_connect(
+            "/api/v1/ws/chat", headers=AUTH_HEADERS
+        ) as websocket:
+            websocket.send_json(
+                {"type": "message", "content": "message A", "session_id": "session-a"}
+            )
+            first = websocket.receive_json()
+            assert first["data"]["text"] == "Response A"
+
+            fake_agent.set_events(
+                [
+                    StreamEvent(kind="final", text="Response B", timestamp=_ts(2.0)),
+                ]
+            )
+            websocket.send_json(
+                {"type": "message", "content": "message B", "session_id": "session-b"}
+            )
+            second = websocket.receive_json()
+            assert second["data"]["text"] == "Response B"
+
+    from fleet_rlm.server.deps import server_state
+
+    keys = [
+        key for key in server_state.sessions.keys() if key.startswith("default:alice:")
+    ]
+    assert "default:alice:session-a" in keys
+    assert "default:alice:session-b" in keys
 
 
 def test_health_endpoint(test_app):

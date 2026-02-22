@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.4.7] - 2026-02-22
+
 ### Highlights (User Impact)
 
 - Added opt-in PostHog LLM analytics for DSPy LM calls with trace correlation and safe payload handling.

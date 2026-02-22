@@ -12,10 +12,10 @@ import { useNavigate, Link } from "react-router";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { usePostHog } from "@posthog/react";
-import { typo } from "../components/config/typo";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
+import { typo } from "@/lib/config/typo";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 export { LoginPage };

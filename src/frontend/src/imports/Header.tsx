@@ -1,4 +1,4 @@
-import svgPaths from "./svg-g9pgfbkia";
+import svgPaths from "@/imports/svg-g9pgfbkia";
 
 function LogoContainer() {
   return (
