@@ -154,16 +154,22 @@ def normalize_updates(
 
 
 def apply_env_updates(
-    *, updates: Mapping[str, str], env_path: Path | None = None
+    *, updates: Mapping[str, Any], env_path: Path | None = None
 ) -> dict[str, Any]:
     """Apply updates to .env and current process environment."""
+    # Normalize and validate updates against the runtime settings allowlist
+    normalized_updates = normalize_updates(
+        updates,
+        allowlist=RUNTIME_SETTINGS_ALLOWLIST,
+    )
+
     target = env_path or resolve_env_path()
-    if not updates:
+    if not normalized_updates:
         return {"updated": [], "env_path": str(target)}
 
     target.touch(exist_ok=True)
-    for key, value in updates.items():
+    for key, value in normalized_updates.items():
         set_key(str(target), key, value)
         os.environ[key] = value
 
-    return {"updated": sorted(updates.keys()), "env_path": str(target)}
+    return {"updated": sorted(normalized_updates.keys()), "env_path": str(target)}
