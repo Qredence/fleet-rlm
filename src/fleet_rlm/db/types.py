@@ -17,10 +17,6 @@ from .models import (
     RunStatus,
     RunStepType,
     SandboxProvider,
-    SkillLinkSource,
-    SkillSource,
-    SkillStatus,
-    SkillUsageStatus,
 )
 
 
@@ -28,79 +24,6 @@ from .models import (
 class IdentityUpsertResult:
     tenant_id: uuid.UUID
     user_id: uuid.UUID
-
-
-@dataclass(frozen=True)
-class SkillTaxonomyUpsertRequest:
-    tenant_id: uuid.UUID
-    key: str
-    name: str
-    created_by_user_id: uuid.UUID | None = None
-    description: str | None = None
-
-
-@dataclass(frozen=True)
-class TaxonomyTermUpsertRequest:
-    tenant_id: uuid.UUID
-    taxonomy_id: uuid.UUID
-    slug: str
-    label: str
-    parent_term_id: uuid.UUID | None = None
-    description: str | None = None
-    synonyms: list[str] = field(default_factory=list)
-    sort_order: int = 0
-    metadata_json: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class SkillUpsertRequest:
-    tenant_id: uuid.UUID
-    stable_key: str
-    display_name: str
-    created_by_user_id: uuid.UUID | None = None
-    description: str | None = None
-    source: SkillSource = SkillSource.SCAFFOLD
-    status: SkillStatus = SkillStatus.ACTIVE
-    latest_version: int | None = None
-    metadata_json: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class SkillVersionCreateRequest:
-    tenant_id: uuid.UUID
-    skill_id: uuid.UUID
-    version_num: int
-    created_by_user_id: uuid.UUID | None = None
-    semver: str | None = None
-    manifest_json: dict[str, Any] = field(default_factory=dict)
-    checksum: str | None = None
-    source_uri: str | None = None
-    is_current: bool = False
-
-
-@dataclass(frozen=True)
-class SkillTermLinkRequest:
-    tenant_id: uuid.UUID
-    skill_id: uuid.UUID
-    term_id: uuid.UUID
-    created_by_user_id: uuid.UUID | None = None
-    confidence: float = 1.0
-    is_primary: bool = False
-    source: SkillLinkSource = SkillLinkSource.MANUAL
-
-
-@dataclass(frozen=True)
-class RunSkillUsageCreateRequest:
-    tenant_id: uuid.UUID
-    run_id: uuid.UUID
-    skill_id: uuid.UUID
-    status: SkillUsageStatus = SkillUsageStatus.STARTED
-    step_id: uuid.UUID | None = None
-    skill_version_id: uuid.UUID | None = None
-    invocation_name: str | None = None
-    metadata_json: dict[str, Any] = field(default_factory=dict)
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
