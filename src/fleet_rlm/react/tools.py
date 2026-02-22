@@ -140,26 +140,50 @@ def execute_submit(
     return {"output": str(result), "depth": agent.current_depth}
 
 
-def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[str, Any]:
-    """Build a normalized trajectory payload from a DSPy RLM result."""
+def build_trajectory_payload(
+    source: Any, *, include_trajectory: bool
+) -> dict[str, Any]:
+    """Build a normalised trajectory payload from either a ``dspy.Prediction``
+    object or a raw sub-agent response ``dict``.
+
+    Both callsites (``tools_rlm_delegate.py`` and inline tool helpers) use this
+    single function so the trajectory key schema stays consistent.
+
+    Returns an empty dict when *include_trajectory* is False.
+    """
     if not include_trajectory:
         return {}
 
-    trajectory = list(getattr(result, "trajectory", []) or [])
+    # Accept both Prediction objects (getattr) and plain dicts
+    if isinstance(source, dict):
+        raw = source.get("trajectory", [])
+        trajectory: list[Any] = (
+            list(raw.values()) if isinstance(raw, dict) else list(raw or [])
+        )
+        final_reasoning = source.get("final_reasoning")
+        depth = source.get("depth")
+        parent_step_id = source.get("parent_step_id")
+    else:
+        trajectory = list(getattr(source, "trajectory", []) or [])
+        final_reasoning = getattr(source, "final_reasoning", None)
+        depth = getattr(source, "depth", None)
+        parent_step_id = getattr(source, "parent_step_id", None)
+
     payload: dict[str, Any] = {
         "trajectory_steps": len(trajectory),
         "trajectory": trajectory,
     }
-    final_reasoning = getattr(result, "final_reasoning", None)
     if final_reasoning:
         payload["final_reasoning"] = final_reasoning
-    depth = getattr(result, "depth", None)
     if isinstance(depth, (int, float)):
         payload["depth"] = int(depth)
-    parent_step_id = getattr(result, "parent_step_id", None)
     if isinstance(parent_step_id, str) and parent_step_id:
         payload["parent_step_id"] = parent_step_id
     return payload
+
+
+# Back-compat alias so existing callers of the private name keep working.
+_rlm_trajectory_payload = build_trajectory_payload
 
 
 # ---------------------------------------------------------------------------
