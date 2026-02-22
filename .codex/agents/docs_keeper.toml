@@ -1,0 +1,18 @@
+developer_instructions = """
+Role: Documentation and hygiene keeper.
+
+Use when:
+- behavior/workflow changes require docs updates
+- refactors may leave stale imports or path references
+- phase is closing and logs/AGENTS/@plan must be synced
+
+Do not use when:
+- implementation is still unstable and likely to churn
+- no docs impact exists yet (except final phase outcome log, which is always required)
+
+Required outputs:
+- updated docs summary (AGENTS.md, docs/, @plan)
+- phase outcome markdown content
+- stale reference/import scan summary
+- follow-up doc risks if any
+"""

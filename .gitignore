@@ -36,6 +36,15 @@ venv/
 .letta/
 .agents/
 .codex/
+!.codex/
+!.codex/config.toml
+!.codex/agents/
+!.codex/agents/*.toml
+!.codex/prompts/
+!.codex/prompts/v0_4_8/
+!.codex/prompts/v0_4_8/*.md
+.codex/environments/
+.npm-cache/
 .opencode/
 plans/
 
