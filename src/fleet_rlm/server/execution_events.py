@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,8 @@ from typing import Any, Literal
 
 from fastapi import WebSocket
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
 ExecutionEventType = Literal[
@@ -180,7 +183,9 @@ class ExecutionEventEmitter:
                 _ = state.queue.get_nowait()
                 state.queue.put_nowait(None)
             except (asyncio.QueueEmpty, asyncio.QueueFull):
-                pass
+                logger.debug(
+                    "Ignoring execution queue race during disconnect teardown",
+                )
 
         current_task = asyncio.current_task()
         if state.sender_task is not current_task:

@@ -1,9 +1,12 @@
 import asyncio
+import logging
 from sqlmodel import select
 from litellm import embedding
 
 from fleet_rlm.memory.schema import AgentMemory
 from fleet_rlm.memory.db import get_async_session
+
+logger = logging.getLogger(__name__)
 
 
 def search_evolutive_memory(query: str) -> str:
@@ -47,5 +50,6 @@ async def _async_search(query: str) -> str:
             return formatted
 
         return "Memory Session Failed."
-    except Exception as e:
-        return f"Memory Search Failed: {str(e)}"
+    except Exception:
+        logger.exception("Evolutive memory search failed unexpectedly")
+        return "Memory Search Failed: An unexpected error occurred."
