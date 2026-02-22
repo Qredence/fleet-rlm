@@ -35,6 +35,23 @@ from .database import init_db
 logger = logging.getLogger(__name__)
 
 
+def _resolve_ui_dist_dir() -> Path | None:
+    """Return the frontend build directory if one exists.
+
+    Supports both the legacy in-package UI layout and the current repo layout
+    (`src/frontend/dist`) used by `fleet web` during local development.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    candidates = [
+        Path(__file__).parent.parent / "ui" / "dist",  # legacy/in-package layout
+        repo_root / "src" / "frontend" / "dist",  # current repo layout
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _emit_posthog_startup_event(cfg: ServerRuntimeConfig) -> bool:
     """Emit a startup event when PostHog runtime analytics is configured.
 
@@ -166,8 +183,8 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         pass
 
     # Mount and Serve Frontend
-    ui_dir = Path(__file__).parent.parent / "ui" / "dist"
-    if ui_dir.exists():
+    ui_dir = _resolve_ui_dist_dir()
+    if ui_dir is not None:
         assets_dir = ui_dir / "assets"
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
