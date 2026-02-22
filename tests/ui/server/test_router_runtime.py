@@ -46,6 +46,7 @@ def staging_client(monkeypatch: pytest.MonkeyPatch):
             allow_debug_auth=False,
             allow_query_auth_tokens=False,
             cors_allowed_origins=["https://example.com"],
+            dev_jwt_secret="staging-test-secret",
             enable_legacy_sqlite_routes=False,
         )
     )

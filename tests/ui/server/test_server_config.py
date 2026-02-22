@@ -2,7 +2,8 @@ from fleet_rlm.server.config import ServerRuntimeConfig
 import pytest
 
 
-def test_default_config():
+def test_default_config(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("VOLUME_NAME", raising=False)
     cfg = ServerRuntimeConfig()
     assert cfg.app_env == "local"
     assert cfg.secret_name == "LITELLM"
@@ -22,6 +23,12 @@ def test_default_config():
     assert cfg.cors_allowed_origins == ["*"]
     assert cfg.ws_execution_max_queue == 256
     assert cfg.ws_execution_drop_policy == "drop_oldest"
+
+
+def test_default_config_uses_volume_name_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VOLUME_NAME", "alt-volume")
+    cfg = ServerRuntimeConfig()
+    assert cfg.volume_name == "alt-volume"
 
 
 def test_custom_config():
