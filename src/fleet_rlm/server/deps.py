@@ -23,6 +23,7 @@ class ServerState:
         self.config = ServerRuntimeConfig()
         self.planner_lm: Any | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
+        self.runtime_test_results: dict[str, dict[str, Any]] = {}
         self.execution_event_emitter = ExecutionEventEmitter()
         self.db_manager: DatabaseManager | None = None
         self.repository: FleetRepository | None = None

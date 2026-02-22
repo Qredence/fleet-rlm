@@ -110,3 +110,46 @@ class SessionStateSummary(BaseModel):
 class SessionStateResponse(BaseModel):
     ok: bool = True
     sessions: list[SessionStateSummary] = Field(default_factory=list)
+
+
+class RuntimeSettingsSnapshot(BaseModel):
+    env_path: str
+    keys: list[str] = Field(default_factory=list)
+    values: dict[str, str] = Field(default_factory=dict)
+    masked_values: dict[str, str] = Field(default_factory=dict)
+
+
+class RuntimeSettingsUpdateRequest(BaseModel):
+    updates: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeSettingsUpdateResponse(BaseModel):
+    updated: list[str] = Field(default_factory=list)
+    env_path: str
+
+
+class RuntimeConnectivityTestResponse(BaseModel):
+    kind: Literal["modal", "lm"]
+    ok: bool
+    preflight_ok: bool
+    checked_at: str
+    checks: dict[str, Any] = Field(default_factory=dict)
+    guidance: list[str] = Field(default_factory=list)
+    latency_ms: int | None = None
+    output_preview: str | None = None
+    error: str | None = None
+
+
+class RuntimeTestCache(BaseModel):
+    modal: RuntimeConnectivityTestResponse | None = None
+    lm: RuntimeConnectivityTestResponse | None = None
+
+
+class RuntimeStatusResponse(BaseModel):
+    app_env: str
+    write_enabled: bool
+    ready: bool
+    llm: dict[str, Any] = Field(default_factory=dict)
+    modal: dict[str, Any] = Field(default_factory=dict)
+    tests: RuntimeTestCache
+    guidance: list[str] = Field(default_factory=list)

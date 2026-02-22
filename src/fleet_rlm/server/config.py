@@ -47,7 +47,9 @@ class ServerRuntimeConfig(BaseModel):
         _env_app_env(),
     )
     secret_name: str = "LITELLM"
-    volume_name: str | None = None
+    volume_name: str | None = Field(
+        default_factory=lambda: os.getenv("VOLUME_NAME") or None
+    )
     timeout: int = 900
     react_max_iters: int = 5
     rlm_max_iterations: int = 30

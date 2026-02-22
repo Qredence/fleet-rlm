@@ -31,6 +31,7 @@ from .routers import (
     auth,
     search,
     memory,
+    runtime,
     sandbox,
 )
 from .database import init_db
@@ -117,6 +118,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         max_queue=cfg.ws_execution_max_queue,
         drop_policy=cfg.ws_execution_drop_policy,
     )
+    server_state.runtime_test_results = {}
     server_state.auth_provider = build_auth_provider(
         auth_mode=cfg.auth_mode,
         dev_jwt_secret=cfg.dev_jwt_secret,
@@ -149,6 +151,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     api_router.include_router(analytics.router)
     api_router.include_router(search.router)
     api_router.include_router(memory.router)
+    api_router.include_router(runtime.router)
     api_router.include_router(sandbox.router)
 
     app.include_router(api_router)
