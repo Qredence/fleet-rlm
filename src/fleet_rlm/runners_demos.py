@@ -20,14 +20,13 @@ from .runners import (
     _require_planner_ready,
     _rlm_trajectory_payload,
 )
-from .signatures import (
-    AnalyzeLongDocument,
+from .signatures_demo import (
     ExtractAPIEndpoints,
     ExtractArchitecture,
     ExtractWithCustomTool,
     FindErrorPatterns,
-    SummarizeLongDocument,
 )
+from .signatures_prod import AnalyzeLongDocument, SummarizeLongDocument
 from .utils.tools import regex_extract
 
 logger = logging.getLogger(__name__)
