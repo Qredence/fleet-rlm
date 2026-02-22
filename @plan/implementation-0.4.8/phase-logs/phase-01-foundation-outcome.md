@@ -16,6 +16,7 @@
 6. `QRE-316` — canonicalized PostHog env handling and shared fallback/default hooks (frontend + backend).
 7. `QRE-318` — simplified Settings page/dialog to a single grouped functional settings surface.
 8. Phase-1 integration fixup — added import-compat shims, strengthened migration assertions, and made settings telemetry toggle call PostHog opt-in/out APIs.
+9. Phase-1 review hotfix — fixed `fleet web` blank-root behavior by resolving the SPA mount path from the current repo frontend build location (`src/frontend/dist`) with legacy fallback support.
 
 ## Parallelization Decisions
 - Safe parallel work used: frontend settings (`QRE-318`) and telemetry env foundation (`QRE-316`) validation were executed independently from backend/db refactors after code landed.
@@ -29,6 +30,7 @@
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/fleet_rlm/server/deps.py`: consolidated FastAPI dependency helpers.
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/fleet_rlm/server/dependencies.py`: compatibility shim re-exporting from `deps.py`.
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/fleet_rlm/server/routers/planned.py`: consolidated placeholder routers.
+- `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/fleet_rlm/server/main.py`: SPA static mount now resolves current frontend dist path (`src/frontend/dist`) with legacy fallback for `fleet web`.
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/fleet_rlm/server/routers/analytics.py`: compatibility shim to `planned.analytics_router` (same for `taxonomy.py`, `search.py`, `memory.py`, `sandbox.py`).
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/fleet_rlm/signatures_prod.py`: production signatures module.
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/fleet_rlm/signatures_demo.py`: demo-only signatures module.
@@ -42,6 +44,7 @@
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/frontend/src/app/pages/SettingsPage.tsx`: removed placeholder category navigation; now renders grouped surface.
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/src/frontend/src/features/settings/SettingsDialog.tsx`: same shared grouped surface for dialog.
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/tests/integration/test_db_migrations.py`: now asserts deprecated tables/enums are absent after `head`.
+- `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/tests/ui/server/test_server_ui_mount.py`: verifies SPA mount path resolution and root serving behavior for `fleet web`.
 
 ## Validation Results
 - Formatting: `uv run ruff format --check ...` (phase Python touched set) -> pass
@@ -51,6 +54,7 @@
 - Frontend type/lint/tests/format: `bun run type-check`, `bunx vitest run ...`, `bunx eslint ...`, `bunx prettier --check ...` -> pass
 - Security: `make security-check` -> pass (`pip-audit` clean, `bandit` clean)
 - Import/reference checks: `uv run python -c "import fleet_rlm.server.deps, ..."` and shim import check -> pass
+- Review hotfix validation (`fleet web`): targeted UI mount tests, `ruff`, `bandit`, import verification, and manual root/assets `curl` checks -> pass
 
 ## Playwright Validation
 - Commands run:
@@ -84,6 +88,7 @@
   - checkpoint comments with validation summaries on each implemented ticket
   - commit-hash checkpoint comments on `QRE-316` and `QRE-318`
 - Project status update: posted (`Fleet-RLM` project status update marked Phase 1 In Review and on-track)
+- Review-stage note: PR branch received follow-up `fleet web` root mount hotfix after user validation reported blank shell; fix pushed to PR #75.
 
 ## Remaining Risks / Follow-Ups
 - `QRE-316`: project-owned default PostHog public key hook is implemented but actual key constant remains intentionally unset until a real project key is provided.
