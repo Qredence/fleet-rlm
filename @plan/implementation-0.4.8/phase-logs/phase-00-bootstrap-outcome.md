@@ -4,7 +4,7 @@
 - Phase: `phase-0`
 - Ticket(s): `QRE-321`
 - Branch: `codex/v0-4-8-phase-0-bootstrap`
-- PR: `pending`
+- PR: `https://github.com/Qredence/fleet-rlm/pull/74`
 - Merge commit: `pending`
 
 ## Sequential Execution Order
