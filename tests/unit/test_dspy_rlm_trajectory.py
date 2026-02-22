@@ -83,6 +83,90 @@ def _make_mock_interpreter(side_effects: list):
 class TestRLMTrajectoryPersistence:
     """Phase A — trajectory accumulation correctness."""
 
+    def test_deterministic_mock_three_step_execution_progression(self):
+        """Deterministically simulate a 3-step RLM run with mocked LM/interpreter.
+
+        This is the canonical fast regression for QRE-300. It validates that
+        the loop performs exactly three iterations (two tool observations plus
+        one submit), and that each trajectory entry carries a thought/action/
+        observation style progression using DSPy's `reasoning`/`code`/`output`
+        fields.
+        """
+        from dspy.primitives.code_interpreter import FinalOutput
+
+        lm = _ScriptedLM(
+            [
+                _chat_response(
+                    reasoning="Step 1: inspect the document header for context.",
+                    code="peek(context, 0, 80)",
+                ),
+                _chat_response(
+                    reasoning="Step 2: search for the target phrase in the document.",
+                    code="grep(context, 'target phrase')",
+                ),
+                _chat_response(
+                    reasoning="Step 3: I have enough evidence; submit the answer.",
+                    code=(
+                        "SUBMIT(findings=['target phrase found'], "
+                        "answer='Target phrase found in the document', "
+                        "sections_examined=2)"
+                    ),
+                ),
+            ]
+        )
+        dspy.settings.configure(lm=lm)
+
+        interpreter = _make_mock_interpreter(
+            side_effects=[
+                "Header preview: target phrase may appear later...",
+                "grep match: target phrase",
+                FinalOutput(
+                    {
+                        "findings": ["target phrase found"],
+                        "answer": "Target phrase found in the document",
+                        "sections_examined": 2,
+                    }
+                ),
+            ]
+        )
+
+        module = AnalyzeLongDocumentModule(
+            interpreter=interpreter,
+            max_iterations=5,
+            max_llm_calls=5,
+            verbose=False,
+        )
+
+        result = module(
+            document="Header preview... target phrase ... footer",
+            query="Find the target phrase",
+        )
+
+        assert interpreter.execute.call_count == 3, "Expected exactly 3 REPL executions"
+        assert hasattr(result, "trajectory")
+        assert isinstance(result.trajectory, list)
+        assert len(result.trajectory) == 3
+
+        # Treat DSPy's `reasoning`/`code`/`output` fields as thought/action/observation.
+        first, second, third = result.trajectory
+
+        assert first["reasoning"].startswith("Step 1:")
+        assert "peek(" in first["code"]
+        assert "Header preview" in str(first.get("output", ""))
+
+        assert second["reasoning"].startswith("Step 2:")
+        assert "grep(" in second["code"]
+        assert "target phrase" in str(second.get("output", ""))
+
+        assert third["reasoning"].startswith("Step 3:")
+        assert "SUBMIT(" in third["code"]
+        # Final submit may serialize the final output payload or a sentinel string.
+        assert third.get("output") is not None
+
+        assert result.findings == ["target phrase found"]
+        assert result.answer == "Target phrase found in the document"
+        assert result.sections_examined == 2
+
     def test_trajectory_is_list_with_correct_step_count(self):
         """dspy.RLM must accumulate exactly one trajectory entry per REPL
         iteration before a successful SUBMIT."""
