@@ -36,4 +36,10 @@ export type {
   SessionStateResponse,
   SessionStateSummary,
   RlmTaskType,
+  RuntimeConnectivityTestKind,
+  RuntimeConnectivityTestResponse,
+  RuntimeSettingsSnapshot,
+  RuntimeSettingsUpdateResponse,
+  RuntimeStatusResponse,
+  RuntimeTestCache,
 } from "@/lib/rlm-api/types";
