@@ -5,4 +5,6 @@ temporary re-export to avoid breaking downstream imports during the v0.4.8
 refactor.
 """
 
-from .deps import *  # noqa: F403
+from . import deps
+
+__all__ = ["deps"]
