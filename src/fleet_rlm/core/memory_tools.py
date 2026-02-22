@@ -15,16 +15,13 @@ def search_evolutive_memory(query: str) -> str:
     that semantically match the query. Use this to remember persistent rules across isolated
     Modal sessions or project runs.
     """
-    # Create an event loop explicitly because DSPy tools are synchronous
+    # Use a dedicated event loop because DSPy tools are synchronous and may be
+    # called from within an existing async context.
+    loop = asyncio.new_event_loop()
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    return loop.run_until_complete(_async_search(query))
-
-
+        return loop.run_until_complete(_async_search(query))
+    finally:
+        loop.close()
 async def _async_search(query: str) -> str:
     try:
         # Generate local embedding via LiteLLM
