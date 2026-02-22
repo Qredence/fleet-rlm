@@ -1,104 +1,78 @@
-# fleet-rlm Agentic Architecture Plan
+# Fleet-RLM Next Evolution Implementation Plan
 
-This document outlines the architectural impact on the current codebase across the 5 phases of the integration.
+This document outlines the architectural and codebase impact for the next phases (6, 7, and 8) of the Fleet-RLM project.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> The architectural additions introduce new directories such as `api/`, `memory/`, and `agents/` inside `src/fleet_rlm`, complementing existing components. Please review carefully to ensure the paths align with your vision.
+> The next evolution introduces advanced Multi-Agent delegation and background Memory Consolidation tasks. Please review the proposed architecture to ensure it aligns with the expected agent behavior and cloud cost budget.
 
 ## Proposed Changes
 
 ---
 
-### 1. Database & Infrastructure (`Phase 1`)
+### A. Legacy Cleanup & Current State Verification (`Phase A`)
 
-We will create the foundation for long-term Evolutive Taxonomy Memory and a standard FastAPI entrypoint.
+Prioritization pivot: Before expanding the Multi-Agent architecture, we must remove legacy debt and verify current sandbox boundaries.
 
-#### [NEW] `schema.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/memory/schema.py)
+#### [DELETE] `src/fleet_rlm/bridge/`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/fleet_rlm/bridge/)
 
-Creates SQLModel definitions for `TaxonomyNode` and `AgentMemory` with `pgvector` embeddings, and establishes the asyncpg connection manager over Neon.
+Remove the deprecated TUI API bridge logic. The new FastAPI websocket routing supersedes this.
 
-#### [NEW] `main.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/api/main.py)
+#### [MODIFY] `src/frontend/src/`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/frontend/src/)
 
-Initializes a barebones FastAPI app and checks for `.env` credentials (`DATABASE_URL`, `MODAL_TOKEN_ID`, etc.).
-
----
-
-### 2. Execution & Tools (`Phase 2`)
-
-Building the core execution environment using Modal and wrapping it as DSPy tools.
-
-#### [NEW] `modal_repl.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/core/modal_repl.py)
-
-Modal deployment stub and a persistent volume mounted at `/data/workspace`, providing stateful `execute_chunk` execution.
-
-#### [NEW] `tools.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/core/tools.py)
-
-Exposes `@dspy.tool` logic for `execute_workspace_code` (enforcing max 2000 chars guard) and `search_evolutive_memory` (pgvector search).
+Execute browser verification to confirm the UI correctly reflects Modal Volume files and parses external external documentation links via the active RLM Trajectories.
 
 ---
 
-### 3. Agentic Brains (`Phase 3`)
+### 6. Multi-Agent Orchestration & Tool Expansion (`Phase 6`)
 
-Defines the core intelligence pipeline utilizing DSPy `dspy.Signature` and `dspy.Module`.
+Adding depth to the ReAct capability by enabling multi-agent workflows and expanding the tool belt.
 
-#### [NEW] `signatures.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/agents/signatures.py)
+#### [MODIFY] `supervisor.py`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/fleet_rlm/agents/supervisor.py)
 
-Contains `TaskDecomposer` and `CodeWriterSignature` defining strict IO primitives.
+Update to support spawning specialized sub-agents with narrow context scopes, reducing token costs and hallucination.
 
-#### [NEW] `worker_rlm.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/agents/worker_rlm.py)
+#### [MODIFY] `tools.py`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/fleet_rlm/core/tools.py)
 
-Defines `RLMEngine` module which loops over decomposition and coding steps, invoking Modal execution and checking completion.
-
-#### [NEW] `supervisor.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/agents/supervisor.py)
-
-A standard `dspy.ReAct` wrapper routing tasks to the `RLMEngine`.
-
-#### [MODIFY] `engine.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/core/engine.py)
-
-Wraps LM setup with `posthog` telemetry tracing.
+Implement new specialized tools targeting web intelligence and deep dataset analysis, complete with truncation guards.
 
 ---
 
-### 4. Telemetry Multiplexer & TUI (`Phase 4`)
+### 7. Frontend Workspace Polish & Visualization (`Phase 7`)
 
-Streams internal agent events gracefully without breaking existing TUI.
+Making the Evolutive Memory and Agent execution visually tangible to the user.
 
-#### [NEW] `ws.py`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/fleet_rlm/api/ws.py)
+#### [MODIFY] `src/frontend/src/features/artifacts/`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/frontend/src/features/artifacts/)
 
-Provides `ws://localhost:8000/ws/stream` to multiplex `chat`, `plan_update`, `rlm_executing`, and `memory_update` events.
+Add new components for rendering dynamic interactive diagrams (e.g., `MemoryGraphView.tsx`) utilizing the real-time TanStack query cache.
 
-#### [MODIFY] `tui-cli/`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/tui-cli) (various)
+#### [MODIFY] `src/frontend/src/components/ui/`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/frontend/src/components/ui/)
 
-Intercepts payload types, keeping `chat` in the main log but isolating agent activity into side-panels using Rich/Textual.
+Build out a rich Markdown and syntax-highlighted block renderer for executed Python snippets returned from Modal.
 
 ---
 
-### 5. Dual-Pane React Frontend (`Phase 5`)
+### 8. Evolutive Memory Hardening (`Phase 8`)
 
-Real-time UI updates representing agent architecture in a rich dashboard.
+Optimizing the semantic vector store for long-term agent persistency.
 
-#### [MODIFY] `agentStore.ts`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/frontend/src/store/agentStore.ts)
+#### [MODIFY] `db.py`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/fleet_rlm/memory/db.py)
 
-Adds specific zustand state slices parsing the websocket models.
+Introduce hybrid search combining traditional boolean text search with pgvector `l2_distance`.
 
-#### [MODIFY] `useMemory.ts`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/frontend/src/hooks/useMemory.ts)
+#### [NEW] `reflection_worker.py`(file:///Volumes/StorageBackup/\_RLM/fleet-rlm-dspy/src/fleet_rlm/memory/reflection_worker.py)
 
-Uses TanStack Query to keep UI synced with the Neon DB memory structures.
-
-#### [MODIFY] `src/frontend/src/components/`(file:///Volumes/Samsung-SSD-T7/Workspaces/Github/qredence/agent-framework/v0.5/\_WORLD/\_RLM/fleet-rlm-dspy/src/frontend/src/components/)
-
-Integrates a collapsible view showcasing real-time code execution and execution chunk summaries.
+An asynchronous job that periodically runs to merge, prune, and consolidate raw `AgentMemory` observations into dense `TaxonomyNode` rules.
 
 ## Verification Plan
 
 ### Automated Tests
 
-- Verification scripts generated per phase (`test_db.py`, walkthroughs for tools).
+- Run `pytest` for the new `reflection_worker.py` logic to ensure no data loss during consolidation.
+- Run `vitest` for the new `MemoryGraphView` component ensuring correct prop mapping from Zustand.
 
 ### Manual Verification
 
-- Testing Modal connectivity locally.
-- Ensuring TUI rendering remains robust during complex code blocks.
-- Exploring React frontend interactions on `localhost`.
+- Execute a complex planning query in the TUI to visually confirm Multi-Agent delegation.
+- Monitor Neon DB metrics during the background Reflection loop to ensure connection pools are not exhausted.

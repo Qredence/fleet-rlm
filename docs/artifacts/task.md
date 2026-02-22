@@ -1,45 +1,27 @@
-# fleet-rlm Surgical Integration Tasks
+# Fleet-RLM Next Evolution Tasks
 
-- [x] **Phase 1: Evolutive Memory Integration**
-  - [x] Add dependencies via `uv add` (sqlmodel, asyncpg, pgvector)
-  - [x] Create `src/fleet_rlm/memory/schema.py` (TaxonomyNode, AgentMemory)
-  - [x] Create `src/fleet_rlm/memory/db.py` (async engine + session factory)
-  - [x] Verify via `test_db.py`
-- [x] **Phase 2: Context Guards & Memory Tools**
-  - [x] Inject `MAX_CHARS=2000` truncation guard into `stateful/sandbox.py`
-  - [x] Create `src/fleet_rlm/core/memory_tools.py` with `@dspy.tool search_evolutive_memory`
-- [x] **Phase 3: Agent Core (ReAct + RLM)** — _Pre-built in existing codebase_
-  - [x] Analyze `react/` module — discovered full dual-loop already exists
-  - [x] `rlm_runtime_modules.py` has 12+ `dspy.RLM` wrappers
-  - [x] `delegate_sub_agent.py` handles depth-tracked recursive sub-agents
-  - [x] `runtime_factory.py` provides lazy-cached module construction
-  - [x] Wire `search_evolutive_memory` into `build_tool_list()` (~5 LOC)
-  - [x] Verify truncation guard covers `dspy.RLM` → `ModalInterpreter.execute()` path
-  - [x] **Verify:** Write `tests/test_tools.py` to confirm memory tool registration
-  - [x] **Verify:** Write `tests/test_rlm_state.py` to ensure Modal session ID sharing
-  - [x] **Verify:** Write `tests/test_guard.py` to test 5000-char `dspy.RLM` truncation
-- [ ] **Phase 4: API & Multiplexed WebSockets**
-  - [ ] Review `src/fleet_rlm/server/routers/` and `execution_events.py`
-  - [ ] Expand `StreamEvent` with `rlm_executing`, `plan_update`, `memory_update` types
-  - [ ] Add WebSocket endpoint broadcasting multiplexed JSON
-  - [ ] Ensure `tui-cli` and `tui-ink` backwards compatibility
-  - [ ] **Verify:** Write `tests/test_events.py` for discriminated union serialization
-  - [ ] **Verify:** E2E test `tui-cli` locally to ensure it doesn't crash on new events
-- [ ] **Phase 5: The Frontend**
-  - [ ] Scaffold Vite + React app in `src/frontend/`
-  - [ ] Build Zustand stores consuming WebSocket stream
-  - [ ] Build Dual-Pane UI (Chat left, Workspace right)
-  - [ ] Connect TanStack Query for Neon taxonomy cache
-  - [ ] **Verify:** Write Vitest unit tests for Zustand WebSocket reconnection
-  - [ ] **Verify:** Write Vitest unit tests for TanStack Query caching logic
+- [ ] **Phase A: Legacy Cleanup & Current State Verification**
+  - [ ] Investigate and prune legacy directories (e.g., `src/fleet_rlm/bridge`)
+  - [ ] Define user stories for Modal Volume and Sandbox verification
+  - [ ] Define user story for external link ingestion and RLM trajectory analysis
+  - [ ] Run browser subagent to test Story 1: Modal Volume Introspection
+  - [ ] Run browser subagent to test Story 2: External Link Ingestion
 
-## Planning Artifacts
+---
 
-- [x] Generate all phase planning documents
-- [x] Generate DSPy alignment matrix
-- [x] Generate industry comparison matrix (6-column)
-- [x] Generate codebase assessment
-- [x] Generate concept, user flow, architecture diagram artifacts
-- [x] Create master `INDEX.md`
-- [x] Generate `verification_matrix.md` with testing plan
-- [x] Copy all artifacts to `docs/` folder
+- [ ] Implement Supervisor Agent that delegates to specialized Sub-Agents
+- [ ] Add advanced DSPy tools (e.g., web scraping, structural dataset analysis)
+- [ ] Refine the Multi-Agent state handoff in `modal_repl.py`
+- [ ] Verify: Create unit tests for Sub-Agent delegation logic
+
+- [ ] **Phase 7: Frontend Workspace Polish & Memory Visualization**
+  - [ ] Enhance Dual-Pane UI with native code-block execution visualization
+  - [ ] Implement dynamic Mermaid.js graph rendering for agent taxonomy/memory flows
+  - [ ] Refine Zustand state for real-time memory reflection updates
+  - [ ] Verify: End-to-end component rendering tests for memory UI blocks
+
+- [ ] **Phase 8: Evolutive Memory Hardening**
+  - [ ] Implement "Reflection Loop" cron/background task to consolidate redundant memories
+  - [ ] Add `hybrid search` (Full Text Search + pgvector) to Neon DB for better recall
+  - [ ] Fine-tune the context truncation threshold based on dynamic input size
+  - [ ] Verify: Integration test ensuring memory consolidation improves retrieval latency
