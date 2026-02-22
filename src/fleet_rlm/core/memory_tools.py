@@ -22,6 +22,8 @@ def search_evolutive_memory(query: str) -> str:
         return loop.run_until_complete(_async_search(query))
     finally:
         loop.close()
+
+
 async def _async_search(query: str) -> str:
     try:
         # Generate local embedding via LiteLLM
