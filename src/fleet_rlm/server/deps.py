@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
+from .database import get_db_session
 from .execution_events import ExecutionEventEmitter
+
+if TYPE_CHECKING:
+    from fleet_rlm.react.agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +46,12 @@ server_state = ServerState()
 
 def get_config() -> ServerRuntimeConfig:
     return server_state.config
+
+
+def get_server_config(request: Request) -> ServerRuntimeConfig:
+    """Compatibility alias for FastAPI DI callers that expect a request-bound getter."""
+    _ = request
+    return get_config()
 
 
 def get_planner_lm() -> Any:
@@ -110,6 +121,50 @@ def get_request_identity(request: Request) -> NormalizedIdentity | None:
     if isinstance(identity, NormalizedIdentity):
         return identity
     return None
+
+
+async def get_db(
+    session: AsyncSession = Depends(get_db_session),
+) -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for providing database sessions."""
+    yield session
+
+
+async def get_react_agent(
+    config: ServerRuntimeConfig = Depends(get_server_config),
+) -> AsyncIterator["RLMReActChatAgent"]:
+    """Provide a configured RLMReActChatAgent for the request lifecycle."""
+    from fleet_rlm.core.config import get_planner_lm_from_env
+    from fleet_rlm.core.interpreter import ModalInterpreter
+    from fleet_rlm.react.agent import RLMReActChatAgent
+    from fleet_rlm.react.tools_rlm_delegate import build_rlm_delegate_tools
+    import dspy
+
+    # Use the globally configured planner_lm if available, otherwise fetch a fresh one
+    planner_lm = getattr(server_state, "planner_lm", None) or get_planner_lm_from_env(
+        model_name=config.agent_model
+    )
+
+    interpreter = ModalInterpreter(app_name="fleet-rlm")
+    dspy.settings.configure(lm=planner_lm)
+    agent = RLMReActChatAgent(interpreter=interpreter, max_depth=config.rlm_max_depth)
+
+    # Lazily mount tools to prevent circular module dependencies during import
+    from fleet_rlm.react import tools_sandbox
+
+    agent.tools.extend(tools_sandbox.build_sandbox_tools(agent))
+    agent.tools.extend(build_rlm_delegate_tools(agent))
+
+    try:
+        yield agent
+    finally:
+        if agent.interpreter:
+            try:
+                agent.interpreter.shutdown()
+            except Exception as e:
+                logging.getLogger("fleet_rlm").error(
+                    "Failed to shutdown interpreter: %s", e
+                )
 
 
 def session_key(workspace_id: str, user_id: str, session_id: str | None = None) -> str:
