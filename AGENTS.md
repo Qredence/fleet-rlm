@@ -235,7 +235,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
 - Runtime settings endpoints are served from `/api/v1/runtime/*`; writes (`PATCH /api/v1/runtime/settings`) are local-only (`APP_ENV=local`) while read/test endpoints remain available across environments
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
-- Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, `skill_taxonomies`, `taxonomy_terms`, `skills`, `skill_versions`, `skill_term_links`, `run_skill_usages`, etc.)
+- Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, etc.); the legacy skills taxonomy tables were removed in v0.4.8 schema cleanup (`QRE-311`)
 - Tenant isolation uses Postgres RLS with transaction-local tenant context via `set_config('app.tenant_id', ..., true)` in repository methods
 - Runtime guardrails are controlled by `APP_ENV` (`local|staging|production`) plus config toggles (`DATABASE_REQUIRED`, `ALLOW_DEBUG_AUTH`, `ALLOW_QUERY_AUTH_TOKENS`, `CORS_ALLOWED_ORIGINS`); non-local environments should run with strict auth and Neon persistence enabled
 - Server auth defaults to `AUTH_MODE=dev` and supports debug headers or local HS256 bearer JWT only when debug auth toggles are enabled; query auth (`debug_tenant_id`, `debug_user_id`, optional `debug_email`, `debug_name`, or `access_token`) is intended for local development
