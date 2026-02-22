@@ -8,32 +8,39 @@ All notable changes to this project are documented in this file.
 
 ### Highlights (User Impact)
 
-- Added opt-in PostHog LLM analytics for DSPy LM calls with trace correlation and safe payload handling.
-- Added env-driven analytics activation so operators can enable observability without changing runtime call sites.
+- Added runtime settings + connectivity diagnostics surfaces so local operators can configure and validate LM/Modal integrations from the app workflow.
+- Hardened WebSocket chat/execution handling to reduce local-session regressions and improve execution event stream stability.
+- Continued Web UI-first docs alignment and frontend/runtime integration cleanup for a smoother browser-based workflow.
 
 ### Added
 
-- **Change:** Added new analytics package under `src/fleet_rlm/analytics/` with:
-  - `PostHogLLMCallback` DSPy callback emission (`$ai_generation`)
-  - `PostHogConfig` model and env loading
-  - PostHog client singleton lifecycle helpers
-  - callback-level trace context propagation (`contextvars`)
-  - sanitization + truncation utilities for prompt/output payloads
-  **Outcome:** First-class LLM analytics is now available with minimal integration overhead.
-- **Change:** Added analytics test coverage:
-  - `tests/unit/test_analytics_sanitization.py`
-  - `tests/unit/test_analytics_callback.py`
-  - `tests/integration/test_analytics_integration.py` (mocked)
-  **Outcome:** Analytics behavior is validated without requiring live PostHog services.
+- **Change:** Added backend runtime settings + diagnostics endpoints under `/api/v1/runtime/*` and supporting runtime settings infrastructure.
+  **Outcome:** Local developers can inspect and validate runtime configuration (LM/Modal connectivity) through a dedicated API/UI workflow instead of ad-hoc environment debugging.
+- **Change:** Added frontend runtime settings UI integration and runtime health warning surfacing in the skill creation flow.
+  **Outcome:** The primary Web UI provides clearer runtime setup guidance and feedback while working in-browser.
+- **Change:** Added/refined test coverage around runtime settings, WebSocket routing/helpers, and trajectory payload handling in the changed surfaces.
+  **Outcome:** Lower regression risk for the Web UI + server integration paths.
 
 ### Changed
 
-- **Change:** Updated `AppConfig`/Hydra config to include `analytics.posthog` defaults and added env helpers in `core/config.py` for env-driven analytics bootstrap.
-  **Outcome:** Analytics settings are centrally configurable and consistent with existing runtime config patterns.
-- **Change:** Wired websocket runtime identity into analytics distinct-id context.
-  **Outcome:** Event attribution prefers authenticated runtime identity and falls back safely.
-- **Change:** Updated project docs (`README.md`, `docs/concepts.md`, `.env.example`, `AGENTS.md`) with PostHog setup and event schema notes.
-  **Outcome:** Operators and contributors have explicit enablement and usage guidance.
+- **Change:** Updated docs and developer-facing guidance (`README.md`, `AGENTS.md`, docs indexes/guides) to align with runtime settings, WebSocket behavior, and the Web UI-first workflow.
+  **Outcome:** Reduced documentation drift and clearer onboarding for local/browser-based usage.
+- **Change:** Normalized/cleaned frontend and backend integration surfaces (including trajectory payload and legacy bridge cleanup) as part of the frontend/runtime alignment work.
+  **Outcome:** Simpler maintenance of the current Web UI stack and less confusion around deprecated bridge paths.
+- **Change:** Performed maintenance-only code quality cleanup (CodeQL/unused variable/readability refactors) in TUI scripts/helpers via PR #67.
+  **Outcome:** Improved code readability and static-analysis hygiene without intended user-facing behavior changes.
+
+### Fixed
+
+- **Change:** Hardened `/api/v1/ws/chat` and `/api/v1/ws/execution` behavior, including regressions around local persistence wrapper flow and bounded internal step emission.
+  **Outcome:** More reliable interactive chat and execution-event streaming during local web sessions.
+- **Change:** Cleaned up pytest discovery collisions for local debug scripts (`test_*.py` renamed to `debug_*.py`).
+  **Outcome:** Lower risk of accidental test collection noise in local and CI test runs.
+
+### Merged Pull Requests
+
+- [#67](https://github.com/Qredence/fleet-rlm/pull/67): Refactor/code-quality cleanup for readability and static-analysis findings.
+- [#72](https://github.com/Qredence/fleet-rlm/pull/72): Frontend runtime settings, websocket hardening, and docs sync.
 
 ## [0.4.6] - 2026-02-19
 

@@ -4,18 +4,86 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/fleet-rlm.svg)](https://pypi.org/project/fleet-rlm/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml/badge.svg)](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml)
-
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/fleet-rlm?period=monthly&units=INTERNATIONAL_SYSTEM&left_color=MAGENTA&right_color=BLACK&left_text=downloads%2Fmonth)](https://pepy.tech/projects/fleet-rlm)
 
 **Secure, cloud-sandboxed Recursive Language Models (RLM) with DSPy and Modal.**
 
-`fleet-rlm` provides a production-ready implementation of **Recursive Language Modeling** aligned with the [DSPy RLM API](https://dspy.ai/api/modules/RLM/). It gives your AI agent a secure "computer" in the cloud to read, search, and analyze massive datasets without local resource constraints.
+`fleet-rlm` gives AI agents a secure cloud sandbox for long-context code and document work, with a Web UI-first experience, recursive delegation, and DSPy-aligned tooling.
 
-[Paper](https://arxiv.org/abs/2501.123) | [Contributing](CONTRIBUTING.md) | [Docs](docs/)
+[Paper](https://arxiv.org/abs/2501.123) | [Docs](docs/) | [Contributing](CONTRIBUTING.md)
 
 ---
 
-## Architecture
+## Quick Start (Web UI First)
+
+Fastest path: install and launch the built-in Web UI.
+
+```bash
+# Install as a runnable CLI tool
+uv tool install fleet-rlm
+
+# Launch the Web UI server
+fleet web
+```
+
+Open `http://localhost:8000` in your browser.
+
+- Prefer a regular environment install instead of `uv tool`?
+```bash
+uv pip install fleet-rlm
+fleet web
+```
+
+- `fleet web` is the primary interactive interface.
+- Plain `fleet-rlm` installs are intended to support `fleet web`.
+- Runtime settings (LM / Modal) can be configured from the Web UI Settings surface in local development.
+- Full setup for Modal secrets, Neon DB, auth modes, and deployment is linked below.
+
+## Why `fleet-rlm`
+
+- Chat with an RLM-powered agent in the browser (`fleet web`)
+- Run recursive long-context tasks with a secure Modal sandbox
+- Analyze documents (including PDF ingestion with MarkItDown/pypdf fallback)
+- Stream execution events and trajectories for observability/debugging
+- Expose capabilities as an MCP server (`fleet-rlm serve-mcp`)
+
+## Other Ways to Run It
+
+Common commands:
+
+```bash
+# CLI demo
+fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
+
+# Explicit API server
+fleet-rlm serve-api --port 8000
+
+# MCP server
+fleet-rlm serve-mcp --transport stdio
+
+# Explore long-context tooling
+fleet-rlm run-long-context --help
+```
+
+### Terminal chat surfaces
+
+- `fleet` starts the standalone interactive chat launcher (Ink runtime path).
+- `fleet-rlm chat` starts the in-process terminal chat.
+- OpenTUI workflows and setup are documented in the guides (see links below) because they require additional local tooling.
+
+## Running From Source (Contributors)
+
+```bash
+# from repo root
+uv sync --extra dev --extra server
+uv run fleet web
+```
+
+Use the full contributor setup (frontend builds, env/bootstrap, quality gates) in [`AGENTS.md`](AGENTS.md) and [`docs/contributing.md`](docs/contributing.md).
+
+## Architecture Overview
+
+Read this after the quick start if you want the full system picture (entry points, ReAct orchestration, tools, Modal execution, persistent storage).
 
 ```mermaid
 graph TB
@@ -79,284 +147,25 @@ graph TB
     style cloud fill:#fce4ec,stroke:#c2185b,stroke-width:2px
 ```
 
-
-**Layers:**
-
-🚪 **Entry Points** → 🧠 **Orchestration** → 🔧 **Tools** → ⚙️ **Execution** → ☁️ **Modal Cloud**
-
-
-## Features
-
-- **Web UI First (0.4.6)**: Integrated React SPA (`src/frontend`) is now the primary interactive surface for chat, execution timeline, and artifact workflows.
-- **Interactive Agent**: `RLMReActChatAgent` (a `dspy.Module`) combines fast, interactive chat with deep, recursive task execution via `rlm_query`.
-- **DSPy Aligned**: Implements `dspy.RLM`, `dspy.Module`, and `dspy.Tool` interfaces — compatible with DSPy optimizers (`BootstrapFewShot`, `MIPROv2`).
-- **Secure Sandbox**: Code runs in isolated **Modal** containers with persistent storage volumes, execution profiles, and sensitive data redaction.
-- **Recursive Delegation**: All delegate tools (`rlm_query`, `analyze_long_document`, `grounded_answer`, etc.) spawn true recursive sub-agents via `spawn_delegate_sub_agent()` with unified depth enforcement.
-- **PDF Ingestion**: Native document loading via MarkItDown with pypdf fallback; OCR guidance for scanned PDFs.
-- **Session State**: Per-workspace, per-user session persistence with manifests stored on Modal volumes.
-- **MCP Server**: Expose fleet-rlm capabilities as an MCP tool server via `serve-mcp`.
-- **Execution Streams**: `/ws/chat` remains the primary interactive stream while `/ws/execution` provides structured execution lifecycle events for Artifact Canvas and observability clients.
-- **Runtime Settings & Diagnostics**: Local development runtime settings can be managed from the Settings UI and validated via Modal/LM connectivity smoke tests (`/api/v1/runtime/*`).
-- **Observability**: Real-time streaming of thoughts, tool execution, trajectory normalization, and structured logging.
-- **LLM Analytics (Opt-in)**: PostHog `$ai_generation` events for DSPy LM calls with trace correlation, token metadata, latency, and payload redaction/truncation.
-
-## PostHog LLM Analytics
-
-PostHog analytics is disabled by default. To enable it, set both:
-
-```bash
-POSTHOG_ENABLED=true
-POSTHOG_API_KEY=phc_...
-```
-
-Optional settings:
-
-- `POSTHOG_HOST` (default: `https://us.i.posthog.com`)
-- `POSTHOG_DISTINCT_ID` (runtime user identity takes precedence in `/ws/chat`)
-- `POSTHOG_FLUSH_INTERVAL` / `POSTHOG_FLUSH_AT`
-- `POSTHOG_ENABLE_DSPY_OPTIMIZATION` (default: `false`)
-- `POSTHOG_INPUT_TRUNCATION` / `POSTHOG_OUTPUT_TRUNCATION`
-- `POSTHOG_REDACT_SENSITIVE` (default: `true`)
-
-Programmatic setup:
-
-```python
-from fleet_rlm import configure_analytics
-
-configure_analytics()  # reads POSTHOG_* environment variables
-```
-
-Each DSPy LM call emits `$ai_generation` with:
-
-- `$ai_trace_id`, `$ai_parent_trace_id`
-- `$ai_model`, `$ai_provider`, `$ai_latency`
-- `$ai_input`, `$ai_output_choices` (sanitized + truncated)
-- `$ai_input_tokens`, `$ai_output_tokens`, `$ai_total_tokens`
-
-## Quick Start
-
-### 1. Install
-
-```bash
-uv pip install fleet-rlm
-```
-
-Optional extras for server and MCP support:
-
-```bash
-uv pip install fleet-rlm[server]   # FastAPI server + WebSocket
-uv pip install fleet-rlm[mcp]      # MCP server
-uv pip install fleet-rlm[full]     # All extras
-```
-
-### 2. Configure
-
-Set up your Modal and LLM credentials:
-
-```bash
-modal setup
-modal volume create rlm-volume-dspy
-modal secret create LITELLM DSPY_LM_MODEL=openai/gemini-3-pro-preview DSPY_LLM_API_KEY=sk-...
-```
-
-Set up NeonDB + backend auth bootstrap:
-
-```bash
-# from repo root
-cp .env.example .env
-# Edit .env and set:
-#   DATABASE_URL=postgresql://... (direct Neon endpoint)
-#   AUTH_MODE=dev
-#   AUTH_REQUIRED=false   # dev default; auth optional until Entra is wired
-#   DEV_JWT_SECRET=...
-```
-
-Initialize DB schema:
-
-```bash
-# from repo root
-uv run python scripts/db_init.py
-```
-
-### 3. Run
-
-**Web UI (React SPA):**
-
-`0.4.6` treats the React SPA as the primary interface. The backend serves the built frontend automatically.
-
-```bash
-# 1. Build the frontend (requires Bun)
-cd src/frontend
-bun install
-bun run build
-cd ../..
-
-# 2. Build the Python package (bundles the UI into the wheel)
-uv build
-
-# 3. Install with server dependencies and run the Web UI server
-uv pip install -e ".[server]"
-uv run fleet web
-```
-Then navigate to `http://localhost:8000` in your browser.
-
-OpenAPI source-of-truth is `openapi.yaml` at repository root. Frontend API types are generated from `src/frontend/openapi/fleet-rlm.openapi.yaml`, which should be synced from the root spec via frontend scripts.
-
-Runtime settings are available in the web UI Settings surface and via runtime endpoints under `/api/v1/runtime/*`. Runtime write operations (`PATCH /api/v1/runtime/settings`) are intentionally restricted to local development (`APP_ENV=local`), and secret-like values are returned masked by the API.
-
-**Interactive Chat (OpenTUI):**
-
-```bash
-# Requires OpenTUI / Bun
-fleet-rlm code-chat --opentui
-```
-
-**Standalone Interactive Chat (Ink):**
-
-```bash
-# Ink runtime (supported standalone path)
-fleet
-
-# Force Ink explicitly
-fleet --ui ink
-```
-
-**One-shot Tasks:**
-
-```bash
-# Basic question
-fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
-
-# Document analysis
-fleet-rlm run-architecture --docs-path docs/architecture.md --query "Extract all components"
-```
-
-**Servers:**
-
-```bash
-# API server (FastAPI + WebSocket) via explicit command
-uv run fleet-rlm serve-api --port 8000
-
-# MCP server
-fleet-rlm serve-mcp --transport stdio
-```
-
-WebSocket endpoints:
-
-- `/api/v1/ws/chat` for interactive conversation and tool orchestration events.
-- `/api/v1/ws/execution` for filtered execution lifecycle events (`execution_started`, `execution_step`, `execution_completed`) scoped by `workspace_id`, `user_id`, and `session_id`.
-
-Runtime diagnostics endpoints:
-
-- `GET /api/v1/runtime/settings`
-- `PATCH /api/v1/runtime/settings` (local-only; `APP_ENV=local`)
-- `POST /api/v1/runtime/tests/modal`
-- `POST /api/v1/runtime/tests/lm`
-- `GET /api/v1/runtime/status`
-
-Execution-stream backpressure for `/api/v1/ws/execution` is configurable via `WS_EXECUTION_MAX_QUEUE` and `WS_EXECUTION_DROP_POLICY`.
-
-Issue a dev token:
-
-```bash
-# from repo root
-uv run python scripts/dev_issue_token.py \
-  --tid "00000000-0000-0000-0000-000000000123" \
-  --oid "00000000-0000-0000-0000-000000000456" \
-  --email dev@example.com \
-  --name "Dev User"
-```
-
-Call an authenticated endpoint (debug headers):
-
-```bash
-curl -s http://127.0.0.1:8000/api/v1/auth/me \
-  -H "X-Debug-Tenant-Id: 00000000-0000-0000-0000-000000000123" \
-  -H "X-Debug-User-Id: 00000000-0000-0000-0000-000000000456" \
-  -H "X-Debug-Email: dev@example.com" \
-  -H "X-Debug-Name: Dev User"
-```
-
-Call an authenticated endpoint (JWT):
-
-```bash
-curl -s http://127.0.0.1:8000/api/v1/auth/me \
-  -H "Authorization: Bearer ${DEV_TOKEN}"
-```
-
-Run DB smoke test:
-
-```bash
-# from repo root
-uv run python scripts/db_smoke.py
-```
-
-`fleet` and `fleet-rlm code-chat` serve different interactive paths:
-
-- `fleet` = standalone Ink chat launcher
-- `fleet-rlm code-chat` = OpenTUI runtime (OpenTUI/Bun required)
-
-## Development Setup
-
-```bash
-# Clone and install
-git clone https://github.com/qredence/fleet-rlm.git
-cd fleet-rlm
-uv sync --extra dev
-
-# With server/MCP support
-uv sync --extra dev --extra server --extra mcp
-
-# Build React frontend bundle for web UI
-cd src/frontend
-bun install
-bun run check
-cd ../..
-
-# Build Ink frontend bundle for `fleet --ui ink`
-cd tui-cli/tui-ink
-bun install
-bun run build
-bun run test
-cd ..
-
-# Copy environment template
-cp .env.example .env
-
-# Never commit .env or real credentials/tokens
-
-# Quality gate
-uv run ruff check src tests
-uv run ruff format --check src tests
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
-uv run pytest -q
-
-# Auto-fix formatting when needed
-uv run ruff format src tests
-```
-
-## Documentation
-
-- [Concepts](docs/explanation/rlm-concepts.md) — Core architecture (Agent, RLM, Sandbox)
-- [User Flows](docs/user_flows.md) — Interaction diagrams (Chat, Tools, Delegation)
-- [Architecture](docs/explanation/architecture.md) — System components and hierarchy
-- [Tutorials](docs/tutorials/index.md) — Step-by-step lessons
-- [How-To Guides](docs/how-to-guides/index.md) — Installation, deployment, troubleshooting
-- [Runtime Settings Guide](docs/how-to-guides/runtime-settings.md) — Configure LM/Modal credentials and run runtime connectivity checks
-- [CLI Reference](docs/reference/cli.md) — Full CLI command reference
-- [HTTP API Reference](docs/reference/http-api.md) — Server endpoints and WebSocket protocol
-- [Source Layout](docs/reference/source-layout.md) — Package structure guide
+## Docs and Guides
+
+- [Documentation index](docs/index.md)
+- [Quick install + setup](docs/how-to-guides/installation.md)
+- [Configure Modal](docs/how-to-guides/configuring-modal.md)
+- [Runtime settings (LM/Modal diagnostics)](docs/how-to-guides/runtime-settings.md)
+- [Deploying the server](docs/how-to-guides/deploying-server.md)
+- [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
+- [CLI reference](docs/reference/cli.md)
+- [HTTP API reference](docs/reference/http-api.md)
+- [Source layout](docs/reference/source-layout.md)
+
+## Advanced Features (Docs-First)
+
+`fleet-rlm` also supports runtime diagnostics endpoints, WebSocket execution streams (`/api/v1/ws/execution`), multi-tenant Neon-backed persistence, and opt-in PostHog LLM analytics. Those workflows are documented in the guides/reference docs rather than front-loaded here.
 
 ## Contributing
 
-We welcome contributions! Please see our [Contribution Guide](CONTRIBUTING.md) and run the quality gate before submitting:
-
-```bash
-uv run ruff check src tests
-uv run ruff format --check src tests
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
-uv run pytest -q
-```
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), then use [`AGENTS.md`](AGENTS.md) for repo-specific commands and quality gates.
 
 ## License
 

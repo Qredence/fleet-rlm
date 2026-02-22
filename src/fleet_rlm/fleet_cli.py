@@ -60,13 +60,16 @@ def _repo_root() -> Path:
 def main() -> None:
     # Quick check for 'web' subcommand before strict parsing
     if len(sys.argv) > 1 and sys.argv[1] == "web":
-        # Check if the server extra is installed
+        # Check if required Web UI/API dependencies are available.
         try:
             import uvicorn  # noqa: F401
             import fastapi  # noqa: F401
+            import jwt  # noqa: F401
         except ImportError:
             print(
-                'Error: Server dependencies not found. Please install with: uv pip install -e ".[server]"',
+                "Error: Required Web UI dependencies not found. "
+                "Reinstall/upgrade fleet-rlm (plain install should include Web UI support). "
+                "Optional server extras remain available via `fleet-rlm[server]`.",
                 file=sys.stderr,
             )
             raise SystemExit(1)

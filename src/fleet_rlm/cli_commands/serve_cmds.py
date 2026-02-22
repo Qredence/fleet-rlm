@@ -38,7 +38,7 @@ def register_serve_commands(
         host: str = typer.Option("127.0.0.1", help="Bind host"),
         port: int = typer.Option(8000, help="Bind port"),
     ) -> None:
-        """Run optional FastAPI server surface (requires `--extra server`)."""
+        """Run the FastAPI server surface (used by `fleet web`)."""
         config = get_config()
         if config is None:
             raise typer.Exit(code=1)
@@ -49,7 +49,8 @@ def register_serve_commands(
                 typer.echo(
                     "Server dependencies missing: "
                     + ", ".join(missing)
-                    + "\nInstall with:\n  uv sync --extra dev --extra server",
+                    + "\nInstall/upgrade with:\n  uv pip install -U fleet-rlm"
+                    + "\n(or from repo: uv sync --extra dev --extra server)",
                     err=True,
                 )
                 raise typer.Exit(code=2)
