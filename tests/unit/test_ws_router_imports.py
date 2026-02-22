@@ -21,10 +21,10 @@ def test_ws_router_split_modules_import():
 
 
 def test_ws_router_registers_expected_websocket_routes():
-    from fleet_rlm.server.routers.ws import router
+    import fleet_rlm.server.routers.ws as ws
 
     websocket_paths = {
-        route.path for route in router.routes if getattr(route, "path", None)
+        route.path for route in ws.router.routes if getattr(route, "path", None)
     }
     assert "/ws/chat" in websocket_paths
     assert "/ws/execution" in websocket_paths
