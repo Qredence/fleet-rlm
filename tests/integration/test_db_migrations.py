@@ -51,6 +51,32 @@ async def test_migrations_apply_and_core_tables_exist():
                     )
                 )
                 names = [row[0] for row in result.fetchall()]
+
+                all_tables_result = await session.execute(
+                    text(
+                        """
+                        select table_name
+                        from information_schema.tables
+                        where table_schema = 'public'
+                        order by table_name
+                        """
+                    )
+                )
+                all_table_names = {row[0] for row in all_tables_result.fetchall()}
+
+                enum_result = await session.execute(
+                    text(
+                        """
+                        select t.typname
+                        from pg_type t
+                        join pg_namespace n on n.oid = t.typnamespace
+                        where n.nspname = 'public'
+                          and t.typtype = 'e'
+                        order by t.typname
+                        """
+                    )
+                )
+                enum_names = {row[0] for row in enum_result.fetchall()}
         assert names == [
             "artifacts",
             "jobs",
@@ -60,5 +86,22 @@ async def test_migrations_apply_and_core_tables_exist():
             "tenants",
             "users",
         ]
+        for deprecated_table in {
+            "skill_taxonomies",
+            "taxonomy_terms",
+            "skills",
+            "skill_versions",
+            "skill_term_links",
+            "run_skill_usages",
+        }:
+            assert deprecated_table not in all_table_names
+
+        for deprecated_enum in {
+            "skill_source",
+            "skill_status",
+            "skill_link_source",
+            "skill_usage_status",
+        }:
+            assert deprecated_enum not in enum_names
     finally:
         await db.dispose()

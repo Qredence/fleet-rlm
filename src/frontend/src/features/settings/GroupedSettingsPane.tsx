@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import posthog from "posthog-js";
 import { toast } from "sonner";
 
 import { SettingsRow } from "@/components/shared/SettingsRow";
@@ -30,6 +31,15 @@ export function GroupedSettingsPane({
   const [apiKey, setApiKey] = useState("");
   const [baselineApiBase, setBaselineApiBase] = useState("");
   const [baselineApiKey, setBaselineApiKey] = useState("");
+
+  useEffect(() => {
+    try {
+      setTelemetryEnabled(!posthog.has_opted_out_capturing());
+    } catch {
+      // PostHog may be disabled or unavailable in some local/test contexts.
+      setTelemetryEnabled(true);
+    }
+  }, []);
 
   useEffect(() => {
     const values = settingsQuery.data?.values;
@@ -138,10 +148,19 @@ export function GroupedSettingsPane({
 
       <SettingsToggleRow
         label="Anonymous telemetry"
-        description="Share anonymous usage telemetry to help improve Fleet-RLM. This setting is UI-local for now; backend AI analytics preference propagation lands in a follow-up ticket."
+        description="Share anonymous usage telemetry to help improve Fleet-RLM. This updates web PostHog capture immediately; backend AI analytics preference propagation lands in follow-up ticket QRE-320."
         checked={telemetryEnabled}
         onChange={(val) => {
           setTelemetryEnabled(val);
+          try {
+            if (val) {
+              posthog.opt_in_capturing();
+            } else {
+              posthog.opt_out_capturing();
+            }
+          } catch {
+            // No-op when PostHog is unavailable; UI state remains visible.
+          }
           toast.success(
             val
               ? "Anonymous telemetry enabled"
