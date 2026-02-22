@@ -4,7 +4,7 @@
 - Phase: `phase-1`
 - Ticket(s): `QRE-296`, `QRE-297`, `QRE-299`, `QRE-300`, `QRE-311`, `QRE-316`, `QRE-318`
 - Branch: `codex/v0-4-8-phase-1-foundation`
-- PR: `pending`
+- PR: `https://github.com/Qredence/fleet-rlm/pull/75`
 - Merge commit: `pending`
 
 ## Sequential Execution Order
@@ -83,7 +83,7 @@
 - Comments posted:
   - checkpoint comments with validation summaries on each implemented ticket
   - commit-hash checkpoint comments on `QRE-316` and `QRE-318`
-- Project status update: pending Phase 1 PR open / in-review transition
+- Project status update: posted (`Fleet-RLM` project status update marked Phase 1 In Review and on-track)
 
 ## Remaining Risks / Follow-Ups
 - `QRE-316`: project-owned default PostHog public key hook is implemented but actual key constant remains intentionally unset until a real project key is provided.
@@ -91,5 +91,5 @@
 - `QRE-311`: destructive migration downgrade remains intentionally unsupported (`NotImplementedError`) because dropped data cannot be restored.
 
 ## Next Phase Prerequisites
-- Phase 1 PR merge (then mark phase-1 tickets `Done` in Linear and create `codex/v0-4-8-phase-2-feature-enablers`)
+- Phase 1 PR #75 merge (then mark phase-1 tickets `Done` in Linear and create `codex/v0-4-8-phase-2-feature-enablers`)
 - Optional: assign/confirm real project-owned public PostHog key before or during `QRE-317`/`QRE-320` work
