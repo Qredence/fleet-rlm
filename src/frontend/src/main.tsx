@@ -5,14 +5,19 @@ import "./styles/index.css";
 // PostHog analytics initialization
 import posthog from "posthog-js";
 import { PostHogProvider } from "@posthog/react";
+import { resolvePostHogWebConfig } from "@/lib/telemetry/posthog";
 
-const posthogKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
-const posthogHost =
-  import.meta.env.VITE_PUBLIC_POSTHOG_HOST || "https://eu.i.posthog.com";
+const posthogConfig = resolvePostHogWebConfig(import.meta.env);
 
-if (posthogKey) {
-  posthog.init(posthogKey, {
-    api_host: posthogHost,
+if (posthogConfig.keySource === "legacy_alias_env") {
+  console.warn(
+    "[fleet-rlm] VITE_PUBLIC_POSTHOG_KEY is deprecated; use VITE_PUBLIC_POSTHOG_API_KEY",
+  );
+}
+
+if (posthogConfig.apiKey) {
+  posthog.init(posthogConfig.apiKey, {
+    api_host: posthogConfig.host,
     defaults: "2026-01-30",
   });
 }

@@ -75,10 +75,20 @@ def _env_bool(value: str | None, *, default: bool) -> bool:
 
 def load_posthog_settings_from_env() -> dict[str, object]:
     """Load PostHog analytics settings from environment variables."""
+    from fleet_rlm.analytics.config import (
+        PROJECT_POSTHOG_DEFAULT_API_KEY,
+        PROJECT_POSTHOG_DEFAULT_HOST,
+    )
+
+    api_key = (
+        os.getenv("POSTHOG_API_KEY") or ""
+    ).strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
+    host = (os.getenv("POSTHOG_HOST") or "").strip() or PROJECT_POSTHOG_DEFAULT_HOST
+    enabled_raw = os.getenv("POSTHOG_ENABLED")
     return {
-        "enabled": _env_bool(os.getenv("POSTHOG_ENABLED"), default=False),
-        "api_key": os.getenv("POSTHOG_API_KEY") or None,
-        "host": os.getenv("POSTHOG_HOST") or "https://us.i.posthog.com",
+        "enabled": _env_bool(enabled_raw, default=bool(api_key)),
+        "api_key": api_key,
+        "host": host,
         "flush_interval": float(os.getenv("POSTHOG_FLUSH_INTERVAL", "10.0")),
         "flush_at": max(1, int(os.getenv("POSTHOG_FLUSH_AT", "10"))),
         "enable_dspy_optimization": _env_bool(

@@ -6,6 +6,9 @@ import os
 
 from pydantic import BaseModel, Field
 
+PROJECT_POSTHOG_DEFAULT_HOST = "https://eu.i.posthog.com"
+PROJECT_POSTHOG_DEFAULT_API_KEY: str | None = None
+
 
 def _env_bool(value: str | None, *, default: bool) -> bool:
     """Parse booleans from environment-friendly strings."""
@@ -24,7 +27,7 @@ class PostHogConfig(BaseModel):
 
     enabled: bool = Field(default=False)
     api_key: str | None = Field(default=None)
-    host: str = Field(default="https://us.i.posthog.com")
+    host: str = Field(default=PROJECT_POSTHOG_DEFAULT_HOST)
     flush_interval: float = Field(default=10.0)
     flush_at: int = Field(default=10)
     enable_dspy_optimization: bool = Field(default=False)
@@ -35,10 +38,15 @@ class PostHogConfig(BaseModel):
     @classmethod
     def from_env(cls) -> "PostHogConfig":
         """Load analytics configuration from environment variables."""
+        api_key = (
+            os.getenv("POSTHOG_API_KEY") or ""
+        ).strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
+        host = (os.getenv("POSTHOG_HOST") or "").strip() or PROJECT_POSTHOG_DEFAULT_HOST
+        enabled_raw = os.getenv("POSTHOG_ENABLED")
         return cls(
-            enabled=_env_bool(os.getenv("POSTHOG_ENABLED"), default=False),
-            api_key=os.getenv("POSTHOG_API_KEY") or None,
-            host=os.getenv("POSTHOG_HOST") or "https://us.i.posthog.com",
+            enabled=_env_bool(enabled_raw, default=bool(api_key)),
+            api_key=api_key,
+            host=host,
             flush_interval=float(os.getenv("POSTHOG_FLUSH_INTERVAL", "10.0")),
             flush_at=max(1, int(os.getenv("POSTHOG_FLUSH_AT", "10"))),
             enable_dspy_optimization=_env_bool(
