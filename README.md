@@ -23,7 +23,7 @@ graph TB
         CLI["CLI (Typer)"]
         WebUI["Web UI<br/>(React SPA)"]
         API["FastAPI<br/>(WS/REST)"]
-        TUI["Ink TUI<br/>(stdio bridge)"]
+        TUI["Ink TUI<br/>(standalone runtime)"]
         MCP["MCP Server"]
     end
 
@@ -96,6 +96,7 @@ graph TB
 - **Session State**: Per-workspace, per-user session persistence with manifests stored on Modal volumes.
 - **MCP Server**: Expose fleet-rlm capabilities as an MCP tool server via `serve-mcp`.
 - **Execution Streams**: `/ws/chat` remains the primary interactive stream while `/ws/execution` provides structured execution lifecycle events for Artifact Canvas and observability clients.
+- **Runtime Settings & Diagnostics**: Local development runtime settings can be managed from the Settings UI and validated via Modal/LM connectivity smoke tests (`/api/v1/runtime/*`).
 - **Observability**: Real-time streaming of thoughts, tool execution, trajectory normalization, and structured logging.
 - **LLM Analytics (Opt-in)**: PostHog `$ai_generation` events for DSPy LM calls with trace correlation, token metadata, latency, and payload redaction/truncation.
 
@@ -201,6 +202,8 @@ Then navigate to `http://localhost:8000` in your browser.
 
 OpenAPI source-of-truth is `openapi.yaml` at repository root. Frontend API types are generated from `src/frontend/openapi/fleet-rlm.openapi.yaml`, which should be synced from the root spec via frontend scripts.
 
+Runtime settings are available in the web UI Settings surface and via runtime endpoints under `/api/v1/runtime/*`. Runtime write operations (`PATCH /api/v1/runtime/settings`) are intentionally restricted to local development (`APP_ENV=local`), and secret-like values are returned masked by the API.
+
 **Interactive Chat (OpenTUI):**
 
 ```bash
@@ -243,6 +246,16 @@ WebSocket endpoints:
 - `/api/v1/ws/chat` for interactive conversation and tool orchestration events.
 - `/api/v1/ws/execution` for filtered execution lifecycle events (`execution_started`, `execution_step`, `execution_completed`) scoped by `workspace_id`, `user_id`, and `session_id`.
 
+Runtime diagnostics endpoints:
+
+- `GET /api/v1/runtime/settings`
+- `PATCH /api/v1/runtime/settings` (local-only; `APP_ENV=local`)
+- `POST /api/v1/runtime/tests/modal`
+- `POST /api/v1/runtime/tests/lm`
+- `GET /api/v1/runtime/status`
+
+Execution-stream backpressure for `/api/v1/ws/execution` is configurable via `WS_EXECUTION_MAX_QUEUE` and `WS_EXECUTION_DROP_POLICY`.
+
 Issue a dev token:
 
 ```bash
@@ -280,7 +293,7 @@ uv run python scripts/db_smoke.py
 
 `fleet` and `fleet-rlm code-chat` serve different interactive paths:
 
-- `fleet` = standalone bridge chat launcher (Ink runtime)
+- `fleet` = standalone Ink chat launcher
 - `fleet-rlm code-chat` = OpenTUI runtime (OpenTUI/Bun required)
 
 ## Development Setup
@@ -310,6 +323,8 @@ cd ..
 # Copy environment template
 cp .env.example .env
 
+# Never commit .env or real credentials/tokens
+
 # Quality gate
 uv run ruff check src tests
 uv run ruff format --check src tests
@@ -327,6 +342,7 @@ uv run ruff format src tests
 - [Architecture](docs/explanation/architecture.md) — System components and hierarchy
 - [Tutorials](docs/tutorials/index.md) — Step-by-step lessons
 - [How-To Guides](docs/how-to-guides/index.md) — Installation, deployment, troubleshooting
+- [Runtime Settings Guide](docs/how-to-guides/runtime-settings.md) — Configure LM/Modal credentials and run runtime connectivity checks
 - [CLI Reference](docs/reference/cli.md) — Full CLI command reference
 - [HTTP API Reference](docs/reference/http-api.md) — Server endpoints and WebSocket protocol
 - [Source Layout](docs/reference/source-layout.md) — Package structure guide

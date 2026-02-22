@@ -192,6 +192,7 @@ uv build
 - `src/fleet_rlm/react/rlm_runtime_modules.py`: canonical reusable DSPy runtime wrappers for long-context tasks
 - `src/fleet_rlm/react/streaming.py`: async/streaming ReAct execution with trajectory normalization
 - `src/fleet_rlm/react/commands.py`: WebSocket command dispatch → tool mapping
+- `src/fleet_rlm/runtime_settings.py`: shared runtime settings masking/allowlist/env update utilities for HTTP + UI surfaces
 
 ### Surfaces
 
@@ -199,9 +200,10 @@ uv build
 - `src/fleet_rlm/cli_commands/`: CLI subcommand modules (`init_cmd.py`, `serve_cmds.py`)
 - `src/fleet_rlm/terminal/`: terminal chat helpers (`commands.py`, `settings.py`, `ui.py`)
 - `src/fleet_rlm/runners.py`: high-level task runners
-- `src/fleet_rlm/server/`: optional FastAPI server (`/api/v1/ws/chat`, `/api/v1/ws/execution`, `/api/v1/chat`, `/api/v1/tasks/basic`, `/api/v1/auth/me`)
+- `src/fleet_rlm/server/`: optional FastAPI server (`/api/v1/ws/chat`, `/api/v1/ws/execution`, `/api/v1/runtime/*`, `/api/v1/chat`, `/api/v1/tasks/basic`, `/api/v1/auth/me`)
+- `src/fleet_rlm/server/routers/runtime.py`: runtime settings + connectivity diagnostics endpoints (`/api/v1/runtime/*`)
+- `src/fleet_rlm/server/routers/ws_helpers.py`, `ws_session.py`, `ws_lifecycle.py`, `ws_commands.py`: split WebSocket auth/session/lifecycle/command helpers used by `routers/ws.py`
 - `src/fleet_rlm/mcp/`: optional FastMCP server
-- `src/fleet_rlm/bridge/`: stdio JSON-RPC bridge for Ink TUI
 - `src/fleet_rlm/stateful/`: stateful agent and sandbox models
 
 ## Testing Notes
@@ -218,7 +220,9 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `tests/unit/test_tools_sandbox.py`, `test_tools.py`, `test_memory_tools.py`
 - `tests/unit/test_context_manager.py`
 - `tests/unit/test_terminal_chat_helpers.py`
-- `tests/unit/test_bridge_handlers.py`, `test_bridge_protocol_server.py`
+- `tests/unit/test_ws_router_imports.py`, `test_ws_chat_helpers.py`
+- `tests/unit/test_runtime_settings.py`
+- `tests/unit/test_dspy_rlm_trajectory.py`
 - `tests/ui/server/test_router_*.py`, `test_server_*.py`
 
 ## Conventions
@@ -229,6 +233,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Prefer `uv run ...` for commands
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
+- Runtime settings endpoints are served from `/api/v1/runtime/*`; writes (`PATCH /api/v1/runtime/settings`) are local-only (`APP_ENV=local`) while read/test endpoints remain available across environments
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
 - Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, `skill_taxonomies`, `taxonomy_terms`, `skills`, `skill_versions`, `skill_term_links`, `run_skill_usages`, etc.)
 - Tenant isolation uses Postgres RLS with transaction-local tenant context via `set_config('app.tenant_id', ..., true)` in repository methods
@@ -253,6 +258,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `/api/v1/ws/execution` is a dedicated filtered execution stream for Artifact Canvas consumers; clients must subscribe with matching `workspace_id`, `user_id`, and `session_id` query params
 - Execution observability is additive: preserve `/api/v1/ws/chat` envelope compatibility (`{"type":"event","data":...}`) while emitting structured `execution_started` / `execution_step` / `execution_completed` events on `/api/v1/ws/execution`
 - Execution stream backpressure is bounded by queue settings (`WS_EXECUTION_MAX_QUEUE`, `WS_EXECUTION_DROP_POLICY`) and should be tuned/observed for high-volume sessions
+- `/api/v1/ws/chat` uses bounded internal REPL-hook step emission to avoid unbounded background task fan-out during interpreter callbacks
 - Keep WebSocket auth/runtime documentation synchronized with implementation whenever auth flow behavior changes (`AUTH_MODE`, `AUTH_REQUIRED`, debug identity, and bearer token paths).
 - Session state manifests (logs/memory/docs/artifacts/metadata) are persisted under Modal Volume V2 paths rooted at `/data/workspaces/<workspace_id>/users/<user_id>/` and isolated by `session_id` in manifest filenames
 - PostHog LLM analytics is opt-in and env-driven (`POSTHOG_ENABLED=true` + `POSTHOG_API_KEY`); use `configure_analytics()` for explicit setup and keep payload redaction/truncation enabled by default
@@ -265,6 +271,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 ## Code Quality and Debugging
 
 - When fixing type/lint errors, first clear stale caches (`.ruff_cache/`, `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`) and run `pre-commit clean` before making code changes.
+- Run `make security-check` (repo wrapper for `pip-audit` + `bandit`) before PRs that touch runtime/server/auth/security-sensitive code paths.
 
 ## Task Planning
 
