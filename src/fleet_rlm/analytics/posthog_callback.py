@@ -17,6 +17,7 @@ from .trace_context import (
     LLMTraceContext,
     get_current_trace,
     get_runtime_distinct_id,
+    get_runtime_telemetry_enabled,
     pop_current_trace,
     push_current_trace,
 )
@@ -157,6 +158,9 @@ class PostHogLLMCallback(BaseCallback):
         if not self.config.enabled:
             return False
         if not self.config.api_key:
+            return False
+        runtime_enabled = get_runtime_telemetry_enabled()
+        if runtime_enabled is False:
             return False
         if self._in_dspy_optimization and not self.config.enable_dspy_optimization:
             return False

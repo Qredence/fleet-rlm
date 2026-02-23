@@ -9,7 +9,10 @@ import dspy
 from fleet_rlm.analytics import configure_analytics
 from fleet_rlm.analytics.config import PostHogConfig
 from fleet_rlm.analytics.posthog_callback import PostHogLLMCallback
-from fleet_rlm.analytics.trace_context import runtime_distinct_id_context
+from fleet_rlm.analytics.trace_context import (
+    runtime_distinct_id_context,
+    runtime_telemetry_enabled_context,
+)
 
 
 class _FakeClient:
@@ -159,6 +162,21 @@ def test_runtime_distinct_id_takes_precedence(monkeypatch) -> None:
         callback.on_lm_end("call-1", {"choices": [{"text": "world"}]}, None)
 
     assert fake_client.calls[0]["distinct_id"] == "runtime-user"
+
+
+def test_runtime_telemetry_disable_suppresses_emission(monkeypatch) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        lambda _config: fake_client,
+    )
+
+    callback = PostHogLLMCallback(_enabled_config(), distinct_id="user-123")
+    with runtime_telemetry_enabled_context(False):
+        callback.on_lm_start("call-1", _FakeLM(), {"prompt": "hello"})
+        callback.on_lm_end("call-1", {"choices": [{"text": "world"}]}, None)
+
+    assert fake_client.calls == []
 
 
 def test_configure_analytics_is_idempotent(monkeypatch) -> None:

@@ -8,6 +8,7 @@ import {
 } from "@/lib/rlm-api";
 import type { ChatMessage } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
+import { telemetryClient } from "@/lib/telemetry/client";
 import { QueryClient } from "@tanstack/react-query";
 
 interface ChatStore {
@@ -94,6 +95,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       type: "message",
       content: text,
       trace: rlmApiConfig.trace,
+      analytics_enabled: telemetryClient.isAnonymousTelemetryEnabled(),
       workspace_id: rlmApiConfig.workspaceId,
       user_id: rlmApiConfig.userId,
       session_id: sessionId,

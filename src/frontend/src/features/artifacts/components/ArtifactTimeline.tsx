@@ -1,10 +1,8 @@
 import { Brain, Terminal, Wrench, Database, FileOutput } from "lucide-react";
 
-import type {
-  ArtifactStepType,
-  ExecutionStep,
-} from "@/stores/artifactStore";
+import type { ArtifactStepType, ExecutionStep } from "@/stores/artifactStore";
 import { cn } from "@/components/ui/utils";
+import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 
 interface ArtifactTimelineProps {
   steps: ExecutionStep[];
@@ -19,25 +17,6 @@ const ICONS: Record<ArtifactStepType, typeof Brain> = {
   memory: Database,
   output: FileOutput,
 };
-
-function asText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
-  if (value == null) return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function summarize(step: ExecutionStep): string {
-  const source = asText(step.output ?? step.input).trim();
-  if (!source) return step.label;
-  const compact = source.replace(/\s+/g, " ");
-  return compact.length > 120 ? `${compact.slice(0, 120)}…` : compact;
-}
 
 function formatTimestamp(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString([], {
@@ -95,7 +74,7 @@ export function ArtifactTimeline({
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap break-words">
-                    {summarize(step)}
+                    {summarizeArtifactStep(step)}
                   </p>
                 </div>
               </div>

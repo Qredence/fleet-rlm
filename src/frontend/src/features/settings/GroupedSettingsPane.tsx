@@ -156,7 +156,7 @@ export function GroupedSettingsPane({
 
       <SettingsToggleRow
         label="Anonymous telemetry"
-        description="Share anonymous usage telemetry to help improve Fleet-RLM. This updates web PostHog capture immediately; backend AI analytics preference propagation lands in follow-up ticket QRE-320."
+        description="Share anonymous usage telemetry to help improve Fleet-RLM. This preference now updates web PostHog capture immediately and propagates to backend AI analytics for new chat turns."
         checked={telemetryEnabled}
         onChange={(val) => {
           setTelemetryEnabled(val);

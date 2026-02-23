@@ -73,12 +73,33 @@ function normalizeLabel(label: string): string {
 
 function inferStatus(step: ExecutionStep): "streaming" | "complete" | "error" {
   const output = asRecord(step.output);
+  const input = asRecord(step.input);
   if (output?.streaming === true) return "streaming";
+  if (asRecord(output?.error) || asRecord(input?.error)) return "error";
+  if (output?.ok === false || input?.ok === false) return "error";
+  if (output?.status === "error" || input?.status === "error") return "error";
+  if (
+    typeof output?.message === "string" &&
+    /error|failed|exception/i.test(output.message)
+  ) {
+    return "error";
+  }
   if (step.type === "output") {
     const label = step.label.toLowerCase();
     if (label.includes("error")) return "error";
   }
+  if (/error|failed|exception/i.test(step.label)) return "error";
   return "complete";
+}
+
+function formatElapsedLabel(ms: number | undefined): string | undefined {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return undefined;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const mins = Math.floor(seconds / 60);
+  const rem = Math.round(seconds % 60);
+  return `${mins}m ${rem}s`;
 }
 
 // ── Depth index ─────────────────────────────────────────────────────
@@ -121,6 +142,8 @@ interface DisplayGroup {
   toolNameSource?: "payload" | "label";
   status: "streaming" | "complete" | "error";
   elapsedMs?: number;
+  representativeInput?: unknown;
+  representativeOutput?: unknown;
 }
 
 function buildDisplayGroups(ordered: ExecutionStep[]): {
@@ -154,6 +177,8 @@ function buildDisplayGroups(ordered: ExecutionStep[]): {
       parentStepId: step.parent_id,
       normalizedLabel: normalizeLabel(step.label),
       status: inferStatus(step),
+      representativeInput: step.input,
+      representativeOutput: step.output,
     };
   };
 
@@ -180,6 +205,8 @@ function buildDisplayGroups(ordered: ExecutionStep[]): {
       currentToolGroup.timestamp = step.timestamp;
       currentToolGroup.representativeStepId = step.id;
       currentToolGroup.status = inferStatus(step);
+      currentToolGroup.representativeInput = step.input;
+      currentToolGroup.representativeOutput = step.output;
       if (!currentToolGroup.toolName) {
         const nextToolBadge = extractToolBadgeFromStep(step);
         currentToolGroup.toolName = nextToolBadge.toolName;
@@ -322,6 +349,8 @@ export function ArtifactGraph({
           elapsedMs: group.elapsedMs,
           status: group.status,
           expanded: group.id === expandedNodeId,
+          input: group.representativeInput,
+          output: group.representativeOutput,
         },
         position: { x: 0, y: 0 },
         selected: isActive,
@@ -363,6 +392,17 @@ export function ArtifactGraph({
           type: "smoothstep",
           animated: tgt.selected === true,
           style: { stroke: "var(--border)", strokeWidth: 1 },
+          label: formatElapsedLabel(src.data.elapsedMs),
+          labelShowBg: true,
+          labelBgStyle: {
+            fill: "color-mix(in srgb, var(--background) 85%, transparent)",
+            opacity: 0.95,
+          },
+          labelStyle: {
+            fontSize: 10,
+            fill: "var(--muted-foreground)",
+            fontVariantNumeric: "tabular-nums",
+          },
         });
       }
     }

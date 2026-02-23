@@ -1,63 +1,17 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SkillMarkdown } from "@/components/shared/SkillMarkdown";
 import type { ExecutionStep } from "@/stores/artifactStore";
+import { buildArtifactPreviewModel } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 
 interface ArtifactPreviewProps {
   steps: ExecutionStep[];
   activeStepId?: string;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return undefined;
-  return value as Record<string, unknown>;
-}
-
-function asText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
-  if (value == null) return "";
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function looksLikeMarkdown(value: string): boolean {
-  return (
-    /^#{1,6}\s/m.test(value) ||
-    /^[-*+]\s/m.test(value) ||
-    /^\d+\.\s/m.test(value) ||
-    /```/.test(value) ||
-    /\[[^\]]+\]\([^)]+\)/.test(value)
-  );
-}
-
-function tryParseJson(value: string): unknown | undefined {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-}
-
-function resolvePreviewContent(step: ExecutionStep | undefined): unknown {
-  if (!step) return undefined;
-  const output = asRecord(step.output);
-  return output?.text ?? output?.payload ?? step.output ?? step.input;
-}
-
 export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
   const outputStep =
     steps.find((step) => step.id === activeStepId && step.type === "output") ??
     [...steps].reverse().find((step) => step.type === "output");
-
-  const content = resolvePreviewContent(outputStep);
-  const text = asText(content).trim();
-  const parsed =
-    typeof content === "string" ? tryParseJson(content) : undefined;
 
   if (!outputStep) {
     return (
@@ -71,21 +25,122 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
     <div className="h-full rounded-card border border-border-subtle overflow-hidden">
       <ScrollArea className="h-full">
         <div className="p-4 md:p-5">
-          {parsed !== undefined && (
-            <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
-              {JSON.stringify(parsed, null, 2)}
-            </pre>
-          )}
-
-          {parsed === undefined && looksLikeMarkdown(text) && (
-            <SkillMarkdown content={text} />
-          )}
-
-          {parsed === undefined && !looksLikeMarkdown(text) && (
-            <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
-              {text || "No preview output was captured for this run."}
-            </pre>
-          )}
+          {(() => {
+            const model = buildArtifactPreviewModel(outputStep);
+            switch (model.kind) {
+              case "markdown":
+                return <SkillMarkdown content={model.text} />;
+              case "text":
+                return (
+                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+                    {model.text ||
+                      "No preview output was captured for this run."}
+                  </pre>
+                );
+              case "error":
+                return (
+                  <div className="rounded-md border border-red-500/40 bg-red-500/5 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-red-500">
+                      Execution failed
+                    </p>
+                    <p className="mt-1 text-sm text-foreground whitespace-pre-wrap break-words">
+                      {model.message}
+                    </p>
+                    {model.details && (
+                      <pre className="mt-2 max-h-80 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 text-xs whitespace-pre-wrap break-words">
+                        {model.details}
+                      </pre>
+                    )}
+                  </div>
+                );
+              case "tool_result":
+                return (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Tool Result
+                      </p>
+                      {model.toolName && (
+                        <p className="text-sm text-foreground mt-1">
+                          {model.toolName}
+                        </p>
+                      )}
+                    </div>
+                    {model.input && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                          Input
+                        </p>
+                        <pre className="max-h-40 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap break-words">
+                          {model.input}
+                        </pre>
+                      </div>
+                    )}
+                    {model.output && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                          Output
+                        </p>
+                        <pre className="max-h-64 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap break-words">
+                          {model.output}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                );
+              case "trajectory":
+                return (
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Trajectory Summary
+                    </p>
+                    {model.thought && (
+                      <div>
+                        <p className="text-xs font-semibold text-foreground/80">
+                          Thought
+                        </p>
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                          {model.thought}
+                        </p>
+                      </div>
+                    )}
+                    {model.action && (
+                      <div>
+                        <p className="text-xs font-semibold text-foreground/80">
+                          Action
+                        </p>
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                          {model.action}
+                        </p>
+                      </div>
+                    )}
+                    {model.observation && (
+                      <div>
+                        <p className="text-xs font-semibold text-foreground/80">
+                          Observation
+                        </p>
+                        <pre className="max-h-64 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap break-words">
+                          {model.observation}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                );
+              case "json":
+                return (
+                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+                    {JSON.stringify(model.value, null, 2)}
+                  </pre>
+                );
+              case "empty":
+              default:
+                return (
+                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+                    No preview output was captured for this run.
+                  </pre>
+                );
+            }
+          })()}
         </div>
       </ScrollArea>
     </div>

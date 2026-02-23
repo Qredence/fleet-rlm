@@ -17,7 +17,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from fleet_rlm import runners
-from fleet_rlm.analytics.trace_context import runtime_distinct_id_context
+from fleet_rlm.analytics.trace_context import (
+    runtime_distinct_id_context,
+    runtime_telemetry_enabled_context,
+)
 from fleet_rlm.core.interpreter import ExecutionProfile
 from fleet_rlm.db.models import (
     RunStatus,
@@ -478,63 +481,67 @@ async def chat_streaming(websocket: WebSocket):
                         agent.load_document(str(docs_path))
                         last_loaded_docs_path = str(docs_path).strip()
 
+                    runtime_analytics_enabled = getattr(msg, "analytics_enabled", None)
                     try:
-                        async for event in agent.aiter_chat_turn_stream(
-                            message=message, trace=trace, cancel_check=cancel_check
+                        with runtime_telemetry_enabled_context(
+                            runtime_analytics_enabled
                         ):
-                            lifecycle.raise_if_persistence_error()
-                            event_dict = {
-                                "kind": event.kind,
-                                "text": event.text,
-                                "payload": event.payload,
-                                "timestamp": event.timestamp.isoformat(),
-                            }
-                            is_terminal_event = event.kind in {
-                                "final",
-                                "cancelled",
-                                "error",
-                            }
-                            if not is_terminal_event:
-                                await websocket.send_json(
-                                    {"type": "event", "data": event_dict}
-                                )
-
-                            step = step_builder.from_stream_event(
-                                kind=event.kind,
-                                text=event.text,
-                                payload=event.payload,
-                                timestamp=event.timestamp.timestamp(),
-                            )
-                            if step is not None:
-                                await lifecycle.emit_step(step)
-                                await lifecycle.persist_step(step)
+                            async for event in agent.aiter_chat_turn_stream(
+                                message=message, trace=trace, cancel_check=cancel_check
+                            ):
                                 lifecycle.raise_if_persistence_error()
+                                event_dict = {
+                                    "kind": event.kind,
+                                    "text": event.text,
+                                    "payload": event.payload,
+                                    "timestamp": event.timestamp.isoformat(),
+                                }
+                                is_terminal_event = event.kind in {
+                                    "final",
+                                    "cancelled",
+                                    "error",
+                                }
+                                if not is_terminal_event:
+                                    await websocket.send_json(
+                                        {"type": "event", "data": event_dict}
+                                    )
 
-                            if event.kind == "final":
-                                await local_persist(include_volume_save=True)
-                                await lifecycle.complete_run(
-                                    RunStatus.COMPLETED, step=step
+                                step = step_builder.from_stream_event(
+                                    kind=event.kind,
+                                    text=event.text,
+                                    payload=event.payload,
+                                    timestamp=event.timestamp.timestamp(),
                                 )
-                                await websocket.send_json(
-                                    {"type": "event", "data": event_dict}
-                                )
-                            elif event.kind in {"cancelled", "error"}:
-                                status = (
-                                    RunStatus.CANCELLED
-                                    if event.kind == "cancelled"
-                                    else RunStatus.FAILED
-                                )
-                                error_json = (
-                                    {"error": event.text, "kind": event.kind}
-                                    if event.kind == "error"
-                                    else None
-                                )
-                                await lifecycle.complete_run(
-                                    status, step=step, error_json=error_json
-                                )
-                                await websocket.send_json(
-                                    {"type": "event", "data": event_dict}
-                                )
+                                if step is not None:
+                                    await lifecycle.emit_step(step)
+                                    await lifecycle.persist_step(step)
+                                    lifecycle.raise_if_persistence_error()
+
+                                if event.kind == "final":
+                                    await local_persist(include_volume_save=True)
+                                    await lifecycle.complete_run(
+                                        RunStatus.COMPLETED, step=step
+                                    )
+                                    await websocket.send_json(
+                                        {"type": "event", "data": event_dict}
+                                    )
+                                elif event.kind in {"cancelled", "error"}:
+                                    status = (
+                                        RunStatus.CANCELLED
+                                        if event.kind == "cancelled"
+                                        else RunStatus.FAILED
+                                    )
+                                    error_json = (
+                                        {"error": event.text, "kind": event.kind}
+                                        if event.kind == "error"
+                                        else None
+                                    )
+                                    await lifecycle.complete_run(
+                                        status, step=step, error_json=error_json
+                                    )
+                                    await websocket.send_json(
+                                        {"type": "event", "data": event_dict}
+                                    )
 
                         if not lifecycle.run_completed:
                             lifecycle.raise_if_persistence_error()

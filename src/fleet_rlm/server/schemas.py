@@ -76,6 +76,7 @@ class WSMessage(BaseModel):
     docs_path: str | None = None
     trace: bool = True
     trace_mode: Literal["compact", "verbose", "off"] | None = None
+    analytics_enabled: bool | None = None
     workspace_id: str = "default"
     user_id: str = "anonymous"
     session_id: str | None = None

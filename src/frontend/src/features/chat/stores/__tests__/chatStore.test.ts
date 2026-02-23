@@ -29,6 +29,12 @@ vi.mock("@/app/pages/skill-creation/backendChatEventAdapter", () => ({
   })),
 }));
 
+vi.mock("@/lib/telemetry/client", () => ({
+  telemetryClient: {
+    isAnonymousTelemetryEnabled: vi.fn(() => true),
+  },
+}));
+
 // ── imports ────────────────────────────────────────────────────────────────────
 // Imported after vi.mock so the mocked versions are resolved.
 import { streamChatOverWs } from "@/lib/rlm-api";
@@ -135,17 +141,15 @@ describe("useChatStore — state management", () => {
       phase: 1 as const,
     };
     useChatStore.getState().addMessage(first);
-    useChatStore
-      .getState()
-      .setMessages((prev) => [
-        ...prev,
-        {
-          id: "m2",
-          type: "system" as const,
-          content: "msg",
-          phase: 1 as const,
-        },
-      ]);
+    useChatStore.getState().setMessages((prev) => [
+      ...prev,
+      {
+        id: "m2",
+        type: "system" as const,
+        content: "msg",
+        phase: 1 as const,
+      },
+    ]);
     expect(useChatStore.getState().messages).toHaveLength(2);
   });
 
@@ -231,6 +235,7 @@ describe("useChatStore — streamMessage", () => {
     expect(payload).toMatchObject({
       type: "message",
       content: "test",
+      analytics_enabled: true,
       session_id: "sess-abc",
       workspace_id: "test-workspace",
       user_id: "test-user",
