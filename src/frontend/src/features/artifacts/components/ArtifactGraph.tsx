@@ -92,6 +92,16 @@ function inferStatus(step: ExecutionStep): "streaming" | "complete" | "error" {
   return "complete";
 }
 
+function formatElapsedLabel(ms: number | undefined): string | undefined {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return undefined;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const mins = Math.floor(seconds / 60);
+  const rem = Math.round(seconds % 60);
+  return `${mins}m ${rem}s`;
+}
+
 // ── Depth index ─────────────────────────────────────────────────────
 
 function buildDepthIndex(steps: ExecutionStep[]): Map<string, number> {
@@ -382,6 +392,17 @@ export function ArtifactGraph({
           type: "smoothstep",
           animated: tgt.selected === true,
           style: { stroke: "var(--border)", strokeWidth: 1 },
+          label: formatElapsedLabel(src.data.elapsedMs),
+          labelShowBg: true,
+          labelBgStyle: {
+            fill: "color-mix(in srgb, var(--background) 85%, transparent)",
+            opacity: 0.95,
+          },
+          labelStyle: {
+            fontSize: 10,
+            fill: "var(--muted-foreground)",
+            fontVariantNumeric: "tabular-nums",
+          },
         });
       }
     }
