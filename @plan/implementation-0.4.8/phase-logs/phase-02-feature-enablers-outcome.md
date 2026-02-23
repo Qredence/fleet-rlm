@@ -4,7 +4,7 @@
 - Phase: `phase-2`
 - Ticket(s): `QRE-298`, `QRE-312`, `QRE-313`, `QRE-302`, `QRE-317`, `QRE-319`
 - Branch: `codex/v0-4-8-phase-2-feature-enablers`
-- PR: `pending`
+- PR: `https://github.com/Qredence/fleet-rlm/pull/76`
 - Merge commit: `pending`
 
 ## Sequential Execution Order
@@ -72,7 +72,7 @@
 ## Docs and Hygiene Updates
 - `AGENTS.md`: updated (added `FLEET_DEMO_TASKS_ENABLED` operator convention).
 - `docs/`: not needed for Phase 2 implementation changes.
-- `@plan/implementation-0.4.8/README.md`: updated (Phase 2 moved to `In Review`, PR pending line to be backfilled after PR open).
+- `@plan/implementation-0.4.8/README.md`: updated (Phase 2 moved to `In Review`, linked to PR #76).
 - Stale reference/import scan summary: frontend `identify(` usage removed from active sources; backend imports validated after runner/model/migration changes.
 
 ## Linear Updates
@@ -81,7 +81,7 @@
 - Comments posted:
   - kickoff comment on `QRE-298`
   - per-ticket checkpoint comments with commit hashes/validation for all six tickets
-- Project status update: pending (to be posted at PR open as `Phase 2 In Review`)
+- Project status update: posted (`Phase 2 (Feature Enablers) is in review`, health `onTrack`)
 
 ## Remaining Risks / Follow-Ups
 - Artifact-graph visual smoke for a real tool-heavy run was not captured in this phase; unit coverage exists for badge extraction/rendering and general frontend e2e smoke is green.
