@@ -316,6 +316,13 @@ class ModalVolume(Base):
         ),
         Index("ix_modal_volumes_tenant_created_at", "tenant_id", "created_at"),
         Index("ix_modal_volumes_tenant_last_seen_at", "tenant_id", "last_seen_at"),
+        Index(
+            "ix_modal_volumes_tenant_provider_env_last_seen",
+            "tenant_id",
+            "provider",
+            "environment",
+            "last_seen_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -371,6 +378,7 @@ class Run(Base):
         ),
         UniqueConstraint("tenant_id", "id", name="uq_runs_tenant_id_id"),
         Index("ix_runs_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_runs_tenant_status_created_at", "tenant_id", "status", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -439,6 +447,18 @@ class RunStep(Base):
         Index("ix_run_steps_tenant_created_at", "tenant_id", "created_at"),
         Index("ix_run_steps_run_id", "run_id"),
         Index("ix_run_steps_tenant_run_step", "tenant_id", "run_id", "step_index"),
+        Index(
+            "ix_run_steps_tenant_type_created_at",
+            "tenant_id",
+            "step_type",
+            "created_at",
+        ),
+        Index(
+            "ix_run_steps_tenant_modal_volume_created_at",
+            "tenant_id",
+            "modal_volume_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -492,6 +512,10 @@ class Artifact(Base):
             name="fk_artifacts_tenant_step__run_steps_tenant_id_id",
         ),
         Index("ix_artifacts_tenant_created_at", "tenant_id", "created_at"),
+        Index(
+            "ix_artifacts_tenant_run_created_at", "tenant_id", "run_id", "created_at"
+        ),
+        Index("ix_artifacts_tenant_kind_created_at", "tenant_id", "kind", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -524,6 +548,7 @@ class RLMProgram(Base):
         UniqueConstraint("tenant_id", "program_key", name="uq_rlm_programs_tenant_key"),
         Index("ix_rlm_programs_tenant_created_at", "tenant_id", "created_at"),
         Index("ix_rlm_programs_tenant_kind_status", "tenant_id", "kind", "status"),
+        Index("ix_rlm_programs_tenant_updated_at", "tenant_id", "updated_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -595,6 +620,18 @@ class RLMTrace(Base):
             "ix_rlm_traces_tenant_run_created_at", "tenant_id", "run_id", "created_at"
         ),
         Index("ix_rlm_traces_tenant_kind_status", "tenant_id", "trace_kind", "status"),
+        Index(
+            "ix_rlm_traces_tenant_program_created_at",
+            "tenant_id",
+            "program_id",
+            "created_at",
+        ),
+        Index(
+            "ix_rlm_traces_tenant_step_created_at",
+            "tenant_id",
+            "run_step_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
