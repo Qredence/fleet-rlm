@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useChatHistory } from "@/hooks/useChatHistory";
@@ -24,7 +24,7 @@ import { isRlmCoreEnabled } from "@/lib/rlm-api";
  */
 export function SkillCreationFlow() {
   const isMobile = useIsMobile();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const { scrollRef, contentRef, isAtBottom, scrollToBottom } =
     useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
@@ -48,12 +48,12 @@ export function SkillCreationFlow() {
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(() => {
     if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
-      posthog?.capture("chat_session_started", {
+      telemetry.capture("chat_session_started", {
         prompt_length: inputValue.length,
       });
     }
     originalHandleSubmit();
-  }, [phase, messages.length, inputValue, posthog, originalHandleSubmit]);
+  }, [phase, messages.length, inputValue, telemetry, originalHandleSubmit]);
 
   // Prompt feature state (persisted in NavigationContext)
   const {
@@ -98,7 +98,7 @@ export function SkillCreationFlow() {
       if (messagesRef.current.length > 0) {
         saveConversation(messagesRef.current, phaseRef.current);
         // PostHog: Track conversation saved
-        posthog?.capture("conversation_saved", {
+        telemetry.capture("conversation_saved", {
           message_count: messagesRef.current.length,
         });
       }
@@ -109,7 +109,7 @@ export function SkillCreationFlow() {
     return () => {
       if (historyResetTimer) clearTimeout(historyResetTimer);
     };
-  }, [sessionId, saveConversation, posthog]);
+  }, [sessionId, saveConversation, telemetry]);
 
   const handleSelectConversation = useCallback(
     (id: string) => {

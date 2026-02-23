@@ -13,9 +13,9 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { usePostHog } from "@posthog/react";
 import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,7 @@ import headerSvg from "@/imports/svg-synwn0xtnf";
 
 function SignupPage() {
   const navigate = useNavigate();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const prefersReduced = useReducedMotion();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -47,9 +47,11 @@ function SignupPage() {
     await new Promise((r) => setTimeout(r, 1000));
     setLoading(false);
 
-    // PostHog: Identify user and capture signup event
-    posthog?.identify(email, { email, name });
-    posthog?.capture("user_signed_up", { email, name });
+    // Anonymous-only telemetry: capture signup event without PII.
+    telemetry.capture("user_signed_up", {
+      source: "signup_page",
+      has_name: Boolean(name.trim()),
+    });
 
     navigate("/", { replace: true });
   }

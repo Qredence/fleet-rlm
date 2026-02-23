@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import { useIsMobile } from "@/components/ui/use-mobile";
 import {
@@ -213,7 +213,7 @@ function IntegrationCard({
 
 function IntegrationsBody() {
   const [integrations, setIntegrations] = useState(initialIntegrations);
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
 
   function handleToggle(id: string) {
     setIntegrations((prev) =>
@@ -223,7 +223,7 @@ function IntegrationsBody() {
 
         // PostHog: Capture integration connect/disconnect events
         if (next) {
-          posthog?.capture("integration_connected", {
+          telemetry.capture("integration_connected", {
             integration_id: intg.id,
             integration_name: intg.name,
             integration_category: intg.category,
@@ -232,7 +232,7 @@ function IntegrationsBody() {
             description: `Your ${intg.name} workspace is now linked. Data sync will begin shortly.`,
           });
         } else {
-          posthog?.capture("integration_disconnected", {
+          telemetry.capture("integration_disconnected", {
             integration_id: intg.id,
             integration_name: intg.name,
             integration_category: intg.category,

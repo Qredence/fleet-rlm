@@ -6,7 +6,7 @@ import {
   useNavigate,
   useRouteError,
 } from "react-router";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/utils";
@@ -32,11 +32,11 @@ export function RouteErrorPage() {
   const error = useRouteError();
   const navigate = useNavigate();
   const location = useLocation();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
 
   // PostHog: Capture route errors for error tracking
   if (error) {
-    posthog?.captureException(error);
+    telemetry.captureException(error);
   }
 
   const message = extractErrorMessage(error);

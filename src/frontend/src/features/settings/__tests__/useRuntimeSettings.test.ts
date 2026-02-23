@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { computeRuntimeUpdates } from "@/features/settings/useRuntimeSettings";
+import {
+  computeLmRuntimeUpdates,
+  computeRuntimeUpdates,
+} from "@/features/settings/useRuntimeSettings";
 
 describe("computeRuntimeUpdates", () => {
   it("returns an empty update payload when values are unchanged", () => {
@@ -41,6 +44,42 @@ describe("computeRuntimeUpdates", () => {
 
     expect(computeRuntimeUpdates(current, baseline)).toEqual({
       VOLUME_NAME: "",
+    });
+  });
+});
+
+describe("computeLmRuntimeUpdates", () => {
+  it("only includes LiteLLM endpoint/key changes", () => {
+    const baseline = {
+      DSPY_LM_API_BASE: "https://proxy.example/v1",
+      DSPY_LLM_API_KEY: "sk-old",
+      SECRET_NAME: "LITELLM",
+      MODAL_TOKEN_ID: "modal-id",
+    };
+    const current = {
+      ...baseline,
+      DSPY_LM_API_BASE: "https://proxy2.example/v1",
+      SECRET_NAME: "SHOULD_NOT_BE_INCLUDED",
+      MODAL_TOKEN_ID: "should-not-be-included",
+    };
+
+    expect(computeLmRuntimeUpdates(current, baseline)).toEqual({
+      DSPY_LM_API_BASE: "https://proxy2.example/v1",
+    });
+  });
+
+  it("keeps explicit empty-string updates for cleared LM values", () => {
+    const baseline = {
+      DSPY_LM_API_BASE: "https://proxy.example/v1",
+      DSPY_LLM_API_KEY: "sk-live",
+    };
+    const current = {
+      DSPY_LM_API_BASE: "",
+      DSPY_LLM_API_KEY: "sk-live",
+    };
+
+    expect(computeLmRuntimeUpdates(current, baseline)).toEqual({
+      DSPY_LM_API_BASE: "",
     });
   });
 });

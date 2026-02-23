@@ -22,12 +22,34 @@ export const RUNTIME_EDITABLE_KEYS = [
 
 export type RuntimeEditableKey = (typeof RUNTIME_EDITABLE_KEYS)[number];
 
+export const RUNTIME_LM_EDITABLE_KEYS = [
+  "DSPY_LLM_API_KEY",
+  "DSPY_LM_API_BASE",
+] as const;
+
+export type RuntimeLmEditableKey = (typeof RUNTIME_LM_EDITABLE_KEYS)[number];
+
 export function computeRuntimeUpdates(
   current: Record<string, string>,
   baseline: Record<string, string>,
 ): Record<string, string> {
   const updates: Record<string, string> = {};
   for (const key of RUNTIME_EDITABLE_KEYS) {
+    const next = current[key] ?? "";
+    const prev = baseline[key] ?? "";
+    if (next !== prev) {
+      updates[key] = next;
+    }
+  }
+  return updates;
+}
+
+export function computeLmRuntimeUpdates(
+  current: Record<string, string>,
+  baseline: Record<string, string>,
+): Record<string, string> {
+  const updates: Record<string, string> = {};
+  for (const key of RUNTIME_LM_EDITABLE_KEYS) {
     const next = current[key] ?? "";
     const prev = baseline[key] ?? "";
     if (next !== prev) {
