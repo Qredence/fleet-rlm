@@ -1,16 +1,5 @@
-"""Stub router for Sandbox (Filesystem)."""
+"""Compatibility shim for planned sandbox router imports."""
 
-from typing import Any
-from fastapi import APIRouter
+from .planned import sandbox_router as router
 
-router = APIRouter(prefix="/sandbox", tags=["sandbox"])
-
-
-@router.get("")
-async def get_sandbox() -> dict[str, Any]:
-    return {"files": []}
-
-
-@router.get("/file")
-async def get_sandbox_file() -> dict[str, Any]:
-    return {"content": ""}
+__all__ = ["router"]

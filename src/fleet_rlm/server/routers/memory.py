@@ -1,17 +1,5 @@
-"""Stub router for Memory."""
+"""Compatibility shim for planned memory router imports."""
 
-from typing import Any
+from .planned import memory_router as router
 
-from fastapi import APIRouter
-
-router = APIRouter(prefix="/memory", tags=["memory"])
-
-
-@router.get("")
-async def list_memory() -> dict[str, Any]:
-    return {"items": []}
-
-
-@router.post("")
-async def create_memory_item() -> dict[str, Any]:
-    return {"status": "ok"}
+__all__ = ["router"]

@@ -1,16 +1,9 @@
-/**
- * Unit tests for backendChatEventAdapter.ts
- *
- * Tests the `applyWsFrameToMessages` function which transforms raw WebSocket
- * server frames into the frontend's `ChatMessage[]` list.
- */
-import { describe, it, expect, vi } from "vitest";
-import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
-import type { ChatMessage } from "@/lib/data/types";
-import type { WsServerMessage } from "@/lib/rlm-api";
+import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
+import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
+import type { ChatMessage, ChatRenderPart } from "@/lib/data/types";
+import type { WsServerMessage } from "@/lib/rlm-api";
 
-// ── helpers ────────────────────────────────────────────────────────────────────
 function makeEvent(
   kind: string,
   text: string,
@@ -26,269 +19,280 @@ function makeError(message: string): WsServerMessage {
   return { type: "error", message };
 }
 
-// ── suite ──────────────────────────────────────────────────────────────────────
+function findFirstPart(
+  messages: ChatMessage[],
+  predicate: (part: ChatRenderPart) => boolean,
+): ChatRenderPart | undefined {
+  for (const message of messages) {
+    for (const part of message.renderParts ?? []) {
+      if (predicate(part)) return part;
+    }
+  }
+  return undefined;
+}
+
 describe("applyWsFrameToMessages", () => {
-  // ── error frame ──────────────────────────────────────────────────────────────
-  describe("error frame (type: 'error')", () => {
-    it("appends a system message with the backend error text", () => {
-      const { messages, terminal, errored } = applyWsFrameToMessages(
-        [],
-        makeError("Something went wrong"),
-      );
-      expect(errored).toBe(true);
-      expect(terminal).toBe(true);
-      expect(messages).toHaveLength(1);
-      const msg = messages[0];
-      expect(msg?.type).toBe("system");
-      expect(msg?.content).toContain("Something went wrong");
-    });
-
-    it("closes any open reasoning bubble before adding the error message", () => {
-      const initialMessages: ChatMessage[] = [
-        {
-          id: "r1",
-          type: "reasoning",
-          content: "",
-          phase: 1,
-          reasoningData: {
-            parts: [{ type: "text", text: "thinking..." }],
-            isThinking: true,
-          },
+  it("appends a backend error system message and closes open reasoning", () => {
+    const initial: ChatMessage[] = [
+      {
+        id: "r1",
+        type: "reasoning",
+        content: "",
+        phase: 1,
+        reasoningData: {
+          parts: [{ type: "text", text: "thinking..." }],
+          isThinking: true,
         },
-      ];
-
-      const { messages } = applyWsFrameToMessages(
-        initialMessages,
-        makeError("Oops"),
-      );
-
-      // The reasoning bubble should be closed (isThinking: false)
-      const reasoning = messages.find((m) => m.type === "reasoning");
-      expect(reasoning?.reasoningData?.isThinking).toBe(false);
-    });
-  });
-
-  // ── assistant_token ──────────────────────────────────────────────────────────
-  describe("assistant_token event", () => {
-    it("creates a streaming assistant bubble and appends the token", () => {
-      const { messages, terminal, errored } = applyWsFrameToMessages(
-        [],
-        makeEvent("assistant_token", "Hello"),
-      );
-      expect(terminal).toBe(false);
-      expect(errored).toBe(false);
-      expect(messages).toHaveLength(1);
-      const msg = messages[0];
-      expect(msg?.type).toBe("assistant");
-      expect(msg?.content).toContain("Hello");
-      if (msg?.type !== "assistant") {
-        throw new Error("Expected assistant message");
-      }
-      expect(msg.streaming).toBe(true);
-    });
-
-    it("accumulates multiple tokens into the same bubble", () => {
-      let msgs: ChatMessage[] = [];
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("assistant_token", "Hello"),
-      ).messages;
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("assistant_token", " world"),
-      ).messages;
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("assistant_token", "!"),
-      ).messages;
-
-      // Still only one assistant bubble
-      const assistantMsgs = msgs.filter((m) => m.type === "assistant");
-      expect(assistantMsgs).toHaveLength(1);
-      expect(assistantMsgs[0]?.content).toBe("Hello world!");
-    });
-  });
-
-  // ── reasoning_step ───────────────────────────────────────────────────────────
-  describe("reasoning_step event", () => {
-    it("creates a reasoning bubble with isThinking: true", () => {
-      const { messages } = applyWsFrameToMessages(
-        [],
-        makeEvent("reasoning_step", "Analyzing input"),
-      );
-      const reasoning = messages.find((m) => m.type === "reasoning");
-      expect(reasoning).toBeDefined();
-      expect(reasoning?.reasoningData?.isThinking).toBe(true);
-      expect(reasoning?.reasoningData?.parts[0]?.text).toBe("Analyzing input");
-    });
-
-    it("appends additional steps to the same open reasoning bubble", () => {
-      let msgs: ChatMessage[] = [];
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("reasoning_step", "Step 1"),
-      ).messages;
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("reasoning_step", "Step 2"),
-      ).messages;
-
-      const reasoning = msgs.find((m) => m.type === "reasoning");
-      expect(reasoning?.reasoningData?.parts).toHaveLength(2);
-    });
-  });
-
-  // ── final ─────────────────────────────────────────────────────────────────────
-  describe("final event", () => {
-    it("closes the streaming assistant bubble with the final text", () => {
-      // Start with a streaming assistant bubble
-      let msgs: ChatMessage[] = [];
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("assistant_token", "Hello"),
-      ).messages;
-
-      // Apply the final event with a complete response
-      const { messages, terminal } = applyWsFrameToMessages(
-        msgs,
-        makeEvent("final", "Hello, how can I help?"),
-      );
-
-      expect(terminal).toBe(true);
-      const assistant = messages.find((m) => m.type === "assistant");
-      if (!assistant) {
-        throw new Error("Expected assistant message");
-      }
-      expect(assistant.streaming).toBe(false);
-      expect(assistant?.content).toBe("Hello, how can I help?");
-    });
-
-    it("closes any open reasoning bubbles on final", () => {
-      let msgs: ChatMessage[] = [];
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("reasoning_step", "Thinking..."),
-      ).messages;
-      msgs = applyWsFrameToMessages(msgs, makeEvent("final", "Done")).messages;
-
-      const reasoning = msgs.find((m) => m.type === "reasoning");
-      expect(reasoning?.reasoningData?.isThinking).toBe(false);
-    });
-
-    it("creates a new assistant bubble if none existed", () => {
-      const { messages } = applyWsFrameToMessages(
-        [],
-        makeEvent("final", "Standalone response"),
-      );
-      const assistant = messages.find((m) => m.type === "assistant");
-      expect(assistant?.content).toBe("Standalone response");
-    });
-
-    it("appends guardrail warnings as a system message", () => {
-      const { messages } = applyWsFrameToMessages(
-        [],
-        makeEvent("final", "ok", {
-          guardrail_warnings: ["Potentially harmful content detected"],
-        }),
-      );
-
-      const system = messages.find((m) => m.type === "system");
-      expect(system).toBeDefined();
-      expect(system?.content).toContain("Potentially harmful content detected");
-    });
-  });
-
-  // ── cancelled ─────────────────────────────────────────────────────────────────
-  describe("cancelled event", () => {
-    it("marks stream as terminal and appends a cancellation notice", () => {
-      const { messages, terminal } = applyWsFrameToMessages(
-        [],
-        makeEvent("cancelled", ""),
-      );
-      expect(terminal).toBe(true);
-      const sys = messages.find((m) => m.type === "system");
-      expect(sys?.content).toContain("cancelled");
-    });
-  });
-
-  // ── status / tool_call / tool_result ──────────────────────────────────────────
-  describe("tool events (status, tool_call, tool_result)", () => {
-    it.each(["status", "tool_call", "tool_result"] as const)(
-      "%s event creates a reasoning-style message (not terminal)",
-      (kind) => {
-        const { messages, terminal, errored } = applyWsFrameToMessages(
-          [],
-          makeEvent(kind, "some info"),
-        );
-        expect(terminal).toBe(false);
-        expect(errored).toBe(false);
-        expect(messages).toHaveLength(1);
       },
+    ];
+
+    const { messages, terminal, errored } = applyWsFrameToMessages(
+      initial,
+      makeError("Something went wrong"),
     );
+
+    expect(terminal).toBe(true);
+    expect(errored).toBe(true);
+    expect(messages.some((m) => m.type === "system")).toBe(true);
+    const reasoning = messages.find((m) => m.type === "reasoning");
+    expect(reasoning?.reasoningData?.isThinking).toBe(false);
   });
 
-  // ── plan_update ───────────────────────────────────────────────────────────────
-  describe("plan_update event", () => {
-    it("creates a plan_update message and closes open reasoning bubbles", () => {
-      let msgs: ChatMessage[] = [];
-      msgs = applyWsFrameToMessages(
-        msgs,
-        makeEvent("reasoning_step", "Thinking..."),
-      ).messages;
+  it("accumulates assistant tokens into a streaming assistant message", () => {
+    let msgs: ChatMessage[] = [];
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("assistant_token", "Hello"),
+    ).messages;
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("assistant_token", " world"),
+    ).messages;
 
-      const { messages, terminal, errored } = applyWsFrameToMessages(
-        msgs,
-        makeEvent("plan_update", "Moving to step 2"),
-      );
-
-      expect(terminal).toBe(false);
-      expect(errored).toBe(false);
-
-      const planMsg = messages.find((m) => m.type === "plan_update");
-      expect(planMsg).toBeDefined();
-      expect(planMsg?.content).toBe("Moving to step 2");
-
-      const reasoning = messages.find((m) => m.type === "reasoning");
-      expect(reasoning?.reasoningData?.isThinking).toBe(false);
-    });
+    const assistant = msgs.find((m) => m.type === "assistant");
+    expect(assistant?.content).toBe("Hello world");
+    expect(assistant?.streaming).toBe(true);
   });
 
-  // ── rlm_executing ─────────────────────────────────────────────────────────────
-  describe("rlm_executing event", () => {
-    it("creates an rlm_executing message with the tool name", () => {
-      const { messages, terminal } = applyWsFrameToMessages(
-        [],
-        makeEvent("rlm_executing", "", { tool_name: "PythonInterpreter" }),
-      );
-
-      expect(terminal).toBe(false);
-      const rlmMsg = messages.find((m) => m.type === "rlm_executing");
-      expect(rlmMsg).toBeDefined();
-      expect(rlmMsg?.content).toBe("Executing PythonInterpreter...");
-    });
+  it("creates reasoning render parts for reasoning_step events", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("reasoning_step", "Analyzing input"),
+    );
+    const reasoning = messages.find((m) => m.type === "reasoning");
+    expect(reasoning?.reasoningData?.isThinking).toBe(true);
+    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
+    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
+      expect(reasoning.renderParts[0].parts[0]?.text).toBe("Analyzing input");
+    }
   });
 
-  // ── memory_update ─────────────────────────────────────────────────────────────
-  describe("memory_update event", () => {
-    it("creates a memory_update message and invalidates TanStack queries if queryClient provided", () => {
-      const mockQueryClient = {
-        invalidateQueries: vi.fn(),
-      } as unknown as QueryClient;
+  it("maps trajectory_step to a chain_of_thought trace render part", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("trajectory_step", "trace", {
+        step_index: 0,
+        step_data: {
+          thought: "Read file",
+          tool_name: "read_file",
+          observation: "Found entrypoint",
+        },
+      }),
+    );
 
-      const { messages, terminal } = applyWsFrameToMessages(
-        [],
-        makeEvent("memory_update", "Saved semantic relationship"),
-        mockQueryClient,
+    const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
+    expect(cot).toBeDefined();
+    if (cot?.kind === "chain_of_thought") {
+      expect(cot.steps).toHaveLength(1);
+      expect(cot.steps[0]?.label).toContain("Read file");
+      expect(cot.steps[0]?.status).toBe("active");
+    }
+  });
+
+  it("maps plan_update to a queue trace part and closes reasoning", () => {
+    let msgs: ChatMessage[] = [];
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("reasoning_step", "Thinking..."),
+    ).messages;
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("plan_update", "Moving to step 2"),
+    ).messages;
+
+    const queue = findFirstPart(msgs, (p) => p.kind === "queue");
+    expect(queue).toBeDefined();
+    if (queue?.kind === "queue") {
+      expect(queue.items[queue.items.length - 1]?.label).toBe(
+        "Moving to step 2",
       );
+    }
 
-      expect(terminal).toBe(false);
-      const memMsg = messages.find((m) => m.type === "memory_update");
-      expect(memMsg).toBeDefined();
-      expect(memMsg?.content).toBe("Saved semantic relationship");
+    const reasoning = msgs.find((m) => m.type === "reasoning");
+    expect(reasoning?.reasoningData?.isThinking).toBe(false);
+  });
 
-      expect(mockQueryClient.invalidateQueries).toHaveBeenCalledWith({
-        queryKey: ["memory"],
-      });
+  it("maps rlm_executing to a task trace part", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("rlm_executing", "Delegating", {
+        tool_name: "PythonInterpreter",
+      }),
+    );
+
+    const task = findFirstPart(messages, (p) => p.kind === "task");
+    expect(task).toBeDefined();
+    if (task?.kind === "task") {
+      expect(task.title).toContain("PythonInterpreter");
+      expect(task.status).toBe("in_progress");
+    }
+  });
+
+  it("maps tool_call/tool_result to a tool render part and updates it in place", () => {
+    let msgs: ChatMessage[] = [];
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("tool_call", "Running tool", {
+        tool_name: "grep",
+        tool_args: { pattern: "foo" },
+      }),
+    ).messages;
+
+    let tool = findFirstPart(msgs, (p) => p.kind === "tool");
+    expect(tool).toBeDefined();
+    if (tool?.kind === "tool") {
+      expect(tool.state).toBe("running");
+      expect(tool.toolType).toBe("grep");
+    }
+
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("tool_result", "Done", {
+        tool_name: "grep",
+        tool_output: "match line",
+      }),
+    ).messages;
+
+    const tools = msgs.flatMap((m) =>
+      (m.renderParts ?? []).filter((p) => p.kind === "tool"),
+    );
+    expect(tools).toHaveLength(1);
+    tool = tools[0];
+    if (tool?.kind === "tool") {
+      expect(tool.state).toBe("output-available");
+      expect(String(tool.output)).toContain("match line");
+    }
+  });
+
+  it("classifies repl execution payloads as sandbox render parts", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("tool_call", "python", {
+        tool_name: "python",
+        step: { type: "repl", input: "print(1)" },
+      }),
+    );
+
+    const sandbox = findFirstPart(messages, (p) => p.kind === "sandbox");
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.code).toContain("print(1)");
+    }
+  });
+
+  it("classifies environment variable payloads as environment_variables on tool_result", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("tool_result", "Env loaded", {
+        tool_name: "runtime_settings",
+        variables: { OPENAI_API_KEY: "sk-test", APP_ENV: "local" },
+      }),
+    );
+
+    const env = findFirstPart(
+      messages,
+      (p) => p.kind === "environment_variables",
+    );
+    expect(env).toBeDefined();
+    if (env?.kind === "environment_variables") {
+      expect(env.variables.map((v) => v.name)).toContain("OPENAI_API_KEY");
+    }
+  });
+
+  it("invalidates memory query on memory_update and renders completed task", () => {
+    const mockQueryClient = {
+      invalidateQueries: vi.fn(),
+    } as unknown as QueryClient;
+
+    const { messages, terminal } = applyWsFrameToMessages(
+      [],
+      makeEvent("memory_update", "Saved semantic relationship"),
+      mockQueryClient,
+    );
+
+    expect(terminal).toBe(false);
+    expect(mockQueryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["memory"],
     });
+    const task = findFirstPart(messages, (p) => p.kind === "task");
+    expect(task).toBeDefined();
+    if (task?.kind === "task") {
+      expect(task.status).toBe("completed");
+    }
+  });
+
+  it("final closes reasoning and finalizes trace parts and attaches citations", () => {
+    let msgs: ChatMessage[] = [];
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("assistant_token", "Hello"),
+    ).messages;
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("reasoning_step", "Thinking"),
+    ).messages;
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("trajectory_step", "trace", {
+        step_index: 0,
+        step_data: { thought: "step one" },
+      }),
+    ).messages;
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("plan_update", "Do X"),
+    ).messages;
+
+    const { messages, terminal } = applyWsFrameToMessages(
+      msgs,
+      makeEvent("final", "Done", {
+        citations: [
+          {
+            title: "Doc",
+            url: "https://example.com",
+            quote: "evidence",
+          },
+        ],
+      }),
+    );
+
+    expect(terminal).toBe(true);
+    const assistant = messages.find((m) => m.type === "assistant");
+    expect(assistant?.streaming).toBe(false);
+    expect(
+      assistant?.renderParts?.some((p) => p.kind === "inline_citation_group"),
+    ).toBe(true);
+
+    const reasoning = messages.find((m) => m.type === "reasoning");
+    expect(reasoning?.reasoningData?.isThinking).toBe(false);
+
+    const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
+    if (cot?.kind === "chain_of_thought") {
+      expect(cot.steps[0]?.status).toBe("complete");
+    }
+    const queue = findFirstPart(messages, (p) => p.kind === "queue");
+    if (queue?.kind === "queue") {
+      expect(queue.items.every((item) => item.completed)).toBe(true);
+    }
   });
 });

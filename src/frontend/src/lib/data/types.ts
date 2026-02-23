@@ -60,6 +60,7 @@ export interface ChatMessage {
     | "user"
     | "assistant"
     | "system"
+    | "trace"
     | "hitl"
     | "clarification"
     | "reasoning"
@@ -68,6 +69,8 @@ export interface ChatMessage {
     | "memory_update";
   content: string;
   phase?: 1 | 2 | 3;
+  /** Structured UI render parts for richer event rendering (AI Elements-style). */
+  renderParts?: ChatRenderPart[];
   /** When true, the Streamdown component will animate text streaming in */
   streaming?: boolean;
   hitlData?: {
@@ -90,6 +93,112 @@ export interface ChatMessage {
     duration?: number;
   };
 }
+
+// ── Chat Render Parts (AI Elements mapping for RLM events) ─────────
+
+export type ChatRenderToolState =
+  | "input-streaming"
+  | "running"
+  | "output-available"
+  | "output-error";
+
+export interface ChatTraceStep {
+  id: string;
+  label: string;
+  status: "pending" | "active" | "complete" | "error";
+  details?: string[];
+}
+
+export interface ChatQueueItem {
+  id: string;
+  label: string;
+  description?: string;
+  completed: boolean;
+}
+
+export interface ChatTaskItem {
+  id: string;
+  text: string;
+  file?: {
+    name: string;
+  };
+}
+
+export interface ChatEnvVarItem {
+  name: string;
+  value: string;
+  required?: boolean;
+}
+
+export interface ChatInlineCitation {
+  number?: string;
+  title: string;
+  url: string;
+  description?: string;
+  quote?: string;
+}
+
+export type ChatRenderPart =
+  | {
+      kind: "reasoning";
+      parts: { type: "text"; text: string }[];
+      isStreaming: boolean;
+      duration?: number;
+    }
+  | {
+      kind: "chain_of_thought";
+      title?: string;
+      steps: ChatTraceStep[];
+    }
+  | {
+      kind: "queue";
+      title: string;
+      items: ChatQueueItem[];
+    }
+  | {
+      kind: "task";
+      title: string;
+      status: "pending" | "in_progress" | "completed" | "error";
+      items?: ChatTaskItem[];
+    }
+  | {
+      kind: "tool";
+      title: string;
+      toolType: string;
+      state: ChatRenderToolState;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    }
+  | {
+      kind: "sandbox";
+      title: string;
+      state: ChatRenderToolState;
+      code?: string;
+      output?: string;
+      errorText?: string;
+      language?: string;
+    }
+  | {
+      kind: "environment_variables";
+      title?: string;
+      variables: ChatEnvVarItem[];
+    }
+  | {
+      kind: "confirmation";
+      question: string;
+      state: "approval-requested" | "approved" | "rejected";
+      actions?: { label: string; variant: "primary" | "secondary" }[];
+    }
+  | {
+      kind: "inline_citation_group";
+      citations: ChatInlineCitation[];
+    }
+  | {
+      kind: "status_note";
+      text: string;
+      tone?: "neutral" | "success" | "warning" | "error";
+    };
 
 // ── Plan Steps (Queue component in Plan tab) ────────────────────────
 export interface PlanStep {

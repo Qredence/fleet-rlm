@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fleet_rlm.server.config import ServerRuntimeConfig
 from fleet_rlm.server.deps import server_state
 from fleet_rlm.server.deps import get_config
-from fleet_rlm.server.dependencies import get_db
+from fleet_rlm.server.deps import get_db
 from fleet_rlm.server.schemas.core import SessionStateResponse, SessionStateSummary
 from fleet_rlm.server.schemas.session import (
     SessionCreate,

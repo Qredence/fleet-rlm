@@ -1,11 +1,5 @@
-"""Stub router for Search."""
+"""Compatibility shim for planned search router imports."""
 
-from typing import Any
-from fastapi import APIRouter
+from .planned import search_router as router
 
-router = APIRouter(prefix="/search", tags=["search"])
-
-
-@router.get("")
-async def search() -> dict[str, Any]:
-    return {"results": []}
+__all__ = ["router"]

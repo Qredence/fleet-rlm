@@ -1,16 +1,5 @@
-"""Stub router for Taxonomy."""
+"""Compatibility shim for planned taxonomy router imports."""
 
-from typing import Any
-from fastapi import APIRouter
+from .planned import taxonomy_router as router
 
-router = APIRouter(prefix="/taxonomy", tags=["taxonomy"])
-
-
-@router.get("")
-async def get_taxonomy() -> list[Any]:
-    return []
-
-
-@router.get("/{path:path}")
-async def get_taxonomy_by_path(path: str) -> dict[str, Any]:
-    return {}
+__all__ = ["router"]

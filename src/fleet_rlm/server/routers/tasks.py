@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from fleet_rlm.server.config import ServerRuntimeConfig
 from fleet_rlm.server.deps import get_config
-from fleet_rlm.server.dependencies import get_db
+from fleet_rlm.server.deps import get_db
 from fleet_rlm.server.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 from fleet_rlm.server.services.task_service import TaskService
 

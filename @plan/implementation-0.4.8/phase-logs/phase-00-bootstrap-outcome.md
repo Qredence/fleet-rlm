@@ -5,7 +5,7 @@
 - Ticket(s): `QRE-321`
 - Branch: `codex/v0-4-8-phase-0-bootstrap`
 - PR: `https://github.com/Qredence/fleet-rlm/pull/74`
-- Merge commit: `pending`
+- Merge commit: `7eb835888e6e742d5c24eba58209e8cd6e2e29d1`
 
 ## Sequential Execution Order
 1. Create Linear `phase-0` label and Phase 0 ticket (`QRE-321`) with milestone/cycle/labels and kickoff comment.
@@ -73,6 +73,9 @@
 ## Linear Updates
 - `QRE-321` created and moved to `In Progress` with kickoff comment.
 - `phase-0` label created and applied.
+- PR opened and ticket labeled `status: needs-review` during review.
+- After merge and post-merge verification, `QRE-321` moved to `Done` and merge comment posted.
+- Fleet-RLM project status updates posted for both **In Review** and **Merged** states.
 
 ## Remaining Risks / Follow-Ups
 - Codex multi-agent config schema is compatibility-targeted and may require small tweaks if local Codex build expects different field names.
@@ -80,6 +83,7 @@
 - Phase-0 PR/merge remains human-gated by policy.
 
 ## Next Phase Prerequisites
-- Phase 0 PR merged.
-- Post-merge smoke completed.
-- Phase 1 branch created from updated `main`.
+- Completed:
+  - Phase 0 PR merged
+  - Post-merge smoke completed
+  - Phase 1 branch created from updated `main` (`codex/v0-4-8-phase-1-foundation`)
