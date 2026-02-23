@@ -25,7 +25,8 @@ import { isRlmCoreEnabled } from "@/lib/rlm-api";
 export function SkillCreationFlow() {
   const isMobile = useIsMobile();
   const posthog = usePostHog();
-  const { scrollRef, contentRef } = useStickToBottom();
+  const { scrollRef, contentRef, isAtBottom, scrollToBottom } =
+    useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
@@ -148,6 +149,8 @@ export function SkillCreationFlow() {
         isMobile={isMobile}
         scrollRef={scrollRef}
         contentRef={contentRef}
+        isAtBottom={isAtBottom}
+        scrollToBottom={scrollToBottom}
         onSuggestionClick={setInputValue}
         onResolveHitl={resolveHitl}
         onResolveClarification={resolveClarification}
@@ -185,8 +188,8 @@ export function SkillCreationFlow() {
                 !backendEnabled
                   ? "Configure FastAPI backend to start chatting\u2026"
                   : phase === "idle"
-                  ? "Ask anything\u2026"
-                  : "Ask a follow-up\u2026"
+                    ? "Ask anything\u2026"
+                    : "Ask a follow-up\u2026"
               }
               disabled={isTyping || !backendEnabled}
               activeFeatures={activeFeatures}
