@@ -73,11 +73,22 @@ function normalizeLabel(label: string): string {
 
 function inferStatus(step: ExecutionStep): "streaming" | "complete" | "error" {
   const output = asRecord(step.output);
+  const input = asRecord(step.input);
   if (output?.streaming === true) return "streaming";
+  if (asRecord(output?.error) || asRecord(input?.error)) return "error";
+  if (output?.ok === false || input?.ok === false) return "error";
+  if (output?.status === "error" || input?.status === "error") return "error";
+  if (
+    typeof output?.message === "string" &&
+    /error|failed|exception/i.test(output.message)
+  ) {
+    return "error";
+  }
   if (step.type === "output") {
     const label = step.label.toLowerCase();
     if (label.includes("error")) return "error";
   }
+  if (/error|failed|exception/i.test(step.label)) return "error";
   return "complete";
 }
 
@@ -121,6 +132,8 @@ interface DisplayGroup {
   toolNameSource?: "payload" | "label";
   status: "streaming" | "complete" | "error";
   elapsedMs?: number;
+  representativeInput?: unknown;
+  representativeOutput?: unknown;
 }
 
 function buildDisplayGroups(ordered: ExecutionStep[]): {
@@ -154,6 +167,8 @@ function buildDisplayGroups(ordered: ExecutionStep[]): {
       parentStepId: step.parent_id,
       normalizedLabel: normalizeLabel(step.label),
       status: inferStatus(step),
+      representativeInput: step.input,
+      representativeOutput: step.output,
     };
   };
 
@@ -180,6 +195,8 @@ function buildDisplayGroups(ordered: ExecutionStep[]): {
       currentToolGroup.timestamp = step.timestamp;
       currentToolGroup.representativeStepId = step.id;
       currentToolGroup.status = inferStatus(step);
+      currentToolGroup.representativeInput = step.input;
+      currentToolGroup.representativeOutput = step.output;
       if (!currentToolGroup.toolName) {
         const nextToolBadge = extractToolBadgeFromStep(step);
         currentToolGroup.toolName = nextToolBadge.toolName;
@@ -322,6 +339,8 @@ export function ArtifactGraph({
           elapsedMs: group.elapsedMs,
           status: group.status,
           expanded: group.id === expandedNodeId,
+          input: group.representativeInput,
+          output: group.representativeOutput,
         },
         position: { x: 0, y: 0 },
         selected: isActive,

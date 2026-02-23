@@ -222,6 +222,13 @@ function addTrajectoryStep(
       ? "repl"
       : "llm";
 
+  const trajectoryPayload = stepData
+    ? {
+        trajectory_step: stepData,
+        text,
+      }
+    : text;
+
   add({
     id:
       asText(stepData?.id) ||
@@ -233,7 +240,7 @@ function addTrajectoryStep(
       asText(stepData?.tool_name) ||
       "Trajectory step",
     input: stepData?.input,
-    output: stepData?.output ?? text,
+    output: stepData ? trajectoryPayload : text,
     timestamp,
   });
 }

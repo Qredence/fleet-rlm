@@ -6,6 +6,11 @@ import {
   NODE_WIDTH,
   STEP_TYPE_META,
 } from "@/features/artifacts/components/GraphStepNode.constants";
+import {
+  extractErrorDetails,
+  extractReplCodePreview,
+  extractTrajectoryChain,
+} from "@/features/artifacts/components/graphNodeDetailParsers";
 
 // ── Node data shape ─────────────────────────────────────────────────
 
@@ -20,6 +25,8 @@ export interface GraphStepNodeData {
   elapsedMs?: number;
   status: "streaming" | "complete" | "error";
   expanded?: boolean;
+  input?: unknown;
+  output?: unknown;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -41,6 +48,9 @@ const GraphStepNode = memo(function GraphStepNode({
   const meta = STEP_TYPE_META[data.type];
   const Icon = meta.Icon;
   const isExpanded = data.expanded === true;
+  const codePreview = extractReplCodePreview(data);
+  const errorDetails = extractErrorDetails(data);
+  const trajectory = extractTrajectoryChain(data);
 
   const statusDot =
     data.status === "streaming"
@@ -52,7 +62,7 @@ const GraphStepNode = memo(function GraphStepNode({
   return (
     <div
       className={cn(
-        "relative rounded-xl border bg-card text-foreground shadow-sm transition-shadow",
+        "group relative rounded-xl border bg-card text-foreground shadow-sm transition-shadow",
         selected
           ? "ring-2 ring-accent border-accent"
           : "border-border-subtle hover:border-border-strong",
@@ -150,6 +160,33 @@ const GraphStepNode = memo(function GraphStepNode({
         </div>
       </div>
 
+      {!isExpanded && codePreview && (
+        <div className="pointer-events-none absolute left-full top-0 z-50 ml-2 w-72 max-w-[24rem] rounded-lg border border-border-subtle bg-card/95 p-2 shadow-lg opacity-0 translate-y-1 transition duration-150 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            REPL code preview
+          </p>
+          <pre className="max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-[10px] leading-relaxed text-foreground whitespace-pre-wrap break-words font-mono">
+            {codePreview}
+          </pre>
+        </div>
+      )}
+
+      {!isExpanded && errorDetails && (
+        <div className="pointer-events-none absolute left-full top-16 z-50 ml-2 w-72 rounded-lg border border-red-500/40 bg-card/95 p-2 shadow-lg opacity-0 translate-y-1 transition duration-150 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-500">
+            Error details
+          </p>
+          <p className="text-[11px] leading-snug text-foreground whitespace-pre-wrap break-words">
+            {errorDetails.message}
+          </p>
+          {errorDetails.code && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Code: {errorDetails.code}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Expanded detail panel */}
       {isExpanded && (
         <div className="absolute left-full top-0 ml-2 z-50 w-72 rounded-xl border border-border-subtle bg-card shadow-lg p-3 text-foreground">
@@ -193,6 +230,78 @@ const GraphStepNode = memo(function GraphStepNode({
             <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words mb-2">
               {data.summary}
             </p>
+          )}
+
+          {codePreview && data.type === "repl" && (
+            <div className="mb-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                REPL code preview
+              </p>
+              <pre className="max-h-40 overflow-auto rounded-md border border-border-subtle bg-muted/40 p-2 text-[10px] leading-relaxed whitespace-pre-wrap break-words font-mono">
+                {codePreview}
+              </pre>
+            </div>
+          )}
+
+          {errorDetails && (
+            <div className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 p-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-500">
+                Error details
+              </p>
+              <p className="text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                {errorDetails.message}
+              </p>
+              {errorDetails.code && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Code: {errorDetails.code}
+                </p>
+              )}
+              {errorDetails.trace && (
+                <pre className="mt-2 max-h-28 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 text-[10px] leading-relaxed whitespace-pre-wrap break-words font-mono">
+                  {errorDetails.trace}
+                </pre>
+              )}
+            </div>
+          )}
+
+          {trajectory && (
+            <div className="mb-2 rounded-md border border-border-subtle bg-muted/20 p-2">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Thought → Action → Observation
+              </p>
+              <div className="space-y-2">
+                {trajectory.thought && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-foreground/80">
+                      Thought
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                      {trajectory.thought}
+                    </p>
+                  </div>
+                )}
+                {trajectory.action && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-foreground/80">
+                      Action
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                      {trajectory.action}
+                    </p>
+                  </div>
+                )}
+                {trajectory.observation && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-foreground/80">
+                      Observation
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                      {trajectory.observation}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
