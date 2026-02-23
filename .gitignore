@@ -47,7 +47,7 @@ venv/
 .npm-cache/
 .opencode/
 plans/
-
+src/fleet_rlm/_scaffold/agents/teams/fleet-rlm/inboxes/
 PLANS.md
 notebooks/dspy-rlm-end-to-end-use-case.ipynb
 .junie/memory/errors.md
