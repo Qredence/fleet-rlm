@@ -30,6 +30,11 @@ venv/
 # OS/editor
 .DS_Store
 .vscode/
+src/.tmp/
+src/output/
+src/output/*
+output/
+output/*
 
 # Local agent/tooling state
 .claude/
