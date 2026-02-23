@@ -307,6 +307,50 @@ class SandboxSession(Base):
     )
 
 
+class ModalVolume(Base):
+    __tablename__ = "modal_volumes"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_modal_volumes_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id", "volume_name", name="uq_modal_volumes_tenant_volume_name"
+        ),
+        Index("ix_modal_volumes_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_modal_volumes_tenant_last_seen_at", "tenant_id", "last_seen_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'modal'")
+    )
+    volume_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_volume_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    environment: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
@@ -379,6 +423,12 @@ class RunStep(Base):
             ondelete="CASCADE",
             name="fk_run_steps_tenant_run__runs_tenant_id_id",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "modal_volume_id"],
+            ["modal_volumes.tenant_id", "modal_volumes.id"],
+            ondelete="SET NULL",
+            name="fk_run_steps_tenant_modal_volume__modal_volumes_tenant_id_id",
+        ),
         UniqueConstraint(
             "tenant_id",
             "run_id",
@@ -404,6 +454,14 @@ class RunStep(Base):
     )
     input_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     output_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    sandbox_session_external_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    modal_volume_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    modal_volume_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cost_usd_micros: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -456,6 +514,126 @@ class Artifact(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RLMProgram(Base):
+    __tablename__ = "rlm_programs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_rlm_programs_tenant_id_id"),
+        UniqueConstraint("tenant_id", "program_key", name="uq_rlm_programs_tenant_key"),
+        Index("ix_rlm_programs_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_rlm_programs_tenant_kind_status", "tenant_id", "kind", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    program_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    kind: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=text("'compiled'")
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'active'")
+    )
+    dspy_signature: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    version_tag: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    program_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class RLMTrace(Base):
+    __tablename__ = "rlm_traces"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"],
+            ["runs.tenant_id", "runs.id"],
+            ondelete="CASCADE",
+            name="fk_rlm_traces_tenant_run__runs_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_step_id"],
+            ["run_steps.tenant_id", "run_steps.id"],
+            ondelete="SET NULL",
+            name="fk_rlm_traces_tenant_step__run_steps_tenant_id_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "program_id"],
+            ["rlm_programs.tenant_id", "rlm_programs.id"],
+            ondelete="SET NULL",
+            name="fk_rlm_traces_tenant_program__rlm_programs_tenant_id_id",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_rlm_traces_tenant_id_id"),
+        Index("ix_rlm_traces_tenant_created_at", "tenant_id", "created_at"),
+        Index(
+            "ix_rlm_traces_tenant_run_created_at", "tenant_id", "run_id", "created_at"
+        ),
+        Index("ix_rlm_traces_tenant_kind_status", "tenant_id", "trace_kind", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    run_step_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    program_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    trace_kind: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=text("'trajectory'")
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'captured'")
+    )
+    source: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=text("'rlm'")
+    )
+    summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 

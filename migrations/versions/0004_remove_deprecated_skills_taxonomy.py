@@ -27,6 +27,10 @@ RLS_TABLES = [
 
 
 def upgrade() -> None:
+    # Widen Alembic's version tracking column before switching to longer
+    # descriptive revision ids in later migrations.
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)")
+
     # Drop tenant RLS policies before dropping the tables they target.
     for table_name in reversed(RLS_TABLES):
         op.execute(

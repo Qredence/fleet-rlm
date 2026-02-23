@@ -40,9 +40,12 @@ async def test_migrations_apply_and_core_tables_exist():
                           and table_name in (
                             'tenants',
                             'users',
+                            'modal_volumes',
                             'runs',
                             'run_steps',
                             'artifacts',
+                            'rlm_programs',
+                            'rlm_traces',
                             'memory_items',
                             'jobs'
                           )
@@ -81,6 +84,9 @@ async def test_migrations_apply_and_core_tables_exist():
             "artifacts",
             "jobs",
             "memory_items",
+            "modal_volumes",
+            "rlm_programs",
+            "rlm_traces",
             "run_steps",
             "runs",
             "tenants",
