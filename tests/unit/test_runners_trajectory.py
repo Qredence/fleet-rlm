@@ -73,6 +73,7 @@ def _fake_rlm_factory():
 
 @pytest.fixture(autouse=True)
 def _patch_runners(monkeypatch):
+    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "true")
     # Patch both runners (re-export hub) and runners_demos (where fns live)
     for mod in (runners, runners_demos):
         monkeypatch.setattr(mod, "_require_planner_ready", lambda env_file=None: None)
@@ -143,3 +144,15 @@ def test_runners_can_suppress_trajectory(fn_name, kwargs):
 def test_runner_includes_final_reasoning_when_available():
     result = runners.run_basic(question="q")
     assert result["final_reasoning"] == "done"
+
+
+def test_demo_runner_disabled_by_default(monkeypatch):
+    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "false")
+    with pytest.raises(RuntimeError, match="demo runner"):
+        runners.run_basic(question="q")
+
+
+def test_long_context_remains_available_without_demo_flag(monkeypatch):
+    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "false")
+    result = runners.run_long_context(docs_path="x.txt", query="q", mode="analyze")
+    assert "trajectory" in result
