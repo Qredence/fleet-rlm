@@ -3,30 +3,47 @@ import { expect, test } from "@playwright/test";
 test("loads app shell without router crash", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "Chat", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Skills", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Taxonomy", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Memory", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Analytics", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Chat", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Skills", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Taxonomy", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Memory", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Analytics", exact: true }),
+  ).toBeVisible();
 
   await expect(
     page.getByRole("heading", { name: "Unexpected Application Error!" }),
   ).toHaveCount(0);
 });
 
-test("opens settings from user menu without runtime exception", async ({ page }) => {
+test("opens settings from user menu without runtime exception", async ({
+  page,
+}) => {
   await page.goto("/");
 
   await page.getByRole("button", { name: "User menu" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
 
-  await expect(page.getByText("Auto-save drafts")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(
+    page.getByText("Anonymous telemetry", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Unexpected Application Error!" }),
   ).toHaveCount(0);
 });
 
-test("navigates primary tabs without hitting route error boundary", async ({ page }) => {
+test("navigates primary tabs without hitting route error boundary", async ({
+  page,
+}) => {
   await page.goto("/");
 
   const tabExpectations = [
@@ -49,5 +66,7 @@ test("navigates primary tabs without hitting route error boundary", async ({ pag
     await expect(page.getByText(tabInfo.content)).toBeVisible();
   }
 
-  await expect(page.getByText("We hit a rendering issue on this route")).toHaveCount(0);
+  await expect(
+    page.getByText("We hit a rendering issue on this route"),
+  ).toHaveCount(0);
 });
