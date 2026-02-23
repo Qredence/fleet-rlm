@@ -13,7 +13,8 @@ type RouteKey =
   | "unsupportedTaxonomy"
   | "unsupportedMemory"
   | "unsupportedAnalytics"
-  | "settings";
+  | "settings"
+  | "chatElementsMock";
 
 type RouteLoader = () => Promise<{ default: ComponentType<unknown> }>;
 
@@ -74,6 +75,10 @@ const routeLoaders: Record<RouteKey, RouteLoader> = {
     const module = await import("@/app/pages/SettingsPage");
     return { default: module.SettingsPage };
   },
+  chatElementsMock: async () => {
+    const module = await import("@/app/pages/ChatElementsMockPage");
+    return { default: module.ChatElementsMockPage };
+  },
 };
 
 const navPreloadMap: Partial<Record<NavItem, RouteKey>> = {
@@ -129,6 +134,7 @@ export const LazyRouteComponents = {
   UnsupportedMemoryPage: lazyRoute("unsupportedMemory"),
   UnsupportedAnalyticsPage: lazyRoute("unsupportedAnalytics"),
   SettingsPage: lazyRoute("settings"),
+  ChatElementsMockPage: lazyRoute("chatElementsMock"),
 } as const;
 
 export function preloadRoute(key: RouteKey): Promise<void> {

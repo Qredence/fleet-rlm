@@ -71,6 +71,10 @@ export const router = createBrowserRouter([
         Component: LazyRouteComponents.SettingsPage,
       },
       {
+        path: "__dev/chat-elements",
+        Component: LazyRouteComponents.ChatElementsMockPage,
+      },
+      {
         path: "*",
         Component: LazyRouteComponents.NotFoundPage,
       },

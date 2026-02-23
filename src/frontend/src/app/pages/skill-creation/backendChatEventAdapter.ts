@@ -112,7 +112,59 @@ function upsertReasoningRenderPart(
   };
 }
 
-function appendReasoning(messages: ChatMessage[], text: string): ChatMessage[] {
+type ReasoningAppendMode = "line" | "chunk";
+
+function mergeReasoningParts(
+  existingParts: { type: "text"; text: string }[],
+  text: string,
+  mode: ReasoningAppendMode,
+): { type: "text"; text: string }[] {
+  if (existingParts.length === 0) {
+    return [{ type: "text", text }];
+  }
+
+  if (mode === "line") {
+    return [...existingParts, { type: "text", text }];
+  }
+
+  const nextParts = [...existingParts];
+  const last = nextParts[nextParts.length - 1];
+  if (!last) return [{ type: "text", text }];
+
+  const incoming = text;
+  const lastText = last.text;
+
+  const startsNewStructuredLine =
+    /^(status:|tool call:|tool result:|plan:|warning:|error:)/i.test(incoming);
+  const looksLikeSentenceChunk =
+    incoming.length <= 32 ||
+    /^[a-z0-9(,[\]'"`]/.test(incoming) ||
+    /^[)\].,;:!?]/.test(incoming);
+  const shouldJoin =
+    !startsNewStructuredLine &&
+    (looksLikeSentenceChunk || !/[.!?:]\s*$/.test(lastText));
+
+  if (shouldJoin) {
+    const needsSpace =
+      !/\s$/.test(lastText) &&
+      !/^[)\].,;:!?]/.test(incoming) &&
+      !/^['"`]/.test(incoming);
+    nextParts[nextParts.length - 1] = {
+      type: "text",
+      text: `${lastText}${needsSpace ? " " : ""}${incoming}`,
+    };
+    return nextParts;
+  }
+
+  nextParts.push({ type: "text", text: incoming });
+  return nextParts;
+}
+
+function appendReasoning(
+  messages: ChatMessage[],
+  text: string,
+  mode: ReasoningAppendMode = "line",
+): ChatMessage[] {
   const trimmed = text.trim();
   if (!trimmed) return messages;
 
@@ -120,10 +172,7 @@ function appendReasoning(messages: ChatMessage[], text: string): ChatMessage[] {
   if (idx >= 0) {
     const msg = messages[idx];
     if (!msg?.reasoningData) return messages;
-    const parts = [
-      ...msg.reasoningData.parts,
-      { type: "text" as const, text: trimmed },
-    ];
+    const parts = mergeReasoningParts(msg.reasoningData.parts, trimmed, mode);
 
     const copy = [...messages];
     copy[idx] = upsertReasoningRenderPart(
@@ -142,7 +191,7 @@ function appendReasoning(messages: ChatMessage[], text: string): ChatMessage[] {
     return copy;
   }
 
-  const parts = [{ type: "text" as const, text: trimmed }];
+  const parts = mergeReasoningParts([], trimmed, mode);
   return [
     ...messages,
     upsertReasoningRenderPart(
@@ -654,7 +703,7 @@ function applyEvent(
     }
     case "reasoning_step": {
       return {
-        messages: appendReasoning(messages, text),
+        messages: appendReasoning(messages, text, "chunk"),
         terminal: false,
         errored: false,
       };
@@ -668,7 +717,7 @@ function applyEvent(
     }
     case "status": {
       return {
-        messages: appendReasoning(messages, `Status: ${text}`),
+        messages: appendReasoning(messages, `Status: ${text}`, "line"),
         terminal: false,
         errored: false,
       };

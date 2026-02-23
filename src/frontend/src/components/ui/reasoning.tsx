@@ -4,6 +4,7 @@ import { ChevronDown, Sparkles } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
+import { Streamdown } from "@/components/ui/streamdown";
 
 // ── Types ───────────────────────────────────────────────────────────
 interface ReasoningPart {
@@ -151,13 +152,13 @@ function Reasoning({
           >
             <div className="border-l-2 border-border-subtle ml-[6px] pl-3 pb-1 pt-1 space-y-2">
               {parts.map((part, i) => (
-                <p
+                <div
                   key={i}
                   className="text-muted-foreground"
                   style={typo.caption}
                 >
-                  {part.text}
-                </p>
+                  <Streamdown content={part.text} streaming={false} />
+                </div>
               ))}
             </div>
           </motion.div>
