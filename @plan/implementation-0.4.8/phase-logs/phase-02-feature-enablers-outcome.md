@@ -5,7 +5,7 @@
 - Ticket(s): `QRE-298`, `QRE-312`, `QRE-313`, `QRE-302`, `QRE-317`, `QRE-319`
 - Branch: `codex/v0-4-8-phase-2-feature-enablers`
 - PR: `https://github.com/Qredence/fleet-rlm/pull/76`
-- Merge commit: `pending`
+- Merge commit: `9fc9ff34b6a70dfddd3d18b4885192820f4c0547`
 
 ## Sequential Execution Order
 1. `QRE-298` demo runner env-gating (`FLEET_DEMO_TASKS_ENABLED`) with production-safe `run_long_context` preservation.
@@ -88,5 +88,5 @@
 - Phase 2 PR review should pay extra attention to migration naming/ordering and PostHog callsite migration breadth.
 
 ## Next Phase Prerequisites
-- Open Phase 2 PR, add Linear PR comments + `status: needs-review`, and post project status update.
-- After merge + post-merge smoke, Phase 3 can start on `codex/v0-4-8-phase-3-feature-delivery`.
+- Complete (PR #76 merged; post-merge smoke + Linear closeout complete).
+- Phase 3 can start on `codex/v0-4-8-phase-3-feature-delivery` (branch created).
