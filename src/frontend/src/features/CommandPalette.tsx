@@ -17,7 +17,7 @@ import {
   Layers,
 } from "lucide-react";
 import { Command } from "cmdk";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { toast } from "sonner";
 import { typo } from "@/lib/config/typo";
 import type { NavItem } from "@/lib/data/types";
@@ -52,19 +52,19 @@ interface CommandPaletteProps {
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const { newSession, isDark, toggleTheme } = useNavigation();
   const { navigateTo, navigate } = useAppNavigate();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
 
   const [search, setSearch] = useState("");
   const prevOpenRef = useRef(open);
 
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      posthog?.capture("command_palette_opened", {
+      telemetry.capture("command_palette_opened", {
         trigger: "keyboard_shortcut",
       });
     }
     prevOpenRef.current = open;
-  }, [open, posthog]);
+  }, [open, telemetry]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -91,14 +91,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         toast.info(BACKEND_CAPABILITY_TOAST);
         return;
       }
-      posthog?.capture("command_palette_action_selected", {
+      telemetry.capture("command_palette_action_selected", {
         action_type: "page",
         action_value: nav,
       });
       navigateTo(nav);
       close();
     },
-    [navigateTo, close, posthog],
+    [navigateTo, close, telemetry],
   );
 
   if (!open) return null;
@@ -203,7 +203,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <Command.Item
                   value="action new session new chat"
                   onSelect={() => {
-                    posthog?.capture("command_palette_action_selected", {
+                    telemetry.capture("command_palette_action_selected", {
                       action_type: "action",
                       action_value: "new_session",
                     });
@@ -223,7 +223,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <Command.Item
                   value={`action toggle theme ${isDark ? "light" : "dark"} mode`}
                   onSelect={() => {
-                    posthog?.capture("command_palette_action_selected", {
+                    telemetry.capture("command_palette_action_selected", {
                       action_type: "action",
                       action_value: "toggle_theme",
                       new_theme: isDark ? "light" : "dark",
@@ -249,7 +249,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <Command.Item
                   value="action open settings preferences"
                   onSelect={() => {
-                    posthog?.capture("command_palette_action_selected", {
+                    telemetry.capture("command_palette_action_selected", {
                       action_type: "action",
                       action_value: "open_settings",
                     });

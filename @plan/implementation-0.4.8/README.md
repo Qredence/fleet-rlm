@@ -32,8 +32,8 @@ This directory is now also the **operational tracker** for milestone execution (
 | Phase | Label | Status | Tracking | Notes |
 | --- | --- | --- | --- | --- |
 | Phase 0 | `phase-0` | Merged | `QRE-321` | Codex multi-agent bootstrap, runbooks, docs, Playwright smoke baseline ([PR #74](https://github.com/Qredence/fleet-rlm/pull/74)) |
-| Phase 1 | `phase-1` | In Review | existing milestone tickets | Foundation tickets implemented on `codex/v0-4-8-phase-1-foundation` ([PR #75](https://github.com/Qredence/fleet-rlm/pull/75)) |
-| Phase 2 | `phase-2` | Planned | existing milestone tickets | Feature enablers |
+| Phase 1 | `phase-1` | Merged | existing milestone tickets | Foundation tickets merged via `codex/v0-4-8-phase-1-foundation` ([PR #75](https://github.com/Qredence/fleet-rlm/pull/75), merge `844fb9d0b274735864df4303318ee69d25467ad7`) |
+| Phase 2 | `phase-2` | In Review | existing milestone tickets | Feature enablers implemented on `codex/v0-4-8-phase-2-feature-enablers` ([PR #76](https://github.com/Qredence/fleet-rlm/pull/76); see `phase-logs/phase-02-feature-enablers-outcome.md`) |
 | Phase 3 | `phase-3` | Planned | existing milestone tickets | Feature delivery |
 | Phase 4 | `phase-4` | Planned | existing milestone tickets | Integration validation |
 

@@ -7,7 +7,7 @@
 import { Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import { useAuth, type PlanTier } from "@/hooks/useAuth";
 import { useIsMobile } from "@/components/ui/use-mobile";
@@ -168,13 +168,13 @@ function PlanCard({
 
 function PricingBody({ onClose }: { onClose: () => void }) {
   const { user, setPlan } = useAuth();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const currentPlan = user?.plan ?? "free";
 
   function handleSelect(tier: PlanTier) {
     if (tier === "enterprise") {
       // PostHog: Capture enterprise inquiry event
-      posthog?.capture("enterprise_inquiry_submitted", {
+      telemetry.capture("enterprise_inquiry_submitted", {
         current_plan: currentPlan,
       });
       toast("Enterprise inquiry submitted", {
@@ -195,7 +195,7 @@ function PricingBody({ onClose }: { onClose: () => void }) {
 
     // PostHog: Capture plan upgrade or downgrade events
     if (isUpgrade) {
-      posthog?.capture("plan_upgraded", {
+      telemetry.capture("plan_upgraded", {
         previous_plan: previousPlan,
         new_plan: tier,
       });
@@ -203,7 +203,7 @@ function PricingBody({ onClose }: { onClose: () => void }) {
         description: `Your workspace has been upgraded from ${previousLabel} to ${tierLabel}. All new features are now available.`,
       });
     } else if (isDowngrade) {
-      posthog?.capture("plan_downgraded", {
+      telemetry.capture("plan_downgraded", {
         previous_plan: previousPlan,
         new_plan: tier,
       });

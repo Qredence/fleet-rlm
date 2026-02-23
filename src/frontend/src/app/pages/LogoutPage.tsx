@@ -12,30 +12,29 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
 import { LogOut, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { usePostHog } from "@posthog/react";
 import { typo } from "@/lib/config/typo";
 import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 type LogoutPhase = "signing-out" | "done";
 
 function LogoutPage() {
   const navigate = useNavigate();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const prefersReduced = useReducedMotion();
   const [phase, setPhase] = useState<LogoutPhase>("signing-out");
 
   useEffect(() => {
-    // PostHog: Capture logout event and reset user
-    posthog?.capture("user_logged_out");
-    posthog?.reset();
+    telemetry.capture("user_logged_out");
+    telemetry.reset();
 
     const timer = setTimeout(() => {
       setPhase("done");
     }, 1200);
     return () => clearTimeout(timer);
-  }, [posthog]);
+  }, [telemetry]);
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4">

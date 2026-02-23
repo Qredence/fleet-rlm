@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Search, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { springs } from "@/lib/config/motion-config";
 import { typo } from "@/lib/config/typo";
 import type { Skill } from "@/lib/data/types";
@@ -33,7 +33,7 @@ export function SkillLibrary() {
   const { selectedSkillId, openCanvas } = useNavigation();
   const { navigateToSkill } = useAppNavigate();
   const isMobile = useIsMobile();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const {
     skills: allSkills,
     dataSource,
@@ -54,7 +54,7 @@ export function SkillLibrary() {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
       if (value.trim()) {
         searchTimerRef.current = setTimeout(() => {
-          posthog?.capture("skill_search_performed", {
+          telemetry.capture("skill_search_performed", {
             search_term: value,
             results_count: allSkills.filter((s) => matchesSkillSearch(s, value))
               .length,
@@ -62,7 +62,7 @@ export function SkillLibrary() {
         }, 500);
       }
     },
-    [posthog, allSkills],
+    [telemetry, allSkills],
   );
 
   // PostHog: Track domain filter changes
@@ -70,16 +70,16 @@ export function SkillLibrary() {
     (domain: string) => {
       setActiveDomain(domain);
       if (domain !== "All") {
-        posthog?.capture("skill_filter_applied", { domain });
+        telemetry.capture("skill_filter_applied", { domain });
       }
     },
-    [posthog],
+    [telemetry],
   );
 
   // PostHog: Track skill selection
   const handleSkillSelect = useCallback(
     (skill: Skill) => {
-      posthog?.capture("skill_selected", {
+      telemetry.capture("skill_selected", {
         skill_id: skill.id,
         skill_name: skill.displayName,
         skill_domain: skill.domain,
@@ -87,7 +87,7 @@ export function SkillLibrary() {
       navigateToSkill("skills", skill.id);
       openCanvas();
     },
-    [posthog, navigateToSkill, openCanvas],
+    [telemetry, navigateToSkill, openCanvas],
   );
 
   // ── Pull-to-refresh state (mobile only) ──────────────────────────

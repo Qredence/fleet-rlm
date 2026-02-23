@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Moon, Sun } from "lucide-react";
-import posthog from "posthog-js";
 import { toast } from "sonner";
 
 import { SettingsRow } from "@/components/shared/SettingsRow";
@@ -8,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/components/ui/utils";
 import { SettingsToggleRow } from "@/features/settings/SettingsToggleRow";
-import { useRuntimeSettings } from "@/features/settings/useRuntimeSettings";
+import {
+  computeLmRuntimeUpdates,
+  useRuntimeSettings,
+} from "@/features/settings/useRuntimeSettings";
+import { telemetryClient } from "@/lib/telemetry/client";
 
 interface GroupedSettingsPaneProps {
   isDark: boolean;
@@ -33,12 +36,7 @@ export function GroupedSettingsPane({
   const [baselineApiKey, setBaselineApiKey] = useState("");
 
   useEffect(() => {
-    try {
-      setTelemetryEnabled(!posthog.has_opted_out_capturing());
-    } catch {
-      // PostHog may be disabled or unavailable in some local/test contexts.
-      setTelemetryEnabled(true);
-    }
+    setTelemetryEnabled(telemetryClient.isAnonymousTelemetryEnabled());
   }, []);
 
   useEffect(() => {
@@ -53,10 +51,16 @@ export function GroupedSettingsPane({
   }, [settingsQuery.data]);
 
   const runtimeUpdates = useMemo(() => {
-    const updates: Record<string, string> = {};
-    if (apiBase !== baselineApiBase) updates.DSPY_LM_API_BASE = apiBase;
-    if (apiKey !== baselineApiKey) updates.DSPY_LLM_API_KEY = apiKey;
-    return updates;
+    return computeLmRuntimeUpdates(
+      {
+        DSPY_LM_API_BASE: apiBase,
+        DSPY_LLM_API_KEY: apiKey,
+      },
+      {
+        DSPY_LM_API_BASE: baselineApiBase,
+        DSPY_LLM_API_KEY: baselineApiKey,
+      },
+    );
   }, [apiBase, apiKey, baselineApiBase, baselineApiKey]);
 
   const dirtyKeys = useMemo(
@@ -67,6 +71,10 @@ export function GroupedSettingsPane({
   const writeEnabled = status?.write_enabled !== false;
 
   const handleSaveLmSettings = () => {
+    if (!writeEnabled) {
+      toast.error("Runtime settings are read-only in this environment");
+      return;
+    }
     if (dirtyKeys.length === 0) {
       toast("No LM integration changes to save");
       return;
@@ -152,15 +160,12 @@ export function GroupedSettingsPane({
         checked={telemetryEnabled}
         onChange={(val) => {
           setTelemetryEnabled(val);
-          try {
-            if (val) {
-              posthog.opt_in_capturing();
-            } else {
-              posthog.opt_out_capturing();
-            }
-          } catch {
-            // No-op when PostHog is unavailable; UI state remains visible.
-          }
+          telemetryClient.setAnonymousTelemetryEnabled(val);
+          telemetryClient.capture("telemetry_preference_updated", {
+            enabled: val,
+            scope: "anonymous_only_web",
+            source: "grouped_settings",
+          });
           toast.success(
             val
               ? "Anonymous telemetry enabled"

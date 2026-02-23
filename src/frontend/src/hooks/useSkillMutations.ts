@@ -16,7 +16,7 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { isMockMode } from "@/lib/api/config";
 import { taskEndpoints } from "@/lib/api/endpoints";
 import { adaptTask } from "@/lib/api/adapters";
@@ -86,7 +86,7 @@ function createMockSkill(input: CreateSkillInput): Skill {
 
 export function useSkillMutations() {
   const queryClient = useQueryClient();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const mock = isMockMode();
 
   // ── Create ──────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ export function useSkillMutations() {
       toast.success(`Created "${newSkill.displayName}"`);
 
       // PostHog: Track skill creation
-      posthog?.capture("skill_created", {
+      telemetry.capture("skill_created", {
         skill_id: newSkill.id,
         skill_name: newSkill.displayName,
         skill_domain: newSkill.domain,
@@ -203,7 +203,7 @@ export function useSkillMutations() {
       toast.success("Skill deleted");
 
       // PostHog: Track skill deletion
-      posthog?.capture("skill_deleted", { skill_id: deletedId });
+      telemetry.capture("skill_deleted", { skill_id: deletedId });
     },
   });
 

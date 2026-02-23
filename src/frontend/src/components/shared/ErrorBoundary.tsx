@@ -1,9 +1,9 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
-import posthog from "posthog-js";
 import { typo } from "@/lib/config/typo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/utils";
+import { telemetryClient } from "@/lib/telemetry/client";
 
 // ── Types ───────────────────────────────────────────────────────────
 interface ErrorBoundaryProps {
@@ -47,11 +47,11 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       info.componentStack,
     );
 
-    // PostHog: Capture component errors for error tracking
-    posthog.captureException(error);
+    // Anonymous-only telemetry: capture component errors for error tracking
+    telemetryClient.captureException(error);
 
     // PostHog: Also capture React-specific context for better debugging
-    posthog.capture("react_error_boundary_exception", {
+    telemetryClient.capture("react_error_boundary_exception", {
       boundary_name: this.props.name ?? null,
       component_stack: info.componentStack,
     });

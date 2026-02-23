@@ -11,8 +11,8 @@
 import { useNavigate, Link } from "react-router";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import { usePostHog } from "@posthog/react";
 import { typo } from "@/lib/config/typo";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +22,7 @@ export { LoginPage };
 
 function LoginPage() {
   const navigate = useNavigate();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const [email, setEmail] = useState("alex@qredence.ai");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,9 +33,10 @@ function LoginPage() {
     await new Promise((r) => setTimeout(r, 800));
     setLoading(false);
 
-    // PostHog: Identify user and capture login event
-    posthog?.identify(email, { email });
-    posthog?.capture("user_logged_in", { email });
+    // Anonymous-only telemetry: capture login event without PII.
+    telemetry.capture("user_logged_in", {
+      source: "login_page",
+    });
 
     navigate("/", { replace: true });
   }

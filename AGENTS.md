@@ -243,6 +243,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `AUTH_MODE=entra` is scaffolded and fail-closed until JWKS verification wiring is implemented
 - Legacy SQLite CRUD routes (`/api/v1/tasks`, `/api/v1/sessions` except `/api/v1/sessions/state`) are compatibility-only and should be gated off outside local development (`LEGACY_SQLITE_ROUTES_ENABLED=false`)
 - ReAct long-context delegate tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`, etc.) use true recursive sub-agents via `spawn_delegate_sub_agent()` — each spawns a new `RLMReActChatAgent` at `depth + 1` with full tool access
+- Demo-only runner exports in `src/fleet_rlm/runners.py` are gated by `FLEET_DEMO_TASKS_ENABLED` (default disabled); `run_long_context` remains available by default as a production-supported path
 - Additive signature tools are available for advanced workflows:
   - `grounded_answer` (returns structured citations with keys `source`, `chunk_id`, `evidence`, `reason`)
   - `triage_incident_logs`

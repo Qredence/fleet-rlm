@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import posthog from "posthog-js";
+import { telemetryClient } from "@/lib/telemetry/client";
 
 export function useTheme() {
   const [isDark, setIsDark] = useState(() => {
@@ -26,9 +26,9 @@ export function useTheme() {
       localStorage.setItem("theme", next ? "dark" : "light");
       return next;
     });
-    // PostHog: Capture theme toggle after state update (side-effect outside setState)
+    // Anonymous-only telemetry: capture theme toggle after state update.
     const wasDark = document.documentElement.classList.contains("dark");
-    posthog?.capture("theme_toggled", {
+    telemetryClient.capture("theme_toggled", {
       new_theme: wasDark ? "light" : "dark",
       previous_theme: wasDark ? "dark" : "light",
     });

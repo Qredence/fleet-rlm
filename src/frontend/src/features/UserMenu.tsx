@@ -15,8 +15,8 @@ import {
   ChevronDown,
   LogIn,
 } from "lucide-react";
-import { usePostHog } from "@posthog/react";
 import { typo } from "@/lib/config/typo";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/components/ui/use-mobile";
@@ -41,7 +41,7 @@ import { cn } from "@/components/ui/utils";
 export function UserMenu() {
   const { isAuthenticated, user, logout } = useAuth();
   const { navigate } = useAppNavigate();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const isMobile = useIsMobile();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -152,7 +152,7 @@ export function UserMenu() {
             <DropdownMenuItem
               onClick={() => {
                 // PostHog: Capture settings opened event
-                posthog?.capture("settings_opened", {
+                telemetry.capture("settings_opened", {
                   source: "user_menu",
                 });
                 setSettingsOpen(true);

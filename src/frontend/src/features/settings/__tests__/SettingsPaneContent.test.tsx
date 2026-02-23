@@ -4,6 +4,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
 
 vi.mock("@/features/settings/useRuntimeSettings", () => ({
+  computeLmRuntimeUpdates: (
+    current: Record<string, string>,
+    baseline: Record<string, string>,
+  ) => {
+    const updates: Record<string, string> = {};
+    for (const key of ["DSPY_LM_API_BASE", "DSPY_LLM_API_KEY"]) {
+      if ((current[key] ?? "") !== (baseline[key] ?? "")) {
+        updates[key] = current[key] ?? "";
+      }
+    }
+    return updates;
+  },
   useRuntimeSettings: () => ({
     settingsQuery: {
       data: {

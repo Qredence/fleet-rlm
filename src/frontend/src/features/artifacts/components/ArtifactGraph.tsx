@@ -12,10 +12,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import dagre from "@dagrejs/dagre";
 
-import type {
-  ArtifactStepType,
-  ExecutionStep,
-} from "@/stores/artifactStore";
+import type { ArtifactStepType, ExecutionStep } from "@/stores/artifactStore";
 import {
   NODE_WIDTH,
   STEP_TYPE_META,
@@ -24,6 +21,7 @@ import {
   GraphStepNode,
   type GraphStepNodeData,
 } from "@/features/artifacts/components/GraphStepNode";
+import { extractToolBadgeFromStep } from "@/features/artifacts/components/graphToolBadge";
 
 // ── Props ───────────────────────────────────────────────────────────
 
@@ -73,9 +71,7 @@ function normalizeLabel(label: string): string {
   return label.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function inferStatus(
-  step: ExecutionStep,
-): "streaming" | "complete" | "error" {
+function inferStatus(step: ExecutionStep): "streaming" | "complete" | "error" {
   const output = asRecord(step.output);
   if (output?.streaming === true) return "streaming";
   if (step.type === "output") {
@@ -121,6 +117,8 @@ interface DisplayGroup {
   representativeStepId: string;
   parentStepId?: string;
   normalizedLabel: string;
+  toolName?: string;
+  toolNameSource?: "payload" | "label";
   status: "streaming" | "complete" | "error";
   elapsedMs?: number;
 }
@@ -141,19 +139,23 @@ function buildDisplayGroups(ordered: ExecutionStep[]): {
     currentToolGroup = null;
   };
 
-  const createGroupFromStep = (step: ExecutionStep): DisplayGroup => ({
-    id: `group-${step.id}`,
-    type: step.type,
-    baseLabel: step.label,
-    summary: summarizeStep(step),
-    count: 1,
-    depth: depthById.get(step.id) ?? 0,
-    timestamp: step.timestamp,
-    representativeStepId: step.id,
-    parentStepId: step.parent_id,
-    normalizedLabel: normalizeLabel(step.label),
-    status: inferStatus(step),
-  });
+  const createGroupFromStep = (step: ExecutionStep): DisplayGroup => {
+    const toolBadge = extractToolBadgeFromStep(step);
+    return {
+      ...toolBadge,
+      id: `group-${step.id}`,
+      type: step.type,
+      baseLabel: step.label,
+      summary: summarizeStep(step),
+      count: 1,
+      depth: depthById.get(step.id) ?? 0,
+      timestamp: step.timestamp,
+      representativeStepId: step.id,
+      parentStepId: step.parent_id,
+      normalizedLabel: normalizeLabel(step.label),
+      status: inferStatus(step),
+    };
+  };
 
   for (const step of ordered) {
     if (step.type !== "tool") {
@@ -178,6 +180,11 @@ function buildDisplayGroups(ordered: ExecutionStep[]): {
       currentToolGroup.timestamp = step.timestamp;
       currentToolGroup.representativeStepId = step.id;
       currentToolGroup.status = inferStatus(step);
+      if (!currentToolGroup.toolName) {
+        const nextToolBadge = extractToolBadgeFromStep(step);
+        currentToolGroup.toolName = nextToolBadge.toolName;
+        currentToolGroup.toolNameSource = nextToolBadge.toolNameSource;
+      }
       stepToGroupId.set(step.id, currentToolGroup.id);
       continue;
     }
@@ -257,7 +264,11 @@ function GraphLegend() {
         const Icon = meta.Icon;
         return (
           <div key={type} className="flex items-center gap-1.5">
-            <Icon className="size-3" style={{ color: meta.color }} aria-hidden />
+            <Icon
+              className="size-3"
+              style={{ color: meta.color }}
+              aria-hidden
+            />
             <span>{meta.label}</span>
           </div>
         );
@@ -306,6 +317,8 @@ export function ArtifactGraph({
           summary,
           count: group.count,
           representativeStepId: group.representativeStepId,
+          toolName: group.toolName,
+          toolNameSource: group.toolNameSource,
           elapsedMs: group.elapsedMs,
           status: group.status,
           expanded: group.id === expandedNodeId,
@@ -322,8 +335,7 @@ export function ArtifactGraph({
       if (seenEdges.has(edgeId)) continue;
       seenEdges.add(edgeId);
 
-      const edgeColor =
-        STEP_TYPE_META[group.type]?.color ?? "var(--border)";
+      const edgeColor = STEP_TYPE_META[group.type]?.color ?? "var(--border)";
 
       graphEdges.push({
         id: edgeId,
@@ -366,7 +378,9 @@ export function ArtifactGraph({
     (_event, node) => {
       const graphNode = node as Node<GraphStepNodeData>;
       onSelectStep(graphNode.data.representativeStepId || graphNode.id);
-      setExpandedNodeId((prev) => (prev === graphNode.id ? null : graphNode.id));
+      setExpandedNodeId((prev) =>
+        prev === graphNode.id ? null : graphNode.id,
+      );
     },
     [onSelectStep],
   );

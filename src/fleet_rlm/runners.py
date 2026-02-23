@@ -21,6 +21,7 @@ All runners automatically:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -281,14 +282,68 @@ class _nullcontext:
         return False
 
 
-from .runners_demos import (  # noqa: E402, F401
-    check_secret_key,
-    check_secret_presence,
-    run_api_endpoints,
-    run_architecture,
-    run_basic,
-    run_custom_tool,
-    run_error_patterns,
-    run_long_context,
-    run_trajectory,
-)
+def _demo_tasks_enabled() -> bool:
+    raw = os.getenv("FLEET_DEMO_TASKS_ENABLED", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _require_demo_tasks_enabled(function_name: str) -> None:
+    if _demo_tasks_enabled():
+        return
+    raise RuntimeError(
+        f"{function_name} is a demo runner and is disabled by default. "
+        "Set FLEET_DEMO_TASKS_ENABLED=true to enable demo runners in local/dev use."
+    )
+
+
+def _load_runners_demos():
+    # Imported lazily to avoid exposing/loading demo runners in default production paths.
+    from . import runners_demos
+
+    return runners_demos
+
+
+def run_basic(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    _require_demo_tasks_enabled("run_basic")
+    return _load_runners_demos().run_basic(*args, **kwargs)
+
+
+def run_architecture(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    _require_demo_tasks_enabled("run_architecture")
+    return _load_runners_demos().run_architecture(*args, **kwargs)
+
+
+def run_api_endpoints(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    _require_demo_tasks_enabled("run_api_endpoints")
+    return _load_runners_demos().run_api_endpoints(*args, **kwargs)
+
+
+def run_error_patterns(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    _require_demo_tasks_enabled("run_error_patterns")
+    return _load_runners_demos().run_error_patterns(*args, **kwargs)
+
+
+def run_trajectory(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    _require_demo_tasks_enabled("run_trajectory")
+    return _load_runners_demos().run_trajectory(*args, **kwargs)
+
+
+def run_custom_tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    _require_demo_tasks_enabled("run_custom_tool")
+    return _load_runners_demos().run_custom_tool(*args, **kwargs)
+
+
+def check_secret_presence(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    # Diagnostic helper remains available in default mode.
+    return _load_runners_demos().check_secret_presence(*args, **kwargs)
+
+
+def check_secret_key(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    # Diagnostic helper remains available in default mode.
+    return _load_runners_demos().check_secret_key(*args, **kwargs)
+
+
+def run_long_context(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    # Kept available by default because this path is used by non-demo surfaces
+    # (MCP + terminal helpers) despite being implemented in runners_demos.py today.
+    return _load_runners_demos().run_long_context(*args, **kwargs)

@@ -25,7 +25,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useNavigation } from "@/hooks/useNavigation";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import type { Conversation } from "@/hooks/useChatHistory";
@@ -71,7 +71,7 @@ export interface ChatSimulation {
 export function useChatSimulation(): ChatSimulation {
   const { isCanvasOpen, openCanvas, setCreationPhase, sessionId } =
     useNavigation();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [phase, setPhase] = useState<CreationPhase>("idle");
@@ -408,7 +408,7 @@ export function useChatSimulation(): ChatSimulation {
   const resolveHitl = useCallback(
     (msgId: string, actionLabel: string) => {
       // PostHog: Capture HITL checkpoint resolution
-      posthog?.capture("hitl_checkpoint_resolved", {
+      telemetry.capture("hitl_checkpoint_resolved", {
         checkpoint_phase: phase,
         action_label: actionLabel,
         is_approval: actionLabel.includes("Approve") || actionLabel.includes("Validation") || actionLabel.includes("Run"),
@@ -445,7 +445,7 @@ export function useChatSimulation(): ChatSimulation {
         }
       }
     },
-    [phase, runPhase2, runPhase3, startClarification, posthog],
+    [phase, runPhase2, runPhase3, startClarification, telemetry],
   );
 
   // ── Submit ──────────────────────────────────────────────────────

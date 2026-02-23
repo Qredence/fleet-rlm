@@ -14,7 +14,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { usePostHog } from "@posthog/react";
+import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import { useAuth } from "@/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
@@ -230,7 +230,7 @@ function PaymentMethodCard({
 
 export function BillingPane() {
   const { user } = useAuth();
-  const posthog = usePostHog();
+  const telemetry = useTelemetry();
   const [methods, setMethods] = useState(initialPaymentMethods);
 
   if (!user) return null;
@@ -282,7 +282,7 @@ export function BillingPane() {
             className="gap-1.5 h-auto py-1 px-2"
             onClick={() => {
               // PostHog: Capture payment method addition initiated
-              posthog?.capture("payment_method_added", {
+              telemetry.capture("payment_method_added", {
                 current_plan: user.plan,
               });
               toast.success("Add payment method dialog opened (mock)", {
@@ -371,7 +371,7 @@ export function BillingPane() {
                     aria-label={`Download invoice ${inv.id}`}
                     onClick={() => {
                       // PostHog: Capture invoice download
-                      posthog?.capture("invoice_downloaded", {
+                      telemetry.capture("invoice_downloaded", {
                         invoice_id: inv.id,
                         invoice_amount: inv.amount,
                         invoice_status: inv.status,
