@@ -20,6 +20,7 @@ export interface WsMessageRequest {
   docs_path?: string | null;
   trace?: boolean;
   trace_mode?: WsTraceMode;
+  analytics_enabled?: boolean;
   workspace_id?: string;
   user_id?: string;
   session_id?: string;

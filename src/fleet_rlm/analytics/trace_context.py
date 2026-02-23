@@ -38,6 +38,12 @@ _RUNTIME_DISTINCT_ID: contextvars.ContextVar[str | None] = contextvars.ContextVa
     "fleet_rlm_runtime_distinct_id",
     default=None,
 )
+_RUNTIME_TELEMETRY_ENABLED: contextvars.ContextVar[bool | None] = (
+    contextvars.ContextVar(
+        "fleet_rlm_runtime_telemetry_enabled",
+        default=None,
+    )
+)
 
 
 def get_current_trace() -> LLMTraceContext | None:
@@ -66,6 +72,11 @@ def get_runtime_distinct_id() -> str | None:
     return candidate or None
 
 
+def get_runtime_telemetry_enabled() -> bool | None:
+    """Return the runtime scoped telemetry preference, if one was set."""
+    return _RUNTIME_TELEMETRY_ENABLED.get()
+
+
 @contextmanager
 def runtime_distinct_id_context(distinct_id: str | None):
     """Temporarily scope an analytics distinct_id to this runtime context."""
@@ -74,3 +85,13 @@ def runtime_distinct_id_context(distinct_id: str | None):
         yield
     finally:
         _RUNTIME_DISTINCT_ID.reset(token)
+
+
+@contextmanager
+def runtime_telemetry_enabled_context(enabled: bool | None):
+    """Temporarily scope a runtime telemetry preference to this execution context."""
+    token = _RUNTIME_TELEMETRY_ENABLED.set(enabled)
+    try:
+        yield
+    finally:
+        _RUNTIME_TELEMETRY_ENABLED.reset(token)
