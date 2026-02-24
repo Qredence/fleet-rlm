@@ -16,20 +16,23 @@ import type { NavItem } from "@/lib/data/types";
 // ── Nav ↔ Path mapping ─────────────────────────────────────────────
 
 const NAV_TO_PATH: Record<NavItem, string> = {
-  new: "/",
-  skills: "/skills",
-  taxonomy: "/taxonomy",
-  memory: "/memory",
-  analytics: "/analytics",
-  settings: "/settings",
+  new: "/app",
+  skills: "/app/skills",
+  taxonomy: "/app/taxonomy",
+  memory: "/app/memory",
+  analytics: "/app/analytics",
+  settings: "/app/settings",
 };
 
 export function navToPath(nav: NavItem): string {
-  return NAV_TO_PATH[nav] ?? "/";
+  return NAV_TO_PATH[nav] ?? "/app";
 }
 
 export function pathToNav(pathname: string): NavItem | null {
-  const section = pathname.split("/").filter(Boolean)[0] ?? "";
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "app") return null;
+  const section = parts[1] ?? "";
+
   const PATH_TO_NAV: Record<string, NavItem> = {
     "": "new",
     skills: "skills",

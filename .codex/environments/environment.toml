@@ -4,7 +4,16 @@ name = "fleet-rlm-dspy"
 
 [setup]
 script = '''
-uv sync --all-groups
 source .venv/bin/activate
-
+uv pip install -e .
 '''
+
+[[actions]]
+name = "uv pip install"
+icon = "tool"
+command = "uv pip install -e ."
+
+[[actions]]
+name = "Run app"
+icon = "run"
+command = "fleet web"
