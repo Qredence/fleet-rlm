@@ -38,6 +38,7 @@ output/*
 
 # Local agent/tooling state
 .claude/
+.claude/team/inboxes/
 .letta/
 .agents/
 .codex/
