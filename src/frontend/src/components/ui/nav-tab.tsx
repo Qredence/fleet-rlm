@@ -32,8 +32,8 @@ export function NavTab({
         disabled
           ? "text-muted-foreground/50 cursor-not-allowed"
           : isActive
-          ? "text-foreground"
-          : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            ? "text-foreground"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted",
       )}
     >
       <span

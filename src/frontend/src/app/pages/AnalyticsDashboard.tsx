@@ -16,12 +16,7 @@ import { useAnalytics } from "@/hooks/useAnalytics";
 import { springs } from "@/lib/config/motion-config";
 import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
 import { AnalyticsSkeleton } from "@/components/shared/AnalyticsSkeleton";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/components/ui/utils";

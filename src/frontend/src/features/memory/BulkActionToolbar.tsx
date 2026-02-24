@@ -53,9 +53,14 @@ export function BulkActionToolbar({
       >
         <Button
           variant="ghost"
-          className={cn("h-8 gap-1.5 px-2 shrink-0", isMobile && "touch-target")}
+          className={cn(
+            "h-8 gap-1.5 px-2 shrink-0",
+            isMobile && "touch-target",
+          )}
           onClick={selectedCount === totalCount ? onDeselectAll : onSelectAll}
-          aria-label={selectedCount === totalCount ? "Deselect all" : "Select all"}
+          aria-label={
+            selectedCount === totalCount ? "Deselect all" : "Select all"
+          }
         >
           {selectedCount === totalCount ? (
             <MinusSquare className="w-4 h-4 text-muted-foreground" />
@@ -79,7 +84,10 @@ export function BulkActionToolbar({
         {hasUnpinnedSelected && (
           <Button
             variant="secondary"
-            className={cn("h-8 gap-1.5 px-3 rounded-button", isMobile && "touch-target")}
+            className={cn(
+              "h-8 gap-1.5 px-3 rounded-button",
+              isMobile && "touch-target",
+            )}
             onClick={onBulkPin}
           >
             <Pin className="w-3.5 h-3.5" />
@@ -89,7 +97,10 @@ export function BulkActionToolbar({
         {hasPinnedSelected && (
           <Button
             variant="secondary"
-            className={cn("h-8 gap-1.5 px-3 rounded-button", isMobile && "touch-target")}
+            className={cn(
+              "h-8 gap-1.5 px-3 rounded-button",
+              isMobile && "touch-target",
+            )}
             onClick={onBulkUnpin}
           >
             <Pin className="w-3.5 h-3.5 text-muted-foreground" />
@@ -98,7 +109,10 @@ export function BulkActionToolbar({
         )}
         <Button
           variant="destructive-ghost"
-          className={cn("h-8 gap-1.5 px-3 rounded-button", isMobile && "touch-target")}
+          className={cn(
+            "h-8 gap-1.5 px-3 rounded-button",
+            isMobile && "touch-target",
+          )}
           onClick={onBulkDelete}
         >
           <Trash2 className="w-3.5 h-3.5" />

@@ -18,10 +18,7 @@ import { isMockMode } from "@/lib/api/config";
 import { mockFilesystem } from "@/lib/data/mock-skills";
 import { filesystemEndpoints } from "@/lib/api/endpoints";
 import { adaptFsTree } from "@/lib/api/adapters";
-import {
-  getCapabilityStatus,
-  type DataSource,
-} from "@/lib/api/capabilities";
+import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
 import type { FsNode } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────

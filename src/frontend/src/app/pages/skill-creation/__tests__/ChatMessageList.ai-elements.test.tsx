@@ -142,7 +142,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       />,
     );
 
-    expect(html).toContain("data-slot=\"shimmer\"");
+    expect(html).toContain('data-slot="shimmer"');
     expect(html).toContain("Agentic Fleet Session");
   });
 });

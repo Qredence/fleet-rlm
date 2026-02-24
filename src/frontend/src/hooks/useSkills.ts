@@ -18,10 +18,7 @@ import { isMockMode } from "@/lib/api/config";
 import { mockSkills, generatedSkillMd } from "@/lib/data/mock-skills";
 import { taskEndpoints, type TaskListParams } from "@/lib/api/endpoints";
 import { adaptTask } from "@/lib/api/adapters";
-import {
-  getCapabilityStatus,
-  type DataSource,
-} from "@/lib/api/capabilities";
+import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
 import type { Skill } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────

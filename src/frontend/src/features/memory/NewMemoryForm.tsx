@@ -82,7 +82,10 @@ export function NewMemoryForm({
             >
               Type
             </label>
-            <Select value={type} onValueChange={(v) => setType(v as MemoryType)}>
+            <Select
+              value={type}
+              onValueChange={(v) => setType(v as MemoryType)}
+            >
               <SelectTrigger
                 className={cn("w-full", isMobile && "touch-target")}
                 style={typo.label}
@@ -138,7 +141,10 @@ export function NewMemoryForm({
               className="text-muted-foreground mb-1.5 block"
               style={typo.helper}
             >
-              Tags <span className="text-muted-foreground/60">(comma-separated)</span>
+              Tags{" "}
+              <span className="text-muted-foreground/60">
+                (comma-separated)
+              </span>
             </label>
             <Input
               value={tagsStr}
@@ -152,7 +158,10 @@ export function NewMemoryForm({
           <div className="flex items-center gap-2 pt-1">
             <Button
               variant="default"
-              className={cn("gap-1.5 rounded-button", isMobile && "touch-target")}
+              className={cn(
+                "gap-1.5 rounded-button",
+                isMobile && "touch-target",
+              )}
               onClick={handleSubmit}
               disabled={!content.trim()}
             >

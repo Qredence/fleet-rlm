@@ -47,14 +47,28 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     let wsInstanceCount = 0;
 
     // We capture each newly created ws inside the mock
-    const sockets: any[] = [];
+    interface MockWebSocketInstance {
+      readyState: number;
+      addEventListener: (
+        event: string,
+        cb: (...args: unknown[]) => void,
+      ) => void;
+      removeEventListener: import("vitest").Mock<never, never[]>;
+      send: import("vitest").Mock<never, never[]>;
+      close: import("vitest").Mock<never, never[]>;
+      trigger: (event: string, arg?: unknown) => void;
+    }
+    const sockets: MockWebSocketInstance[] = [];
 
-    MockWebSocket.mockImplementation(function (this: any) {
+    MockWebSocket.mockImplementation(function (this: MockWebSocketInstance) {
       wsInstanceCount++;
-      const listeners: Record<string, Function[]> = {};
+      const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
 
       this.readyState = 0;
-      this.addEventListener = (event: string, cb: Function) => {
+      this.addEventListener = (
+        event: string,
+        cb: (...args: unknown[]) => void,
+      ) => {
         if (!listeners[event]) listeners[event] = [];
         listeners[event].push(cb);
       };
@@ -63,7 +77,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
       this.close = vi.fn();
 
       // helper to trigger events on this socket
-      this.trigger = (event: string, arg?: any) => {
+      this.trigger = (event: string, arg?: unknown) => {
         for (const cb of listeners[event] || []) cb(arg);
       };
 

@@ -26,14 +26,19 @@ import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { getDomainColor } from "@/lib/taxonomy/graph";
 import { useTaxonomyGraphCanvas } from "@/features/taxonomy/useTaxonomyGraphCanvas";
 import { IconButton } from "@/components/ui/icon-button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/components/ui/utils";
 
-const layoutModes: { mode: LayoutMode; label: string; icon: typeof Network }[] = [
-  { mode: "force", label: "Force", icon: Network },
-  { mode: "cluster", label: "Cluster", icon: GitFork },
-  { mode: "tree", label: "Tree", icon: TreeDeciduous },
-];
+const layoutModes: { mode: LayoutMode; label: string; icon: typeof Network }[] =
+  [
+    { mode: "force", label: "Force", icon: Network },
+    { mode: "cluster", label: "Cluster", icon: GitFork },
+    { mode: "tree", label: "Tree", icon: TreeDeciduous },
+  ];
 
 export function TaxonomyGraph() {
   const { skills: allSkills } = useSkills();

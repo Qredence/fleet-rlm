@@ -115,7 +115,7 @@ export function useChat(): UseChatReturn {
       }
     },
     [], // No dependencies: isMockMode is a pure function of build-time env vars,
-        // and React state setters (setError, setIsStreaming, setStreamingContent) are stable.
+    // and React state setters (setError, setIsStreaming, setStreamingContent) are stable.
   );
 
   return {

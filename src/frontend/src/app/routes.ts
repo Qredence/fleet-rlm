@@ -6,12 +6,16 @@
  * sections can be split without exposing blank screens on transient
  * chunk-load failures.
  */
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, redirect } from "react-router";
 import { RootLayout, RootHydrateFallback } from "@/app/layout/RootLayout";
 import { RouteErrorPage } from "@/app/pages/RouteErrorPage";
 import { LazyRouteComponents } from "@/lib/perf/routePreload";
 
 export const router = createBrowserRouter([
+  {
+    path: "/",
+    loader: () => redirect("/app"),
+  },
   {
     path: "/login",
     Component: LazyRouteComponents.LoginPage,
@@ -33,7 +37,7 @@ export const router = createBrowserRouter([
     ErrorBoundary: RouteErrorPage,
   },
   {
-    path: "/",
+    path: "/app",
     Component: RootLayout,
     HydrateFallback: RootHydrateFallback,
     ErrorBoundary: RouteErrorPage,
@@ -44,35 +48,31 @@ export const router = createBrowserRouter([
       },
       {
         path: "skills",
-        Component: LazyRouteComponents.UnsupportedSkillsPage,
+        Component: LazyRouteComponents.SkillLibrary,
       },
       {
         path: "skills/:skillId",
-        Component: LazyRouteComponents.UnsupportedSkillsPage,
+        Component: LazyRouteComponents.SkillLibrary,
       },
       {
         path: "taxonomy",
-        Component: LazyRouteComponents.UnsupportedTaxonomyPage,
+        Component: LazyRouteComponents.TaxonomyBrowser,
       },
       {
         path: "taxonomy/:skillId",
-        Component: LazyRouteComponents.UnsupportedTaxonomyPage,
+        Component: LazyRouteComponents.TaxonomyBrowser,
       },
       {
         path: "memory",
-        Component: LazyRouteComponents.UnsupportedMemoryPage,
+        Component: LazyRouteComponents.MemoryPage,
       },
       {
         path: "analytics",
-        Component: LazyRouteComponents.UnsupportedAnalyticsPage,
+        Component: LazyRouteComponents.AnalyticsDashboard,
       },
       {
         path: "settings",
         Component: LazyRouteComponents.SettingsPage,
-      },
-      {
-        path: "__dev/chat-elements",
-        Component: LazyRouteComponents.ChatElementsMockPage,
       },
       {
         path: "*",

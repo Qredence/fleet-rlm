@@ -102,7 +102,9 @@ export function MemoryEntryCard({
                 <Badge variant="secondary" className="rounded-full">
                   <span style={typo.micro}>{meta.label}</span>
                 </Badge>
-                {entry.pinned && <Pin className="w-3 h-3 text-accent fill-accent" />}
+                {entry.pinned && (
+                  <Pin className="w-3 h-3 text-accent fill-accent" />
+                )}
                 <span
                   className="text-muted-foreground ml-auto shrink-0"
                   style={typo.helper}
@@ -130,7 +132,10 @@ export function MemoryEntryCard({
               )}
 
               <div className="flex items-center gap-3">
-                <span className="text-muted-foreground truncate" style={typo.helper}>
+                <span
+                  className="text-muted-foreground truncate"
+                  style={typo.helper}
+                >
                   {entry.source}
                 </span>
 
@@ -158,7 +163,10 @@ export function MemoryEntryCard({
                     >
                       <Button
                         variant="ghost"
-                        className={cn("h-7 w-7 p-0", isMobile && "touch-target")}
+                        className={cn(
+                          "h-7 w-7 p-0",
+                          isMobile && "touch-target",
+                        )}
                         onClick={() => onPin(entry.id)}
                         aria-label={entry.pinned ? "Unpin" : "Pin"}
                       >
@@ -173,7 +181,10 @@ export function MemoryEntryCard({
                       </Button>
                       <Button
                         variant="ghost"
-                        className={cn("h-7 w-7 p-0", isMobile && "touch-target")}
+                        className={cn(
+                          "h-7 w-7 p-0",
+                          isMobile && "touch-target",
+                        )}
                         onClick={() => onDelete(entry.id)}
                         aria-label="Delete memory"
                       >

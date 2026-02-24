@@ -213,7 +213,9 @@ export function RuntimePane() {
   const modalTest = status?.tests?.modal;
   const lmTest = status?.tests?.lm;
   const saveDisabled =
-    dirtyKeys.length === 0 || saveSettings.isPending || status?.write_enabled === false;
+    dirtyKeys.length === 0 ||
+    saveSettings.isPending ||
+    status?.write_enabled === false;
 
   return (
     <div>
@@ -308,7 +310,9 @@ export function RuntimePane() {
             variant="secondary"
             className="rounded-lg"
             onClick={handleTestAll}
-            disabled={testModalConnection.isPending || testLmConnection.isPending}
+            disabled={
+              testModalConnection.isPending || testLmConnection.isPending
+            }
           >
             Test All
           </Button>
@@ -328,7 +332,10 @@ export function RuntimePane() {
         </Badge>
       </SettingsRow>
 
-      <SettingsRow label="LM Smoke" description={`Last result: ${testSummary(lmTest)}`}>
+      <SettingsRow
+        label="LM Smoke"
+        description={`Last result: ${testSummary(lmTest)}`}
+      >
         <Badge variant={testVariant(lmTest)}>
           {lmTest?.checked_at
             ? `${testSummary(lmTest)} • ${new Date(lmTest.checked_at).toLocaleString()}`
@@ -337,10 +344,15 @@ export function RuntimePane() {
       </SettingsRow>
 
       <div className="py-4 border-b border-border-subtle">
-        <p className="text-sm text-foreground font-medium mb-2">Preflight Checks</p>
+        <p className="text-sm text-foreground font-medium mb-2">
+          Preflight Checks
+        </p>
         <div className="flex flex-wrap gap-2">
           {llmChecks.map(([key, ok]) => (
-            <Badge key={`llm-${key}`} variant={ok ? "success" : "destructive-subtle"}>
+            <Badge
+              key={`llm-${key}`}
+              variant={ok ? "success" : "destructive-subtle"}
+            >
               LM {formatCheckLabel(key)}: {ok ? "configured" : "missing"}
             </Badge>
           ))}

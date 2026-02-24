@@ -25,7 +25,11 @@ import {
 } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import type { PromptFeature, PromptMode } from "@/lib/data/types";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/components/ui/utils";
 import { UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
@@ -288,11 +292,7 @@ function WebSearchChip() {
 
 // ── Skills / Apps chip ──────────────────────────────────────────────
 
-function SkillsChip({
-  selectedSkills,
-}: {
-  selectedSkills: string[];
-}) {
+function SkillsChip({ selectedSkills }: { selectedSkills: string[] }) {
   const [open, setOpen] = useState(false);
   const selectedCount = selectedSkills.length;
   const chipLabel = selectedCount > 0 ? `Apps (${selectedCount})` : "Apps";
@@ -358,9 +358,7 @@ export function PromptToolbar({
       {showWebSearch && <WebSearchChip />}
 
       {/* Skills / Apps selector */}
-      {showSkills && (
-        <SkillsChip selectedSkills={selectedSkills} />
-      )}
+      {showSkills && <SkillsChip selectedSkills={selectedSkills} />}
     </div>
   );
 }

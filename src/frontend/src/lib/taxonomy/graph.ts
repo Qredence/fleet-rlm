@@ -92,8 +92,10 @@ export function clientToGraph(
   transform: { x: number; y: number; scale: number },
 ): { gx: number; gy: number } {
   const rect = canvas.getBoundingClientRect();
-  const gx = (clientX - rect.left - rect.width / 2) / transform.scale - transform.x;
-  const gy = (clientY - rect.top - rect.height / 2) / transform.scale - transform.y;
+  const gx =
+    (clientX - rect.left - rect.width / 2) / transform.scale - transform.x;
+  const gy =
+    (clientY - rect.top - rect.height / 2) / transform.scale - transform.y;
   return { gx, gy };
 }
 

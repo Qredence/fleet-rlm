@@ -1,10 +1,4 @@
-import {
-  Brain,
-  Database,
-  FileOutput,
-  Terminal,
-  Wrench,
-} from "lucide-react";
+import { Brain, Database, FileOutput, Terminal, Wrench } from "lucide-react";
 
 import type { ArtifactStepType } from "@/stores/artifactStore";
 

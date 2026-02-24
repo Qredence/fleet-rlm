@@ -1,4 +1,8 @@
-export { rlmApiConfig, isRlmCoreEnabled, isRlmWsEnabled } from "@/lib/rlm-api/config";
+export {
+  rlmApiConfig,
+  isRlmCoreEnabled,
+  isRlmWsEnabled,
+} from "@/lib/rlm-api/config";
 export {
   SUPPORTED_SECTIONS,
   UNSUPPORTED_SECTION_REASON,
@@ -11,7 +15,10 @@ export {
 } from "@/lib/rlm-api/messages";
 export { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 export { rlmCoreEndpoints } from "@/lib/rlm-api/endpoints";
-export { streamChatOverWs, createBackendSessionId } from "@/lib/rlm-api/wsClient";
+export {
+  streamChatOverWs,
+  createBackendSessionId,
+} from "@/lib/rlm-api/wsClient";
 export type {
   WsTraceMode,
   WsConnectionStatus,

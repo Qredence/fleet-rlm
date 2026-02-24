@@ -42,7 +42,8 @@ def test_cli_help_lists_subcommands():
     assert "check-secret" in result.stdout
 
 
-def test_cli_bad_docs_path_returns_error():
+def test_cli_bad_docs_path_returns_error(monkeypatch):
+    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "true")
     result = runner.invoke(
         app,
         [

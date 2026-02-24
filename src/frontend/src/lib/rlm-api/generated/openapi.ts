@@ -4,525 +4,998 @@
  */
 
 export interface paths {
-    "/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Health */
-        get: operations["health_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ready": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Ready */
-        get: operations["ready_ready_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/chat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Chat */
-        post: operations["chat_chat_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/basic": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run Basic */
-        post: operations["run_basic_tasks_basic_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/architecture": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run Architecture */
-        post: operations["run_architecture_tasks_architecture_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/long-context": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run Long Context */
-        post: operations["run_long_context_tasks_long_context_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/check-secret": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Check Secret */
-        post: operations["check_secret_tasks_check_secret_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/sessions/state": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Session State
-         * @description Return lightweight summaries of active/restored session state.
-         */
-        get: operations["list_session_state_sessions_state_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
+  "/health": {
+    /** Health */
+    get: operations["health_health_get"];
+  };
+  "/ready": {
+    /** Ready */
+    get: operations["ready_ready_get"];
+  };
+  "/api/v1/auth/login": {
+    /** Login */
+    post: operations["login_api_v1_auth_login_post"];
+  };
+  "/api/v1/auth/logout": {
+    /** Logout */
+    post: operations["logout_api_v1_auth_logout_post"];
+  };
+  "/api/v1/auth/me": {
+    /** Get Me */
+    get: operations["get_me_api_v1_auth_me_get"];
+  };
+  "/api/v1/chat": {
+    /** Chat */
+    post: operations["chat_api_v1_chat_post"];
+  };
+  "/api/v1/tasks": {
+    /**
+     * List Tasks
+     * @description List all tasks.
+     */
+    get: operations["list_tasks_api_v1_tasks_get"];
+    /**
+     * Create Task
+     * @description Create a new task.
+     */
+    post: operations["create_task_api_v1_tasks_post"];
+  };
+  "/api/v1/tasks/{task_id}": {
+    /**
+     * Get Task
+     * @description Get a specific task by ID.
+     */
+    get: operations["get_task_api_v1_tasks__task_id__get"];
+    /**
+     * Delete Task
+     * @description Delete a specific task.
+     */
+    delete: operations["delete_task_api_v1_tasks__task_id__delete"];
+    /**
+     * Update Task
+     * @description Update a specific task.
+     */
+    patch: operations["update_task_api_v1_tasks__task_id__patch"];
+  };
+  "/api/v1/sessions/state": {
+    /**
+     * List Session State
+     * @description Return lightweight summaries of active/restored in-memory session state.
+     */
+    get: operations["list_session_state_api_v1_sessions_state_get"];
+  };
+  "/api/v1/sessions": {
+    /**
+     * List Sessions
+     * @description List all sessions.
+     */
+    get: operations["list_sessions_api_v1_sessions_get"];
+    /**
+     * Create Session
+     * @description Create a new session.
+     */
+    post: operations["create_session_api_v1_sessions_post"];
+  };
+  "/api/v1/sessions/{session_id}": {
+    /**
+     * Get Session
+     * @description Get a specific session by ID.
+     */
+    get: operations["get_session_api_v1_sessions__session_id__get"];
+    /**
+     * Delete Session
+     * @description Delete a specific session.
+     */
+    delete: operations["delete_session_api_v1_sessions__session_id__delete"];
+    /**
+     * Update Session
+     * @description Update a specific session.
+     */
+    patch: operations["update_session_api_v1_sessions__session_id__patch"];
+  };
+  "/api/v1/taxonomy": {
+    /** Get Taxonomy */
+    get: operations["get_taxonomy_api_v1_taxonomy_get"];
+  };
+  "/api/v1/taxonomy/{path}": {
+    /** Get Taxonomy By Path */
+    get: operations["get_taxonomy_by_path_api_v1_taxonomy__path__get"];
+  };
+  "/api/v1/analytics": {
+    /** Get Analytics */
+    get: operations["get_analytics_api_v1_analytics_get"];
+  };
+  "/api/v1/analytics/skills/{skill_id}": {
+    /** Get Skill Analytics */
+    get: operations["get_skill_analytics_api_v1_analytics_skills__skill_id__get"];
+  };
+  "/api/v1/search": {
+    /** Search */
+    get: operations["search_api_v1_search_get"];
+  };
+  "/api/v1/memory": {
+    /** List Memory */
+    get: operations["list_memory_api_v1_memory_get"];
+    /** Create Memory Item */
+    post: operations["create_memory_item_api_v1_memory_post"];
+  };
+  "/api/v1/runtime/settings": {
+    /** Get Runtime Settings */
+    get: operations["get_runtime_settings_api_v1_runtime_settings_get"];
+    /** Patch Runtime Settings */
+    patch: operations["patch_runtime_settings_api_v1_runtime_settings_patch"];
+  };
+  "/api/v1/runtime/tests/modal": {
+    /** Test Modal Connection */
+    post: operations["test_modal_connection_api_v1_runtime_tests_modal_post"];
+  };
+  "/api/v1/runtime/tests/lm": {
+    /** Test Lm Connection */
+    post: operations["test_lm_connection_api_v1_runtime_tests_lm_post"];
+  };
+  "/api/v1/runtime/status": {
+    /** Get Runtime Status */
+    get: operations["get_runtime_status_api_v1_runtime_status_get"];
+  };
+  "/api/v1/sandbox": {
+    /** Get Sandbox */
+    get: operations["get_sandbox_api_v1_sandbox_get"];
+  };
+  "/api/v1/sandbox/file": {
+    /** Get Sandbox File */
+    get: operations["get_sandbox_file_api_v1_sandbox_file_get"];
+  };
 }
+
 export type webhooks = Record<string, never>;
+
 export interface components {
-    schemas: {
-        /** ChatRequest */
-        ChatRequest: {
-            /** Message */
-            message: string;
-            /** Docs Path */
-            docs_path?: string | null;
-            /**
-             * Trace
-             * @default false
-             */
-            trace: boolean;
-        };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
-        };
-        /** HealthResponse */
-        HealthResponse: {
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /**
-             * Version
-             * @default 0.4.4
-             */
-            version: string;
-        };
-        /** ReadyResponse */
-        ReadyResponse: {
-            /** Ready */
-            ready: boolean;
-            /** Planner Configured */
-            planner_configured: boolean;
-        };
-        /** SessionStateResponse */
-        SessionStateResponse: {
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /** Sessions */
-            sessions?: components["schemas"]["SessionStateSummary"][];
-        };
-        /** SessionStateSummary */
-        SessionStateSummary: {
-            /** Key */
-            key: string;
-            /** Workspace Id */
-            workspace_id: string;
-            /** User Id */
-            user_id: string;
-            /** Session Id */
-            session_id?: string | null;
-            /**
-             * History Turns
-             * @default 0
-             */
-            history_turns: number;
-            /**
-             * Document Count
-             * @default 0
-             */
-            document_count: number;
-            /**
-             * Memory Count
-             * @default 0
-             */
-            memory_count: number;
-            /**
-             * Log Count
-             * @default 0
-             */
-            log_count: number;
-            /**
-             * Artifact Count
-             * @default 0
-             */
-            artifact_count: number;
-            /** Updated At */
-            updated_at?: string | null;
-        };
-        /** TaskRequest */
-        TaskRequest: {
-            /**
-             * Task Type
-             * @enum {string}
-             */
-            task_type: "basic" | "architecture" | "api_endpoints" | "error_patterns" | "long_context" | "summarize" | "custom_tool";
-            /**
-             * Question
-             * @default
-             */
-            question: string;
-            /** Docs Path */
-            docs_path?: string | null;
-            /**
-             * Query
-             * @default
-             */
-            query: string;
-            /**
-             * Max Iterations
-             * @default 15
-             */
-            max_iterations: number;
-            /**
-             * Max Llm Calls
-             * @default 30
-             */
-            max_llm_calls: number;
-            /**
-             * Timeout
-             * @default 600
-             */
-            timeout: number;
-            /**
-             * Chars
-             * @default 10000
-             */
-            chars: number;
-            /**
-             * Verbose
-             * @default true
-             */
-            verbose: boolean;
-        };
-        /** TaskResponse */
-        TaskResponse: {
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-            /** Result */
-            result?: {
-                [key: string]: unknown;
-            };
-            /** Error */
-            error?: string | null;
-        };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
-        };
+  schemas: {
+    /** ChatRequest */
+    ChatRequest: {
+      /** Message */
+      message: string;
+      /** Docs Path */
+      docs_path?: string | null;
+      /**
+       * Trace
+       * @default false
+       */
+      trace?: boolean;
     };
-    responses: never;
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    /** HTTPValidationError */
+    HTTPValidationError: {
+      /** Detail */
+      detail?: components["schemas"]["ValidationError"][];
+    };
+    /** HealthResponse */
+    HealthResponse: {
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /**
+       * Version
+       * @default 0.4.8
+       */
+      version?: string;
+    };
+    /** ReadyResponse */
+    ReadyResponse: {
+      /** Ready */
+      ready: boolean;
+      /** Planner Configured */
+      planner_configured: boolean;
+      /**
+       * Planner
+       * @enum {string}
+       */
+      planner: "ready" | "missing";
+      /**
+       * Database
+       * @enum {string}
+       */
+      database: "ready" | "missing" | "disabled" | "degraded";
+      /** Database Required */
+      database_required: boolean;
+      /** Sandbox Provider */
+      sandbox_provider: string;
+    };
+    /** RuntimeConnectivityTestResponse */
+    RuntimeConnectivityTestResponse: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "modal" | "lm";
+      /** Ok */
+      ok: boolean;
+      /** Preflight Ok */
+      preflight_ok: boolean;
+      /** Checked At */
+      checked_at: string;
+      /** Checks */
+      checks?: {
+        [key: string]: unknown;
+      };
+      /** Guidance */
+      guidance?: string[];
+      /** Latency Ms */
+      latency_ms?: number | null;
+      /** Output Preview */
+      output_preview?: string | null;
+      /** Error */
+      error?: string | null;
+    };
+    /** RuntimeSettingsSnapshot */
+    RuntimeSettingsSnapshot: {
+      /** Env Path */
+      env_path: string;
+      /** Keys */
+      keys?: string[];
+      /** Values */
+      values?: {
+        [key: string]: string;
+      };
+      /** Masked Values */
+      masked_values?: {
+        [key: string]: string;
+      };
+    };
+    /** RuntimeSettingsUpdateRequest */
+    RuntimeSettingsUpdateRequest: {
+      /** Updates */
+      updates?: {
+        [key: string]: unknown;
+      };
+    };
+    /** RuntimeSettingsUpdateResponse */
+    RuntimeSettingsUpdateResponse: {
+      /** Updated */
+      updated?: string[];
+      /** Env Path */
+      env_path: string;
+    };
+    /** RuntimeStatusResponse */
+    RuntimeStatusResponse: {
+      /** App Env */
+      app_env: string;
+      /** Write Enabled */
+      write_enabled: boolean;
+      /** Ready */
+      ready: boolean;
+      /** Llm */
+      llm?: {
+        [key: string]: unknown;
+      };
+      /** Modal */
+      modal?: {
+        [key: string]: unknown;
+      };
+      tests: components["schemas"]["RuntimeTestCache"];
+      /** Guidance */
+      guidance?: string[];
+    };
+    /** RuntimeTestCache */
+    RuntimeTestCache: {
+      modal?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
+      lm?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
+    };
+    /**
+     * SessionCreate
+     * @description Schema for creating a new Session.
+     */
+    SessionCreate: {
+      /**
+       * Title
+       * @default New Session
+       */
+      title?: string | null;
+    };
+    /**
+     * SessionResponse
+     * @description Schema for returning a Session to the frontend.
+     */
+    SessionResponse: {
+      /** Id */
+      id: string;
+      /** Title */
+      title: string;
+      /** Status */
+      status: string;
+      /**
+       * Createdat
+       * Format: date-time
+       */
+      createdAt: string;
+    };
+    /** SessionStateResponse */
+    SessionStateResponse: {
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Sessions */
+      sessions?: components["schemas"]["SessionStateSummary"][];
+    };
+    /** SessionStateSummary */
+    SessionStateSummary: {
+      /** Key */
+      key: string;
+      /** Workspace Id */
+      workspace_id: string;
+      /** User Id */
+      user_id: string;
+      /** Session Id */
+      session_id?: string | null;
+      /**
+       * History Turns
+       * @default 0
+       */
+      history_turns?: number;
+      /**
+       * Document Count
+       * @default 0
+       */
+      document_count?: number;
+      /**
+       * Memory Count
+       * @default 0
+       */
+      memory_count?: number;
+      /**
+       * Log Count
+       * @default 0
+       */
+      log_count?: number;
+      /**
+       * Artifact Count
+       * @default 0
+       */
+      artifact_count?: number;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * SessionUpdate
+     * @description Schema for updating an existing Session.
+     */
+    SessionUpdate: {
+      /** Title */
+      title?: string | null;
+      /** Status */
+      status?: string | null;
+    };
+    /**
+     * TaskCreate
+     * @description Schema for creating a new Task.
+     */
+    TaskCreate: {
+      /** Objective */
+      objective: string;
+      /** Sessionid */
+      sessionId?: string | null;
+    };
+    /**
+     * TaskResponse
+     * @description Schema for returning a Task to the frontend.
+     */
+    TaskResponse: {
+      /** Id */
+      id: string;
+      /** Sessionid */
+      sessionId: string | null;
+      /** Objective */
+      objective: string;
+      /** Status */
+      status: string;
+      /** Result */
+      result: string | null;
+      /**
+       * Createdat
+       * Format: date-time
+       */
+      createdAt: string;
+      /**
+       * Updatedat
+       * Format: date-time
+       */
+      updatedAt: string;
+    };
+    /**
+     * TaskUpdate
+     * @description Schema for updating an existing Task.
+     */
+    TaskUpdate: {
+      /** Status */
+      status?: string | null;
+      /** Result */
+      result?: string | null;
+    };
+    /** ValidationError */
+    ValidationError: {
+      /** Location */
+      loc: (string | number)[];
+      /** Message */
+      msg: string;
+      /** Error Type */
+      type: string;
+      /** Input */
+      input?: unknown;
+      /** Context */
+      ctx?: Record<string, never>;
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
+
 export type $defs = Record<string, never>;
+
+export type external = Record<string, never>;
+
 export interface operations {
-    health_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+  /** Health */
+  health_health_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["HealthResponse"];
         };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-        };
+      };
     };
-    ready_ready_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+  };
+  /** Ready */
+  ready_ready_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReadyResponse"];
         };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReadyResponse"];
-                };
-            };
-        };
+      };
     };
-    chat_chat_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+  };
+  /** Login */
+  login_api_v1_auth_login_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChatRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
+      };
     };
-    run_basic_tasks_basic_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+  };
+  /** Logout */
+  logout_api_v1_auth_logout_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
+      };
     };
-    run_architecture_tasks_architecture_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+  };
+  /** Get Me */
+  get_me_api_v1_auth_me_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
+      };
     };
-    run_long_context_tasks_long_context_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
+  };
+  /** Chat */
+  chat_api_v1_chat_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChatRequest"];
+      };
     };
-    check_secret_tasks_check_secret_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskResponse"];
-                };
-            };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
     };
-    list_session_state_sessions_state_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionStateResponse"];
-                };
-            };
-        };
+  };
+  /**
+   * List Tasks
+   * @description List all tasks.
+   */
+  list_tasks_api_v1_tasks_get: {
+    parameters: {
+      query?: {
+        skip?: number;
+        limit?: number;
+      };
     };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TaskResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Task
+   * @description Create a new task.
+   */
+  create_task_api_v1_tasks_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TaskCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TaskResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Task
+   * @description Get a specific task by ID.
+   */
+  get_task_api_v1_tasks__task_id__get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TaskResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Task
+   * @description Delete a specific task.
+   */
+  delete_task_api_v1_tasks__task_id__delete: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Task
+   * @description Update a specific task.
+   */
+  update_task_api_v1_tasks__task_id__patch: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TaskUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TaskResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Session State
+   * @description Return lightweight summaries of active/restored in-memory session state.
+   */
+  list_session_state_api_v1_sessions_state_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionStateResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List Sessions
+   * @description List all sessions.
+   */
+  list_sessions_api_v1_sessions_get: {
+    parameters: {
+      query?: {
+        skip?: number;
+        limit?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Session
+   * @description Create a new session.
+   */
+  create_session_api_v1_sessions_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Session
+   * @description Get a specific session by ID.
+   */
+  get_session_api_v1_sessions__session_id__get: {
+    parameters: {
+      path: {
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Session
+   * @description Delete a specific session.
+   */
+  delete_session_api_v1_sessions__session_id__delete: {
+    parameters: {
+      path: {
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Session
+   * @description Update a specific session.
+   */
+  update_session_api_v1_sessions__session_id__patch: {
+    parameters: {
+      path: {
+        session_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Taxonomy */
+  get_taxonomy_api_v1_taxonomy_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown[];
+        };
+      };
+    };
+  };
+  /** Get Taxonomy By Path */
+  get_taxonomy_by_path_api_v1_taxonomy__path__get: {
+    parameters: {
+      path: {
+        path: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Analytics */
+  get_analytics_api_v1_analytics_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  /** Get Skill Analytics */
+  get_skill_analytics_api_v1_analytics_skills__skill_id__get: {
+    parameters: {
+      path: {
+        skill_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Search */
+  search_api_v1_search_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  /** List Memory */
+  list_memory_api_v1_memory_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  /** Create Memory Item */
+  create_memory_item_api_v1_memory_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  /** Get Runtime Settings */
+  get_runtime_settings_api_v1_runtime_settings_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeSettingsSnapshot"];
+        };
+      };
+    };
+  };
+  /** Patch Runtime Settings */
+  patch_runtime_settings_api_v1_runtime_settings_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RuntimeSettingsUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeSettingsUpdateResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Test Modal Connection */
+  test_modal_connection_api_v1_runtime_tests_modal_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
+        };
+      };
+    };
+  };
+  /** Test Lm Connection */
+  test_lm_connection_api_v1_runtime_tests_lm_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
+        };
+      };
+    };
+  };
+  /** Get Runtime Status */
+  get_runtime_status_api_v1_runtime_status_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeStatusResponse"];
+        };
+      };
+    };
+  };
+  /** Get Sandbox */
+  get_sandbox_api_v1_sandbox_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  /** Get Sandbox File */
+  get_sandbox_file_api_v1_sandbox_file_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
 }

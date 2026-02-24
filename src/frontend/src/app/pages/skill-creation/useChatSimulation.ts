@@ -42,9 +42,7 @@ import {
   buildPhase2ClarificationPlan,
   buildPhase2ExecutionPlan,
 } from "@/lib/skill-creation/simulation/phase2";
-import {
-  buildPhase3ExecutionPlan,
-} from "@/lib/skill-creation/simulation/phase3";
+import { buildPhase3ExecutionPlan } from "@/lib/skill-creation/simulation/phase3";
 import { clarificationIntro } from "@/lib/skill-creation/simulation/messages";
 import type {
   ClarificationFollowUpPlan,
@@ -232,7 +230,11 @@ export function useChatSimulation(): ChatSimulation {
 
         maybeOpenCanvas(plan.ensureCanvasOpen);
 
-        if (!plan.followUpHitl && !plan.followUpSystemMessage && !plan.markComplete) {
+        if (
+          !plan.followUpHitl &&
+          !plan.followUpSystemMessage &&
+          !plan.markComplete
+        ) {
           return;
         }
 
@@ -411,7 +413,10 @@ export function useChatSimulation(): ChatSimulation {
       telemetry.capture("hitl_checkpoint_resolved", {
         checkpoint_phase: phase,
         action_label: actionLabel,
-        is_approval: actionLabel.includes("Approve") || actionLabel.includes("Validation") || actionLabel.includes("Run"),
+        is_approval:
+          actionLabel.includes("Approve") ||
+          actionLabel.includes("Validation") ||
+          actionLabel.includes("Run"),
       });
 
       setMessages((prev) =>
@@ -435,10 +440,7 @@ export function useChatSimulation(): ChatSimulation {
           startClarification(1);
         }
       } else if (phase === "generating") {
-        if (
-          actionLabel.includes("Validation") ||
-          actionLabel.includes("Run")
-        ) {
+        if (actionLabel.includes("Validation") || actionLabel.includes("Run")) {
           runPhase3();
         } else {
           startClarification(2);

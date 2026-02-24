@@ -13,10 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import svgPaths from "@/imports/svg-z9gb50zttr";
 import { cn } from "@/components/ui/utils";
-import {
-  CanvasSwitcher,
-  type CanvasMode,
-} from "@/features/CanvasSwitcher";
+import { CanvasSwitcher, type CanvasMode } from "@/features/CanvasSwitcher";
 import { CodeArtifact } from "@/features/CodeArtifact";
 import { ArtifactCanvas } from "@/features/artifacts/components/ArtifactCanvas";
 import {
@@ -24,7 +21,30 @@ import {
   isSectionSupported,
   UNSUPPORTED_SECTION_REASON,
 } from "@/lib/rlm-api";
-import { BackendCapabilityPage } from "@/app/pages/BackendCapabilityPage";
+
+function UnsupportedState({
+  sectionLabel,
+  reason,
+}: {
+  sectionLabel: string;
+  reason?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-center px-8">
+      <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center mb-4">
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 16.33 14.6601">
+          <path d={svgPaths.p1f0f5080} fill="var(--muted-foreground)" />
+        </svg>
+      </div>
+      <p className="text-foreground mb-1" style={typo.label}>
+        {sectionLabel} unavailable
+      </p>
+      <p className="text-muted-foreground" style={typo.caption}>
+        {reason || "This functionality is currently disabled or unsupported."}
+      </p>
+    </div>
+  );
+}
 
 function EmptyCanvas() {
   return (
@@ -74,7 +94,9 @@ function getHeaderLabel(mode: CanvasMode): string {
 
 function getHeaderIcon(mode: CanvasMode) {
   if (mode === "code-artifact") {
-    return <Brain className="size-3.5 text-accent shrink-0" aria-hidden="true" />;
+    return (
+      <Brain className="size-3.5 text-accent shrink-0" aria-hidden="true" />
+    );
   }
   return null;
 }
@@ -161,14 +183,14 @@ export function BuilderPanel() {
       <div className="flex-1 min-h-0">
         {isUnsupportedNav ? (
           <ErrorBoundary name="Unsupported Section">
-            <BackendCapabilityPage
+            <UnsupportedState
               sectionLabel={navLabel(activeNav)}
               reason={UNSUPPORTED_SECTION_REASON}
             />
           </ErrorBoundary>
         ) : !coreReady ? (
           <ErrorBoundary name="Mock Mode Active">
-            <BackendCapabilityPage
+            <UnsupportedState
               sectionLabel="Chat"
               reason="FastAPI chat runtime is not available in mock mode. Disable VITE_MOCK_MODE to connect to the backend."
             />

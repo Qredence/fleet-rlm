@@ -97,7 +97,9 @@ export function SkillLibraryHeaderControls({
                         y: prefersReduced ? 0 : -8,
                         opacity: 0,
                       }}
-                      transition={prefersReduced ? springs.instant : springs.snappy}
+                      transition={
+                        prefersReduced ? springs.instant : springs.snappy
+                      }
                     >
                       {count}
                     </motion.span>

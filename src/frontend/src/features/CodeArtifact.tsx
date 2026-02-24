@@ -31,7 +31,11 @@ import { typo } from "@/lib/config/typo";
 import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 import { cn } from "@/components/ui/utils";
 import { useCodeMirror } from "@/hooks/useCodeMirror";
 
@@ -266,7 +270,8 @@ export function CodeArtifact() {
     return initial;
   });
 
-  const activeFile = mockFiles.find((f) => f.id === activeFileId) ?? defaultFile;
+  const activeFile =
+    mockFiles.find((f) => f.id === activeFileId) ?? defaultFile;
   const currentCode = editedCode[activeFileId] ?? activeFile.code;
 
   // CodeMirror hook

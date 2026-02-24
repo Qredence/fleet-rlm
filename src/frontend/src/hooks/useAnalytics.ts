@@ -15,10 +15,7 @@ import { isMockMode } from "@/lib/api/config";
 import { analyticsData as mockAnalyticsData } from "@/lib/data/mock-skills";
 import { analyticsEndpoints } from "@/lib/api/endpoints";
 import { adaptAnalytics, type AnalyticsData } from "@/lib/api/adapters";
-import {
-  getCapabilityStatus,
-  type DataSource,
-} from "@/lib/api/capabilities";
+import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
 
 // ── Query Keys ──────────────────────────────────────────────────────
 

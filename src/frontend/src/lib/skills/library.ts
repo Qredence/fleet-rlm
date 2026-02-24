@@ -31,7 +31,10 @@ export function matchesSkillSearch(skill: Skill, search: string): boolean {
   );
 }
 
-export function buildDomainCounts(skills: Skill[], search: string): Record<string, number> {
+export function buildDomainCounts(
+  skills: Skill[],
+  search: string,
+): Record<string, number> {
   const searchMatched = skills.filter((s) => matchesSkillSearch(s, search));
   const counts: Record<string, number> = {
     All: searchMatched.length,
@@ -42,7 +45,11 @@ export function buildDomainCounts(skills: Skill[], search: string): Record<strin
   return counts;
 }
 
-export function filterSkills(skills: Skill[], search: string, activeDomain: string): Skill[] {
+export function filterSkills(
+  skills: Skill[],
+  search: string,
+  activeDomain: string,
+): Skill[] {
   return skills.filter((s) => {
     const matchSearch = matchesSkillSearch(s, search);
     const matchDomain = activeDomain === "All" || s.domain === activeDomain;
@@ -63,11 +70,13 @@ export function sortSkills(skills: Skill[], key: SortKey): Skill[] {
       return sorted.sort((a, b) => b.usageCount - a.usageCount);
     case "last-used":
       return sorted.sort(
-        (a, b) => new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime(),
+        (a, b) =>
+          new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime(),
       );
     case "created":
       return sorted.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
     default:
       return sorted;

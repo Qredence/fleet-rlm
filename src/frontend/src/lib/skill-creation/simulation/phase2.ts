@@ -1,5 +1,8 @@
 import { mockReasoningPhase2 } from "@/lib/data/mock-skills";
-import { phase2AssistantSummary, phase2ClarificationSummary } from "@/lib/skill-creation/simulation/messages";
+import {
+  phase2AssistantSummary,
+  phase2ClarificationSummary,
+} from "@/lib/skill-creation/simulation/messages";
 import type {
   ClarificationFollowUpPlan,
   PhaseExecutionPlan,

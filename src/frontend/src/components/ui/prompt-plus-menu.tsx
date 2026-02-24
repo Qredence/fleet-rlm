@@ -21,7 +21,11 @@ import {
 import { toast } from "sonner";
 import { typo } from "@/lib/config/typo";
 import type { PromptFeature } from "@/lib/data/types";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/components/ui/utils";
 import composerSvgPaths from "@/imports/svg-er4mz3hmp1";

@@ -17,7 +17,11 @@ import type { Conversation } from "@/hooks/useChatHistory";
 import { cn } from "@/components/ui/utils";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ── Types ────────────────────────────────────────────────────────────

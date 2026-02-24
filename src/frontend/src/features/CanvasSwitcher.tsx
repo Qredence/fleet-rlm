@@ -13,7 +13,11 @@ import { cn } from "@/components/ui/utils";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { PanelHeaderChip } from "@/components/ui/panel-header-chip";
 import type { Skill } from "@/lib/data/types";
 

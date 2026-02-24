@@ -31,9 +31,7 @@ export const TypingDots = memo(function TypingDots({ label }: Props) {
           key={i}
           className="w-1.5 h-1.5 rounded-full bg-muted-foreground"
           animate={prefersReduced ? REDUCED_ANIMATE : FULL_ANIMATE}
-          transition={
-            prefersReduced ? REDUCED_TRANSITION : dotTransition(i)
-          }
+          transition={prefersReduced ? REDUCED_TRANSITION : dotTransition(i)}
         />
       ))}
       {label ? (

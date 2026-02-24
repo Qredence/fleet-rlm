@@ -1,4 +1,10 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -27,10 +33,13 @@ function EnvironmentVariables({
 }) {
   const [internalShow, setInternalShow] = useState(defaultShowValues);
   const resolvedShow = showValues ?? internalShow;
-  const setShowValues = useCallback((next: boolean) => {
-    if (showValues == null) setInternalShow(next);
-    onShowValuesChange?.(next);
-  }, [showValues, onShowValuesChange]);
+  const setShowValues = useCallback(
+    (next: boolean) => {
+      if (showValues == null) setInternalShow(next);
+      onShowValuesChange?.(next);
+    },
+    [showValues, onShowValuesChange],
+  );
   const value = useMemo(
     () => ({ showValues: resolvedShow, setShowValues }),
     [resolvedShow, setShowValues],

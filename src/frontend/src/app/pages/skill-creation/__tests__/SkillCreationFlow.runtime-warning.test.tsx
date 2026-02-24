@@ -4,7 +4,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SkillCreationFlow } from "@/app/pages/skill-creation/SkillCreationFlow";
 
 let runtimeStatusMock: { data?: { ready: boolean; guidance?: string[] } } = {
-  data: { ready: false, guidance: ["Run Runtime tests from Settings -> Runtime."] },
+  data: {
+    ready: false,
+    guidance: ["Run Runtime tests from Settings -> Runtime."],
+  },
 };
 
 vi.mock("@posthog/react", () => ({

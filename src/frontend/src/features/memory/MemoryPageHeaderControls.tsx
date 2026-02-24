@@ -76,7 +76,10 @@ export function MemoryPageHeaderControls({
         {!selectionMode && entriesCount > 0 && (
           <Button
             variant="secondary"
-            className={cn("gap-1.5 rounded-button shrink-0", isMobile && "touch-target")}
+            className={cn(
+              "gap-1.5 rounded-button shrink-0",
+              isMobile && "touch-target",
+            )}
             onClick={onEnterSelectionMode}
             aria-label="Enter selection mode"
           >
@@ -87,7 +90,10 @@ export function MemoryPageHeaderControls({
         {!selectionMode && (
           <Button
             variant="default"
-            className={cn("gap-1.5 rounded-button shrink-0", isMobile && "touch-target")}
+            className={cn(
+              "gap-1.5 rounded-button shrink-0",
+              isMobile && "touch-target",
+            )}
             onClick={onToggleNewForm}
           >
             <Plus className="w-4 h-4" />
@@ -97,7 +103,10 @@ export function MemoryPageHeaderControls({
         {selectionMode && (
           <Button
             variant="ghost"
-            className={cn("gap-1.5 rounded-button shrink-0", isMobile && "touch-target")}
+            className={cn(
+              "gap-1.5 rounded-button shrink-0",
+              isMobile && "touch-target",
+            )}
             onClick={onExitSelectionMode}
           >
             <X className="w-4 h-4 text-muted-foreground" />
@@ -135,7 +144,10 @@ export function MemoryPageHeaderControls({
         {activeFilters.size > 0 && (
           <Button
             variant="ghost"
-            className={cn("h-7 px-2 gap-1 rounded-full", isMobile && "min-h-[36px]")}
+            className={cn(
+              "h-7 px-2 gap-1 rounded-full",
+              isMobile && "min-h-[36px]",
+            )}
             onClick={onClearFilters}
           >
             <X className="w-3 h-3 text-muted-foreground" />

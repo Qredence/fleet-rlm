@@ -9,12 +9,11 @@ type RouteKey =
   | "logout"
   | "notFound"
   | "skillCreation"
-  | "unsupportedSkills"
-  | "unsupportedTaxonomy"
-  | "unsupportedMemory"
-  | "unsupportedAnalytics"
-  | "settings"
-  | "chatElementsMock";
+  | "skills"
+  | "taxonomy"
+  | "memory"
+  | "analytics"
+  | "settings";
 
 type RouteLoader = () => Promise<{ default: ComponentType<unknown> }>;
 
@@ -39,54 +38,34 @@ const routeLoaders: Record<RouteKey, RouteLoader> = {
     const module = await import("@/app/pages/SkillCreationFlow");
     return { default: module.SkillCreationFlow };
   },
-  unsupportedSkills: async () => {
-    const module = await import("@/app/pages/BackendCapabilityPage");
-    return {
-      default: () => (
-        <module.BackendCapabilityPage sectionLabel="Skills" />
-      ),
-    };
+  skills: async () => {
+    const module = await import("@/app/pages/SkillLibrary");
+    return { default: module.SkillLibrary };
   },
-  unsupportedTaxonomy: async () => {
-    const module = await import("@/app/pages/BackendCapabilityPage");
-    return {
-      default: () => (
-        <module.BackendCapabilityPage sectionLabel="Taxonomy" />
-      ),
-    };
+  taxonomy: async () => {
+    const module = await import("@/app/pages/TaxonomyBrowser");
+    return { default: module.TaxonomyBrowser };
   },
-  unsupportedMemory: async () => {
-    const module = await import("@/app/pages/BackendCapabilityPage");
-    return {
-      default: () => (
-        <module.BackendCapabilityPage sectionLabel="Memory" />
-      ),
-    };
+  memory: async () => {
+    const module = await import("@/app/pages/MemoryPage");
+    return { default: module.MemoryPage };
   },
-  unsupportedAnalytics: async () => {
-    const module = await import("@/app/pages/BackendCapabilityPage");
-    return {
-      default: () => (
-        <module.BackendCapabilityPage sectionLabel="Analytics" />
-      ),
-    };
+  analytics: async () => {
+    const module = await import("@/app/pages/AnalyticsDashboard");
+    return { default: module.AnalyticsDashboard };
   },
   settings: async () => {
     const module = await import("@/app/pages/SettingsPage");
     return { default: module.SettingsPage };
   },
-  chatElementsMock: async () => {
-    const module = await import("@/app/pages/ChatElementsMockPage");
-    return { default: module.ChatElementsMockPage };
-  },
 };
 
 const navPreloadMap: Partial<Record<NavItem, RouteKey>> = {
   new: "skillCreation",
-  skills: "unsupportedSkills",
-  taxonomy: "unsupportedTaxonomy",
-  memory: "unsupportedMemory",
-  analytics: "unsupportedAnalytics",
+  skills: "skills",
+  taxonomy: "taxonomy",
+  memory: "memory",
+  analytics: "analytics",
   settings: "settings",
 };
 
@@ -129,12 +108,11 @@ export const LazyRouteComponents = {
   LogoutPage: lazyRoute("logout"),
   NotFoundPage: lazyRoute("notFound"),
   SkillCreationFlow: lazyRoute("skillCreation"),
-  UnsupportedSkillsPage: lazyRoute("unsupportedSkills"),
-  UnsupportedTaxonomyPage: lazyRoute("unsupportedTaxonomy"),
-  UnsupportedMemoryPage: lazyRoute("unsupportedMemory"),
-  UnsupportedAnalyticsPage: lazyRoute("unsupportedAnalytics"),
+  SkillLibrary: lazyRoute("skills"),
+  TaxonomyBrowser: lazyRoute("taxonomy"),
+  MemoryPage: lazyRoute("memory"),
+  AnalyticsDashboard: lazyRoute("analytics"),
   SettingsPage: lazyRoute("settings"),
-  ChatElementsMockPage: lazyRoute("chatElementsMock"),
 } as const;
 
 export function preloadRoute(key: RouteKey): Promise<void> {

@@ -14,10 +14,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { NavTab } from "@/components/ui/nav-tab";
 import { cn } from "@/components/ui/utils";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
-import {
-  BACKEND_CAPABILITY_TOOLTIP,
-  isSectionSupported,
-} from "@/lib/rlm-api";
+import { BACKEND_CAPABILITY_TOOLTIP, isSectionSupported } from "@/lib/rlm-api";
 import headerSvg from "@/imports/svg-synwn0xtnf";
 
 // ── Tab definitions ─────────────────────────────────────────────────

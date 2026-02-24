@@ -27,7 +27,7 @@ import type { ApiError, ApiStreamEvent } from "@/lib/api/types";
 // sessionStorage is cleared on tab close, providing better security than
 // localStorage while persisting across page refreshes.
 
-const TOKEN_KEY = 'fleet-rlm:access-token';
+const TOKEN_KEY = "fleet-rlm:access-token";
 
 // Initialize from storage on module load
 let _accessToken: string | null = sessionStorage.getItem(TOKEN_KEY);
@@ -136,7 +136,9 @@ function buildUrl(
 ): string {
   // If baseUrl is empty, we must use a relative URL or window.location.origin
   // new URL(path, "") throws a TypeError.
-  const baseUrl = apiConfig.baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
+  const baseUrl =
+    apiConfig.baseUrl ||
+    (typeof window !== "undefined" ? window.location.origin : "");
 
   // If we still don't have a base URL (e.g., SSR environment with empty config),
   // we fallback to just the path, but URL parsing requires a base.

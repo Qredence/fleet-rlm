@@ -175,7 +175,13 @@ export function useTaxonomyGraphCanvas({
 
       if (isSelected || isHovered || isDragged) {
         ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius + (isDragged ? 6 : 4), 0, Math.PI * 2);
+        ctx.arc(
+          node.x,
+          node.y,
+          node.radius + (isDragged ? 6 : 4),
+          0,
+          Math.PI * 2,
+        );
         ctx.fillStyle = isDragged
           ? withAlpha(colors.accent, 0.15)
           : isSelected
@@ -196,7 +202,10 @@ export function useTaxonomyGraphCanvas({
 
       ctx.beginPath();
       ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-      ctx.fillStyle = withAlpha(domainColor, isSelected || isDragged ? 1 : 0.85);
+      ctx.fillStyle = withAlpha(
+        domainColor,
+        isSelected || isDragged ? 1 : 0.85,
+      );
       ctx.fill();
       ctx.strokeStyle = isSelected || isDragged ? colors.accent : domainColor;
       ctx.lineWidth = (isSelected || isDragged ? 2.5 : 1.5) / t.scale;
@@ -308,12 +317,20 @@ export function useTaxonomyGraphCanvas({
     [draw, prefersReduced],
   );
 
-  const hitTest = useCallback((clientX: number, clientY: number): GraphNode | null => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const { gx, gy } = clientToGraph(clientX, clientY, canvas, transformRef.current);
-    return hitTestNode(graphRef.current.nodes, gx, gy);
-  }, []);
+  const hitTest = useCallback(
+    (clientX: number, clientY: number): GraphNode | null => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const { gx, gy } = clientToGraph(
+        clientX,
+        clientY,
+        canvas,
+        transformRef.current,
+      );
+      return hitTestNode(graphRef.current.nodes, gx, gy);
+    },
+    [],
+  );
 
   const handleMouseDown = useCallback(
     (e: ReactMouseEvent<HTMLCanvasElement>) => {
@@ -371,8 +388,10 @@ export function useTaxonomyGraphCanvas({
       }
 
       if (panRef.current) {
-        const dx = (e.clientX - panRef.current.startX) / transformRef.current.scale;
-        const dy = (e.clientY - panRef.current.startY) / transformRef.current.scale;
+        const dx =
+          (e.clientX - panRef.current.startX) / transformRef.current.scale;
+        const dy =
+          (e.clientY - panRef.current.startY) / transformRef.current.scale;
         setTransform((prev) => ({
           ...prev,
           x: panRef.current!.originX + dx,
@@ -457,7 +476,10 @@ export function useTaxonomyGraphCanvas({
       ? "cursor-pointer"
       : "cursor-grab active:cursor-grabbing";
 
-  const domains = useMemo(() => [...new Set(skills.map((s) => s.domain))], [skills]);
+  const domains = useMemo(
+    () => [...new Set(skills.map((s) => s.domain))],
+    [skills],
+  );
 
   return {
     canvasRef,
@@ -479,5 +501,7 @@ export function useTaxonomyGraphCanvas({
   };
 }
 
-export type UseTaxonomyGraphCanvasResult = ReturnType<typeof useTaxonomyGraphCanvas>;
+export type UseTaxonomyGraphCanvasResult = ReturnType<
+  typeof useTaxonomyGraphCanvas
+>;
 export type { LayoutMode, GraphNode, GraphEdge };

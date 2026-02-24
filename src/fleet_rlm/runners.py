@@ -21,7 +21,6 @@ All runners automatically:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -282,68 +281,163 @@ class _nullcontext:
         return False
 
 
-def _demo_tasks_enabled() -> bool:
-    raw = os.getenv("FLEET_DEMO_TASKS_ENABLED", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+def run_long_context(
+    *,
+    docs_path: Path | str,
+    query: str,
+    mode: str = "analyze",
+    max_iterations: int = 30,
+    max_llm_calls: int = 50,
+    verbose: bool = True,
+    timeout: int = 900,
+    secret_name: str = "LITELLM",
+    volume_name: str | None = None,
+    include_trajectory: bool = True,
+    env_file: Path | None = None,
+) -> dict[str, Any]:
+    """Run a long-context analysis or summarization task.
+
+    Loads a document into the sandbox and uses injected helpers
+    (``peek``, ``grep``, ``chunk_by_size``, ``chunk_by_headers``,
+    buffers, volume persistence) to let the RLM explore it
+    programmatically.
+
+    Args:
+        docs_path: Path to the document file.
+        query: The analysis query or focus topic.
+        mode: ``"analyze"`` (default) or ``"summarize"``.
+        max_iterations: Maximum RLM iterations (default: 30).
+        max_llm_calls: Maximum LLM calls (default: 50).
+        verbose: Enable verbose output (default: True).
+        timeout: Sandbox timeout in seconds (default: 900).
+        secret_name: Modal secret name (default: "LITELLM").
+        volume_name: Optional Modal volume name for persistence.
+        include_trajectory: Include RLM trajectory metadata in output.
+        env_file: Optional path to .env file.
+
+    Returns:
+        Dictionary with results specific to the chosen mode.
+        For ``"analyze"``:
+            - findings, answer, sections_examined, doc_chars
+        For ``"summarize"``:
+            - summary, key_points, coverage_pct, doc_chars
+
+    Raises:
+        ValueError: If *mode* is not ``"analyze"`` or ``"summarize"``.
+    """
+    if mode not in ("analyze", "summarize"):
+        raise ValueError(f"mode must be 'analyze' or 'summarize', got {mode!r}")
+
+    docs = _read_docs(docs_path)
+    _require_planner_ready(env_file)
+
+    from .signatures_prod import AnalyzeLongDocument, SummarizeLongDocument
+
+    sig = AnalyzeLongDocument if mode == "analyze" else SummarizeLongDocument
+
+    with _interpreter(
+        timeout=timeout, secret_name=secret_name, volume_name=volume_name
+    ) as interpreter:
+        rlm = dspy.RLM(
+            signature=sig,
+            interpreter=interpreter,
+            max_iterations=max_iterations,
+            max_llm_calls=max_llm_calls,
+            verbose=verbose,
+        )
+
+        if mode == "analyze":
+            result = rlm(document=docs, query=query)
+            response = {
+                "findings": result.findings,
+                "answer": result.answer,
+                "sections_examined": result.sections_examined,
+                "doc_chars": len(docs),
+            }
+            response.update(
+                _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+            )
+            return response
+        else:
+            result = rlm(document=docs, focus=query)
+            response = {
+                "summary": result.summary,
+                "key_points": result.key_points,
+                "coverage_pct": result.coverage_pct,
+                "doc_chars": len(docs),
+            }
+            response.update(
+                _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+            )
+            return response
 
 
-def _require_demo_tasks_enabled(function_name: str) -> None:
-    if _demo_tasks_enabled():
-        return
-    raise RuntimeError(
-        f"{function_name} is a demo runner and is disabled by default. "
-        "Set FLEET_DEMO_TASKS_ENABLED=true to enable demo runners in local/dev use."
-    )
+def check_secret_presence(*, secret_name: str = "LITELLM") -> dict[str, bool]:
+    """Check which DSPy environment variables are present in a Modal secret.
+
+    Creates a temporary sandbox with the specified secret and checks
+    for the presence of DSPy-related environment variables.
+
+    Args:
+        secret_name: Name of the Modal secret to check (default: "LITELLM").
+
+    Returns:
+        Dictionary mapping environment variable names to boolean presence.
+        Checks: DSPY_LM_MODEL, DSPY_LM_API_BASE, DSPY_LLM_API_KEY, DSPY_LM_MAX_TOKENS.
+    """
+    import json
+    import modal
+
+    app = modal.App.lookup("dspy-rlm-secret-check", create_if_missing=True)
+    sb = modal.Sandbox.create(app=app, secrets=[modal.Secret.from_name(secret_name)])
+    try:
+        code = r"""
+import json, os
+keys = [
+  "DSPY_LM_MODEL",
+  "DSPY_LM_API_BASE",
+  "DSPY_LLM_API_KEY",
+  "DSPY_LM_MAX_TOKENS",
+]
+print(json.dumps({k: bool(os.environ.get(k)) for k in keys}))
+"""
+        proc = sb.exec("python", "-c", code, timeout=60)
+        proc.wait()
+        return json.loads(proc.stdout.read().strip())
+    finally:
+        sb.terminate()
 
 
-def _load_runners_demos():
-    # Imported lazily to avoid exposing/loading demo runners in default production paths.
-    from . import runners_demos
+def check_secret_key(
+    *, secret_name: str = "LITELLM", key: str = "DSPY_LLM_API_KEY"
+) -> dict[str, Any]:
+    """Check a specific environment variable in a Modal secret.
 
-    return runners_demos
+    Creates a temporary sandbox to verify that a specific key exists
+    in the Modal secret, without exposing the actual value.
 
+    Args:
+        secret_name: Name of the Modal secret to check (default: "LITELLM").
+        key: Environment variable name to check (default: "DSPY_LLM_API_KEY").
 
-def run_basic(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    _require_demo_tasks_enabled("run_basic")
-    return _load_runners_demos().run_basic(*args, **kwargs)
+    Returns:
+        Dictionary containing:
+            - present: Boolean indicating if the key exists and is non-empty
+            - length: Character length of the key's value (0 if not present)
+    """
+    import json
+    import modal
 
-
-def run_architecture(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    _require_demo_tasks_enabled("run_architecture")
-    return _load_runners_demos().run_architecture(*args, **kwargs)
-
-
-def run_api_endpoints(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    _require_demo_tasks_enabled("run_api_endpoints")
-    return _load_runners_demos().run_api_endpoints(*args, **kwargs)
-
-
-def run_error_patterns(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    _require_demo_tasks_enabled("run_error_patterns")
-    return _load_runners_demos().run_error_patterns(*args, **kwargs)
-
-
-def run_trajectory(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    _require_demo_tasks_enabled("run_trajectory")
-    return _load_runners_demos().run_trajectory(*args, **kwargs)
-
-
-def run_custom_tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    _require_demo_tasks_enabled("run_custom_tool")
-    return _load_runners_demos().run_custom_tool(*args, **kwargs)
-
-
-def check_secret_presence(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    # Diagnostic helper remains available in default mode.
-    return _load_runners_demos().check_secret_presence(*args, **kwargs)
-
-
-def check_secret_key(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    # Diagnostic helper remains available in default mode.
-    return _load_runners_demos().check_secret_key(*args, **kwargs)
-
-
-def run_long_context(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    # Kept available by default because this path is used by non-demo surfaces
-    # (MCP + terminal helpers) despite being implemented in runners_demos.py today.
-    return _load_runners_demos().run_long_context(*args, **kwargs)
+    app = modal.App.lookup("dspy-rlm-secret-check", create_if_missing=True)
+    sb = modal.Sandbox.create(app=app, secrets=[modal.Secret.from_name(secret_name)])
+    try:
+        code = (
+            "import json, os\n"
+            f"val=os.environ.get({key!r}, '')\n"
+            "print(json.dumps({'present': bool(val), 'length': len(val)}))\n"
+        )
+        proc = sb.exec("python", "-c", code, timeout=60)
+        proc.wait()
+        return json.loads(proc.stdout.read().strip())
+    finally:
+        sb.terminate()

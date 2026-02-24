@@ -14,10 +14,7 @@ import { isMockMode } from "@/lib/api/config";
 import { mockTaxonomy } from "@/lib/data/mock-skills";
 import { taxonomyEndpoints } from "@/lib/api/endpoints";
 import { adaptTaxonomy } from "@/lib/api/adapters";
-import {
-  getCapabilityStatus,
-  type DataSource,
-} from "@/lib/api/capabilities";
+import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
 import type { TaxonomyNode } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────

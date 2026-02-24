@@ -14,15 +14,9 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { isMockMode } from "@/lib/api/config";
-import {
-  memoryEndpoints,
-  type MemoryListParams,
-} from "@/lib/api/endpoints";
+import { memoryEndpoints, type MemoryListParams } from "@/lib/api/endpoints";
 import { adaptMemoryEntry } from "@/lib/api/adapters";
-import {
-  getCapabilityStatus,
-  type DataSource,
-} from "@/lib/api/capabilities";
+import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
 import { useMockStateStore } from "@/stores/mockStateStore";
 import type { MemoryEntry, MemoryType } from "@/lib/data/types";
 

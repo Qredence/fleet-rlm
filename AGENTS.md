@@ -299,7 +299,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 
 ## Multi-Agent Workflows
 
-- When using the teammate/RLM system: prefer using existing agents in `@.claude/agents/` rather than spawning new exploration tasks.
+- When using the teammate/RLM system: prefer using existing agents in Junie guidelines rather than spawning new exploration tasks.
 
 ## Codex Multi-Agent Delivery Workflow (v0.4.8)
 
@@ -323,7 +323,7 @@ Phase 0 for milestone `v0.4.8` introduces a **project-scoped Codex multi-agent o
 - `qa_playwright`: browser smoke/regression validation via Playwright CLI wrapper
 - `reviewer`: findings-first review before PR open (bugs/regressions/test gaps/security risks)
 - `docs_keeper`: sync docs, `AGENTS.md`, `@plan`, phase logs, and stale references/imports
-- `linear_ops`: Linear MCP operations (labels/issues/cycles/comments/status updates)
+- `linear_ops`: Linear operations (labels/issues/cycles/comments/status updates)
 
 ### Phase Execution Loop (Required)
 
@@ -367,7 +367,7 @@ Phase 0 for milestone `v0.4.8` introduces a **project-scoped Codex multi-agent o
 
 ### Network and Tool Containment (Multi-Agent)
 
-- Prefer MCP tools and local repository context over arbitrary network access
+- Prefer tools and local repository context over arbitrary network access
 - `explorer` should remain read-only
 - `qa_playwright` should stay within local app URLs unless explicitly required
 - `linear_ops` should focus on Linear mutations/reads only

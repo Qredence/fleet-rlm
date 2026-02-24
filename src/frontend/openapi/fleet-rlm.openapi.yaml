@@ -1,160 +1,643 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.4.4
+  version: 0.4.8
 paths:
   /health:
     get:
       tags:
-        - health
+      - health
       summary: Health
       operationId: health_health_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
+                $ref: '#/components/schemas/HealthResponse'
   /ready:
     get:
       tags:
-        - health
+      - health
       summary: Ready
       operationId: ready_ready_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReadyResponse"
-  /chat:
+                $ref: '#/components/schemas/ReadyResponse'
+  /api/v1/auth/login:
     post:
       tags:
-        - chat
+      - auth
+      summary: Login
+      operationId: login_api_v1_auth_login_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Login Api V1 Auth Login Post
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - auth
+      summary: Logout
+      operationId: logout_api_v1_auth_logout_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Logout Api V1 Auth Logout Post
+  /api/v1/auth/me:
+    get:
+      tags:
+      - auth
+      summary: Get Me
+      operationId: get_me_api_v1_auth_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Get Me Api V1 Auth Me Get
+  /api/v1/chat:
+    post:
+      tags:
+      - chat
       summary: Chat
-      operationId: chat_chat_post
+      operationId: chat_api_v1_chat_post
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ChatRequest"
+              $ref: '#/components/schemas/ChatRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema: {}
-        "422":
+        '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /tasks/basic:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks:
     post:
       tags:
-        - tasks
-      summary: Run Basic
-      operationId: run_basic_tasks_basic_post
+      - tasks
+      summary: Create Task
+      description: Create a new task.
+      operationId: create_task_api_v1_tasks_post
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TaskRequest"
-        required: true
+              $ref: '#/components/schemas/TaskCreate'
       responses:
-        "200":
+        '201':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TaskResponse"
-        "422":
+                $ref: '#/components/schemas/TaskResponse'
+        '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /tasks/architecture:
-    post:
-      tags:
-        - tasks
-      summary: Run Architecture
-      operationId: run_architecture_tasks_architecture_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TaskRequest"
-        required: true
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TaskResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /tasks/long-context:
-    post:
-      tags:
-        - tasks
-      summary: Run Long Context
-      operationId: run_long_context_tasks_long_context_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TaskRequest"
-        required: true
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TaskResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /tasks/check-secret:
-    post:
-      tags:
-        - tasks
-      summary: Check Secret
-      operationId: check_secret_tasks_check_secret_post
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TaskResponse"
-  /sessions/state:
+                $ref: '#/components/schemas/HTTPValidationError'
     get:
       tags:
-        - sessions
-      summary: List Session State
-      description: Return lightweight summaries of active/restored session state.
-      operationId: list_session_state_sessions_state_get
+      - tasks
+      summary: List Tasks
+      description: List all tasks.
+      operationId: list_tasks_api_v1_tasks_get
+      parameters:
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          title: Limit
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionStateResponse"
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskResponse'
+                title: Response List Tasks Api V1 Tasks Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks/{task_id}:
+    get:
+      tags:
+      - tasks
+      summary: Get Task
+      description: Get a specific task by ID.
+      operationId: get_task_api_v1_tasks__task_id__get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - tasks
+      summary: Update Task
+      description: Update a specific task.
+      operationId: update_task_api_v1_tasks__task_id__patch
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - tasks
+      summary: Delete Task
+      description: Delete a specific task.
+      operationId: delete_task_api_v1_tasks__task_id__delete
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/state:
+    get:
+      tags:
+      - sessions
+      summary: List Session State
+      description: Return lightweight summaries of active/restored in-memory session
+        state.
+      operationId: list_session_state_api_v1_sessions_state_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionStateResponse'
+  /api/v1/sessions:
+    post:
+      tags:
+      - sessions
+      summary: Create Session
+      description: Create a new session.
+      operationId: create_session_api_v1_sessions_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - sessions
+      summary: List Sessions
+      description: List all sessions.
+      operationId: list_sessions_api_v1_sessions_get
+      parameters:
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionResponse'
+                title: Response List Sessions Api V1 Sessions Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/{session_id}:
+    get:
+      tags:
+      - sessions
+      summary: Get Session
+      description: Get a specific session by ID.
+      operationId: get_session_api_v1_sessions__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - sessions
+      summary: Update Session
+      description: Update a specific session.
+      operationId: update_session_api_v1_sessions__session_id__patch
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - sessions
+      summary: Delete Session
+      description: Delete a specific session.
+      operationId: delete_session_api_v1_sessions__session_id__delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/taxonomy:
+    get:
+      tags:
+      - taxonomy
+      summary: Get Taxonomy
+      operationId: get_taxonomy_api_v1_taxonomy_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items: {}
+                type: array
+                title: Response Get Taxonomy Api V1 Taxonomy Get
+  /api/v1/taxonomy/{path}:
+    get:
+      tags:
+      - taxonomy
+      summary: Get Taxonomy By Path
+      operationId: get_taxonomy_by_path_api_v1_taxonomy__path__get
+      parameters:
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Taxonomy By Path Api V1 Taxonomy  Path  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/analytics:
+    get:
+      tags:
+      - analytics
+      summary: Get Analytics
+      operationId: get_analytics_api_v1_analytics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Get Analytics Api V1 Analytics Get
+  /api/v1/analytics/skills/{skill_id}:
+    get:
+      tags:
+      - analytics
+      summary: Get Skill Analytics
+      operationId: get_skill_analytics_api_v1_analytics_skills__skill_id__get
+      parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Skill Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Skill Analytics Api V1 Analytics Skills  Skill
+                  Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/search:
+    get:
+      tags:
+      - search
+      summary: Search
+      operationId: search_api_v1_search_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Search Api V1 Search Get
+  /api/v1/memory:
+    get:
+      tags:
+      - memory
+      summary: List Memory
+      operationId: list_memory_api_v1_memory_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response List Memory Api V1 Memory Get
+    post:
+      tags:
+      - memory
+      summary: Create Memory Item
+      operationId: create_memory_item_api_v1_memory_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Create Memory Item Api V1 Memory Post
+  /api/v1/runtime/settings:
+    get:
+      tags:
+      - runtime
+      summary: Get Runtime Settings
+      operationId: get_runtime_settings_api_v1_runtime_settings_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSettingsSnapshot'
+    patch:
+      tags:
+      - runtime
+      summary: Patch Runtime Settings
+      operationId: patch_runtime_settings_api_v1_runtime_settings_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeSettingsUpdateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSettingsUpdateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/tests/modal:
+    post:
+      tags:
+      - runtime
+      summary: Test Modal Connection
+      operationId: test_modal_connection_api_v1_runtime_tests_modal_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+  /api/v1/runtime/tests/lm:
+    post:
+      tags:
+      - runtime
+      summary: Test Lm Connection
+      operationId: test_lm_connection_api_v1_runtime_tests_lm_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+  /api/v1/runtime/status:
+    get:
+      tags:
+      - runtime
+      summary: Get Runtime Status
+      operationId: get_runtime_status_api_v1_runtime_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStatusResponse'
+  /api/v1/sandbox:
+    get:
+      tags:
+      - sandbox
+      summary: Get Sandbox
+      operationId: get_sandbox_api_v1_sandbox_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Get Sandbox Api V1 Sandbox Get
+  /api/v1/sandbox/file:
+    get:
+      tags:
+      - sandbox
+      summary: Get Sandbox File
+      operationId: get_sandbox_file_api_v1_sandbox_file_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Get Sandbox File Api V1 Sandbox File Get
 components:
   schemas:
     ChatRequest:
@@ -164,8 +647,8 @@ components:
           title: Message
         docs_path:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Docs Path
         trace:
           type: boolean
@@ -173,13 +656,13 @@ components:
           default: false
       type: object
       required:
-        - message
+      - message
       title: ChatRequest
     HTTPValidationError:
       properties:
         detail:
           items:
-            $ref: "#/components/schemas/ValidationError"
+            $ref: '#/components/schemas/ValidationError'
           type: array
           title: Detail
       type: object
@@ -193,7 +676,7 @@ components:
         version:
           type: string
           title: Version
-          default: 0.4.4
+          default: 0.4.8
       type: object
       title: HealthResponse
     ReadyResponse:
@@ -204,11 +687,208 @@ components:
         planner_configured:
           type: boolean
           title: Planner Configured
+        planner:
+          type: string
+          enum:
+          - ready
+          - missing
+          title: Planner
+        database:
+          type: string
+          enum:
+          - ready
+          - missing
+          - disabled
+          - degraded
+          title: Database
+        database_required:
+          type: boolean
+          title: Database Required
+        sandbox_provider:
+          type: string
+          title: Sandbox Provider
       type: object
       required:
-        - ready
-        - planner_configured
+      - ready
+      - planner_configured
+      - planner
+      - database
+      - database_required
+      - sandbox_provider
       title: ReadyResponse
+    RuntimeConnectivityTestResponse:
+      properties:
+        kind:
+          type: string
+          enum:
+          - modal
+          - lm
+          title: Kind
+        ok:
+          type: boolean
+          title: Ok
+        preflight_ok:
+          type: boolean
+          title: Preflight Ok
+        checked_at:
+          type: string
+          title: Checked At
+        checks:
+          additionalProperties: true
+          type: object
+          title: Checks
+        guidance:
+          items:
+            type: string
+          type: array
+          title: Guidance
+        latency_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Latency Ms
+        output_preview:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Output Preview
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      type: object
+      required:
+      - kind
+      - ok
+      - preflight_ok
+      - checked_at
+      title: RuntimeConnectivityTestResponse
+    RuntimeSettingsSnapshot:
+      properties:
+        env_path:
+          type: string
+          title: Env Path
+        keys:
+          items:
+            type: string
+          type: array
+          title: Keys
+        values:
+          additionalProperties:
+            type: string
+          type: object
+          title: Values
+        masked_values:
+          additionalProperties:
+            type: string
+          type: object
+          title: Masked Values
+      type: object
+      required:
+      - env_path
+      title: RuntimeSettingsSnapshot
+    RuntimeSettingsUpdateRequest:
+      properties:
+        updates:
+          additionalProperties: true
+          type: object
+          title: Updates
+      type: object
+      title: RuntimeSettingsUpdateRequest
+    RuntimeSettingsUpdateResponse:
+      properties:
+        updated:
+          items:
+            type: string
+          type: array
+          title: Updated
+        env_path:
+          type: string
+          title: Env Path
+      type: object
+      required:
+      - env_path
+      title: RuntimeSettingsUpdateResponse
+    RuntimeStatusResponse:
+      properties:
+        app_env:
+          type: string
+          title: App Env
+        write_enabled:
+          type: boolean
+          title: Write Enabled
+        ready:
+          type: boolean
+          title: Ready
+        llm:
+          additionalProperties: true
+          type: object
+          title: Llm
+        modal:
+          additionalProperties: true
+          type: object
+          title: Modal
+        tests:
+          $ref: '#/components/schemas/RuntimeTestCache'
+        guidance:
+          items:
+            type: string
+          type: array
+          title: Guidance
+      type: object
+      required:
+      - app_env
+      - write_enabled
+      - ready
+      - tests
+      title: RuntimeStatusResponse
+    RuntimeTestCache:
+      properties:
+        modal:
+          anyOf:
+          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+          - type: 'null'
+        lm:
+          anyOf:
+          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+          - type: 'null'
+      type: object
+      title: RuntimeTestCache
+    SessionCreate:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+          default: New Session
+      type: object
+      title: SessionCreate
+      description: Schema for creating a new Session.
+    SessionResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        title:
+          type: string
+          title: Title
+        status:
+          type: string
+          title: Status
+        createdAt:
+          type: string
+          format: date-time
+          title: Createdat
+      type: object
+      required:
+      - id
+      - title
+      - status
+      - createdAt
+      title: SessionResponse
+      description: Schema for returning a Session to the frontend.
     SessionStateResponse:
       properties:
         ok:
@@ -217,7 +897,7 @@ components:
           default: true
         sessions:
           items:
-            $ref: "#/components/schemas/SessionStateSummary"
+            $ref: '#/components/schemas/SessionStateSummary'
           type: array
           title: Sessions
       type: object
@@ -235,8 +915,8 @@ components:
           title: User Id
         session_id:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Session Id
         history_turns:
           type: integer
@@ -260,89 +940,107 @@ components:
           default: 0
         updated_at:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Updated At
       type: object
       required:
-        - key
-        - workspace_id
-        - user_id
+      - key
+      - workspace_id
+      - user_id
       title: SessionStateSummary
-    TaskRequest:
+    SessionUpdate:
       properties:
-        task_type:
-          type: string
-          enum:
-            - basic
-            - architecture
-            - api_endpoints
-            - error_patterns
-            - long_context
-            - summarize
-            - custom_tool
-          title: Task Type
-        question:
-          type: string
-          title: Question
-          default: ""
-        docs_path:
+        title:
           anyOf:
-            - type: string
-            - type: "null"
-          title: Docs Path
-        query:
+          - type: string
+          - type: 'null'
+          title: Title
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      type: object
+      title: SessionUpdate
+      description: Schema for updating an existing Session.
+    TaskCreate:
+      properties:
+        objective:
           type: string
-          title: Query
-          default: ""
-        max_iterations:
-          type: integer
-          title: Max Iterations
-          default: 15
-        max_llm_calls:
-          type: integer
-          title: Max Llm Calls
-          default: 30
-        timeout:
-          type: integer
-          title: Timeout
-          default: 600
-        chars:
-          type: integer
-          title: Chars
-          default: 10000
-        verbose:
-          type: boolean
-          title: Verbose
-          default: true
+          title: Objective
+        sessionId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionid
       type: object
       required:
-        - task_type
-      title: TaskRequest
+      - objective
+      title: TaskCreate
+      description: Schema for creating a new Task.
     TaskResponse:
       properties:
-        ok:
-          type: boolean
-          title: Ok
-          default: true
-        result:
-          additionalProperties: true
-          type: object
-          title: Result
-        error:
+        id:
+          type: string
+          title: Id
+        sessionId:
           anyOf:
-            - type: string
-            - type: "null"
-          title: Error
+          - type: string
+          - type: 'null'
+          title: Sessionid
+        objective:
+          type: string
+          title: Objective
+        status:
+          type: string
+          title: Status
+        result:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Result
+        createdAt:
+          type: string
+          format: date-time
+          title: Createdat
+        updatedAt:
+          type: string
+          format: date-time
+          title: Updatedat
       type: object
+      required:
+      - id
+      - sessionId
+      - objective
+      - status
+      - result
+      - createdAt
+      - updatedAt
       title: TaskResponse
+      description: Schema for returning a Task to the frontend.
+    TaskUpdate:
+      properties:
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+        result:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Result
+      type: object
+      title: TaskUpdate
+      description: Schema for updating an existing Task.
     ValidationError:
       properties:
         loc:
           items:
             anyOf:
-              - type: string
-              - type: integer
+            - type: string
+            - type: integer
           type: array
           title: Location
         msg:
@@ -358,7 +1056,7 @@ components:
           title: Context
       type: object
       required:
-        - loc
-        - msg
-        - type
+      - loc
+      - msg
+      - type
       title: ValidationError

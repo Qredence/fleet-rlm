@@ -80,7 +80,9 @@ describe("api capabilities probing", () => {
     });
 
     expect(next.dataSource).toBe("fallback");
-    expect(next.degradedReason).toContain("memory data is using local mock fallback");
+    expect(next.degradedReason).toContain(
+      "memory data is using local mock fallback",
+    );
     expect(next.degradedReason).toContain("responded with 404");
   });
 
@@ -93,7 +95,9 @@ describe("api capabilities probing", () => {
     });
 
     expect(next.dataSource).toBe("fallback");
-    expect(next.degradedReason).toContain("taxonomy data is using local mock fallback");
+    expect(next.degradedReason).toContain(
+      "taxonomy data is using local mock fallback",
+    );
     expect(next.degradedReason).toContain("/api/v1/taxonomy is unavailable");
   });
 

@@ -233,7 +233,10 @@ export function FsItem({
           <Folder className="w-4 h-4 text-muted-foreground" />
         )}
 
-        <span className="flex-1 text-left min-w-0 truncate text-foreground" style={isVolume ? typo.label : typo.caption}>
+        <span
+          className="flex-1 text-left min-w-0 truncate text-foreground"
+          style={isVolume ? typo.label : typo.caption}
+        >
           {isVolume ? `/sandbox/${node.name}` : node.name}
         </span>
 

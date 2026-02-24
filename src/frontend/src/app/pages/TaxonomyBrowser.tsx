@@ -24,7 +24,10 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/components/ui/utils";
-import { FsItem, TaxonomyItem } from "@/features/taxonomy/TaxonomyBrowserSections";
+import {
+  FsItem,
+  TaxonomyItem,
+} from "@/features/taxonomy/TaxonomyBrowserSections";
 import {
   collectExpandableIds,
   collectTaxonomyIds,

@@ -29,7 +29,6 @@ from omegaconf import OmegaConf
 
 from .cli_commands.init_cmd import register_init_command
 from .cli_commands.serve_cmds import register_serve_commands
-from .cli_demos import register_demo_commands
 from .config import AppConfig
 from .terminal_chat import TerminalChatOptions, run_terminal_chat
 
@@ -74,7 +73,6 @@ def _handle_error(exc: Exception) -> None:
 
 
 # --- Register extracted commands ---
-register_demo_commands(app, _print_result=_print_result, _handle_error=_handle_error)
 register_init_command(app, _handle_error=_handle_error)
 register_serve_commands(app, get_config=lambda: _CONFIG, _handle_error=_handle_error)
 

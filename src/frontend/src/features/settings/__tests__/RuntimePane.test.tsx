@@ -54,10 +54,17 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
     },
     saveSettings: { isPending: false, mutate: vi.fn() },
     testModalConnection: { isPending: false, mutate: vi.fn() },
-    testLmConnection: { isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() },
+    testLmConnection: {
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    },
     testAllConnections: vi.fn(),
   }),
-  computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
+  computeRuntimeUpdates: (
+    current: Record<string, string>,
+    baseline: Record<string, string>,
+  ) => {
     const updates: Record<string, string> = {};
     for (const key of Object.keys(current)) {
       if ((current[key] ?? "") !== (baseline[key] ?? "")) {
