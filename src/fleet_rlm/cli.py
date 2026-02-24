@@ -1,6 +1,6 @@
 """Command-line interface for DSPy RLM with Modal.
 
-This module provides a Typer-based CLI for running RLM demonstrations
+This module provides a Typer-based CLI for running RLM workflows
 and diagnostics. Commands are organized by use case:
 
 Core commands:
@@ -8,9 +8,6 @@ Core commands:
     - serve-api: Optional FastAPI server surface
     - serve-mcp: Optional FastMCP server surface
     - init: Bootstrap Claude Code scaffold assets
-
-Demo commands (registered from cli_demos):
-    - run-basic, run-architecture, run-api-endpoints, etc.
 
 Usage:
     # Use Hydra syntax for configuration overrides

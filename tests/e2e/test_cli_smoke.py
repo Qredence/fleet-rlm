@@ -37,41 +37,8 @@ def _normalized_help_text(text: str) -> str:
 def test_cli_help_lists_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "run-basic" in result.stdout
-    assert "run-architecture" in result.stdout
-    assert "check-secret" in result.stdout
-
-
-def test_cli_bad_docs_path_returns_error(monkeypatch):
-    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "true")
-    result = runner.invoke(
-        app,
-        [
-            "run-architecture",
-            "--docs-path",
-            "missing-docs.txt",
-            "--query",
-            "extract modules",
-        ],
-    )
-    assert result.exit_code == 1
-    assert (
-        "Docs path does not exist" in result.stdout
-        or "Docs path does not exist" in result.stderr
-    )
-
-
-def test_cli_requires_docs_path_for_architecture():
-    result = runner.invoke(
-        app,
-        [
-            "run-architecture",
-            "--query",
-            "extract modules",
-        ],
-    )
-    assert result.exit_code == 2
-    assert "docs-path" in result.stdout or "docs-path" in result.stderr
+    assert "chat" in result.stdout
+    assert "init" in result.stdout
 
 
 def test_init_list_shows_all_categories():

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm import runners
-from fleet_rlm import runners_demos
 
 
 class _FakeInterpreter:
@@ -27,13 +26,6 @@ def _fake_rlm_factory():
             self.kwargs = kwargs
 
         def __call__(self, **call_kwargs):
-            # route by input args used by each runner wrapper
-            if "question" in call_kwargs:
-                return SimpleNamespace(
-                    answer="42",
-                    trajectory=[{"reasoning": "calc", "code": "print(42)"}],
-                    final_reasoning="done",
-                )
             if "document" in call_kwargs and "query" in call_kwargs:
                 return SimpleNamespace(
                     findings=["f1"],
@@ -49,23 +41,6 @@ def _fake_rlm_factory():
                     coverage_pct=88,
                     trajectory=[{"reasoning": "summarize"}],
                 )
-            if "docs" in call_kwargs and "query" in call_kwargs:
-                return SimpleNamespace(
-                    modules=["m1"],
-                    optimizers=["o1"],
-                    design_principles="dp",
-                    trajectory=[{"reasoning": "arch"}],
-                )
-            if "docs" in call_kwargs:
-                return SimpleNamespace(
-                    api_endpoints=["/x"],
-                    error_categories={"E": "fix"},
-                    total_errors_found=1,
-                    headers=["h"],
-                    code_blocks=["c"],
-                    structure_summary="ok",
-                    trajectory=[{"reasoning": "docs"}],
-                )
             raise AssertionError(f"Unexpected call kwargs: {call_kwargs}")
 
     return _FakeRLM
@@ -73,23 +48,15 @@ def _fake_rlm_factory():
 
 @pytest.fixture(autouse=True)
 def _patch_runners(monkeypatch):
-    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "true")
-    # Patch both runners (re-export hub) and runners_demos (where fns live)
-    for mod in (runners, runners_demos):
-        monkeypatch.setattr(mod, "_require_planner_ready", lambda env_file=None: None)
-        monkeypatch.setattr(mod, "_read_docs", lambda path: "doc text\nline2")
-        monkeypatch.setattr(mod, "_interpreter", lambda **kwargs: _FakeInterpreter())
-    monkeypatch.setattr(runners_demos.dspy, "RLM", _fake_rlm_factory())
+    monkeypatch.setattr(runners, "_require_planner_ready", lambda env_file=None: None)
+    monkeypatch.setattr(runners, "_read_docs", lambda path: "doc text\nline2")
+    monkeypatch.setattr(runners, "_interpreter", lambda **kwargs: _FakeInterpreter())
+    monkeypatch.setattr(runners.dspy, "RLM", _fake_rlm_factory())
 
 
 @pytest.mark.parametrize(
     ("fn_name", "kwargs"),
     [
-        ("run_basic", {"question": "q"}),
-        ("run_architecture", {"docs_path": "x.txt", "query": "q"}),
-        ("run_api_endpoints", {"docs_path": "x.txt"}),
-        ("run_error_patterns", {"docs_path": "x.txt"}),
-        ("run_custom_tool", {"docs_path": "x.txt"}),
         ("run_long_context", {"docs_path": "x.txt", "query": "q", "mode": "analyze"}),
         ("run_long_context", {"docs_path": "x.txt", "query": "q", "mode": "summarize"}),
     ],
@@ -105,14 +72,6 @@ def test_runners_include_trajectory_by_default(fn_name, kwargs):
 @pytest.mark.parametrize(
     ("fn_name", "kwargs"),
     [
-        ("run_basic", {"question": "q", "include_trajectory": False}),
-        (
-            "run_architecture",
-            {"docs_path": "x.txt", "query": "q", "include_trajectory": False},
-        ),
-        ("run_api_endpoints", {"docs_path": "x.txt", "include_trajectory": False}),
-        ("run_error_patterns", {"docs_path": "x.txt", "include_trajectory": False}),
-        ("run_custom_tool", {"docs_path": "x.txt", "include_trajectory": False}),
         (
             "run_long_context",
             {
@@ -139,20 +98,3 @@ def test_runners_can_suppress_trajectory(fn_name, kwargs):
     assert "trajectory_steps" not in result
     assert "trajectory" not in result
     assert "final_reasoning" not in result
-
-
-def test_runner_includes_final_reasoning_when_available():
-    result = runners.run_basic(question="q")
-    assert result["final_reasoning"] == "done"
-
-
-def test_demo_runner_disabled_by_default(monkeypatch):
-    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "false")
-    with pytest.raises(RuntimeError, match="demo runner"):
-        runners.run_basic(question="q")
-
-
-def test_long_context_remains_available_without_demo_flag(monkeypatch):
-    monkeypatch.setenv("FLEET_DEMO_TASKS_ENABLED", "false")
-    result = runners.run_long_context(docs_path="x.txt", query="q", mode="analyze")
-    assert "trajectory" in result

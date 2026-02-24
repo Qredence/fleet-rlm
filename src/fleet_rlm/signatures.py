@@ -1,16 +1,9 @@
-"""Compatibility re-export module for DSPy signatures.
+"""Re-export module for DSPy signatures.
 
-Canonical signatures are split into production/runtime (`signatures_prod`) and
-demo/example (`signatures_demo`) modules. This file remains as a compatibility
-shim to avoid breaking imports while call sites migrate incrementally.
+Production/runtime signatures live in ``signatures_prod``. This file
+re-exports them for convenience so callers can ``from .signatures import …``.
 """
 
-from .signatures_demo import (
-    ExtractAPIEndpoints,
-    ExtractArchitecture,
-    ExtractWithCustomTool,
-    FindErrorPatterns,
-)
 from .signatures_prod import (
     AnalyzeLongDocument,
     ClarificationQuestionSignature,
@@ -27,10 +20,6 @@ from .signatures_prod import (
 )
 
 __all__ = [
-    "ExtractArchitecture",
-    "ExtractAPIEndpoints",
-    "FindErrorPatterns",
-    "ExtractWithCustomTool",
     "AnalyzeLongDocument",
     "SummarizeLongDocument",
     "ExtractFromLogs",

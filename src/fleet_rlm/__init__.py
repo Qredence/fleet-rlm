@@ -15,10 +15,10 @@ Key components:
 
 Example:
     >>> from fleet_rlm import configure_planner_from_env, sandbox_driver
-    >>> from fleet_rlm import ModalInterpreter, ExtractArchitecture
+    >>> from fleet_rlm import ModalInterpreter, AnalyzeLongDocument
     >>> configure_planner_from_env()
     >>> interpreter = ModalInterpreter()
-    >>> rlm = dspy.RLM(signature=ExtractArchitecture, interpreter=interpreter)
+    >>> rlm = dspy.RLM(signature=AnalyzeLongDocument, interpreter=interpreter)
 """
 
 __version__ = "0.4.8"
@@ -69,11 +69,7 @@ from .signatures import (
     CodeChangePlan,
     ClarificationQuestionSignature,
     CoreMemoryUpdateProposal,
-    ExtractAPIEndpoints,
-    ExtractArchitecture,
     ExtractFromLogs,
-    ExtractWithCustomTool,
-    FindErrorPatterns,
     GroundedAnswerWithCitations,
     IncidentTriageFromLogs,
     MemoryActionIntentSignature,
@@ -102,10 +98,6 @@ __all__ = [
     "StatefulSandboxManager",
     "ExecutionRecord",
     "SandboxResult",
-    "ExtractArchitecture",
-    "ExtractAPIEndpoints",
-    "FindErrorPatterns",
-    "ExtractWithCustomTool",
     "AnalyzeLongDocument",
     "SummarizeLongDocument",
     "ExtractFromLogs",
