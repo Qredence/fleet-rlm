@@ -4,6 +4,55 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.4.8] - 2026-02-24
+
+### Highlights (User Impact)
+
+- Completed milestone `v0.4.8` end-to-end across Phase 0-4: foundation hardening, DB/schema enablers, Canvas UX delivery, telemetry propagation, and live integration validation.
+- Upgraded the browser chat and artifact surfaces with AI Elements rendering, typed timeline/preview summaries, and richer graph diagnostics.
+- Shipped runtime/privacy stabilization: simplified settings, LM runtime wiring, anonymous telemetry defaults, and UI-to-backend telemetry preference enforcement.
+
+### Added
+
+- **Change:** Added Codex multi-agent delivery bootstrap and phase runbook system for milestone execution (`QRE-321`).
+  **Outcome:** Repeatable, documented phase-by-phase delivery workflow with stronger execution hygiene.
+- **Change:** Added deterministic RLM mock trajectory assessment coverage and live integration validation harness/test (`QRE-300`, `QRE-301`).
+  **Outcome:** Both fast deterministic regression confidence and credential-gated end-to-end tracing validation are now available.
+- **Change:** Added RLM/DSPy + Modal infrastructure persistence schema (`QRE-312`, `QRE-313`) and Neon optimization pass (`QRE-314`).
+  **Outcome:** Better trace/program persistence and improved Postgres performance characteristics for Neon deployments.
+- **Change:** Added Canvas graph/timeline/preview feature set: tool badges, REPL code preview, failed-node error details, trajectory TAO chain view, edge elapsed labels, typed timeline summaries, typed final-output rendering (`QRE-302`, `QRE-304`, `QRE-305`, `QRE-306`, `QRE-307`, `QRE-309`, `QRE-310`).
+  **Outcome:** Artifact analysis is substantially more readable and actionable in the UI.
+- **Change:** Added AI Elements chat QA + renderer hardening artifacts, including deterministic `/__dev/chat-elements` route and renderer coverage (`QRE-322`).
+  **Outcome:** Stable visual QA path and stronger regression protection for chat rendering behavior.
+
+### Changed
+
+- **Change:** Refactored backend architecture boundaries and runtime/demo separation (`QRE-296`, `QRE-297`, `QRE-298`, `QRE-299`).
+  **Outcome:** Cleaner dependency boundaries, reduced demo leakage risk, and simpler router organization.
+- **Change:** Simplified settings surface to only functional settings and wired LM integration fields to runtime APIs (`QRE-318`, `QRE-319`).
+  **Outcome:** More trustworthy settings UX with real runtime-backed behavior.
+- **Change:** Standardized telemetry defaults and instrumentation behavior for anonymous-first operation (`QRE-316`, `QRE-317`).
+  **Outcome:** Safer telemetry posture with reduced PII risk.
+
+### Fixed
+
+- **Change:** Fixed reasoning/thinking stream formatting and chunk coalescing issues in AI Elements chat rendering (`QRE-322`).
+  **Outcome:** Reasoning panels render coherent content instead of fragmented one-word lines.
+- **Change:** Implemented end-to-end telemetry preference propagation from UI toggle to backend AI analytics callback (`QRE-320`).
+  **Outcome:** Disabling telemetry in UI now suppresses backend AI analytics emission for that session flow.
+
+### Merged Pull Requests
+
+- [#74](https://github.com/Qredence/fleet-rlm/pull/74): v0.4.8 Phase 0 bootstrap (`QRE-321`).
+- [#75](https://github.com/Qredence/fleet-rlm/pull/75): v0.4.8 Phase 1 foundation (`QRE-296`, `QRE-297`, `QRE-299`, `QRE-300`, `QRE-311`, `QRE-316`, `QRE-318`).
+- [#76](https://github.com/Qredence/fleet-rlm/pull/76): v0.4.8 Phase 2 feature enablers (`QRE-298`, `QRE-302`, `QRE-312`, `QRE-313`, `QRE-317`, `QRE-319`).
+- [#77](https://github.com/Qredence/fleet-rlm/pull/77): v0.4.8 Phase 3 feature delivery (`QRE-304`, `QRE-305`, `QRE-306`, `QRE-307`, `QRE-309`, `QRE-310`, `QRE-314`, `QRE-320`).
+- [#78](https://github.com/Qredence/fleet-rlm/pull/78): v0.4.8 Phase 4 integration validation (`QRE-301`) and chat QA follow-up integration (`QRE-322`).
+
+### Implemented Milestone Issues
+
+`QRE-296`, `QRE-297`, `QRE-298`, `QRE-299`, `QRE-300`, `QRE-301`, `QRE-302`, `QRE-304`, `QRE-305`, `QRE-306`, `QRE-307`, `QRE-309`, `QRE-310`, `QRE-311`, `QRE-312`, `QRE-313`, `QRE-314`, `QRE-316`, `QRE-317`, `QRE-318`, `QRE-319`, `QRE-320`, `QRE-321`, `QRE-322`.
+
 ## [0.4.7] - 2026-02-22
 
 ### Highlights (User Impact)
