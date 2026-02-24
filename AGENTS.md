@@ -129,6 +129,20 @@ uv run python scripts/test_modal_connection.py
 uv run python scripts/validate_agents.py
 ```
 
+### QRE-301 Live E2E Tracing Validation
+
+```bash
+# from repo root
+# start server in another terminal
+uv run fleet-rlm serve-api --port 8000
+
+# run live websocket + persistence validation harness
+uv run python scripts/validate_rlm_e2e_trace.py
+
+# optional env-gated integration test path
+QRE301_LIVE=1 uv run pytest -q tests/integration/test_qre301_live_trace.py
+```
+
 ### Frontend Build + Package Sync Workflow
 
 ```bash
@@ -235,6 +249,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
 - Runtime settings endpoints are served from `/api/v1/runtime/*`; writes (`PATCH /api/v1/runtime/settings`) are local-only (`APP_ENV=local`) while read/test endpoints remain available across environments
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
+- `load_document` / `docs_path` also support public `http(s)` URLs (including best-effort GitHub Gist page URL -> raw URL rewrite); `fetch_web_document` is a thin explicit alias for agent tool discoverability. Local/private-network URL targets are blocked by default for safety unless explicitly enabled via URL document fetch env overrides
 - Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, etc.); the legacy skills taxonomy tables were removed in v0.4.8 schema cleanup (`QRE-311`)
 - Tenant isolation uses Postgres RLS with transaction-local tenant context via `set_config('app.tenant_id', ..., true)` in repository methods
 - Runtime guardrails are controlled by `APP_ENV` (`local|staging|production`) plus config toggles (`DATABASE_REQUIRED`, `ALLOW_DEBUG_AUTH`, `ALLOW_QUERY_AUTH_TOKENS`, `CORS_ALLOWED_ORIGINS`); non-local environments should run with strict auth and Neon persistence enabled

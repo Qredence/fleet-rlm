@@ -381,15 +381,65 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
             prefix_len=self.stdout_summary_prefix_len,
         )
 
+    def _drain_or_flush_stdin(self) -> None:
+        """Flush sandbox stdin, preferring Modal's async drain when available.
+
+        ``aexecute()`` dispatches ``execute()`` to a worker thread via
+        ``asyncio.to_thread(...)``. In that thread there is no running event loop,
+        so bridging to Modal's async stream API with ``asyncio.run(...)`` is safe
+        and avoids Modal's AsyncUsageWarning for blocking ``drain()`` calls.
+        """
+        if self._stdin is None:
+            raise CodeInterpreterError("Sandbox input stream is not initialized")
+
+        def _drain_or_flush_impl() -> None:
+            drain = getattr(self._stdin, "drain", None)
+            if callable(drain):
+                drain_aio = getattr(drain, "aio", None)
+                if callable(drain_aio):
+                    asyncio.run(drain_aio())
+                    return
+                drain()
+                return
+
+            flush = getattr(self._stdin, "flush", None)
+            if callable(flush):
+                flush()
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            _drain_or_flush_impl()
+            return
+
+        # If execute() is invoked from a thread that already owns a running
+        # event loop, avoid touching Modal's blocking ``drain`` interface on
+        # that thread. Run the resolution + drain/flush in a helper thread.
+        thread_exc: Exception | None = None
+
+        def _run_async_drain() -> None:
+            nonlocal thread_exc
+            try:
+                _drain_or_flush_impl()
+            except Exception as exc:  # pragma: no cover - exercised via caller
+                thread_exc = exc
+
+        drain_thread = threading.Thread(
+            target=_run_async_drain,
+            name="modal-stdin-drain",
+            daemon=True,
+        )
+        drain_thread.start()
+        drain_thread.join()
+        if thread_exc is not None:
+            raise thread_exc
+
     def _write_line(self, payload: dict[str, Any]) -> None:
         """Write a JSON payload to the sandbox stdin."""
         if self._stdin is None:
             raise CodeInterpreterError("Sandbox input stream is not initialized")
         self._stdin.write(json.dumps(payload) + "\n")
-        if hasattr(self._stdin, "drain"):
-            self._stdin.drain()
-        elif hasattr(self._stdin, "flush"):
-            self._stdin.flush()
+        self._drain_or_flush_stdin()
 
     @staticmethod
     def _is_recoverable_exec_channel_error(exc: Exception) -> bool:

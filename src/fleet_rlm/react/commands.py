@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
     "load_document": ("load_document", ["path"], ["alias"]),
+    "fetch_web_document": ("fetch_web_document", ["url"], ["alias"]),
     "set_active_document": ("set_active_document", ["alias"], []),
     "list_documents": ("list_documents", [], []),
     "list_files": ("list_files", [], ["path", "pattern"]),
@@ -125,6 +126,8 @@ _BLOCKING_COMMANDS = frozenset(
         "propose_memory_update",
         "parallel_semantic_map",
         "chunk_sandbox",
+        "load_document",
+        "fetch_web_document",
         "save_buffer",
         "load_volume",
         "process_document",

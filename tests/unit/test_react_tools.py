@@ -185,6 +185,66 @@ def test_load_document_pdf_includes_extraction_metadata(monkeypatch, tmp_path):
     assert result["pages_with_text"] == 2
 
 
+def test_load_document_url_includes_fetch_metadata(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr(
+        "fleet_rlm.react.document_tools.fetch_url_document_content",
+        lambda url, *, read_document_content: (
+            "Fetched web content",
+            {
+                "source_kind": "url",
+                "source_url": url,
+                "final_url": url,
+                "http_status": 200,
+                "content_type": "text/plain",
+                "fetched_bytes": 18,
+                "fetch_method": "httpx",
+            },
+        ),
+    )
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.load_document("https://example.com/test.txt", alias="web")
+
+    assert result["status"] == "ok"
+    assert result["alias"] == "web"
+    assert result["path"] == "https://example.com/test.txt"
+    assert result["source_kind"] == "url"
+    assert result["http_status"] == 200
+    assert result["fetch_method"] == "httpx"
+
+
+def test_fetch_web_document_alias_uses_same_url_loader(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr(
+        "fleet_rlm.react.document_tools.fetch_url_document_content",
+        lambda url, *, read_document_content: (
+            "Fetched alias content",
+            {
+                "source_kind": "url",
+                "source_url": url,
+                "final_url": url,
+                "http_status": 200,
+                "content_type": "text/plain",
+                "fetched_bytes": 20,
+                "fetch_method": "httpx",
+            },
+        ),
+    )
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.fetch_web_document("https://example.com/alias.txt", alias="web")
+
+    assert result["status"] == "ok"
+    assert result["alias"] == "web"
+    assert result["path"] == "https://example.com/alias.txt"
+    assert result["source_kind"] == "url"
+    assert result["source_url"] == "https://example.com/alias.txt"
+    assert result["fetch_method"] == "httpx"
+
+
 def test_pdf_extraction_falls_back_to_pypdf_when_markitdown_fails(
     monkeypatch, tmp_path
 ):
@@ -401,6 +461,7 @@ def test_new_tools_in_tool_registry(monkeypatch):
     ]
 
     assert "list_files" in tool_names
+    assert "fetch_web_document" in tool_names
     assert "read_file_slice" in tool_names
     assert "find_files" in tool_names
     assert "grounded_answer" in tool_names

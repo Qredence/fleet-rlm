@@ -34,8 +34,8 @@ This directory is now also the **operational tracker** for milestone execution (
 | Phase 0 | `phase-0` | Merged | `QRE-321` | Codex multi-agent bootstrap, runbooks, docs, Playwright smoke baseline ([PR #74](https://github.com/Qredence/fleet-rlm/pull/74)) |
 | Phase 1 | `phase-1` | Merged | existing milestone tickets | Foundation tickets merged via `codex/v0-4-8-phase-1-foundation` ([PR #75](https://github.com/Qredence/fleet-rlm/pull/75), merge `844fb9d0b274735864df4303318ee69d25467ad7`) |
 | Phase 2 | `phase-2` | Merged | existing milestone tickets | Feature enablers merged via [PR #76](https://github.com/Qredence/fleet-rlm/pull/76) (merge `9fc9ff34b6a70dfddd3d18b4885192820f4c0547`; see `phase-logs/phase-02-feature-enablers-outcome.md`) |
-| Phase 3 | `phase-3` | Planned | existing milestone tickets | Feature delivery (branch created: `codex/v0-4-8-phase-3-feature-delivery`) |
-| Phase 4 | `phase-4` | Planned | existing milestone tickets | Integration validation |
+| Phase 3 | `phase-3` | Merged | existing milestone tickets | Feature delivery merged via [PR #77](https://github.com/Qredence/fleet-rlm/pull/77) (merge `8c247dbfd28a76962ae89ca670e59d96352eb77d`; see `phase-logs/phase-03-feature-delivery-outcome.md`) |
+| Phase 4 | `phase-4` | In Progress | `QRE-301` | Integration validation on branch `codex/v0-4-8-phase-4-integration-validation` (live harness + env-gated test + evidence bundle) |
 
 ### Codex Multi-Agent Operating Layer (Phase 0 Bootstrap)
 

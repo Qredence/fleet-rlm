@@ -23,7 +23,7 @@ venv/
 .env.*
 !.env.example
 !.env.sample
-
+@plan/
 # Jupyter
 .ipynb_checkpoints/
 
@@ -61,7 +61,7 @@ notebooks/dspy-rlm-end-to-end-use-case.ipynb
 .junie/memory/memory.version
 .junie/memory/tasks.md
 .junie/.onboarding_migrated
-
+.idea/
 # Local plan files
 plans/alignment_analysis.md
 plans/architecture.md

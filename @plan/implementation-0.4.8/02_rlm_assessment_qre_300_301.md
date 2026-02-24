@@ -152,3 +152,66 @@ No explicit `blockedBy` / `blocks` relations are defined in Linear for this grou
 - [ ] Credential/network flakiness risks are explicitly documented for `QRE-301`.
 - [ ] Cross-track handoff expectations (DB schema, telemetry, WS events) are captured.
 - [ ] Parallelization guidance prevents ambiguous E2E validation during active backend churn.
+
+## Phase 4 Operational Runbook (QRE-301)
+
+### Objective
+
+Provide a repeatable live validation path that proves the integrated long-document
+RLM execution path:
+
+- websocket chat + execution event streaming
+- trajectory/execution step schema correctness
+- session-state persistence
+- Postgres run/run_step/artifact persistence
+
+### Live Validation Entry Points
+
+1. Script harness:
+   - `uv run python scripts/validate_rlm_e2e_trace.py`
+2. Env-gated integration test:
+   - `uv run pytest -q tests/integration/test_qre301_live_trace.py`
+
+### Required Environment Prerequisites
+
+- `QRE301_LIVE=1` (for integration test execution)
+- `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`
+- `DSPY_LM_MODEL` plus LM API key (`DSPY_LLM_API_KEY` or `DSPY_LM_API_KEY`)
+- `DATABASE_URL`
+- running local server:
+  - `uv run fleet-rlm serve-api --port 8000` (or `uv run fleet web`)
+
+### Expected Event Sequence (Execution Stream)
+
+1. `execution_started`
+2. one or more `execution_step`
+3. `execution_completed`
+
+And all events must carry consistent:
+- `run_id`
+- `workspace_id`
+- `user_id`
+- `session_id`
+
+### Required Persistence Assertions
+
+- `/api/v1/sessions/state` contains the target session with `history_turns >= 1`
+- `runs` row exists where `external_run_id == execution_started.run_id`
+- run status is `completed`
+- `run_steps` count for the run is > 0
+- `artifacts` count for the run is > 0 after `write_to_file` command dispatch
+
+### Evidence Artifacts
+
+Script output bundle directory:
+
+- `output/phase-04/qre-301/<timestamp>-<session_id>/`
+
+Expected files:
+
+- `chat-events.jsonl`
+- `execution-events.jsonl`
+- `runtime-status.json`
+- `session-state.json`
+- `db-verification.json`
+- `summary.md`
