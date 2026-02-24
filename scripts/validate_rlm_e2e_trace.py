@@ -29,9 +29,9 @@ from fleet_rlm.db.models import Artifact, Run, RunStatus, RunStep
 _DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 _DEFAULT_WORKSPACE_ID = "default"
 _DEFAULT_USER_ID = "alice"
-_DEFAULT_DOCS_PATH = "/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/AGENTS.md"
-_DEFAULT_OUTPUT_DIR = (
-    "/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/output/phase-04/qre-301"
+_DEFAULT_DOCS_PATH = str(Path(__file__).resolve().parent.parent / "AGENTS.md")
+_DEFAULT_OUTPUT_DIR = str(
+    Path(__file__).resolve().parent.parent / "output/phase-04/qre-301"
 )
 _DEFAULT_TIMEOUT_SECONDS = 240
 _DEFAULT_PROMPT = (
