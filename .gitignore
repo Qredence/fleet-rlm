@@ -23,7 +23,7 @@ venv/
 .env.*
 !.env.example
 !.env.sample
-
+@plan/
 # Jupyter
 .ipynb_checkpoints/
 
