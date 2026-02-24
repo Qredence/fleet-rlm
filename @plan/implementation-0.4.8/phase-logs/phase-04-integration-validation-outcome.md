@@ -4,7 +4,7 @@
 - Phase: `phase-4`
 - Ticket(s): `QRE-301`
 - Branch: `codex/v0-4-8-phase-4-integration-validation`
-- PR: `pending`
+- PR: `https://github.com/Qredence/fleet-rlm/pull/78`
 - Merge commit: `pending`
 
 ## Sequential Execution Order
@@ -27,22 +27,26 @@
 - `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/AGENTS.md`: added QRE-301 live validation workflow commands.
 
 ## Validation Results
-- Formatting: `pending`
-- Lint: `pending`
-- Typecheck: `pending`
-- Tests: `pending`
-- Security: `pending`
-- Import/reference checks: `pending`
+- Formatting: `uv run ruff format --check scripts/validate_rlm_e2e_trace.py tests/integration/test_qre301_live_trace.py` -> ✅
+- Lint: `uv run ruff check scripts/validate_rlm_e2e_trace.py tests/integration/test_qre301_live_trace.py` -> ✅
+- Typecheck: `uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"` -> ✅
+- Tests:
+  - `uv run pytest -q tests/ui/test_server_websocket.py` -> ✅
+  - `uv run pytest -q tests/integration/test_qre301_live_trace.py` -> ✅ (`skip` in current environment due live gate)
+- Security: `pending` (not required for this script/test/docs-only phase scope)
+- Import/reference checks:
+  - `uv run python -c "import fleet_rlm.server.main"` -> ✅
+  - `uv run python -c "import fleet_rlm.server.execution_events"` -> ✅
 
 ## Playwright Validation
 - Commands run:
-  - `pending`
+  - `manual run pending`
 - Flows validated:
-  - `pending`
+  - Playwright not required for this backend validation ticket; ws + persistence assertions covered via test/script.
 - Artifacts:
-  - `pending`
+  - live evidence bundle pending a shell with running server + credentials
 - Failures / retries:
-  - `pending`
+  - `uv run python scripts/validate_rlm_e2e_trace.py --timeout-seconds 30` failed with `All connection attempts failed` (expected in current shell without active local server process)
 
 ## Docs and Hygiene Updates
 - `AGENTS.md`: updated with Phase 4 live validation commands.
@@ -54,9 +58,13 @@
 - Issues updated: `QRE-301`
 - Labels/cycle/state changes:
   - moved to `In Progress`
+  - added `status: needs-review` at PR open
 - Comments posted:
   - kickoff comment posted with branch scope and deliverables
-- Project status update: pending.
+  - checkpoint comment with commit hashes and validation summary
+  - PR-open comment with link + included commits
+- Project status update:
+  - `Phase 4 in review` (`onTrack`) posted on Fleet-RLM project
 
 ## Remaining Risks / Follow-Ups
 - Live validation remains credential and provider latency dependent; pass/fail artifacts must be captured for every release candidate run.
