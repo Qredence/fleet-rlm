@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.4.8] - 2026-02-24
+
+### Highlights (User Impact)
+
+- Completed the v0.4.8 milestone with end-to-end live RLM tracing validation and post-merge hygiene closeout.
+- Finalized Web UI and runtime integration hardening delivered across Phases 1-4, including AI Elements chat rendering, telemetry/settings stabilization, and Neon schema/performance groundwork.
+
+### Added
+
+- **Change:** Added a repeatable live validation harness for long-document tracing and persistence verification (`scripts/validate_rlm_e2e_trace.py`) plus env-gated integration coverage.
+  **Outcome:** Operators can run evidence-driven end-to-end validation for release confidence.
+
+### Changed
+
+- **Change:** Completed milestone closeout documentation and Linear hygiene after PR #78 merge.
+  **Outcome:** Phase logs, milestone tracking, and review labels now reflect final merged state.
+
 ## [0.4.7] - 2026-02-22
 
 ### Highlights (User Impact)
