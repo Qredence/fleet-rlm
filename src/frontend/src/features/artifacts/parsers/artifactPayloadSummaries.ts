@@ -13,7 +13,14 @@ export function asText(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean")
     return String(value);
-  if (value == null) return "";
+  if (!value) return "";
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const rec = value as Record<string, unknown>;
+    const extracted = rec.text ?? rec.output ?? rec.result ?? rec.message;
+    if (typeof extracted === "string") return extracted;
+  }
+
   try {
     return JSON.stringify(value);
   } catch {
@@ -117,6 +124,10 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
       const latest = asText(output.status[output.status.length - 1]);
       return `Status: ${compact(latest, 110)}`;
     }
+    // Unpack the {streaming, text} envelope emitted by the backend LLM step
+    if (typeof output?.text === "string" && output.text.trim()) {
+      return compact(output.text, 120);
+    }
   }
   if (step.type === "output") {
     const out = asRecord(step.output);
@@ -138,7 +149,44 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
     if (payload != null) return `Structured output (${typeof payload})`;
   }
 
-  const generic = compact(asText(step.output ?? step.input));
+  // Generic fallback for plain objects
+  const genericRecord = asRecord(step.output);
+  if (genericRecord) {
+    const textCandidate =
+      genericRecord.text ??
+      genericRecord.output ??
+      genericRecord.result ??
+      genericRecord.message;
+    if (typeof textCandidate === "string" && textCandidate.trim()) {
+      return compact(textCandidate, 120);
+    }
+    return step.label; // Prevents stringifying a raw unparsed object payload
+  }
+
+  // If output is a raw string, try parsing it as JSON to prevent JSON representation leaks
+  if (typeof step.output === "string") {
+    try {
+      const parsed = JSON.parse(step.output);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const textCandidate =
+          parsed.text ?? parsed.output ?? parsed.result ?? parsed.message;
+        if (typeof textCandidate === "string" && textCandidate.trim()) {
+          return compact(textCandidate, 120);
+        }
+        return step.label; // Was a JSON object, but no readable text discovered, do not leak raw JSON
+      }
+    } catch {
+      // Not JSON, safe to use as a raw human-readable string
+    }
+    return compact(step.output, 120) || step.label;
+  }
+
+  // Final fallback (numbers, booleans, etc.)
+  if (step.output != null) {
+    return compact(asText(step.output), 120) || step.label;
+  }
+
+  const generic = compact(asText(step.input));
   return generic || step.label;
 }
 

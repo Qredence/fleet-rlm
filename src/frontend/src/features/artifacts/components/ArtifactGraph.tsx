@@ -43,28 +43,16 @@ const DAGRE_RANK_SEP = 50;
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-function asText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value == null) return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value))
     return undefined;
   return value as Record<string, unknown>;
 }
 
+import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
+
 function summarizeStep(step: ExecutionStep): string {
-  const text = asText(step.output ?? step.input)
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!text) return step.label;
-  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+  return summarizeArtifactStep(step);
 }
 
 function normalizeLabel(label: string): string {
