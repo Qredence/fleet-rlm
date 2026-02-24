@@ -129,6 +129,20 @@ uv run python scripts/test_modal_connection.py
 uv run python scripts/validate_agents.py
 ```
 
+### QRE-301 Live E2E Tracing Validation
+
+```bash
+# from repo root
+# start server in another terminal
+uv run fleet-rlm serve-api --port 8000
+
+# run live websocket + persistence validation harness
+uv run python scripts/validate_rlm_e2e_trace.py
+
+# optional env-gated integration test path
+QRE301_LIVE=1 uv run pytest -q tests/integration/test_qre301_live_trace.py
+```
+
 ### Frontend Build + Package Sync Workflow
 
 ```bash
