@@ -126,6 +126,8 @@ _BLOCKING_COMMANDS = frozenset(
         "propose_memory_update",
         "parallel_semantic_map",
         "chunk_sandbox",
+        "load_document",
+        "fetch_web_document",
         "save_buffer",
         "load_volume",
         "process_document",

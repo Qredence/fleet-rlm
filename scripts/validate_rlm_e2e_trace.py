@@ -320,8 +320,8 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
         raise RuntimeError("DATABASE_URL must be set for DB persistence verification.")
 
     session_id = args.session_id or f"qre301-{uuid.uuid4().hex[:10]}"
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    output_dir = Path(args.output_dir) / f"{timestamp}-{session_id}"
+    timestamp_str = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    output_dir = Path(args.output_dir) / f"{timestamp_str}-{session_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     headers = {

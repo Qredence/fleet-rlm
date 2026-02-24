@@ -20,11 +20,11 @@
 - Merge conflicts or coordination issues: none so far.
 
 ## Code Changes Summary
-- `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/tests/integration/test_qre301_live_trace.py`: env-gated live websocket + persistence integration test for `QRE-301`.
-- `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/scripts/validate_rlm_e2e_trace.py`: repeatable live validation harness producing evidence bundle under `output/phase-04/qre-301/`.
-- `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/@plan/implementation-0.4.8/02_rlm_assessment_qre_300_301.md`: added Phase 4 operational runbook and acceptance checks.
-- `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/@plan/implementation-0.4.8/README.md`: Phase 4 status moved to `In Progress` with `QRE-301` scope.
-- `/Users/zocho/.codex/worktrees/d075/fleet-rlm-dspy/AGENTS.md`: added QRE-301 live validation workflow commands.
+- `tests/integration/test_qre301_live_trace.py`: env-gated live websocket + persistence integration test for `QRE-301`.
+- `scripts/validate_rlm_e2e_trace.py`: repeatable live validation harness producing evidence bundle under `output/phase-04/qre-301/`.
+- `@plan/implementation-0.4.8/02_rlm_assessment_qre_300_301.md`: added Phase 4 operational runbook and acceptance checks.
+- `@plan/implementation-0.4.8/README.md`: Phase 4 status moved to `In Progress` with `QRE-301` scope.
+- `AGENTS.md`: added QRE-301 live validation workflow commands.
 
 ## Validation Results
 - Formatting: `uv run ruff format --check scripts/validate_rlm_e2e_trace.py tests/integration/test_qre301_live_trace.py` -> ✅

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,7 +71,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow():
     workspace_id = "default"
     user_id = "alice"
     session_id = f"qre301-live-{uuid.uuid4().hex[:8]}"
-    docs_path = os.path.abspath("AGENTS.md")
+    docs_path = str(Path(__file__).resolve().parents[2] / "AGENTS.md")
     prompt = (
         "Analyze this repository and provide a concise architecture summary with "
         "key execution flow checkpoints."

@@ -253,9 +253,13 @@ def test_write_line_prefers_drain_aio_when_available(mock_modal, monkeypatch):
             calls["writes"].append(data)
 
     interp._stdin = _Writer()
+
+    def _raise_no_running_loop():
+        raise RuntimeError("no running loop")
+
     monkeypatch.setattr(
         "fleet_rlm.core.interpreter.asyncio.get_running_loop",
-        lambda: (_ for _ in ()).throw(RuntimeError("no running loop")),
+        _raise_no_running_loop,
     )
 
     interp._write_line({"hello": "world"})
@@ -348,7 +352,7 @@ def test_write_line_does_not_call_asyncio_run_when_event_loop_present(
     interp._stdin = _Writer()
     monkeypatch.setattr(
         "fleet_rlm.core.interpreter.asyncio.get_running_loop",
-        lambda: object(),
+        object,
     )
 
     interp._write_line({"mode": "fallback"})
