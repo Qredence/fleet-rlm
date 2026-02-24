@@ -231,6 +231,132 @@ async def test_async_context_manager_calls_start_and_shutdown(mock_modal):
     mock_shutdown.assert_called_once()
 
 
+def test_write_line_prefers_drain_aio_when_available(mock_modal, monkeypatch):
+    """_write_line should use drain.aio() when Modal-style async drain is present."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    calls: dict[str, object] = {"writes": []}
+
+    class _DrainWithAio:
+        def __call__(self):
+            calls["sync_drain_called"] = True
+
+        async def aio(self):
+            calls["aio_drain_called"] = True
+
+    class _Writer:
+        def __init__(self):
+            self.drain = _DrainWithAio()
+
+        def write(self, data):
+            calls["writes"].append(data)
+
+    interp._stdin = _Writer()
+    monkeypatch.setattr(
+        "fleet_rlm.core.interpreter.asyncio.get_running_loop",
+        lambda: (_ for _ in ()).throw(RuntimeError("no running loop")),
+    )
+
+    interp._write_line({"hello": "world"})
+
+    assert calls.get("aio_drain_called") is True
+    assert calls.get("sync_drain_called") is not True
+    assert calls["writes"] == ['{"hello": "world"}\n']
+
+
+def test_write_line_falls_back_to_sync_drain_when_aio_missing(mock_modal):
+    """_write_line should use blocking drain() when drain.aio() is unavailable."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    calls: dict[str, object] = {"writes": []}
+
+    class _Writer:
+        def write(self, data):
+            calls["writes"].append(data)
+
+        def drain(self):
+            calls["sync_drain_called"] = True
+
+    interp._stdin = _Writer()
+    interp._write_line({"ok": True})
+
+    assert calls.get("sync_drain_called") is True
+    assert calls["writes"] == ['{"ok": true}\n']
+
+
+def test_write_line_falls_back_to_flush_when_drain_missing(mock_modal):
+    """_write_line should use flush() when no drain() method exists."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    calls: dict[str, object] = {"writes": []}
+
+    class _Writer:
+        def write(self, data):
+            calls["writes"].append(data)
+
+        def flush(self):
+            calls["flush_called"] = True
+
+    interp._stdin = _Writer()
+    interp._write_line({"n": 1})
+
+    assert calls.get("flush_called") is True
+    assert calls["writes"] == ['{"n": 1}\n']
+
+
+def test_write_line_raises_when_stdin_missing(mock_modal):
+    """_write_line should error clearly when sandbox stdin is unavailable."""
+    from dspy.primitives.code_interpreter import CodeInterpreterError
+
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    interp._stdin = None
+
+    with pytest.raises(
+        CodeInterpreterError, match="Sandbox input stream is not initialized"
+    ):
+        interp._write_line({"x": 1})
+
+
+def test_write_line_does_not_call_asyncio_run_when_event_loop_present(
+    mock_modal, monkeypatch
+):
+    """_write_line should still use drain.aio() via helper thread when loop is running."""
+    from fleet_rlm.core.interpreter import ModalInterpreter
+
+    interp = ModalInterpreter(timeout=10)
+    calls: dict[str, object] = {"writes": []}
+
+    class _DrainWithAio:
+        def __call__(self):
+            calls["sync_drain_called"] = True
+
+        async def aio(self):
+            calls["aio_drain_called"] = True
+
+    class _Writer:
+        def __init__(self):
+            self.drain = _DrainWithAio()
+
+        def write(self, data):
+            calls["writes"].append(data)
+
+    interp._stdin = _Writer()
+    monkeypatch.setattr(
+        "fleet_rlm.core.interpreter.asyncio.get_running_loop",
+        lambda: object(),
+    )
+
+    interp._write_line({"mode": "fallback"})
+
+    assert calls.get("sync_drain_called") is not True
+    assert calls.get("aio_drain_called") is True
+
+
 def test_start_bundles_driver_dependencies_in_exec_command(mock_modal, monkeypatch):
     """start() should embed helper module sources so sandbox needn't import fleet_rlm."""
     from fleet_rlm.core.interpreter import ModalInterpreter

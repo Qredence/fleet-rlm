@@ -28,6 +28,7 @@ TOOL_DELEGATE_NAMES: frozenset[str] = frozenset(
     {
         # Document tools
         "load_document",
+        "fetch_web_document",
         "set_active_document",
         "list_documents",
         # Filesystem tools
