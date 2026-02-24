@@ -80,11 +80,13 @@ def _resolve_host_ips(
     hostname: str, port: int
 ) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-    results: set[ipaddress._BaseAddress] = set()
+    results: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
     for info in infos:
         sockaddr = info[4]
         ip_str = sockaddr[0]
-        results.add(ipaddress.ip_address(ip_str))
+        ip_obj = ipaddress.ip_address(ip_str)
+        if isinstance(ip_obj, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+            results.add(ip_obj)
     return results
 
 
