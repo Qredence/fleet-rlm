@@ -544,11 +544,7 @@ def test_signature_output_types_are_generic():
         CodeChangePlan,
         ClarificationQuestionSignature,
         CoreMemoryUpdateProposal,
-        ExtractAPIEndpoints,
-        ExtractArchitecture,
         ExtractFromLogs,
-        ExtractWithCustomTool,
-        FindErrorPatterns,
         GroundedAnswerWithCitations,
         IncidentTriageFromLogs,
         MemoryActionIntentSignature,
@@ -559,12 +555,6 @@ def test_signature_output_types_are_generic():
     )
 
     checks = [
-        (ExtractArchitecture, "modules", list[str]),
-        (ExtractArchitecture, "optimizers", list[str]),
-        (ExtractAPIEndpoints, "api_endpoints", list[str]),
-        (FindErrorPatterns, "error_categories", dict[str, str]),
-        (ExtractWithCustomTool, "headers", list[str]),
-        (ExtractWithCustomTool, "code_blocks", list[str]),
         (AnalyzeLongDocument, "findings", list[str]),
         (SummarizeLongDocument, "key_points", list[str]),
         (ExtractFromLogs, "matches", list[str]),

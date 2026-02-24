@@ -328,11 +328,11 @@ class TestDSPyRLMIntegrationIssues:
         """Signature fields should be properly handled."""
         import dspy
         from fleet_rlm import ModalInterpreter
-        from fleet_rlm.signatures import ExtractArchitecture
+        from fleet_rlm.signatures import AnalyzeLongDocument
 
         with ModalInterpreter(timeout=120) as interpreter:
             rlm = dspy.RLM(
-                signature=ExtractArchitecture,
+                signature=AnalyzeLongDocument,
                 interpreter=interpreter,
                 max_iterations=10,
                 max_llm_calls=15,
@@ -340,11 +340,11 @@ class TestDSPyRLMIntegrationIssues:
             )
 
             docs = "# Architecture\n\nThis system uses modules and optimizers."
-            result = rlm(docs=docs, query="What are the main components?")
+            result = rlm(document=docs, query="What are the main components?")
 
-            assert hasattr(result, "modules")
-            assert hasattr(result, "optimizers")
-            assert hasattr(result, "design_principles")
+            assert hasattr(result, "findings")
+            assert hasattr(result, "answer")
+            assert hasattr(result, "sections_examined")
 
     def test_max_llm_calls_respected(self, require_litellm):
         """max_llm_calls should be strictly enforced."""
