@@ -7,52 +7,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server.main import create_app
-
-
-@pytest.fixture
-def local_client(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        "fleet_rlm.server.main.get_planner_lm_from_env", lambda *_, **__: None
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.server.main._emit_posthog_startup_event", lambda *_: False
-    )
-    app = create_app(
-        config=ServerRuntimeConfig(
-            app_env="local",
-            database_required=False,
-            enable_legacy_sqlite_routes=False,
-        )
-    )
-    with TestClient(app) as client:
-        yield client
-
-
-@pytest.fixture
-def staging_client(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        "fleet_rlm.server.main.get_planner_lm_from_env", lambda *_, **__: None
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.server.main._emit_posthog_startup_event", lambda *_: False
-    )
-    app = create_app(
-        config=ServerRuntimeConfig(
-            app_env="staging",
-            database_required=False,
-            auth_required=True,
-            allow_debug_auth=False,
-            allow_query_auth_tokens=False,
-            cors_allowed_origins=["https://example.com"],
-            dev_jwt_secret="staging-test-secret",
-            enable_legacy_sqlite_routes=False,
-        )
-    )
-    with TestClient(app) as client:
-        yield client
-
 
 def test_runtime_settings_masks_secrets(
     local_client: TestClient, monkeypatch: pytest.MonkeyPatch

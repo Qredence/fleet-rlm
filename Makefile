@@ -1,13 +1,18 @@
 PYTHON_SOURCES = src tests config/test_responses_endpoint.py
+PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
-.PHONY: help sync sync-dev sync-all test lint format-check format typecheck metadata-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean
+.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean
 
 help:
 	@echo "Targets:"
 	@echo "  make sync              - Install runtime dependencies with uv"
 	@echo "  make sync-dev          - Install dev dependencies with uv"
 	@echo "  make sync-all          - Install all extras + dev dependencies with uv"
-	@echo "  make test              - Run pytest (-q)"
+	@echo "  make test              - Alias for test-fast"
+	@echo "  make test-fast         - Run default non-live/non-benchmark tests"
+	@echo "  make test-unit         - Run unit tests (non-live/non-benchmark)"
+	@echo "  make test-ui           - Run UI tests (non-live/non-benchmark)"
+	@echo "  make test-integration  - Run integration + e2e tests (non-live/non-benchmark)"
 	@echo "  make lint              - Run ruff check"
 	@echo "  make format-check      - Run ruff format --check"
 	@echo "  make format            - Run ruff format (writes changes)"
@@ -34,7 +39,19 @@ sync-all:
 	uv sync --all-extras --dev
 
 test:
-	uv run pytest -q
+	$(MAKE) test-fast
+
+test-fast:
+	uv run pytest -q -m "$(PYTEST_FAST_MARKERS)"
+
+test-unit:
+	uv run pytest -q tests/unit -m "$(PYTEST_FAST_MARKERS)"
+
+test-ui:
+	uv run pytest -q tests/ui -m "$(PYTEST_FAST_MARKERS)"
+
+test-integration:
+	uv run pytest -q tests/integration tests/e2e -m "$(PYTEST_FAST_MARKERS)"
 
 lint:
 	uv run ruff check $(PYTHON_SOURCES)
@@ -63,7 +80,7 @@ frontend-check:
 		echo "No src/frontend/package.json found, skipping frontend checks."; \
 	fi
 
-quality-gate: lint format-check typecheck test metadata-check frontend-check
+quality-gate: lint format-check typecheck test-fast metadata-check frontend-check
 
 check: quality-gate
 

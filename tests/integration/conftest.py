@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import os
+from typing import AsyncIterator
 
 import pytest
+import pytest_asyncio
+
+from fleet_rlm.db import DatabaseManager, FleetRepository
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def _lm_configured() -> bool:
@@ -65,3 +71,21 @@ def require_litellm() -> None:
         pytest.skip("DSPy LM not configured")
     if not check_litellm_secret():
         pytest.skip("LITELLM secret not configured")
+
+
+@pytest_asyncio.fixture
+async def database_manager() -> AsyncIterator[DatabaseManager]:
+    """DB manager fixture for integration tests."""
+    if not DATABASE_URL:
+        pytest.skip("DATABASE_URL not configured")
+    db = DatabaseManager(DATABASE_URL)
+    try:
+        yield db
+    finally:
+        await db.dispose()
+
+
+@pytest_asyncio.fixture
+async def repository(database_manager: DatabaseManager) -> FleetRepository:
+    """Repository fixture for DB-backed integration tests."""
+    return FleetRepository(database_manager)

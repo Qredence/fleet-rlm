@@ -56,7 +56,7 @@ uv run python -c "from fleet_rlm import configure_analytics; configure_analytics
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
-uv run pytest -q
+uv run pytest -q -m "not live_llm and not benchmark"
 uv run python scripts/check_release_hygiene.py
 uv run python scripts/check_release_metadata.py
 
@@ -66,6 +66,9 @@ uv run ruff format --check src tests
 uv run ruff format src tests
 uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run pytest
+uv run pytest -q tests/unit -m "not live_llm and not benchmark"
+uv run pytest -q tests/ui -m "not live_llm and not benchmark"
+uv run pytest -q tests/integration tests/e2e -m "not live_llm and not benchmark"
 uv run python scripts/check_release_hygiene.py
 uv run python scripts/check_release_metadata.py
 
@@ -239,6 +242,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `tests/unit/test_runtime_settings.py`
 - `tests/unit/test_dspy_rlm_trajectory.py`
 - `tests/ui/server/test_router_*.py`, `test_server_*.py`
+- `tests/ui/ws/test_*.py`
 
 ## Conventions
 
@@ -246,6 +250,9 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Type-check with `ty` (not `mypy`)
 - Format/lint with `ruff`
 - Prefer `uv run ...` for commands
+- Default smoke test expression excludes live and benchmark tests: `-m "not live_llm and not benchmark"`
+- Pytest suite markers in use: `unit`, `ui`, `integration`, `db`, `e2e`, `live_llm`, `benchmark`
+- CI job names for required checks: `Quality`, `Test Unit`, `Test UI`, `Test Integration`, `Frontend Check`
 - Frontend package manager is `bun` (`src/frontend/package.json` defines `packageManager: bun@...`); do not introduce npm lockfiles (`package-lock.json`) unless npm is intentionally adopted for a specific workspace
 - Keep generated artifacts scoped to their owning workspace/runtime (`dist/`, coverage, Playwright outputs); avoid committing one-off local verification scripts or root-level lockfiles that are not part of the project workflow
 - For packaged/local `fleet web` runs that should serve embedded UI assets, rebuild and sync frontend artifacts with `uv run python scripts/build_ui.py` (copies `src/frontend/dist` -> `src/fleet_rlm/ui/dist`)

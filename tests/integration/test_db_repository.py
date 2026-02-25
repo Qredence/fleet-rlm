@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
-import pytest_asyncio
 from sqlalchemy.exc import IntegrityError
 
-from fleet_rlm.db import DatabaseManager, FleetRepository
+from fleet_rlm.db import FleetRepository
 from fleet_rlm.db.models import (
     ArtifactKind,
     JobStatus,
@@ -26,24 +24,7 @@ from fleet_rlm.db.types import (
     RunStepCreateRequest,
 )
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-pytestmark = pytest.mark.skipif(
-    not DATABASE_URL,
-    reason="DATABASE_URL not configured",
-)
-
-
-@pytest_asyncio.fixture
-async def repository() -> FleetRepository:
-    assert DATABASE_URL is not None
-    db = DatabaseManager(DATABASE_URL)
-    await db.ping()
-    repo = FleetRepository(db)
-    try:
-        yield repo
-    finally:
-        await db.dispose()
+pytestmark = pytest.mark.db
 
 
 @pytest.mark.asyncio

@@ -9,10 +9,9 @@ on:
     branches: [main, master]
 
 jobs:
-  test:
-    name: Test and Lint
+  quality:
+    name: Quality
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -52,17 +51,77 @@ jobs:
       - name: Type-check with ty
         run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 
-      - name: Run tests
-        run: uv run pytest
+  test-unit:
+    name: Test Unit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Run unit tests
+        run: uv run pytest -q tests/unit -m "not live_llm and not benchmark"
 
-      - name: Set up Bun for frontend checks
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+  test-ui:
+    name: Test UI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Run UI tests
+        run: uv run pytest -q tests/ui -m "not live_llm and not benchmark"
+
+  test-integration:
+    name: Test Integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Run integration and e2e tests
+        run: uv run pytest -q tests/integration tests/e2e -m "not live_llm and not benchmark"
+
+  frontend-check:
+    name: Frontend Check
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('src/frontend/package.json') != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Bun
         uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
         with:
           bun-version: "1.2.10"
 
       - name: Cache Bun packages
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: ~/.bun/install/cache
@@ -71,19 +130,16 @@ jobs:
             ${{ runner.os }}-bun-
 
       - name: Frontend install
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
           bun install --frozen-lockfile
 
       - name: Install Playwright browser
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
           bunx playwright install --with-deps chromium
 
       - name: Frontend quality gate
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
           bun run check

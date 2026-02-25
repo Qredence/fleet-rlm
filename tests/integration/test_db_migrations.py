@@ -12,10 +12,13 @@ from fleet_rlm.db import DatabaseManager
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-pytestmark = pytest.mark.skipif(
-    not DATABASE_URL,
-    reason="DATABASE_URL not configured",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not DATABASE_URL,
+        reason="DATABASE_URL not configured",
+    ),
+    pytest.mark.db,
+]
 
 
 @pytest.mark.asyncio

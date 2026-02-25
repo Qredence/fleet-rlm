@@ -119,8 +119,13 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers"
 markers = [
+    "unit: unit test suite",
+    "ui: UI/server test suite",
+    "integration: integration test suite",
+    "db: database-backed integration tests",
+    "e2e: end-to-end test suite",
     "benchmark: performance/throughput benchmark tests",
     "live_llm: tests that require live Modal + configured LM/LITELLM secret",
 ]
