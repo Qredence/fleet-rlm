@@ -7,6 +7,22 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/components/ui/utils";
 
+function safeHref(href: string): string | undefined {
+  try {
+    const parsed = new URL(href);
+    if (
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:" ||
+      parsed.protocol === "file:"
+    ) {
+      return parsed.toString();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function InlineCitation({ children }: { children: ReactNode }) {
   return <span className="inline-flex align-baseline">{children}</span>;
 }
@@ -77,12 +93,13 @@ function InlineCitationSource({
   url: string;
   description?: string;
 }) {
+  const href = safeHref(url);
   return (
     <div className="space-y-1">
       <a
-        href={url}
+        href={href}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener noreferrer nofollow"
         className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
       >
         {title}

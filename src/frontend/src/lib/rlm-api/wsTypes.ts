@@ -42,13 +42,19 @@ export type WsEventKind =
   | "cancelled"
   | "plan_update"
   | "rlm_executing"
-  | "memory_update";
+  | "memory_update"
+  | "hitl_request"
+  | "hitl_resolved"
+  | "command_ack"
+  | "command_reject";
 
 export interface WsEventPayload {
   kind: WsEventKind;
   text: string;
   payload?: Record<string, unknown>;
   timestamp?: string;
+  version?: number;
+  event_id?: string;
 }
 
 export interface WsServerEvent {

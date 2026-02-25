@@ -268,9 +268,26 @@ describe("applyWsFrameToMessages", () => {
       makeEvent("final", "Done", {
         citations: [
           {
+            source_id: "src-doc",
             title: "Doc",
             url: "https://example.com",
             quote: "evidence",
+          },
+        ],
+        sources: [
+          {
+            source_id: "src-doc",
+            kind: "web",
+            title: "Doc",
+            canonical_url: "https://example.com",
+          },
+        ],
+        attachments: [
+          {
+            attachment_id: "att-1",
+            name: "report.json",
+            mime_type: "application/json",
+            url: "https://example.com/report.json",
           },
         ],
       }),
@@ -281,6 +298,12 @@ describe("applyWsFrameToMessages", () => {
     expect(assistant?.streaming).toBe(false);
     expect(
       assistant?.renderParts?.some((p) => p.kind === "inline_citation_group"),
+    ).toBe(true);
+    expect(assistant?.renderParts?.some((p) => p.kind === "sources")).toBe(
+      true,
+    );
+    expect(
+      assistant?.renderParts?.some((p) => p.kind === "attachments"),
     ).toBe(true);
 
     const reasoning = messages.find((m) => m.type === "reasoning");
@@ -294,5 +317,31 @@ describe("applyWsFrameToMessages", () => {
     if (queue?.kind === "queue") {
       expect(queue.items.every((item) => item.completed)).toBe(true);
     }
+  });
+
+  it("maps hitl_request and hitl_resolved events to interactive hitl messages", () => {
+    const requested = applyWsFrameToMessages(
+      [],
+      makeEvent("hitl_request", "Need approval", {
+        question: "Approve deployment?",
+        actions: [
+          { label: "Approve", variant: "primary" },
+          { label: "Reject", variant: "secondary" },
+        ],
+      }),
+    ).messages;
+
+    const hitl = requested.find((m) => m.type === "hitl");
+    expect(hitl?.hitlData?.question).toBe("Approve deployment?");
+    expect(hitl?.hitlData?.resolved).toBeUndefined();
+
+    const resolved = applyWsFrameToMessages(
+      requested,
+      makeEvent("hitl_resolved", "Approved", { resolution: "Approved" }),
+    ).messages;
+
+    const resolvedHitl = resolved.find((m) => m.type === "hitl");
+    expect(resolvedHitl?.hitlData?.resolved).toBe(true);
+    expect(resolvedHitl?.hitlData?.resolvedLabel).toBe("Approved");
   });
 });

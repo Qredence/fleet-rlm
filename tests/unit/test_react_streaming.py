@@ -430,6 +430,45 @@ def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
     assert any("brief" in warning for warning in warnings)
 
 
+def test_iter_chat_turn_stream_enriches_final_payload_with_sources_and_citations(
+    monkeypatch,
+):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    def _fake_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            yield dspy.Prediction(
+                assistant_response="done",
+                trajectory={
+                    "thought_0": "collect evidence",
+                    "output_0": {
+                        "citations": [
+                            {
+                                "title": "DSPy docs",
+                                "url": "https://dspy.ai",
+                                "quote": "Reasoning framework",
+                            }
+                        ]
+                    },
+                },
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    events = list(agent.iter_chat_turn_stream("cite", trace=False))
+    final_event = events[-1]
+
+    assert final_event.kind == "final"
+    assert final_event.payload["schema_version"] == 2
+    assert len(final_event.payload["citations"]) == 1
+    assert len(final_event.payload["sources"]) == 1
+    assert len(final_event.payload["citation_anchors"]) == 1
+
+
 # ---------------------------------------------------------------------------
 # _normalize_trajectory tests
 # ---------------------------------------------------------------------------

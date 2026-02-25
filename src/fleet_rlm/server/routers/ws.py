@@ -501,6 +501,8 @@ async def chat_streaming(websocket: WebSocket):
                                     "text": event.text,
                                     "payload": event.payload,
                                     "timestamp": event.timestamp.isoformat(),
+                                    "version": 2,
+                                    "event_id": str(uuid.uuid4()),
                                 }
                                 is_terminal_event = event.kind in {
                                     "final",

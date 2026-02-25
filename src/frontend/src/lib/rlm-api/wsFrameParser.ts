@@ -18,6 +18,10 @@ function isWsEventKind(value: string): value is WsEventKind {
     "plan_update",
     "rlm_executing",
     "memory_update",
+    "hitl_request",
+    "hitl_resolved",
+    "command_ack",
+    "command_reject",
   ].includes(value);
 }
 
@@ -46,6 +50,15 @@ function asText(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 function normalizeExecutionStepKind(
@@ -161,23 +174,59 @@ function parseExecutionEnvelope(
 export function parseWsServerFrame(
   parsed: Record<string, unknown>,
 ): WsServerMessage | null {
-  const frameType = parsed.type;
+  const frameType = String(parsed.type ?? "");
 
   if (frameType === "event") {
     const data = asRecord(parsed.data);
-    if (!data) return null;
+    const envelope = data ?? parsed;
 
-    const kind = String(data.kind ?? "");
+    const kind = String(envelope.kind ?? "");
     if (!isWsEventKind(kind)) return null;
 
     return {
       type: "event",
       data: {
         kind,
-        text: asText(data.text),
-        payload: asRecord(data.payload) ?? undefined,
+        text: asText(envelope.text),
+        payload: asRecord(envelope.payload) ?? undefined,
         timestamp:
-          typeof data.timestamp === "string" ? data.timestamp : undefined,
+          typeof envelope.timestamp === "string"
+            ? envelope.timestamp
+            : typeof parsed.timestamp === "string"
+              ? parsed.timestamp
+              : undefined,
+        version: asNumber(envelope.version ?? parsed.version),
+        event_id:
+          typeof envelope.event_id === "string"
+            ? envelope.event_id
+            : typeof parsed.event_id === "string"
+              ? parsed.event_id
+              : undefined,
+      },
+    };
+  }
+
+  if (frameType === "command_result") {
+    const result = asRecord(parsed.result) ?? {};
+    const command = asText(parsed.command || "command");
+    const status = String(result.status ?? "ok").toLowerCase();
+    const kind: WsEventKind =
+      status === "ok" ? "command_ack" : "command_reject";
+
+    return {
+      type: "event",
+      data: {
+        kind,
+        text:
+          kind === "command_ack"
+            ? `${command} completed`
+            : asText(result.error ?? `${command} failed`),
+        payload: {
+          command,
+          result,
+          raw: parsed,
+        },
+        version: asNumber(parsed.version),
       },
     };
   }

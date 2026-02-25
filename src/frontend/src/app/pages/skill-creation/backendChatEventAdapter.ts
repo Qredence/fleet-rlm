@@ -1,10 +1,12 @@
 import type {
+  ChatAttachmentItem,
   ChatEnvVarItem,
   ChatInlineCitation,
   ChatMessage,
   ChatQueueItem,
   ChatRenderPart,
   ChatRenderToolState,
+  ChatSourceItem,
   ChatTraceStep,
 } from "@/lib/data/types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
@@ -12,11 +14,60 @@ import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";
 
 const DEFAULT_PHASE = 1 as const;
+const MAX_CITATIONS = 16;
+const MAX_SOURCES = 16;
+const MAX_ATTACHMENTS = 16;
 
 interface ApplyFrameResult {
   messages: ChatMessage[];
   terminal: boolean;
   errored: boolean;
+}
+
+interface FinalReferenceBundle {
+  citations: ChatInlineCitation[];
+  sources: ChatSourceItem[];
+  attachments: ChatAttachmentItem[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function normalizeUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:" ||
+      parsed.protocol === "file:"
+    ) {
+      return parsed.toString();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function asOptionalText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 function nextId(prefix: string): string {
@@ -642,48 +693,242 @@ function upsertToolLikePart(
   return appendTracePart(messages, part, text);
 }
 
-function attachInlineCitations(
-  messages: ChatMessage[],
-  payload?: Record<string, unknown>,
-): ChatMessage[] {
+function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[] {
   const raw = payload?.citations;
-  if (!Array.isArray(raw) || raw.length === 0) return messages;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
   const citations = raw
-    .map((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-      const rec = item as Record<string, unknown>;
-      const title = typeof rec.title === "string" ? rec.title : "Source";
-      const url = typeof rec.url === "string" ? rec.url : "";
+    .slice(0, MAX_CITATIONS)
+    .map<ChatInlineCitation | null>((item, index) => {
+      const rec = asRecord(item);
+      if (!rec) return null;
+
+      const url = normalizeUrl(rec.url ?? rec.source_url ?? rec.canonical_url);
       if (!url) return null;
+
+      const title =
+        asOptionalText(rec.title ?? rec.source_title) ??
+        asOptionalText(rec.source) ??
+        "Source";
+      const numericNumber = asOptionalNumber(rec.number);
+      const sourceId =
+        asOptionalText(rec.source_id) ??
+        asOptionalText(rec.sourceId) ??
+        undefined;
+      const anchorId =
+        asOptionalText(rec.anchor_id) ??
+        asOptionalText(rec.anchorId) ??
+        undefined;
+
       return {
-        number: typeof rec.number === "string" ? rec.number : undefined,
+        number:
+          asOptionalText(rec.number) ??
+          (numericNumber != null ? String(numericNumber) : String(index + 1)),
         title,
         url,
-        description:
-          typeof rec.description === "string" ? rec.description : undefined,
-        quote: typeof rec.quote === "string" ? rec.quote : undefined,
+        description: asOptionalText(rec.description),
+        quote: asOptionalText(rec.quote ?? rec.evidence),
+        sourceId,
+        anchorId,
+        startChar: asOptionalNumber(rec.start_char ?? rec.startChar),
+        endChar: asOptionalNumber(rec.end_char ?? rec.endChar),
       };
     })
-    .filter(
-      (v): v is NonNullable<typeof v> => v != null,
-    ) satisfies ChatInlineCitation[];
+    .filter((value): value is ChatInlineCitation => value != null);
 
-  if (citations.length === 0) return messages;
+  const deduped = new Map<string, ChatInlineCitation>();
+  for (const citation of citations) {
+    const key = [
+      citation.anchorId ?? "",
+      citation.sourceId ?? "",
+      citation.url,
+      citation.quote ?? "",
+    ].join("|");
+    if (!deduped.has(key)) deduped.set(key, citation);
+  }
+  return [...deduped.values()].slice(0, MAX_CITATIONS);
+}
 
+function parseSources(
+  payload: Record<string, unknown> | undefined,
+  citations: ChatInlineCitation[],
+): ChatSourceItem[] {
+  const rawSources = payload?.sources;
+  const sources = new Map<string, ChatSourceItem>();
+
+  if (Array.isArray(rawSources)) {
+    for (const item of rawSources.slice(0, MAX_SOURCES)) {
+      const rec = asRecord(item);
+      if (!rec) continue;
+
+      const canonicalUrl = normalizeUrl(rec.canonical_url ?? rec.canonicalUrl);
+      const displayUrl = normalizeUrl(rec.display_url ?? rec.displayUrl);
+      const url = normalizeUrl(rec.url) ?? displayUrl ?? canonicalUrl;
+      if (!url && !canonicalUrl) continue;
+
+      const sourceId =
+        asOptionalText(rec.source_id) ??
+        asOptionalText(rec.sourceId) ??
+        asOptionalText(rec.id) ??
+        `source-${sources.size + 1}`;
+      const kindRaw = asOptionalText(rec.kind)?.toLowerCase();
+      const kind: ChatSourceItem["kind"] =
+        kindRaw === "web" ||
+        kindRaw === "file" ||
+        kindRaw === "artifact" ||
+        kindRaw === "tool_output"
+          ? kindRaw
+          : "other";
+      const title = asOptionalText(rec.title) ?? "Source";
+
+      const source: ChatSourceItem = {
+        sourceId,
+        kind,
+        title,
+        url: url ?? undefined,
+        canonicalUrl: canonicalUrl ?? url ?? undefined,
+        displayUrl: displayUrl ?? url ?? undefined,
+        description: asOptionalText(rec.description),
+        quote: asOptionalText(rec.quote),
+      };
+
+      const dedupeKey = source.canonicalUrl ?? source.url ?? source.sourceId;
+      sources.set(dedupeKey, source);
+    }
+  }
+
+  if (sources.size === 0) {
+    for (const citation of citations) {
+      const dedupeKey = citation.url;
+      if (sources.has(dedupeKey)) continue;
+      sources.set(dedupeKey, {
+        sourceId: citation.sourceId ?? `source-${sources.size + 1}`,
+        kind: "web",
+        title: citation.title,
+        url: citation.url,
+        canonicalUrl: citation.url,
+        displayUrl: citation.url,
+        description: citation.description,
+        quote: citation.quote,
+      });
+    }
+  }
+
+  return [...sources.values()].slice(0, MAX_SOURCES);
+}
+
+function parseAttachments(
+  payload?: Record<string, unknown>,
+): ChatAttachmentItem[] {
+  const raw = payload?.attachments;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  const attachments = raw
+    .slice(0, MAX_ATTACHMENTS)
+    .map<ChatAttachmentItem | null>((item) => {
+      const rec = asRecord(item);
+      if (!rec) return null;
+
+      const attachmentId =
+        asOptionalText(rec.attachment_id) ??
+        asOptionalText(rec.attachmentId) ??
+        asOptionalText(rec.id) ??
+        nextId("attachment");
+      const name =
+        asOptionalText(rec.name) ??
+        asOptionalText(rec.title) ??
+        "Attachment";
+
+      return {
+        attachmentId,
+        name,
+        url: normalizeUrl(rec.url ?? rec.download_url ?? rec.downloadUrl),
+        previewUrl: normalizeUrl(rec.preview_url ?? rec.previewUrl),
+        mimeType: asOptionalText(rec.mime_type ?? rec.mimeType),
+        mediaType: asOptionalText(rec.media_type ?? rec.mediaType),
+        sizeBytes: asOptionalNumber(rec.size_bytes ?? rec.sizeBytes),
+        kind: asOptionalText(rec.kind),
+        description: asOptionalText(rec.description),
+      };
+    })
+    .filter((value): value is ChatAttachmentItem => value != null);
+
+  const deduped = new Map<string, ChatAttachmentItem>();
+  for (const attachment of attachments) {
+    const key = attachment.attachmentId;
+    if (!deduped.has(key)) deduped.set(key, attachment);
+  }
+  return [...deduped.values()].slice(0, MAX_ATTACHMENTS);
+}
+
+function parseFinalReferences(
+  payload?: Record<string, unknown>,
+): FinalReferenceBundle {
+  const citations = parseCitations(payload);
+  return {
+    citations,
+    sources: parseSources(payload, citations),
+    attachments: parseAttachments(payload),
+  };
+}
+
+function upsertAssistantRenderPart(
+  messages: ChatMessage[],
+  part: ChatRenderPart,
+): ChatMessage[] {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (!msg || msg.type !== "assistant") continue;
+
+    const nextParts = [...(msg.renderParts ?? [])];
+    const existingIndex = nextParts.findIndex((candidate) => {
+      if (candidate.kind !== part.kind) return false;
+      if (part.kind === "inline_citation_group") return true;
+      if (part.kind === "sources") return true;
+      if (part.kind === "attachments") return true;
+      return false;
+    });
+    if (existingIndex >= 0) {
+      nextParts[existingIndex] = part;
+    } else {
+      nextParts.push(part);
+    }
+
     const copy = [...messages];
-    copy[i] = {
-      ...msg,
-      renderParts: [
-        ...(msg.renderParts ?? []),
-        { kind: "inline_citation_group", citations },
-      ],
-    };
+    copy[i] = { ...msg, renderParts: nextParts };
     return copy;
   }
   return messages;
+}
+
+function attachFinalReferences(
+  messages: ChatMessage[],
+  payload?: Record<string, unknown>,
+): ChatMessage[] {
+  const refs = parseFinalReferences(payload);
+  let next = messages;
+
+  if (refs.citations.length > 0) {
+    next = upsertAssistantRenderPart(next, {
+      kind: "inline_citation_group",
+      citations: refs.citations,
+    });
+  }
+  if (refs.sources.length > 0) {
+    next = upsertAssistantRenderPart(next, {
+      kind: "sources",
+      title: "Sources",
+      sources: refs.sources,
+    });
+  }
+  if (refs.attachments.length > 0) {
+    next = upsertAssistantRenderPart(next, {
+      kind: "attachments",
+      attachments: refs.attachments,
+      variant: "grid",
+    });
+  }
+  return next;
 }
 
 function applyEvent(
@@ -777,6 +1022,113 @@ function applyEvent(
       }
       return { messages: next, terminal: false, errored: false };
     }
+    case "hitl_request": {
+      const hitlPayload = asRecord(payload?.hitl ?? payload);
+      const question =
+        asOptionalText(hitlPayload?.question) || text.trim() || "Approval needed";
+      const rawActions = hitlPayload?.actions;
+      const actions = Array.isArray(rawActions)
+        ? rawActions
+            .map((item) => {
+              const rec = asRecord(item);
+              if (!rec) return null;
+              const label = asOptionalText(rec.label);
+              if (!label) return null;
+              const variant = asOptionalText(rec.variant);
+              return {
+                label,
+                variant:
+                  variant === "primary" || variant === "secondary"
+                    ? variant
+                    : "secondary",
+              } as const;
+            })
+            .filter(
+              (
+                value,
+              ): value is { label: string; variant: "primary" | "secondary" } =>
+                value != null,
+            )
+        : [];
+
+      return {
+        messages: [
+          ...messages,
+          {
+            id: nextId("hitl"),
+            type: "hitl",
+            content: question,
+            phase: DEFAULT_PHASE,
+            hitlData: {
+              question,
+              actions:
+                actions.length > 0
+                  ? actions
+                  : [
+                      { label: "Approve", variant: "primary" },
+                      { label: "Reject", variant: "secondary" },
+                    ],
+            },
+          },
+        ],
+        terminal: false,
+        errored: false,
+      };
+    }
+    case "hitl_resolved": {
+      const resolution =
+        asOptionalText(payload?.resolution) ??
+        asOptionalText(payload?.label) ??
+        text.trim();
+      if (!resolution) return { messages, terminal: false, errored: false };
+
+      let updated = false;
+      const next = messages.map((msg) => {
+        if (updated || msg.type !== "hitl" || !msg.hitlData || msg.hitlData.resolved) {
+          return msg;
+        }
+        updated = true;
+        return {
+          ...msg,
+          hitlData: {
+            ...msg.hitlData,
+            resolved: true,
+            resolvedLabel: resolution,
+          },
+        };
+      });
+      return { messages: next, terminal: false, errored: false };
+    }
+    case "command_ack": {
+      return {
+        messages: appendTracePart(
+          messages,
+          {
+            kind: "status_note",
+            tone: "success",
+            text: text || "Action acknowledged",
+          },
+          text || "Action acknowledged",
+        ),
+        terminal: false,
+        errored: false,
+      };
+    }
+    case "command_reject": {
+      return {
+        messages: appendTracePart(
+          messages,
+          {
+            kind: "status_note",
+            tone: "error",
+            text: text || "Action rejected",
+          },
+          text || "Action rejected",
+        ),
+        terminal: false,
+        errored: false,
+      };
+    }
     case "final": {
       let next = completeAssistant(messages, text);
       next = finishReasoning(next);
@@ -791,7 +1143,7 @@ function applyEvent(
         next = finishReasoning(next);
       }
 
-      next = attachInlineCitations(next, payload);
+      next = attachFinalReferences(next, payload);
 
       const warnings = readGuardrailWarnings(payload);
       if (warnings.length > 0) {

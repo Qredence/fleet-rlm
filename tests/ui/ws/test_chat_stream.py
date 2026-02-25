@@ -45,6 +45,8 @@ def test_websocket_basic_message_flow(
         assert len(received_events) == 3
         assert received_events[0]["data"]["kind"] == "assistant_token"
         assert received_events[0]["data"]["text"] == "Hello"
+        assert received_events[0]["data"]["version"] == 2
+        assert isinstance(received_events[0]["data"]["event_id"], str)
         assert received_events[1]["data"]["kind"] == "assistant_token"
         assert received_events[1]["data"]["text"] == " world"
         assert received_events[2]["data"]["kind"] == "final"

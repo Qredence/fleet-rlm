@@ -82,6 +82,18 @@ import {
   InlineCitationText,
 } from "@/components/ai-elements/inline-citation";
 import {
+  Attachments,
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+} from "@/components/ai-elements/attachments";
+import {
+  Source,
+  Sources,
+  SourcesContent,
+  SourcesTrigger,
+} from "@/components/ai-elements/sources";
+import {
   Confirmation,
   ConfirmationAccepted,
   ConfirmationAction,
@@ -196,6 +208,59 @@ function renderInlineCitations(
         </InlineCitationCard>
       </InlineCitation>
     </div>
+  );
+}
+
+function renderSources(
+  part: Extract<ChatRenderPart, { kind: "sources" }>,
+): ReactNode {
+  if (part.sources.length === 0) return null;
+  return (
+    <Sources defaultOpen={false}>
+      <SourcesTrigger count={part.sources.length} />
+      <SourcesContent>
+        <div className="space-y-2">
+          {part.sources.map((source) => (
+            <Source
+              key={`${source.sourceId}-${source.url ?? source.canonicalUrl ?? source.title}`}
+              href={source.url ?? source.canonicalUrl}
+              title={source.title}
+            >
+              {source.description || source.quote || source.displayUrl}
+            </Source>
+          ))}
+        </div>
+      </SourcesContent>
+    </Sources>
+  );
+}
+
+function renderAttachments(
+  part: Extract<ChatRenderPart, { kind: "attachments" }>,
+): ReactNode {
+  if (part.attachments.length === 0) return null;
+  return (
+    <Attachments variant={part.variant ?? "grid"}>
+      {part.attachments.map((attachment) => (
+        <Attachment
+          key={attachment.attachmentId}
+          data={{
+            id: attachment.attachmentId,
+            name: attachment.name,
+            url: attachment.url,
+            previewUrl: attachment.previewUrl,
+            mimeType: attachment.mimeType,
+            mediaType: attachment.mediaType,
+            description: attachment.description,
+            sizeBytes: attachment.sizeBytes,
+            kind: attachment.kind,
+          }}
+        >
+          <AttachmentPreview />
+          <AttachmentInfo showMediaType />
+        </Attachment>
+      ))}
+    </Attachments>
   );
 }
 
@@ -392,6 +457,10 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       );
     case "inline_citation_group":
       return <div key={key}>{renderInlineCitations(part)}</div>;
+    case "sources":
+      return <div key={key}>{renderSources(part)}</div>;
+    case "attachments":
+      return <div key={key}>{renderAttachments(part)}</div>;
     case "status_note":
       return (
         <div

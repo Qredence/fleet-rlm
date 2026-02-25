@@ -136,6 +136,40 @@ export interface ChatInlineCitation {
   url: string;
   description?: string;
   quote?: string;
+  sourceId?: string;
+  anchorId?: string;
+  startChar?: number;
+  endChar?: number;
+}
+
+export type ChatSourceKind =
+  | "web"
+  | "file"
+  | "artifact"
+  | "tool_output"
+  | "other";
+
+export interface ChatSourceItem {
+  sourceId: string;
+  kind: ChatSourceKind;
+  title: string;
+  url?: string;
+  canonicalUrl?: string;
+  displayUrl?: string;
+  description?: string;
+  quote?: string;
+}
+
+export interface ChatAttachmentItem {
+  attachmentId: string;
+  name: string;
+  url?: string;
+  previewUrl?: string;
+  mimeType?: string;
+  mediaType?: string;
+  sizeBytes?: number;
+  kind?: string;
+  description?: string;
 }
 
 export type ChatRenderPart =
@@ -193,6 +227,16 @@ export type ChatRenderPart =
   | {
       kind: "inline_citation_group";
       citations: ChatInlineCitation[];
+    }
+  | {
+      kind: "sources";
+      sources: ChatSourceItem[];
+      title?: string;
+    }
+  | {
+      kind: "attachments";
+      attachments: ChatAttachmentItem[];
+      variant?: "grid" | "inline" | "list";
     }
   | {
       kind: "status_note";
