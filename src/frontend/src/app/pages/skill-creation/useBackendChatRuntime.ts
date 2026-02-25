@@ -8,7 +8,10 @@ import { applyWsFrameToArtifacts } from "@/app/pages/skill-creation/backendArtif
 import type { ChatSimulation } from "@/app/pages/skill-creation/useChatSimulation";
 import { useArtifactStore } from "@/stores/artifactStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import type { WsServerMessage } from "@/lib/rlm-api";
+import {
+  type WsServerMessage,
+  subscribeToExecutionStream,
+} from "@/lib/rlm-api";
 import { useQueryClient } from "@tanstack/react-query";
 
 function isTerminalFrame(frame: WsServerMessage): boolean {
@@ -87,6 +90,16 @@ export function useBackendChatRuntime(): ChatSimulation {
 
     resetRuntime();
   }, [navSessionId, resetRuntime]);
+
+  useEffect(() => {
+    if (!navSessionId) return;
+
+    const unsubscribe = subscribeToExecutionStream(navSessionId, {
+      onFrame: (frame) => applyWsFrameToArtifacts(frame),
+    });
+
+    return () => unsubscribe();
+  }, [navSessionId]);
 
   const onFrame = useCallback(
     (frame: WsServerMessage) => {

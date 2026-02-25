@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WsMessageRequest } from "../wsClient";
 
-// ── Mocks ────────────────────────────────────────────────────────────────────
-
-// Polyfill global fetch if needed, though we just mock WebSocket here.
 const MockWebSocket = vi.fn();
 MockWebSocket.prototype.addEventListener = vi.fn();
 MockWebSocket.prototype.removeEventListener = vi.fn();
 MockWebSocket.prototype.send = vi.fn();
 MockWebSocket.prototype.close = vi.fn();
-MockWebSocket.prototype.readyState = 0; // CONNECTING
+MockWebSocket.prototype.readyState = 0;
+Object.assign(MockWebSocket, {
+  CONNECTING: 0,
+  OPEN: 1,
+  CLOSING: 2,
+  CLOSED: 3,
+});
 
 vi.stubGlobal("WebSocket", MockWebSocket);
 vi.stubGlobal("localStorage", {
@@ -20,6 +23,64 @@ async function loadWsClientModule() {
   vi.resetModules();
   return import("../wsClient");
 }
+
+interface MockWebSocketInstance {
+  readyState: number;
+  addEventListener: (
+    event: string,
+    cb: (...args: unknown[]) => void,
+  ) => void;
+  removeEventListener: import("vitest").Mock;
+  send: import("vitest").Mock;
+  close: import("vitest").Mock;
+  trigger: (event: string, arg?: unknown) => void;
+}
+
+function installSocketFactory() {
+  let wsInstanceCount = 0;
+  const sockets: MockWebSocketInstance[] = [];
+
+  MockWebSocket.mockImplementation(function (this: MockWebSocketInstance) {
+    wsInstanceCount += 1;
+    const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
+
+    this.readyState = 0;
+    this.addEventListener = (
+      event: string,
+      cb: (...args: unknown[]) => void,
+    ) => {
+      if (!listeners[event]) listeners[event] = [];
+      listeners[event].push(cb);
+    };
+    this.removeEventListener = vi.fn();
+    this.send = vi.fn();
+    this.close = vi.fn();
+
+    this.trigger = (event: string, arg?: unknown) => {
+      if (event === "open") {
+        this.readyState = 1;
+      }
+      if (event === "close") {
+        this.readyState = 3;
+      }
+      for (const cb of listeners[event] || []) cb(arg);
+    };
+
+    sockets.push(this);
+    return this;
+  });
+
+  return {
+    sockets,
+    getCount: () => wsInstanceCount,
+  };
+}
+
+const dummyMessage: WsMessageRequest = {
+  type: "message",
+  content: "test",
+  session_id: "test",
+};
 
 describe("streamChatOverWs - Reconnection & Backoff", () => {
   beforeEach(() => {
@@ -34,60 +95,13 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     vi.restoreAllMocks();
   });
 
-  const dummyMessage: WsMessageRequest = {
-    type: "message",
-    content: "test",
-    session_id: "test",
-  };
-
   it("attempts to reconnect on close until max retries", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
     const { streamChatOverWs } = await loadWsClientModule();
-
-    let wsInstanceCount = 0;
-
-    // We capture each newly created ws inside the mock
-    interface MockWebSocketInstance {
-      readyState: number;
-      addEventListener: (
-        event: string,
-        cb: (...args: unknown[]) => void,
-      ) => void;
-      removeEventListener: import("vitest").Mock<never, never[]>;
-      send: import("vitest").Mock<never, never[]>;
-      close: import("vitest").Mock<never, never[]>;
-      trigger: (event: string, arg?: unknown) => void;
-    }
-    const sockets: MockWebSocketInstance[] = [];
-
-    MockWebSocket.mockImplementation(function (this: MockWebSocketInstance) {
-      wsInstanceCount++;
-      const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
-
-      this.readyState = 0;
-      this.addEventListener = (
-        event: string,
-        cb: (...args: unknown[]) => void,
-      ) => {
-        if (!listeners[event]) listeners[event] = [];
-        listeners[event].push(cb);
-      };
-      this.removeEventListener = vi.fn();
-      this.send = vi.fn();
-      this.close = vi.fn();
-
-      // helper to trigger events on this socket
-      this.trigger = (event: string, arg?: unknown) => {
-        for (const cb of listeners[event] || []) cb(arg);
-      };
-
-      sockets.push(this);
-      return this;
-    });
+    const { sockets, getCount } = installSocketFactory();
 
     const statusChangeMock = vi.fn();
 
-    // Start streaming
     const streamPromise = streamChatOverWs(dummyMessage, {
       onFrame: vi.fn(),
       onStatusChange: statusChangeMock,
@@ -96,34 +110,158 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
       maxBackoff: 100,
     });
 
-    // Attempt 0
-    await Promise.resolve(); // flush microtasks
-    expect(wsInstanceCount).toBe(1);
+    await Promise.resolve();
+    expect(getCount()).toBe(1);
     expect(statusChangeMock).toHaveBeenCalledWith("connecting");
 
-    // Simulate connection failure on Attempt 0
-    sockets[0].trigger("close", { code: 1006, wasClean: false });
-
-    // Backoff is initialBackoff = 10ms
+    sockets[0]?.trigger("close", { code: 1006, wasClean: false });
     await vi.advanceTimersByTimeAsync(15);
 
-    // Attempt 1
-    expect(wsInstanceCount).toBe(2);
+    expect(getCount()).toBe(2);
     expect(statusChangeMock).toHaveBeenCalledWith("reconnecting");
 
-    // Simulate connection failure on Attempt 1
-    sockets[1].trigger("close", { code: 1006, wasClean: false });
-
-    // Backoff is calculateBackoff(attempt - 1) -> calculateBackoff(1) -> 10 * 2^1 = 20ms
+    sockets[1]?.trigger("close", { code: 1006, wasClean: false });
     await vi.advanceTimersByTimeAsync(25);
 
-    // Attempt 2
-    expect(wsInstanceCount).toBe(3);
+    expect(getCount()).toBe(3);
 
-    // Simulate connection failure on Attempt 2
-    sockets[2].trigger("close", { code: 1006, wasClean: false });
+    sockets[2]?.trigger("close", { code: 1006, wasClean: false });
 
-    // Now it should throw since maxRetries = 2
     await expect(streamPromise).rejects.toThrow(/after 2 retries/i);
+  });
+
+  it("treats final event as terminal for chat stream", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const { streamChatOverWs } = await loadWsClientModule();
+    const { sockets, getCount } = installSocketFactory();
+
+    const streamPromise = streamChatOverWs(dummyMessage, {
+      onFrame: vi.fn(),
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    await Promise.resolve();
+    expect(getCount()).toBe(1);
+
+    sockets[0]?.trigger("open");
+    sockets[0]?.trigger("message", {
+      data: JSON.stringify({
+        type: "event",
+        data: {
+          kind: "final",
+          text: "done",
+        },
+      }),
+    });
+
+    await expect(streamPromise).resolves.toBeUndefined();
+    expect(sockets[0]?.close).toHaveBeenCalled();
+  });
+
+  it("ignores malformed frames and continues processing subsequent frames", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const { streamChatOverWs } = await loadWsClientModule();
+    const { sockets } = installSocketFactory();
+
+    const onFrame = vi.fn();
+    const streamPromise = streamChatOverWs(dummyMessage, {
+      onFrame,
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    await Promise.resolve();
+
+    sockets[0]?.trigger("open");
+    sockets[0]?.trigger("message", { data: "{not-json" });
+    sockets[0]?.trigger("message", {
+      data: JSON.stringify({
+        type: "event",
+        data: {
+          kind: "final",
+          text: "done",
+        },
+      }),
+    });
+
+    await expect(streamPromise).resolves.toBeUndefined();
+    expect(onFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends cancel and closes socket when aborted", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const { streamChatOverWs } = await loadWsClientModule();
+    const { sockets } = installSocketFactory();
+
+    const controller = new AbortController();
+    const streamPromise = streamChatOverWs(dummyMessage, {
+      onFrame: vi.fn(),
+      signal: controller.signal,
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    await Promise.resolve();
+
+    sockets[0]?.trigger("open");
+    controller.abort();
+
+    await expect(streamPromise).resolves.toBeUndefined();
+    expect(sockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "cancel" }),
+    );
+    expect(sockets[0]?.close).toHaveBeenCalled();
+  });
+
+  it("keeps execution subscriptions open after execution_completed frames", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const { subscribeToExecutionStream } = await loadWsClientModule();
+    const { sockets, getCount } = installSocketFactory();
+
+    const onFrame = vi.fn();
+    const unsubscribe = subscribeToExecutionStream("session-1", {
+      onFrame,
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    await Promise.resolve();
+    expect(getCount()).toBe(1);
+
+    sockets[0]?.trigger("open");
+    sockets[0]?.trigger("message", {
+      data: JSON.stringify({
+        type: "execution_completed",
+        output: "run completed",
+        timestamp: new Date().toISOString(),
+      }),
+    });
+
+    await Promise.resolve();
+    expect(onFrame).toHaveBeenCalledTimes(1);
+    expect(sockets[0]?.close).not.toHaveBeenCalled();
+
+    sockets[0]?.trigger("message", {
+      data: JSON.stringify({
+        type: "execution_step",
+        step: {
+          id: "step-2",
+          type: "tool",
+          label: "Tool result",
+          output: "ok",
+          timestamp: Date.now() / 1000,
+        },
+      }),
+    });
+
+    await Promise.resolve();
+    expect(onFrame).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
   });
 });

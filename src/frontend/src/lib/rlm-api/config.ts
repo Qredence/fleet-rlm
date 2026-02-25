@@ -9,13 +9,13 @@ function trimOrEmpty(value: string | undefined): string {
   return value?.trim() ?? "";
 }
 
-function deriveWsUrl(apiUrl: string): string {
+function deriveWsUrl(apiUrl: string, path: string): string {
   if (!apiUrl) return "";
 
   try {
     const url = new URL(apiUrl);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.pathname = "/api/v1/ws/chat";
+    url.pathname = path;
     url.search = "";
     url.hash = "";
     return url.toString().replace(/\/$/, "");
@@ -45,21 +45,37 @@ const mockMode = parseBool(
   false,
 );
 
-function getActiveWsUrl() {
-  if (explicitWsUrl) return explicitWsUrl;
-  if (baseUrl) return deriveWsUrl(baseUrl);
+function getActiveWsUrl(path: string) {
+  if (explicitWsUrl) {
+    if (path === "/api/v1/ws/execution") {
+      if (explicitWsUrl.endsWith("/chat")) {
+        return explicitWsUrl.replace(/\/chat$/, "/execution");
+      }
+      // Explicit URL doesn't end in /chat — derive execution URL from its origin
+      try {
+        const parsed = new URL(explicitWsUrl);
+        parsed.pathname = "/api/v1/ws/execution";
+        return parsed.toString().replace(/\/$/, "");
+      } catch {
+        // Malformed URL; fall through to use explicitWsUrl as-is
+      }
+    }
+    return explicitWsUrl;
+  }
+  if (baseUrl) return deriveWsUrl(baseUrl, path);
 
   // If no baseUrl, derive from current origin if in browser
   if (typeof window !== "undefined") {
     const loc = window.location;
-    return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/v1/ws/chat`;
+    return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}${path}`;
   }
   return "";
 }
 
 export const rlmApiConfig = {
   baseUrl,
-  wsUrl: getActiveWsUrl(),
+  wsUrl: getActiveWsUrl("/api/v1/ws/chat"),
+  wsExecutionUrl: getActiveWsUrl("/api/v1/ws/execution"),
   mockMode,
   timeoutMs: 30_000,
   workspaceId:
