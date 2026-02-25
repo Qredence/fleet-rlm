@@ -48,7 +48,8 @@ function sanitizeLogValue(value: unknown): string {
       text = String(value);
     }
   }
-  return text.replace(/[\r\n]+/g, " ");
+  // Remove ASCII control characters (including newlines) to prevent log injection.
+  return text.replace(/[\u0000-\u001F\u007F]+/g, " ");
 }
 
 export async function streamChatOverWs(
