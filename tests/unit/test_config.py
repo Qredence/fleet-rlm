@@ -120,7 +120,7 @@ def test_agent_config_guardrail_defaults():
     from fleet_rlm.config import AgentConfig
 
     agent = AgentConfig()
-    assert agent.max_iters == 10
+    assert agent.max_iters == 35
     assert agent.temperature == 1.0
     assert agent.delegate_model is None
     assert agent.delegate_max_tokens == 64000

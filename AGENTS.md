@@ -45,6 +45,7 @@ uv run fleet-rlm code-chat --opentui
 uv run fleet-rlm serve-api --port 8000
 uv run fleet-rlm serve-api interpreter.volume_name=my-volume --port 8000
 uv run fleet-rlm serve-mcp --transport stdio
+uv run python scripts/build_ui.py
 uv run python scripts/db_init.py
 uv run alembic upgrade head
 uv run python scripts/dev_issue_token.py --tid <tid> --oid <oid> --email dev@example.com --name "Dev User"
@@ -247,6 +248,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Prefer `uv run ...` for commands
 - Frontend package manager is `bun` (`src/frontend/package.json` defines `packageManager: bun@...`); do not introduce npm lockfiles (`package-lock.json`) unless npm is intentionally adopted for a specific workspace
 - Keep generated artifacts scoped to their owning workspace/runtime (`dist/`, coverage, Playwright outputs); avoid committing one-off local verification scripts or root-level lockfiles that are not part of the project workflow
+- For packaged/local `fleet web` runs that should serve embedded UI assets, rebuild and sync frontend artifacts with `uv run python scripts/build_ui.py` (copies `src/frontend/dist` -> `src/fleet_rlm/ui/dist`)
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
 - Runtime settings endpoints are served from `/api/v1/runtime/*`; writes (`PATCH /api/v1/runtime/settings`) are local-only (`APP_ENV=local`) while read/test endpoints remain available across environments

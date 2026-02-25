@@ -35,7 +35,7 @@ src/output/
 src/output/*
 output/
 output/*
-
+artifacts/
 # Local agent/tooling state
 .claude/
 .claude/team/inboxes/

@@ -12,6 +12,9 @@ from pathlib import Path
 
 import dspy
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env from current working directory by default
 logger = logging.getLogger(__name__)
 
 
@@ -128,7 +131,7 @@ def configure_posthog_analytics_from_env() -> object | None:
             else None,
             host=settings["host"]
             if isinstance(settings["host"], str)
-            else "https://us.i.posthog.com",
+            else "https://eu.i.posthog.com",
             distinct_id=settings["distinct_id"]
             if isinstance(settings["distinct_id"], str)
             else None,
@@ -183,7 +186,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
     DSPy with a language model based on the loaded configuration.
 
     Required environment variables:
-        - DSPY_LM_MODEL: The model identifier (e.g., "openai/gemini-3-flash-preview")
+        - DSPY_LM_MODEL: The model identifier (e.g., "openai/gemini-3.1-pro")
         - DSPY_LLM_API_KEY or DSPY_LM_API_KEY: API key for the model provider
 
     Optional environment variables:

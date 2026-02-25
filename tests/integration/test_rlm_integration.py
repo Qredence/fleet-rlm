@@ -19,48 +19,15 @@ API notes
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-
-def _lm_configured():
-    """Check if an LM is configured for DSPy."""
-    try:
-        import dspy
-
-        return dspy.settings.lm is not None
-    except Exception:
-        return False
-
-
-# Skip all tests if Modal credentials or LM not available
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("MODAL_TOKEN_ID")
-    or not os.environ.get("MODAL_TOKEN_SECRET")
-    or not _lm_configured(),
-    reason="Modal credentials or LM not configured",
-)
-
-
-def check_litellm_secret():
-    """Check if LITELLM secret is configured in Modal."""
-    try:
-        from fleet_rlm.runners import check_secret_presence
-
-        result = check_secret_presence()
-        return all(result.values())
-    except Exception:
-        return False
+pytestmark = pytest.mark.live_llm
 
 
 @pytest.fixture
-def interpreter():
+def interpreter(require_litellm):
     """Fixture providing a started ModalInterpreter."""
     from fleet_rlm.core.interpreter import ModalInterpreter
-
-    if not check_litellm_secret():
-        pytest.skip("LITELLM secret not configured")
 
     interp = ModalInterpreter(timeout=120)
     interp.start()
@@ -69,12 +36,9 @@ def interpreter():
 
 
 @pytest.fixture
-def interpreter_with_volume():
+def interpreter_with_volume(require_litellm):
     """Fixture providing a ModalInterpreter with volume support."""
     from fleet_rlm.core.interpreter import ModalInterpreter
-
-    if not check_litellm_secret():
-        pytest.skip("LITELLM secret not configured")
 
     interp = ModalInterpreter(
         timeout=120,
@@ -293,13 +257,10 @@ SUBMIT(content)
 class TestDSPyRLMIntegration:
     """Test full dspy.RLM integration."""
 
-    def test_rlm_basic_question(self):
+    def test_rlm_basic_question(self, require_litellm):
         """Test dspy.RLM with basic question-answering."""
         import dspy
         from fleet_rlm import ModalInterpreter
-
-        if not check_litellm_secret():
-            pytest.skip("LITELLM secret not configured")
 
         with ModalInterpreter(timeout=120) as interpreter:
             rlm = dspy.RLM(
@@ -315,13 +276,10 @@ class TestDSPyRLMIntegration:
             assert hasattr(result, "answer")
             assert "4" in str(result.answer)
 
-    def test_rlm_trajectory_captured(self):
+    def test_rlm_trajectory_captured(self, require_litellm):
         """Test dspy.RLM captures trajectory."""
         import dspy
         from fleet_rlm import ModalInterpreter
-
-        if not check_litellm_secret():
-            pytest.skip("LITELLM secret not configured")
 
         with ModalInterpreter(timeout=120) as interpreter:
             rlm = dspy.RLM(
@@ -340,13 +298,10 @@ class TestDSPyRLMIntegration:
             for step in trajectory:
                 assert "reasoning" in step or "code" in step
 
-    def test_rlm_respects_max_iterations(self):
+    def test_rlm_respects_max_iterations(self, require_litellm):
         """Test dspy.RLM respects iteration limit."""
         import dspy
         from fleet_rlm import ModalInterpreter
-
-        if not check_litellm_secret():
-            pytest.skip("LITELLM secret not configured")
 
         with ModalInterpreter(timeout=120) as interpreter:
             rlm = dspy.RLM(

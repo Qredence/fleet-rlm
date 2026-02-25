@@ -78,18 +78,18 @@ graph TD
 
 ### User Story 1: The Context Deduplication
 
-> **As an** Orchestrator Agent dealing with an aging project,  
-> **I want** a background worker to consolidate redundant memory entries,  
+> **As an** Orchestrator Agent dealing with an aging project,
+> **I want** a background worker to consolidate redundant memory entries,
 > **So that** when I search my memory index to find the user's coding style guidelines, I don't retrieve five identical fragments and waste tokens.
 
 ### User Story 2: The Multi-Agent Specialization
 
-> **As a** Developer using the TUI/Frontend,  
-> **I want** to see my complex task automatically broken into a Research pass and an Execution pass,  
+> **As a** Developer using the TUI/Frontend,
+> **I want** to see my complex task automatically broken into a Research pass and an Execution pass,
 > **So that** I know the system isn't trying to blindly write code without first fully understanding the constraints.
 
 ### User Story 3: The Hybrid Search Necessity
 
-> **As a** specialized Sub-Agent,  
-> **I want** to query my memory for an exact string match on a library function `init_database_pool_v3` rather than just semantic closeness,  
+> **As a** specialized Sub-Agent,
+> **I want** to query my memory for an exact string match on a library function `init_database_pool_v3` rather than just semantic closeness,
 > **So that** I don't accidentally hallucinate an old `v2` implementation.

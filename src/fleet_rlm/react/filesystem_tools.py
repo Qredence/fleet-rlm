@@ -107,20 +107,21 @@ def build_filesystem_tools(agent: RLMReActChatAgent) -> list[Any]:
                 if root.exists() and root.is_dir():
                     scope_roots.append(root)
             if scope_roots:
-                scoped_matches = {
-                    candidate
-                    for root in scope_roots
-                    for candidate in root.glob(pattern_norm)
-                    if _is_included(candidate)
-                }
-                matched_files = sorted(scoped_matches, key=str)
+                scoped_matches: list[Path] = []
+                for root in scope_roots:
+                    for candidate in root.glob(pattern_norm):
+                        candidate_path = base / str(candidate)
+                        if _is_included(candidate_path):
+                            scoped_matches.append(candidate_path)
+                for candidate in sorted(set(scoped_matches), key=str):
+                    if isinstance(candidate, Path):
+                        matched_files.append(candidate)
 
         if not matched_files:
-            matched_files = [
-                candidate
-                for candidate in base.glob(pattern_norm)
-                if _is_included(candidate)
-            ]
+            for candidate in base.glob(pattern_norm):
+                candidate_path = base / str(candidate)
+                if _is_included(candidate_path):
+                    matched_files.append(candidate_path)
 
         files_result = sorted(str(p.relative_to(base)) for p in matched_files)
         total_bytes = sum(p.stat().st_size for p in matched_files)

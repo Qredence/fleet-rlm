@@ -120,7 +120,10 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
-markers = ["benchmark: performance/throughput benchmark tests"]
+markers = [
+    "benchmark: performance/throughput benchmark tests",
+    "live_llm: tests that require live Modal + configured LM/LITELLM secret",
+]
 
 [tool.ty.src]
 exclude = ["tests/", "scripts/", "notebooks/", "test_modal_guard.py"]

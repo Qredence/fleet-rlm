@@ -57,12 +57,12 @@ class AgentConfig(BaseModel):
     """Configuration for the RLMReActChatAgent."""
 
     max_iters: int = Field(
-        default=10,
+        default=35,
         description="Maximum number of ReAct loop iterations per turn.",
     )
     model: str = Field(
         default="openai/gemini-3.1-pro",
-        description="LLM model identifier to use. Must include LiteLLM provider prefix e.g. 'openai/model-name'."
+        description="LLM model identifier to use. Must include LiteLLM provider prefix e.g. 'openai/model-name'.",
     )
     temperature: float = Field(
         default=1.0,

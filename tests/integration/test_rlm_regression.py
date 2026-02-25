@@ -15,46 +15,9 @@ API notes
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-
-def _lm_configured():
-    """Check if an LM is configured for DSPy."""
-    try:
-        import dspy
-
-        return dspy.settings.lm is not None
-    except Exception:
-        return False
-
-
-# Skip all tests if Modal credentials or LM not available
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("MODAL_TOKEN_ID")
-    or not os.environ.get("MODAL_TOKEN_SECRET")
-    or not _lm_configured(),
-    reason="Modal credentials or LM not configured",
-)
-
-
-def check_litellm_secret():
-    """Check if LITELLM secret is configured in Modal."""
-    try:
-        from fleet_rlm.runners import check_secret_presence
-
-        result = check_secret_presence()
-        return all(result.values())
-    except Exception:
-        return False
-
-
-@pytest.fixture
-def require_litellm():
-    """Skip test if LITELLM not configured."""
-    if not check_litellm_secret():
-        pytest.skip("LITELLM secret not configured")
+pytestmark = pytest.mark.live_llm
 
 
 class TestInfiniteLoopPrevention:

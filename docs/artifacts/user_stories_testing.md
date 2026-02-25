@@ -8,8 +8,8 @@ To ensure the foundation is sound, the following User Stories must be tested end
 
 ### Story 1: Modal Volume Introspection
 
-> **As a** Developer using the Chat UI,  
-> **I want to** ask the agent to list the files currently stored in my remote Modal Volume,  
+> **As a** Developer using the Chat UI,
+> **I want to** ask the agent to list the files currently stored in my remote Modal Volume,
 > **So that** I can verify the persistent sandbox filesystem is accessible and correctly wired.
 >
 > _Test Query:_ "Can you execute code to list all the files currently in the /data/workspace Modal Volume?"
@@ -17,8 +17,8 @@ To ensure the foundation is sound, the following User Stories must be tested end
 
 ### Story 2: External Link Ingestion & Analysis
 
-> **As an** Orchestrator,  
-> **I want to** give the agent a URL to documentation (e.g., Modal docs),  
+> **As an** Orchestrator,
+> **I want to** give the agent a URL to documentation (e.g., Modal docs),
 > **So that** the RLM engine can fetch the content, ingest it, reason over it through trajectories, and deposit the findings into the Neon Evolutive Memory.
 >
 > _Test Query:_ "Please fetch and analyze the documentation at https://modal.com/docs/guide. Summarize the core concepts and save them to memory."
