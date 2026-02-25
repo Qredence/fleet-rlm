@@ -4,11 +4,19 @@ import pytest
 
 def test_default_config(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("VOLUME_NAME", raising=False)
+    monkeypatch.delenv("DSPY_DELEGATE_LM_MODEL", raising=False)
+    monkeypatch.delenv("DSPY_DELEGATE_LM_MAX_TOKENS", raising=False)
     cfg = ServerRuntimeConfig()
     assert cfg.app_env == "local"
     assert cfg.secret_name == "LITELLM"
     assert cfg.timeout == 900
-    assert cfg.react_max_iters == 5
+    assert cfg.react_max_iters == 15
+    assert cfg.deep_react_max_iters == 35
+    assert cfg.enable_adaptive_iters is True
+    assert cfg.delegate_max_calls_per_turn == 8
+    assert cfg.delegate_result_truncation_chars == 8000
+    assert cfg.agent_delegate_model is None
+    assert cfg.agent_delegate_max_tokens == 64000
     assert cfg.rlm_max_depth == 2
     assert cfg.volume_name is None
     assert cfg.ws_default_workspace_id == "default"

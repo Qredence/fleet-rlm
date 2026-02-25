@@ -6,8 +6,10 @@ agent:
   # Default to DSPY_LM_MODEL environment variable if set, otherwise fallback to a known model
   # from config/config.yaml (e.g., gemini-3-flash-preview or deepseek-v3.2-maas).
   # We use OC env interpolation to respect user's existing .env setup.
-  model: "${oc.env:DSPY_LM_MODEL,gemini-3-flash-preview}"
-  temperature: 0.0
+  model: "${oc.env:DSPY_LM_MODEL,openai/gemini-3.1-pro}"
+  temperature: 1
+  delegate_model: null
+  delegate_max_tokens: 64000
   rlm_max_iterations: 30
   guardrail_mode: "off"
   min_substantive_chars: 20
@@ -30,19 +32,23 @@ memory:
 
 rlm_settings:
   max_depth: 2
-  max_iters: 5
+  max_iters: 15
+  deep_max_iters: 35
+  enable_adaptive_iters: true
   max_iterations: 30
   max_llm_calls: 50
   max_output_chars: 10000
+  delegate_max_calls_per_turn: 8
+  delegate_result_truncation_chars: 8000
   stdout_summary_threshold: 10000
   stdout_summary_prefix_len: 200
   verbose: True
 
 analytics:
   posthog:
-    enabled: ${oc.env:POSTHOG_ENABLED,false}
+    enabled: ${oc.env:POSTHOG_ENABLED,true}
     api_key: ${oc.env:POSTHOG_API_KEY,null}
-    host: ${oc.env:POSTHOG_HOST,https://us.i.posthog.com}
+    host: ${oc.env:POSTHOG_HOST,https://eu.i.posthog.com}
     flush_interval: ${oc.env:POSTHOG_FLUSH_INTERVAL,10.0}
     flush_at: ${oc.env:POSTHOG_FLUSH_AT,10}
     enable_dspy_optimization: ${oc.env:POSTHOG_ENABLE_DSPY_OPTIMIZATION,false}

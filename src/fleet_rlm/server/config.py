@@ -51,10 +51,14 @@ class ServerRuntimeConfig(BaseModel):
         default_factory=lambda: os.getenv("VOLUME_NAME") or None
     )
     timeout: int = 900
-    react_max_iters: int = 5
+    react_max_iters: int = 15
+    deep_react_max_iters: int = 35
+    enable_adaptive_iters: bool = True
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
     rlm_max_depth: int = 2  # Maximum recursion depth for sub-agents (rlm_query)
+    delegate_max_calls_per_turn: int = 8
+    delegate_result_truncation_chars: int = 8000
     interpreter_async_execute: bool = True
     agent_guardrail_mode: Literal["off", "warn", "strict"] = "off"
     agent_min_substantive_chars: int = 20
@@ -65,6 +69,14 @@ class ServerRuntimeConfig(BaseModel):
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
     sandbox_provider: str = "modal"  # "modal", "local", "daytona"
     agent_model: str | None = None  # Model identifier to use for the agent
+    agent_delegate_model: str | None = Field(
+        default_factory=lambda: os.getenv("DSPY_DELEGATE_LM_MODEL") or None
+    )
+    agent_delegate_max_tokens: int = Field(
+        default_factory=lambda: _env_int(
+            os.getenv("DSPY_DELEGATE_LM_MAX_TOKENS"), default=64000
+        )
+    )
     database_url: str | None = Field(
         default_factory=lambda: os.getenv("DATABASE_URL") or None
     )

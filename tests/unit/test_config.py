@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import fleet_rlm.core.config as config
+import yaml
 
 
 class _FakeLM:
@@ -76,7 +77,11 @@ def test_rlm_settings_defaults():
     settings = RlmSettings()
     assert settings.max_depth == 2
     assert settings.max_llm_calls == 50
-    assert settings.max_iters == 5
+    assert settings.max_iters == 15
+    assert settings.deep_max_iters == 35
+    assert settings.enable_adaptive_iters is True
+    assert settings.delegate_max_calls_per_turn == 8
+    assert settings.delegate_result_truncation_chars == 8000
 
 
 def test_rlm_settings_custom():
@@ -115,5 +120,78 @@ def test_agent_config_guardrail_defaults():
     from fleet_rlm.config import AgentConfig
 
     agent = AgentConfig()
+    assert agent.max_iters == 10
+    assert agent.temperature == 1.0
+    assert agent.delegate_model is None
+    assert agent.delegate_max_tokens == 64000
     assert agent.guardrail_mode == "off"
     assert agent.min_substantive_chars == 20
+
+
+def test_config_model_defaults_match_hydra_yaml():
+    """Pydantic defaults should mirror Hydra defaults for shared runtime keys."""
+    from fleet_rlm.config import AgentConfig, RlmSettings
+
+    config_path = Path("src/fleet_rlm/conf/config.yaml")
+    raw = yaml.safe_load(config_path.read_text())
+
+    assert isinstance(raw, dict)
+    agent_cfg = raw["agent"]
+    rlm_cfg = raw["rlm_settings"]
+
+    assert AgentConfig().max_iters == agent_cfg["max_iters"]
+    assert AgentConfig().temperature == float(agent_cfg["temperature"])
+    assert AgentConfig().delegate_model == agent_cfg["delegate_model"]
+    assert AgentConfig().delegate_max_tokens == int(agent_cfg["delegate_max_tokens"])
+    assert RlmSettings().max_iters == rlm_cfg["max_iters"]
+    assert RlmSettings().deep_max_iters == rlm_cfg["deep_max_iters"]
+    assert RlmSettings().enable_adaptive_iters == bool(rlm_cfg["enable_adaptive_iters"])
+    assert (
+        RlmSettings().delegate_max_calls_per_turn
+        == rlm_cfg["delegate_max_calls_per_turn"]
+    )
+    assert (
+        RlmSettings().delegate_result_truncation_chars
+        == rlm_cfg["delegate_result_truncation_chars"]
+    )
+
+
+def test_get_delegate_lm_from_env_uses_delegate_model(monkeypatch, tmp_path: Path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DSPY_DELEGATE_LM_MODEL=openai/delegate-mini\n"
+        "DSPY_DELEGATE_LM_API_KEY=sk-delegate\n"
+        "DSPY_DELEGATE_LM_API_BASE=https://delegate.example\n"
+    )
+
+    monkeypatch.setattr(config.dspy, "LM", _FakeLM)
+    monkeypatch.delenv("DSPY_DELEGATE_LM_MODEL", raising=False)
+    monkeypatch.delenv("DSPY_DELEGATE_LM_API_KEY", raising=False)
+    monkeypatch.delenv("DSPY_DELEGATE_LM_API_BASE", raising=False)
+
+    lm = config.get_delegate_lm_from_env(env_file=env_file, default_max_tokens=2048)
+    assert lm is not None
+    assert lm.model == "openai/delegate-mini"
+    assert lm.api_key == "sk-delegate"
+    assert lm.api_base == "https://delegate.example"
+    assert lm.max_tokens == 2048
+
+
+def test_get_delegate_lm_from_env_returns_none_on_init_error(
+    monkeypatch, tmp_path: Path
+):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DSPY_DELEGATE_LM_MODEL=openai/delegate-mini\n"
+        "DSPY_DELEGATE_LM_API_KEY=sk-delegate\n"
+    )
+
+    def _raise_lm(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(config.dspy, "LM", _raise_lm)
+    monkeypatch.delenv("DSPY_DELEGATE_LM_MODEL", raising=False)
+    monkeypatch.delenv("DSPY_DELEGATE_LM_API_KEY", raising=False)
+
+    lm = config.get_delegate_lm_from_env(env_file=env_file)
+    assert lm is None

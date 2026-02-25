@@ -61,12 +61,23 @@ class AgentConfig(BaseModel):
         description="Maximum number of ReAct loop iterations per turn.",
     )
     model: str = Field(
-        default="gpt-4-turbo-preview",
-        description="LLM model identifier to use.",
+        default="openai/gemini-3-flash-preview",
+        description="LLM model identifier to use. Must include LiteLLM provider prefix e.g. 'openai/model-name'.",
     )
     temperature: float = Field(
-        default=0.0,
+        default=1.0,
         description="LLM sampling temperature.",
+    )
+    delegate_model: str | None = Field(
+        default=None,
+        description=(
+            "Optional cheaper model identifier used for delegate/sub-agent turns. "
+            "When unset, delegates use the parent planner model."
+        ),
+    )
+    delegate_max_tokens: int = Field(
+        default=64000,
+        description="Maximum token budget for delegate model calls.",
     )
     rlm_max_iterations: int = Field(
         default=30,
@@ -90,8 +101,16 @@ class RlmSettings(BaseModel):
         description="Maximum recursion depth for RLM subagents.",
     )
     max_iters: int = Field(
-        default=5,
+        default=15,
         description="Maximum iterations for ReAct agent.",
+    )
+    deep_max_iters: int = Field(
+        default=35,
+        description="Escalated iteration budget for deep-analysis turns.",
+    )
+    enable_adaptive_iters: bool = Field(
+        default=True,
+        description="Enable adaptive turn budgets based on intent and tool errors.",
     )
     max_iterations: int = Field(
         default=30,
@@ -105,6 +124,14 @@ class RlmSettings(BaseModel):
         default=10000,
         description="Maximum output characters.",
     )
+    delegate_max_calls_per_turn: int = Field(
+        default=8,
+        description="Maximum number of delegate sub-agent spawns in a single turn.",
+    )
+    delegate_result_truncation_chars: int = Field(
+        default=8000,
+        description="Maximum delegate response size before truncating for safety.",
+    )
     stdout_summary_threshold: int = Field(
         default=10000,
         description="Threshold for stdout summarization.",
@@ -114,7 +141,7 @@ class RlmSettings(BaseModel):
         description="Prefix length in summaries.",
     )
     verbose: bool = Field(
-        default=False,
+        default=True,
         description="Enable verbose logging.",
     )
 
