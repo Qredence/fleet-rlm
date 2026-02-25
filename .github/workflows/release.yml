@@ -83,13 +83,13 @@ jobs:
 
       - name: Set up Bun for frontend checks
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
         with:
           bun-version: "1.2.10"
 
       - name: Cache Bun packages
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('src/frontend/bun.lock') }}
