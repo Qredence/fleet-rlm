@@ -7,6 +7,7 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   quality:
@@ -111,17 +112,28 @@ jobs:
   frontend-check:
     name: Frontend Check
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('src/frontend/package.json') != '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Detect frontend workspace
+        id: frontend
+        shell: bash
+        run: |
+          if [ -f src/frontend/package.json ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Bun
+        if: steps.frontend.outputs.enabled == 'true'
         uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
         with:
           bun-version: "1.2.10"
 
       - name: Cache Bun packages
+        if: steps.frontend.outputs.enabled == 'true'
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: ~/.bun/install/cache
@@ -130,16 +142,23 @@ jobs:
             ${{ runner.os }}-bun-
 
       - name: Frontend install
+        if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
           bun install --frozen-lockfile
 
       - name: Install Playwright browser
+        if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
           bunx playwright install --with-deps chromium
 
       - name: Frontend quality gate
+        if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
           bun run check
+
+      - name: Frontend check skipped
+        if: steps.frontend.outputs.enabled != 'true'
+        run: echo "No src/frontend/package.json found. Skipping frontend checks."
