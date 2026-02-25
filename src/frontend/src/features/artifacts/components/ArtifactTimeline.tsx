@@ -3,6 +3,12 @@ import { Brain, Terminal, Wrench, Database, FileOutput } from "lucide-react";
 import type { ArtifactStepType, ExecutionStep } from "@/stores/artifactStore";
 import { cn } from "@/components/ui/utils";
 import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
+import {
+  ChainOfThought,
+  ChainOfThoughtHeader,
+  ChainOfThoughtContent,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
 
 interface ArtifactTimelineProps {
   steps: ExecutionStep[];
@@ -17,6 +23,16 @@ const ICONS: Record<ArtifactStepType, typeof Brain> = {
   memory: Database,
   output: FileOutput,
 };
+
+function mapStatus(
+  step: ExecutionStep,
+): "pending" | "active" | "complete" | "error" {
+  const label = step.label?.toLowerCase() ?? "";
+  if (label.includes("error") || label.includes("failed")) return "error";
+  // If the step has output, treat as complete
+  if (step.output != null) return "complete";
+  return "active";
+}
 
 function formatTimestamp(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString([], {
@@ -43,45 +59,43 @@ export function ArtifactTimeline({
 
   return (
     <div className="h-full overflow-auto pr-1">
-      <div className="space-y-2">
-        {ordered.map((step) => {
-          const Icon = ICONS[step.type] ?? Brain;
-          const selected = step.id === activeStepId;
+      <ChainOfThought defaultOpen>
+        <ChainOfThoughtHeader>Execution trace</ChainOfThoughtHeader>
+        <ChainOfThoughtContent>
+          {ordered.map((step) => {
+            const Icon = ICONS[step.type] ?? Brain;
+            const selected = step.id === activeStepId;
+            const summary = summarizeArtifactStep(step);
 
-          return (
-            <button
-              type="button"
-              key={step.id}
-              onClick={() => onSelectStep(step.id)}
-              className={cn(
-                "w-full text-left rounded-card border p-3 transition-colors",
-                selected
-                  ? "border-accent bg-accent/10"
-                  : "border-border-subtle hover:bg-muted/40",
-              )}
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-7 h-7 rounded-md bg-muted flex items-center justify-center shrink-0">
-                  <Icon className="size-4 text-muted-foreground" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm text-foreground truncate">
-                      {step.label}
+            return (
+              <button
+                type="button"
+                key={step.id}
+                onClick={() => onSelectStep(step.id)}
+                className={cn(
+                  "w-full text-left transition-colors",
+                  selected && "bg-accent/10 rounded-md",
+                )}
+              >
+                <ChainOfThoughtStep
+                  label={step.label}
+                  status={mapStatus(step)}
+                  icon={Icon}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap wrap-break-word flex-1">
+                      {summary}
                     </p>
-                    <span className="text-xs text-muted-foreground shrink-0">
+                    <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
                       {formatTimestamp(step.timestamp)}
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap break-words">
-                    {summarizeArtifactStep(step)}
-                  </p>
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+                </ChainOfThoughtStep>
+              </button>
+            );
+          })}
+        </ChainOfThoughtContent>
+      </ChainOfThought>
     </div>
   );
 }

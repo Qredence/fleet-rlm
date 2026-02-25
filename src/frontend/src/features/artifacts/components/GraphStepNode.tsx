@@ -76,7 +76,7 @@ const GraphStepNode = memo(function GraphStepNode({
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-border !w-2 !h-2"
+        className="bg-border! w-2! h-2!"
       />
 
       <div className="flex items-start gap-2.5 px-3 py-2.5">
@@ -132,7 +132,7 @@ const GraphStepNode = memo(function GraphStepNode({
             <p
               className={cn(
                 "mt-0.5 text-[11px] leading-snug text-muted-foreground",
-                !isExpanded && "line-clamp-1",
+                !isExpanded && "line-clamp-2",
               )}
             >
               {data.summary}
@@ -165,7 +165,7 @@ const GraphStepNode = memo(function GraphStepNode({
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             REPL code preview
           </p>
-          <pre className="max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-[10px] leading-relaxed text-foreground whitespace-pre-wrap break-words font-mono">
+          <pre className="max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-[10px] leading-relaxed text-foreground whitespace-pre-wrap wrap-break-word font-mono">
             {codePreview}
           </pre>
         </div>
@@ -176,7 +176,7 @@ const GraphStepNode = memo(function GraphStepNode({
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-500">
             Error details
           </p>
-          <p className="text-[11px] leading-snug text-foreground whitespace-pre-wrap break-words">
+          <p className="text-[11px] leading-snug text-foreground whitespace-pre-wrap wrap-break-word">
             {errorDetails.message}
           </p>
           {errorDetails.code && (
@@ -211,7 +211,7 @@ const GraphStepNode = memo(function GraphStepNode({
             </span>
           </div>
 
-          <p className="text-xs font-semibold text-foreground mb-1 break-words">
+          <p className="text-xs font-semibold text-foreground mb-1 wrap-break-word">
             {data.label}
           </p>
 
@@ -227,7 +227,7 @@ const GraphStepNode = memo(function GraphStepNode({
           )}
 
           {data.summary && (
-            <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words mb-2">
+            <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word mb-2">
               {data.summary}
             </p>
           )}
@@ -237,7 +237,7 @@ const GraphStepNode = memo(function GraphStepNode({
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 REPL code preview
               </p>
-              <pre className="max-h-40 overflow-auto rounded-md border border-border-subtle bg-muted/40 p-2 text-[10px] leading-relaxed whitespace-pre-wrap break-words font-mono">
+              <pre className="max-h-40 overflow-auto rounded-md border border-border-subtle bg-muted/40 p-2 text-[10px] leading-relaxed whitespace-pre-wrap wrap-break-word font-mono">
                 {codePreview}
               </pre>
             </div>
@@ -248,7 +248,7 @@ const GraphStepNode = memo(function GraphStepNode({
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-500">
                 Error details
               </p>
-              <p className="text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words">
+              <p className="text-[11px] leading-relaxed text-foreground whitespace-pre-wrap wrap-break-word">
                 {errorDetails.message}
               </p>
               {errorDetails.code && (
@@ -257,7 +257,7 @@ const GraphStepNode = memo(function GraphStepNode({
                 </p>
               )}
               {errorDetails.trace && (
-                <pre className="mt-2 max-h-28 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 text-[10px] leading-relaxed whitespace-pre-wrap break-words font-mono">
+                <pre className="mt-2 max-h-28 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 text-[10px] leading-relaxed whitespace-pre-wrap wrap-break-word font-mono">
                   {errorDetails.trace}
                 </pre>
               )}
@@ -275,7 +275,7 @@ const GraphStepNode = memo(function GraphStepNode({
                     <p className="text-[10px] font-semibold text-foreground/80">
                       Thought
                     </p>
-                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
                       {trajectory.thought}
                     </p>
                   </div>
@@ -285,7 +285,7 @@ const GraphStepNode = memo(function GraphStepNode({
                     <p className="text-[10px] font-semibold text-foreground/80">
                       Action
                     </p>
-                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
                       {trajectory.action}
                     </p>
                   </div>
@@ -295,7 +295,7 @@ const GraphStepNode = memo(function GraphStepNode({
                     <p className="text-[10px] font-semibold text-foreground/80">
                       Observation
                     </p>
-                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                    <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
                       {trajectory.observation}
                     </p>
                   </div>
@@ -320,7 +320,7 @@ const GraphStepNode = memo(function GraphStepNode({
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-border !w-2 !h-2"
+        className="bg-border! w-2! h-2!"
       />
     </div>
   );
