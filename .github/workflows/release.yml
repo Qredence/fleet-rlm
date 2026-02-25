@@ -209,8 +209,8 @@ jobs:
           for i in 1 2 3; do
             echo "Attempt $i to install fleet-rlm==${{ needs.preflight.outputs.normalized_version }}"
             if pip install \
-              --index-url https://test.pypi.org/simple/ \
-              --extra-index-url https://pypi.org/simple \
+              --index-url https://pypi.org/simple \
+              --extra-index-url https://test.pypi.org/simple/ \
               fleet-rlm==${{ needs.preflight.outputs.normalized_version }}; then
               echo "✅ Successfully installed"
               exit 0
