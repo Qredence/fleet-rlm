@@ -35,6 +35,22 @@ export type {
 
 export { createBackendSessionId };
 
+function sanitizeLogValue(value: unknown): string {
+  let text: string;
+  if (value instanceof Error) {
+    text = `${value.name}: ${value.message}`;
+  } else if (typeof value === "string") {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  return text.replace(/[\r\n]+/g, " ");
+}
+
 export async function streamChatOverWs(
   message: WsMessageRequest,
   options: StreamWsOptions,
@@ -69,7 +85,7 @@ export function subscribeToExecutionStream(
     signal: controller.signal,
     terminalEventKinds: [],
   }).catch((err: unknown) => {
-    console.error("Execution stream error:", err);
+    console.error("Execution stream error:", sanitizeLogValue(err));
   });
 
   return () => controller.abort();
