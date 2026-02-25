@@ -33,7 +33,7 @@ This document serves as the "Context Hydration" ground truth for the `fleet-rlm`
 import dspy
 
 # Initialize the LM (e.g., using LiteLLM underneath)
-lm = dspy.LM("openai/gpt-4o-mini", api_key="your_api_key")
+lm = dspy.LM("openai/gemini-3-flash-preview", api_key="[ENCRYPTION_KEY]")
 
 # Set globally
 dspy.configure(lm=lm)
@@ -57,7 +57,7 @@ import litellm
 # Litellm handles the callback natively with PostHog's system variables
 # Requires: POSTHOG_API_KEY and POSTHOG_PROJECT_HOST
 
-lm = dspy.LM("openai/gpt-4o-mini", api_key="your_openai_api_key")
+lm = dspy.LM("openai/gemini-3-flash-preview", api_key={{DSPY_LM_API_KEY}})
 dspy.configure(lm=lm)
 
 # All standard dspy.Predict modules will now automatically dispatch $ai_generation events to PostHog.

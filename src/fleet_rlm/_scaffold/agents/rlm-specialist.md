@@ -121,7 +121,7 @@ except FileNotFoundError:
 - Use buffers (`add_buffer`/`get_buffer`) for stateful accumulation
 - Use `llm_query_batched()` instead of sequential `llm_query()` for parallel analysis
 - Reduce `max_iterations` and `max_llm_calls` to minimum needed
-- Use `sub_lm` with a cheaper model (e.g., GPT-4o-mini) for cost optimization
+- Use `sub_lm` with a cheaper model (e.g., gemini-3-flash-preview) for cost optimization
 - Increase `timeout` only when needed (default 600s is usually sufficient)
 - Enable `summarize_stdout` to prevent context window pollution (default: True)
 
@@ -171,10 +171,10 @@ import dspy
 from fleet_rlm import ModalInterpreter
 
 # Main planner uses GPT-4o
-dspy.configure(lm=dspy.LM("openai/gpt-4o"))
+dspy.configure(lm=dspy.LM("openai/gemini-3-flash-preview"))
 
 # Sub-queries use GPT-4o-mini (10x cheaper)
-cheap_lm = dspy.LM("openai/gpt-4o-mini")
+cheap_lm = dspy.LM("openai/gemini-3-flash-preview")
 
 with ModalInterpreter(sub_lm=cheap_lm, max_llm_calls=100) as interp:
     rlm = dspy.RLM(

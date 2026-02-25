@@ -245,6 +245,8 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Type-check with `ty` (not `mypy`)
 - Format/lint with `ruff`
 - Prefer `uv run ...` for commands
+- Frontend package manager is `bun` (`src/frontend/package.json` defines `packageManager: bun@...`); do not introduce npm lockfiles (`package-lock.json`) unless npm is intentionally adopted for a specific workspace
+- Keep generated artifacts scoped to their owning workspace/runtime (`dist/`, coverage, Playwright outputs); avoid committing one-off local verification scripts or root-level lockfiles that are not part of the project workflow
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
 - Runtime settings endpoints are served from `/api/v1/runtime/*`; writes (`PATCH /api/v1/runtime/settings`) are local-only (`APP_ENV=local`) while read/test endpoints remain available across environments

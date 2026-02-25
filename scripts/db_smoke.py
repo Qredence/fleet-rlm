@@ -54,7 +54,7 @@ async def _run() -> None:
             created_by_user_id=identity.user_id,
             external_run_id=external_run_id,
             model_provider="openai",
-            model_name="gpt-5",
+            model_name="gemini-3-flash-preview",
         )
     )
 
