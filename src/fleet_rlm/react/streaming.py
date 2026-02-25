@@ -169,6 +169,7 @@ def iter_chat_turn_stream(
         raise ValueError("message cannot be empty")
 
     agent.start()
+    effective_max_iters = agent._prepare_turn(message)
 
     stream_listeners = [StreamListener(signature_field_name="assistant_response")]
     if trace:
@@ -208,6 +209,16 @@ def iter_chat_turn_stream(
                 "trajectory": fallback.get("trajectory", {}),
                 "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
+                "effective_max_iters": fallback.get(
+                    "effective_max_iters", effective_max_iters
+                ),
+                "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
+                "delegate_fallback_count_turn": fallback.get(
+                    "delegate_fallback_count_turn", 0
+                ),
+                "delegate_result_truncated_count_turn": fallback.get(
+                    "delegate_result_truncated_count_turn", 0
+                ),
             },
         )
         return
@@ -221,6 +232,7 @@ def iter_chat_turn_stream(
             user_request=message,
             history=agent.history,
             core_memory=agent.fmt_core_memory(),
+            max_iters=effective_max_iters,
         )
         for value in stream:
             if cancel_check is not None and cancel_check():
@@ -232,7 +244,10 @@ def iter_chat_turn_stream(
                 yield StreamEvent(
                     kind="cancelled",
                     text=marked_partial,
-                    payload={"history_turns": agent.history_turns()},
+                    payload={
+                        "history_turns": agent.history_turns(),
+                        **agent._turn_metrics(),
+                    },
                 )
                 return
 
@@ -332,6 +347,16 @@ def iter_chat_turn_stream(
                 "trajectory": fallback.get("trajectory", {}),
                 "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
+                "effective_max_iters": fallback.get(
+                    "effective_max_iters", effective_max_iters
+                ),
+                "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
+                "delegate_fallback_count_turn": fallback.get(
+                    "delegate_fallback_count_turn", 0
+                ),
+                "delegate_result_truncated_count_turn": fallback.get(
+                    "delegate_result_truncated_count_turn", 0
+                ),
             },
         )
         return
@@ -361,6 +386,8 @@ def iter_chat_turn_stream(
         trajectory = {}
         final_reasoning = ""
 
+    agent._finalize_turn(trajectory)
+
     assistant_response, guardrail_warnings = agent._validate_assistant_response(
         assistant_response=assistant_response,
         trajectory=trajectory,
@@ -376,6 +403,7 @@ def iter_chat_turn_stream(
             "final_reasoning": final_reasoning,
             "history_turns": agent.history_turns(),
             "guardrail_warnings": guardrail_warnings,
+            **agent._turn_metrics(),
         },
     )
 
@@ -401,6 +429,7 @@ async def aiter_chat_turn_stream(
         raise ValueError("message cannot be empty")
 
     agent.start()
+    effective_max_iters = agent._prepare_turn(message)
 
     stream_listeners = [StreamListener(signature_field_name="assistant_response")]
     if trace:
@@ -440,6 +469,16 @@ async def aiter_chat_turn_stream(
                 "trajectory": fallback.get("trajectory", {}),
                 "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
+                "effective_max_iters": fallback.get(
+                    "effective_max_iters", effective_max_iters
+                ),
+                "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
+                "delegate_fallback_count_turn": fallback.get(
+                    "delegate_fallback_count_turn", 0
+                ),
+                "delegate_result_truncated_count_turn": fallback.get(
+                    "delegate_result_truncated_count_turn", 0
+                ),
             },
         )
         return
@@ -452,6 +491,7 @@ async def aiter_chat_turn_stream(
             user_request=message,
             history=agent.history,
             core_memory=agent.fmt_core_memory(),
+            max_iters=effective_max_iters,
         )
         async for value in output_stream:
             if cancel_check is not None and cancel_check():
@@ -463,7 +503,10 @@ async def aiter_chat_turn_stream(
                 yield StreamEvent(
                     kind="cancelled",
                     text=marked_partial,
-                    payload={"history_turns": agent.history_turns()},
+                    payload={
+                        "history_turns": agent.history_turns(),
+                        **agent._turn_metrics(),
+                    },
                 )
                 return
 
@@ -563,6 +606,16 @@ async def aiter_chat_turn_stream(
                 "trajectory": fallback.get("trajectory", {}),
                 "history_turns": fallback.get("history_turns", agent.history_turns()),
                 "fallback": True,
+                "effective_max_iters": fallback.get(
+                    "effective_max_iters", effective_max_iters
+                ),
+                "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
+                "delegate_fallback_count_turn": fallback.get(
+                    "delegate_fallback_count_turn", 0
+                ),
+                "delegate_result_truncated_count_turn": fallback.get(
+                    "delegate_result_truncated_count_turn", 0
+                ),
             },
         )
         return
@@ -592,6 +645,8 @@ async def aiter_chat_turn_stream(
         trajectory = {}
         final_reasoning = ""
 
+    agent._finalize_turn(trajectory)
+
     assistant_response, guardrail_warnings = agent._validate_assistant_response(
         assistant_response=assistant_response,
         trajectory=trajectory,
@@ -607,5 +662,6 @@ async def aiter_chat_turn_stream(
             "final_reasoning": final_reasoning,
             "history_turns": agent.history_turns(),
             "guardrail_warnings": guardrail_warnings,
+            **agent._turn_metrics(),
         },
     )

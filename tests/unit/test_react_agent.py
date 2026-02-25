@@ -238,6 +238,121 @@ def test_forward_accepts_custom_history(monkeypatch):
     assert len(agent.history.messages) == 0
 
 
+def test_forward_uses_baseline_iters_for_normal_prompt(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    captured: dict[str, object] = {}
+
+    class _CaptureReact:
+        def __call__(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(assistant_response="ok", trajectory={})
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        react_max_iters=15,
+        deep_react_max_iters=35,
+        enable_adaptive_iters=True,
+    )
+    agent.react = _CaptureReact()  # type: ignore[assignment]
+
+    prediction = agent.forward(user_request="say hello")
+    assert prediction.assistant_response == "ok"
+    assert captured["max_iters"] == 15
+
+
+def test_forward_uses_deep_iters_for_deep_analysis_prompt(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    captured: dict[str, object] = {}
+
+    class _CaptureReact:
+        def __call__(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(assistant_response="ok", trajectory={})
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        react_max_iters=15,
+        deep_react_max_iters=35,
+        enable_adaptive_iters=True,
+    )
+    agent.react = _CaptureReact()  # type: ignore[assignment]
+
+    prediction = agent.forward(
+        user_request="Do a full codebase deep analysis for maintainability hotspots."
+    )
+    assert prediction.assistant_response == "ok"
+    assert captured["max_iters"] == 35
+
+
+def test_forward_escalates_after_repeated_tool_errors(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    class _ErrorReact:
+        def __call__(self, **kwargs):
+            return SimpleNamespace(
+                assistant_response="first",
+                trajectory={
+                    "steps": [
+                        {"output": "error: tool one failed"},
+                        {"output": "error: tool two failed"},
+                    ]
+                },
+            )
+
+    captured: dict[str, object] = {}
+
+    class _CaptureReact:
+        def __call__(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(assistant_response="second", trajectory={})
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        react_max_iters=15,
+        deep_react_max_iters=35,
+        enable_adaptive_iters=True,
+    )
+    agent.react = _ErrorReact()  # type: ignore[assignment]
+    first = agent.forward(user_request="quick check")
+    assert first.assistant_response == "first"
+
+    agent.react = _CaptureReact()  # type: ignore[assignment]
+    second = agent.forward(user_request="quick follow-up")
+    assert second.assistant_response == "second"
+    assert captured["max_iters"] == 35
+
+
+def test_forward_disable_adaptive_iters_keeps_baseline(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    captured: dict[str, object] = {}
+
+    class _CaptureReact:
+        def __call__(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(assistant_response="ok", trajectory={})
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        react_max_iters=15,
+        deep_react_max_iters=35,
+        enable_adaptive_iters=False,
+    )
+    agent.react = _CaptureReact()  # type: ignore[assignment]
+
+    prediction = agent.forward(
+        user_request="Do a full codebase deep analysis for maintainability hotspots."
+    )
+    assert prediction.assistant_response == "ok"
+    assert captured["max_iters"] == 15
+
+
 def test_chat_turn_uses_module_call_semantics(monkeypatch):
     """chat_turn() should invoke the DSPy module call path (`self(...)`)."""
     records = []

@@ -63,6 +63,8 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self,
         *,
         react_max_iters: int = 10,
+        deep_react_max_iters: int = 35,
+        enable_adaptive_iters: bool = True,
         rlm_max_iterations: int = 30,
         rlm_max_llm_calls: int = 50,
         timeout: int = 900,
@@ -78,15 +80,30 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         guardrail_mode: Literal["off", "warn", "strict"] = "off",
         max_output_chars: int = 10000,
         min_substantive_chars: int = 20,
+        delegate_lm: Any | None = None,
+        delegate_max_calls_per_turn: int = 8,
+        delegate_result_truncation_chars: int = 8000,
     ) -> None:
         super().__init__()
         self.react_max_iters = react_max_iters
+        self.deep_react_max_iters = max(react_max_iters, deep_react_max_iters)
+        self.enable_adaptive_iters = enable_adaptive_iters
         self.rlm_max_iterations = rlm_max_iterations
         self.rlm_max_llm_calls = rlm_max_llm_calls
         self.verbose = verbose
         self.history_max_turns = history_max_turns
         self._max_depth = max_depth
         self._current_depth = current_depth
+        self.delegate_lm = delegate_lm
+        self.delegate_max_calls_per_turn = max(1, int(delegate_max_calls_per_turn))
+        self.delegate_result_truncation_chars = max(
+            256, int(delegate_result_truncation_chars)
+        )
+        self._last_tool_error_count = 0
+        self._current_effective_max_iters = react_max_iters
+        self._delegate_calls_turn = 0
+        self._delegate_fallback_count_turn = 0
+        self._delegate_result_truncated_count_turn = 0
 
         # Validation configuration
         self._validation_config = ValidationConfig(
@@ -243,13 +260,16 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         module graph is visible to optimizers and ``save()``/``load()``.
         """
         self.start()
+        effective_max_iters = self._prepare_turn(user_request)
         prediction = self.react(
             user_request=user_request,
             history=history or self.history,
             core_memory=self.fmt_core_memory(),
+            max_iters=effective_max_iters,
         )
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         trajectory = getattr(prediction, "trajectory", {})
+        self._finalize_turn(trajectory)
         assistant_response, warnings = self._validate_assistant_response(
             assistant_response=assistant_response,
             trajectory=trajectory,
@@ -257,6 +277,18 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         setattr(prediction, "assistant_response", assistant_response)
         if warnings:
             setattr(prediction, "guardrail_warnings", warnings)
+        setattr(prediction, "effective_max_iters", self._current_effective_max_iters)
+        setattr(prediction, "delegate_calls_turn", self._delegate_calls_turn)
+        setattr(
+            prediction,
+            "delegate_fallback_count_turn",
+            self._delegate_fallback_count_turn,
+        )
+        setattr(
+            prediction,
+            "delegate_result_truncated_count_turn",
+            self._delegate_result_truncated_count_turn,
+        )
         return prediction
 
     # -----------------------------------------------------------------
@@ -281,6 +313,28 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             "history_turns": self.history_turns(),
             "core_memory_snapshot": self.get_core_memory_snapshot(),
             "guardrail_warnings": guardrail_warnings,
+            "effective_max_iters": int(
+                getattr(
+                    prediction, "effective_max_iters", self._current_effective_max_iters
+                )
+            ),
+            "delegate_calls_turn": int(
+                getattr(prediction, "delegate_calls_turn", self._delegate_calls_turn)
+            ),
+            "delegate_fallback_count_turn": int(
+                getattr(
+                    prediction,
+                    "delegate_fallback_count_turn",
+                    self._delegate_fallback_count_turn,
+                )
+            ),
+            "delegate_result_truncated_count_turn": int(
+                getattr(
+                    prediction,
+                    "delegate_result_truncated_count_turn",
+                    self._delegate_result_truncated_count_turn,
+                )
+            ),
         }
 
     def iter_chat_turn_stream(
@@ -346,13 +400,16 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             raise ValueError("message cannot be empty")
 
         self.start()
+        effective_max_iters = self._prepare_turn(message)
         prediction = await self.react.acall(
             user_request=message,
             history=self.history,
             core_memory=self.fmt_core_memory(),
+            max_iters=effective_max_iters,
         )
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         trajectory = getattr(prediction, "trajectory", {})
+        self._finalize_turn(trajectory)
         assistant_response, warnings = self._validate_assistant_response(
             assistant_response=assistant_response,
             trajectory=trajectory,
@@ -364,6 +421,10 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             "trajectory": trajectory,
             "history_turns": self.history_turns(),
             "guardrail_warnings": warnings,
+            "effective_max_iters": self._current_effective_max_iters,
+            "delegate_calls_turn": self._delegate_calls_turn,
+            "delegate_fallback_count_turn": self._delegate_fallback_count_turn,
+            "delegate_result_truncated_count_turn": self._delegate_result_truncated_count_turn,
         }
 
     async def aiter_chat_turn_stream(
@@ -482,6 +543,94 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         if self.history_max_turns is not None and self.history_max_turns > 0:
             messages = messages[-self.history_max_turns :]
         self.history = dspy.History(messages=messages)
+
+    def _turn_metrics(self) -> dict[str, int]:
+        return {
+            "effective_max_iters": int(self._current_effective_max_iters),
+            "delegate_calls_turn": int(self._delegate_calls_turn),
+            "delegate_fallback_count_turn": int(self._delegate_fallback_count_turn),
+            "delegate_result_truncated_count_turn": int(
+                self._delegate_result_truncated_count_turn
+            ),
+        }
+
+    def _prepare_turn(self, user_request: str) -> int:
+        """Initialize per-turn counters and compute effective iteration budget."""
+        self._delegate_calls_turn = 0
+        self._delegate_fallback_count_turn = 0
+        self._delegate_result_truncated_count_turn = 0
+        self._current_effective_max_iters = self._compute_effective_max_iters(
+            user_request
+        )
+        return self._current_effective_max_iters
+
+    def _compute_effective_max_iters(self, user_request: str) -> int:
+        baseline = max(1, int(self.react_max_iters))
+        if not self.enable_adaptive_iters:
+            return baseline
+
+        deep_budget = max(baseline, int(self.deep_react_max_iters))
+        request = (user_request or "").lower()
+        deep_markers = (
+            "full codebase",
+            "entire codebase",
+            "deep analysis",
+            "architecture",
+            "hotspot",
+            "repo-wide",
+            "across the repo",
+            "maintainability",
+            "code quality",
+            "simplification",
+            "performance audit",
+            "long-context",
+        )
+        if any(marker in request for marker in deep_markers):
+            return deep_budget
+        if self._last_tool_error_count >= 2:
+            return deep_budget
+        return baseline
+
+    def _finalize_turn(self, trajectory: Any) -> None:
+        """Capture post-turn metrics for adaptive follow-up turns."""
+        self._last_tool_error_count = self._count_tool_errors(trajectory)
+
+    def _count_tool_errors(self, trajectory: Any) -> int:
+        if not isinstance(trajectory, dict):
+            return 0
+
+        total = 0
+        for key, value in trajectory.items():
+            if not str(key).startswith("observation_"):
+                continue
+            text = str(value).lower()
+            if "execution error in" in text or "traceback" in text:
+                total += 1
+
+        steps = trajectory.get("steps")
+        if isinstance(steps, list):
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                text = str(
+                    step.get("output", step.get("observation", step.get("error", "")))
+                ).lower()
+                if "error" in text and "no error" not in text:
+                    total += 1
+        return total
+
+    def _claim_delegate_slot(self) -> tuple[bool, int]:
+        limit = max(1, int(self.delegate_max_calls_per_turn))
+        if self._delegate_calls_turn >= limit:
+            return False, limit
+        self._delegate_calls_turn += 1
+        return True, limit
+
+    def _record_delegate_fallback(self) -> None:
+        self._delegate_fallback_count_turn += 1
+
+    def _record_delegate_truncation(self) -> None:
+        self._delegate_result_truncated_count_turn += 1
 
     def _validate_assistant_response(
         self,

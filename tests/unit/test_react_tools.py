@@ -129,6 +129,108 @@ def test_list_files_returns_glob_matches(monkeypatch, tmp_path):
     assert "readme.md" not in result["files"]
 
 
+def test_list_files_recursive_glob_includes_direct_children(monkeypatch, tmp_path):
+    """Recursive globs should include direct children under the matched prefix."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    src = tmp_path / "src"
+    nested = src / "nested"
+    nested.mkdir(parents=True)
+    (src / "a.py").write_text("print('a')")
+    (nested / "b.py").write_text("print('b')")
+    (src / "ignore.txt").write_text("ignore")
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.list_files(str(tmp_path), pattern="src/**/*.py")
+
+    assert result["status"] == "ok"
+    assert result["count"] == 2
+    assert "src/a.py" in result["files"]
+    assert "src/nested/b.py" in result["files"]
+
+
+def test_list_files_ignores_common_dependency_dirs(monkeypatch, tmp_path):
+    """Ignored directories should be excluded from listing and counts."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "pkg.js").write_text("module.exports = {}")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "keep.py").write_text("print('keep')")
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.list_files(str(tmp_path), pattern="**/*")
+
+    assert result["status"] == "ok"
+    assert result["count"] == 1
+    assert result["files"] == ["src/keep.py"]
+
+
+def test_list_files_count_size_and_display_cap(monkeypatch, tmp_path):
+    """Count and size should include all matches while files list is capped at 100."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    total_size = 0
+    for idx in range(105):
+        content = f"file-{idx:03d}"
+        total_size += len(content)
+        (tmp_path / f"f{idx:03d}.txt").write_text(content)
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.list_files(str(tmp_path), pattern="*.txt")
+
+    assert result["status"] == "ok"
+    assert result["count"] == 105
+    assert len(result["files"]) == 100
+    assert result["total_bytes"] == total_size
+
+
+def test_list_files_source_first_scopes_default_recursive_scan(monkeypatch, tmp_path):
+    """Default recursive scans should prioritize source roots and report scope metadata."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "inside.py").write_text("print('inside')")
+    (tmp_path / "outside.py").write_text("print('outside')")
+
+    monkeypatch.chdir(tmp_path)
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.list_files(".", pattern="**/*.py")
+
+    assert result["status"] == "ok"
+    assert result["list_files_scoped"] is True
+    assert "src" in result["list_files_scope_roots"]
+    assert "src/inside.py" in result["files"]
+    assert "outside.py" not in result["files"]
+
+
+def test_list_files_source_first_falls_back_to_root_when_scopes_empty(
+    monkeypatch, tmp_path
+):
+    """If scoped roots have no matches, the tool should fall back to root scanning."""
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "README.md").write_text("# root")
+
+    monkeypatch.chdir(tmp_path)
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.list_files(".", pattern="**/*.md")
+
+    assert result["status"] == "ok"
+    assert result["count"] == 1
+    assert result["files"] == ["README.md"]
+    assert result["list_files_scoped"] is True
+    assert "src" in result["list_files_scope_roots"]
+
+
 def test_read_file_slice_returns_line_range(monkeypatch, tmp_path):
     """read_file_slice should return a specific range of lines with line numbers."""
     records = []

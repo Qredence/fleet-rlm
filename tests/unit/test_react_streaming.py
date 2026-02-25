@@ -125,6 +125,33 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
     assert len(agent.history.messages) == 1
 
 
+def test_iter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    captured: dict[str, object] = {}
+
+    def _fake_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            captured.update(stream_kwargs)
+            yield dspy.Prediction(
+                assistant_response="done",
+                trajectory={"tool_name_0": "finish"},
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        react_max_iters=15,
+        deep_react_max_iters=35,
+    )
+    list(agent.iter_chat_turn_stream("full codebase deep analysis", trace=False))
+    assert captured["max_iters"] == 35
+
+
 def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
@@ -262,6 +289,44 @@ async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
     assert events[-1].kind == "final"
     assert events[-1].text == "hello"
     assert len(agent.history.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_aiter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    captured: dict[str, object] = {}
+
+    def _fake_streamify(*args, **kwargs):
+        assert kwargs.get("async_streaming") is True
+
+        async def _stream(**stream_kwargs):
+            captured.update(stream_kwargs)
+            yield dspy.Prediction(
+                assistant_response="hello",
+                trajectory={"tool_name_0": "finish"},
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(
+        interpreter=_FakeInterpreter(),
+        react_max_iters=15,
+        deep_react_max_iters=35,
+    )
+    events = [
+        event
+        async for event in agent.aiter_chat_turn_stream(
+            "full codebase deep analysis",
+            trace=False,
+        )
+    ]
+
+    assert events[-1].kind == "final"
+    assert captured["max_iters"] == 35
 
 
 def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeypatch):

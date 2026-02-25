@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
+
+import dspy
 
 if TYPE_CHECKING:
     from .agent import RLMReActChatAgent
@@ -51,23 +54,96 @@ def spawn_delegate_sub_agent(
             ),
         }
 
+    claim_slot = getattr(agent, "_claim_delegate_slot", None)
+    if callable(claim_slot):
+        claim_result = claim_slot()
+        if (
+            isinstance(claim_result, tuple)
+            and len(claim_result) == 2
+            and isinstance(claim_result[0], bool)
+        ):
+            allowed = bool(claim_result[0])
+            limit = int(claim_result[1])
+            if not allowed:
+                return {
+                    "status": "error",
+                    "error": (
+                        "Delegate call budget reached for this turn. "
+                        f"Maximum delegate calls per turn is {limit}."
+                    ),
+                    "delegate_max_calls_per_turn": limit,
+                }
+
     SubAgentClass = agent.__class__
 
+    delegate_lm = getattr(agent, "delegate_lm", None)
+    parent_lm = getattr(dspy.settings, "lm", None)
+    fallback_used = delegate_lm is None
+    if fallback_used and callable(getattr(agent, "_record_delegate_fallback", None)):
+        agent._record_delegate_fallback()
+
     sub_agent = SubAgentClass(
+        react_max_iters=getattr(agent, "react_max_iters", 10),
+        deep_react_max_iters=getattr(agent, "deep_react_max_iters", 35),
+        enable_adaptive_iters=getattr(agent, "enable_adaptive_iters", True),
+        rlm_max_iterations=getattr(agent, "rlm_max_iterations", 30),
+        rlm_max_llm_calls=getattr(agent, "rlm_max_llm_calls", 50),
+        verbose=getattr(agent, "verbose", False),
+        history_max_turns=getattr(agent, "history_max_turns", None),
         interpreter=agent.interpreter,
         max_depth=agent._max_depth,
         current_depth=agent._current_depth + 1,
+        guardrail_mode=getattr(agent, "guardrail_mode", "off"),
+        max_output_chars=getattr(agent, "max_output_chars", 10000),
+        min_substantive_chars=getattr(agent, "min_substantive_chars", 20),
+        delegate_lm=delegate_lm,
+        delegate_max_calls_per_turn=getattr(agent, "delegate_max_calls_per_turn", 8),
+        delegate_result_truncation_chars=getattr(
+            agent, "delegate_result_truncation_chars", 8000
+        ),
     )
 
     if document is not None:
         sub_agent._set_document(document_alias, document)
 
-    result = sub_agent.chat_turn(prompt)
+    lm_context = (
+        dspy.context(lm=delegate_lm)
+        if delegate_lm is not None
+        else (dspy.context(lm=parent_lm) if parent_lm is not None else nullcontext())
+    )
+    try:
+        with lm_context:
+            result = sub_agent.chat_turn(prompt)
+    except Exception:
+        if delegate_lm is not None and parent_lm is not None:
+            if callable(getattr(agent, "_record_delegate_fallback", None)):
+                agent._record_delegate_fallback()
+            fallback_used = True
+            with dspy.context(lm=parent_lm):
+                result = sub_agent.chat_turn(prompt)
+        else:
+            raise
+
+    result_copy = dict(result)
+    result_copy.setdefault("status", "ok")
+    response_text = str(result_copy.get("assistant_response", ""))
+    truncation_limit = int(getattr(agent, "delegate_result_truncation_chars", 8000))
+    if truncation_limit > 0 and len(response_text) > truncation_limit:
+        truncated = response_text[:truncation_limit].rstrip()
+        result_copy["assistant_response"] = (
+            f"{truncated}\n\n[truncated delegate output]"
+        )
+        result_copy["delegate_output_truncated"] = True
+        if callable(getattr(agent, "_record_delegate_truncation", None)):
+            agent._record_delegate_truncation()
+    else:
+        result_copy["delegate_output_truncated"] = False
 
     return {
-        **result,
+        **result_copy,
         "depth": agent._current_depth + 1,
         "sub_agent_history": sub_agent.history_turns(),
+        "delegate_lm_fallback": fallback_used,
     }
 
 

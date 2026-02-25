@@ -50,7 +50,7 @@ def build_filesystem_tools(agent: RLMReActChatAgent) -> list[Any]:
         Returns:
             Dictionary with status, path, files list, count, and total bytes.
         """
-        base = Path(path)
+        base = Path(path).resolve()
         if not base.exists():
             raise FileNotFoundError(f"Path not found: {base}")
         if not base.is_dir():
@@ -61,20 +61,80 @@ def build_filesystem_tools(agent: RLMReActChatAgent) -> list[Any]:
                 "files": [base.name],
                 "count": 1,
                 "total_bytes": base.stat().st_size,
+                "list_files_scoped": False,
+                "list_files_scope_roots": [],
             }
 
-        # Directory: glob for files matching pattern
-        matched = [p for p in base.glob(pattern) if p.is_file()]
-        files = sorted(str(p.relative_to(base)) for p in matched)
-        total_bytes = sum(p.stat().st_size for p in matched)
+        IGNORED_DIRS = {
+            ".git",
+            ".venv",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            ".tmpl",
+            ".next",
+            "dist",
+            "build",
+            ".dspy",
+            ".mypy_cache",
+            ".pytest_cache",
+            "__target__",
+        }
+
+        def _is_included(candidate: Path) -> bool:
+            if not candidate.is_file():
+                return False
+            rel_parts = candidate.relative_to(base).parts
+            return not any(part in IGNORED_DIRS for part in rel_parts)
+
+        pattern_norm = (pattern or "**/*").strip() or "**/*"
+        path_norm = path.strip() if isinstance(path, str) else "."
+        is_default_root = path_norm in {"", ".", "./"}
+        pattern_parts = Path(pattern_norm).parts
+        first_part = pattern_parts[0] if pattern_parts else ""
+        has_explicit_root = bool(first_part) and not any(
+            token in first_part for token in ("*", "?", "[", "]")
+        )
+        source_first_scope = (
+            is_default_root and not has_explicit_root and "**" in pattern_norm
+        )
+
+        scope_roots: list[Path] = []
+        matched_files: list[Path] = []
+        if source_first_scope:
+            for root_name in ("src", "tests", "docs", "scripts"):
+                root = base / root_name
+                if root.exists() and root.is_dir():
+                    scope_roots.append(root)
+            if scope_roots:
+                scoped_matches = {
+                    candidate
+                    for root in scope_roots
+                    for candidate in root.glob(pattern_norm)
+                    if _is_included(candidate)
+                }
+                matched_files = sorted(scoped_matches, key=lambda p: str(p))
+
+        if not matched_files:
+            matched_files = [
+                candidate
+                for candidate in base.glob(pattern_norm)
+                if _is_included(candidate)
+            ]
+
+        files_result = sorted(str(p.relative_to(base)) for p in matched_files)
+        total_bytes = sum(p.stat().st_size for p in matched_files)
+        scope_roots_rel = [str(root.relative_to(base)) for root in scope_roots]
 
         return {
             "status": "ok",
             "path": str(base),
-            "files": files[:100],  # Cap at 100 for display
-            "count": len(files),
+            "files": files_result[:100],  # Cap at 100 for display
+            "count": len(files_result),
             "total_bytes": total_bytes,
             "hint": "Use load_document to read a specific file from this listing.",
+            "list_files_scoped": bool(scope_roots_rel),
+            "list_files_scope_roots": scope_roots_rel,
         }
 
     def read_file_slice(

@@ -1,7 +1,8 @@
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 
-from src.fleet_rlm.react.agent import RLMReActChatAgent
-from src.fleet_rlm.react.delegate_sub_agent import spawn_delegate_sub_agent
+from fleet_rlm.react.agent import RLMReActChatAgent
+from fleet_rlm.react.delegate_sub_agent import spawn_delegate_sub_agent
 
 
 def test_sub_agent_interpreter_sharing():
@@ -44,4 +45,100 @@ def test_sub_agent_interpreter_sharing():
 
     finally:
         # Restore the original method
+        RLMReActChatAgent.chat_turn = original_chat_turn
+
+
+def test_delegate_budget_cap_returns_bounded_error():
+    mock_interpreter = MagicMock()
+    parent_agent = RLMReActChatAgent(
+        interpreter=mock_interpreter,
+        delegate_max_calls_per_turn=1,
+    )
+    parent_agent._current_depth = 0
+
+    original_chat_turn = RLMReActChatAgent.chat_turn
+    try:
+        RLMReActChatAgent.chat_turn = lambda self, prompt, **kwargs: {
+            "assistant_response": "ok"
+        }
+        first = spawn_delegate_sub_agent(parent_agent, prompt="delegate once")
+        second = spawn_delegate_sub_agent(parent_agent, prompt="delegate twice")
+        assert first["status"] == "ok"
+        assert second["status"] == "error"
+        assert "Delegate call budget reached" in second["error"]
+    finally:
+        RLMReActChatAgent.chat_turn = original_chat_turn
+
+
+def test_delegate_result_truncation_updates_metadata():
+    mock_interpreter = MagicMock()
+    parent_agent = RLMReActChatAgent(
+        interpreter=mock_interpreter,
+        delegate_result_truncation_chars=256,
+    )
+    parent_agent._current_depth = 0
+
+    original_chat_turn = RLMReActChatAgent.chat_turn
+    try:
+        RLMReActChatAgent.chat_turn = lambda self, prompt, **kwargs: {
+            "assistant_response": "x" * 1024
+        }
+        result = spawn_delegate_sub_agent(parent_agent, prompt="truncate output")
+        assert result["status"] == "ok"
+        assert result["delegate_output_truncated"] is True
+        assert result["assistant_response"].endswith("[truncated delegate output]")
+        assert parent_agent._delegate_result_truncated_count_turn == 1
+    finally:
+        RLMReActChatAgent.chat_turn = original_chat_turn
+
+
+def test_delegate_uses_delegate_lm_context_when_available(monkeypatch):
+    mock_interpreter = MagicMock()
+    delegate_lm = object()
+    parent_agent = RLMReActChatAgent(
+        interpreter=mock_interpreter, delegate_lm=delegate_lm
+    )
+    parent_agent._current_depth = 0
+
+    seen_lms: list[object] = []
+
+    @contextmanager
+    def _fake_context(*, lm):
+        seen_lms.append(lm)
+        yield
+
+    monkeypatch.setattr(
+        "fleet_rlm.react.delegate_sub_agent.dspy.context", _fake_context
+    )
+
+    original_chat_turn = RLMReActChatAgent.chat_turn
+    try:
+        RLMReActChatAgent.chat_turn = lambda self, prompt, **kwargs: {
+            "assistant_response": "ok"
+        }
+        result = spawn_delegate_sub_agent(parent_agent, prompt="delegate with lm")
+        assert result["status"] == "ok"
+        assert result["delegate_lm_fallback"] is False
+        assert seen_lms and seen_lms[0] is delegate_lm
+    finally:
+        RLMReActChatAgent.chat_turn = original_chat_turn
+
+
+def test_delegate_fallback_count_increments_when_delegate_lm_missing():
+    mock_interpreter = MagicMock()
+    parent_agent = RLMReActChatAgent(interpreter=mock_interpreter, delegate_lm=None)
+    parent_agent._current_depth = 0
+
+    original_chat_turn = RLMReActChatAgent.chat_turn
+    try:
+        RLMReActChatAgent.chat_turn = lambda self, prompt, **kwargs: {
+            "assistant_response": "ok"
+        }
+        result = spawn_delegate_sub_agent(
+            parent_agent, prompt="no delegate lm configured"
+        )
+        assert result["status"] == "ok"
+        assert result["delegate_lm_fallback"] is True
+        assert parent_agent._delegate_fallback_count_turn == 1
+    finally:
         RLMReActChatAgent.chat_turn = original_chat_turn
