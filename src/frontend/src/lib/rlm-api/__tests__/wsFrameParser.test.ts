@@ -26,12 +26,15 @@ describe("parseWsServerFrame", () => {
       command: "hitl.respond",
       result: { status: "ok", value: true },
       version: 2,
+      event_id: "evt-command-ack",
     });
 
     expect(frame).toBeTruthy();
     if (!frame || frame.type !== "event") return;
     expect(frame.data.kind).toBe("command_ack");
     expect(frame.data.payload?.command).toBe("hitl.respond");
+    expect(frame.data.version).toBe(2);
+    expect(frame.data.event_id).toBe("evt-command-ack");
   });
 
   it("maps command_result error to command_reject event", () => {

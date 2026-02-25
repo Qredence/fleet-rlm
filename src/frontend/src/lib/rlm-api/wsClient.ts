@@ -5,6 +5,7 @@ import {
   createReconnectingWs,
 } from "@/lib/rlm-api/wsReconnecting";
 import type {
+  WsCommandRequest,
   StreamWsOptions,
   WsCancelRequest,
   WsClientMessage,
@@ -24,6 +25,7 @@ export type {
   WsConnectionStatus,
   WsConnectionOptions,
   WsMessageRequest,
+  WsCommandRequest,
   WsCancelRequest,
   WsClientMessage,
   WsEventKind,
@@ -61,6 +63,21 @@ export async function streamChatOverWs(
   }
 
   await createReconnectingWs(message, { ...options, url: rlmApiConfig.wsUrl });
+}
+
+export async function sendCommandOverWs(
+  message: WsCommandRequest,
+  options: StreamWsOptions,
+): Promise<void> {
+  if (!rlmApiConfig.wsUrl) {
+    throw createWsError("WebSocket URL is not configured (VITE_FLEET_WS_URL)");
+  }
+
+  await createReconnectingWs(message, {
+    ...options,
+    url: rlmApiConfig.wsUrl,
+    terminalEventKinds: ["command_ack", "command_reject"],
+  });
 }
 
 export function subscribeToExecutionStream(

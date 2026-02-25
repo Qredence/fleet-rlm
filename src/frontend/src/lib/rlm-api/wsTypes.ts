@@ -28,7 +28,19 @@ export interface WsCancelRequest {
   type: "cancel";
 }
 
-export type WsClientMessage = WsMessageRequest | WsCancelRequest;
+export interface WsCommandRequest {
+  type: "command";
+  command: string;
+  args?: Record<string, unknown>;
+  workspace_id?: string;
+  user_id?: string;
+  session_id?: string;
+}
+
+export type WsClientMessage =
+  | WsMessageRequest
+  | WsCancelRequest
+  | WsCommandRequest;
 
 export type WsEventKind =
   | "assistant_token"

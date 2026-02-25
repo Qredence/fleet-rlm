@@ -227,6 +227,8 @@ export function parseWsServerFrame(
           raw: parsed,
         },
         version: asNumber(parsed.version),
+        event_id:
+          typeof parsed.event_id === "string" ? parsed.event_id : undefined,
       },
     };
   }

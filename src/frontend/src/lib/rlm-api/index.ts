@@ -17,6 +17,7 @@ export { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 export { rlmCoreEndpoints } from "@/lib/rlm-api/endpoints";
 export {
   streamChatOverWs,
+  sendCommandOverWs,
   subscribeToExecutionStream,
   createBackendSessionId,
 } from "@/lib/rlm-api/wsClient";
@@ -25,6 +26,7 @@ export type {
   WsConnectionStatus,
   WsConnectionOptions,
   WsMessageRequest,
+  WsCommandRequest,
   WsCancelRequest,
   WsClientMessage,
   WsEventKind,

@@ -697,6 +697,46 @@ function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[]
   const raw = payload?.citations;
   if (!Array.isArray(raw) || raw.length === 0) return [];
 
+  const rawAnchors = Array.isArray(payload?.citation_anchors)
+    ? payload.citation_anchors
+    : [];
+  const anchorsById = new Map<
+    string,
+    {
+      number?: string;
+      startChar?: number;
+      endChar?: number;
+    }
+  >();
+  const anchorsBySourceAndNumber = new Map<
+    string,
+    {
+      number?: string;
+      startChar?: number;
+      endChar?: number;
+    }
+  >();
+
+  for (const anchorItem of rawAnchors) {
+    const anchor = asRecord(anchorItem);
+    if (!anchor) continue;
+    const anchorId =
+      asOptionalText(anchor.anchor_id) ?? asOptionalText(anchor.anchorId);
+    const sourceId =
+      asOptionalText(anchor.source_id) ?? asOptionalText(anchor.sourceId);
+    const number =
+      asOptionalText(anchor.number) ??
+      (() => {
+        const parsed = asOptionalNumber(anchor.number);
+        return parsed != null ? String(parsed) : undefined;
+      })();
+    const startChar = asOptionalNumber(anchor.start_char ?? anchor.startChar);
+    const endChar = asOptionalNumber(anchor.end_char ?? anchor.endChar);
+    const value = { number, startChar, endChar };
+    if (anchorId) anchorsById.set(anchorId, value);
+    if (sourceId && number) anchorsBySourceAndNumber.set(`${sourceId}|${number}`, value);
+  }
+
   const citations = raw
     .slice(0, MAX_CITATIONS)
     .map<ChatInlineCitation | null>((item, index) => {
@@ -719,19 +759,33 @@ function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[]
         asOptionalText(rec.anchor_id) ??
         asOptionalText(rec.anchorId) ??
         undefined;
+      const anchorFromId = anchorId ? anchorsById.get(anchorId) : undefined;
+      const rawNumberText =
+        asOptionalText(rec.number) ??
+        (numericNumber != null ? String(numericNumber) : undefined);
+      const anchorFromSource = sourceId
+        ? anchorsBySourceAndNumber.get(
+            `${sourceId}|${rawNumberText ?? String(index + 1)}`,
+          )
+        : undefined;
+      const anchorData = anchorFromId ?? anchorFromSource;
+      const finalNumber = anchorData?.number ?? rawNumberText ?? String(index + 1);
+      const startChar =
+        asOptionalNumber(rec.start_char ?? rec.startChar) ??
+        anchorData?.startChar;
+      const endChar =
+        asOptionalNumber(rec.end_char ?? rec.endChar) ?? anchorData?.endChar;
 
       return {
-        number:
-          asOptionalText(rec.number) ??
-          (numericNumber != null ? String(numericNumber) : String(index + 1)),
+        number: finalNumber,
         title,
         url,
         description: asOptionalText(rec.description),
         quote: asOptionalText(rec.quote ?? rec.evidence),
         sourceId,
         anchorId,
-        startChar: asOptionalNumber(rec.start_char ?? rec.startChar),
-        endChar: asOptionalNumber(rec.end_char ?? rec.endChar),
+        startChar,
+        endChar,
       };
     })
     .filter((value): value is ChatInlineCitation => value != null);
@@ -746,7 +800,24 @@ function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[]
     ].join("|");
     if (!deduped.has(key)) deduped.set(key, citation);
   }
-  return [...deduped.values()].slice(0, MAX_CITATIONS);
+
+  const sorted = [...deduped.values()].sort((a, b) => {
+    const aNumber = Number(a.number);
+    const bNumber = Number(b.number);
+    const aHasNumber = Number.isFinite(aNumber);
+    const bHasNumber = Number.isFinite(bNumber);
+    if (aHasNumber && bHasNumber && aNumber !== bNumber) return aNumber - bNumber;
+    if (aHasNumber !== bHasNumber) return aHasNumber ? -1 : 1;
+    const aStart = a.startChar ?? Number.POSITIVE_INFINITY;
+    const bStart = b.startChar ?? Number.POSITIVE_INFINITY;
+    if (aStart !== bStart) return aStart - bStart;
+    return a.url.localeCompare(b.url);
+  });
+
+  return sorted.slice(0, MAX_CITATIONS).map((citation, index) => ({
+    ...citation,
+    number: citation.number ?? String(index + 1),
+  }));
 }
 
 function parseSources(
@@ -931,6 +1002,51 @@ function attachFinalReferences(
   return next;
 }
 
+function resolveHitlByMessageId(
+  messages: ChatMessage[],
+  messageId: string,
+  resolution: string,
+): ChatMessage[] {
+  let changed = false;
+  const next = messages.map((msg) => {
+    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
+      return msg;
+    }
+    changed = true;
+    return {
+      ...msg,
+      hitlData: {
+        ...msg.hitlData,
+        resolved: true,
+        resolvedLabel: resolution,
+      },
+    };
+  });
+  return changed ? next : messages;
+}
+
+function rollbackHitlByMessageId(
+  messages: ChatMessage[],
+  messageId: string,
+): ChatMessage[] {
+  let changed = false;
+  const next = messages.map((msg) => {
+    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
+      return msg;
+    }
+    changed = true;
+    return {
+      ...msg,
+      hitlData: {
+        ...msg.hitlData,
+        resolved: false,
+        resolvedLabel: undefined,
+      },
+    };
+  });
+  return changed ? next : messages;
+}
+
 function applyEvent(
   messages: ChatMessage[],
   frame: WsServerEvent,
@@ -1100,9 +1216,18 @@ function applyEvent(
       return { messages: next, terminal: false, errored: false };
     }
     case "command_ack": {
+      const command = asOptionalText(payload?.command);
+      const result = asRecord(payload?.result);
+      const messageId = asOptionalText(result?.message_id ?? result?.messageId);
+      const resolution =
+        asOptionalText(result?.resolution) ?? asOptionalText(result?.action_label);
+      let next = messages;
+      if (command === "resolve_hitl" && messageId && resolution) {
+        next = resolveHitlByMessageId(next, messageId, resolution);
+      }
       return {
         messages: appendTracePart(
-          messages,
+          next,
           {
             kind: "status_note",
             tone: "success",
@@ -1115,9 +1240,16 @@ function applyEvent(
       };
     }
     case "command_reject": {
+      const command = asOptionalText(payload?.command);
+      const result = asRecord(payload?.result);
+      const messageId = asOptionalText(result?.message_id ?? result?.messageId);
+      let next = messages;
+      if (command === "resolve_hitl" && messageId) {
+        next = rollbackHitlByMessageId(next, messageId);
+      }
       return {
         messages: appendTracePart(
-          messages,
+          next,
           {
             kind: "status_note",
             tone: "error",

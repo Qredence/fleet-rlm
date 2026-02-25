@@ -269,3 +269,38 @@ def test_websocket_cancel_message(
 
         total = 1 + len(remaining)
         assert total == 6
+
+
+def test_websocket_resolve_hitl_command_flow(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "command",
+                "command": "resolve_hitl",
+                "args": {
+                    "message_id": "hitl-123",
+                    "action_label": "Approve",
+                },
+            }
+        )
+
+        event = websocket.receive_json()
+        assert event["type"] == "event"
+        assert event["data"]["kind"] == "hitl_resolved"
+        assert event["data"]["payload"]["message_id"] == "hitl-123"
+        assert event["data"]["payload"]["resolution"] == "Approve"
+        assert event["data"]["version"] == 1
+        assert isinstance(event["data"]["event_id"], str)
+
+        command_result = websocket.receive_json()
+        assert command_result["type"] == "command_result"
+        assert command_result["command"] == "resolve_hitl"
+        assert command_result["result"]["status"] == "ok"
+        assert command_result["result"]["message_id"] == "hitl-123"
+        assert command_result["result"]["resolution"] == "Approve"
+        assert command_result["version"] == 1
+        assert isinstance(command_result["event_id"], str)

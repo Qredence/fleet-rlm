@@ -148,6 +148,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html).toContain("trace.json");
     expect(html).toContain("[1]");
     expect(html).toContain("Done with sources");
+    expect(html.match(/data-slot=\"sources-trigger\"/g)?.length).toBe(1);
   });
 
   it("shows shimmer while typing with no streaming assistant message", () => {

@@ -18,6 +18,20 @@ from .ws_lifecycle import PersistenceRequiredError
 logger = logging.getLogger(__name__)
 
 
+def _command_response(
+    *,
+    command: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "type": "command_result",
+        "command": command,
+        "result": result,
+        "version": 1,
+        "event_id": str(uuid.uuid4()),
+    }
+
+
 async def _handle_command(
     websocket: WebSocket,
     agent: "runners.RLMReActChatAgent",
@@ -38,9 +52,59 @@ async def _handle_command(
         )
         return
 
+    if command == "resolve_hitl":
+        message_id = str(args.get("message_id", "")).strip()
+        action_label = str(args.get("action_label", "")).strip()
+        if not message_id or not action_label:
+            await websocket.send_json(
+                _command_response(
+                    command=command,
+                    result={
+                        "status": "error",
+                        "error": "resolve_hitl requires message_id and action_label",
+                        "message_id": message_id or None,
+                    },
+                )
+            )
+            return
+
+        hitl_event_id = str(uuid.uuid4())
+        await websocket.send_json(
+            {
+                "type": "event",
+                "data": {
+                    "kind": "hitl_resolved",
+                    "text": action_label,
+                    "payload": {
+                        "message_id": message_id,
+                        "resolution": action_label,
+                        "source": "command",
+                    },
+                    "version": 1,
+                    "event_id": hitl_event_id,
+                },
+            }
+        )
+        await websocket.send_json(
+            _command_response(
+                command=command,
+                result={
+                    "status": "ok",
+                    "message_id": message_id,
+                    "resolution": action_label,
+                },
+            )
+        )
+        return
+
     try:
         with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
             result = await agent.execute_command(command, args)
+        normalized_result = (
+            {"status": "ok", **result}
+            if isinstance(result, dict)
+            else {"status": "ok", "value": result}
+        )
 
         # Track likely artifact writes as session metadata.
         if session_record is not None and command in {
@@ -104,19 +168,18 @@ async def _handle_command(
                     )
 
         await websocket.send_json(
-            {
-                "type": "command_result",
-                "command": command,
-                "result": result,
-            }
+            _command_response(command=command, result=normalized_result)
         )
     except (ValueError, FileNotFoundError, KeyError) as exc:
         await websocket.send_json(
-            {
-                "type": "command_result",
-                "command": command,
-                "result": {"status": "error", "error": str(exc)},
-            }
+            _command_response(
+                command=command,
+                result={
+                    "status": "error",
+                    "error": str(exc),
+                    "message_id": str(args.get("message_id", "")).strip() or None,
+                },
+            )
         )
     except Exception as exc:
         logger.error(
@@ -130,12 +193,12 @@ async def _handle_command(
             },
         )
         await websocket.send_json(
-            {
-                "type": "command_result",
-                "command": command,
-                "result": {
+            _command_response(
+                command=command,
+                result={
                     "status": "error",
                     "error": f"Internal error: {type(exc).__name__}: {exc}",
+                    "message_id": str(args.get("message_id", "")).strip() or None,
                 },
-            }
+            )
         )

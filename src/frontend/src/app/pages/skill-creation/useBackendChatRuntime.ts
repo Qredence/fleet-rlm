@@ -4,11 +4,14 @@ import { toast } from "sonner";
 import { useNavigation } from "@/hooks/useNavigation";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import type { Conversation } from "@/hooks/useChatHistory";
+import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/app/pages/skill-creation/backendArtifactEventAdapter";
 import type { ChatSimulation } from "@/app/pages/skill-creation/useChatSimulation";
 import { useArtifactStore } from "@/stores/artifactStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
+  sendCommandOverWs,
+  rlmApiConfig,
   type WsServerMessage,
   subscribeToExecutionStream,
 } from "@/lib/rlm-api";
@@ -45,6 +48,45 @@ function toUserMessage(content: string): ChatMessage {
   };
 }
 
+function applyOptimisticHitlResolution(
+  messages: ChatMessage[],
+  msgId: string,
+  actionLabel: string,
+): ChatMessage[] {
+  return messages.map((message) => {
+    if (message.id !== msgId || message.type !== "hitl" || !message.hitlData) {
+      return message;
+    }
+    return {
+      ...message,
+      hitlData: {
+        ...message.hitlData,
+        resolved: true,
+        resolvedLabel: actionLabel,
+      },
+    };
+  });
+}
+
+function revertOptimisticHitlResolution(
+  messages: ChatMessage[],
+  msgId: string,
+): ChatMessage[] {
+  return messages.map((message) => {
+    if (message.id !== msgId || message.type !== "hitl" || !message.hitlData) {
+      return message;
+    }
+    return {
+      ...message,
+      hitlData: {
+        ...message.hitlData,
+        resolved: false,
+        resolvedLabel: undefined,
+      },
+    };
+  });
+}
+
 export function useBackendChatRuntime(): ChatSimulation {
   const {
     setCreationPhase,
@@ -57,6 +99,7 @@ export function useBackendChatRuntime(): ChatSimulation {
   const {
     messages,
     isStreaming,
+    sessionId,
     streamMessage,
     stopStreaming,
     resetSession,
@@ -184,12 +227,45 @@ export function useBackendChatRuntime(): ChatSimulation {
     setMessages,
   ]);
 
-  const resolveHitl = useCallback(() => {
-    toast("Live backend mode", {
-      description:
-        "HITL checkpoints are currently driven by backend events only.",
-    });
-  }, []);
+  const resolveHitl = useCallback(
+    async (msgId: string, actionLabel: string) => {
+      const label = actionLabel.trim();
+      if (!label) return;
+
+      setMessages((prev) => applyOptimisticHitlResolution(prev, msgId, label));
+
+      try {
+        await sendCommandOverWs(
+          {
+            type: "command",
+            command: "resolve_hitl",
+            args: {
+              message_id: msgId,
+              action_label: label,
+            },
+            workspace_id: rlmApiConfig.workspaceId,
+            user_id: rlmApiConfig.userId,
+            session_id: sessionId,
+          },
+          {
+            onFrame: (frame) => {
+              setMessages((prev) => {
+                const result = applyWsFrameToMessages(prev, frame, queryClient);
+                return result.messages;
+              });
+              onFrame(frame);
+            },
+          },
+        );
+      } catch (error) {
+        setMessages((prev) => revertOptimisticHitlResolution(prev, msgId));
+        const message =
+          error instanceof Error ? error.message : "Unknown command error";
+        toast.error("Failed to resolve checkpoint", { description: message });
+      }
+    },
+    [onFrame, queryClient, sessionId, setMessages],
+  );
 
   const resolveClarification = useCallback(() => {
     toast("Live backend mode", {
