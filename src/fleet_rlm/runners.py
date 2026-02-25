@@ -20,6 +20,7 @@ All runners automatically:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,7 +29,32 @@ import dspy
 from .core.config import configure_planner_from_env
 from .core.interpreter import ModalInterpreter
 from .react.agent import RLMReActChatAgent
-from .signatures_prod import AnalyzeLongDocument, SummarizeLongDocument
+from .signatures import AnalyzeLongDocument, SummarizeLongDocument
+
+
+@dataclass(slots=True)
+class _ReActAgentOptions:
+    """Internal configuration bundle used to build chat agents consistently."""
+
+    react_max_iters: int = 15
+    deep_react_max_iters: int = 35
+    enable_adaptive_iters: bool = True
+    rlm_max_iterations: int = 30
+    rlm_max_llm_calls: int = 50
+    max_depth: int = 2
+    timeout: int = 900
+    secret_name: str = "LITELLM"
+    volume_name: str | None = None
+    verbose: bool = False
+    history_max_turns: int | None = None
+    extra_tools: list | None = None
+    interpreter_async_execute: bool = True
+    guardrail_mode: Literal["off", "warn", "strict"] = "off"
+    max_output_chars: int = 10000
+    min_substantive_chars: int = 20
+    delegate_lm: Any | None = None
+    delegate_max_calls_per_turn: int = 8
+    delegate_result_truncation_chars: int = 8000
 
 
 def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[str, Any]:
@@ -106,10 +132,51 @@ def _interpreter(
     )
 
 
+def _build_react_agent_from_options(
+    *,
+    options: _ReActAgentOptions,
+    docs_path: Path | str | None = None,
+    env_file: Path | None = None,
+    planner_lm: Any | None = None,
+) -> RLMReActChatAgent:
+    """Build a chat agent from consolidated options with stable behavior."""
+    if planner_lm is None:
+        _require_planner_ready(env_file)
+
+    agent = RLMReActChatAgent(
+        react_max_iters=options.react_max_iters,
+        deep_react_max_iters=options.deep_react_max_iters,
+        enable_adaptive_iters=options.enable_adaptive_iters,
+        rlm_max_iterations=options.rlm_max_iterations,
+        rlm_max_llm_calls=options.rlm_max_llm_calls,
+        max_depth=options.max_depth,
+        timeout=options.timeout,
+        secret_name=options.secret_name,
+        volume_name=options.volume_name,
+        verbose=options.verbose,
+        history_max_turns=options.history_max_turns,
+        extra_tools=options.extra_tools,
+        interpreter_async_execute=options.interpreter_async_execute,
+        guardrail_mode=options.guardrail_mode,
+        max_output_chars=options.max_output_chars,
+        min_substantive_chars=options.min_substantive_chars,
+        delegate_lm=options.delegate_lm,
+        delegate_max_calls_per_turn=options.delegate_max_calls_per_turn,
+        delegate_result_truncation_chars=options.delegate_result_truncation_chars,
+    )
+
+    if docs_path is not None:
+        agent.load_document(str(docs_path), alias="active")
+
+    return agent
+
+
 def build_react_chat_agent(
     *,
     docs_path: Path | str | None = None,
-    react_max_iters: int = 5,
+    react_max_iters: int = 15,
+    deep_react_max_iters: int = 35,
+    enable_adaptive_iters: bool = True,
     rlm_max_iterations: int = 30,
     rlm_max_llm_calls: int = 50,
     max_depth: int = 2,
@@ -125,12 +192,17 @@ def build_react_chat_agent(
     guardrail_mode: Literal["off", "warn", "strict"] = "off",
     max_output_chars: int = 10000,
     min_substantive_chars: int = 20,
+    delegate_lm: Any | None = None,
+    delegate_max_calls_per_turn: int = 8,
+    delegate_result_truncation_chars: int = 8000,
 ) -> RLMReActChatAgent:
     """Build an interactive DSPy ReAct chat agent for RLM workflows.
 
     Args:
         docs_path: Optional path to preload as the active document.
         react_max_iters: Maximum DSPy ReAct tool-iteration loops.
+        deep_react_max_iters: Escalated iteration budget for deep analysis turns.
+        enable_adaptive_iters: Toggle adaptive turn budgeting.
         rlm_max_iterations: Maximum iterations for internal ``dspy.RLM`` tools.
         rlm_max_llm_calls: Maximum LLM calls for internal RLM/interpreter usage.
         max_depth: Maximum recursion depth for sub-agent spawning.
@@ -149,15 +221,17 @@ def build_react_chat_agent(
         guardrail_mode: Guardrail behavior for assistant responses.
         max_output_chars: Maximum allowed assistant response length.
         min_substantive_chars: Soft warning threshold for brief responses.
+        delegate_lm: Optional lower-cost LM used for delegate sub-agent turns.
+        delegate_max_calls_per_turn: Per-turn delegate spawn budget.
+        delegate_result_truncation_chars: Delegate output truncation limit.
 
     Returns:
         A configured ``RLMReActChatAgent`` instance.
     """
-    if planner_lm is None:
-        _require_planner_ready(env_file)
-
-    agent = RLMReActChatAgent(
+    options = _ReActAgentOptions(
         react_max_iters=react_max_iters,
+        deep_react_max_iters=deep_react_max_iters,
+        enable_adaptive_iters=enable_adaptive_iters,
         rlm_max_iterations=rlm_max_iterations,
         rlm_max_llm_calls=rlm_max_llm_calls,
         max_depth=max_depth,
@@ -171,19 +245,25 @@ def build_react_chat_agent(
         guardrail_mode=guardrail_mode,
         max_output_chars=max_output_chars,
         min_substantive_chars=min_substantive_chars,
+        delegate_lm=delegate_lm,
+        delegate_max_calls_per_turn=delegate_max_calls_per_turn,
+        delegate_result_truncation_chars=delegate_result_truncation_chars,
     )
-
-    if docs_path is not None:
-        agent.load_document(str(docs_path), alias="active")
-
-    return agent
+    return _build_react_agent_from_options(
+        options=options,
+        docs_path=docs_path,
+        env_file=env_file,
+        planner_lm=planner_lm,
+    )
 
 
 def run_react_chat_once(
     *,
     message: str,
     docs_path: Path | str | None = None,
-    react_max_iters: int = 5,
+    react_max_iters: int = 15,
+    deep_react_max_iters: int = 35,
+    enable_adaptive_iters: bool = True,
     rlm_max_iterations: int = 30,
     rlm_max_llm_calls: int = 50,
     max_depth: int = 2,
@@ -197,11 +277,15 @@ def run_react_chat_once(
     guardrail_mode: Literal["off", "warn", "strict"] = "off",
     max_output_chars: int = 10000,
     min_substantive_chars: int = 20,
+    delegate_lm: Any | None = None,
+    delegate_max_calls_per_turn: int = 8,
+    delegate_result_truncation_chars: int = 8000,
 ) -> dict[str, Any]:
     """Run a single prompt through the interactive ReAct chat agent."""
-    with build_react_chat_agent(
-        docs_path=docs_path,
+    options = _ReActAgentOptions(
         react_max_iters=react_max_iters,
+        deep_react_max_iters=deep_react_max_iters,
+        enable_adaptive_iters=enable_adaptive_iters,
         rlm_max_iterations=rlm_max_iterations,
         rlm_max_llm_calls=rlm_max_llm_calls,
         max_depth=max_depth,
@@ -209,11 +293,19 @@ def run_react_chat_once(
         secret_name=secret_name,
         volume_name=volume_name,
         verbose=verbose,
-        env_file=env_file,
         interpreter_async_execute=interpreter_async_execute,
         guardrail_mode=guardrail_mode,
         max_output_chars=max_output_chars,
         min_substantive_chars=min_substantive_chars,
+        delegate_lm=delegate_lm,
+        delegate_max_calls_per_turn=delegate_max_calls_per_turn,
+        delegate_result_truncation_chars=delegate_result_truncation_chars,
+    )
+    with _build_react_agent_from_options(
+        options=options,
+        docs_path=docs_path,
+        env_file=env_file,
+        planner_lm=None,
     ) as agent:
         result = agent.chat_turn(message)
         if not include_trajectory:
@@ -225,7 +317,9 @@ async def arun_react_chat_once(
     *,
     message: str,
     docs_path: Path | str | None = None,
-    react_max_iters: int = 5,
+    react_max_iters: int = 15,
+    deep_react_max_iters: int = 35,
+    enable_adaptive_iters: bool = True,
     rlm_max_iterations: int = 30,
     rlm_max_llm_calls: int = 50,
     max_depth: int = 2,
@@ -240,11 +334,15 @@ async def arun_react_chat_once(
     guardrail_mode: Literal["off", "warn", "strict"] = "off",
     max_output_chars: int = 10000,
     min_substantive_chars: int = 20,
+    delegate_lm: Any | None = None,
+    delegate_max_calls_per_turn: int = 8,
+    delegate_result_truncation_chars: int = 8000,
 ) -> dict[str, Any]:
     """Async version of ``run_react_chat_once`` using ``achat_turn``."""
-    agent = build_react_chat_agent(
-        docs_path=docs_path,
+    options = _ReActAgentOptions(
         react_max_iters=react_max_iters,
+        deep_react_max_iters=deep_react_max_iters,
+        enable_adaptive_iters=enable_adaptive_iters,
         rlm_max_iterations=rlm_max_iterations,
         rlm_max_llm_calls=rlm_max_llm_calls,
         max_depth=max_depth,
@@ -252,12 +350,19 @@ async def arun_react_chat_once(
         secret_name=secret_name,
         volume_name=volume_name,
         verbose=verbose,
-        env_file=env_file,
-        planner_lm=planner_lm,
         interpreter_async_execute=interpreter_async_execute,
         guardrail_mode=guardrail_mode,
         max_output_chars=max_output_chars,
         min_substantive_chars=min_substantive_chars,
+        delegate_lm=delegate_lm,
+        delegate_max_calls_per_turn=delegate_max_calls_per_turn,
+        delegate_result_truncation_chars=delegate_result_truncation_chars,
+    )
+    agent = _build_react_agent_from_options(
+        options=options,
+        docs_path=docs_path,
+        env_file=env_file,
+        planner_lm=planner_lm,
     )
     try:
         with dspy.context(lm=planner_lm) if planner_lm else _nullcontext():

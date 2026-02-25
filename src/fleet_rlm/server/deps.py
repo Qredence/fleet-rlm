@@ -27,6 +27,7 @@ class ServerState:
     def __init__(self) -> None:
         self.config = ServerRuntimeConfig()
         self.planner_lm: Any | None = None
+        self.delegate_lm: Any | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
         self.runtime_test_results: dict[str, dict[str, Any]] = {}
         self.execution_event_emitter = ExecutionEventEmitter()
@@ -56,6 +57,10 @@ def get_server_config(request: Request) -> ServerRuntimeConfig:
 
 def get_planner_lm() -> Any:
     return server_state.planner_lm
+
+
+def get_delegate_lm() -> Any:
+    return server_state.delegate_lm
 
 
 def get_db_manager() -> DatabaseManager | None:
@@ -134,7 +139,7 @@ async def get_react_agent(
     config: ServerRuntimeConfig = Depends(get_server_config),
 ) -> AsyncIterator["RLMReActChatAgent"]:
     """Provide a configured RLMReActChatAgent for the request lifecycle."""
-    from fleet_rlm.core.config import get_planner_lm_from_env
+    from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
     from fleet_rlm.core.interpreter import ModalInterpreter
     from fleet_rlm.react.agent import RLMReActChatAgent
     from fleet_rlm.react.tools_rlm_delegate import build_rlm_delegate_tools
@@ -144,10 +149,33 @@ async def get_react_agent(
     planner_lm = getattr(server_state, "planner_lm", None) or get_planner_lm_from_env(
         model_name=config.agent_model
     )
+    if planner_lm is None:
+        raise HTTPException(status_code=503, detail="Planner LM not configured")
+    delegate_lm = getattr(
+        server_state, "delegate_lm", None
+    ) or get_delegate_lm_from_env(
+        model_name=config.agent_delegate_model,
+        default_max_tokens=config.agent_delegate_max_tokens,
+    )
 
     interpreter = ModalInterpreter(app_name="fleet-rlm")
     dspy.settings.configure(lm=planner_lm)
-    agent = RLMReActChatAgent(interpreter=interpreter, max_depth=config.rlm_max_depth)
+    agent = RLMReActChatAgent(
+        interpreter=interpreter,
+        max_depth=config.rlm_max_depth,
+        react_max_iters=config.react_max_iters,
+        deep_react_max_iters=config.deep_react_max_iters,
+        enable_adaptive_iters=config.enable_adaptive_iters,
+        rlm_max_iterations=config.rlm_max_iterations,
+        rlm_max_llm_calls=config.rlm_max_llm_calls,
+        interpreter_async_execute=config.interpreter_async_execute,
+        guardrail_mode=config.agent_guardrail_mode,
+        max_output_chars=config.agent_max_output_chars,
+        min_substantive_chars=config.agent_min_substantive_chars,
+        delegate_lm=delegate_lm,
+        delegate_max_calls_per_turn=config.delegate_max_calls_per_turn,
+        delegate_result_truncation_chars=config.delegate_result_truncation_chars,
+    )
 
     # Lazily mount tools to prevent circular module dependencies during import
     from fleet_rlm.react import tools_sandbox

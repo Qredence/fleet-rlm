@@ -12,7 +12,7 @@ from pathlib import Path
 from fleet_rlm import __version__
 from fleet_rlm.analytics.client import get_posthog_client, shutdown_posthog_client
 from fleet_rlm.analytics.config import PostHogConfig
-from fleet_rlm.core.config import get_planner_lm_from_env
+from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
@@ -112,10 +112,15 @@ async def lifespan(app: FastAPI):
         server_state.planner_lm = get_planner_lm_from_env()
     else:
         server_state.planner_lm = get_planner_lm_from_env(model_name=model_name)
+    server_state.delegate_lm = get_delegate_lm_from_env(
+        model_name=cfg.agent_delegate_model,
+        default_max_tokens=cfg.agent_delegate_max_tokens,
+    )
 
     _emit_posthog_startup_event(cfg)
     yield
     server_state.planner_lm = None
+    server_state.delegate_lm = None
     shutdown_posthog_client()
     if server_state.db_manager is not None:
         await server_state.db_manager.dispose()

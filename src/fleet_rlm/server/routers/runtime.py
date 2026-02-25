@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from fleet_rlm.core.config import get_planner_lm_from_env
+from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.runtime_settings import (
     RUNTIME_SETTINGS_ALLOWLIST,
     RUNTIME_SETTINGS_KEYS,
@@ -176,6 +176,10 @@ async def patch_runtime_settings(
 
     # Rebuild planner LM in-process to apply updated env values immediately.
     server_state.planner_lm = get_planner_lm_from_env(model_name=config.agent_model)
+    server_state.delegate_lm = get_delegate_lm_from_env(
+        model_name=config.agent_delegate_model,
+        default_max_tokens=config.agent_delegate_max_tokens,
+    )
 
     return RuntimeSettingsUpdateResponse(**result)
 
@@ -287,6 +291,10 @@ async def test_lm_connection() -> RuntimeConnectivityTestResponse:
 
         ok = bool(output_preview)
         server_state.planner_lm = planner_lm
+        server_state.delegate_lm = get_delegate_lm_from_env(
+            model_name=server_state.config.agent_delegate_model,
+            default_max_tokens=server_state.config.agent_delegate_max_tokens,
+        )
     except FutureTimeoutError:
         error = (
             f"LM test timed out after {_RUNTIME_TEST_TIMEOUT_SECONDS}s. "

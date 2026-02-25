@@ -22,7 +22,7 @@ from rich.table import Table
 
 from . import runners
 from .config import AppConfig
-from .core.config import get_planner_lm_from_env
+from .core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from .models import TraceMode
 from .react.commands import COMMAND_DISPATCH
 from .terminal import (
@@ -152,6 +152,10 @@ class _TerminalChatSession:
     def run(self) -> None:
         """Run the interactive prompt loop."""
         planner_lm = get_planner_lm_from_env(model_name=self.config.agent.model)
+        delegate_lm = get_delegate_lm_from_env(
+            model_name=self.config.agent.delegate_model,
+            default_max_tokens=self.config.agent.delegate_max_tokens,
+        )
         self._print_banner(planner_ready=planner_lm is not None)
         if planner_lm is None:
             self.console.print(
@@ -162,6 +166,8 @@ class _TerminalChatSession:
         agent_context = runners.build_react_chat_agent(
             docs_path=self.options.docs_path,
             react_max_iters=self.config.rlm_settings.max_iters,
+            deep_react_max_iters=self.config.rlm_settings.deep_max_iters,
+            enable_adaptive_iters=self.config.rlm_settings.enable_adaptive_iters,
             rlm_max_iterations=self.config.agent.rlm_max_iterations,
             rlm_max_llm_calls=self.config.rlm_settings.max_llm_calls,
             max_depth=self.config.rlm_settings.max_depth,
@@ -173,6 +179,9 @@ class _TerminalChatSession:
             guardrail_mode=self.config.agent.guardrail_mode,
             max_output_chars=self.config.rlm_settings.max_output_chars,
             min_substantive_chars=self.config.agent.min_substantive_chars,
+            delegate_lm=delegate_lm,
+            delegate_max_calls_per_turn=self.config.rlm_settings.delegate_max_calls_per_turn,
+            delegate_result_truncation_chars=self.config.rlm_settings.delegate_result_truncation_chars,
         )
 
         lm_context = dspy.context(lm=planner_lm) if planner_lm else nullcontext()

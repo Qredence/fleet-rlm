@@ -141,6 +141,7 @@ async def chat_streaming(websocket: WebSocket):
 
     cfg = server_state.config
     _planner_lm = server_state.planner_lm
+    _delegate_lm = server_state.delegate_lm
     repository = server_state.repository
     persistence_required = cfg.database_required
     identity_rows = None
@@ -176,6 +177,8 @@ async def chat_streaming(websocket: WebSocket):
 
     agent_context = runners.build_react_chat_agent(
         react_max_iters=cfg.react_max_iters,
+        deep_react_max_iters=cfg.deep_react_max_iters,
+        enable_adaptive_iters=cfg.enable_adaptive_iters,
         rlm_max_iterations=cfg.rlm_max_iterations,
         rlm_max_llm_calls=cfg.rlm_max_llm_calls,
         max_depth=cfg.rlm_max_depth,
@@ -187,6 +190,9 @@ async def chat_streaming(websocket: WebSocket):
         max_output_chars=cfg.agent_max_output_chars,
         min_substantive_chars=cfg.agent_min_substantive_chars,
         planner_lm=_planner_lm,
+        delegate_lm=_delegate_lm,
+        delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
+        delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
     )
 
     analytics_distinct_id = (identity.user_claim or "").strip() or None

@@ -6,10 +6,13 @@ finding project roots, and guarding against module shadowing issues with Modal.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import dspy
+
+logger = logging.getLogger(__name__)
 
 
 def _find_project_root(start: Path) -> Path:
@@ -180,7 +183,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
     DSPy with a language model based on the loaded configuration.
 
     Required environment variables:
-        - DSPY_LM_MODEL: The model identifier (e.g., "openai/gpt-4")
+        - DSPY_LM_MODEL: The model identifier (e.g., "openai/gemini-3-flash-preview")
         - DSPY_LLM_API_KEY or DSPY_LM_API_KEY: API key for the model provider
 
     Optional environment variables:
@@ -267,6 +270,76 @@ def get_planner_lm_from_env(
         api_key=api_key,
         max_tokens=int(os.environ.get("DSPY_LM_MAX_TOKENS", "64000")),
     )
+
+
+def get_delegate_lm_from_env(
+    *,
+    env_file: Path | None = None,
+    model_name: str | None = None,
+    default_api_key: str | None = None,
+    default_api_base: str | None = None,
+    default_max_tokens: int | None = None,
+) -> dspy.LM | None:
+    """Create and return an optional delegate DSPy LM from environment.
+
+    Resolution policy:
+    - model: explicit ``model_name`` -> ``DSPY_DELEGATE_LM_MODEL`` -> ``None``
+    - api key: ``DSPY_DELEGATE_LM_API_KEY`` -> ``default_api_key`` -> planner key envs
+    - api base: ``DSPY_DELEGATE_LM_API_BASE`` -> ``default_api_base`` -> planner base env
+
+    This helper is intentionally best-effort and returns ``None`` on missing
+    inputs or init failures so callers can fall back to the parent planner LM.
+    """
+    dotenv_path = env_file
+    if dotenv_path is None:
+        project_root = _find_project_root(Path.cwd())
+        dotenv_path = project_root / ".env"
+
+    _load_dotenv(dotenv_path)
+    _guard_modal_shadowing()
+    configure_posthog_analytics_from_env()
+
+    model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
+    if not model:
+        return None
+
+    api_key = (
+        os.environ.get("DSPY_DELEGATE_LM_API_KEY")
+        or default_api_key
+        or os.environ.get("DSPY_LLM_API_KEY")
+        or os.environ.get("DSPY_LM_API_KEY")
+    )
+    if not api_key:
+        logger.warning(
+            "Delegate LM model is configured but no API key is available; using planner fallback."
+        )
+        return None
+
+    raw_max_tokens = default_max_tokens
+    if raw_max_tokens is None:
+        try:
+            raw_max_tokens = int(os.environ.get("DSPY_LM_MAX_TOKENS", "64000"))
+        except (TypeError, ValueError):
+            raw_max_tokens = 64000
+
+    try:
+        return dspy.LM(
+            model,
+            api_base=(
+                os.environ.get("DSPY_DELEGATE_LM_API_BASE")
+                or default_api_base
+                or os.environ.get("DSPY_LM_API_BASE")
+            ),
+            api_key=api_key,
+            max_tokens=int(raw_max_tokens),
+        )
+    except Exception:
+        logger.warning(
+            "Failed to initialize delegate LM '%s'; using planner fallback.",
+            model,
+            exc_info=True,
+        )
+        return None
 
 
 def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
