@@ -1,234 +1,172 @@
-# HTTP API Reference
+# HTTP and WebSocket API Reference
 
-The `fleet-rlm` server exposes both conversational and task-oriented endpoints via FastAPI.
+This reference describes the server surface exposed by `src/fleet_rlm/server/main.py`.
 
-## Authentication
+## Base Surface
 
-- `AUTH_MODE=dev`:
-  - Default behavior is `AUTH_REQUIRED=false` (auth optional).
-  - Optional fallback identity when auth is omitted/invalid:
-    - `tenant_claim=default` (or `ws_default_workspace_id`)
-    - `user_claim=anonymous` (or `ws_default_user_id`)
-  - Debug headers (`X-Debug-Tenant-Id`, `X-Debug-User-Id`, `X-Debug-Email`, `X-Debug-Name`), or
-  - `Authorization: Bearer <HS256 token>` with `tid`/`oid`/`email`/`name`.
-  - WebSocket-only fallback query auth: `debug_tenant_id` + `debug_user_id` (optional `debug_email`/`debug_name`) or `access_token=<HS256 token>`.
-  - Set `AUTH_REQUIRED=true` to enforce auth on all non-health HTTP + all WS routes.
-- `AUTH_MODE=entra`: scaffolded and currently fail-closed until JWKS validation wiring is added.
+- Health endpoints are unprefixed: `/health`, `/ready`
+- API endpoints are prefixed with `/api/v1`
+- WebSocket endpoints are served under `/api/v1/ws/*`
 
-Identity is normalized to:
+## Authentication Model
 
-- `tenant_claim` (`tid`)
-- `user_claim` (`oid`)
-- `email`
-- `name`
+Current auth configuration is controlled by environment/runtime settings:
 
-## Chat Endpoints
+- `AUTH_MODE=dev|entra` (default `dev`)
+- `AUTH_REQUIRED=true|false`
+- `ALLOW_DEBUG_AUTH`
+- `ALLOW_QUERY_AUTH_TOKENS`
 
-### `POST /api/v1/chat`
+`dev` mode supports debug headers and local HS256 tokens.
+`entra` mode is scaffolded and currently fail-closed until JWKS verification is implemented.
 
-Run a single ReAct chat turn.
+See [Auth Modes](../auth.md) for complete behavior and guardrails.
 
-**Request:**
+## REST Endpoints (from `openapi.yaml`)
+
+### Health
+- `GET /health`
+- `GET /ready`
+
+### Auth
+- `POST /api/v1/auth/login` (stub)
+- `POST /api/v1/auth/logout` (stub)
+- `GET /api/v1/auth/me` (stub)
+
+### Chat
+- `POST /api/v1/chat`
+
+`POST /api/v1/chat` request body:
 
 ```json
 {
-  "message": "Calculate the factorial of 500",
-  "docs_path": "/data/knowledge/math_docs.txt",
+  "message": "Summarize this file",
+  "docs_path": "README.md",
   "trace": false
 }
 ```
 
-**Response:**
+Response is a runner payload from `arun_react_chat_once` (dynamic shape; commonly includes `assistant_response`, optional trajectory metadata, turn counters, and warnings).
+
+### Runtime Settings and Diagnostics
+- `GET /api/v1/runtime/settings`
+- `PATCH /api/v1/runtime/settings`
+- `POST /api/v1/runtime/tests/modal`
+- `POST /api/v1/runtime/tests/lm`
+- `GET /api/v1/runtime/status`
+
+Notes:
+- Runtime writes (`PATCH /runtime/settings`) are allowed only when `APP_ENV=local`.
+- Tests/status endpoints are readable in all environments.
+
+### Legacy SQLite Compatibility Routes
+
+These route groups are compatibility surfaces and are gated by `LEGACY_SQLITE_ROUTES_ENABLED`.
+When disabled, handlers return `410 Gone` with guidance to Neon-backed runtime paths.
+
+- Tasks:
+  - `POST /api/v1/tasks`
+  - `GET /api/v1/tasks`
+  - `GET /api/v1/tasks/{task_id}`
+  - `PATCH /api/v1/tasks/{task_id}`
+  - `DELETE /api/v1/tasks/{task_id}`
+- Sessions:
+  - `GET /api/v1/sessions/state` (always available in current router)
+  - `POST /api/v1/sessions`
+  - `GET /api/v1/sessions`
+  - `GET /api/v1/sessions/{session_id}`
+  - `PATCH /api/v1/sessions/{session_id}`
+  - `DELETE /api/v1/sessions/{session_id}`
+
+Example task payloads use camelCase where defined by schema aliases:
 
 ```json
 {
-  "assistant_response": "The text of the agent's answer...",
-  "trajectory": {},
-  "history_turns": 1,
-  "guardrail_warnings": []
+  "objective": "Run end-to-end validation",
+  "sessionId": "abc123"
 }
 ```
 
-Notes:
+### Planned/Stub Route Groups
 
-- `trajectory` is omitted when `trace=false`.
-- `guardrail_warnings` is additive and may be an empty array.
+These are currently minimal placeholder endpoints and should be treated as scaffolded API surfaces:
+
+- `GET /api/v1/taxonomy`
+- `GET /api/v1/taxonomy/{path}`
+- `GET /api/v1/analytics`
+- `GET /api/v1/analytics/skills/{skill_id}`
+- `GET /api/v1/search`
+- `GET /api/v1/memory`
+- `POST /api/v1/memory`
+- `GET /api/v1/sandbox`
+- `GET /api/v1/sandbox/file`
+
+## WebSocket Endpoints
+
+WebSockets are intentionally documented from router code (`ws.py`) because they are not represented in OpenAPI.
 
 ### `WS /api/v1/ws/chat`
 
-WebSocket endpoint for real-time streaming and command dispatch.
+Primary interactive chat stream.
 
-**Client -> Server message shapes:**
-
-- Message turn:
+Incoming payload shape (`WSMessage`):
 
 ```json
 {
   "type": "message",
-  "content": "...",
+  "content": "Analyze this document",
   "docs_path": null,
   "trace": true,
   "trace_mode": "compact",
   "workspace_id": "default",
-  "user_id": "alice",
+  "user_id": "anonymous",
   "session_id": "session-123"
 }
 ```
 
-**WebSocket auth-only query params (dev mode):**
+Supported `type` values:
+- `message`
+- `cancel`
+- `command`
 
-- `debug_tenant_id`
-- `debug_user_id`
-- `debug_email`
-- `debug_name`
-- `access_token`
-
-- Cancel:
-
-```json
-{ "type": "cancel" }
-```
-
-- Command dispatch:
+For `command`, include:
 
 ```json
 {
   "type": "command",
-  "command": "write_to_file",
-  "args": { "path": "notes/todo.md", "content": "...", "append": true },
-  "workspace_id": "default",
-  "user_id": "alice",
+  "command": "load_document",
+  "args": {"path": "README.md", "alias": "active"},
   "session_id": "session-123"
 }
 ```
 
-**Server -> Client message shapes:**
-
-- Event stream:
-
-```json
-{
-  "type": "event",
-  "data": {
-    "kind": "final",
-    "text": "assistant response text",
-    "payload": {
-      "trajectory": {},
-      "final_reasoning": "...",
-      "history_turns": 3,
-      "guardrail_warnings": []
-    },
-    "timestamp": "...ISO8601..."
-  }
-}
-```
-
-- Command result: `{"type":"command_result","command":"...","result":{}}`
-- Error: `{"type":"error","message":"..."}`
-
-Session identity notes:
-
-- Auth claims are canonical tenant/user authority.
-- `workspace_id` and `user_id` in payloads are accepted for compatibility but non-authoritative.
-- Session cache key is still tracked as `workspace_id:user_id` internally, populated from auth claims.
+Server emits envelopes such as:
+- `{"type":"event","data":...}`
+- `{"type":"command_result","command":"...","result":{...}}`
+- `{"type":"error","message":"..."}`
 
 ### `WS /api/v1/ws/execution`
 
-Dedicated execution graph stream for Artifact Canvas and observability clients.
+Execution graph stream for observability/artifact consumers.
 
-**Subscription query params (required):**
-
+Query params:
 - `workspace_id`
 - `user_id`
-- `session_id`
+- `session_id` (required; missing session id yields error + close)
 
-If any filter is missing, the server returns an error payload and closes with policy
-violation (`1008`).
+Event types:
+- `execution_started`
+- `execution_step`
+- `execution_completed`
 
-**Server -> Client `ExecutionEvent` shape:**
+## Contract Verification
 
-```json
-{
-  "type": "execution_step",
-  "run_id": "default:alice:session-123:1",
-  "workspace_id": "default",
-  "user_id": "alice",
-  "session_id": "session-123",
-  "step": {
-    "id": "default:alice:session-123:1:s3",
-    "parent_id": "default:alice:session-123:1:root",
-    "type": "tool",
-    "label": "load_document",
-    "input": { "tool_name": "load_document", "tool_args": "path='docs/a.md'" },
-    "output": null,
-    "timestamp": 1739916000.123
-  }
-}
+Use these checks when updating API docs:
+
+```bash
+# REST contract
+rg -n "^  /" openapi.yaml
+
+# WebSocket routes (not in OpenAPI)
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
 ```
-
-Event lifecycle:
-
-- `execution_started` (one per chat turn)
-- `execution_step` (live LLM/tool/repl/memory/output graph updates)
-- `execution_completed` (terminal event for the run)
-
-Notes:
-
-- `run_id` is deterministic per turn: `{workspace_id}:{user_id}:{session_id}:{turn_index}`.
-- Step payload fields are best-effort and sanitized (truncated + sensitive key redaction).
-- `/api/v1/ws/chat` remains unchanged and backward compatible.
-
-## Task Endpoints (`/api/v1/tasks/{type}`)
-
-These endpoints wrap specific `fleet_rlm.runners` functions.
-
-### `POST /api/v1/tasks/basic`
-
-Runs the `run_basic` runner loop.
-
-### `POST /api/v1/tasks/architecture`
-
-Runs `run_architecture` (Analysis of docs). Requires `docs_path`.
-
-### `POST /api/v1/tasks/long-context`
-
-Runs the Long-Context RLM strategy.
-**Params:**
-
-- `mode`: "analyze" or "summarize" (via `task_type` in body or inferred)
-
-## Schemas
-
-### `TaskRequest`
-
-Common input schema for task endpoints:
-
-```json
-{
-  "task_type": "basic",
-  "question": "string",
-  "query": "string (optional)",
-  "docs_path": "string (optional)",
-  "max_iterations": 15,
-  "max_llm_calls": 30,
-  "timeout": 600,
-  "chars": 10000,
-  "verbose": true
-}
-```
-
-### `TaskResponse`
-
-```json
-{
-  "ok": true,
-  "result": {},
-  "error": "string (if ok=false)"
-}
-```
-
-## Auth Introspection
-
-### `GET /api/v1/auth/me`
-
-Returns normalized identity and, when DB is configured, resolved tenant/user UUIDs.

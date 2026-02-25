@@ -1,93 +1,71 @@
 # Contributing to fleet-rlm
 
-Thank you for your interest in contributing to **fleet-rlm**! This document provides guidelines and instructions for contributing to the project.
+Thanks for contributing.
 
-## Table of Contents
+This guide focuses on current repository workflows.
 
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Workflow](#development-workflow)
-- [Coding Standards](#coding-standards)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation](#documentation)
-- [Submitting Changes](#submitting-changes)
+## Prerequisites
 
-## Code of Conduct
+- Python 3.10+
+- `uv`
+- `bun` (frontend checks)
 
-This project adheres to a code of conduct that all contributors are expected to follow:
-
-- Be respectful and inclusive.
-- Provide constructive feedback.
-
-## Getting Started
-
-### Prerequisites
-
-- Python >= 3.10
-- `uv` package manager
-- Modal account
-
-### Setup
+## Setup
 
 ```bash
-# Fork and clone
-git clone https://github.com/your-username/fleet-rlm.git
-cd fleet-rlm
-
-# Install deps
-uv sync --all-groups
-uv run pre-commit install
+# from repo root
+uv sync --extra dev --extra server --extra mcp
+cp .env.example .env
 ```
 
-## Development Workflow
-
-1.  **Branching**: Create a branch from `main` (e.g., `feature/my-feature`).
-2.  **Coding**: Make changes.
-3.  **Testing**: Run `uv run pytest`.
-4.  **Linting**: Run `uv run ruff check .` and `uv run ruff format .`.
-
-## Coding Standards
-
-- **Style**: We use `ruff` for formatting.
-- **Types**: Use type hints (`from __future__ import annotations`).
-- **Docs**: Include docstrings for all modules and functions.
-
-## Testing Guidelines
-
-Run all tests before submitting:
+## Development Commands
 
 ```bash
-uv run pytest
+# from repo root
+uv run fleet-rlm --help
+uv run fleet --help
 ```
 
-Add new tests in `tests/` for any new functionality. Mock external services like Modal using `monkeypatch`.
+## Quality Gate (Before PR)
 
-The test suite covers:
+```bash
+# from repo root
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+uv run pytest -q
+uv run python scripts/check_release_hygiene.py
+uv run python scripts/check_release_metadata.py
+```
 
-| Test File                 | What It Tests                                             |
-| :------------------------ | :-------------------------------------------------------- |
-| `test_chunking.py`        | All chunking strategies (size, headers, timestamps, JSON) |
-| `test_cli_smoke.py`       | CLI help display and command discovery                    |
-| `test_config.py`          | Environment variable loading and fallbacks                |
-| `test_context_manager.py` | `__enter__`/`__exit__` context manager protocol           |
-| `test_driver_helpers.py`  | Sandbox-side helpers (peek, grep, chunk, buffers, volume) |
-| `test_driver_protocol.py` | SUBMIT output mapping and tool call round-trips           |
-| `test_rlm_benchmarks.py`  | Performance benchmarks (chunking throughput)              |
-| `test_rlm_integration.py` | End-to-end integration (mocked Modal sandbox)             |
-| `test_rlm_regression.py`  | Regression tests for edge cases                           |
-| `test_tools.py`           | Regex extraction, groups, flags                           |
-| `test_volume_support.py`  | Volume mount/persistence configuration                    |
+Optional frontend check (if frontend workspace is in scope):
 
-## Documentation
+```bash
+# from repo root
+cd src/frontend
+bun install --frozen-lockfile
+bun run check
+cd ../..
+```
 
-- **README.md**: High-level overview.
-- **docs/**: This directory contains guides, tutorials, and concepts.
-- **Inline**: Update docstrings for any code changes.
+## Documentation Rules
 
-## Submitting Changes
+- Update docs in the same PR when behavior changes.
+- Keep `docs/index.md` active section aligned with maintained docs.
+- Treat `docs/artifacts`, `docs/plans`, `docs/references`, and `docs/explanation` as historical/research archives unless explicitly modernizing them.
 
-1.  Update documentation if behavior changes.
-2.  Ensure CI checks pass (lint, test).
-3.  Submit a Pull Request with a clear description.
+## Validation Before Merge
 
-For more details, see the root [CONTRIBUTING.md](../CONTRIBUTING.md) file.
+At minimum:
+
+```bash
+# from repo root
+uv run fleet-rlm --help
+rg -n "^  /" openapi.yaml
+```
+
+If you changed server/API docs, also verify WS route references:
+
+```bash
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
+```

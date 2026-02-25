@@ -1,64 +1,57 @@
 # Source Layout (`src/fleet_rlm`)
 
-This reference describes the package directory layout and what each area is responsible for.
+This map reflects the current package layout in `v0.4.8`.
 
-## Core Package
+## Top-Level Package
 
-- `src/fleet_rlm/__init__.py`: public exports and package version
-- `src/fleet_rlm/cli.py`: Typer CLI entrypoint
-- `src/fleet_rlm/runners.py`: high-level orchestrator functions
-- `src/fleet_rlm/signatures.py`: DSPy signatures used by RLM workflows
+- `src/fleet_rlm/__init__.py`: public exports and version
+- `src/fleet_rlm/cli.py`: `fleet-rlm` Typer CLI entrypoint
+- `src/fleet_rlm/fleet_cli.py`: `fleet` launcher entrypoint
+- `src/fleet_rlm/runners.py`: maintained high-level runner functions
+- `src/fleet_rlm/signatures.py`: DSPy signatures used in runtime flows
 
-## Runtime Layers
+## Core Runtime
 
-- `src/fleet_rlm/core/`: interpreter runtime, sandbox driver, env configuration
-- `src/fleet_rlm/react/`: ReAct agent, tools, command dispatch, streaming events
-- `src/fleet_rlm/chunking/`: pure chunking helpers (size/header/timestamp/json)
-- `src/fleet_rlm/stateful/`: stateful session and persistence-oriented wrappers
-- `src/fleet_rlm/models.py`: streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`
-- `src/fleet_rlm/bridge/`: stdio JSON-RPC bridge for Ink TUI
+- `src/fleet_rlm/core/`: interpreter runtime, sandbox driver, config helpers
+- `src/fleet_rlm/react/`: ReAct agent, tool registry, command dispatch, streaming
+- `src/fleet_rlm/chunking/`: chunking utilities
+- `src/fleet_rlm/stateful/`: stateful wrappers and sandbox state models
 
-## Optional Service Surfaces
+## Server Surface
 
-- `src/fleet_rlm/server/`: FastAPI application, routers, schemas, middleware
-- `src/fleet_rlm/mcp/`: MCP server runtime and tool surface
+- `src/fleet_rlm/server/main.py`: FastAPI app factory and lifespan
+- `src/fleet_rlm/server/config.py`: runtime config and guardrails
+- `src/fleet_rlm/server/deps.py`: shared dependencies and server state
+- `src/fleet_rlm/server/routers/`: HTTP + WebSocket routers
+- `src/fleet_rlm/server/schemas/`: Pydantic schemas
+- `src/fleet_rlm/server/services/`: service layer for legacy SQLite CRUD routes
+- `src/fleet_rlm/server/auth/`: auth abstraction (`dev` + scaffolded `entra`)
 
-## Utilities
+## Data and Persistence
 
-- `src/fleet_rlm/utils/`: scaffold install, Modal helpers, reusable utility tools
+- `src/fleet_rlm/db/`: Neon/Postgres engine, models, repository
+- `src/fleet_rlm/memory/`: memory-domain helpers
+- `migrations/`: Alembic migrations for Neon schema
 
-## Scaffold Assets (Claude Code)
+## Optional Service Surface
 
-- `src/fleet_rlm/_scaffold/skills/`: packaged skills
-- `src/fleet_rlm/_scaffold/agents/`: packaged sub-agent definitions
-- `src/fleet_rlm/_scaffold/teams/`: packaged team templates
-- `src/fleet_rlm/_scaffold/hooks/`: packaged prompt hooks
+- `src/fleet_rlm/mcp/`: FastMCP server runtime
 
-These are installed to `~/.claude/` via:
+## Scaffold Assets
 
-```bash
-uv run fleet-rlm init
-```
+Packaged templates installed by `fleet-rlm init`:
 
-## Current Conventions
+- `src/fleet_rlm/_scaffold/skills/`
+- `src/fleet_rlm/_scaffold/agents/`
+- `src/fleet_rlm/_scaffold/teams/`
+- `src/fleet_rlm/_scaffold/hooks/`
 
-- Library/runtime code should live under importable Python modules (`*.py`) in `src/fleet_rlm/`.
-- Operational configs and non-package docs should live outside `src/` (for example `config/`, `docs/`).
-- Avoid empty placeholder package directories and `__pycache__` directories in source control.
+## Frontend Workspace
 
-## Frontend (`src/frontend`)
+- `src/frontend/`: React + TypeScript Web UI
+- `src/frontend/openapi/fleet-rlm.openapi.yaml`: frontend-side API spec copy
 
-React + TypeScript + Vite single-page application for the Fleet web UI.
+## Notes
 
-- `src/frontend/src/app/App.tsx`: root component (React Router provider)
-- `src/frontend/src/app/routes.ts`: route config with lazy-loaded page modules
-- `src/frontend/src/app/layout/`: `RootLayout`, `DesktopShell`, `MobileShell`, `RouteSync`
-- `src/frontend/src/app/pages/`: page components (`SkillCreationFlow`, `SkillLibrary`, `MemoryPage`, `TaxonomyBrowser`, `AnalyticsDashboard`, `SettingsPage`, auth pages)
-- `src/frontend/src/app/components/hooks/`: React hooks (`useChat`, `useSkills`, `useMemory`, `useAuth`, `useFilesystem`, etc.)
-- `src/frontend/src/app/components/features/`: feature components (artifacts, settings, command palette, notifications)
-- `src/frontend/src/app/components/shared/`: reusable shared components (skeletons, error boundary, toggles)
-- `src/frontend/src/app/components/ui/`: Radix UI primitives (shadcn/ui style)
-- `src/frontend/src/app/lib/api/`: generic HTTP/SSE API client with snake↔camel case conversion
-- `src/frontend/src/app/lib/rlm-api/`: fleet-rlm-specific API layer (WebSocket client, OpenAPI-generated types)
-- `src/frontend/src/app/lib/perf/`: lazy route loading with retry (`lazyWithRetry`, `routePreload`)
-- `src/frontend/src/app/providers/`: context providers (`AppProviders`, `AuthProvider`, `NavigationProvider`)
+- Historical references to a `bridge/` runtime are archival and not part of the active layout.
+- The canonical API contract remains `openapi.yaml` at repository root.

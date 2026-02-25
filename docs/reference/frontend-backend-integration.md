@@ -1,60 +1,80 @@
-# Frontend ↔ FastAPI Integration (Current State)
+# Frontend ↔ Backend Integration
 
-This document describes the current, supported integration model between:
-- frontend SPA: `src/frontend`
-- backend API: `src/fleet_rlm/server`
+This document captures the current integration contract between:
 
-## Supported backend surface
+- Frontend SPA: `src/frontend`
+- Backend API: `src/fleet_rlm/server`
 
-The frontend is aligned to the FastAPI routes exposed by the backend OpenAPI/runtime:
-- `GET /health`
-- `GET /ready`
-- `POST /chat`
-- `POST /tasks/basic`
-- `POST /tasks/architecture`
-- `POST /tasks/long-context`
-- `POST /tasks/check-secret`
-- `GET /sessions/state`
-- `WS /ws/chat`
+## API Base and Routing
 
-## Frontend API layer ownership
+Backend serves:
 
-The canonical frontend backend layer is:
-- `src/frontend/src/app/lib/rlm-api/*`
+- Health: `/health`, `/ready`
+- Versioned API: `/api/v1/*`
+- WebSockets: `/api/v1/ws/chat`, `/api/v1/ws/execution`
 
-Legacy compatibility layer `src/frontend/src/app/lib/api/*` has been removed in FastAPI-only mode.
+## Backend Surfaces Used by Frontend
 
-## Runtime behavior expectations
+Primary interactive/chat surfaces:
 
-- Primary interactive chat streaming uses `WS /ws/chat`.
-- Non-streaming backend calls use `rlm-api` REST clients.
-- Unsupported UI sections must be explicitly gated in UX and routed to capability notices.
+- `POST /api/v1/chat`
+- `WS /api/v1/ws/chat`
+- `WS /api/v1/ws/execution`
 
-## Environment configuration
+Runtime setup surfaces:
 
-Frontend backend connectivity is controlled by:
+- `GET /api/v1/runtime/settings`
+- `PATCH /api/v1/runtime/settings` (local-only writes)
+- `POST /api/v1/runtime/tests/modal`
+- `POST /api/v1/runtime/tests/lm`
+- `GET /api/v1/runtime/status`
+
+Compatibility/stub surfaces that may still be present in UI flows:
+
+- Legacy-gated: `/api/v1/tasks*`, `/api/v1/sessions*`
+- Planned/stub: `/api/v1/taxonomy*`, `/api/v1/analytics*`, `/api/v1/search`, `/api/v1/memory*`, `/api/v1/sandbox*`
+
+## WebSocket Behavior
+
+### `/api/v1/ws/chat`
+
+- Accepts `message`, `cancel`, and `command` payloads.
+- Emits `event`, `command_result`, and `error` envelopes.
+- Auth claims are canonical tenant/user authority.
+
+### `/api/v1/ws/execution`
+
+- Dedicated execution stream for artifact/step visualization.
+- Filters by subscription identity (`workspace_id`, `user_id`, `session_id`).
+- Emits `execution_started`, `execution_step`, `execution_completed`.
+
+## Environment Variables
+
+Frontend connectivity is typically driven by:
+
 - `VITE_FLEET_API_URL`
 - `VITE_FLEET_WS_URL`
 - `VITE_FLEET_WORKSPACE_ID`
 - `VITE_FLEET_USER_ID`
 - `VITE_FLEET_TRACE`
 
-## Validation checklist
+## Validation Checklist
 
-From `src/frontend`:
-
-```bash
-bun run type-check
-bun run lint
-bun run build
-```
-
-From repo root (backend import sanity):
+From repo root:
 
 ```bash
-uv run python -c "import fleet_rlm.server.main as m; print(bool(m.app))"
+uv run fleet-rlm serve-api --port 8000
+rg -n "^  /" openapi.yaml
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
 ```
 
-## Notes
+From `src/frontend` (optional frontend validation):
 
-If backend/route behavior changes, update this document in the same PR.
+```bash
+bun install --frozen-lockfile
+bun run check
+```
+
+## Change Policy
+
+If backend routes or payload shapes change, update this file in the same PR as the code change.

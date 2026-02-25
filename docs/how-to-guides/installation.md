@@ -1,78 +1,76 @@
 # Installation Guide
 
-Follow these steps to set up `fleet-rlm` on your local machine.
+This guide covers current installation paths for `fleet-rlm`.
 
 ## Prerequisites
 
-- **Python**: 3.10 or higher.
-- **Package Manager**: [`uv`](https://github.com/astral-sh/uv) (strongly recommended) or pip.
-- **Operating System**: macOS or Linux (Windows supported via WSL).
+- Python 3.10+
+- `uv`
+- Modal account (for sandbox execution)
 
-## 1. Install the Package
-
-You can clone the repository for development or install it as a library.
-
-### Option A: Development Install (Cloning)
+## Option A: Install from PyPI
 
 ```bash
-git clone https://github.com/qredence/fleet-rlm.git
-cd fleet-rlm
-uv sync --extra dev --extra server
+uv tool install fleet-rlm
+fleet --help
 ```
 
-`fleet-rlm` now includes `markitdown[all]` as a core runtime dependency so
-PDF/document ingestion works in `load_document` and `read_file_slice`.
-
-### Option B: Library Install (pip)
+Launch Web UI:
 
 ```bash
-uv pip install fleet-rlm
+fleet web
 ```
 
-## 2. Configure Local Environment
-
-Create a `.env` file in your project root to configure the local Planner LLM.
+## Option B: Install from Source (Contributors)
 
 ```bash
+# from repo root
+uv sync --extra dev --extra server --extra mcp
 cp .env.example .env
 ```
 
-Edit the file with your API keys:
+Run help checks:
+
+```bash
+# from repo root
+uv run fleet-rlm --help
+uv run fleet --help
+```
+
+## Configure Planner LM
+
+Set at least:
 
 ```ini
 DSPY_LM_MODEL=openai/gpt-4o
 DSPY_LLM_API_KEY=sk-...
 ```
 
-## 3. Configure Cloud Runtime
+## Configure Modal
 
-`fleet-rlm` uses **Modal** to execute code securely in the cloud. You must set up authentication and secrets.
+See [Configuring Modal](configuring-modal.md).
 
-👉 **Step-by-step guide**: [Configuring Modal](configuring-modal.md)
-
-## 4. Install Helper Skills (Optional)
-
-If you use Claude, install the bundled skills and agents to help you develop faster.
-
-👉 **Step-by-step guide**: [Managing Skills](managing-skills.md)
-
-## Verification
-
-Run the basic demo to ensure everything is working:
+## Verification (Current Workflows)
 
 ```bash
-uv run fleet-rlm run-basic
+# Terminal chat surface
+uv run fleet-rlm chat --trace-mode compact
+
+# Web surface
+uv run fleet web
 ```
 
-Optional PDF ingestion check:
+Optional Python API verification:
 
 ```bash
 uv run python - <<'PY'
-from fleet_rlm.runners import build_react_chat_agent
+from fleet_rlm.runners import run_long_context
 
-agent = build_react_chat_agent()
-result = agent.load_document("rlm_content/entreprise-report-2030.pdf")
-print(result["status"], result.get("source_type"), result["chars"])
-agent.shutdown()
+result = run_long_context(
+    docs_path="README.md",
+    query="Summarize key architecture points",
+    mode="analyze",
+)
+print(result["answer"][:200])
 PY
 ```

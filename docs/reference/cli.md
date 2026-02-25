@@ -1,279 +1,159 @@
 # CLI Reference
 
-The `fleet-rlm` application uses [Typer](https://typer.tiangolo.com/) to provide a rich CLI experience.
+This document describes the current CLI surfaces for `fleet-rlm` `v0.4.8`.
 
-## General Usage
+## Entrypoints
 
-```bash
-uv run fleet-rlm [COMMAND] [OPTIONS]
-```
+There are two command entrypoints:
 
-The package also installs a standalone interactive launcher:
+- `fleet-rlm`: Typer-based command group
+- `fleet`: lightweight launcher for terminal chat and Web UI startup
 
-```bash
-fleet [--ui auto|ink|python] [OPTIONS] [hydra-overrides]
-```
+## `fleet-rlm` Commands
 
-Use this when you want bridge-powered chat from a single command without starting the OpenTUI runtime manually.
-
-## Optional Extras
+From repo root (source install):
 
 ```bash
-# Base development/runtime
-uv sync --extra dev
-
-# API + MCP server surfaces
-uv sync --extra dev --extra mcp --extra server
+uv run fleet-rlm --help
 ```
 
-## Commands
+Current command set:
 
-### Setup Commands
+- `init`: install scaffold assets to a Claude directory
+- `serve-api`: run FastAPI server
+- `serve-mcp`: run FastMCP server
+- `chat`: run standalone in-process terminal chat
 
-| Command | Description                                                        | Key Options                                                                                                                                                                                                                                                                 |
-| :------ | :----------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `init`  | Install custom Claude scaffold assets (skills/agents/teams/hooks). | `--target`: Install directory (default: ~/.claude)<br>`--force`: Overwrite existing files<br>`--list`: List available content<br>`--skills-only`/`--agents-only`/`--teams-only`/`--hooks-only`: Install one asset class<br>`--no-teams`/`--no-hooks`: Skip optional classes |
-
-### RLM Execution Commands
-
-| Command              | Description                                                    | Key Options                                                                                                                                                                                    |
-| :------------------- | :------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run-basic`          | Run a simple Q&A task with code generation.                    | `--question`: The prompt<br>`--volume-name`: Optional persistent volume                                                                                                                        |
-| `run-architecture`   | Extract architecture/concepts from a document.                 | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Info to extract                                                                                                               |
-| `run-api-endpoints`  | Extract API endpoints from documentation.                      | `--docs-path`: Path to document file (text or PDF)                                                                                                                                             |
-| `run-error-patterns` | Analyze error patterns in documentation.                       | `--docs-path`: Path to document file (text or PDF)                                                                                                                                             |
-| `run-trajectory`     | Inspect the full execution history (trajectory) of an RLM run. | `--docs-path`: Path to document file (text or PDF)<br>`--chars`: Limit input size                                                                                                              |
-| `run-custom-tool`    | Demonstrate usage of custom tools (e.g., Regex).               | `--docs-path`: Path to document file (text or PDF)                                                                                                                                             |
-| `run-long-context`   | Analyze or summarize long documents with sandbox helpers.      | `--docs-path`: Path to document file (text or PDF)<br>`--query`: Analysis query<br>`--mode`: `analyze` or `summarize`                                                                          |
-| `code-chat`          | Primary OpenTUI interactive ReAct + RLM terminal UI.           | `--docs-path`: Path to document file (text or PDF)<br>`--trace` / `--no-trace`<br>`--trace-mode [compact\|verbose\|off]`<br>`--stream-refresh-ms`<br>`--no-stream`<br>`--opentui/--no-opentui` |
-| `run-react-chat`     | Backward-compatible alias of `code-chat`.                      | Same options as `code-chat`                                                                                                                                                                    |
-| `serve-api`          | Optional FastAPI + websocket service.                          | `--host`<br>`--port`                                                                                                                                                                           |
-| `serve-mcp`          | Optional FastMCP service (stdio/http transports).              | `--transport`<br>`--host`<br>`--port`                                                                                                                                                          |
-
-## Standalone `fleet` launcher
-
-The `fleet` entrypoint is a standalone chat launcher installed with the package scripts.
-
-- `--ui auto` (default): prefer Ink (`tui-cli/tui-ink`) and fall back to Python UI
-- `--ui ink`: require Ink runtime
-- `--ui python`: force Python UI
-
-Examples:
+### `fleet-rlm init`
 
 ```bash
-fleet
-fleet --ui ink
-fleet --ui python --trace-mode compact
-```
-
-## Runtime Overrides (Hydra)
-
-Use Hydra-style overrides (`key=value`) with CLI commands to tune runtime behavior.
-
-Examples:
-
-```bash
-uv run fleet-rlm serve-api --port 8000 \
-    interpreter.async_execute=true \
-    agent.guardrail_mode=warn \
-    rlm_settings.max_iters=8
-
-uv run fleet-rlm serve-mcp --transport stdio \
-    agent.guardrail_mode=strict
-```
-
-## Trajectory Metadata
-
-For Python API and MCP `dspy.RLM` wrappers, trajectory is included by default in responses
-(`trajectory_steps`, `trajectory`, and `final_reasoning` when available). Use
-`include_trajectory=False` on those programmatic surfaces to suppress it.
-The dedicated `run-trajectory` command remains the compact trajectory-inspection workflow.
-
-### Utility Commands
-
-| Command            | Description                                      | Key Options                        |
-| :----------------- | :----------------------------------------------- | :--------------------------------- |
-| `check-secret`     | Check if Modal secrets are correctly configured. |                                    |
-| `check-secret-key` | Inspect a specific secret key value.             | `--key`: The env var name to check |
-
-## Common Options
-
-### `--volume-name`
-
-All `run-*` commands support this option.
-
-- **Usage**: `--volume-name my-data-vol`
-- **Effect**: Mounts the specified Modal Volume to `/data/` inside the sandbox.
-- **Requirement**: The volume must be created first via `modal volume create`.
-
-### `--docs-path`
-
-Required for analysis commands.
-
-- **Usage**: `--docs-path path/to/file.txt`
-- **Effect**: Reads the local file and uploads/makes it available to the sandbox context.
-
-## `init` Command Details
-
-The `init` command installs bundled Claude scaffold assets from `fleet-rlm` to your file system.
-
-### Basic Usage
-
-```bash
-# Install to default location (~/.claude/)
-uv run fleet-rlm init
-
-# List available content without installing
-uv run fleet-rlm init --list
-
-# Install to custom directory
-uv run fleet-rlm init --target ~/.config/claude
-
-# Force overwrite existing files
-uv run fleet-rlm init --force
-```
-
-### What Gets Installed
-
-- **10 Skills**: Workflow patterns, debugging, testing, execution helpers
-- **Agent definitions**: Primary agents plus supporting team agent definitions under `agents/teams/`
-- **1 Team template**: Team config and inbox templates under `teams/`
-- **5 Hook templates**: Prompt hooks under `hooks/`
-
-### Installation Structure
-
-```
-~/.claude/
-├── skills/
-│   ├── dspy-signature/
-│   ├── modal-sandbox/
-│   ├── rlm/
-│   ├── rlm-batch/
-│   ├── rlm-debug/
-│   ├── rlm-execute/
-│   ├── rlm-long-context/
-│   ├── rlm-memory/
-│   ├── rlm-run/
-│   └── rlm-test-suite/
-├── agents/
-│   ├── modal-interpreter-agent.md
-│   ├── rlm-orchestrator.md
-│   ├── rlm-specialist.md
-│   ├── rlm-subcall.md
-│   └── teams/
-├── teams/
-│   └── fleet-rlm/
-│       ├── config.json
-│       └── inboxes/
-└── hooks/
-    ├── README.md
-    ├── hookify.fleet-rlm-document-process.local.md
-    ├── hookify.fleet-rlm-large-file.local.md
-    ├── hookify.fleet-rlm-llm-query-error.local.md
-    └── hookify.fleet-rlm-modal-error.local.md
-```
-
-See the [Skills and Agents Guide](skills-and-agents.md) for detailed usage information.
-
-## Help
-
-For any command, you can append `--help` to see the full list of arguments and options.
-
-```bash
-uv run fleet-rlm run-architecture --help
 uv run fleet-rlm init --help
 ```
 
-## `code-chat` Details
+Key options:
 
-`code-chat` is the primary interactive coding runtime for the ReAct agent.
-OpenTUI is the only supported runtime.
+- `--target PATH` (default `~/.claude`)
+- `--force`
+- `--skills-only`
+- `--agents-only`
+- `--teams-only`
+- `--hooks-only`
+- `--no-teams`
+- `--no-hooks`
+- `--list`
 
-Note: this OpenTUI-only statement applies to `fleet-rlm code-chat`. The standalone `fleet` launcher supports Ink-first with Python fallback as documented above.
-
-### Slash Commands
-
-- `/exit`
-- `/help`
-- `/history`
-- `/reset`
-- `/tools`
-- `/load <path>`
-- `/docs`
-- `/trace compact|verbose|off` (also accepts `on|off`)
-- `/stream on|off`
-- `/clear`
-- `/profile show|set <name>`
-- `/py` (multiline Python execution in Modal sandbox; finish with `:end`)
-- `/rg <pattern> [path]`
-- `/save-buffer <name> <path>`
-- `/load-volume <path> [alias]`
-
-### Examples
+Examples:
 
 ```bash
-uv run fleet-rlm code-chat \
-  --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-  --trace-mode compact
+# Install all scaffold assets
+uv run fleet-rlm init
 
-# Explicit OpenTUI mode
-uv run fleet-rlm code-chat --opentui
+# List available packaged assets without writing files
+uv run fleet-rlm init --list
 
-# Alias command (kept for compatibility)
-uv run fleet-rlm run-react-chat --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
+# Install only skills
+uv run fleet-rlm init --skills-only
 ```
 
-### WebSocket command aliases
-
-The backend command dispatcher also supports these command names for interactive clients:
-
-- `process_document`
-- `write_to_file`
-- `edit_core_memory`
-
-## `run-long-context` Details
-
-The `run-long-context` command loads a document into the sandbox and leverages injected helpers so the RLM can explore it programmatically.
-
-### Modes
-
-- **`analyze`** (default): Uses the `AnalyzeLongDocument` signature. The RLM navigates, queries, and synthesizes findings.
-- **`summarize`**: Uses the `SummarizeLongDocument` signature. The RLM chunks the document, queries each chunk, and merges summaries.
-
-### Examples
+### `fleet-rlm serve-api`
 
 ```bash
-# Analyze a large document
-uv run fleet-rlm run-long-context \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --query "What are the main design decisions?" \
-    --mode analyze
-
-# Summarize with a specific focus
-uv run fleet-rlm run-long-context \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --query "DSPy optimizers" \
-    --mode summarize
-
-# With persistent volume
-uv run fleet-rlm run-long-context \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --query "Architecture overview" \
-    --mode analyze \
-    --volume-name rlm-volume-dspy
+uv run fleet-rlm serve-api --help
 ```
 
-### Available Sandbox Helpers
+Options:
 
-Inside the sandbox, the Planner's generated code has access to:
+- `--host` (default `127.0.0.1`)
+- `--port` (default `8000`)
 
-| Helper                                                            | Description                                               |
-| :---------------------------------------------------------------- | :-------------------------------------------------------- |
-| `peek(text, start=0, length=2000)`                                | Inspect a slice of a large document.                      |
-| `grep(text, pattern, context=0)`                                  | Case-insensitive line search with optional context lines. |
-| `chunk_by_size(text, size=200_000, overlap=0)`                    | Fixed-size chunking.                                      |
-| `chunk_by_headers(text, pattern=r"^#{1,3} ", flags=re.MULTILINE)` | Header-based section splitting.                           |
-| `add_buffer(name, value)`                                         | Accumulate values across iterations.                      |
-| `get_buffer(name)` / `clear_buffer(name)`                         | Retrieve or clear accumulated values.                     |
-| `save_to_volume(path, content)`                                   | Persist data to a mounted volume.                         |
-| `load_from_volume(path)`                                          | Load persisted data from a mounted volume.                |
+Example:
+
+```bash
+uv run fleet-rlm serve-api --host 0.0.0.0 --port 8000
+```
+
+Hydra-style config overrides are supported as trailing `key=value` tokens:
+
+```bash
+uv run fleet-rlm serve-api --port 8000 \
+  interpreter.async_execute=true \
+  agent.guardrail_mode=warn
+```
+
+### `fleet-rlm serve-mcp`
+
+```bash
+uv run fleet-rlm serve-mcp --help
+```
+
+Options:
+
+- `--transport` (`stdio`, `sse`, `streamable-http`; default `stdio`)
+- `--host` (default `127.0.0.1`)
+- `--port` (default `8001`)
+
+Examples:
+
+```bash
+# stdio transport (Claude Desktop / Codex MCP style)
+uv run fleet-rlm serve-mcp --transport stdio
+
+# HTTP transport
+uv run fleet-rlm serve-mcp --transport streamable-http --host 0.0.0.0 --port 8001
+```
+
+### `fleet-rlm chat`
+
+```bash
+uv run fleet-rlm chat --help
+```
+
+Options:
+
+- `--docs-path PATH`
+- `--trace / --no-trace`
+- `--trace-mode TEXT` (`compact`, `verbose`, `off`)
+
+Example:
+
+```bash
+uv run fleet-rlm chat --docs-path README.md --trace-mode compact
+```
+
+## `fleet` Launcher
+
+Inspect:
+
+```bash
+uv run fleet --help
+```
+
+Behavior:
+
+- `fleet` starts standalone terminal chat.
+- `fleet web` starts the Web UI/API server on `0.0.0.0:8000` by delegating to `fleet-rlm serve-api`.
+
+Options:
+
+- `--docs-path PATH`
+- `--trace-mode {compact,verbose,off}`
+- `--volume-name TEXT`
+- `--secret-name TEXT`
+
+Examples:
+
+```bash
+# Terminal chat
+fleet
+
+# Launch web surface
+fleet web
+
+# Chat with explicit runtime hints
+fleet --docs-path README.md --trace-mode verbose --volume-name rlm-volume-dspy
+```
+
+## Notes
+
+- If other documents reference commands that are not shown in current `fleet-rlm --help`, treat those references as historical.
+- For MCP setup examples, see [Using the MCP Server](../how-to-guides/using-mcp-server.md).

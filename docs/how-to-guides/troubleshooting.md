@@ -1,84 +1,82 @@
 # Troubleshooting
 
-Common issues encountered when working with `fleet-rlm` and their solutions.
+Common issues and current recovery paths.
 
-## Configuration Issues
+## Planner Not Configured
 
-### "Planner LM not configured"
+Symptom:
+- chat/API fails with planner configuration errors
 
-**Symptoms**: The agent fails immediately saying it cannot find a model.
-**Cause**: The environment variables for the LLM are missing.
-**Solution**:
-
-1.  Check your `.env` file exists in the root.
-2.  Ensure `DSPY_LM_MODEL` and `DSPY_LLM_API_KEY` are set.
-3.  Restart your shell or Jupyter kernel to reload env vars.
-
-### "Modal secret not found"
-
-**Symptoms**: The code runs locally but fails inside the sandbox with authentication errors.
-**Cause**: The secrets haven't been pushed to Modal.
-**Solution**:
-Run the secret creation command again:
+Checks:
 
 ```bash
-uv run modal secret create LITELLM DSPY_LLM_API_KEY=...
+echo "$DSPY_LM_MODEL"
+echo "$DSPY_LLM_API_KEY"
 ```
 
-## Execution Issues
+Fix:
+- Set `DSPY_LM_MODEL` and `DSPY_LLM_API_KEY` (or `DSPY_LM_API_KEY`)
+- Restart terminal/session
 
-### "Modal sandbox process exited unexpectedly"
+## Modal Credentials Missing
 
-**Symptoms**: The execution stops abruptly.
-**Cause**: Often due to token expiry or connectivity issues.
-**Solution**:
-Refreshes your authentication:
+Symptom:
+- Modal tests fail or sandbox startup errors
+
+Fix:
 
 ```bash
-uv run modal token set
+uv run modal setup
 ```
 
-### "No module named 'modal'"
+Then re-run server runtime tests:
+- `POST /api/v1/runtime/tests/modal`
+- `POST /api/v1/runtime/tests/lm`
 
-**Symptoms**: Python import errors.
-**Cause**: Dependencies are not installed in the current environment.
-**Solution**:
-Sync your dependencies:
+## Secret/Volume Mismatch
+
+Symptom:
+- Runtime says secret or volume unavailable
+
+Fix:
 
 ```bash
-uv sync
+uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...
+uv run modal volume create rlm-volume-dspy
 ```
 
-### "Binary file detected" or PDF extraction fails
+## WebSocket Auth Failures
 
-**Symptoms**: `load_document` or `read_file_slice` fails on a document path.
-**Cause**:
-- The input is a non-text binary file not supported by document ingestion, or
-- The PDF is scanned/image-only and requires OCR.
-**Solution**:
-1. Reinstall runtime dependencies to ensure MarkItDown is present:
-   ```bash
-   uv sync
-   ```
-2. For scanned PDFs, run OCR first and then load the OCR'd text/PDF.
-3. Retry with `load_document` on the OCR output.
+Symptom:
+- WS close/errors on `/api/v1/ws/chat` or `/api/v1/ws/execution`
 
-### Modal Package Shadowing
+Checks:
+- verify `AUTH_MODE` and `AUTH_REQUIRED`
+- in dev mode, verify debug headers/token/query auth settings
 
-**Symptoms**: Weird `AttributeError` on `modal` objects.
-**Cause**: You have a file named `modal.py` in your working directory, confusing Python imports.
-**Solution**:
-Delete or rename any file named `modal.py` in your project root or source folders.
+See [Auth Modes](../auth.md).
 
-## Debugging Tips
+## Legacy Routes Return 410
 
-- **Check the Trajectory**: Use `run-trajectory` to see exactly what the Planner is thinking and what code it is writing.
-- **Inspect Secrets**: Use `check-secret` and `check-secret-key` to verify the environment values that the application sees.
-- **Use the Context Manager**: Wrap `ModalInterpreter` in a `with` block to ensure resources are always cleaned up, even if an error occurs:
-  ```python
-  with ModalInterpreter() as interp:
-      result = interp.execute("print('hello')")
-  ```
-- **Test Sandbox Helpers Locally**: The sandbox-side helpers (`peek`, `grep`, `chunk_by_size`, etc.) are tested in `tests/test_driver_helpers.py`. You can run these tests to verify helper behaviour without a live Modal connection.
-- **Inspect Buffers**: If using stateful multi-step analysis, check buffer contents with `get_buffer("name")` inside your sandbox code to verify accumulated state.
-- **Volume Debugging**: Check whether your volume is mounted by running `save_to_volume("test.txt", "hello")` in the sandbox. If it returns `[no volume mounted at /data]`, the volume was not configured.
+Symptom:
+- `/api/v1/tasks*` or `/api/v1/sessions*` returns `410 Gone`
+
+Cause:
+- `LEGACY_SQLITE_ROUTES_ENABLED=false`
+
+Action:
+- expected in stricter environments; migrate to Neon-backed/runtime routes for production paths
+
+## Diagnostic Commands
+
+```bash
+# CLI surface truth
+uv run fleet-rlm --help
+uv run fleet --help
+
+# API route inventory
+rg -n "^  /" openapi.yaml
+
+# WS route inventory
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
+```

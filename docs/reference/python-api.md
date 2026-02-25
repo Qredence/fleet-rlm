@@ -1,140 +1,114 @@
 # Python API Reference
 
-This reference documents the core Python classes and functions available in `fleet_rlm` for building custom RLM applications.
+This page documents the current, maintained Python interfaces for building on `fleet-rlm`.
 
-## Code Map
+## Core Runtime Classes
 
-The following diagram illustrates the key classes in the `fleet_rlm` library and their relationships.
+### `fleet_rlm.core.interpreter.ModalInterpreter`
 
-```mermaid
-classDiagram
-    class ModalInterpreter {
-        +start()
-        +execute(code: str)
-        +shutdown()
-        +llm_query(prompt: str)
-        -secrets: list[Secret]
-        -volume_name: str
-    }
+Primary sandbox execution runtime.
 
-    class RLMReActChatAgent {
-        +chat_turn(message: str)
-        +load_document(path: str)
-        -history: dspy.History
-        -interpreter: ModalInterpreter
-    }
-
-    class ServerRuntimeConfig {
-        +secret_name: str
-        +timeout: int
-        +rlm_max_iterations: int
-    }
-
-    class Runners {
-        +run_basic()
-        +run_architecture()
-        +run_long_context()
-    }
-
-    RLMReActChatAgent *-- ModalInterpreter : owns/uses
-    Runners ..> ModalInterpreter : instantiates
-    Runners ..> RLMReActChatAgent : instantiates
-```
-
-## Core Modules
-
-### `fleet_rlm.core.interpreter`
-
-#### `class ModalInterpreter`
-
-The main interface for executing code in a Modal sandbox.
-
-**Constructor:**
+Typical usage:
 
 ```python
-ModalInterpreter(
-    image: modal.Image | None = None,
-  image_python_version: str = "3.13",
-    timeout: int = 600,
-    secret_name: str = "LITELLM",
-    volume_name: str | None = None,
-  async_execute: bool = True,
-    # ...
-)
+from fleet_rlm import ModalInterpreter
+
+with ModalInterpreter(timeout=600, secret_name="LITELLM", volume_name="rlm-volume-dspy") as interp:
+    result = interp.execute("print('hello')")
 ```
 
-**Methods:**
+Key capabilities:
+- lifecycle control (`start`, `shutdown`, context managers)
+- sync/async execution (`execute`, `aexecute`)
+- execution profile support used by server and delegate workflows
 
-- `start()`: Boots the remote sandbox. Must be called before `execute`.
-- `execute(code: str) -> str`: Runs Python code in the sandbox. Returns stdout/stderr or metadata summary.
-- `aexecute(code: str) -> str`: Async wrapper for `execute`; non-blocking when `async_execute=True`.
-- `shutdown()`: Terminates the sandbox.
-- `__enter__ / __exit__`: Context manager support for automatic startup/shutdown.
-- `__aenter__ / __aexit__`: Async context manager support for startup/shutdown in async workflows.
+### `fleet_rlm.react.agent.RLMReActChatAgent`
 
-### `fleet_rlm.runners`
+Interactive ReAct orchestration module used by CLI and server chat surfaces.
 
-High-level functions that orchestrate the entire RLM workflow (Config -> Init Interpreter -> Run DSPy -> Cleanup).
+Key behaviors:
+- document loading and active-alias management
+- command dispatch execution
+- sync/async chat turn helpers
+- streaming event generation for WebSocket clients
 
-#### Functions
+## Runner Functions (`fleet_rlm.runners`)
 
-- **`build_react_chat_agent(...)`**: Configures and returns an `RLMReActChatAgent` instance.
-- **`run_react_chat_once(...)`**: Runs a single turn of the interactive ReAct chat agent.
-- **`arun_react_chat_once(...)`**: Async single-turn ReAct helper for FastAPI/WebSocket flows.
-- **`run_basic(question: str) -> dict`**: Runs a simple RLM query (e.g., math, fibonacci).
-- **`run_architecture(docs_path: str, query: str) -> dict`**: Extracts architecture info from a doc file.
-- **`run_api_endpoints(docs_path: str) -> dict`**: Extracts API endpoints from documentation.
-- **`run_error_patterns(docs_path: str) -> dict`**: Finds and categorizes error patterns.
-- **`run_trajectory(docs_path: str, chars: int) -> dict`**: Runs RLM with trajectory tracking for debugging.
-- **`run_custom_tool(docs_path: str) -> dict`**: Runs RLM using a custom regex tool for structured extraction.
-- **`run_long_context(docs_path: str, query: str, mode: str) -> dict`**: Runs the long-context RLM strategy (chunking + subagents).
-- **`check_secret_presence(secret_name: str) -> dict`**: Checks if DSPy env vars are present in a Modal secret.
-- **`check_secret_key(secret_name: str, key: str) -> dict`**: Checks if a specific env var key exists in a Modal secret.
+Current maintained runner surface:
 
-`build_react_chat_agent`, `run_react_chat_once`, and `arun_react_chat_once` also accept these runtime controls:
+- `build_react_chat_agent(...)`
+- `run_react_chat_once(...)`
+- `arun_react_chat_once(...)`
+- `run_long_context(...)`
+- `check_secret_presence(...)`
+- `check_secret_key(...)`
 
-- `interpreter_async_execute: bool = True`
-- `guardrail_mode: Literal["off", "warn", "strict"] = "off"`
-- `max_output_chars: int = 10000`
-- `min_substantive_chars: int = 20`
+### `build_react_chat_agent(...)`
 
-### Trajectory Defaults
+Constructs an `RLMReActChatAgent` with runtime controls such as:
+- ReAct/RLM iteration budgets
+- recursion depth
+- Modal timeout/secret/volume
+- guardrail settings
+- delegate LM settings
 
-For `dspy.RLM`-backed runner helpers (`run_basic`, `run_architecture`, `run_api_endpoints`,
-`run_error_patterns`, `run_custom_tool`, `run_long_context`), trajectory metadata is included
-by default:
+### `run_react_chat_once(...)` and `arun_react_chat_once(...)`
 
-- `trajectory_steps`: number of RLM steps
-- `trajectory`: raw DSPy trajectory entries
-- `final_reasoning`: included when provided by DSPy
+Single-turn wrappers around the interactive ReAct agent.
 
-Use `include_trajectory=False` to suppress these fields when you need smaller payloads.
-`run_trajectory` remains a dedicated compact inspection helper.
+Common output shape includes:
+- `assistant_response`
+- optional trajectory metadata (when enabled)
+- turn/session metadata and warnings
 
-### `fleet_rlm.signatures`
+### `run_long_context(...)`
 
-DSPy Signatures defining the Input/Output schemas for RLM tasks.
+Long-document analysis/summarization helper backed by DSPy RLM signatures.
 
-#### Signatures
+Modes:
+- `analyze` → `AnalyzeLongDocument`
+- `summarize` → `SummarizeLongDocument`
 
-- **`ExtractArchitecture`**:
-  - Inputs: `docs`, `query`
-  - Outputs: `modules`, `optimizers`, `design_principles`
-- **`ExtractAPIEndpoints`**:
-  - Inputs: `docs`
-  - Outputs: `api_endpoints`
-- **`FindErrorPatterns`**:
-  - Inputs: `docs`
-  - Outputs: `error_categories`, `total_errors_found`
-- **`ExtractWithCustomTool`**:
-  - Inputs: `docs`
-  - Outputs: `headers`, `code_blocks`, `structure_summary`
-- **`AnalyzeLongDocument`**:
-  - Inputs: `document`, `query`
-  - Outputs: `findings`, `answer`, `sections_examined`
-- **`SummarizeLongDocument`**:
-  - Inputs: `document`, `focus`
-  - Outputs: `summary`, `key_points`, `coverage_pct`
-- **`ExtractFromLogs`**:
-  - Inputs: `logs`, `query`
-  - Outputs: `matches`, `patterns`, `time_range`
+### Secret Diagnostics
+
+- `check_secret_presence(secret_name="LITELLM")`
+- `check_secret_key(secret_name="LITELLM", key="DSPY_LLM_API_KEY")`
+
+These execute Modal-side checks for required environment keys.
+
+## Signatures (`fleet_rlm.signatures`)
+
+Current maintained signatures include:
+
+- `AnalyzeLongDocument`
+- `SummarizeLongDocument`
+- `ExtractFromLogs`
+- `GroundedAnswerWithCitations`
+- `IncidentTriageFromLogs`
+- `CodeChangePlan`
+- `CoreMemoryUpdateProposal`
+- `VolumeFileTreeSignature`
+- `MemoryActionIntentSignature`
+- `MemoryStructureAuditSignature`
+- `MemoryStructureMigrationPlanSignature`
+- `ClarificationQuestionSignature`
+
+## Minimal Example
+
+```python
+from fleet_rlm.runners import run_long_context
+
+result = run_long_context(
+    docs_path="README.md",
+    query="Summarize the architecture",
+    mode="analyze",
+)
+print(result["answer"])
+```
+
+## Import Verification
+
+```bash
+uv run python -c "from fleet_rlm.runners import run_long_context, run_react_chat_once"
+uv run python -c "from fleet_rlm.signatures import AnalyzeLongDocument"
+```

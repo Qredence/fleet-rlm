@@ -1,24 +1,33 @@
 # Auth Modes (Dev vs Entra)
 
-The backend uses an auth abstraction with normalized identity output:
+`fleet-rlm` uses an auth abstraction under `src/fleet_rlm/server/auth/`.
+
+All routes consume normalized identity fields:
 
 - `tenant_claim` (`tid`)
 - `user_claim` (`oid`)
 - `email`
 - `name`
 
-All server logic consumes this normalized shape.
-
 ## Configuration
 
+Primary env/config controls:
+
 - `AUTH_MODE=dev|entra` (default `dev`)
-- `AUTH_REQUIRED=true|false` (default: `false` in `dev`, `true` in `entra`)
-- `DEV_JWT_SECRET=...`
-- Future placeholders: `ENTRA_JWKS_URL`, `ENTRA_ISSUER`, `ENTRA_AUDIENCE`
+- `AUTH_REQUIRED=true|false`
+- `DEV_JWT_SECRET`
+- `ALLOW_DEBUG_AUTH`
+- `ALLOW_QUERY_AUTH_TOKENS`
+- `ENTRA_JWKS_URL` (future)
+- `ENTRA_ISSUER` (future)
+- `ENTRA_AUDIENCE` (future)
+
+Guardrails from server config:
+- in `staging/production`: `AUTH_REQUIRED=true`, debug auth disabled, wildcard CORS blocked
 
 ## `AUTH_MODE=dev`
 
-`DevAuth` accepts either:
+Dev provider accepts:
 
 1. Debug headers:
 - `X-Debug-Tenant-Id`
@@ -26,65 +35,35 @@ All server logic consumes this normalized shape.
 - `X-Debug-Email`
 - `X-Debug-Name`
 
-2. Local HS256 JWT (`Authorization: Bearer ...`) with claims:
+2. `Authorization: Bearer <HS256 token>` with claims:
 - `tid`
 - `oid`
-- `email`
-- `name`
+- optional `email`, `name`
 
-For WebSocket clients that cannot set custom headers, `AUTH_MODE=dev` also accepts query parameters:
+3. WebSocket query fallbacks (when enabled):
+- `debug_tenant_id`, `debug_user_id`
+- optional `debug_email`, `debug_name`
+- `access_token` (HS256)
 
-- `debug_tenant_id`
-- `debug_user_id`
-- `debug_email`
-- `debug_name`
-- `access_token` (HS256 token with `tid`/`oid` claims)
-
-WebSocket evaluation order in dev mode is:
-
-1. Header debug identity
-2. Header bearer token
-3. Query debug identity
-4. Query `access_token`
-5. Reject with `401`
-
-When `AUTH_REQUIRED=false` in dev mode:
-
-- Missing/invalid auth does not block requests.
-- HTTP/WS routes run with fallback identity:
-  - `tenant_claim=default` (or `ws_default_workspace_id`)
-  - `user_claim=anonymous` (or `ws_default_user_id`)
-- If valid debug headers/token are provided, those still take precedence.
-
-Issue a token:
-
-```bash
-# from repo root
-uv run python scripts/dev_issue_token.py \
-  --tid "00000000-0000-0000-0000-000000000123" \
-  --oid "00000000-0000-0000-0000-000000000456" \
-  --email dev@example.com \
-  --name "Dev User"
-```
+If `AUTH_REQUIRED=false`, HTTP/WS can fall back to unauthenticated defaults (`default` / `anonymous`) when auth fails.
 
 ## `AUTH_MODE=entra`
 
-`EntraAuth` is scaffolded but intentionally fail-closed today.
+Current state:
 
-- App startup fails immediately when `AUTH_MODE=entra` is selected.
-- HTTP returns `503` with an explicit not-implemented message.
-- WebSocket closes with auth error.
+- scaffolded provider exists
+- token verification is not implemented yet
+- requests fail closed with explicit errors
 
-Next step is JWKS validation wiring for real Entra OIDC access tokens.
+This mode is reserved for future JWKS/OIDC validation wiring.
 
 ## Route Enforcement
 
-- `AUTH_REQUIRED=true`: non-health HTTP routes and WS routes enforce auth.
-- `AUTH_REQUIRED=false` (dev default): routes accept unauthenticated requests and use fallback identity.
-- Missing/invalid auth is rejected (`401` for HTTP, `1008` close for WS) only when auth is required.
+- `AUTH_REQUIRED=true`: enforce auth on non-health HTTP routes and WebSockets
+- `AUTH_REQUIRED=false`: allow fallback identity in dev-style local workflows
 
 ## Identity Authority
 
-Auth claims are canonical for tenant/user authority.
+Auth claims are canonical tenant/user authority.
 
-For WebSocket payload/query compatibility, `workspace_id`/`user_id` can still be sent but are non-authoritative.
+WS payload/query values such as `workspace_id` and `user_id` are compatibility fields and not authoritative identity in authenticated flows.

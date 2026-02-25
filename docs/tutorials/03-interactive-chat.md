@@ -1,89 +1,53 @@
-# Interactive Code Chat
+# Tutorial 03: Interactive Chat
 
-This tutorial guides you through the interactive "Code Chat" mode, a Research-Action (ReAct) loop where the agent writes code to answer your questions.
+This tutorial covers terminal and WebSocket chat flows.
 
-## Overview
-
-Interactive chat supports two runtime surfaces:
-
-- `fleet`: standalone launcher (Ink-first with Python fallback)
-- `fleet-rlm code-chat`: OpenTUI runtime
-
-Both are optimized for monitoring the agent's thought process. Unlike a standard chatbot, these interfaces separate conversation from tool execution and internal reasoning.
-
-## Starting the Chat
-
-Run one of the following commands:
+## Terminal Chat (`fleet-rlm chat`)
 
 ```bash
-# Standalone interactive launcher (Ink-first, Python fallback)
-fleet
-
-# OpenTUI runtime
-uv run fleet-rlm code-chat
+uv run fleet-rlm chat --trace-mode compact
 ```
 
-Optional arguments:
+Useful slash commands include:
 
-- `fleet --ui auto|ink|python`: Select standalone runtime behavior.
-- `code-chat --opentui/--no-opentui`: OpenTUI runtime toggle (`--opentui` default).
-- `--docs-path <path>`: Preload a document into context.
+- `/help`
+- `/status`
+- `/settings`
+- `/docs <path> [alias]`
+- `/analyze <query>`
+- `/summarize <focus>`
+- `/exit`
 
-## The User Interface
+## Launcher Chat (`fleet`)
 
-The TUI is divided into panels to help you track the agent's complex behavior without cluttering the conversation.
-
-```text
-+-----------------------------------------------------------+
-|  Chat History                                             |
-|                                                           |
-|  [User]: Calculate the 20th Fibonacci number.             |
-|  [Agent]: I will write a recursive function to calculate  |
-|           it using the sandbox.                           |
-|  [Agent]: The result is 6765.                             |
-|                                                           |
-+---------------------------+-------------------------------+
-|  Tool Outputs             |  Reasoning / Thought Process  |
-|                           |                               |
-|  > Executing code...      | * Thought: Need to define     |
-|  > Code returned: 6765    |   fib() function.             |
-|                           | * Action: execute_code        |
-|                           | * Observation: Success        |
-+---------------------------+-------------------------------+
-|  > Input: _                                               |
-+-----------------------------------------------------------+
+```bash
+fleet --trace-mode verbose
 ```
 
-## The Workflow
+## WebSocket Chat
 
-The agent follows a ReAct (Reason + Act) loop.
+With server running (`uv run fleet web` or `uv run fleet-rlm serve-api`), connect to:
 
-```mermaid
-graph TD
-    Start([User Input]) --> Think
+- `ws://127.0.0.1:8000/api/v1/ws/chat`
 
-    subgraph "Agent Cycle"
-        Think[**Think**: Plan the next step]
-        Act[**Act**: Write & Execute Code]
-        Observe[**Observe**: Read Code Output]
-    end
+Send:
 
-    Think -->|Decide Action| Act
-    Act -->|Run in Sandbox| Observe
-    Observe -->|Analyze Result| Think
-    Think -->|Answer Found| Finish([Final Answer])
+```json
+{
+  "type": "message",
+  "content": "Analyze README architecture",
+  "trace": true,
+  "trace_mode": "compact",
+  "session_id": "tutorial-session"
+}
 ```
 
-1.  **Think**: The agent analyzes your request and plans. You see this in the "Reasoning" pane.
-2.  **Act**: The agent writes Python code. This is executed in the cloud **Modal Sandbox**.
-3.  **Observe**: The agent reads the standard output (`stdout`) or return value. You see this in the "Tool Outputs" pane.
-4.  **Loop**: Steps 1-3 repeat until the agent has the answer.
+Expect streamed `event` envelopes and a final payload containing the assistant response.
 
-## Key Commands
+## Execution Stream (Optional)
 
-Inside the chat, you can use special slash commands:
+Subscribe to:
 
-- `/clear`: Clear the chat history.
-- `/files`: List files in the sandbox workspace.
-- `/upload <path>`: Upload a local file to the sandbox.
-- `/exit`: Quit the session.
+- `ws://127.0.0.1:8000/api/v1/ws/execution?workspace_id=default&user_id=anonymous&session_id=tutorial-session`
+
+Use this for live execution graph/step telemetry alongside chat.

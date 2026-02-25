@@ -1,145 +1,78 @@
-# System Architecture
+# Architecture Overview
 
-Visualizing the structural components and relationships within `fleet-rlm`.
+This document describes the maintained architecture for `fleet-rlm` `v0.4.8`.
 
-## Overview
+## Entry Points
 
-```
-                        ┌─────────────────────────────────────────┐
-                        │           Entry Points                  │
-                        │                                         │
-                        │  CLI   FastAPI  Ink TUI  MCP   Web UI   │
-                        │ (Typer)(WS/REST)(bridge)(stdio)(React)  │
-                        └────────────┬────────────────────────────┘
-                                     │
-                        ┌────────────▼────────────────────────────┐
-                        │     RLMReActChatAgent (dspy.Module)     │
-                        │                                         │
-                        │  ReAct Loop ◄── Chat History            │
-                        │      │      ◄── Core Memory             │
-                        │      │      ◄── Document Cache          │
-                        │      │          (Guardrails)            │
-                        │      ▼                                  │
-                        │  ┌──────────┬──────────┬────────────┐   │
-                        │  │ load_doc │ rlm_query│execute_code│   │
-                        │  │ read_file│ llm_query│ edit_file  │   │
-                        │  │ chunk_*  │(recursive)│ search    │   │
-                        │  └────┬─────┴─────┬────┴─────┬──────┘   │
-                        └───────┼───────────┼──────────┼──────────┘
-                                │           │          │
-                        ┌───────▼───────────▼──────────▼──────────┐
-                        │         ModalInterpreter                │
-                        │    (JSON protocol · exec profiles)      │
-                        │   ROOT │ DELEGATE │ MAINTENANCE         │
-                        └────────────────┬────────────────────────┘
-                                         │ stdin/stdout
-                    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-                      Modal Cloud        │
-                        ┌────────────────▼────────────────────────┐
-                        │          Sandbox Driver                 │
-                        │   exec() · helpers · tool_call bridge   │
-                        │                                         │
-                        │   ┌──────────────────────────────────┐  │
-                        │   │    Persistent Volume (/data/)    │  │
-                        │   │  workspaces/  artifacts/  memory/│  │
-                        │   └──────────────────────────────────┘  │
-                        └─────────────────────────────────────────┘
-```
+- `fleet` launcher (`src/fleet_rlm/fleet_cli.py`)
+- `fleet-rlm` CLI (`src/fleet_rlm/cli.py`)
+- FastAPI server (`src/fleet_rlm/server/main.py`)
+- MCP server (`src/fleet_rlm/mcp/`)
 
-**Layers at a glance:**
-
-| Layer         | Components                          | Responsibility                                        |
-| ------------- | ----------------------------------- | ----------------------------------------------------- |
-| Entry Points  | CLI, FastAPI, Ink TUI, MCP, Web UI  | User-facing surfaces — all converge on the same agent |
-| Orchestration | `RLMReActChatAgent` + ReAct tools   | DSPy reasoning loop, tool dispatch, history & memory  |
-| Execution     | `ModalInterpreter`                  | JSON protocol to sandbox, execution profile gating    |
-| Sandbox       | Driver + Volume                     | Isolated Python exec, persistent `/data/` storage     |
-
-## 1. Module Hierarchy
-
-The DSPy module structure of the interactive agent.
+## High-Level Component Flow
 
 ```mermaid
-graph TD
-    Agent[RLMReActChatAgent] -->|wraps| ReAct[dspy.ReAct]
-    ReAct -->|uses| Signature[RLMReActChatSignature]
-    ReAct -->|calls| Tools[Tool List]
-
-    subgraph "Tools"
-        Tools -->|Standard| FS[File System Tools]
-        Tools -->|Delegate| RLM[dspy.RLM Wrappers]
-        Tools -->|Sandbox| Edit[Edit File / Chunking]
-    end
-
-    RLM -->|"uses"| Interpreter[ModalInterpreter]
-    Edit -->|uses| Interpreter
+flowchart LR
+  User["User"] --> Surf["CLI / Web UI / MCP Client"]
+  Surf --> API["FastAPI + Routers"]
+  API --> Agent["RLMReActChatAgent"]
+  Agent --> Runtime["ModalInterpreter"]
+  Runtime --> Sandbox["Modal Sandbox"]
+  API --> DB[("Neon Postgres")]
+  Agent --> LM["Planner/Delegate LMs"]
 ```
 
-## 2. Component Architecture (Web UI & Backend)
+The same agent/runtime stack powers terminal chat, REST chat, and WebSocket chat.
 
-Top-level system components and data flow relative to the user and the local backend.
+## Core Layers
 
-```mermaid
-graph LR
-    User([User]) <-->|Browser| React[Vite / React Web UI]
-    React <-->|WebSocket /api/v1/ws/chat| FastAPI[FastAPI Backend]
-    React <-->|HTTP REST /api/v1/*| FastAPI
+### 1. Orchestration Layer
 
-    FastAPI <-->|SQLite| DB[(fleet_rlm.db)]
-    FastAPI <-->|Stream| Agent[RLMReActChatAgent]
+- `src/fleet_rlm/react/agent.py`
+- `src/fleet_rlm/react/streaming.py`
+- `src/fleet_rlm/react/tools*.py`
 
-    Agent <-->|Context| History[dspy.History]
-    Agent <-->|LLM Calls| Model[Language Model]
+Responsibilities:
+- ReAct loop orchestration
+- tool dispatch and command handling
+- trajectory and streaming event generation
 
-    subgraph "Execution Plane"
-        Agent <-->|JSON Protocol| Sandbox[Modal Sandbox]
-        Sandbox <-->|Read/Write| Volume[Modal Volume]
-        Sandbox <-->|Exec| Python[Python Runtime]
-    end
-```
+### 2. Execution Layer
 
-## 3. Deployment Topology
+- `src/fleet_rlm/core/interpreter.py`
+- `src/fleet_rlm/core/driver.py`
+- `src/fleet_rlm/core/driver_factories.py`
 
-Physical/Network view of the deployment. `fleet-rlm` runs locally, serving a built React frontend via FastAPI, and executes computational workloads in Modal.
+Responsibilities:
+- remote code execution in Modal
+- execution profile control
+- sandbox helper injection and protocol handling
 
-```mermaid
-graph TD
-    Client[Browser] -->|HTTP / WS| App[FastAPI App (Local)]
+### 3. Service Layer
 
-    subgraph "Local Environment"
-        App -->|Serves Static Files| Dist[Frontend Dist]
-        App -->|Reads/Writes| DB[(SQLite DB)]
-        App -->|Host| Agent[RLMAgent Instance]
-    end
+- `src/fleet_rlm/server/routers/*`
+- `src/fleet_rlm/server/deps.py`
+- `src/fleet_rlm/server/config.py`
 
-    subgraph "Modal Cloud"
-        Agent -->|gRPC/HTTP| ModalAPI[Modal API]
-        ModalAPI -->|Spawns| Container[Sandbox Container]
-    end
+Responsibilities:
+- HTTP and WS transport
+- auth and identity normalization
+- runtime settings and diagnostics
+- session/execution streaming lifecycle
 
-    subgraph "LLM Providers"
-        Agent -->|API| OpenAI[OpenAI / Anthropic / Gemini]
-    end
-```
+### 4. Persistence Layer
 
-## 4. RLM Recursive Structure
+- `src/fleet_rlm/db/*`
+- `migrations/*`
 
-How `dspy.RLM` handles complex tasks through recursion.
+Responsibilities:
+- tenant-aware run/step/artifact/memory persistence
+- RLS-enforced isolation
 
-```mermaid
-graph TD
-    Root[Root Agent] -->|Call| RLM_A[RLM: Planner]
-    RLM_A -->|Spawns| RLM_B1[RLM: Worker 1]
-    RLM_A -->|Spawns| RLM_B2[RLM: Worker 2]
+## API and Streaming Surfaces
 
-    RLM_B1 -->|Exec| Sandbox1[Sandbox 1]
-    RLM_B2 -->|Exec| Sandbox2[Sandbox 2]
+- REST contract source: `openapi.yaml`
+- WS chat stream: `/api/v1/ws/chat`
+- WS execution stream: `/api/v1/ws/execution`
 
-    Sandbox1 -->|Result| RLM_B1
-    Sandbox2 -->|Result| RLM_B2
-
-    RLM_B1 -->|Report| RLM_A
-    RLM_B2 -->|Report| RLM_A
-
-    RLM_A -->|Final Answer| Root
-```
+Execution stream events are additive observability and do not replace chat envelopes.

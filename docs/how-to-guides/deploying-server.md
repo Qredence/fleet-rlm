@@ -1,100 +1,32 @@
 # Deploying the API Server
 
-`fleet-rlm` includes a production-ready **FastAPI** server that exposes RLM capabilities via HTTP and WebSockets. This guide explains how to deploy and interact with it.
+This guide describes the current FastAPI server surface used by `fleet web` and API clients.
 
-## Running the Server
-
-Use the CLI to start the server:
+## Start the Server
 
 ```bash
-uv run fleet-rlm serve-api --port 8000 --host 0.0.0.0
+uv run fleet-rlm serve-api --host 0.0.0.0 --port 8000
 ```
 
-Once running, you can access the interactive API usage documentation (Scalar) at:
-`http://localhost:8000/scalar`
+UI/static assets are served when frontend build output is present.
 
-## Request Lifecycle
+## Core Endpoint Groups
 
-The server handles requests by spinning up an isolated RLM agent for each conversation turn.
+- Health: `/health`, `/ready`
+- REST API: `/api/v1/*`
+- WebSockets:
+  - `/api/v1/ws/chat`
+  - `/api/v1/ws/execution`
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant API as FastAPI (/chat)
-    participant Runner as Task Runner
-    participant Agent as RLM Agent
-    participant Sandbox as Modal Cloud
+## API Docs Surface
 
-    Client->>API: POST /chat {"message": "analyze data.csv"}
-    activate API
-    API->>Runner: spawn_task(chat_request)
-    activate Runner
-    Runner->>Agent: Initialize Agent & History
-    activate Agent
+When `scalar-fastapi` is available, interactive docs are served at:
 
-    rect rgb(240, 240, 240)
-        note right of Agent: ReAct Loop
-        Agent->>Sandbox: execute_code()
-        Sandbox-->>Agent: result
-    end
+- `/scalar`
 
-    Agent-->>Runner: Final Trajectory & Response
-    deactivate Agent
-    Runner-->>API: JSON Response
-    deactivate Runner
-    API-->>Client: 200 OK
-    deactivate API
-```
+## Runtime Configuration
 
-## Key Endpoints
-
-### `POST /chat`
-
-Stateless chat endpoint. Checks for RLM completion in a single turn.
-
-**Request:**
-
-```json
-{
-  "message": "Calculate pi to 10 digits",
-  "session_id": "optional-session-id"
-}
-```
-
-**Response:**
-
-```json
-{
-  "assistant_response": "The value of pi is 3.1415926535",
-  "trajectory": {},
-  "history_turns": 1,
-  "guardrail_warnings": []
-}
-```
-
-### `GET /health`
-
-Kubernetes-style health check. Returns `200 OK` if the server and Modal connection are healthy.
-
-### `WS /ws/chat`
-
-WebSocket endpoint for real-time streaming of agent thoughts and tool outputs.
-
-## Configuration
-
-The server is configured by Hydra config plus environment-backed model credentials.
-
-Common runtime knobs:
-
-- `interpreter.timeout`
-- `interpreter.async_execute`
-- `agent.guardrail_mode` (`off`, `warn`, `strict`)
-- `agent.min_substantive_chars`
-- `rlm_settings.max_iters`
-- `rlm_settings.max_llm_calls`
-- `rlm_settings.max_depth`
-
-Example:
+You can pass Hydra overrides at startup:
 
 ```bash
 uv run fleet-rlm serve-api --host 0.0.0.0 --port 8000 \
@@ -103,4 +35,22 @@ uv run fleet-rlm serve-api --host 0.0.0.0 --port 8000 \
   rlm_settings.max_iters=8
 ```
 
-For planner LM setup, export `DSPY_LM_MODEL` and (`DSPY_LLM_API_KEY` or `DSPY_LM_API_KEY`).
+## Auth and Environment Guardrails
+
+Important runtime controls:
+
+- `APP_ENV` (`local|staging|production`)
+- `AUTH_MODE` (`dev|entra`)
+- `AUTH_REQUIRED`
+- `DATABASE_URL`
+- `DATABASE_REQUIRED`
+- `LEGACY_SQLITE_ROUTES_ENABLED`
+
+See [Auth Modes](../auth.md) and [Database Architecture](../db.md).
+
+## Smoke Checks
+
+```bash
+curl -sS http://127.0.0.1:8000/health
+curl -sS http://127.0.0.1:8000/ready
+```

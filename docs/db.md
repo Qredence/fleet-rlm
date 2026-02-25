@@ -1,51 +1,55 @@
 # Database Architecture
 
-This project uses a local SQLite database to persist application state, managed asynchronously via SQLAlchemy and SQLModel.
+Current backend persistence uses **Neon/Postgres** with Alembic migrations and tenant isolation via row-level security (RLS).
 
-## Core Setup
+## Primary Data Stack
 
-- **Database Engine**: SQLite (`fleet_rlm.db`)
-- **ORM**: [SQLModel](https://sqlmodel.tiangolo.com/) (built on Pydantic and SQLAlchemy)
-- **Async Support**: `aiosqlite` with `AsyncSession`
+- Engine/session management: `src/fleet_rlm/db/engine.py`
+- Repository layer: `src/fleet_rlm/db/repository.py`
+- Domain models: `src/fleet_rlm/db/models.py`
+- Migrations: `migrations/` (Alembic)
 
-The database configuration is defined in `src/fleet_rlm/server/database.py`.
+## Connection and Engine
 
-```python
-DATABASE_URL = "sqlite+aiosqlite:///./fleet_rlm.db"
-```
+`DatabaseManager` normalizes PostgreSQL URLs for async (`asyncpg`) and sync (Alembic `psycopg`) usage.
 
-## Initialization & Lifecycle
+Key helpers:
 
-Unlike systems that use external migration tools like Alembic, this local setup currently initializes the schema dynamically on application startup.
+- `to_async_database_url(...)`
+- `to_sync_database_url(...)`
+- `DatabaseManager.session()`
 
-During the FastAPI application lifespan (defined in `src/fleet_rlm/server/main.py`), the `init_db()` function is called:
+## Migration Lifecycle
 
-```python
-async def init_db() -> None:
-    """Initialize the database by creating all tables."""
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-```
+Alembic environment:
 
-This creates all tables defined by SQLModel classes that have been imported into the application registry.
+- `migrations/env.py`
 
-## Session Management
+Baseline schema + RLS policies are defined in versioned migrations (for example `0001_neon_core_schema.py`).
 
-Database sessions are provided to FastAPI endpoints via dependency injection using the `get_db_session()` generator.
+## Tenant Isolation (RLS)
 
-```python
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from .database import get_db_session
+Repository methods set tenant context per transaction:
 
-@router.get("/example")
-async def example_endpoint(session: AsyncSession = Depends(get_db_session)):
-    # Use the async session
-    pass
-```
+- `SELECT set_config('app.tenant_id', :tenant_id, true)`
 
-## Data Models
+RLS policies reference `current_setting('app.tenant_id', true)` to enforce tenant scoping.
 
-The data models representing the application state (e.g., chat sessions, tasks, memory) are defined using SQLModel. The specific tables and relationships are defined across the `models.py` files in the codebase (e.g., `src/fleet_rlm/server/models.py`).
+## Runtime Behavior
 
-Since this is a local, single-tenant SQLite database, complex concepts like Row-Level Security (RLS) or tenant isolation are not applicable or enforced at the database level in this environment.
+Server startup behavior (`src/fleet_rlm/server/main.py` + config):
+
+- if `DATABASE_URL` is configured, Neon repository is initialized
+- if `DATABASE_REQUIRED=true` and URL missing, startup fails
+- if database is optional and missing, runtime continues with persistence-disabled warnings
+
+## Legacy SQLite Compatibility Surface
+
+A separate local compatibility model exists under:
+
+- `src/fleet_rlm/server/models.py`
+- `src/fleet_rlm/server/services/*`
+- `src/fleet_rlm/server/routers/tasks.py`
+- `src/fleet_rlm/server/routers/sessions.py`
+
+These routes are gated by `LEGACY_SQLITE_ROUTES_ENABLED` and are not the canonical multi-tenant persistence path.

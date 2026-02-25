@@ -1,21 +1,24 @@
 # How-to Guides
 
-Guides are directions that take you through the steps required to solve a real-world problem.
+Task-focused guides for operating `fleet-rlm` with the current codebase.
 
-## Setup & Configuration
+## Setup and Configuration
+- [Installation](installation.md)
+- [Configuring Modal](configuring-modal.md)
+- [Runtime Settings](runtime-settings.md)
 
-- **[Installation](installation.md)**: Install the package and dependencies.
-- **[Configuring Modal](configuring-modal.md)**: setup secrets, authentication, and volumes.
+## Running and Integration
+- [Deploying the API Server](deploying-server.md)
+- [Using the MCP Server](using-mcp-server.md)
+- [Using Notebooks](using-notebooks.md)
+- [Managing Skills](managing-skills.md)
+- [Using Claude Code Agents](using-claude-code-agents.md)
 
-## Integration
+## Reliability
+- [Performance Regression Guardrail](performance-regression-guardrail.md)
+- [Troubleshooting](troubleshooting.md)
 
-- **[Managing Skills](managing-skills.md)**: Use the bundled Claude skills to accelerate development.
-- **[Using with Claude Code (Skills/Agents/Teams)](using-claude-code-agents.md)**: Run workflows through packaged scaffold assets.
-- **[Using Notebooks](using-notebooks.md)**: Working with Jupyter notebooks.
-- **[Using with Claude Desktop](using-mcp-server.md)**: Connect `fleet-rlm` to Claude via MCP.
-- **[Performance Regression Guardrail](performance-regression-guardrail.md)**: Create and compare benchmark baselines.
+## Notes
 
-## Deployment
-
-- **[Deploying the API Server](deploying-server.md)**: Run the FastAPI server for production use.
-- **[Troubleshooting](troubleshooting.md)**: Common errors and solutions.
+These guides cover maintained operational flows.
+Historical exploration notes live under archive folders referenced in [docs/index.md](../index.md).

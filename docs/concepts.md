@@ -1,116 +1,62 @@
 # fleet-rlm Concepts
 
-`fleet-rlm` is a robust agent framework that combines interactive chat with deep, recursive task execution in a secure cloud sandbox.
+`fleet-rlm` combines a ReAct chat orchestrator with recursive long-context execution in Modal sandboxes.
 
-## Core Architecture
+## Core Concepts
 
-The system is built on four main pillars:
+## 1. ReAct Chat Orchestrator
 
-1.  **Interactive Agent (`RLMReActChatAgent`)**
-2.  **Recursive Language Model (`dspy.RLM`)**
-3.  **Cloud Sandbox (`ModalInterpreter`)**
-4.  **Tooling Ecosystem**
+`RLMReActChatAgent` is the interactive orchestrator.
 
-```mermaid
-graph TD
-    User([User]) <--> UI[Web UI / CLI]
-    UI <--> API[FastAPI / WebSocket]
-    API <--> Agent[RLMReActChatAgent]
+It:
+- receives user requests from CLI/API/WS
+- decides tool actions
+- streams intermediate/final events
+- maintains conversation and document context
 
-    subgraph "Reasoning Loop (ReAct)"
-        Agent -- "Thought" --> Agent
-        Agent -- "Call Tool" --> Tools
-    end
+## 2. Recursive Long-Context Execution
 
-    subgraph "Tool Execution"
-        Tools -- "Standard" --> FS[FileSystem / RAG]
-        Tools -- "Delegate" --> RLM[dspy.RLM]
-        Tools -- "Execute" --> Sandbox[Modal Sandbox]
-    end
+For deep tasks, runners and tools use DSPy RLM signatures and iterative sandbox execution.
 
-    subgraph "Deep Work (RLM)"
-        RLM -- "Generate Code" --> Sandbox
-        Sandbox -- "Result" --> RLM
-        RLM -- "Refine" --> RLM
-    end
+Examples:
+- `AnalyzeLongDocument`
+- `SummarizeLongDocument`
+- `ExtractFromLogs`
 
-    Sandbox <--> Cloud[Modal Cloud]
-```
+## 3. Modal Sandbox Runtime
 
----
+`ModalInterpreter` provides isolated remote execution.
 
-## 1. Interactive Agent (`RLMReActChatAgent`)
+Benefits:
+- sandbox isolation from host environment
+- persistent volume integration when configured
+- controlled execution profiles for root/delegate behavior
 
-The **Agent** is the user's primary interface. It is a long-running, stateful entity that maintains conversation history and context.
+## 4. Runtime Surfaces
 
-- **Type**: `dspy.Module` (ReAct-based)
-- **Role**: Orchestrator. It decides _what_ needs to be done but delegates _how_ to tools.
-- **Behavior**: It thinks in a loop: Thought -> Action -> Observation -> Thought.
-- **State**: Persists across turns using `dspy.History`.
+- Terminal chat: `fleet-rlm chat` or `fleet`
+- Web/API: `fleet web` or `fleet-rlm serve-api`
+- MCP: `fleet-rlm serve-mcp`
 
-## 2. Recursive Language Model (`dspy.RLM`)
+All surfaces converge on shared orchestration/runtime modules.
 
-The **RLM** is the engine for deep, computational work. Unlike the interactive agent, the RLM creates its own programs to solve problems.
+## 5. Observability and State
 
-- **Type**: `dspy.Module` (RLM)
-- **Role**: Specialist. It solves complex, specific tasks by writing and executing code.
-- **Behavior**: It generates Python code, runs it in the sandbox, inspects the output, and iterates until the task is complete.
-- **Key Feature**: It can recursively spawn sub-RLMs for even finer-grained tasks.
+The system emits:
+- chat stream events (`/api/v1/ws/chat`)
+- execution graph events (`/api/v1/ws/execution`)
 
-## 3. Cloud Sandbox (`ModalInterpreter`)
+Persistence model:
+- canonical multi-tenant state in Neon/Postgres
+- compatibility SQLite CRUD routes available only when explicitly enabled
 
-The **Sandbox** is the secure execution environment where code runs. It is not running on the user's machine or the main server, but in an isolated cloud container (via Modal).
+## 6. Auth and Environment Guardrails
 
-- **Role**: Execution. It runs Python code, shell commands, and manages files.
-- **Features**:
-  - **Persistence**: Files and state can persist via Modal Volumes.
-  - **Isolation**: Sandbox crashes don't affect the main agent.
-  - **Security**: No access to the host environment secrets unless explicitly allowed.
-  - **Tools**: It has built-in tools like `llm_query` (to call back to the LLM) and `chunk_text`.
+Runtime behavior is environment-sensitive via config:
+- `APP_ENV`
+- `AUTH_MODE`
+- `AUTH_REQUIRED`
+- `DATABASE_REQUIRED`
+- `LEGACY_SQLITE_ROUTES_ENABLED`
 
-## 4. Tooling Ecosystem
-
-Tools are the bridge between the Agent/RLM and the Sandbox.
-
-- **Host Tools**: Run on the API server (e.g., `load_document`, `list_files`). Used for light work.
-- **Sandbox Tools**: Run inside the Modal container (e.g., `execute_code`, `edit_file`). Used for heavy lifting.
-- **Delegate Tools**: Trigger RLM workflows (e.g., `analyze_long_document`, `rlm_query`).
-
----
-
-## 5. LLM Observability (PostHog)
-
-`fleet-rlm` can attach a DSPy callback that emits PostHog `$ai_generation` events for every DSPy LM call.
-
-- **Default**: disabled (`POSTHOG_ENABLED=false`)
-- **Activation**: set `POSTHOG_ENABLED=true` and `POSTHOG_API_KEY`
-- **Safety**: payloads are redacted and truncated before emission
-- **Tracing**: callback-level parent/child trace IDs are correlated via `contextvars`
-- **Determinism**: optimization traffic is excluded by default (`POSTHOG_ENABLE_DSPY_OPTIMIZATION=false`)
-
-The callback captures model/provider, latency, token usage (best effort), and sanitized prompt/output snippets without changing the RLM execution contract.
-
----
-
-## Key Workflows
-
-### The "Thinking" Chat
-
-When you ask the agent a question, it doesn't just answer from training data. It checks if it needs more info:
-
-1.  **User**: "Summarize the logs."
-2.  **Agent**: "I need to read the logs first." -> Calls `load_document`.
-3.  **Agent**: "Now I need to analyze them." -> Calls `extract_from_logs` (RLM).
-4.  **RLM**: _Interacts with Sandbox to process logs..._ -> Returns structured data.
-5.  **Agent**: "Here is the summary based on the analysis..."
-
-### Recursive Delegation
-
-For complex tasks, the Agent delegates to RLM, which can delegate further:
-
-- **User**: "Refactor the codebase."
-- **Agent**: Calls `rlm_query("Refactor codebase")`.
-- **RLM (Parent)**: Identifies 5 files to change. Spawns 5 `rlm_query` sub-calls.
-- **RLM (Child)**: Edits one file, runs tests, confirms fix.
-- **RLM (Parent)**: Collects results, verifies integration.
-- **Agent**: Reports success.
+These controls determine whether auth, persistence, and legacy compatibility routes are enforced.

@@ -1,8 +1,12 @@
-# Explanation
+# Explanation (Archive)
 
-Explanation provides background and context to understand the system.
+This section is preserved for conceptual background and historical design rationale.
 
-- **[RLM Concepts](rlm-concepts.md)**: Theory behind Recursive Language Models.
-- **[Architecture](architecture.md)**: System design, diagrams, and components.
-- **[Stateful Architecture](stateful-architecture.md)**: Deep dive into agent memory.
-- **[Memory Topology Notes](memory-topology.md)**: Experimental memory-topology design notes.
+It is **not** the primary source of truth for current runtime behavior.
+
+- [RLM Concepts](rlm-concepts.md)
+- [Architecture](architecture.md)
+- [Stateful Architecture](stateful-architecture.md)
+- [Memory Topology Notes](memory-topology.md)
+
+For maintained docs, start at [docs/index.md](../index.md).
