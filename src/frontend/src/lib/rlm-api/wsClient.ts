@@ -48,8 +48,12 @@ function sanitizeLogValue(value: unknown): string {
       text = String(value);
     }
   }
-  // Remove ASCII control characters (including newlines) to prevent log injection.
-  return text.replace(/[\u0000-\u001F\u007F]+/g, " ");
+  // Remove ASCII control characters (including newlines) to prevent log injection,
+  // and normalize whitespace so the value cannot affect log structure.
+  const stripped = text.replace(/[\u0000-\u001F\u007F]+/g, " ");
+  const normalized = stripped.replace(/\s+/g, " ").trim();
+  // Clearly mark sanitized, potentially user-controlled content.
+  return `[sanitized] ${normalized}`;
 }
 
 export async function streamChatOverWs(
