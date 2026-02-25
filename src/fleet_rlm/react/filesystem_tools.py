@@ -113,7 +113,7 @@ def build_filesystem_tools(agent: RLMReActChatAgent) -> list[Any]:
                     for candidate in root.glob(pattern_norm)
                     if _is_included(candidate)
                 }
-                matched_files = sorted(scoped_matches, key=lambda p: str(p))
+                matched_files = sorted(scoped_matches, key=str)
 
         if not matched_files:
             matched_files = [
