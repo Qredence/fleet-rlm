@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- **Change:** Completed refactor cleanup phases for server/runtime surfaces, including app/request-bound server state lifecycle, legacy SQLite isolation, and WebSocket streaming loop decomposition.
+  **Outcome:** Lower runtime ambiguity, improved testability, and reduced complexity in `server` and websocket internals.
+- **Change:** Consolidated duplicate server schemas and removed compatibility shim modules/routes (`server/dependencies.py`, flat `server/schemas.py`, router shim files), with planned stub routes now returning explicit `501`.
+  **Outcome:** Clearer canonical imports/surfaces and more truthful API behavior for unimplemented endpoints.
+
 ## [0.4.8] - 2026-02-24
 
 ### Highlights (User Impact)

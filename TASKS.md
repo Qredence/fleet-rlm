@@ -137,12 +137,17 @@ Goal: replace placeholder success responses with explicit not-implemented respon
 - [x] `uv run python scripts/check_release_metadata.py`
 
 ## Impacted Areas Checklist
-- [ ] Server runtime internals updated safely (`main.py`, `deps.py`, `routers/ws*.py`, `routers/runtime.py`, `routers/health.py`, `routers/sessions.py`).
-- [ ] Legacy CRUD SQLite paths verified under gating.
-- [ ] Schema export consolidation completed.
-- [ ] UI/WS/server tests migrated off brittle global-state assumptions.
-- [ ] Planned routes now clearly signal `501` behavior.
-- [ ] Breaking compatibility changes documented in release notes/changelog.
+- [x] Server runtime internals updated safely (`main.py`, `deps.py`, `routers/ws*.py`, `routers/runtime.py`, `routers/health.py`, `routers/sessions.py`).
+- [x] Legacy CRUD SQLite paths verified under gating.
+- [x] Schema export consolidation completed.
+- [x] UI/WS/server tests migrated off brittle global-state assumptions.
+- [x] Planned routes now clearly signal `501` behavior.
+- [x] Breaking compatibility changes documented in release notes/changelog.
+
+Evidence:
+- Runtime internals + state lifecycle: `refactor: migrate server state to app lifecycle and isolate legacy sqlite` (`6cdcf4e`).
+- WS decomposition + planned-route behavior: `refactor: extract websocket streaming loop and harden planned stubs` (`26319da`).
+- Validation evidence: full quality gate and phase gates passed on 2026-02-26.
 
 ## Session Log
 - 2026-02-26: Created root `PLANS.md` and root `TASKS.md` scaffolding for phased execution tracking.
