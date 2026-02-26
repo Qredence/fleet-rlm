@@ -60,7 +60,8 @@ class ReplHookBridge:
             try:
                 await self._worker_task
             except asyncio.CancelledError:
-                pass
+                # Cancellation of the worker during shutdown is expected; ignore.
+                logger.debug("REPL step worker task was cancelled during shutdown")
 
     async def _emit_and_persist_repl_step(self, step_data: ExecutionStep) -> None:
         if self._lifecycle.run_completed:
