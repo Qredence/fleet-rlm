@@ -365,8 +365,11 @@ async def chat_streaming(websocket: WebSocket):
                 )
                 try:
                     await local_persist(include_volume_save=True)
-                except PersistenceRequiredError:
-                    pass
+                except PersistenceRequiredError as persist_exc:
+                    logger.warning(
+                        "Session persistence failed after stream error: %s",
+                        _sanitize_for_log(persist_exc),
+                    )
                 if lifecycle is not None:
                     await lifecycle.complete_run(
                         RunStatus.FAILED,
