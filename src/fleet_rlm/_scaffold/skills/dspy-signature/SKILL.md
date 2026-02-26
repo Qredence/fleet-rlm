@@ -110,7 +110,7 @@ print(result.confidence)   # NOT result["confidence"]
 
 ## fleet-rlm Built-in Signatures
 
-Defined in `src/fleet_rlm/signatures.py`:
+Defined in `src/fleet_rlm/react/signatures.py`:
 
 - `ExtractArchitecture`: `docs, query -> modules, optimizers, design_principles`
 - `ExtractAPIEndpoints`: `docs -> api_endpoints`

@@ -17,7 +17,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-load_dotenv(ROOT / ".env", override=False)
+load_dotenv(ROOT / ".env", override=True)
 
 from fleet_rlm.db.engine import to_sync_database_url  # noqa: E402
 from fleet_rlm.db.models import Base  # noqa: E402

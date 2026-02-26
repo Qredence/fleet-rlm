@@ -53,14 +53,14 @@ The following checks were run in check-only mode:
 
 #### 3.1 File listing over large trees can become expensive
 - Why it matters: `list_files` with wide patterns on large repos can be slow and return many stat calls.
-- Affected files/functions: `src/fleet_rlm/react/filesystem_tools.py:list_files`.
+- Affected files/functions: `src/fleet_rlm/react/tools/filesystem.py:list_files`.
 - Recommendation: keep ignore-dir filtering, preserve glob semantics, and document benchmark workflow for large trees.
 - Risk: Medium.
 - Effort: Small.
 
 #### 3.2 Large hotspot modules are maintenance bottlenecks
 - Why it matters: high line-count modules (e.g., websocket router, interpreter, agent/streaming) are harder to reason about and optimize.
-- Affected files/functions: `src/fleet_rlm/server/routers/ws.py`, `src/fleet_rlm/core/interpreter.py`, `src/fleet_rlm/react/streaming.py`, `src/fleet_rlm/react/agent.py`.
+- Affected files/functions: `src/fleet_rlm/server/routers/ws/api.py`, `src/fleet_rlm/core/interpreter.py`, `src/fleet_rlm/react/streaming.py`, `src/fleet_rlm/react/agent.py`.
 - Recommendation: prefer boundary extraction by feature seams (event mapping, persistence hooks, lifecycle orchestration) with no behavior changes.
 - Risk: Medium.
 - Effort: Large.

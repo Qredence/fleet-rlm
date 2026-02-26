@@ -12,7 +12,7 @@
  *   - src/fleet_rlm/server/routers/tasks.py
  *   - src/fleet_rlm/server/routers/sessions.py
  *   - src/fleet_rlm/server/routers/chat.py
- *   - src/fleet_rlm/server/routers/ws.py
+ *   - src/fleet_rlm/server/routers/ws/api.py
  *
  * TODO: Validate these against the actual Pydantic schemas once the
  *       backend OpenAPI spec is available. Adjust field names, types,

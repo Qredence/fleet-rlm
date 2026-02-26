@@ -14,7 +14,7 @@ A parameter-by-parameter mapping of every `dspy.RLM` API surface to its correspo
 | `max_llm_calls`      | `50`                      | `rlm_max_llm_calls=50`                                         | `react/agent.py:67` / `core/interpreter.py:158`   |
 | `max_output_chars`   | `10000`                   | `stdout_summary_threshold=10000` + hard `MAX_CHARS=2000` guard | `core/interpreter.py:148` / `stateful/sandbox.py` |
 | `verbose`            | `False`                   | `verbose=False`                                                | `react/agent.py:71`                               |
-| `tools`              | `list[Callable] \| None`  | `build_tool_list()` + `_extra_tools`                           | `react/tools.py`                                  |
+| `tools`              | `list[Callable] \| None`  | `build_tool_list()` + `_extra_tools`                           | `react/tools/__init__.py`                         |
 | `sub_lm`             | `dspy.LM \| None`         | `sub_lm` on `ModalInterpreter`                                 | `core/interpreter.py:150` / `core/llm_tools.py`   |
 | `interpreter`        | `CodeInterpreter \| None` | `ModalInterpreter` (custom `CodeInterpreter`)                  | `core/interpreter.py`                             |
 
@@ -45,7 +45,7 @@ A parameter-by-parameter mapping of every `dspy.RLM` API surface to its correspo
 | Extension              | Description                                                                         | Status         |
 | :--------------------- | :---------------------------------------------------------------------------------- | :------------- |
 | **Execution Profiles** | `ROOT_INTERLOCUTOR` / `RLM_DELEGATE` / `MAINTENANCE` profiles control tool exposure | ✅ Implemented |
-| **Evolutive Memory**   | `@dspy.tool search_evolutive_memory` backed by Neon pgvector                        | ✅ Phase 1-2   |
+| **Evolutive Memory**   | Legacy compatibility tool (`search_evolutive_memory`) now returns deterministic deprecation text | ⚠️ Deprecated |
 | **Session History**    | `log_execution()` / `get_session_history()` persists execution traces               | ✅ Implemented |
 | **Volume Ops**         | `workspace_write/read/list/append` + `save_to_volume/load_from_volume`              | ✅ Implemented |
 | **Core Memory**        | Persona/Human/Scratchpad blocks via `CoreMemoryMixin`                               | ✅ Implemented |

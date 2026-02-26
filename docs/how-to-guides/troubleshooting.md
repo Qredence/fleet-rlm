@@ -78,5 +78,5 @@ uv run fleet --help
 rg -n "^  /" openapi.yaml
 
 # WS route inventory
-rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
 ```

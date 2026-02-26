@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.signatures import (
+from fleet_rlm.react.signatures import (
     AnalyzeLongDocument,
     CodeChangePlan,
     ClarificationQuestionSignature,

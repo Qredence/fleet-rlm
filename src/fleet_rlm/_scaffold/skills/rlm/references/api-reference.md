@@ -69,7 +69,7 @@ These functions are injected automatically by the driver and available inside
 
 ## DSPy Signatures
 
-Built-in signatures from `src/fleet_rlm/signatures.py`:
+Built-in signatures from `src/fleet_rlm/react/signatures.py`:
 
 | Signature               | Inputs              | Outputs                                                           |
 | ----------------------- | ------------------- | ----------------------------------------------------------------- |

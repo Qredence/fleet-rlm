@@ -76,7 +76,7 @@ Modes:
 
 These execute Modal-side checks for required environment keys.
 
-## Signatures (`fleet_rlm.signatures`)
+## Signatures (`fleet_rlm.react.signatures`)
 
 Current maintained signatures include:
 
@@ -110,5 +110,5 @@ print(result["answer"])
 
 ```bash
 uv run python -c "from fleet_rlm.runners import run_long_context, run_react_chat_once"
-uv run python -c "from fleet_rlm.signatures import AnalyzeLongDocument"
+uv run python -c "from fleet_rlm.react.signatures import AnalyzeLongDocument"
 ```
