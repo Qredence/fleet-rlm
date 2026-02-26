@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+import logging
 
 from . import execute_submit
 from .memory_intelligence import build_memory_intelligence_tools
@@ -59,16 +60,16 @@ def _reload_volume_best_effort(ctx: _SandboxToolContext) -> None:
     if ctx.agent.interpreter._volume:
         try:
             ctx.agent.interpreter.reload()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.exception("Best-effort volume reload failed: %s", exc)
 
 
 def _commit_volume_best_effort(ctx: _SandboxToolContext) -> None:
     if ctx.agent.interpreter._volume:
         try:
             ctx.agent.interpreter.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.exception("Best-effort volume commit failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
