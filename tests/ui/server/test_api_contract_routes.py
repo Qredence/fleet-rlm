@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
@@ -45,7 +46,21 @@ def test_required_http_and_websocket_routes_are_registered(
     assert _REQUIRED_WS_PATHS.issubset(ws_paths)
 
 
-def test_runtime_contract_endpoints_remain_available(local_client: TestClient) -> None:
+def test_runtime_contract_endpoints_remain_available(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Keep this contract test offline/deterministic and avoid touching live Modal
+    # config files or credentials while checking route availability.
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
+    monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.runtime.load_modal_config", lambda: {}
+    )
+
     settings = local_client.get("/api/v1/runtime/settings")
     status = local_client.get("/api/v1/runtime/status")
     modal = local_client.post("/api/v1/runtime/tests/modal")

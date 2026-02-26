@@ -84,30 +84,34 @@ def test_runtime_modal_smoke_success(
     monkeypatch.setenv("MODAL_TOKEN_ID", "token-id")
     monkeypatch.setenv("MODAL_TOKEN_SECRET", "token-secret")
 
+    def _aio_method(value):
+        async def _call(*args, **kwargs):
+            _ = args, kwargs
+            return value
+
+        return SimpleNamespace(aio=_call)
+
+    class _FakeStdout:
+        def __init__(self) -> None:
+            self.read = _aio_method("ok")
+
     class _FakeProc:
         def __init__(self) -> None:
-            self.stdout = SimpleNamespace(read=lambda: "ok")
-
-        def wait(self) -> None:
-            return None
+            self.stdout = _FakeStdout()
+            self.wait = _aio_method(None)
 
     class _FakeSandbox:
-        @staticmethod
-        def create(*args, **kwargs):
-            return _FakeSandbox()
-
-        def exec(self, *args, **kwargs):
-            return _FakeProc()
-
-        def terminate(self) -> None:
-            return None
+        def __init__(self) -> None:
+            self.exec = _aio_method(_FakeProc())
+            self.terminate = _aio_method(None)
 
     class _FakeApp:
-        @staticmethod
-        def lookup(*args, **kwargs):
-            return SimpleNamespace(name="runtime-smoke")
+        lookup = _aio_method(SimpleNamespace(name="runtime-smoke"))
 
-    fake_modal = SimpleNamespace(App=_FakeApp, Sandbox=_FakeSandbox)
+    class _FakeSandboxNamespace:
+        create = _aio_method(_FakeSandbox())
+
+    fake_modal = SimpleNamespace(App=_FakeApp, Sandbox=_FakeSandboxNamespace)
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
 
     response = local_client.post("/api/v1/runtime/tests/modal")

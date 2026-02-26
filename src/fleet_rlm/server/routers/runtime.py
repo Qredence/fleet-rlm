@@ -221,11 +221,13 @@ async def test_modal_connection(request: Request) -> RuntimeConnectivityTestResp
     try:
         import modal
 
-        app = modal.App.lookup("fleet-rlm-runtime-smoke", create_if_missing=True)
-        sandbox = modal.Sandbox.create(app=app, timeout=30)
-        proc = sandbox.exec("python", "-c", "print('ok')", timeout=15)
-        proc.wait()
-        output_preview = _coerce_output_text(proc.stdout.read())
+        app = await modal.App.lookup.aio(
+            "fleet-rlm-runtime-smoke", create_if_missing=True
+        )
+        sandbox = await modal.Sandbox.create.aio(app=app, timeout=30)
+        proc = await sandbox.exec.aio("python", "-c", "print('ok')", timeout=15)
+        await proc.wait.aio()
+        output_preview = _coerce_output_text(await proc.stdout.read.aio())
         ok = output_preview == "ok"
         if not ok:
             error = "Modal sandbox returned unexpected output."
@@ -235,7 +237,7 @@ async def test_modal_connection(request: Request) -> RuntimeConnectivityTestResp
         latency_ms = int((time.perf_counter() - started) * 1000)
         if sandbox is not None:
             try:
-                sandbox.terminate()
+                await sandbox.terminate.aio()
             except Exception:
                 pass
 
