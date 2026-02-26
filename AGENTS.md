@@ -169,7 +169,7 @@ uv build
 - OpenTUI under `tui-cli/opentui-rlm/` and Ink TUI under `tui-cli/tui-ink/` are supported terminal runtimes.
 - Python Textual and legacy prompt-toolkit UI runtimes have been removed (v0.4.0).
 - TUI keyboard interactions are centralized through shared shortcut/focus plumbing (global + pane-specific shortcuts) instead of ad-hoc handlers per component.
-- `src/fleet_rlm/models.py` contains streaming data models (`StreamEvent`, `TurnState`) used by `react/streaming.py`, not UI code.
+- `src/fleet_rlm/models/streaming.py` is the canonical streaming model module (`StreamEvent`, `TurnState`); `src/fleet_rlm/models/models.py` remains a compatibility shim.
 
 ## Architecture Highlights
 
@@ -197,30 +197,31 @@ uv build
 - `src/fleet_rlm/react/document_cache.py`: `DocumentCacheMixin` (document storage and alias management)
 - `src/fleet_rlm/react/validation.py`: response guardrail validation
 - `src/fleet_rlm/react/tool_delegation.py`: dynamic `__getattr__` tool dispatch (replaces 25+ boilerplate methods)
-- `src/fleet_rlm/react/tools.py`: ReAct tool assembly and host-side tool definitions
-- `src/fleet_rlm/react/document_tools.py`: document loading/reading tools
-- `src/fleet_rlm/react/filesystem_tools.py`: file listing/search tools
-- `src/fleet_rlm/react/chunking_tools.py`: text chunking tools
-- `src/fleet_rlm/react/tools_sandbox.py`: sandbox-specific tools (`rlm_query`, `edit_file`) with depth enforcement
-- `src/fleet_rlm/react/tools_sandbox_helpers.py`: shared sandbox tool helpers
+- `src/fleet_rlm/react/tools/__init__.py`: canonical ReAct tool assembly + shared helpers
+- `src/fleet_rlm/react/tools/document.py`: document loading/reading tools (flat `react/document_tools.py` is compatibility shim)
+- `src/fleet_rlm/react/tools/filesystem.py`: file listing/search tools (flat `react/filesystem_tools.py` is compatibility shim)
+- `src/fleet_rlm/react/tools/chunking.py`: text chunking tools (flat `react/chunking_tools.py` is compatibility shim)
+- `src/fleet_rlm/react/tools/sandbox.py`: sandbox-specific tools (`rlm_query`, `edit_file`) with depth enforcement (flat `react/tools_sandbox.py` is compatibility shim)
+- `src/fleet_rlm/react/tools/sandbox_helpers.py`: shared sandbox tool helpers (flat `react/tools_sandbox_helpers.py` is compatibility shim)
 - `src/fleet_rlm/react/delegate_sub_agent.py`: `spawn_delegate_sub_agent()` — shared true-recursion helper
-- `src/fleet_rlm/react/tools_rlm_delegate.py`: RLM delegate tools (all use true recursive sub-agents)
-- `src/fleet_rlm/react/tools_memory_intelligence.py`: memory intelligence tools (tree, audit, migration, clarification)
+- `src/fleet_rlm/react/tools/delegate.py`: canonical RLM delegate tools (flat `react/tools_rlm_delegate.py` is compatibility shim)
+- `src/fleet_rlm/react/tools/memory_intelligence.py`: canonical memory intelligence tools (flat `react/tools_memory_intelligence.py` is compatibility shim)
 - `src/fleet_rlm/react/runtime_factory.py`: lazy-loading runtime module factory
 - `src/fleet_rlm/react/rlm_runtime_modules.py`: canonical reusable DSPy runtime wrappers for long-context tasks
 - `src/fleet_rlm/react/streaming.py`: async/streaming ReAct execution with trajectory normalization
 - `src/fleet_rlm/react/commands.py`: WebSocket command dispatch → tool mapping
-- `src/fleet_rlm/runtime_settings.py`: shared runtime settings masking/allowlist/env update utilities for HTTP + UI surfaces
+- `src/fleet_rlm/server/runtime_settings.py`: canonical runtime settings masking/allowlist/env update utilities for HTTP + UI surfaces (`src/fleet_rlm/runtime_settings.py` is compatibility shim)
 
 ### Surfaces
 
 - `src/fleet_rlm/cli.py`: Typer CLI entrypoint
 - `src/fleet_rlm/cli_commands/`: CLI subcommand modules (`init_cmd.py`, `serve_cmds.py`)
-- `src/fleet_rlm/terminal/`: terminal chat helpers (`commands.py`, `settings.py`, `ui.py`)
+- `src/fleet_rlm/terminal/`: terminal chat runtime/helpers (`chat.py`, `commands.py`, `settings.py`, `ui.py`); root `terminal_chat.py` is a compatibility shim
 - `src/fleet_rlm/runners.py`: high-level task runners
 - `src/fleet_rlm/server/`: optional FastAPI server (`/api/v1/ws/chat`, `/api/v1/ws/execution`, `/api/v1/runtime/*`, `/api/v1/chat`, `/api/v1/tasks/basic`, `/api/v1/auth/me`)
 - `src/fleet_rlm/server/routers/runtime.py`: runtime settings + connectivity diagnostics endpoints (`/api/v1/runtime/*`)
-- `src/fleet_rlm/server/routers/ws_helpers.py`, `ws_session.py`, `ws_lifecycle.py`, `ws_commands.py`: split WebSocket auth/session/lifecycle/command helpers used by `routers/ws.py`
+- `src/fleet_rlm/server/routers/ws/`: canonical websocket package (`api.py`, `helpers.py`, `session.py`, `lifecycle.py`, `commands.py`, `streaming.py`, etc.); flat `ws_*` modules are compatibility shims
+- `src/fleet_rlm/server/execution/`: canonical execution observability package (`events.py`, `step_builder.py`, `sanitizer.py`); legacy `execution_*` modules are compatibility facades
 - `src/fleet_rlm/mcp/`: optional FastMCP server
 - `src/fleet_rlm/stateful/`: stateful agent and sandbox models
 

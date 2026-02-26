@@ -22,32 +22,32 @@ from fleet_rlm.db.models import (
     RunStatus,
 )
 
-from ..deps import get_server_state_from_websocket
-from ..execution_events import (
+from ...deps import get_server_state_from_websocket
+from ...execution import (
     ExecutionSubscription,
 )
 
 
-from .ws_helpers import (
+from .helpers import (
     _authenticate_websocket,
     _error_envelope,
     _get_execution_emitter,
     _sanitize_for_log,
     _sanitize_id,
 )
-from .ws_lifecycle import (
+from .lifecycle import (
     ExecutionLifecycleManager,
     PersistenceRequiredError,
     _classify_stream_failure,
 )
-from .ws_message_loop import (
+from .message_loop import (
     parse_ws_message_or_send_error,
     resolve_session_identity,
     switch_session_if_needed,
 )
-from .ws_session import persist_session_state
-from .ws_streaming import run_streaming_turn
-from .ws_turn import handle_command_with_persist, initialize_turn_lifecycle
+from .session import persist_session_state
+from .streaming import run_streaming_turn
+from .turn import handle_command_with_persist, initialize_turn_lifecycle
 
 
 router = APIRouter(tags=["websocket"])

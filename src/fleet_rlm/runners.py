@@ -29,7 +29,7 @@ import dspy
 from .core.config import configure_planner_from_env
 from .core.interpreter import ModalInterpreter
 from .react.agent import RLMReActChatAgent
-from .signatures import AnalyzeLongDocument, SummarizeLongDocument
+from .react.signatures import AnalyzeLongDocument, SummarizeLongDocument
 
 
 @dataclass(slots=True)

@@ -10,7 +10,7 @@ from typing import Any
 
 import dspy
 
-from ..signatures import (
+from .signatures import (
     AnalyzeLongDocument,
     CodeChangePlan,
     ClarificationQuestionSignature,

@@ -13,7 +13,7 @@ from fleet_rlm.db import DatabaseManager, FleetRepository
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .legacy_compat import get_db_session
-from .execution_events import ExecutionEventEmitter
+from .execution import ExecutionEventEmitter
 
 if TYPE_CHECKING:
     from fleet_rlm.react.agent import RLMReActChatAgent
@@ -184,7 +184,7 @@ async def get_react_agent(
     from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
     from fleet_rlm.core.interpreter import ModalInterpreter
     from fleet_rlm.react.agent import RLMReActChatAgent
-    from fleet_rlm.react.tools_rlm_delegate import build_rlm_delegate_tools
+    from fleet_rlm.react.tools.delegate import build_rlm_delegate_tools
     import dspy
 
     state = get_server_state(request)
@@ -220,9 +220,9 @@ async def get_react_agent(
     )
 
     # Lazily mount tools to prevent circular module dependencies during import
-    from fleet_rlm.react import tools_sandbox
+    from fleet_rlm.react.tools.sandbox import build_sandbox_tools
 
-    agent.tools.extend(tools_sandbox.build_sandbox_tools(agent))
+    agent.tools.extend(build_sandbox_tools(agent))
     agent.tools.extend(build_rlm_delegate_tools(agent))
 
     try:

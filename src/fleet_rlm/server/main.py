@@ -18,7 +18,7 @@ from fleet_rlm.db import DatabaseManager, FleetRepository
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
 from .deps import ServerState
-from .execution_events import ExecutionEventEmitter
+from .execution import ExecutionEventEmitter
 from .legacy_compat import init_db, set_legacy_sqlite_enabled
 from .middleware import add_middlewares
 from .routers import (

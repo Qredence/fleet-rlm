@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from fleet_rlm.server.models import Session
+from fleet_rlm.server.legacy_models import Session
 from fleet_rlm.server.schemas.session import SessionCreate, SessionUpdate
 
 

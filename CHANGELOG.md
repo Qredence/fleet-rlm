@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Change:** Implemented Wave 7.1 structural simplification with canonical package regrouping and one-release compatibility shims (`server/routers/ws/`, `server/execution/`, `react/tools/`, `terminal/chat.py`, `server/runtime_settings.py`, `react/signatures.py`, `models/streaming.py`).
+  **Outcome:** Cleaner module ownership and reduced namespace ambiguity without intentional HTTP/WS/frontend contract drift; legacy import paths remain supported through `v0.5.0`.
 - **Change:** Completed refactor cleanup phases for server/runtime surfaces, including app/request-bound server state lifecycle, legacy SQLite isolation, and WebSocket streaming loop decomposition.
   **Outcome:** Lower runtime ambiguity, improved testability, and reduced complexity in `server` and websocket internals.
 - **Change:** Consolidated duplicate server schemas and removed compatibility shim modules/routes (`server/dependencies.py`, flat `server/schemas.py`, router shim files), with planned stub routes now returning explicit `501`.

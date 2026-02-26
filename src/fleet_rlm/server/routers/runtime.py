@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.runtime_settings import (
+from fleet_rlm.server.runtime_settings import (
     RUNTIME_SETTINGS_ALLOWLIST,
     RUNTIME_SETTINGS_KEYS,
     apply_env_updates,

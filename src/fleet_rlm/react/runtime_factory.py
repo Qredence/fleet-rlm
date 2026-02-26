@@ -34,7 +34,7 @@ def get_runtime_module(agent: "RLMReActChatAgent", name: str) -> dspy.Module:
     if module is not None:
         return module
 
-    from ..signatures import (
+    from .signatures import (
         AnalyzeLongDocument,
         ClarificationQuestionSignature,
         CodeChangePlan,

@@ -1,6 +1,6 @@
 """Interactive data models used by streaming runtimes."""
 
-from .models import (
+from .streaming import (
     ProfileConfig,
     SessionConfig,
     StreamEvent,

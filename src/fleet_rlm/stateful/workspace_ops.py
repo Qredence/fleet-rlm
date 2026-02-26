@@ -21,6 +21,29 @@ class WorkspaceOpsContext:
     workspace_path: str
 
 
+def _validate_workspace_filename(workspace_path: str, filename: str) -> str:
+    """Validate that *filename* stays under *workspace_path* and return the resolved path.
+
+    Raises ``ValueError`` on path-traversal attempts (``../``, absolute paths,
+    null bytes, etc.).
+    """
+    import posixpath
+
+    if not filename or "\x00" in filename:
+        raise ValueError(f"Invalid filename: {filename!r}")
+
+    # Reject absolute paths outright.
+    if posixpath.isabs(filename):
+        raise ValueError(f"Absolute filenames are not allowed: {filename!r}")
+
+    # Normalise and confirm the result stays inside workspace_path.
+    resolved = posixpath.normpath(f"{workspace_path}/{filename}")
+    workspace_prefix = workspace_path.rstrip("/") + "/"
+    if not (resolved == workspace_path or resolved.startswith(workspace_prefix)):
+        raise ValueError(f"Path traversal detected: {filename!r} escapes workspace")
+    return resolved
+
+
 def save_workspace_file(
     *,
     ctx: WorkspaceOpsContext,
@@ -28,7 +51,10 @@ def save_workspace_file(
     content: str,
 ) -> dict[str, Any]:
     """Save content to a workspace file and normalize response payload."""
-    file_path = f"{ctx.workspace_path}/{filename}"
+    try:
+        file_path = _validate_workspace_filename(ctx.workspace_path, filename)
+    except ValueError as exc:
+        return operation_error(filename, str(exc))
     code = f"""
 import os
 try:
@@ -72,7 +98,10 @@ def load_workspace_file(
     filename: str,
 ) -> dict[str, Any]:
     """Load content from a workspace file and normalize response payload."""
-    file_path = f"{ctx.workspace_path}/{filename}"
+    try:
+        file_path = _validate_workspace_filename(ctx.workspace_path, filename)
+    except ValueError as exc:
+        return operation_error(filename, str(exc))
     code = f"""
 try:
     with open("{file_path}", "r") as f:
@@ -137,7 +166,10 @@ def delete_workspace_file(
     filename: str,
 ) -> dict[str, Any]:
     """Delete a workspace file and normalize response payload."""
-    file_path = f"{ctx.workspace_path}/{filename}"
+    try:
+        file_path = _validate_workspace_filename(ctx.workspace_path, filename)
+    except ValueError as exc:
+        return operation_error(filename, str(exc))
     code = f"""
 import os
 
