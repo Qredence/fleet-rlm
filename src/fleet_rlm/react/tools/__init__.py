@@ -19,16 +19,16 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from dspy.primitives.code_interpreter import FinalOutput
 
-from ..chunking import (
+from ...chunking import (
     chunk_by_headers,
     chunk_by_json_keys,
     chunk_by_size,
     chunk_by_timestamps,
 )
-from ..core.interpreter import ExecutionProfile
+from ...core.interpreter import ExecutionProfile
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from ..agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 
@@ -208,10 +208,10 @@ def build_tool_list(
     """
     from dspy import Tool
 
-    from .chunking_tools import build_chunking_tools
-    from .document_tools import build_document_tools
-    from .filesystem_tools import build_filesystem_tools
-    from .tools_sandbox import build_sandbox_tools
+    from .chunking import build_chunking_tools
+    from .document import build_document_tools
+    from .filesystem import build_filesystem_tools
+    from .sandbox import build_sandbox_tools
 
     tools: list[Tool] = []
 
@@ -229,7 +229,7 @@ def build_tool_list(
 
     # Evolutive memory intelligence tools
     try:
-        from ..core.memory_tools import search_evolutive_memory
+        from ...core.memory_tools import search_evolutive_memory
 
         tools.append(Tool(search_evolutive_memory))
     except Exception as e:

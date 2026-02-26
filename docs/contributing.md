@@ -67,5 +67,5 @@ rg -n "^  /" openapi.yaml
 If you changed server/API docs, also verify WS route references:
 
 ```bash
-rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
 ```

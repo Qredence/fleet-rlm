@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .tools import chunk_text, execute_submit, normalize_strategy, resolve_document
+from . import chunk_text, execute_submit, normalize_strategy, resolve_document
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from ..agent import RLMReActChatAgent
 
 
 # ---------------------------------------------------------------------------

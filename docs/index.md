@@ -42,5 +42,5 @@ The folders below are preserved for design history and analysis context. They ar
 When docs conflict with code, treat these as authoritative:
 - CLI surfaces: `src/fleet_rlm/cli.py`, `src/fleet_rlm/cli_commands/`, `src/fleet_rlm/fleet_cli.py`
 - HTTP contract: `openapi.yaml`
-- WebSocket behavior: `src/fleet_rlm/server/routers/ws.py`
-- Python interfaces: `src/fleet_rlm/runners.py`, `src/fleet_rlm/signatures.py`
+- WebSocket behavior: `src/fleet_rlm/server/routers/ws/api.py`
+- Python interfaces: `src/fleet_rlm/runners.py`, `src/fleet_rlm/react/signatures.py`

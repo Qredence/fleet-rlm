@@ -170,10 +170,10 @@ Use a cheaper model for sub-queries while keeping the main planner on a strong m
 import dspy
 from fleet_rlm import ModalInterpreter
 
-# Main planner uses GPT-4o
-dspy.configure(lm=dspy.LM("openai/gemini-3-flash-preview"))
+# Main planner uses a strong model (e.g., Gemini-3 Pro Preview)
+dspy.configure(lm=dspy.LM("openai/gemini-3.1-pro-preview"))
 
-# Sub-queries use GPT-4o-mini (10x cheaper)
+# Sub-queries use  gemini-3-flash-preview (10x cheaper)
 cheap_lm = dspy.LM("openai/gemini-3-flash-preview")
 
 with ModalInterpreter(sub_lm=cheap_lm, max_llm_calls=100) as interp:

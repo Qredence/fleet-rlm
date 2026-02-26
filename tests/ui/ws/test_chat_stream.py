@@ -93,9 +93,7 @@ def test_websocket_final_event_waits_for_run_completion(
     )
     delayed_repo = DelayedRepository(completion_delay_seconds=0.05)
 
-    from fleet_rlm.server.deps import server_state
-
-    server_state.repository = delayed_repo
+    ws_client.app.state.server_state.repository = delayed_repo
     with ws_client.websocket_connect(
         "/api/v1/ws/chat", headers=websocket_auth_headers
     ) as websocket:

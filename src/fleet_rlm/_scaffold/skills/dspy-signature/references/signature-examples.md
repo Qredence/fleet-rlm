@@ -62,7 +62,7 @@
 
 ## fleet-rlm Built-in Signatures
 
-From `src/fleet_rlm/signatures.py`:
+From `src/fleet_rlm/react/signatures.py`:
 
 ```python
 # Architecture extraction

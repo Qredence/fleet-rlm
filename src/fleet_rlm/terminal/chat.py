@@ -20,12 +20,12 @@ from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.table import Table
 
-from . import runners
-from .config import AppConfig
-from .core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from .models import TraceMode
-from .react.commands import COMMAND_DISPATCH
-from .terminal import (
+from .. import runners
+from ..config import AppConfig
+from ..core.config import get_delegate_lm_from_env, get_planner_lm_from_env
+from ..models import TraceMode
+from ..react.commands import COMMAND_DISPATCH
+from . import (
     _FleetCompleter,
     _badge,
     _bottom_toolbar,
@@ -39,7 +39,7 @@ from .terminal import (
     settings_llm,
     settings_modal,
 )
-from .utils.modal import get_default_volume_name, load_modal_config
+from ..utils.modal import get_default_volume_name, load_modal_config
 
 
 @dataclass(slots=True)
@@ -338,13 +338,13 @@ class _TerminalChatSession:
 
     def _check_secret(self) -> None:
         """Check Modal secret (delegates to terminal.settings module)."""
-        from .terminal import check_secret
+        from . import check_secret
 
         check_secret(self)
 
     def _check_secret_key(self, *, key: str) -> None:
         """Check Modal secret key (delegates to terminal.settings module)."""
-        from .terminal import check_secret_key
+        from . import check_secret_key
 
         check_secret_key(self, key=key)
 
@@ -442,13 +442,13 @@ class _TerminalChatSession:
 
     def _print_command_palette(self, agent: Any) -> bool:
         """Print command palette (delegates to terminal.commands module)."""
-        from .terminal import print_command_palette
+        from . import print_command_palette
 
         return print_command_palette(self, agent)
 
     def _print_unknown_command(self, command: str) -> None:
         """Print unknown command error (delegates to terminal.commands module)."""
-        from .terminal import _print_unknown_command
+        from . import _print_unknown_command
 
         _print_unknown_command(self, command)
 
@@ -499,7 +499,7 @@ class _TerminalChatSession:
 
     def _authorize_command(self, *, command: str) -> bool:
         """Authorize a command based on session policy."""
-        from .terminal import _prompt_choice
+        from . import _prompt_choice
 
         policy = self.command_permissions.get(command, "ask")
         if policy == "deny":
@@ -546,7 +546,7 @@ class _TerminalChatSession:
 
     def _render_shell(self, *, draft_assistant: str = "") -> None:
         """Render the shell UI layout."""
-        from .terminal import _render_shell
+        from . import _render_shell
 
         _render_shell(
             console=self.console,

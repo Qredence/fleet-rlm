@@ -7,9 +7,9 @@ near-empty modules.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 analytics_router = APIRouter(prefix="/analytics", tags=["analytics"])
 taxonomy_router = APIRouter(prefix="/taxonomy", tags=["taxonomy"])
@@ -18,48 +18,56 @@ memory_router = APIRouter(prefix="/memory", tags=["memory"])
 sandbox_router = APIRouter(prefix="/sandbox", tags=["sandbox"])
 
 
+def _planned_not_implemented(endpoint: str) -> NoReturn:
+    """Raise a consistent 501 response for planned-only endpoints."""
+    raise HTTPException(
+        status_code=501,
+        detail=f"{endpoint} endpoint not yet implemented",
+    )
+
+
 @analytics_router.get("")
 async def get_analytics() -> dict[str, Any]:
-    return {}
+    _planned_not_implemented("analytics")
 
 
 @analytics_router.get("/skills/{skill_id}")
 async def get_skill_analytics(skill_id: str) -> dict[str, Any]:
     _ = skill_id
-    return {}
+    _planned_not_implemented("analytics skill")
 
 
 @taxonomy_router.get("")
 async def get_taxonomy() -> list[Any]:
-    return []
+    _planned_not_implemented("taxonomy")
 
 
 @taxonomy_router.get("/{path:path}")
 async def get_taxonomy_by_path(path: str) -> dict[str, Any]:
     _ = path
-    return {}
+    _planned_not_implemented("taxonomy path")
 
 
 @search_router.get("")
 async def search() -> dict[str, Any]:
-    return {"results": []}
+    _planned_not_implemented("search")
 
 
 @memory_router.get("")
 async def list_memory() -> dict[str, Any]:
-    return {"items": []}
+    _planned_not_implemented("memory list")
 
 
 @memory_router.post("")
 async def create_memory_item() -> dict[str, Any]:
-    return {"status": "ok"}
+    _planned_not_implemented("memory create")
 
 
 @sandbox_router.get("")
 async def get_sandbox() -> dict[str, Any]:
-    return {"files": []}
+    _planned_not_implemented("sandbox")
 
 
 @sandbox_router.get("/file")
 async def get_sandbox_file() -> dict[str, Any]:
-    return {"content": ""}
+    _planned_not_implemented("sandbox file")

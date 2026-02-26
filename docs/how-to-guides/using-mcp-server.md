@@ -20,7 +20,7 @@ To use `fleet-rlm` with Claude Desktop, add the following to your config file:
       "command": "uv",
       "args": ["run", "fleet-rlm", "serve-mcp", "--transport", "stdio"],
       "env": {
-        "DSPY_LM_MODEL": "openai/gpt-4o",
+        "DSPY_LM_MODEL": "openai/gemini-3-flash-preview",
         "DSPY_LLM_API_KEY": "sk-..."
       }
     }

@@ -27,7 +27,7 @@ from omegaconf import OmegaConf
 from .cli_commands.init_cmd import register_init_command
 from .cli_commands.serve_cmds import register_serve_commands
 from .config import AppConfig
-from .terminal_chat import TerminalChatOptions, run_terminal_chat
+from .terminal.chat import TerminalChatOptions, run_terminal_chat
 
 # We use a global variable to store the hydra config so Typer commands can access it
 # This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)

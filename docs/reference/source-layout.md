@@ -8,7 +8,7 @@ This map reflects the current package layout in `v0.4.8`.
 - `src/fleet_rlm/cli.py`: `fleet-rlm` Typer CLI entrypoint
 - `src/fleet_rlm/fleet_cli.py`: `fleet` launcher entrypoint
 - `src/fleet_rlm/runners.py`: maintained high-level runner functions
-- `src/fleet_rlm/signatures.py`: DSPy signatures used in runtime flows
+- `src/fleet_rlm/react/signatures.py`: DSPy signatures used in runtime flows
 
 ## Core Runtime
 
@@ -30,7 +30,8 @@ This map reflects the current package layout in `v0.4.8`.
 ## Data and Persistence
 
 - `src/fleet_rlm/db/`: Neon/Postgres engine, models, repository
-- `src/fleet_rlm/memory/`: memory-domain helpers
+- `src/fleet_rlm/models/`: canonical streaming/event models (`streaming.py`, package exports)
+- `src/fleet_rlm/server/execution/`: execution observability package (`events.py`, `step_builder.py`, `sanitizer.py`)
 - `migrations/`: Alembic migrations for Neon schema
 
 ## Optional Service Surface

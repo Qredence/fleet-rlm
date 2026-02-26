@@ -15,7 +15,7 @@ import pytest
 from dspy.primitives.code_interpreter import FinalOutput
 
 from fleet_rlm.react import RLMReActChatAgent
-from fleet_rlm.react.document_tools import _read_document_content
+from fleet_rlm.react.tools.document import _read_document_content
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +265,7 @@ def test_load_document_pdf_includes_extraction_metadata(monkeypatch, tmp_path):
     pdf_file.write_bytes(b"%PDF-1.4 test bytes")
 
     monkeypatch.setattr(
-        "fleet_rlm.react.document_tools._read_document_content",
+        "fleet_rlm.react.tools.document._read_document_content",
         lambda _path: (
             "Page one\nPage two",
             {
@@ -291,7 +291,7 @@ def test_load_document_url_includes_fetch_metadata(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
     monkeypatch.setattr(
-        "fleet_rlm.react.document_tools.fetch_url_document_content",
+        "fleet_rlm.react.tools.document.fetch_url_document_content",
         lambda url, *, read_document_content: (
             "Fetched web content",
             {
@@ -321,7 +321,7 @@ def test_fetch_web_document_alias_uses_same_url_loader(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
     monkeypatch.setattr(
-        "fleet_rlm.react.document_tools.fetch_url_document_content",
+        "fleet_rlm.react.tools.document.fetch_url_document_content",
         lambda url, *, read_document_content: (
             "Fetched alias content",
             {
@@ -414,7 +414,7 @@ def test_read_file_slice_pdf_uses_extracted_text(monkeypatch, tmp_path):
     pdf_file = tmp_path / "slice.pdf"
     pdf_file.write_bytes(b"%PDF-1.4 slice bytes")
     monkeypatch.setattr(
-        "fleet_rlm.react.document_tools._read_document_content",
+        "fleet_rlm.react.tools.document._read_document_content",
         lambda _path: ("Line 1\nLine 2\nLine 3\nLine 4", {"source_type": "pdf"}),
     )
 
@@ -461,7 +461,7 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.react.tools_rlm_delegate.spawn_delegate_sub_agent", _fake_spawn
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent", _fake_spawn
     )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
@@ -486,7 +486,7 @@ def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.react.tools_rlm_delegate.spawn_delegate_sub_agent", _fake_spawn
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent", _fake_spawn
     )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
@@ -512,7 +512,7 @@ def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.react.tools_rlm_delegate.spawn_delegate_sub_agent", _fake_spawn
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent", _fake_spawn
     )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"

@@ -18,7 +18,7 @@ uv run modal volume create rlm-volume-dspy
 
 ```bash
 uv run modal secret create LITELLM \
-  DSPY_LM_MODEL=openai/gpt-4o \
+  DSPY_LM_MODEL=openai/gemini-3-flash-preview \
   DSPY_LLM_API_KEY=sk-...
 ```
 

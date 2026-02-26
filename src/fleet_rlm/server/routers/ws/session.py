@@ -9,12 +9,17 @@ from dspy.primitives.code_interpreter import FinalOutput
 from fleet_rlm import runners
 from fleet_rlm.core.interpreter import ExecutionProfile
 from fleet_rlm.db import FleetRepository
-from fleet_rlm.db.models import MemoryKind, MemoryScope, MemorySource
-from fleet_rlm.db.types import IdentityUpsertResult, MemoryItemCreateRequest
+from fleet_rlm.db.types import IdentityUpsertResult
 
-from ..deps import server_state
-from .ws_helpers import _now_iso, _sanitize_for_log, _sanitize_id
-from .ws_lifecycle import PersistenceRequiredError
+from ...deps import ServerState
+from .helpers import _sanitize_id
+from .lifecycle import PersistenceRequiredError
+from .session_store import (
+    ensure_manifest_shape,
+    persist_memory_item_if_needed,
+    sync_session_record_state,
+    update_manifest_from_exported_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +84,7 @@ import uuid  # noqa: E402
 
 async def persist_session_state(
     *,
+    state: ServerState,
     agent: "runners.RLMReActChatAgent",
     session_record: dict[str, Any] | None,
     active_manifest_path: str | None,
@@ -99,72 +105,17 @@ async def persist_session_state(
         manifest = {}
         session_record["manifest"] = manifest
 
-    logs = manifest.get("logs")
-    if not isinstance(logs, list):
-        logs = []
-        manifest["logs"] = logs
-
-    memory = manifest.get("memory")
-    if not isinstance(memory, list):
-        memory = []
-        manifest["memory"] = memory
-
-    generated_docs = manifest.get("generated_docs")
-    if not isinstance(generated_docs, list):
-        generated_docs = []
-        manifest["generated_docs"] = generated_docs
-
-    artifacts = manifest.get("artifacts")
-    if not isinstance(artifacts, list):
-        artifacts = []
-        manifest["artifacts"] = artifacts
-
-    metadata = manifest.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
-        manifest["metadata"] = metadata
-
-    if latest_user_message:
-        logs.append(
-            {
-                "timestamp": _now_iso(),
-                "user_message": latest_user_message,
-                "history_turns": len(exported_state.get("history", [])),
-            }
-        )
-        # Lightweight conversational memory snapshot.
-        memory.append(
-            {
-                "timestamp": _now_iso(),
-                "content": latest_user_message[:400],
-            }
-        )
-
-    generated_docs[:] = sorted(list(exported_state.get("documents", {}).keys()))
-    previous_rev_raw = manifest.get("rev", 0)
-    previous_rev_candidate = (
-        previous_rev_raw if isinstance(previous_rev_raw, (int, float, str)) else 0
+    ensure_manifest_shape(manifest)
+    previous_rev, _next_rev = update_manifest_from_exported_state(
+        manifest=manifest,
+        exported_state=exported_state,
+        latest_user_message=latest_user_message,
     )
-    try:
-        previous_rev = int(previous_rev_candidate)
-    except (TypeError, ValueError):
-        previous_rev = 0
-    manifest["rev"] = previous_rev + 1
-    metadata["updated_at"] = _now_iso()
-    metadata["history_turns"] = len(exported_state.get("history", []))
-    metadata["document_count"] = len(exported_state.get("documents", {}))
-    metadata["artifact_count"] = len(artifacts)
-    manifest["state"] = exported_state  # Persist full state for volume restore (#24)
-    session_data = session_record.get("session")
-    if not isinstance(session_data, dict):
-        session_data = {}
-        session_record["session"] = session_data
-    session_data["state"] = exported_state
-    session_data["session_id"] = session_record.get("session_id")
-
-    record_key = session_record.get("key")
-    if isinstance(record_key, str):
-        server_state.sessions[record_key] = session_record
+    sync_session_record_state(
+        state=state,
+        session_record=session_record,
+        exported_state=exported_state,
+    )
 
     if include_volume_save and active_manifest_path and interpreter is not None:
         remote_manifest = await _volume_load_manifest(agent, active_manifest_path)
@@ -198,28 +149,11 @@ async def persist_session_state(
                     raise PersistenceRequiredError("manifest_write_failed", message)
                 logger.warning(message)
 
-    if latest_user_message and repository is not None and identity_rows is not None:
-        try:
-            await repository.store_memory_item(
-                MemoryItemCreateRequest(
-                    tenant_id=identity_rows.tenant_id,
-                    scope=MemoryScope.RUN
-                    if active_run_db_id is not None
-                    else MemoryScope.USER,
-                    scope_id=str(active_run_db_id or identity_rows.user_id),
-                    kind=MemoryKind.NOTE,
-                    source=MemorySource.USER_INPUT,
-                    content_text=latest_user_message[:1000],
-                    tags=["ws", "chat"],
-                )
-            )
-        except Exception as exc:
-            if persistence_required:
-                raise PersistenceRequiredError(
-                    "memory_item_persist_failed",
-                    f"Failed to persist memory item: {exc}",
-                ) from exc
-            logger.warning(
-                "Failed to persist memory item: %s",
-                _sanitize_for_log(exc),
-            )
+    await persist_memory_item_if_needed(
+        repository=repository,
+        identity_rows=identity_rows,
+        active_run_db_id=active_run_db_id,
+        latest_user_message=latest_user_message,
+        persistence_required=persistence_required,
+        logger=logger,
+    )

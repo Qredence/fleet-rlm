@@ -90,7 +90,7 @@ print(result.confidence)   # NOT result["confidence"]
 
 ## Built-in Signatures
 
-See `dspy-signature` skill and `src/fleet_rlm/signatures.py` for full details.
+See `dspy-signature` skill and `src/fleet_rlm/react/signatures.py` for full details.
 
 ## Execution Patterns
 
@@ -109,7 +109,7 @@ print(result.answer)
 ### Document Analysis
 
 ```python
-from fleet_rlm.signatures import AnalyzeLongDocument
+from fleet_rlm.react.signatures import AnalyzeLongDocument
 
 doc = open("large_document.txt").read()
 rlm = dspy.RLM(

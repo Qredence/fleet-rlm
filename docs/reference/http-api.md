@@ -168,5 +168,5 @@ Use these checks when updating API docs:
 rg -n "^  /" openapi.yaml
 
 # WebSocket routes (not in OpenAPI)
-rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
 ```

@@ -11,15 +11,65 @@ the modularization effort (Linear: QRE-273).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+import logging
 
-from .tools import execute_submit
-from .tools_memory_intelligence import build_memory_intelligence_tools
-from .tools_rlm_delegate import build_rlm_delegate_tools
-from .tools_sandbox_helpers import _resolve_volume_path
+from . import execute_submit
+from .memory_intelligence import build_memory_intelligence_tools
+from .delegate import build_rlm_delegate_tools
+from .sandbox_helpers import _resolve_volume_path
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from ..agent import RLMReActChatAgent
+
+
+@dataclass(slots=True)
+class _SandboxToolContext:
+    """Shared context for sandbox/volume tool operations."""
+
+    agent: "RLMReActChatAgent"
+
+
+def _execute_submit_ctx(
+    ctx: _SandboxToolContext, code: str, *, variables: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return execute_submit(ctx.agent, code, variables=variables or {})
+
+
+def _resolve_path_or_error(
+    *,
+    path: str,
+    default_root: str,
+    allowed_root: str = "/data",
+) -> tuple[str | None, dict[str, Any] | None]:
+    try:
+        return (
+            _resolve_volume_path(
+                path,
+                default_root=default_root,
+                allowed_root=allowed_root,
+            ),
+            None,
+        )
+    except ValueError as exc:
+        return None, {"status": "error", "error": str(exc)}
+
+
+def _reload_volume_best_effort(ctx: _SandboxToolContext) -> None:
+    if ctx.agent.interpreter._volume:
+        try:
+            ctx.agent.interpreter.reload()
+        except Exception as exc:
+            logging.exception("Best-effort volume reload failed: %s", exc)
+
+
+def _commit_volume_best_effort(ctx: _SandboxToolContext) -> None:
+    if ctx.agent.interpreter._volume:
+        try:
+            ctx.agent.interpreter.commit()
+        except Exception as exc:
+            logging.exception("Best-effort volume commit failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +85,7 @@ def build_sandbox_tools(
     Returns a list of ``dspy.Tool`` wrappers ready to be appended to the
     main tool list built by ``build_tool_list``.
     """
+    ctx = _SandboxToolContext(agent=agent)
     tools: list[Any] = []
 
     # -- RLM delegation tools (extracted to tools_rlm_delegate.py) ------------
@@ -70,8 +121,8 @@ else:
         f.write(new_content)
     SUBMIT(status="ok", path=path, message="File updated successfully")
 """
-        return execute_submit(
-            agent,
+        return _execute_submit_ctx(
+            ctx,
             code,
             variables={
                 "path": path,
@@ -84,8 +135,10 @@ else:
 
     def read_buffer(name: str) -> dict[str, Any]:
         """Read the full contents of a sandbox buffer."""
-        result = execute_submit(
-            agent, "SUBMIT(items=get_buffer(name))", variables={"name": name}
+        result = _execute_submit_ctx(
+            ctx,
+            "SUBMIT(items=get_buffer(name))",
+            variables={"name": name},
         )
         items = result.get("items", [])
         return {"status": "ok", "name": name, "items": items, "count": len(items)}
@@ -98,18 +151,16 @@ else:
         else:
             code = 'clear_buffer()\nSUBMIT(status="ok", scope="all")'
             variables = {}
-        return execute_submit(agent, code, variables=variables)
+        return _execute_submit_ctx(ctx, code, variables=variables)
 
     def save_buffer_to_volume(name: str, path: str) -> dict[str, Any]:
         """Persist a sandbox buffer to Modal Volume storage as JSON."""
-        try:
-            resolved_path = _resolve_volume_path(
-                path,
-                default_root="/data/workspace/buffers",
-                allowed_root="/data",
-            )
-        except ValueError as exc:
-            return {"status": "error", "error": str(exc)}
+        resolved_path, error = _resolve_path_or_error(
+            path=path,
+            default_root="/data/workspace/buffers",
+        )
+        if error is not None:
+            return error
 
         code = """
 import json
@@ -118,46 +169,37 @@ payload = json.dumps(items, indent=2, ensure_ascii=False, default=str)
 saved_path = save_to_volume(path, payload)
 SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 """
-        result = execute_submit(
-            agent,
+        result = _execute_submit_ctx(
+            ctx,
             code,
             variables={"name": name, "path": resolved_path},
         )
-        if result.get("status") == "ok" and agent.interpreter._volume:
-            try:
-                agent.interpreter.commit()
-            except Exception:
-                pass
+        if result.get("status") == "ok":
+            _commit_volume_best_effort(ctx)
         return result
 
     def load_text_from_volume(path: str, alias: str = "active") -> dict[str, Any]:
         """Load text from Modal Volume into host-side document memory."""
-        try:
-            resolved_path = _resolve_volume_path(
-                path,
-                default_root="/data/workspace",
-                allowed_root="/data",
-            )
-        except ValueError as exc:
-            return {"status": "error", "error": str(exc)}
+        resolved_path, error = _resolve_path_or_error(
+            path=path,
+            default_root="/data/workspace",
+        )
+        if error is not None:
+            return error
 
-        if agent.interpreter._volume:
-            try:
-                # Pull latest writes from other containers before reading.
-                agent.interpreter.reload()
-            except Exception:
-                pass
+        # Pull latest writes from other containers before reading.
+        _reload_volume_best_effort(ctx)
 
-        result = execute_submit(
-            agent,
+        result = _execute_submit_ctx(
+            ctx,
             'text = load_from_volume(path)\nSUBMIT(status="ok", text=text)',
             variables={"path": resolved_path},
         )
         text = str(result.get("text", ""))
         if text.startswith("[error:"):
             return {"status": "error", "error": text, "path": resolved_path}
-        agent._set_document(alias, text)
-        agent.active_alias = alias
+        ctx.agent._set_document(alias, text)
+        ctx.agent.active_alias = alias
         return {
             "status": "ok",
             "alias": alias,
@@ -171,7 +213,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
         loaded = load_text_from_volume(path, alias=alias)
         if loaded.get("status") != "ok":
             return loaded
-        text = agent.documents.get(alias, "")
+        text = ctx.agent.documents.get(alias, "")
         return {
             "status": "ok",
             "alias": alias,
@@ -187,20 +229,14 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 
     def memory_read(path: str) -> dict[str, Any]:
         """Read a file from persistent memory (Modal Volume)."""
-        try:
-            resolved_path = _resolve_volume_path(
-                path,
-                default_root="/data/memory",
-                allowed_root="/data",
-            )
-        except ValueError as exc:
-            return {"status": "error", "error": str(exc)}
+        resolved_path, error = _resolve_path_or_error(
+            path=path,
+            default_root="/data/memory",
+        )
+        if error is not None:
+            return error
 
-        if agent.interpreter._volume:
-            try:
-                agent.interpreter.reload()
-            except Exception:
-                pass
+        _reload_volume_best_effort(ctx)
 
         code = """
 try:
@@ -212,18 +248,16 @@ except FileNotFoundError:
 except Exception as e:
     SUBMIT(status="error", error=f"{type(e).__name__}: {e}")
 """
-        return execute_submit(agent, code, variables={"path": resolved_path})
+        return _execute_submit_ctx(ctx, code, variables={"path": resolved_path})
 
     def memory_write(path: str, content: str) -> dict[str, Any]:
         """Write content to a file in persistent memory (Modal Volume)."""
-        try:
-            resolved_path = _resolve_volume_path(
-                path,
-                default_root="/data/memory",
-                allowed_root="/data",
-            )
-        except ValueError as exc:
-            return {"status": "error", "error": str(exc)}
+        resolved_path, error = _resolve_path_or_error(
+            path=path,
+            default_root="/data/memory",
+        )
+        if error is not None:
+            return error
 
         code = """
 import os
@@ -249,19 +283,15 @@ except Exception as e:
 """
         # Note: Modal volumes are eventually consistent, but os.sync() helps.
         # The Interpreter also exposes a .commit() method if needed on the host side.
-        result = execute_submit(
-            agent,
+        result = _execute_submit_ctx(
+            ctx,
             code,
             variables={"path": resolved_path, "content": content},
         )
 
         # Trigger explicit commit on the host side for immediate persistence
         if result.get("status") == "ok":
-            if agent.interpreter._volume:
-                try:
-                    agent.interpreter.commit()
-                except Exception:
-                    pass  # Ignore commit errors, best effort
+            _commit_volume_best_effort(ctx)
         return result
 
     def write_to_file(path: str, content: str, append: bool = False) -> dict[str, Any]:
@@ -269,14 +299,12 @@ except Exception as e:
         if not append:
             return memory_write(path=path, content=content)
 
-        try:
-            resolved_path = _resolve_volume_path(
-                path,
-                default_root="/data/memory",
-                allowed_root="/data",
-            )
-        except ValueError as exc:
-            return {"status": "error", "error": str(exc)}
+        resolved_path, error = _resolve_path_or_error(
+            path=path,
+            default_root="/data/memory",
+        )
+        if error is not None:
+            return error
 
         code = """
 import os
@@ -299,16 +327,13 @@ try:
 except Exception as e:
     SUBMIT(status="error", error=f"{type(e).__name__}: {e}")
 """
-        result = execute_submit(
-            agent,
+        result = _execute_submit_ctx(
+            ctx,
             code,
             variables={"path": resolved_path, "content": content},
         )
-        if result.get("status") == "ok" and agent.interpreter._volume:
-            try:
-                agent.interpreter.commit()
-            except Exception:
-                pass
+        if result.get("status") == "ok":
+            _commit_volume_best_effort(ctx)
         return result
 
     def edit_core_memory(
@@ -325,9 +350,9 @@ except Exception as e:
             }
 
         message = (
-            agent.core_memory_append(section, content)
+            ctx.agent.core_memory_append(section, content)
             if mode_norm == "append"
-            else agent.core_memory_replace(section, content)
+            else ctx.agent.core_memory_replace(section, content)
         )
         if message.startswith("Error:"):
             return {"status": "error", "error": message}
@@ -337,29 +362,25 @@ except Exception as e:
             "section": section,
             "mode": mode_norm,
             "message": message,
-            "chars": len(agent._core_memory.get(section, "")),
+            "chars": len(ctx.agent._core_memory.get(section, "")),
         }
 
     def memory_list(path: str = ".") -> dict[str, Any]:
         """List files and directories in persistent memory."""
         try:
-            resolved_path = (
-                _resolve_volume_path(
-                    path,
+            if path.strip() in {"", ".", "./"}:
+                resolved_path = "/data/memory"
+            else:
+                resolved_path, error = _resolve_path_or_error(
+                    path=path,
                     default_root="/data/memory",
-                    allowed_root="/data",
                 )
-                if path.strip() not in {"", ".", "./"}
-                else "/data/memory"
-            )
-        except ValueError as exc:
-            return {"status": "error", "error": str(exc)}
+                if error is not None:
+                    return error
+        except AttributeError:
+            resolved_path = "/data/memory"
 
-        if agent.interpreter._volume:
-            try:
-                agent.interpreter.reload()
-            except Exception:
-                pass
+        _reload_volume_best_effort(ctx)
 
         code = """
 import os
@@ -373,7 +394,7 @@ try:
 except Exception as e:
     SUBMIT(status="error", error=f"{type(e).__name__}: {e}")
 """
-        return execute_submit(agent, code, variables={"path": resolved_path})
+        return _execute_submit_ctx(ctx, code, variables={"path": resolved_path})
 
     # -- Assemble tool list --------------------------------------------------
 

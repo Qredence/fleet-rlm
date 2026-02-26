@@ -654,7 +654,7 @@ def test_reset_clears_history_and_documents(monkeypatch):
 def test_signature_output_types_are_generic():
     """All Signature output fields should use typed generics, not bare list/dict."""
     import typing
-    from fleet_rlm.signatures import (
+    from fleet_rlm.react.signatures import (
         AnalyzeLongDocument,
         CodeChangePlan,
         ClarificationQuestionSignature,

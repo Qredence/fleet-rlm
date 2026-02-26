@@ -62,10 +62,10 @@ def test_websocket_session_state_isolated_by_session_id(
         second = websocket.receive_json()
         assert second["data"]["text"] == "Response B"
 
-    from fleet_rlm.server.deps import server_state
-
     keys = [
-        key for key in server_state.sessions.keys() if key.startswith("default:alice:")
+        key
+        for key in ws_client.app.state.server_state.sessions.keys()
+        if key.startswith("default:alice:")
     ]
     assert "default:alice:session-a" in keys
     assert "default:alice:session-b" in keys

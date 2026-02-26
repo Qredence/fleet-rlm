@@ -21,6 +21,11 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from .models import AnalysisResult, CodeScript
+from .result_adapters import (
+    extract_execute_error,
+    final_output_dict,
+    final_output_value,
+)
 from .sandbox import SandboxResult, StatefulSandboxManager
 
 logger = logging.getLogger(__name__)
@@ -234,14 +239,12 @@ SUBMIT(analyses=analyses, count=len(analyses))
 """
         try:
             result = self.sandbox.interpreter.execute(code)
-            if hasattr(result, "output"):
-                output = result.output
-            else:
-                output = result
+            output = final_output_dict(result)
+            if output is None and isinstance(result, dict):
+                output = cast(dict[str, Any], result)
 
             if isinstance(output, dict):
-                output_dict = cast(dict[str, Any], output)
-                analyses = output_dict.get("analyses")
+                analyses = output.get("analyses")
                 if isinstance(analyses, list):
                     return [
                         AnalysisResult.from_dict(a)
@@ -316,15 +319,6 @@ SUBMIT(analyses=analyses, count=len(analyses))
             return json.loads(result["content"])
         return None
 
-    @staticmethod
-    def _extract_execute_error(result: Any) -> str | None:
-        """Return an error message for interpreter results that contain stderr text."""
-        if isinstance(result, str):
-            stripped = result.strip()
-            if "[Error]" in stripped:
-                return stripped
-        return None
-
     def read_script(self, name: str) -> CodeScript | None:
         """Load a saved script by name.
 
@@ -366,7 +360,7 @@ SUBMIT(analyses=analyses, count=len(analyses))
         result: Any = None
         try:
             result = self.sandbox.interpreter.execute(script.code, variables=variables)
-            error_message = self._extract_execute_error(result)
+            error_message = extract_execute_error(result)
         except Exception as exc:
             error_message = str(exc)
 
@@ -387,8 +381,10 @@ SUBMIT(analyses=analyses, count=len(analyses))
         if error_message is not None:
             return SandboxResult(success=False, output=None, error=error_message)
 
+        final_payload = final_output_value(result)
         return SandboxResult(
-            success=True, output=result.output if hasattr(result, "output") else result
+            success=True,
+            output=final_payload if final_payload is not None else result,
         )
 
     def list_scripts(self) -> list[dict[str, Any]]:
@@ -427,14 +423,12 @@ SUBMIT(scripts=scripts, count=len(scripts))
 """
         try:
             result = self.sandbox.interpreter.execute(code)
-            if hasattr(result, "output"):
-                output = result.output
-            else:
-                output = result
+            output = final_output_dict(result)
+            if output is None and isinstance(result, dict):
+                output = cast(dict[str, Any], result)
 
             if isinstance(output, dict):
-                output_dict = cast(dict[str, Any], output)
-                scripts = output_dict.get("scripts")
+                scripts = output.get("scripts")
                 if isinstance(scripts, list):
                     return [s for s in scripts if isinstance(s, dict)]
                 return []

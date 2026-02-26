@@ -65,7 +65,7 @@ From repo root:
 ```bash
 uv run fleet-rlm serve-api --port 8000
 rg -n "^  /" openapi.yaml
-rg -n "@router.websocket" src/fleet_rlm/server/routers/ws.py
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
 ```
 
 From `src/frontend` (optional frontend validation):

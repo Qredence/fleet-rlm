@@ -8,10 +8,10 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.runtime_settings import (
+from fleet_rlm.server.runtime_settings import (
     RUNTIME_SETTINGS_ALLOWLIST,
     RUNTIME_SETTINGS_KEYS,
     apply_env_updates,
@@ -20,7 +20,7 @@ from fleet_rlm.runtime_settings import (
 )
 from fleet_rlm.utils.modal import load_modal_config
 
-from ..deps import server_state
+from ..deps import get_server_state
 from ..schemas.core import (
     RuntimeConnectivityTestResponse,
     RuntimeSettingsSnapshot,
@@ -39,11 +39,12 @@ def _utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
-def _runtime_setting_overrides() -> dict[str, str]:
-    cfg = server_state.config
+def _runtime_setting_overrides(
+    *, secret_name: str, volume_name: str | None
+) -> dict[str, str]:
     return {
-        "SECRET_NAME": cfg.secret_name,
-        "VOLUME_NAME": cfg.volume_name or "",
+        "SECRET_NAME": secret_name,
+        "VOLUME_NAME": volume_name or "",
     }
 
 
@@ -78,11 +79,11 @@ def _coerce_output_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _cache_runtime_test(result: RuntimeConnectivityTestResponse) -> None:
-    server_state.runtime_test_results[result.kind] = result.model_dump(mode="json")
+def _cache_runtime_test(*, state, result: RuntimeConnectivityTestResponse) -> None:
+    state.runtime_test_results[result.kind] = result.model_dump(mode="json")
 
 
-def _modal_preflight() -> tuple[dict[str, bool], list[str]]:
+def _modal_preflight(*, secret_name: str) -> tuple[dict[str, bool], list[str]]:
     modal_cfg = load_modal_config()
     credentials_from_env = bool(
         os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET")
@@ -91,7 +92,7 @@ def _modal_preflight() -> tuple[dict[str, bool], list[str]]:
         modal_cfg.get("token_id") and modal_cfg.get("token_secret")
     )
     credentials_available = credentials_from_env or credentials_from_profile
-    secret_name_set = bool(server_state.config.secret_name.strip())
+    secret_name_set = bool(secret_name.strip())
 
     checks = {
         "credentials_from_env": credentials_from_env,
@@ -137,19 +138,25 @@ def _lm_preflight() -> tuple[dict[str, bool], list[str]]:
 
 
 @router.get("/settings", response_model=RuntimeSettingsSnapshot)
-async def get_runtime_settings() -> RuntimeSettingsSnapshot:
+async def get_runtime_settings(request: Request) -> RuntimeSettingsSnapshot:
+    state = get_server_state(request)
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
-        extra_values=_runtime_setting_overrides(),
+        extra_values=_runtime_setting_overrides(
+            secret_name=state.config.secret_name,
+            volume_name=state.config.volume_name,
+        ),
     )
     return RuntimeSettingsSnapshot(**snapshot)
 
 
 @router.patch("/settings", response_model=RuntimeSettingsUpdateResponse)
 async def patch_runtime_settings(
+    request_scope: Request,
     request: RuntimeSettingsUpdateRequest,
 ) -> RuntimeSettingsUpdateResponse:
-    config = server_state.config
+    state = get_server_state(request_scope)
+    config = state.config
     if config.app_env != "local":
         raise HTTPException(
             status_code=403,
@@ -175,8 +182,8 @@ async def patch_runtime_settings(
         config.volume_name = resolved_volume_name or None
 
     # Rebuild planner LM in-process to apply updated env values immediately.
-    server_state.planner_lm = get_planner_lm_from_env(model_name=config.agent_model)
-    server_state.delegate_lm = get_delegate_lm_from_env(
+    state.planner_lm = get_planner_lm_from_env(model_name=config.agent_model)
+    state.delegate_lm = get_delegate_lm_from_env(
         model_name=config.agent_delegate_model,
         default_max_tokens=config.agent_delegate_max_tokens,
     )
@@ -185,8 +192,9 @@ async def patch_runtime_settings(
 
 
 @router.post("/tests/modal", response_model=RuntimeConnectivityTestResponse)
-async def test_modal_connection() -> RuntimeConnectivityTestResponse:
-    checks, guidance = _modal_preflight()
+async def test_modal_connection(request: Request) -> RuntimeConnectivityTestResponse:
+    state = get_server_state(request)
+    checks, guidance = _modal_preflight(secret_name=state.config.secret_name)
     preflight_ok = checks["credentials_available"] and checks["secret_name_set"]
 
     checked_at = _utc_now_iso()
@@ -200,7 +208,7 @@ async def test_modal_connection() -> RuntimeConnectivityTestResponse:
             guidance=guidance,
             error="Modal preflight checks failed.",
         )
-        _cache_runtime_test(result)
+        _cache_runtime_test(state=state, result=result)
         return result
 
     latency_ms: int | None = None
@@ -213,11 +221,13 @@ async def test_modal_connection() -> RuntimeConnectivityTestResponse:
     try:
         import modal
 
-        app = modal.App.lookup("fleet-rlm-runtime-smoke", create_if_missing=True)
-        sandbox = modal.Sandbox.create(app=app, timeout=30)
-        proc = sandbox.exec("python", "-c", "print('ok')", timeout=15)
-        proc.wait()
-        output_preview = _coerce_output_text(proc.stdout.read())
+        app = await modal.App.lookup.aio(
+            "fleet-rlm-runtime-smoke", create_if_missing=True
+        )
+        sandbox = await modal.Sandbox.create.aio(app=app, timeout=30)
+        proc = await sandbox.exec.aio("python", "-c", "print('ok')", timeout=15)
+        await proc.wait.aio()
+        output_preview = _coerce_output_text(await proc.stdout.read.aio())
         ok = output_preview == "ok"
         if not ok:
             error = "Modal sandbox returned unexpected output."
@@ -227,7 +237,7 @@ async def test_modal_connection() -> RuntimeConnectivityTestResponse:
         latency_ms = int((time.perf_counter() - started) * 1000)
         if sandbox is not None:
             try:
-                sandbox.terminate()
+                await sandbox.terminate.aio()
             except Exception:
                 pass
 
@@ -245,12 +255,13 @@ async def test_modal_connection() -> RuntimeConnectivityTestResponse:
         output_preview=output_preview,
         error=error,
     )
-    _cache_runtime_test(result)
+    _cache_runtime_test(state=state, result=result)
     return result
 
 
 @router.post("/tests/lm", response_model=RuntimeConnectivityTestResponse)
-async def test_lm_connection() -> RuntimeConnectivityTestResponse:
+async def test_lm_connection(request: Request) -> RuntimeConnectivityTestResponse:
+    state = get_server_state(request)
     checks, guidance = _lm_preflight()
     preflight_ok = checks["model_set"] and checks["api_key_set"]
 
@@ -265,7 +276,7 @@ async def test_lm_connection() -> RuntimeConnectivityTestResponse:
             guidance=guidance,
             error="LM preflight checks failed.",
         )
-        _cache_runtime_test(result)
+        _cache_runtime_test(state=state, result=result)
         return result
 
     latency_ms: int | None = None
@@ -275,7 +286,7 @@ async def test_lm_connection() -> RuntimeConnectivityTestResponse:
 
     started = time.perf_counter()
     try:
-        planner_lm = get_planner_lm_from_env(model_name=server_state.config.agent_model)
+        planner_lm = get_planner_lm_from_env(model_name=state.config.agent_model)
         if planner_lm is None:
             raise RuntimeError(
                 "Failed to construct planner LM from environment settings."
@@ -290,10 +301,10 @@ async def test_lm_connection() -> RuntimeConnectivityTestResponse:
             output_preview = future.result(timeout=_RUNTIME_TEST_TIMEOUT_SECONDS)
 
         ok = bool(output_preview)
-        server_state.planner_lm = planner_lm
-        server_state.delegate_lm = get_delegate_lm_from_env(
-            model_name=server_state.config.agent_delegate_model,
-            default_max_tokens=server_state.config.agent_delegate_max_tokens,
+        state.planner_lm = planner_lm
+        state.delegate_lm = get_delegate_lm_from_env(
+            model_name=state.config.agent_delegate_model,
+            default_max_tokens=state.config.agent_delegate_max_tokens,
         )
     except FutureTimeoutError:
         error = (
@@ -319,17 +330,20 @@ async def test_lm_connection() -> RuntimeConnectivityTestResponse:
         output_preview=output_preview,
         error=error,
     )
-    _cache_runtime_test(result)
+    _cache_runtime_test(state=state, result=result)
     return result
 
 
 @router.get("/status", response_model=RuntimeStatusResponse)
-async def get_runtime_status() -> RuntimeStatusResponse:
+async def get_runtime_status(request: Request) -> RuntimeStatusResponse:
+    state = get_server_state(request)
     llm_checks, llm_guidance = _lm_preflight()
-    modal_checks, modal_guidance = _modal_preflight()
+    modal_checks, modal_guidance = _modal_preflight(
+        secret_name=state.config.secret_name
+    )
 
-    cached_modal = server_state.runtime_test_results.get("modal")
-    cached_lm = server_state.runtime_test_results.get("lm")
+    cached_modal = state.runtime_test_results.get("modal")
+    cached_lm = state.runtime_test_results.get("lm")
 
     modal_test = (
         RuntimeConnectivityTestResponse(**cached_modal)
@@ -353,17 +367,17 @@ async def get_runtime_status() -> RuntimeStatusResponse:
         )
 
     return RuntimeStatusResponse(
-        app_env=server_state.config.app_env,
-        write_enabled=server_state.config.app_env == "local",
+        app_env=state.config.app_env,
+        write_enabled=state.config.app_env == "local",
         ready=ready,
         llm={
             **llm_checks,
-            "planner_configured": server_state.planner_lm is not None,
+            "planner_configured": state.planner_lm is not None,
         },
         modal={
             **modal_checks,
-            "secret_name": server_state.config.secret_name,
-            "configured_volume": server_state.config.volume_name or "",
+            "secret_name": state.config.secret_name,
+            "configured_volume": state.config.volume_name or "",
         },
         tests=RuntimeTestCache(modal=modal_test, lm=lm_test),
         guidance=guidance,

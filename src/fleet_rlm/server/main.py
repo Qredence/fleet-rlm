@@ -17,8 +17,9 @@ from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
-from .deps import server_state
-from .execution_events import ExecutionEventEmitter
+from .deps import ServerState
+from .execution import ExecutionEventEmitter
+from .legacy_compat import init_db, set_legacy_sqlite_enabled
 from .middleware import add_middlewares
 from .routers import (
     auth,
@@ -30,7 +31,6 @@ from .routers import (
     tasks,
     ws,
 )
-from .database import init_db
 
 logger = logging.getLogger(__name__)
 
@@ -81,63 +81,17 @@ def _emit_posthog_startup_event(cfg: ServerRuntimeConfig) -> bool:
         return False
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    cfg = server_state.config
-    server_state.db_manager = None
-    server_state.repository = None
-
-    if cfg.enable_legacy_sqlite_routes:
-        await init_db()
-
-    if cfg.database_url:
-        db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
-        if cfg.db_validate_on_startup or cfg.database_required:
-            await db_manager.ping()
-        server_state.db_manager = db_manager
-        server_state.repository = FleetRepository(db_manager)
-    elif cfg.database_required:
-        raise RuntimeError("DATABASE_URL is required when database_required=true")
-    else:
-        logger.warning(
-            "runtime_persistence_disabled",
-            extra={
-                "database_required": cfg.database_required,
-                "app_env": cfg.app_env,
-            },
-        )
-
-    model_name = server_state.config.agent_model if server_state.config else None
-    if model_name is None:
-        server_state.planner_lm = get_planner_lm_from_env()
-    else:
-        server_state.planner_lm = get_planner_lm_from_env(model_name=model_name)
-    server_state.delegate_lm = get_delegate_lm_from_env(
-        model_name=cfg.agent_delegate_model,
-        default_max_tokens=cfg.agent_delegate_max_tokens,
+def _build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
+    """Build initialized in-memory server state container."""
+    state = ServerState(
+        config=cfg,
+        execution_event_emitter=ExecutionEventEmitter(
+            max_queue=cfg.ws_execution_max_queue,
+            drop_policy=cfg.ws_execution_drop_policy,
+        ),
     )
-
-    _emit_posthog_startup_event(cfg)
-    yield
-    server_state.planner_lm = None
-    server_state.delegate_lm = None
-    shutdown_posthog_client()
-    if server_state.db_manager is not None:
-        await server_state.db_manager.dispose()
-    server_state.db_manager = None
-    server_state.repository = None
-
-
-def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
-    cfg = config or ServerRuntimeConfig()
-    cfg.validate_startup_or_raise()
-    server_state.config = cfg
-    server_state.execution_event_emitter = ExecutionEventEmitter(
-        max_queue=cfg.ws_execution_max_queue,
-        drop_policy=cfg.ws_execution_drop_policy,
-    )
-    server_state.runtime_test_results = {}
-    server_state.auth_provider = build_auth_provider(
+    state.runtime_test_results = {}
+    state.auth_provider = build_auth_provider(
         auth_mode=cfg.auth_mode,
         dev_jwt_secret=cfg.dev_jwt_secret,
         allow_debug_auth=cfg.allow_debug_auth,
@@ -146,19 +100,54 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         entra_issuer=cfg.entra_issuer,
         entra_audience=cfg.entra_audience,
     )
+    state.db_manager = None
+    state.repository = None
+    return state
 
-    app = FastAPI(
-        title="fleet-rlm",
-        version=__version__,
-        lifespan=lifespan,
+
+async def _initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) -> None:
+    """Initialize legacy and Neon persistence paths based on runtime config."""
+    set_legacy_sqlite_enabled(cfg.enable_legacy_sqlite_routes)
+    if cfg.enable_legacy_sqlite_routes:
+        await init_db()
+
+    if cfg.database_url:
+        db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
+        if cfg.db_validate_on_startup or cfg.database_required:
+            await db_manager.ping()
+        state.db_manager = db_manager
+        state.repository = FleetRepository(db_manager)
+        return
+
+    if cfg.database_required:
+        raise RuntimeError("DATABASE_URL is required when database_required=true")
+
+    logger.warning(
+        "runtime_persistence_disabled",
+        extra={
+            "database_required": cfg.database_required,
+            "app_env": cfg.app_env,
+        },
     )
 
-    add_middlewares(app, cfg)
 
-    # Health endpoints remain un-prefixed
+def _initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
+    """Load planner/delegate LMs into process state."""
+    model_name = cfg.agent_model
+    if model_name is None:
+        state.planner_lm = get_planner_lm_from_env()
+    else:
+        state.planner_lm = get_planner_lm_from_env(model_name=model_name)
+    state.delegate_lm = get_delegate_lm_from_env(
+        model_name=cfg.agent_delegate_model,
+        default_max_tokens=cfg.agent_delegate_max_tokens,
+    )
+
+
+def _register_api_routes(app: FastAPI) -> None:
+    """Register health and /api/v1 route groups on app."""
     app.include_router(health.router)
 
-    # Group all API routes under /api/v1
     api_router = APIRouter(prefix="/api/v1")
     api_router.include_router(auth.router)
     api_router.include_router(chat.router)
@@ -171,8 +160,57 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     api_router.include_router(planned.memory_router)
     api_router.include_router(runtime.router)
     api_router.include_router(planned.sandbox_router)
-
     app.include_router(api_router)
+
+
+def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
+    """Mount built frontend assets and SPA fallback route."""
+    assets_dir = ui_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    ui_root = ui_dir.resolve()
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        _ = full_path
+        index_path = ui_root / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+
+        return {"error": "UI build not found. Run 'bun run build' in src/frontend."}
+
+
+def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
+    cfg = config or ServerRuntimeConfig()
+    cfg.validate_startup_or_raise()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        state = _build_server_state(cfg)
+        app.state.server_state = state
+
+        await _initialize_persistence(state, cfg)
+        _initialize_lms(state, cfg)
+
+        _emit_posthog_startup_event(cfg)
+        yield
+        state.planner_lm = None
+        state.delegate_lm = None
+        shutdown_posthog_client()
+        if state.db_manager is not None:
+            await state.db_manager.dispose()
+        state.db_manager = None
+        state.repository = None
+
+    app = FastAPI(
+        title="fleet-rlm",
+        version=__version__,
+        lifespan=lifespan,
+    )
+
+    add_middlewares(app, cfg)
+    _register_api_routes(app)
 
     try:
         from scalar_fastapi import get_scalar_api_reference
@@ -187,25 +225,9 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         # Scalar docs are optional and only enabled when scalar_fastapi is installed.
         pass
 
-    # Mount and Serve Frontend
     ui_dir = _resolve_ui_dist_dir()
     if ui_dir is not None:
-        assets_dir = ui_dir / "assets"
-        if assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-
-        ui_root = ui_dir.resolve()
-
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_spa(full_path: str):
-            # Assets are mounted at /assets via StaticFiles above.
-            # All non-asset routes should return index.html for SPA routing.
-            _ = full_path
-            index_path = ui_root / "index.html"
-            if index_path.exists():
-                return FileResponse(index_path)
-
-            return {"error": "UI build not found. Run 'bun run build' in src/frontend."}
+        _mount_spa(app, ui_dir)
 
     return app
 

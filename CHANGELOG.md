@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- **Change:** Implemented Wave 7.1 structural simplification with canonical package regrouping and one-release compatibility shims (`server/routers/ws/`, `server/execution/`, `react/tools/`, `terminal/chat.py`, `server/runtime_settings.py`, `react/signatures.py`, `models/streaming.py`).
+  **Outcome:** Cleaner module ownership and reduced namespace ambiguity without intentional HTTP/WS/frontend contract drift; legacy import paths remain supported through `v0.5.0`.
+- **Change:** Completed refactor cleanup phases for server/runtime surfaces, including app/request-bound server state lifecycle, legacy SQLite isolation, and WebSocket streaming loop decomposition.
+  **Outcome:** Lower runtime ambiguity, improved testability, and reduced complexity in `server` and websocket internals.
+- **Change:** Consolidated duplicate server schemas and removed compatibility shim modules/routes (`server/dependencies.py`, flat `server/schemas.py`, router shim files), with planned stub routes now returning explicit `501`.
+  **Outcome:** Clearer canonical imports/surfaces and more truthful API behavior for unimplemented endpoints.
+- **Change:** Executed Wave 7 server-first simplification with contract lock: added API/WS/frontend contract tests and decomposed websocket/session/execution internals into focused modules (`ws_message_loop`, `ws_turn`, `ws_repl_hook`, `ws_session_store`, execution event sanitizer/step builder facade split).
+  **Outcome:** Lower nesting/ownership ambiguity in hot paths while preserving `/api/v1/*` routes, websocket endpoints, and envelope contracts.
+- **Change:** Refactored React/stateful internals for maintainability with no intentional external behavior changes: extracted streaming citation assembly (`react/streaming_citations.py`), normalized tool-builder contexts, deduped chat result shaping, and centralized stateful result/workspace adapters.
+  **Outcome:** Reduced duplicated logic and clearer module boundaries with frontend/backend wiring preserved (`/api/v1/ws/chat`, `/api/v1/ws/execution`, runtime endpoints, and frontend URL derivation semantics).
+
 ## [0.4.8] - 2026-02-24
 
 ### Highlights (User Impact)

@@ -16,10 +16,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .document_sources import fetch_url_document_content, is_http_url
+from ..document_sources import fetch_url_document_content, is_http_url
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from ..agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 

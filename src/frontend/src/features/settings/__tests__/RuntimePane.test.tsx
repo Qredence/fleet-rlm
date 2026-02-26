@@ -10,7 +10,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
         env_path: "/tmp/.env",
         keys: [],
         values: {
-          DSPY_LM_MODEL: "openai/gpt-4o-mini",
+          DSPY_LM_MODEL: "openai/gemini-3-flash-preview",
           DSPY_LLM_API_KEY: "sk-...yz",
           DSPY_LM_API_BASE: "https://api.example.com/v1",
           DSPY_LM_MAX_TOKENS: "64000",

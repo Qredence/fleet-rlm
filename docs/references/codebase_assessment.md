@@ -16,7 +16,7 @@ The existing codebase is highly mature, specifically regarding backend multiplex
 ### What to EDIT (Surgically Modifying)
 
 - `src/fleet_rlm/stateful/sandbox.py` (540 LOC): Currently uses a single-pass `dspy.ChainOfThought` for code generation. We are surgically injecting a true recursive `RLMEngine(dspy.Module)` loop here, and we have already injected a 2000-char Context Truncation Guard.
-- `src/fleet_rlm/react/tools_rlm_delegate.py`: Needs to securely route complex, multi-step tasks to the new RLMEngine in `sandbox.py` instead of running basic single-shots.
+- `src/fleet_rlm/react/tools/delegate.py`: Routes complex, multi-step tasks to recursive delegate sub-agents.
 
 ### What to CLEAN / REMOVE
 
@@ -46,9 +46,8 @@ src/fleet_rlm/
 │   ├── interpreter.py
 │   ├── driver.py
 │   └── memory_tools.py (NEW - 45 LOC)
-├── memory/ (NEW DOMAIN)
-│   ├── db.py (71 LOC)
-│   └── schema.py (71 LOC)
+├── models/
+│   └── streaming.py
 ├── react/
 │   └── agent.py
 └── stateful/

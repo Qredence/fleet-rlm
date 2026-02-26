@@ -9,9 +9,7 @@ def test_health(local_client: TestClient):
 
 
 def test_ready_no_planner(local_client: TestClient):
-    from fleet_rlm.server.deps import server_state
-
-    server_state.planner_lm = None
+    local_client.app.state.server_state.planner_lm = None
     r = local_client.get("/ready")
     assert r.status_code == 200
     data = r.json()

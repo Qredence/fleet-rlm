@@ -299,7 +299,7 @@ def print_command_palette(session: Any, agent: Any) -> bool:
     Returns:
         False (never exits).
     """
-    from ..terminal_chat import _COMMAND_SPECS, _COMMAND_TEMPLATES
+    from ..terminal.chat import _COMMAND_SPECS, _COMMAND_TEMPLATES
 
     query = input_dialog(
         title="Command palette",
@@ -421,7 +421,7 @@ def _print_unknown_command(session: Any, command: str) -> None:
         command: The unknown command.
     """
     from ..react.commands import COMMAND_DISPATCH
-    from ..terminal_chat import _COMMAND_SPECS
+    from ..terminal.chat import _COMMAND_SPECS
 
     options = sorted({spec.name for spec in _COMMAND_SPECS})
     options.extend(f"/{name}" for name in sorted(COMMAND_DISPATCH))

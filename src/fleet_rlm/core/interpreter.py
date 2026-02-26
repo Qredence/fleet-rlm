@@ -270,11 +270,10 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
             if line.strip() != "from __future__ import annotations"
         )
 
-    def start(self) -> None:
-        """Start the Modal sandbox and initialize the driver process."""
-        if self._sandbox is not None:
-            return
-
+    def _build_driver_command_and_sandbox_kwargs(
+        self, *, app: modal.App
+    ) -> tuple[str, dict[str, Any]]:
+        """Build sandbox driver command and kwargs shared by start/astart."""
         with self._llm_call_lock:
             self._llm_call_count = 0
 
@@ -288,8 +287,6 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         ]
         driver_command = "\n\n".join(bundled_sources)
 
-        app = self._resolve_app()
-
         sandbox_kwargs: dict[str, Any] = {
             "app": app,
             "image": self.image,
@@ -301,6 +298,18 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         if self.volume_name:
             self._volume = self._resolve_volume()
             sandbox_kwargs["volumes"] = {self.volume_mount_path: self._volume}
+
+        return driver_command, sandbox_kwargs
+
+    def start(self) -> None:
+        """Start the Modal sandbox and initialize the driver process."""
+        if self._sandbox is not None:
+            return
+
+        app = self._resolve_app()
+        driver_command, sandbox_kwargs = self._build_driver_command_and_sandbox_kwargs(
+            app=app
+        )
 
         self._sandbox = modal.Sandbox.create(**sandbox_kwargs)
         self._proc = self._sandbox.exec(
@@ -317,32 +326,10 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         if self._sandbox is not None:
             return
 
-        with self._llm_call_lock:
-            self._llm_call_count = 0
-
-        bundled_sources = [
-            self._module_source_for_sandbox(driver_factories),
-            self._module_source_for_sandbox(sandbox_tools),
-            self._module_source_for_sandbox(session_history),
-            self._module_source_for_sandbox(volume_tools),
-            inspect.getsource(sandbox_driver),
-            "sandbox_driver()",
-        ]
-        driver_command = "\n\n".join(bundled_sources)
-
         app = await self._aresolve_app()
-
-        sandbox_kwargs: dict[str, Any] = {
-            "app": app,
-            "image": self.image,
-            "secrets": self.secrets,
-            "timeout": self.timeout,
-        }
-        if self.idle_timeout is not None:
-            sandbox_kwargs["idle_timeout"] = self.idle_timeout
-        if self.volume_name:
-            self._volume = self._resolve_volume()
-            sandbox_kwargs["volumes"] = {self.volume_mount_path: self._volume}
+        driver_command, sandbox_kwargs = self._build_driver_command_and_sandbox_kwargs(
+            app=app
+        )
 
         self._sandbox = await modal.Sandbox.create.aio(**sandbox_kwargs)
         self._proc = await self._sandbox.exec.aio(

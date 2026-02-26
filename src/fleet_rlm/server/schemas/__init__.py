@@ -1,6 +1,7 @@
 """Schema package exports for FastAPI server routers."""
 
 from .core import (
+    AuthMeResponse,
     ChatRequest,
     ChatResponse,
     HealthResponse,
@@ -17,6 +18,7 @@ from .session import SessionCreate, SessionResponse, SessionUpdate
 from .task import TaskCreate, TaskResponse, TaskUpdate
 
 __all__ = [
+    "AuthMeResponse",
     "ChatRequest",
     "ChatResponse",
     "HealthResponse",

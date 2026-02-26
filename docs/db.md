@@ -47,7 +47,7 @@ Server startup behavior (`src/fleet_rlm/server/main.py` + config):
 
 A separate local compatibility model exists under:
 
-- `src/fleet_rlm/server/models.py`
+- `src/fleet_rlm/server/legacy_models.py`
 - `src/fleet_rlm/server/services/*`
 - `src/fleet_rlm/server/routers/tasks.py`
 - `src/fleet_rlm/server/routers/sessions.py`

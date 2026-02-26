@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .cli import _initialize_config
-from .terminal_chat import TerminalChatOptions, run_terminal_chat
+from .terminal.chat import TerminalChatOptions, run_terminal_chat
 
 
 def _build_parser() -> argparse.ArgumentParser:
