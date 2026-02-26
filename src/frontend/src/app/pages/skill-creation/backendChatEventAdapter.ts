@@ -1142,6 +1142,9 @@ function applyEvent(
       const hitlPayload = asRecord(payload?.hitl ?? payload);
       const question =
         asOptionalText(hitlPayload?.question) || text.trim() || "Approval needed";
+      const messageId =
+        asOptionalText(hitlPayload?.message_id ?? hitlPayload?.messageId) ??
+        nextId("hitl");
       const rawActions = hitlPayload?.actions;
       const actions = Array.isArray(rawActions)
         ? rawActions
@@ -1171,7 +1174,7 @@ function applyEvent(
         messages: [
           ...messages,
           {
-            id: nextId("hitl"),
+            id: messageId,
             type: "hitl",
             content: question,
             phase: DEFAULT_PHASE,
@@ -1192,11 +1195,20 @@ function applyEvent(
       };
     }
     case "hitl_resolved": {
+      const messageId = asOptionalText(payload?.message_id ?? payload?.messageId);
       const resolution =
         asOptionalText(payload?.resolution) ??
         asOptionalText(payload?.label) ??
         text.trim();
       if (!resolution) return { messages, terminal: false, errored: false };
+
+      if (messageId) {
+        return {
+          messages: resolveHitlByMessageId(messages, messageId, resolution),
+          terminal: false,
+          errored: false,
+        };
+      }
 
       let updated = false;
       const next = messages.map((msg) => {

@@ -96,15 +96,21 @@ function InlineCitationSource({
   const href = safeHref(url);
   return (
     <div className="space-y-1">
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer nofollow"
-        className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-      >
-        {title}
-        <ExternalLink className="size-3.5" />
-      </a>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+        >
+          {title}
+          <ExternalLink className="size-3.5" />
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-sm font-medium text-foreground">
+          {title}
+        </span>
+      )}
       <div className="text-xs text-muted-foreground break-all">{url}</div>
       {description ? (
         <p className="text-xs text-muted-foreground">{description}</p>

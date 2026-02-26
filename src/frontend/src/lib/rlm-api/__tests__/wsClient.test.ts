@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { WsMessageRequest } from "../wsClient";
+import type { WsCommandRequest, WsMessageRequest } from "../wsClient";
 
 const MockWebSocket = vi.fn();
 MockWebSocket.prototype.addEventListener = vi.fn();
@@ -79,6 +79,16 @@ function installSocketFactory() {
 const dummyMessage: WsMessageRequest = {
   type: "message",
   content: "test",
+  session_id: "test",
+};
+
+const dummyCommand: WsCommandRequest = {
+  type: "command",
+  command: "resolve_hitl",
+  args: {
+    message_id: "hitl-1",
+    action_label: "Approve",
+  },
   session_id: "test",
 };
 
@@ -263,5 +273,26 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     expect(onFrame).toHaveBeenCalledTimes(2);
 
     unsubscribe();
+  });
+
+  it("does not retry command requests by default", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const { sendCommandOverWs } = await loadWsClientModule();
+    const { sockets, getCount } = installSocketFactory();
+
+    const commandPromise = sendCommandOverWs(dummyCommand, {
+      onFrame: vi.fn(),
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    await Promise.resolve();
+    expect(getCount()).toBe(1);
+
+    sockets[0]?.trigger("open");
+    sockets[0]?.trigger("close", { code: 1006, wasClean: false });
+
+    await expect(commandPromise).rejects.toThrow(/after 0 retries/i);
+    expect(getCount()).toBe(1);
   });
 });

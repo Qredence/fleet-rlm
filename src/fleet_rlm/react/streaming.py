@@ -12,6 +12,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Callable, Iterable, cast
+from urllib.parse import urlparse
 
 import dspy
 from dspy.streaming.messages import StatusMessage, StatusMessageProvider, StreamResponse
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 STREAM_EVENT_SCHEMA_VERSION = 2
+_ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https", "file"})
 
 # ---------------------------------------------------------------------------
 # Status-message parsing helpers
@@ -140,11 +142,21 @@ def _as_text(value: Any) -> str | None:
     return None
 
 
+def _sanitize_external_url(value: Any) -> str | None:
+    url = _as_text(value)
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in _ALLOWED_EXTERNAL_URL_SCHEMES:
+        return None
+    return url
+
+
 def _normalize_citation_entry(item: Any, *, index: int) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
 
-    url = _as_text(
+    url = _sanitize_external_url(
         item.get("url") or item.get("source_url") or item.get("canonical_url")
     )
     if not url:
@@ -260,7 +272,7 @@ def _build_sources_from_citations(
     sources_by_key: dict[str, dict[str, Any]] = {}
     for citation in citations:
         source_id = _as_text(citation.get("source_id")) or "source"
-        url = _as_text(citation.get("url"))
+        url = _sanitize_external_url(citation.get("url"))
         if not url:
             continue
         key = url.lower().rstrip("/")
@@ -305,8 +317,10 @@ def _extract_final_attachments(
             {
                 "attachment_id": attachment_id,
                 "name": _as_text(item.get("name") or item.get("title")) or "Attachment",
-                "url": _as_text(item.get("url") or item.get("download_url")),
-                "preview_url": _as_text(item.get("preview_url")),
+                "url": _sanitize_external_url(
+                    item.get("url") or item.get("download_url")
+                ),
+                "preview_url": _sanitize_external_url(item.get("preview_url")),
                 "mime_type": _as_text(item.get("mime_type") or item.get("mimeType")),
                 "media_type": _as_text(item.get("media_type") or item.get("mediaType")),
                 "size_bytes": item.get("size_bytes")

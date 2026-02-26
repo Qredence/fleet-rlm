@@ -51,7 +51,12 @@ function sanitizeLogValue(value: unknown): string {
     }
   }
   // Remove ASCII control characters (including newlines) to prevent log injection.
-  return text.replace(/[\u0000-\u001F\u007F]+/g, " ");
+  let sanitized = "";
+  for (const char of text) {
+    const code = char.charCodeAt(0);
+    sanitized += code <= 0x1f || code === 0x7f ? " " : char;
+  }
+  return sanitized;
 }
 
 export async function streamChatOverWs(
@@ -76,6 +81,7 @@ export async function sendCommandOverWs(
   await createReconnectingWs(message, {
     ...options,
     url: rlmApiConfig.wsUrl,
+    maxRetries: options.maxRetries ?? 0,
     terminalEventKinds: ["command_ack", "command_reject"],
   });
 }

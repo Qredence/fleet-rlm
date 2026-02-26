@@ -44,11 +44,24 @@ async def _handle_command(
 ) -> None:
     """Dispatch a command message to the agent and return the result."""
     command = str(payload.get("command", "")).strip()
-    args = payload.get("args", {})
+    raw_args = payload.get("args", {})
+    args = raw_args if isinstance(raw_args, dict) else None
 
     if not command:
         await websocket.send_json(
             {"type": "error", "message": "Command name cannot be empty"}
+        )
+        return
+    if args is None:
+        await websocket.send_json(
+            _command_response(
+                command=command,
+                result={
+                    "status": "error",
+                    "error": "Command args must be a JSON object",
+                    "message_id": None,
+                },
+            )
         )
         return
 

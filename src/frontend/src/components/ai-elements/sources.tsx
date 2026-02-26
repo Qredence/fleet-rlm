@@ -94,6 +94,40 @@ function Source({
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const hrefSafe = safeHref(href);
   const sourceTitle = title || (hrefSafe ? domainForLabel(hrefSafe) : "Source");
+  const content = (
+    <>
+      <div className="flex items-center gap-2">
+        <span className="truncate text-xs font-medium text-foreground">
+          {sourceTitle}
+        </span>
+        {hrefSafe ? (
+          <ExternalLink className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+        ) : null}
+      </div>
+      {hrefSafe ? (
+        <div className="mt-1 truncate text-[11px] text-muted-foreground">
+          {domainForLabel(hrefSafe)}
+        </div>
+      ) : null}
+      {children ? (
+        <div className="mt-1 text-xs text-muted-foreground">{children}</div>
+      ) : null}
+    </>
+  );
+
+  if (!hrefSafe) {
+    return (
+      <div
+        data-slot="source"
+        className={cn(
+          "block rounded-md border border-border-subtle p-2",
+          className,
+        )}
+      >
+        {content}
+      </div>
+    );
+  }
 
   return (
     <a
@@ -108,20 +142,7 @@ function Source({
       )}
       {...props}
     >
-      <div className="flex items-center gap-2">
-        <span className="truncate text-xs font-medium text-foreground">
-          {sourceTitle}
-        </span>
-        <ExternalLink className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
-      </div>
-      {hrefSafe ? (
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">
-          {domainForLabel(hrefSafe)}
-        </div>
-      ) : null}
-      {children ? (
-        <div className="mt-1 text-xs text-muted-foreground">{children}</div>
-      ) : null}
+      {content}
     </a>
   );
 }

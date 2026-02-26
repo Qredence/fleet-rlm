@@ -375,6 +375,37 @@ describe("applyWsFrameToMessages", () => {
     expect(resolvedHitl?.hitlData?.resolvedLabel).toBe("Approved");
   });
 
+  it("resolves the matching HITL message when hitl_resolved includes message_id", () => {
+    const first = applyWsFrameToMessages(
+      [],
+      makeEvent("hitl_request", "Need approval #1", {
+        message_id: "hitl-1",
+        question: "Approve first?",
+      }),
+    ).messages;
+    const second = applyWsFrameToMessages(
+      first,
+      makeEvent("hitl_request", "Need approval #2", {
+        message_id: "hitl-2",
+        question: "Approve second?",
+      }),
+    ).messages;
+
+    const resolved = applyWsFrameToMessages(
+      second,
+      makeEvent("hitl_resolved", "Approved second", {
+        message_id: "hitl-2",
+        resolution: "Approved second",
+      }),
+    ).messages;
+
+    const hitl1 = resolved.find((m) => m.id === "hitl-1");
+    const hitl2 = resolved.find((m) => m.id === "hitl-2");
+    expect(hitl1?.hitlData?.resolved).toBeUndefined();
+    expect(hitl2?.hitlData?.resolved).toBe(true);
+    expect(hitl2?.hitlData?.resolvedLabel).toBe("Approved second");
+  });
+
   it("applies resolve_hitl command acknowledgements to the target HITL message", () => {
     const messages: ChatMessage[] = [
       {
