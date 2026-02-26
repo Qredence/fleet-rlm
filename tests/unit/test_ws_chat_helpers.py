@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 
-from fleet_rlm.server.routers.ws import (
+from fleet_rlm.server.routers.ws_streaming import (
     _enqueue_latest_nonblocking,
     _should_reload_docs_path,
 )

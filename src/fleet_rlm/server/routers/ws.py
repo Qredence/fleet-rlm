@@ -6,9 +6,7 @@
 # that introspection, causing WebSocket endpoints to reject connections
 # with HTTP 403 ("Field required" for a query param named ``websocket``).
 
-import asyncio
 import logging
-import time
 import uuid
 from typing import Any
 
@@ -19,7 +17,6 @@ from pydantic import ValidationError
 from fleet_rlm import runners
 from fleet_rlm.analytics.trace_context import (
     runtime_distinct_id_context,
-    runtime_telemetry_enabled_context,
 )
 from fleet_rlm.core.interpreter import ExecutionProfile
 from fleet_rlm.db.models import (
@@ -30,64 +27,34 @@ from fleet_rlm.db.types import (
 )
 
 from ..deps import get_server_state_from_websocket, session_key
-from ..utils import parse_model_identity, resolve_sandbox_provider
 from ..execution_events import (
-    ExecutionStep,
     ExecutionStepBuilder,
     ExecutionSubscription,
 )
 from ..schemas import WSMessage
+from ..utils import parse_model_identity, resolve_sandbox_provider
 
 
 from .ws_helpers import (
+    _authenticate_websocket,
+    _error_envelope,
+    _get_execution_emitter,
     _sanitize_for_log,
     _sanitize_id,
-    _authenticate_websocket,
-    _get_execution_emitter,
-    _error_envelope,
 )
-from .ws_session import _manifest_path, _volume_load_manifest, persist_session_state
+from .ws_commands import _handle_command
 from .ws_lifecycle import (
     ExecutionLifecycleManager,
     PersistenceRequiredError,
     _classify_stream_failure,
 )
-from .ws_commands import _handle_command
+from .ws_session import _manifest_path, _volume_load_manifest, persist_session_state
+from .ws_streaming import run_streaming_turn
 
 
 router = APIRouter(tags=["websocket"])
 
 logger = logging.getLogger(__name__)
-
-_REPL_HOOK_STEP_QUEUE_MAX = 128
-
-
-def _should_reload_docs_path(last_docs_path: str | None, docs_path: str | None) -> bool:
-    """Return True when a docs path is provided and differs from the last loaded path."""
-    candidate = (docs_path or "").strip()
-    if not candidate:
-        return False
-    return candidate != (last_docs_path or "")
-
-
-def _enqueue_latest_nonblocking(queue: asyncio.Queue, item: object) -> bool:
-    """Enqueue without blocking, dropping the oldest item when the queue is full."""
-    try:
-        queue.put_nowait(item)
-        return True
-    except asyncio.QueueFull:
-        pass
-
-    try:
-        _ = queue.get_nowait()
-    except asyncio.QueueEmpty:
-        return False
-
-    try:
-        queue.put_nowait(item)
-        return True
-    except asyncio.QueueFull:
-        return False
 
 
 @router.websocket("/ws/execution")
@@ -228,7 +195,6 @@ async def chat_streaming(websocket: WebSocket):
             active_run_db_id: uuid.UUID | None = None
             lifecycle: ExecutionLifecycleManager | None = None
             execution_emitter = _get_execution_emitter(state)
-            ws_loop = asyncio.get_running_loop()
             last_loaded_docs_path: str | None = None
 
             async def local_persist(
@@ -430,185 +396,21 @@ async def chat_streaming(websocket: WebSocket):
                     def cancel_check() -> bool:
                         return cancel_flag["cancelled"]
 
-                    await lifecycle.emit_started()
-
-                    previous_execution_hook = None
-                    repl_step_queue: asyncio.Queue[ExecutionStep | None] | None = None
-                    repl_step_worker_task: asyncio.Task[None] | None = None
-
-                    async def _emit_and_persist_repl_step(
-                        step_data: ExecutionStep,
-                    ) -> None:
-                        if lifecycle.run_completed:
-                            return
-                        try:
-                            await lifecycle.emit_step(step_data)
-                            await lifecycle.persist_step(step_data)
-                        except Exception as exc:
-                            logger.warning(
-                                "Failed to emit/persist REPL execution step: %s",
-                                _sanitize_for_log(exc),
-                            )
-                            lifecycle._persistence_error = exc
-
-                    async def _repl_step_worker() -> None:
-                        assert repl_step_queue is not None
-                        while True:
-                            step_data = await repl_step_queue.get()
-                            if step_data is None:
-                                break
-                            await _emit_and_persist_repl_step(step_data)
-
-                    def _queue_repl_step(step_data: ExecutionStep) -> None:
-                        if repl_step_queue is None or lifecycle.run_completed:
-                            return
-                        if not _enqueue_latest_nonblocking(repl_step_queue, step_data):
-                            logger.debug(
-                                "Dropped REPL execution step due to queue contention"
-                            )
-
-                    def _interpreter_hook(payload: dict[str, Any]) -> None:
-                        if lifecycle.run_completed:
-                            return
-                        repl_step = step_builder.from_interpreter_hook(payload)
-                        if repl_step is None:
-                            return
-                        ws_loop.call_soon_threadsafe(
-                            lambda step_data=repl_step: _queue_repl_step(step_data)
-                        )
-
-                    repl_step_queue = asyncio.Queue(maxsize=_REPL_HOOK_STEP_QUEUE_MAX)
-                    repl_step_worker_task = asyncio.create_task(_repl_step_worker())
-
-                    if interpreter is not None:
-                        previous_execution_hook = getattr(
-                            interpreter, "execution_event_callback", None
-                        )
-                        interpreter.execution_event_callback = _interpreter_hook
-
-                    if _should_reload_docs_path(last_loaded_docs_path, docs_path):
-                        agent.load_document(str(docs_path))
-                        last_loaded_docs_path = str(docs_path).strip()
-
                     runtime_analytics_enabled = getattr(msg, "analytics_enabled", None)
-                    try:
-                        with runtime_telemetry_enabled_context(
-                            runtime_analytics_enabled
-                        ):
-                            async for event in agent.aiter_chat_turn_stream(
-                                message=message, trace=trace, cancel_check=cancel_check
-                            ):
-                                lifecycle.raise_if_persistence_error()
-                                event_dict = {
-                                    "kind": event.kind,
-                                    "text": event.text,
-                                    "payload": event.payload,
-                                    "timestamp": event.timestamp.isoformat(),
-                                    "version": 2,
-                                    "event_id": str(uuid.uuid4()),
-                                }
-                                is_terminal_event = event.kind in {
-                                    "final",
-                                    "cancelled",
-                                    "error",
-                                }
-                                if not is_terminal_event:
-                                    await websocket.send_json(
-                                        {"type": "event", "data": event_dict}
-                                    )
-
-                                step = step_builder.from_stream_event(
-                                    kind=event.kind,
-                                    text=event.text,
-                                    payload=event.payload,
-                                    timestamp=event.timestamp.timestamp(),
-                                )
-                                if step is not None:
-                                    await lifecycle.emit_step(step)
-                                    await lifecycle.persist_step(step)
-                                    lifecycle.raise_if_persistence_error()
-
-                                if event.kind == "final":
-                                    await local_persist(include_volume_save=True)
-                                    await lifecycle.complete_run(
-                                        RunStatus.COMPLETED, step=step
-                                    )
-                                    await websocket.send_json(
-                                        {"type": "event", "data": event_dict}
-                                    )
-                                elif event.kind in {"cancelled", "error"}:
-                                    status = (
-                                        RunStatus.CANCELLED
-                                        if event.kind == "cancelled"
-                                        else RunStatus.FAILED
-                                    )
-                                    error_json = (
-                                        {"error": event.text, "kind": event.kind}
-                                        if event.kind == "error"
-                                        else None
-                                    )
-                                    await lifecycle.complete_run(
-                                        status, step=step, error_json=error_json
-                                    )
-                                    await websocket.send_json(
-                                        {"type": "event", "data": event_dict}
-                                    )
-
-                        if not lifecycle.run_completed:
-                            lifecycle.raise_if_persistence_error()
-                            await lifecycle.complete_run(RunStatus.COMPLETED)
-
-                    except Exception as exc:
-                        error_code = _classify_stream_failure(exc)
-                        logger.error(
-                            "Streaming error: %s",
-                            _sanitize_for_log(exc),
-                            exc_info=True,
-                            extra={
-                                "error_type": type(exc).__name__,
-                                "error_code": error_code,
-                            },
-                        )
-                        await websocket.send_json(
-                            _error_envelope(
-                                code=error_code,
-                                message=f"Streaming error: {exc}",
-                                details={"error_type": type(exc).__name__},
-                            )
-                        )
-                        if not lifecycle.run_completed:
-                            error_step = step_builder.from_stream_event(
-                                kind="error",
-                                text=f"Streaming error: {exc}",
-                                payload={
-                                    "error_type": type(exc).__name__,
-                                    "error_code": error_code,
-                                },
-                                timestamp=time.time(),
-                            )
-                            if error_step is not None:
-                                await lifecycle.emit_step(error_step)
-                            await lifecycle.complete_run(
-                                RunStatus.FAILED,
-                                step=error_step,
-                                error_json={
-                                    "error": str(exc),
-                                    "error_type": type(exc).__name__,
-                                    "code": error_code,
-                                },
-                            )
-                    finally:
-                        if interpreter is not None:
-                            interpreter.execution_event_callback = (
-                                previous_execution_hook
-                            )
-                        if repl_step_queue is not None:
-                            await repl_step_queue.put(None)
-                        if repl_step_worker_task is not None:
-                            try:
-                                await repl_step_worker_task
-                            except asyncio.CancelledError:
-                                pass
+                    last_loaded_docs_path = await run_streaming_turn(
+                        websocket=websocket,
+                        agent=agent,
+                        message=message,
+                        docs_path=docs_path,
+                        trace=trace,
+                        cancel_check=cancel_check,
+                        lifecycle=lifecycle,
+                        step_builder=step_builder,
+                        interpreter=interpreter,
+                        last_loaded_docs_path=last_loaded_docs_path,
+                        analytics_enabled=runtime_analytics_enabled,
+                        persist_session_state=local_persist,
+                    )
 
             except WebSocketDisconnect:
                 cancel_flag["cancelled"] = True

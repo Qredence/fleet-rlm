@@ -18,16 +18,16 @@ Compatibility mode: full breaking cleanup
 | Phase 1: Dead Code & Duplicate Removal | Done | None | Remove dead/shim files and consolidate schemas |
 | Phase 2: Config & Interpreter Dedup | Done | None | Shared startup/env preparation helpers |
 | Phase 3: Streaming Dedup | Done | None | Remove sync/async duplication in `streaming.py` |
-| Phase 4: Server State + DB Cleanup | Not Started | Phase 1 | App/request-bound server state, legacy SQLite isolation |
-| Phase 5: WebSocket Decomposition | Not Started | Phases 1 + 4 | Smaller `ws.py`, extracted streaming loop |
-| Phase 6: Stub Router Cleanup | Not Started | Phase 1 | Planned routes return explicit `501` |
+| Phase 4: Server State + DB Cleanup | Done | Phase 1 | App/request-bound server state, legacy SQLite isolation |
+| Phase 5: WebSocket Decomposition | Done | Phases 1 + 4 | Smaller `ws.py`, extracted streaming loop |
+| Phase 6: Stub Router Cleanup | Done | Phase 1 | Planned routes return explicit `501` |
 
 ## Phase 0: Planning Docs
 - [x] Create root `PLANS.md` with required section order.
 - [x] Include full source plan from `plans/refactoring-plan.md` in verbatim section.
 - [x] Add decision rationale, expected outcomes, impact analysis, and assumptions.
 - [x] Create root `TASKS.md` for execution tracking.
-- [ ] Keep `PLANS.md` and `TASKS.md` synchronized as implementation progresses.
+- [x] Keep `PLANS.md` and `TASKS.md` synchronized as implementation progresses.
 
 ## Phase 1: Dead Code & Duplicate Removal
 Goal: remove duplicate and compatibility-shim files; keep one canonical schema path.
@@ -89,52 +89,52 @@ Goal: remove duplicated sync/async streaming control flow in `src/fleet_rlm/reac
 Goal: move mutable server state to app/request lifecycle and isolate legacy SQLite path cleanly.
 
 ### Work Breakdown
-- [ ] Introduce request/app-state accessors in `src/fleet_rlm/server/deps.py`.
-- [ ] Move `ServerState` instantiation and assignment into FastAPI lifespan in `src/fleet_rlm/server/main.py`.
-- [ ] Remove direct module-global state mutation patterns where practical.
-- [ ] Rename/relocate `src/fleet_rlm/server/database.py` to `src/fleet_rlm/server/legacy_compat.py`.
-- [ ] Gate legacy SQLite usage through runtime config (`enable_legacy_sqlite_routes`).
-- [ ] Update imports in `main.py`, `deps.py`, and dependent modules.
-- [ ] Update tests that currently mutate `server_state` directly.
+- [x] Introduce request/app-state accessors in `src/fleet_rlm/server/deps.py`.
+- [x] Move `ServerState` instantiation and assignment into FastAPI lifespan in `src/fleet_rlm/server/main.py`.
+- [x] Remove direct module-global state mutation patterns where practical.
+- [x] Rename/relocate `src/fleet_rlm/server/database.py` to `src/fleet_rlm/server/legacy_compat.py`.
+- [x] Gate legacy SQLite usage through runtime config (`enable_legacy_sqlite_routes`).
+- [x] Update imports in `main.py`, `deps.py`, and dependent modules.
+- [x] Update tests that currently mutate `server_state` directly.
 
 ### Validation Gate
-- [ ] `uv run ruff check src/fleet_rlm/server`
-- [ ] `uv run pytest tests/ui -q -m "not live_llm and not benchmark"`
-- [ ] `uv run pytest tests/unit/test_ws_router_imports.py tests/unit/test_ws_chat_helpers.py -q`
-- [ ] Verify local server health after startup.
+- [x] `uv run ruff check src/fleet_rlm/server`
+- [x] `uv run pytest tests/ui -q -m "not live_llm and not benchmark"`
+- [x] `uv run pytest tests/unit/test_ws_router_imports.py tests/unit/test_ws_chat_helpers.py -q`
+- [x] Verify local server health after startup.
 
 ## Phase 5: WebSocket Handler Decomposition
 Goal: reduce `ws.py` complexity by extracting streaming turn execution into `ws_streaming.py`.
 
 ### Work Breakdown
-- [ ] Create `src/fleet_rlm/server/routers/ws_streaming.py`.
-- [ ] Move streaming loop + REPL hook queue/worker handling from `ws.py`.
-- [ ] Keep session switching, message dispatch, and top-level WS control in `ws.py`.
-- [ ] Ensure lifecycle and persistence behavior are preserved.
+- [x] Create `src/fleet_rlm/server/routers/ws_streaming.py`.
+- [x] Move streaming loop + REPL hook queue/worker handling from `ws.py`.
+- [x] Keep session switching, message dispatch, and top-level WS control in `ws.py`.
+- [x] Ensure lifecycle and persistence behavior are preserved.
 
 ### Validation Gate
-- [ ] `uv run ruff check src/fleet_rlm/server/routers`
-- [ ] `uv run pytest tests/ui/ws -q -m "not live_llm"`
-- [ ] `uv run pytest tests/unit/test_ws_chat_helpers.py -q`
+- [x] `uv run ruff check src/fleet_rlm/server/routers`
+- [x] `uv run pytest tests/ui/ws -q -m "not live_llm"`
+- [x] `uv run pytest tests/unit/test_ws_chat_helpers.py -q`
 
 ## Phase 6: Stub Router Cleanup
 Goal: replace placeholder success responses with explicit not-implemented responses.
 
 ### Work Breakdown
-- [ ] Update `src/fleet_rlm/server/routers/planned.py` stubs to return `501` with clear details.
-- [ ] Ensure response payload shape is consistent and explicit.
-- [ ] Update/extend tests for changed HTTP behavior.
+- [x] Update `src/fleet_rlm/server/routers/planned.py` stubs to return `501` with clear details.
+- [x] Ensure response payload shape is consistent and explicit.
+- [x] Update/extend tests for changed HTTP behavior.
 
 ### Validation Gate
-- [ ] `uv run pytest tests/ui/server -q -m "not live_llm"`
+- [x] `uv run pytest tests/ui/server -q -m "not live_llm"`
 
 ## Cross-Cutting Quality Gate (Before Merge)
-- [ ] `uv run ruff check src tests`
-- [ ] `uv run ruff format --check src tests`
-- [ ] `uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"`
-- [ ] `uv run pytest -q -m "not live_llm and not benchmark"`
-- [ ] `uv run python scripts/check_release_hygiene.py`
-- [ ] `uv run python scripts/check_release_metadata.py`
+- [x] `uv run ruff check src tests`
+- [x] `uv run ruff format --check src tests`
+- [x] `uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"`
+- [x] `uv run pytest -q -m "not live_llm and not benchmark"`
+- [x] `uv run python scripts/check_release_hygiene.py`
+- [x] `uv run python scripts/check_release_metadata.py`
 
 ## Impacted Areas Checklist
 - [ ] Server runtime internals updated safely (`main.py`, `deps.py`, `routers/ws*.py`, `routers/runtime.py`, `routers/health.py`, `routers/sessions.py`).
@@ -149,3 +149,6 @@ Goal: replace placeholder success responses with explicit not-implemented respon
 - 2026-02-26: Completed Phase 1 (schema consolidation + compatibility shim deletions) and passed Phase 1 validation gate.
 - 2026-02-26: Completed Phase 2 (config/interpreter deduplication) and passed Phase 2 validation gate.
 - 2026-02-26: Completed Phase 3 (streaming helper extraction and deduplication) and passed Phase 3 validation gate.
+- 2026-02-26: Completed Phase 4 (app/request-bound server state + legacy SQLite isolation) and passed Phase 4 validation gate.
+- 2026-02-26: Completed Phase 5 (WebSocket streaming loop extraction to `ws_streaming.py`) and passed Phase 5 validation gate.
+- 2026-02-26: Completed Phase 6 (planned router 501 behavior + UI tests) and passed Phase 6 validation gate.
