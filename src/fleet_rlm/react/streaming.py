@@ -11,7 +11,7 @@ import logging
 import json
 import re
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any, Callable, Iterable, cast
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, cast
 from urllib.parse import urlparse
 
 import dspy
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 STREAM_EVENT_SCHEMA_VERSION = 2
 _ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https", "file"})
+ToolEventKind = Literal["tool_call", "plan_update", "rlm_executing", "memory_update"]
 
 # ---------------------------------------------------------------------------
 # Status-message parsing helpers
@@ -407,6 +408,170 @@ class ReActStatusProvider(StatusMessageProvider):
 # ---------------------------------------------------------------------------
 
 
+def _classify_tool_event_kind(tool_name: str | None) -> ToolEventKind:
+    if tool_name == "plan_code_change":
+        return "plan_update"
+    if tool_name in (
+        "rlm_query",
+        "analyze_long_document",
+        "summarize_long_document",
+        "extract_from_logs",
+        "grounded_answer",
+        "triage_incident_logs",
+        "parallel_semantic_map",
+    ):
+        return "rlm_executing"
+    if tool_name and (tool_name.startswith("core_memory") or "memory" in tool_name):
+        return "memory_update"
+    return "tool_call"
+
+
+def _build_fallback_events(
+    *,
+    fallback: dict[str, Any],
+    exc: Exception,
+    effective_max_iters: int,
+    agent: RLMReActChatAgent,
+    init_phase: bool,
+) -> Iterable[StreamEvent]:
+    prefix = "streaming unavailable" if init_phase else "stream error"
+    yield StreamEvent(
+        kind="status",
+        text=f"{prefix}; fell back to non-streaming ({exc})",
+        payload={"fallback": True, "error_type": type(exc).__name__},
+    )
+    yield StreamEvent(
+        kind="final",
+        flush_tokens=True,
+        text=str(fallback.get("assistant_response", "")),
+        payload=_build_final_payload(
+            final_prediction=None,
+            trajectory=cast(dict[str, Any], fallback.get("trajectory", {}) or {}),
+            history_turns=int(fallback.get("history_turns", agent.history_turns())),
+            guardrail_warnings=[],
+            turn_metrics={
+                "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
+                "delegate_fallback_count_turn": fallback.get(
+                    "delegate_fallback_count_turn", 0
+                ),
+                "delegate_result_truncated_count_turn": fallback.get(
+                    "delegate_result_truncated_count_turn", 0
+                ),
+            },
+            fallback=True,
+            fallback_error_type=type(exc).__name__,
+            effective_max_iters=int(
+                fallback.get("effective_max_iters", effective_max_iters)
+            ),
+        ),
+    )
+
+
+def _process_stream_value(
+    *,
+    value: Any,
+    trace: bool,
+    assistant_chunks: list[str],
+    last_tool_name_ref: list[str | None],
+) -> Iterable[StreamEvent]:
+    if isinstance(value, StreamResponse):
+        if value.signature_field_name == "assistant_response":
+            assistant_chunks.append(value.chunk)
+            yield StreamEvent(kind="assistant_token", text=value.chunk)
+        elif value.signature_field_name == "next_thought" and trace:
+            yield StreamEvent(
+                kind="reasoning_step",
+                text=value.chunk,
+                payload={"source": "next_thought"},
+            )
+        return
+
+    if isinstance(value, StatusMessage):
+        text = value.message
+        yield StreamEvent(kind="status", text=text)
+
+        tool_call = parse_tool_call_status(text)
+        if tool_call:
+            tool_payload = parse_tool_call_payload(text) or {}
+            parsed_name = tool_payload.get("tool_name")
+            if isinstance(parsed_name, str) and parsed_name:
+                last_tool_name_ref[0] = parsed_name
+
+            yield StreamEvent(
+                kind=_classify_tool_event_kind(
+                    parsed_name if isinstance(parsed_name, str) else None
+                ),
+                text=tool_call,
+                payload=tool_payload,
+            )
+
+        tool_result = parse_tool_result_status(text)
+        if tool_result:
+            result_payload = (
+                parse_tool_result_payload(text, tool_name=last_tool_name_ref[0]) or {}
+            )
+            yield StreamEvent(
+                kind="tool_result",
+                text=tool_result,
+                payload=result_payload,
+            )
+
+
+def _emit_prediction_trajectory_events(
+    final_prediction: dspy.Prediction,
+) -> Iterable[StreamEvent]:
+    trajectory = getattr(final_prediction, "trajectory", {})
+    if not trajectory or not isinstance(trajectory, dict):
+        return
+
+    steps = _normalize_trajectory(trajectory)
+    if not steps:
+        return
+
+    for idx, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        step_text = step.get("thought", step.get("action", str(step)))
+        yield StreamEvent(
+            kind="trajectory_step",
+            flush_tokens=True,
+            text=step_text,
+            payload={
+                "step_index": idx,
+                "step_data": step,
+                "total_steps": len(steps),
+            },
+        )
+
+
+def _extract_final_response(
+    *,
+    final_prediction: dspy.Prediction | None,
+    assistant_chunks: list[str],
+) -> tuple[str, dict[str, Any], str]:
+    if final_prediction is not None:
+        assistant_response = str(
+            getattr(final_prediction, "assistant_response", "")
+        ).strip()
+        raw_trajectory = getattr(final_prediction, "trajectory", {})
+        trajectory = raw_trajectory if isinstance(raw_trajectory, dict) else {}
+        final_reasoning = ""
+        if hasattr(final_prediction, "reasoning"):
+            final_reasoning = str(final_prediction.reasoning)
+        elif trajectory:
+            steps = _normalize_trajectory(trajectory)
+            reasoning_parts = []
+            for step in steps:
+                if isinstance(step, dict):
+                    thought = step.get("thought", "")
+                    if thought:
+                        reasoning_parts.append(thought)
+            final_reasoning = "\n".join(reasoning_parts)
+        return assistant_response, trajectory, final_reasoning
+
+    return "".join(assistant_chunks).strip(), {}, ""
+
+
 def iter_chat_turn_stream(
     agent: RLMReActChatAgent,
     message: str,
@@ -448,41 +613,18 @@ def iter_chat_turn_stream(
             extra={"error_type": type(exc).__name__},
         )
         fallback = agent.chat_turn(message)
-        yield StreamEvent(
-            kind="status",
-            text=f"streaming unavailable; fell back to non-streaming ({exc})",
-            payload={"fallback": True, "error_type": type(exc).__name__},
-        )
-        yield StreamEvent(
-            kind="final",
-            flush_tokens=True,
-            text=str(fallback.get("assistant_response", "")),
-            payload=_build_final_payload(
-                final_prediction=None,
-                trajectory=cast(dict[str, Any], fallback.get("trajectory", {}) or {}),
-                history_turns=int(fallback.get("history_turns", agent.history_turns())),
-                guardrail_warnings=[],
-                turn_metrics={
-                    "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
-                    "delegate_fallback_count_turn": fallback.get(
-                        "delegate_fallback_count_turn", 0
-                    ),
-                    "delegate_result_truncated_count_turn": fallback.get(
-                        "delegate_result_truncated_count_turn", 0
-                    ),
-                },
-                fallback=True,
-                fallback_error_type=type(exc).__name__,
-                effective_max_iters=int(
-                    fallback.get("effective_max_iters", effective_max_iters)
-                ),
-            ),
+        yield from _build_fallback_events(
+            fallback=fallback,
+            exc=exc,
+            effective_max_iters=effective_max_iters,
+            agent=agent,
+            init_phase=True,
         )
         return
 
     assistant_chunks: list[str] = []
     final_prediction: dspy.Prediction | None = None
-    last_tool_name: str | None = None
+    last_tool_name_ref: list[str | None] = [None]
 
     try:
         stream = stream_program(
@@ -508,81 +650,16 @@ def iter_chat_turn_stream(
                 )
                 return
 
-            if isinstance(value, StreamResponse):
-                if value.signature_field_name == "assistant_response":
-                    assistant_chunks.append(value.chunk)
-                    yield StreamEvent(kind="assistant_token", text=value.chunk)
-                elif value.signature_field_name == "next_thought" and trace:
-                    yield StreamEvent(
-                        kind="reasoning_step",
-                        text=value.chunk,
-                        payload={"source": "next_thought"},
-                    )
-            elif isinstance(value, StatusMessage):
-                text = value.message
-                yield StreamEvent(kind="status", text=text)
-                tool_call = parse_tool_call_status(text)
-                if tool_call:
-                    tool_payload = parse_tool_call_payload(text) or {}
-                    parsed_name = tool_payload.get("tool_name")
-                    if isinstance(parsed_name, str) and parsed_name:
-                        last_tool_name = parsed_name
-
-                    event_kind = "tool_call"
-                    if parsed_name == "plan_code_change":
-                        event_kind = "plan_update"
-                    elif parsed_name in (
-                        "rlm_query",
-                        "analyze_long_document",
-                        "summarize_long_document",
-                        "extract_from_logs",
-                        "grounded_answer",
-                        "triage_incident_logs",
-                        "parallel_semantic_map",
-                    ):
-                        event_kind = "rlm_executing"
-                    elif parsed_name and (
-                        parsed_name.startswith("core_memory") or "memory" in parsed_name
-                    ):
-                        event_kind = "memory_update"
-
-                    yield StreamEvent(
-                        kind=event_kind,
-                        text=tool_call,
-                        payload=tool_payload,
-                    )
-                tool_result = parse_tool_result_status(text)
-                if tool_result:
-                    result_payload = (
-                        parse_tool_result_payload(text, tool_name=last_tool_name) or {}
-                    )
-                    yield StreamEvent(
-                        kind="tool_result",
-                        text=tool_result,
-                        payload=result_payload,
-                    )
-            elif isinstance(value, dspy.Prediction):
+            if isinstance(value, dspy.Prediction):
                 final_prediction = value
-                # Emit trajectory steps as they're captured
-                trajectory = getattr(final_prediction, "trajectory", {})
-                if trajectory and isinstance(trajectory, dict):
-                    steps = _normalize_trajectory(trajectory)
-                    if steps:
-                        for idx, step in enumerate(steps):
-                            if isinstance(step, dict):
-                                step_text = step.get(
-                                    "thought", step.get("action", str(step))
-                                )
-                                yield StreamEvent(
-                                    kind="trajectory_step",
-                                    flush_tokens=True,
-                                    text=step_text,
-                                    payload={
-                                        "step_index": idx,
-                                        "step_data": step,
-                                        "total_steps": len(steps),
-                                    },
-                                )
+                yield from _emit_prediction_trajectory_events(final_prediction)
+            else:
+                yield from _process_stream_value(
+                    value=value,
+                    trace=trace,
+                    assistant_chunks=assistant_chunks,
+                    last_tool_name_ref=last_tool_name_ref,
+                )
     except Exception as exc:
         logger.error(
             "Streaming error, falling back: %s",
@@ -591,62 +668,19 @@ def iter_chat_turn_stream(
             extra={"error_type": type(exc).__name__},
         )
         fallback = agent.chat_turn(message)
-        yield StreamEvent(
-            kind="status",
-            text=f"stream error; fell back to non-streaming ({exc})",
-            payload={"fallback": True, "error_type": type(exc).__name__},
-        )
-        yield StreamEvent(
-            kind="final",
-            flush_tokens=True,
-            text=str(fallback.get("assistant_response", "")),
-            payload=_build_final_payload(
-                final_prediction=None,
-                trajectory=cast(dict[str, Any], fallback.get("trajectory", {}) or {}),
-                history_turns=int(fallback.get("history_turns", agent.history_turns())),
-                guardrail_warnings=[],
-                turn_metrics={
-                    "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
-                    "delegate_fallback_count_turn": fallback.get(
-                        "delegate_fallback_count_turn", 0
-                    ),
-                    "delegate_result_truncated_count_turn": fallback.get(
-                        "delegate_result_truncated_count_turn", 0
-                    ),
-                },
-                fallback=True,
-                fallback_error_type=type(exc).__name__,
-                effective_max_iters=int(
-                    fallback.get("effective_max_iters", effective_max_iters)
-                ),
-            ),
+        yield from _build_fallback_events(
+            fallback=fallback,
+            exc=exc,
+            effective_max_iters=effective_max_iters,
+            agent=agent,
+            init_phase=False,
         )
         return
 
-    if final_prediction is not None:
-        assistant_response = str(
-            getattr(final_prediction, "assistant_response", "")
-        ).strip()
-        trajectory = getattr(final_prediction, "trajectory", {})
-        # Extract final reasoning/thinking
-        final_reasoning = ""
-        if hasattr(final_prediction, "reasoning"):
-            final_reasoning = str(final_prediction.reasoning)
-        elif trajectory and isinstance(trajectory, dict):
-            # Try to construct reasoning from trajectory steps
-            steps = _normalize_trajectory(trajectory)
-            if steps:
-                reasoning_parts = []
-                for step in steps:
-                    if isinstance(step, dict):
-                        thought = step.get("thought", "")
-                        if thought:
-                            reasoning_parts.append(thought)
-                final_reasoning = "\n".join(reasoning_parts)
-    else:
-        assistant_response = "".join(assistant_chunks).strip()
-        trajectory = {}
-        final_reasoning = ""
+    assistant_response, trajectory, final_reasoning = _extract_final_response(
+        final_prediction=final_prediction,
+        assistant_chunks=assistant_chunks,
+    )
 
     agent._finalize_turn(trajectory)
 
@@ -722,40 +756,19 @@ async def aiter_chat_turn_stream(
             extra={"error_type": type(exc).__name__},
         )
         fallback = await agent.achat_turn(message)
-        yield StreamEvent(
-            kind="status",
-            text=f"streaming unavailable; fell back to non-streaming ({exc})",
-            payload={"fallback": True, "error_type": type(exc).__name__},
-        )
-        yield StreamEvent(
-            kind="final",
-            flush_tokens=True,
-            text=str(fallback.get("assistant_response", "")),
-            payload=_build_final_payload(
-                final_prediction=None,
-                trajectory=cast(dict[str, Any], fallback.get("trajectory", {}) or {}),
-                history_turns=int(fallback.get("history_turns", agent.history_turns())),
-                guardrail_warnings=[],
-                turn_metrics={
-                    "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
-                    "delegate_fallback_count_turn": fallback.get(
-                        "delegate_fallback_count_turn", 0
-                    ),
-                    "delegate_result_truncated_count_turn": fallback.get(
-                        "delegate_result_truncated_count_turn", 0
-                    ),
-                },
-                fallback=True,
-                fallback_error_type=type(exc).__name__,
-                effective_max_iters=int(
-                    fallback.get("effective_max_iters", effective_max_iters)
-                ),
-            ),
-        )
+        for event in _build_fallback_events(
+            fallback=fallback,
+            exc=exc,
+            effective_max_iters=effective_max_iters,
+            agent=agent,
+            init_phase=True,
+        ):
+            yield event
         return
 
     assistant_chunks: list[str] = []
     final_prediction: dspy.Prediction | None = None
+    last_tool_name_ref: list[str | None] = [None]
 
     try:
         output_stream = stream_program(
@@ -781,81 +794,18 @@ async def aiter_chat_turn_stream(
                 )
                 return
 
-            if isinstance(value, StreamResponse):
-                if value.signature_field_name == "assistant_response":
-                    assistant_chunks.append(value.chunk)
-                    yield StreamEvent(kind="assistant_token", text=value.chunk)
-                elif value.signature_field_name == "next_thought" and trace:
-                    yield StreamEvent(
-                        kind="reasoning_step",
-                        text=value.chunk,
-                        payload={"source": "next_thought"},
-                    )
-            elif isinstance(value, StatusMessage):
-                text = value.message
-                yield StreamEvent(kind="status", text=text)
-                tool_call = parse_tool_call_status(text)
-                if tool_call:
-                    tool_payload = parse_tool_call_payload(text) or {}
-                    parsed_name = tool_payload.get("tool_name")
-                    if isinstance(parsed_name, str) and parsed_name:
-                        last_tool_name = parsed_name
-
-                    event_kind = "tool_call"
-                    if parsed_name == "plan_code_change":
-                        event_kind = "plan_update"
-                    elif parsed_name in (
-                        "rlm_query",
-                        "analyze_long_document",
-                        "summarize_long_document",
-                        "extract_from_logs",
-                        "grounded_answer",
-                        "triage_incident_logs",
-                        "parallel_semantic_map",
-                    ):
-                        event_kind = "rlm_executing"
-                    elif parsed_name and (
-                        parsed_name.startswith("core_memory") or "memory" in parsed_name
-                    ):
-                        event_kind = "memory_update"
-
-                    yield StreamEvent(
-                        kind=event_kind,
-                        text=tool_call,
-                        payload=tool_payload,
-                    )
-                tool_result = parse_tool_result_status(text)
-                if tool_result:
-                    result_payload = (
-                        parse_tool_result_payload(text, tool_name=last_tool_name) or {}
-                    )
-                    yield StreamEvent(
-                        kind="tool_result",
-                        text=tool_result,
-                        payload=result_payload,
-                    )
-            elif isinstance(value, dspy.Prediction):
+            if isinstance(value, dspy.Prediction):
                 final_prediction = value
-                # Emit trajectory steps as they're captured
-                trajectory = getattr(final_prediction, "trajectory", {})
-                if trajectory and isinstance(trajectory, dict):
-                    steps = _normalize_trajectory(trajectory)
-                    if steps:
-                        for idx, step in enumerate(steps):
-                            if isinstance(step, dict):
-                                step_text = step.get(
-                                    "thought", step.get("action", str(step))
-                                )
-                                yield StreamEvent(
-                                    kind="trajectory_step",
-                                    flush_tokens=True,
-                                    text=step_text,
-                                    payload={
-                                        "step_index": idx,
-                                        "step_data": step,
-                                        "total_steps": len(steps),
-                                    },
-                                )
+                for event in _emit_prediction_trajectory_events(final_prediction):
+                    yield event
+            else:
+                for event in _process_stream_value(
+                    value=value,
+                    trace=trace,
+                    assistant_chunks=assistant_chunks,
+                    last_tool_name_ref=last_tool_name_ref,
+                ):
+                    yield event
     except Exception as exc:
         logger.error(
             "Async streaming error, falling back: %s",
@@ -864,62 +814,20 @@ async def aiter_chat_turn_stream(
             extra={"error_type": type(exc).__name__},
         )
         fallback = await agent.achat_turn(message)
-        yield StreamEvent(
-            kind="status",
-            text=f"stream error; fell back to non-streaming ({exc})",
-            payload={"fallback": True, "error_type": type(exc).__name__},
-        )
-        yield StreamEvent(
-            kind="final",
-            flush_tokens=True,
-            text=str(fallback.get("assistant_response", "")),
-            payload=_build_final_payload(
-                final_prediction=None,
-                trajectory=cast(dict[str, Any], fallback.get("trajectory", {}) or {}),
-                history_turns=int(fallback.get("history_turns", agent.history_turns())),
-                guardrail_warnings=[],
-                turn_metrics={
-                    "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
-                    "delegate_fallback_count_turn": fallback.get(
-                        "delegate_fallback_count_turn", 0
-                    ),
-                    "delegate_result_truncated_count_turn": fallback.get(
-                        "delegate_result_truncated_count_turn", 0
-                    ),
-                },
-                fallback=True,
-                fallback_error_type=type(exc).__name__,
-                effective_max_iters=int(
-                    fallback.get("effective_max_iters", effective_max_iters)
-                ),
-            ),
-        )
+        for event in _build_fallback_events(
+            fallback=fallback,
+            exc=exc,
+            effective_max_iters=effective_max_iters,
+            agent=agent,
+            init_phase=False,
+        ):
+            yield event
         return
 
-    if final_prediction is not None:
-        assistant_response = str(
-            getattr(final_prediction, "assistant_response", "")
-        ).strip()
-        trajectory = getattr(final_prediction, "trajectory", {})
-        # Extract final reasoning/thinking
-        final_reasoning = ""
-        if hasattr(final_prediction, "reasoning"):
-            final_reasoning = str(final_prediction.reasoning)
-        elif trajectory and isinstance(trajectory, dict):
-            # Try to construct reasoning from trajectory steps
-            steps = _normalize_trajectory(trajectory)
-            if steps:
-                reasoning_parts = []
-                for step in steps:
-                    if isinstance(step, dict):
-                        thought = step.get("thought", "")
-                        if thought:
-                            reasoning_parts.append(thought)
-                final_reasoning = "\n".join(reasoning_parts)
-    else:
-        assistant_response = "".join(assistant_chunks).strip()
-        trajectory = {}
-        final_reasoning = ""
+    assistant_response, trajectory, final_reasoning = _extract_final_response(
+        final_prediction=final_prediction,
+        assistant_chunks=assistant_chunks,
+    )
 
     agent._finalize_turn(trajectory)
 

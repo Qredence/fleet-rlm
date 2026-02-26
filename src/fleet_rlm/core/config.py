@@ -141,6 +141,18 @@ def configure_posthog_analytics_from_env() -> object | None:
         return None
 
 
+def _prepare_env(*, env_file: Path | None = None) -> None:
+    """Load env defaults and shared runtime guards for LM configuration helpers."""
+    dotenv_path = env_file
+    if dotenv_path is None:
+        project_root = _find_project_root(Path.cwd())
+        dotenv_path = project_root / ".env"
+
+    _load_dotenv(dotenv_path)
+    _guard_modal_shadowing()
+    configure_posthog_analytics_from_env()
+
+
 def _guard_modal_shadowing() -> None:
     """Guard against module shadowing that can break Modal imports.
 
@@ -211,14 +223,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
         ...     print("Failed to configure planner - check environment variables")
     """
 
-    dotenv_path = env_file
-    if dotenv_path is None:
-        project_root = _find_project_root(Path.cwd())
-        dotenv_path = project_root / ".env"
-
-    _load_dotenv(dotenv_path)
-    _guard_modal_shadowing()
-    configure_posthog_analytics_from_env()
+    _prepare_env(env_file=env_file)
 
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
     model = os.environ.get("DSPY_LM_MODEL")
@@ -252,14 +257,7 @@ def get_planner_lm_from_env(
     Returns:
         A configured dspy.LM instance if configuration is available, None otherwise.
     """
-    dotenv_path = env_file
-    if dotenv_path is None:
-        project_root = _find_project_root(Path.cwd())
-        dotenv_path = project_root / ".env"
-
-    _load_dotenv(dotenv_path)
-    _guard_modal_shadowing()
-    configure_posthog_analytics_from_env()
+    _prepare_env(env_file=env_file)
 
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
     model = model_name or os.environ.get("DSPY_LM_MODEL")
@@ -293,14 +291,7 @@ def get_delegate_lm_from_env(
     This helper is intentionally best-effort and returns ``None`` on missing
     inputs or init failures so callers can fall back to the parent planner LM.
     """
-    dotenv_path = env_file
-    if dotenv_path is None:
-        project_root = _find_project_root(Path.cwd())
-        dotenv_path = project_root / ".env"
-
-    _load_dotenv(dotenv_path)
-    _guard_modal_shadowing()
-    configure_posthog_analytics_from_env()
+    _prepare_env(env_file=env_file)
 
     model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
     if not model:
