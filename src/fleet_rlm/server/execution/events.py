@@ -129,6 +129,7 @@ class ExecutionEventEmitter:
             try:
                 await state.sender_task
             except asyncio.CancelledError:
+                # Normal outcome: task was cancelled during disconnect teardown.
                 pass
             except Exception:
                 pass
