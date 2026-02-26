@@ -268,9 +268,40 @@ describe("applyWsFrameToMessages", () => {
       makeEvent("final", "Done", {
         citations: [
           {
-            title: "Doc",
-            url: "https://example.com",
-            quote: "evidence",
+            source_id: "src-b",
+            anchor_id: "anchor-b",
+            title: "Doc B",
+            url: "https://example.com/b",
+            quote: "evidence-b",
+          },
+          {
+            source_id: "src-a",
+            anchor_id: "anchor-a",
+            title: "Doc A",
+            url: "https://example.com/a",
+            quote: "evidence-a",
+          },
+        ],
+        citation_anchors: [
+          {
+            anchor_id: "anchor-a",
+            source_id: "src-a",
+            number: "1",
+            start_char: 5,
+          },
+          {
+            anchor_id: "anchor-b",
+            source_id: "src-b",
+            number: "2",
+            start_char: 42,
+          },
+        ],
+        attachments: [
+          {
+            attachment_id: "att-1",
+            name: "report.json",
+            mime_type: "application/json",
+            url: "https://example.com/report.json",
           },
         ],
       }),
@@ -282,6 +313,28 @@ describe("applyWsFrameToMessages", () => {
     expect(
       assistant?.renderParts?.some((p) => p.kind === "inline_citation_group"),
     ).toBe(true);
+    expect(assistant?.renderParts?.some((p) => p.kind === "sources")).toBe(
+      true,
+    );
+    expect(
+      assistant?.renderParts?.some((p) => p.kind === "attachments"),
+    ).toBe(true);
+    const citationGroup = assistant?.renderParts?.find(
+      (p) => p.kind === "inline_citation_group",
+    );
+    if (citationGroup?.kind === "inline_citation_group") {
+      expect(citationGroup.citations[0]?.title).toBe("Doc A");
+      expect(citationGroup.citations[0]?.number).toBe("1");
+      expect(citationGroup.citations[1]?.title).toBe("Doc B");
+      expect(citationGroup.citations[1]?.number).toBe("2");
+    }
+
+    const sources = assistant?.renderParts?.find((p) => p.kind === "sources");
+    if (sources?.kind === "sources") {
+      expect(sources.sources).toHaveLength(2);
+      expect(sources.sources[0]?.sourceId).toBe("src-a");
+      expect(sources.sources[1]?.sourceId).toBe("src-b");
+    }
 
     const reasoning = messages.find((m) => m.type === "reasoning");
     expect(reasoning?.reasoningData?.isThinking).toBe(false);
@@ -294,5 +347,132 @@ describe("applyWsFrameToMessages", () => {
     if (queue?.kind === "queue") {
       expect(queue.items.every((item) => item.completed)).toBe(true);
     }
+  });
+
+  it("maps hitl_request and hitl_resolved events to interactive hitl messages", () => {
+    const requested = applyWsFrameToMessages(
+      [],
+      makeEvent("hitl_request", "Need approval", {
+        question: "Approve deployment?",
+        actions: [
+          { label: "Approve", variant: "primary" },
+          { label: "Reject", variant: "secondary" },
+        ],
+      }),
+    ).messages;
+
+    const hitl = requested.find((m) => m.type === "hitl");
+    expect(hitl?.hitlData?.question).toBe("Approve deployment?");
+    expect(hitl?.hitlData?.resolved).toBeUndefined();
+
+    const resolved = applyWsFrameToMessages(
+      requested,
+      makeEvent("hitl_resolved", "Approved", { resolution: "Approved" }),
+    ).messages;
+
+    const resolvedHitl = resolved.find((m) => m.type === "hitl");
+    expect(resolvedHitl?.hitlData?.resolved).toBe(true);
+    expect(resolvedHitl?.hitlData?.resolvedLabel).toBe("Approved");
+  });
+
+  it("resolves the matching HITL message when hitl_resolved includes message_id", () => {
+    const first = applyWsFrameToMessages(
+      [],
+      makeEvent("hitl_request", "Need approval #1", {
+        message_id: "hitl-1",
+        question: "Approve first?",
+      }),
+    ).messages;
+    const second = applyWsFrameToMessages(
+      first,
+      makeEvent("hitl_request", "Need approval #2", {
+        message_id: "hitl-2",
+        question: "Approve second?",
+      }),
+    ).messages;
+
+    const resolved = applyWsFrameToMessages(
+      second,
+      makeEvent("hitl_resolved", "Approved second", {
+        message_id: "hitl-2",
+        resolution: "Approved second",
+      }),
+    ).messages;
+
+    const hitl1 = resolved.find((m) => m.id === "hitl-1");
+    const hitl2 = resolved.find((m) => m.id === "hitl-2");
+    expect(hitl1?.hitlData?.resolved).toBeUndefined();
+    expect(hitl2?.hitlData?.resolved).toBe(true);
+    expect(hitl2?.hitlData?.resolvedLabel).toBe("Approved second");
+  });
+
+  it("applies resolve_hitl command acknowledgements to the target HITL message", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "hitl-1",
+        type: "hitl",
+        content: "Need approval",
+        phase: 1,
+        hitlData: {
+          question: "Approve?",
+          actions: [
+            { label: "Approve", variant: "primary" },
+            { label: "Reject", variant: "secondary" },
+          ],
+        },
+      },
+    ];
+
+    const next = applyWsFrameToMessages(
+      messages,
+      makeEvent("command_ack", "resolve_hitl completed", {
+        command: "resolve_hitl",
+        result: {
+          status: "ok",
+          message_id: "hitl-1",
+          resolution: "Approved by reviewer",
+        },
+      }),
+    ).messages;
+
+    const hitl = next.find((m) => m.id === "hitl-1");
+    expect(hitl?.hitlData?.resolved).toBe(true);
+    expect(hitl?.hitlData?.resolvedLabel).toBe("Approved by reviewer");
+  });
+
+  it("rolls back optimistic HITL state when resolve_hitl command is rejected", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "hitl-2",
+        type: "hitl",
+        content: "Need approval",
+        phase: 1,
+        hitlData: {
+          question: "Approve?",
+          actions: [
+            { label: "Approve", variant: "primary" },
+            { label: "Reject", variant: "secondary" },
+          ],
+          resolved: true,
+          resolvedLabel: "Approve",
+        },
+      },
+    ];
+
+    const next = applyWsFrameToMessages(
+      messages,
+      makeEvent("command_reject", "Denied", {
+        command: "resolve_hitl",
+        result: {
+          status: "error",
+          message_id: "hitl-2",
+          error: "Denied",
+        },
+      }),
+    ).messages;
+
+    const hitl = next.find((m) => m.id === "hitl-2");
+    expect(hitl?.hitlData?.resolved).toBe(false);
+    expect(hitl?.hitlData?.resolvedLabel).toBeUndefined();
   });
 });

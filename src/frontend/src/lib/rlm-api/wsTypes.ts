@@ -28,7 +28,19 @@ export interface WsCancelRequest {
   type: "cancel";
 }
 
-export type WsClientMessage = WsMessageRequest | WsCancelRequest;
+export interface WsCommandRequest {
+  type: "command";
+  command: string;
+  args?: Record<string, unknown>;
+  workspace_id?: string;
+  user_id?: string;
+  session_id?: string;
+}
+
+export type WsClientMessage =
+  | WsMessageRequest
+  | WsCancelRequest
+  | WsCommandRequest;
 
 export type WsEventKind =
   | "assistant_token"
@@ -42,13 +54,19 @@ export type WsEventKind =
   | "cancelled"
   | "plan_update"
   | "rlm_executing"
-  | "memory_update";
+  | "memory_update"
+  | "hitl_request"
+  | "hitl_resolved"
+  | "command_ack"
+  | "command_reject";
 
 export interface WsEventPayload {
   kind: WsEventKind;
   text: string;
   payload?: Record<string, unknown>;
   timestamp?: string;
+  version?: number;
+  event_id?: string;
 }
 
 export interface WsServerEvent {

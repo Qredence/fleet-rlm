@@ -15,7 +15,7 @@ from dspy.primitives.code_interpreter import FinalOutput
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
 from fleet_rlm.react import RLMReActChatAgent
-from fleet_rlm.react.streaming import _normalize_trajectory
+from fleet_rlm.react.streaming import _build_final_payload, _normalize_trajectory
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +428,102 @@ def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
     warnings = list(final_event.payload.get("guardrail_warnings", []) or [])
     assert warnings
     assert any("brief" in warning for warning in warnings)
+
+
+def test_iter_chat_turn_stream_enriches_final_payload_with_sources_and_citations(
+    monkeypatch,
+):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+
+    def _fake_streamify(*args, **kwargs):
+        def _stream(**stream_kwargs):
+            yield dspy.Prediction(
+                assistant_response="done",
+                trajectory={
+                    "thought_0": "collect evidence",
+                    "output_0": {
+                        "citations": [
+                            {
+                                "title": "DSPy docs",
+                                "url": "https://dspy.ai",
+                                "quote": "Reasoning framework",
+                            }
+                        ]
+                    },
+                },
+            )
+
+        return _stream
+
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    events = list(agent.iter_chat_turn_stream("cite", trace=False))
+    final_event = events[-1]
+
+    assert final_event.kind == "final"
+    assert final_event.payload["schema_version"] == 2
+    assert len(final_event.payload["citations"]) == 1
+    assert len(final_event.payload["sources"]) == 1
+    assert len(final_event.payload["citation_anchors"]) == 1
+
+
+def test_build_final_payload_filters_unsafe_external_urls():
+    payload = _build_final_payload(
+        final_prediction=dspy.Prediction(
+            citations=[
+                {
+                    "source_id": "src-unsafe",
+                    "anchor_id": "anc-unsafe",
+                    "title": "Unsafe source",
+                    "url": "javascript:alert(1)",
+                },
+                {
+                    "source_id": "src-safe",
+                    "anchor_id": "anc-safe",
+                    "title": "Safe source",
+                    "url": "https://example.com/safe",
+                },
+            ],
+            attachments=[
+                {
+                    "attachment_id": "att-unsafe",
+                    "name": "Unsafe attachment",
+                    "url": "javascript:alert(1)",
+                    "preview_url": "data:text/plain,hello",
+                },
+                {
+                    "attachment_id": "att-safe",
+                    "name": "Safe attachment",
+                    "url": "https://example.com/file.txt",
+                },
+            ],
+        ),
+        trajectory={},
+        history_turns=0,
+        guardrail_warnings=[],
+        turn_metrics={},
+        fallback=False,
+    )
+
+    citations = payload["citations"]
+    assert len(citations) == 1
+    assert citations[0]["source_id"] == "src-safe"
+    assert citations[0]["url"] == "https://example.com/safe"
+
+    sources = payload["sources"]
+    assert len(sources) == 1
+    assert sources[0]["source_id"] == "src-safe"
+    assert sources[0]["canonical_url"] == "https://example.com/safe"
+
+    attachments = payload["attachments"]
+    assert len(attachments) == 2
+    unsafe = next(att for att in attachments if att["attachment_id"] == "att-unsafe")
+    assert unsafe["url"] is None
+    assert unsafe["preview_url"] is None
+    safe = next(att for att in attachments if att["attachment_id"] == "att-safe")
+    assert safe["url"] == "https://example.com/file.txt"
 
 
 # ---------------------------------------------------------------------------

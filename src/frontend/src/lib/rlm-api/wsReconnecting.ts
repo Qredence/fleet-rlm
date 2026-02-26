@@ -1,10 +1,10 @@
 import { parseWsServerFrame, createWsError } from "@/lib/rlm-api/wsFrameParser";
 import type {
+  WsClientMessage,
   StreamWsOptions,
-  WsCancelRequest,
   WsConnectionStatus,
   WsEventKind,
-  WsMessageRequest,
+  WsCancelRequest,
 } from "@/lib/rlm-api/wsTypes";
 
 let backendSessionFallbackSequence = 0;
@@ -48,7 +48,7 @@ export function createBackendSessionId(): string {
 }
 
 export async function createReconnectingWs(
-  message: WsMessageRequest | null,
+  message: WsClientMessage | null,
   options: StreamWsOptions & { url: string; terminalEventKinds?: WsEventKind[] },
 ): Promise<void> {
   const {

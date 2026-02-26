@@ -80,6 +80,32 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         streaming: false,
         renderParts: [
           {
+            kind: "sources",
+            title: "Sources",
+            sources: [
+              {
+                sourceId: "src-1",
+                kind: "web",
+                title: "Fleet docs",
+                url: "https://example.com/docs",
+                description: "Primary reference",
+              },
+            ],
+          },
+          {
+            kind: "attachments",
+            variant: "grid",
+            attachments: [
+              {
+                attachmentId: "att-1",
+                name: "trace.json",
+                mimeType: "application/json",
+                sizeBytes: 1024,
+                url: "https://example.com/trace.json",
+              },
+            ],
+          },
+          {
             kind: "inline_citation_group",
             citations: [
               {
@@ -119,8 +145,10 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html).toContain("APP_ENV");
     expect(html).toContain("Approve action?");
     expect(html).toContain("Sources");
+    expect(html).toContain("trace.json");
     expect(html).toContain("[1]");
     expect(html).toContain("Done with sources");
+    expect(html.match(/data-slot=\"sources-trigger\"/g)?.length).toBe(1);
   });
 
   it("shows shimmer while typing with no streaming assistant message", () => {

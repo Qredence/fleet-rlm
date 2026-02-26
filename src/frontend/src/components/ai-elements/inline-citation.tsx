@@ -7,6 +7,22 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/components/ui/utils";
 
+function safeHref(href: string): string | undefined {
+  try {
+    const parsed = new URL(href);
+    if (
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:" ||
+      parsed.protocol === "file:"
+    ) {
+      return parsed.toString();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function InlineCitation({ children }: { children: ReactNode }) {
   return <span className="inline-flex align-baseline">{children}</span>;
 }
@@ -77,17 +93,24 @@ function InlineCitationSource({
   url: string;
   description?: string;
 }) {
+  const href = safeHref(url);
   return (
     <div className="space-y-1">
-      <a
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-      >
-        {title}
-        <ExternalLink className="size-3.5" />
-      </a>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+        >
+          {title}
+          <ExternalLink className="size-3.5" />
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-sm font-medium text-foreground">
+          {title}
+        </span>
+      )}
       <div className="text-xs text-muted-foreground break-all">{url}</div>
       {description ? (
         <p className="text-xs text-muted-foreground">{description}</p>
