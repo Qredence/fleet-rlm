@@ -102,14 +102,11 @@ src/
         useAppNavigate.ts  # App-level nav hook wrapping React Router useNavigate()
         useAuth.tsx         # Mock auth context + AuthProvider
         useAnalytics.ts     # React Query hook for analytics dashboard
-        useChat.ts          # Chat hook with SSE streaming (mock delegates to useChatSimulation)
         useChatHistory.ts   # Conversation history with localStorage persistence
         useCodeMirror.ts    # CodeMirror 6 hook (dynamic imports via loadPkg)
         useFilesystem.ts    # React Query hook for sandbox filesystem data
         useMemory.ts        # React Query hooks for memory entries (CRUD + bulk)
         useNavigation.tsx   # Centralised app state context + NavigationProvider
-        useSearch.ts        # Debounced cross-entity search hook
-        useSessions.ts      # React Query hooks for session management
         useSkills.ts        # React Query hook for skills list + single + content
         useSkillMutations.ts # Create/update/delete mutations with optimistic updates
         useStickToBottom.ts # Chat auto-scroll hook
@@ -803,21 +800,13 @@ tick={{
 
 ## 13. SVG & Image Handling
 
-### 13.1 Figma-Exported SVGs
+### 13.1 Branding and SVG Icons
 
-SVGs are stored as path-data modules in `/src/imports/svg-*.ts`.
-Import and use inside `<svg>` elements:
+Branding assets live in `src/frontend/public/branding/` and are consumed via
+public URLs (for example `/branding/logo-mark.svg`).
 
-```tsx
-import svgPaths from "@/imports/svg-g9pgfbkia";
-
-<svg viewBox="0 0 18 17" fill="none">
-  <path d={svgPaths.p4dc2a80} fill="var(--foreground)" />
-</svg>;
-```
-
-Always use `fill="var(--foreground)"` or `fill="currentColor"` for theme
-compatibility. Never duplicate or recreate imported SVGs.
+For UI icons, prefer Lucide icon components and theme with token-driven text
+colors (`text-foreground`, `text-muted-foreground`, `text-accent`, etc.).
 
 ### 13.2 Raster Images
 
@@ -884,8 +873,8 @@ import { useAuth } from "../hooks/useAuth";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
 
-// Figma assets
-import svgPaths from "@/imports/svg-xxxxx";
+// Branding assets from public/
+import { BrandMark } from "@/components/shared/BrandMark";
 ```
 
 ### 14.3 Styling Priority

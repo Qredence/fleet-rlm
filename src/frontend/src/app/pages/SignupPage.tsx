@@ -19,7 +19,7 @@ import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import headerSvg from "@/imports/svg-synwn0xtnf";
+import { BrandMark } from "@/components/shared/BrandMark";
 
 function SignupPage() {
   const navigate = useNavigate();
@@ -71,21 +71,7 @@ function SignupPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="flex flex-col items-center gap-3 pb-2">
-            <div className="w-8 h-[15px]">
-              <svg
-                className="block size-full"
-                fill="none"
-                preserveAspectRatio="xMidYMid meet"
-                viewBox="0 0 18 17"
-              >
-                <path
-                  clipRule="evenodd"
-                  d={headerSvg.p4dc2a80}
-                  fill="var(--foreground)"
-                  fillRule="evenodd"
-                />
-              </svg>
-            </div>
+            <BrandMark className="w-8 h-[15px] text-foreground" />
             <div className="text-center">
               <h1 className="text-foreground" style={typo.h3}>
                 Create your account

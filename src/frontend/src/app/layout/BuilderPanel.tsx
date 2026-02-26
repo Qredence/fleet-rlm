@@ -1,4 +1,4 @@
-import { X, Brain } from "lucide-react";
+import { X, Brain, PanelRight } from "lucide-react";
 import { useCallback } from "react";
 import { typo } from "@/lib/config/typo";
 import { useNavigation } from "@/hooks/useNavigation";
@@ -11,7 +11,6 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import svgPaths from "@/imports/svg-z9gb50zttr";
 import { cn } from "@/components/ui/utils";
 import { CanvasSwitcher, type CanvasMode } from "@/features/CanvasSwitcher";
 import { CodeArtifact } from "@/features/CodeArtifact";
@@ -32,9 +31,7 @@ function UnsupportedState({
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
       <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center mb-4">
-        <svg className="w-6 h-6" fill="none" viewBox="0 0 16.33 14.6601">
-          <path d={svgPaths.p1f0f5080} fill="var(--muted-foreground)" />
-        </svg>
+        <PanelRight className="w-6 h-6 text-muted-foreground" />
       </div>
       <p className="text-foreground mb-1" style={typo.label}>
         {sectionLabel} unavailable
@@ -50,9 +47,7 @@ function EmptyCanvas() {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
       <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center mb-4">
-        <svg className="w-6 h-6" fill="none" viewBox="0 0 16.33 14.6601">
-          <path d={svgPaths.p1f0f5080} fill="var(--muted-foreground)" />
-        </svg>
+        <PanelRight className="w-6 h-6 text-muted-foreground" />
       </div>
       <p className="text-foreground mb-1" style={typo.label}>
         No active canvas

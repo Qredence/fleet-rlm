@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   ChevronRight,
   Check,
+  Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { typo } from "@/lib/config/typo";
@@ -28,7 +29,6 @@ import {
 } from "@/components/ui/popover";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/components/ui/utils";
-import composerSvgPaths from "@/imports/svg-er4mz3hmp1";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -74,12 +74,12 @@ export function PromptPlusMenu({
             isActive={hasActive}
             aria-label="Prompt features"
           >
-            <svg className="size-5" fill="none" viewBox="0 0 20 20">
-              <path
-                d={composerSvgPaths.p2b835b70}
-                fill={hasActive ? "var(--accent)" : "var(--foreground)"}
-              />
-            </svg>
+            <Plus
+              className={cn(
+                "size-5",
+                hasActive ? "text-accent" : "text-foreground",
+              )}
+            />
           </IconButton>
         </span>
       </PopoverTrigger>

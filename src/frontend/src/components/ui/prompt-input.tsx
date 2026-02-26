@@ -11,6 +11,7 @@
  * The transition between modes uses Motion spring physics.
  */
 import { useRef, useCallback, useEffect } from "react";
+import { ArrowUp, Mic } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { springs } from "@/lib/config/motion-config";
 import { typo } from "@/lib/config/typo";
@@ -19,7 +20,6 @@ import { cn } from "@/components/ui/utils";
 import { IconButton } from "@/components/ui/icon-button";
 import { PromptPlusMenu } from "@/components/ui/prompt-plus-menu";
 import { PromptToolbar } from "@/components/ui/prompt-toolbar";
-import composerSvgPaths from "@/imports/svg-er4mz3hmp1";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -108,9 +108,7 @@ export function PromptInput({
         className="touch-target rounded-full"
         aria-label="Voice input"
       >
-        <svg className="size-5" fill="none" viewBox="0 0 20 20">
-          <path d={composerSvgPaths.p3c9c8b00} fill="var(--foreground)" />
-        </svg>
+        <Mic className="size-5 text-foreground" />
       </IconButton>
       <IconButton
         type="button"
@@ -119,12 +117,7 @@ export function PromptInput({
         disabled={!canSend}
         aria-label="Send message"
       >
-        <svg className="size-5" fill="none" viewBox="0 0 20 20">
-          <path
-            d={composerSvgPaths.p22cb5880}
-            fill="var(--primary-foreground)"
-          />
-        </svg>
+        <ArrowUp className="size-5 text-primary-foreground" />
       </IconButton>
     </div>
   );

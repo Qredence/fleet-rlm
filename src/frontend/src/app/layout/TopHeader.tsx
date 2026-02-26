@@ -1,10 +1,12 @@
 import { LayoutGroup } from "motion/react";
+import { PanelRight, SquarePen } from "lucide-react";
 import type { NavItem } from "@/lib/data/types";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/components/ui/use-mobile";
 import { UserMenu } from "@/features/UserMenu";
 import { NotificationCenter } from "@/features/NotificationCenter";
+import { BrandMark } from "@/components/shared/BrandMark";
 import {
   Tooltip,
   TooltipTrigger,
@@ -15,7 +17,6 @@ import { NavTab } from "@/components/ui/nav-tab";
 import { cn } from "@/components/ui/utils";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
 import { BACKEND_CAPABILITY_TOOLTIP, isSectionSupported } from "@/lib/rlm-api";
-import headerSvg from "@/imports/svg-synwn0xtnf";
 
 // ── Tab definitions ─────────────────────────────────────────────────
 const navItems: { key: NavItem; label: string }[] = [
@@ -68,21 +69,7 @@ export function TopHeader() {
     >
       {/* ── Logo ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 shrink-0">
-        <div className="w-[18px] h-[17px] shrink-0">
-          <svg
-            className="block size-full"
-            fill="none"
-            preserveAspectRatio="xMidYMid meet"
-            viewBox="0 0 18 17"
-          >
-            <path
-              clipRule="evenodd"
-              d={headerSvg.p4dc2a80}
-              fill="var(--foreground)"
-              fillRule="evenodd"
-            />
-          </svg>
-        </div>
+        <BrandMark className="w-[18px] h-[17px] shrink-0 text-foreground" />
       </div>
 
       {/* ── Navigation tabs (desktop only) ─────────────────────── */}
@@ -146,9 +133,7 @@ export function TopHeader() {
                 aria-label="New Session"
                 className={isMobile ? "touch-target" : undefined}
               >
-                <svg className="size-5" fill="none" viewBox="0 0 20 20">
-                  <path d={headerSvg.p2fd67200} fill="var(--foreground)" />
-                </svg>
+                <SquarePen className="size-5 text-foreground" />
               </IconButton>
             </span>
           </TooltipTrigger>
@@ -167,13 +152,7 @@ export function TopHeader() {
                 }
                 className={isMobile ? "touch-target" : undefined}
               >
-                <svg className="size-6" fill="none" viewBox="0 0 24 24">
-                  <path d={headerSvg.p3a006380} fill="currentColor" />
-                  <path d={headerSvg.p20a25d00} fill="currentColor" />
-                  <path d={headerSvg.p1337c9c0} fill="currentColor" />
-                  <path d={headerSvg.pe8ed000} fill="currentColor" />
-                  <path d={headerSvg.p2032bd00} fill="currentColor" />
-                </svg>
+                <PanelRight className="size-6" />
               </IconButton>
             </span>
           </TooltipTrigger>

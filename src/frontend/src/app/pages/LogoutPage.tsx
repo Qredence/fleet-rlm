@@ -16,7 +16,7 @@ import { typo } from "@/lib/config/typo";
 import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import headerSvg from "@/imports/svg-synwn0xtnf";
+import { BrandMark } from "@/components/shared/BrandMark";
 
 type LogoutPhase = "signing-out" | "done";
 
@@ -56,21 +56,7 @@ function LogoutPage() {
               transition={prefersReduced ? fades.instant : fades.fast}
               className="flex flex-col items-center gap-5 py-4"
             >
-              <div className="w-8 h-[15px]">
-                <svg
-                  className="block size-full"
-                  fill="none"
-                  preserveAspectRatio="xMidYMid meet"
-                  viewBox="0 0 18 17"
-                >
-                  <path
-                    clipRule="evenodd"
-                    d={headerSvg.p4dc2a80}
-                    fill="var(--foreground)"
-                    fillRule="evenodd"
-                  />
-                </svg>
-              </div>
+              <BrandMark className="w-8 h-[15px] text-foreground" />
               <div className="flex flex-col items-center gap-3">
                 <motion.div
                   animate={prefersReduced ? undefined : { rotate: 360 }}
@@ -99,21 +85,7 @@ function LogoutPage() {
               transition={prefersReduced ? springs.instant : springs.default}
               className="flex flex-col items-center gap-5 py-4"
             >
-              <div className="w-8 h-[15px]">
-                <svg
-                  className="block size-full"
-                  fill="none"
-                  preserveAspectRatio="xMidYMid meet"
-                  viewBox="0 0 18 17"
-                >
-                  <path
-                    clipRule="evenodd"
-                    d={headerSvg.p4dc2a80}
-                    fill="var(--foreground)"
-                    fillRule="evenodd"
-                  />
-                </svg>
-              </div>
+              <BrandMark className="w-8 h-[15px] text-foreground" />
               <div
                 className="w-12 h-12 flex items-center justify-center bg-muted"
                 style={{ borderRadius: "var(--radius)" }}

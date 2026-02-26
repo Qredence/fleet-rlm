@@ -13,7 +13,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
-import headerSvg from "@/imports/svg-synwn0xtnf";
+import { BrandMark } from "@/components/shared/BrandMark";
 
 export function NotFoundPage() {
   const navigate = useNavigate();
@@ -27,16 +27,7 @@ export function NotFoundPage() {
         transition={shouldReduceMotion ? springs.instant : springs.default}
         className="flex flex-col items-center text-center gap-6 max-w-[380px]"
       >
-        <div className="w-8 h-[15px]">
-          <svg className="block size-full" fill="none" viewBox="0 0 18 17">
-            <path
-              clipRule="evenodd"
-              d={headerSvg.p4dc2a80}
-              fill="var(--foreground)"
-              fillRule="evenodd"
-            />
-          </svg>
-        </div>
+        <BrandMark className="w-8 h-[15px] text-foreground" />
         <div
           className="w-16 h-16 flex items-center justify-center bg-muted"
           style={{ borderRadius: "var(--radius-card)" }}
