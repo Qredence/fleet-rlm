@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Change:** Upgraded core development and runtime dependencies: fastapi[standard] to >=0.133.1, websockets to >=16, ruff to >=0.15.4, ty to >=0.0.19.
+  **Outcome:** All lint, type-check, and unit test gates pass with upgraded versions; fully backward compatible with no code changes required.
 - **Change:** Implemented Wave 7.1 structural simplification with canonical package regrouping and one-release compatibility shims (`server/routers/ws/`, `server/execution/`, `react/tools/`, `terminal/chat.py`, `server/runtime_settings.py`, `react/signatures.py`, `models/streaming.py`).
   **Outcome:** Cleaner module ownership and reduced namespace ambiguity without intentional HTTP/WS/frontend contract drift; legacy import paths remain supported through `v0.5.0`.
 - **Change:** Completed refactor cleanup phases for server/runtime surfaces, including app/request-bound server state lifecycle, legacy SQLite isolation, and WebSocket streaming loop decomposition.
