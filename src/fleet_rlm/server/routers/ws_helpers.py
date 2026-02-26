@@ -10,7 +10,7 @@ from fastapi import WebSocket
 from fleet_rlm.db.models import RunStepType
 
 from ..auth import AuthError
-from ..deps import build_unauthenticated_identity, server_state
+from ..deps import ServerState, build_unauthenticated_identity
 
 logger = logging.getLogger(__name__)
 
@@ -65,19 +65,19 @@ def _map_execution_step_type(step_type: str) -> RunStepType:
 # ── Execution emitter singleton ────────────────────────────────────────
 
 
-def _get_execution_emitter():
-    emitter = server_state.execution_event_emitter
+def _get_execution_emitter(state: ServerState):
+    emitter = state.execution_event_emitter
     if emitter is not None:
         return emitter
 
     from ..execution_events import ExecutionEventEmitter
 
-    cfg = server_state.config
+    cfg = state.config
     emitter = ExecutionEventEmitter(
         max_queue=cfg.ws_execution_max_queue,
         drop_policy=cfg.ws_execution_drop_policy,
     )
-    server_state.execution_event_emitter = emitter
+    state.execution_event_emitter = emitter
     return emitter
 
 
@@ -86,9 +86,10 @@ def _get_execution_emitter():
 
 async def _authenticate_websocket(
     websocket: WebSocket,
+    state: ServerState,
 ):
-    cfg = server_state.config
-    provider = server_state.auth_provider
+    cfg = state.config
+    provider = state.auth_provider
     if provider is None:
         if cfg.auth_required:
             await websocket.accept()

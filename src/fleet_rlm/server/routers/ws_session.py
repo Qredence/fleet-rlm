@@ -12,7 +12,7 @@ from fleet_rlm.db import FleetRepository
 from fleet_rlm.db.models import MemoryKind, MemoryScope, MemorySource
 from fleet_rlm.db.types import IdentityUpsertResult, MemoryItemCreateRequest
 
-from ..deps import server_state
+from ..deps import ServerState
 from .ws_helpers import _now_iso, _sanitize_for_log, _sanitize_id
 from .ws_lifecycle import PersistenceRequiredError
 
@@ -79,6 +79,7 @@ import uuid  # noqa: E402
 
 async def persist_session_state(
     *,
+    state: ServerState,
     agent: "runners.RLMReActChatAgent",
     session_record: dict[str, Any] | None,
     active_manifest_path: str | None,
@@ -164,7 +165,7 @@ async def persist_session_state(
 
     record_key = session_record.get("key")
     if isinstance(record_key, str):
-        server_state.sessions[record_key] = session_record
+        state.sessions[record_key] = session_record
 
     if include_volume_save and active_manifest_path and interpreter is not None:
         remote_manifest = await _volume_load_manifest(agent, active_manifest_path)

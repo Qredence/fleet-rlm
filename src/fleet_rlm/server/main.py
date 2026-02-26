@@ -17,8 +17,9 @@ from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
-from .deps import server_state
+from .deps import ServerState
 from .execution_events import ExecutionEventEmitter
+from .legacy_compat import init_db, set_legacy_sqlite_enabled
 from .middleware import add_middlewares
 from .routers import (
     auth,
@@ -30,7 +31,6 @@ from .routers import (
     tasks,
     ws,
 )
-from .database import init_db
 
 logger = logging.getLogger(__name__)
 
@@ -81,71 +81,74 @@ def _emit_posthog_startup_event(cfg: ServerRuntimeConfig) -> bool:
         return False
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    cfg = server_state.config
-    server_state.db_manager = None
-    server_state.repository = None
-
-    if cfg.enable_legacy_sqlite_routes:
-        await init_db()
-
-    if cfg.database_url:
-        db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
-        if cfg.db_validate_on_startup or cfg.database_required:
-            await db_manager.ping()
-        server_state.db_manager = db_manager
-        server_state.repository = FleetRepository(db_manager)
-    elif cfg.database_required:
-        raise RuntimeError("DATABASE_URL is required when database_required=true")
-    else:
-        logger.warning(
-            "runtime_persistence_disabled",
-            extra={
-                "database_required": cfg.database_required,
-                "app_env": cfg.app_env,
-            },
-        )
-
-    model_name = server_state.config.agent_model if server_state.config else None
-    if model_name is None:
-        server_state.planner_lm = get_planner_lm_from_env()
-    else:
-        server_state.planner_lm = get_planner_lm_from_env(model_name=model_name)
-    server_state.delegate_lm = get_delegate_lm_from_env(
-        model_name=cfg.agent_delegate_model,
-        default_max_tokens=cfg.agent_delegate_max_tokens,
-    )
-
-    _emit_posthog_startup_event(cfg)
-    yield
-    server_state.planner_lm = None
-    server_state.delegate_lm = None
-    shutdown_posthog_client()
-    if server_state.db_manager is not None:
-        await server_state.db_manager.dispose()
-    server_state.db_manager = None
-    server_state.repository = None
-
-
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     cfg = config or ServerRuntimeConfig()
     cfg.validate_startup_or_raise()
-    server_state.config = cfg
-    server_state.execution_event_emitter = ExecutionEventEmitter(
-        max_queue=cfg.ws_execution_max_queue,
-        drop_policy=cfg.ws_execution_drop_policy,
-    )
-    server_state.runtime_test_results = {}
-    server_state.auth_provider = build_auth_provider(
-        auth_mode=cfg.auth_mode,
-        dev_jwt_secret=cfg.dev_jwt_secret,
-        allow_debug_auth=cfg.allow_debug_auth,
-        allow_query_auth_tokens=cfg.allow_query_auth_tokens,
-        entra_jwks_url=cfg.entra_jwks_url,
-        entra_issuer=cfg.entra_issuer,
-        entra_audience=cfg.entra_audience,
-    )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        state = ServerState(
+            config=cfg,
+            execution_event_emitter=ExecutionEventEmitter(
+                max_queue=cfg.ws_execution_max_queue,
+                drop_policy=cfg.ws_execution_drop_policy,
+            ),
+        )
+        state.runtime_test_results = {}
+        state.auth_provider = build_auth_provider(
+            auth_mode=cfg.auth_mode,
+            dev_jwt_secret=cfg.dev_jwt_secret,
+            allow_debug_auth=cfg.allow_debug_auth,
+            allow_query_auth_tokens=cfg.allow_query_auth_tokens,
+            entra_jwks_url=cfg.entra_jwks_url,
+            entra_issuer=cfg.entra_issuer,
+            entra_audience=cfg.entra_audience,
+        )
+        app.state.server_state = state
+
+        state.db_manager = None
+        state.repository = None
+
+        set_legacy_sqlite_enabled(cfg.enable_legacy_sqlite_routes)
+        if cfg.enable_legacy_sqlite_routes:
+            await init_db()
+
+        if cfg.database_url:
+            db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
+            if cfg.db_validate_on_startup or cfg.database_required:
+                await db_manager.ping()
+            state.db_manager = db_manager
+            state.repository = FleetRepository(db_manager)
+        elif cfg.database_required:
+            raise RuntimeError("DATABASE_URL is required when database_required=true")
+        else:
+            logger.warning(
+                "runtime_persistence_disabled",
+                extra={
+                    "database_required": cfg.database_required,
+                    "app_env": cfg.app_env,
+                },
+            )
+
+        model_name = cfg.agent_model
+        if model_name is None:
+            state.planner_lm = get_planner_lm_from_env()
+        else:
+            state.planner_lm = get_planner_lm_from_env(model_name=model_name)
+        state.delegate_lm = get_delegate_lm_from_env(
+            model_name=cfg.agent_delegate_model,
+            default_max_tokens=cfg.agent_delegate_max_tokens,
+        )
+
+        _emit_posthog_startup_event(cfg)
+        yield
+        state.planner_lm = None
+        state.delegate_lm = None
+        shutdown_posthog_client()
+        if state.db_manager is not None:
+            await state.db_manager.dispose()
+        state.db_manager = None
+        state.repository = None
 
     app = FastAPI(
         title="fleet-rlm",

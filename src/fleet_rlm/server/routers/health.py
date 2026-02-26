@@ -1,8 +1,8 @@
 """Health and readiness endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from ..deps import server_state
+from ..deps import get_server_state
 from ..schemas.core import HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
@@ -14,11 +14,12 @@ async def health():
 
 
 @router.get("/ready", response_model=ReadyResponse)
-async def ready():
-    cfg = server_state.config
-    planner_ready = server_state.planner_lm is not None
+async def ready(request: Request):
+    state = get_server_state(request)
+    cfg = state.config
+    planner_ready = state.planner_lm is not None
 
-    if server_state.repository is not None:
+    if state.repository is not None:
         database_status = "ready"
     elif cfg.database_required:
         database_status = "missing"

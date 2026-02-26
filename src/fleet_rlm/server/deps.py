@@ -5,14 +5,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, WebSocket
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
-from .database import get_db_session
+from .legacy_compat import get_db_session
 from .execution_events import ExecutionEventEmitter
 
 if TYPE_CHECKING:
@@ -24,13 +24,20 @@ logger = logging.getLogger(__name__)
 class ServerState:
     """Shared server state, set during lifespan."""
 
-    def __init__(self) -> None:
-        self.config = ServerRuntimeConfig()
+    def __init__(
+        self,
+        *,
+        config: ServerRuntimeConfig | None = None,
+        execution_event_emitter: ExecutionEventEmitter | None = None,
+    ) -> None:
+        self.config = config or ServerRuntimeConfig()
         self.planner_lm: Any | None = None
         self.delegate_lm: Any | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
         self.runtime_test_results: dict[str, dict[str, Any]] = {}
-        self.execution_event_emitter = ExecutionEventEmitter()
+        self.execution_event_emitter = (
+            execution_event_emitter or ExecutionEventEmitter()
+        )
         self.db_manager: DatabaseManager | None = None
         self.repository: FleetRepository | None = None
         self.auth_provider: AuthProvider | None = None
@@ -38,47 +45,63 @@ class ServerState:
     @property
     def is_ready(self) -> bool:
         planner_ready = self.planner_lm is not None
-        db_ready = (not self.config.database_required) or self.repository is not None
+        db_ready = not self.config.database_required or self.repository is not None
         return planner_ready and db_ready
 
 
-server_state = ServerState()
+def _require_server_state(app: Any) -> ServerState:
+    candidate = getattr(getattr(app, "state", None), "server_state", None)
+    if isinstance(candidate, ServerState):
+        return candidate
+    raise RuntimeError(
+        "Server state is not initialized. Ensure FastAPI lifespan startup has completed."
+    )
 
 
-def get_config() -> ServerRuntimeConfig:
-    return server_state.config
+def get_server_state(request: Request) -> ServerState:
+    try:
+        return _require_server_state(request.app)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def get_server_state_from_websocket(websocket: WebSocket) -> ServerState:
+    return _require_server_state(websocket.app)
+
+
+def get_config(request: Request) -> ServerRuntimeConfig:
+    return get_server_state(request).config
 
 
 def get_server_config(request: Request) -> ServerRuntimeConfig:
     """Compatibility alias for FastAPI DI callers that expect a request-bound getter."""
-    _ = request
-    return get_config()
+    return get_config(request)
 
 
-def get_planner_lm() -> Any:
-    return server_state.planner_lm
+def get_planner_lm(request: Request) -> Any:
+    return get_server_state(request).planner_lm
 
 
-def get_delegate_lm() -> Any:
-    return server_state.delegate_lm
+def get_delegate_lm(request: Request) -> Any:
+    return get_server_state(request).delegate_lm
 
 
-def get_db_manager() -> DatabaseManager | None:
-    return server_state.db_manager
+def get_db_manager(request: Request) -> DatabaseManager | None:
+    return get_server_state(request).db_manager
 
 
-def get_repository() -> FleetRepository | None:
-    return server_state.repository
+def get_repository(request: Request) -> FleetRepository | None:
+    return get_server_state(request).repository
 
 
-def get_auth_provider() -> AuthProvider | None:
-    return server_state.auth_provider
+def get_auth_provider(request: Request) -> AuthProvider | None:
+    return get_server_state(request).auth_provider
 
 
 def build_unauthenticated_identity(
     config: ServerRuntimeConfig | None = None,
 ) -> NormalizedIdentity:
-    cfg = config or server_state.config
+    cfg = config or ServerRuntimeConfig()
     return NormalizedIdentity(
         tenant_claim=cfg.ws_default_workspace_id,
         user_claim=cfg.ws_default_user_id,
@@ -87,8 +110,8 @@ def build_unauthenticated_identity(
     )
 
 
-def require_repository() -> FleetRepository:
-    repository = get_repository()
+def require_repository(request: Request) -> FleetRepository:
+    repository = get_repository(request)
     if repository is None:
         raise HTTPException(
             status_code=503,
@@ -98,8 +121,9 @@ def require_repository() -> FleetRepository:
 
 
 async def require_http_identity(request: Request) -> NormalizedIdentity:
-    provider = get_auth_provider()
-    cfg = server_state.config
+    state = get_server_state(request)
+    provider = state.auth_provider
+    cfg = state.config
     if provider is None:
         if cfg.auth_required:
             raise HTTPException(
@@ -129,13 +153,31 @@ def get_request_identity(request: Request) -> NormalizedIdentity | None:
 
 
 async def get_db(
-    session: AsyncSession = Depends(get_db_session),
+    request: Request,
 ) -> AsyncGenerator[AsyncSession, None]:
     """Dependency for providing database sessions."""
-    yield session
+    try:
+        async for session in get_db_session():
+            yield session
+    except RuntimeError as exc:
+        path = request.url.path
+        if "/tasks" in path:
+            detail = (
+                "Legacy SQLite task routes are disabled. "
+                "Use Neon-backed runtime APIs instead."
+            )
+        elif "/sessions" in path:
+            detail = (
+                "Legacy SQLite session routes are disabled. "
+                "Use WS session state and Neon-backed APIs instead."
+            )
+        else:
+            detail = str(exc)
+        raise HTTPException(status_code=410, detail=detail) from exc
 
 
 async def get_react_agent(
+    request: Request,
     config: ServerRuntimeConfig = Depends(get_server_config),
 ) -> AsyncIterator["RLMReActChatAgent"]:
     """Provide a configured RLMReActChatAgent for the request lifecycle."""
@@ -145,15 +187,15 @@ async def get_react_agent(
     from fleet_rlm.react.tools_rlm_delegate import build_rlm_delegate_tools
     import dspy
 
+    state = get_server_state(request)
+
     # Use the globally configured planner_lm if available, otherwise fetch a fresh one
-    planner_lm = getattr(server_state, "planner_lm", None) or get_planner_lm_from_env(
+    planner_lm = state.planner_lm or get_planner_lm_from_env(
         model_name=config.agent_model
     )
     if planner_lm is None:
         raise HTTPException(status_code=503, detail="Planner LM not configured")
-    delegate_lm = getattr(
-        server_state, "delegate_lm", None
-    ) or get_delegate_lm_from_env(
+    delegate_lm = state.delegate_lm or get_delegate_lm_from_env(
         model_name=config.agent_delegate_model,
         default_max_tokens=config.agent_delegate_max_tokens,
     )

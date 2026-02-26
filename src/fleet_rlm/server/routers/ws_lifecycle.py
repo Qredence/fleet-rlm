@@ -70,28 +70,6 @@ def _build_execution_event(
     )
 
 
-async def _emit_execution_event(
-    *,
-    event_type: ExecutionEventType,
-    run_id: str,
-    workspace_id: str,
-    user_id: str,
-    session_id: str,
-    step: ExecutionStep | None = None,
-) -> None:
-    from .ws_helpers import _get_execution_emitter
-
-    event = _build_execution_event(
-        event_type=event_type,
-        run_id=run_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        session_id=session_id,
-        step=step,
-    )
-    await _get_execution_emitter().emit(event)
-
-
 # ── Lifecycle manager ──────────────────────────────────────────────────
 
 

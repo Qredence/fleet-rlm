@@ -72,15 +72,5 @@ def websocket_auth_headers() -> dict[str, str]:
 
 @pytest.fixture
 def reset_server_state() -> Iterator[None]:
-    """Clear mutable server process state to keep tests independent."""
-    from fleet_rlm.server.deps import server_state
-
-    server_state.sessions.clear()
-    server_state.runtime_test_results.clear()
-    server_state.repository = None
-    server_state.db_manager = None
+    """Compatibility fixture for app-scoped server state tests."""
     yield
-    server_state.sessions.clear()
-    server_state.runtime_test_results.clear()
-    server_state.repository = None
-    server_state.db_manager = None

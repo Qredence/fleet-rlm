@@ -27,8 +27,6 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from fleet_rlm.server.deps import server_state
-
     planner = object()
     monkeypatch.setattr(
         "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
@@ -55,9 +53,10 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
         "SECRET_NAME",
         "VOLUME_NAME",
     }
-    assert server_state.config.secret_name == "ALT_SECRET"
-    assert server_state.config.volume_name == "alt-volume"
-    assert server_state.planner_lm is planner
+    state = local_client.app.state.server_state
+    assert state.config.secret_name == "ALT_SECRET"
+    assert state.config.volume_name == "alt-volume"
+    assert state.planner_lm is planner
     assert os.environ.get("SECRET_NAME") == "ALT_SECRET"
 
 
@@ -171,9 +170,7 @@ def test_runtime_status_uses_cached_results(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from fleet_rlm.server.deps import server_state
-
-    server_state.runtime_test_results = {
+    local_client.app.state.server_state.runtime_test_results = {
         "modal": {
             "kind": "modal",
             "ok": True,

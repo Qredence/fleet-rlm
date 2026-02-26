@@ -2,12 +2,10 @@
 
 from typing import Sequence
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server.deps import server_state
-from fleet_rlm.server.deps import get_config
-from fleet_rlm.server.deps import get_db
+from fleet_rlm.server.deps import get_config, get_db, get_server_state
 from fleet_rlm.server.schemas.core import SessionStateResponse, SessionStateSummary
 from fleet_rlm.server.schemas.session import (
     SessionCreate,
@@ -37,10 +35,11 @@ def require_legacy_sqlite_routes(
 
 
 @router.get("/state", response_model=SessionStateResponse)
-async def list_session_state() -> SessionStateResponse:
+async def list_session_state(request: Request) -> SessionStateResponse:
     """Return lightweight summaries of active/restored in-memory session state."""
+    state = get_server_state(request)
     summaries: list[SessionStateSummary] = []
-    for key, payload in server_state.sessions.items():
+    for key, payload in state.sessions.items():
         manifest = payload.get("manifest", {}) if isinstance(payload, dict) else {}
         session = payload.get("session", {}) if isinstance(payload, dict) else {}
         state = session.get("state", {}) if isinstance(session, dict) else {}

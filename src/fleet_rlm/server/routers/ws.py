@@ -29,7 +29,7 @@ from fleet_rlm.db.types import (
     RunCreateRequest,
 )
 
-from ..deps import server_state, session_key
+from ..deps import get_server_state_from_websocket, session_key
 from ..utils import parse_model_identity, resolve_sandbox_provider
 from ..execution_events import (
     ExecutionStep,
@@ -98,7 +98,8 @@ async def execution_stream(
     session_id: str | None = None,
 ):
     """Dedicated execution stream for Artifact Canvas consumers."""
-    identity = await _authenticate_websocket(websocket)
+    state = get_server_state_from_websocket(websocket)
+    identity = await _authenticate_websocket(websocket, state)
     if identity is None:
         return
 
@@ -117,7 +118,7 @@ async def execution_stream(
         )
         await websocket.close(code=1008)
         return
-    emitter = _get_execution_emitter()
+    emitter = _get_execution_emitter(state)
     await emitter.connect(websocket, subscription)
 
     try:
@@ -133,16 +134,17 @@ async def execution_stream(
 @router.websocket("/ws/chat")
 async def chat_streaming(websocket: WebSocket):
     """Streaming WebSocket endpoint with native DSPy async streaming."""
-    identity = await _authenticate_websocket(websocket)
+    state = get_server_state_from_websocket(websocket)
+    identity = await _authenticate_websocket(websocket, state)
     if identity is None:
         return
 
     await websocket.accept()
 
-    cfg = server_state.config
-    _planner_lm = server_state.planner_lm
-    _delegate_lm = server_state.delegate_lm
-    repository = server_state.repository
+    cfg = state.config
+    _planner_lm = state.planner_lm
+    _delegate_lm = state.delegate_lm
+    repository = state.repository
     persistence_required = cfg.database_required
     identity_rows = None
     if repository is not None:
@@ -225,7 +227,7 @@ async def chat_streaming(websocket: WebSocket):
             session_record: dict[str, Any] | None = None
             active_run_db_id: uuid.UUID | None = None
             lifecycle: ExecutionLifecycleManager | None = None
-            execution_emitter = _get_execution_emitter()
+            execution_emitter = _get_execution_emitter(state)
             ws_loop = asyncio.get_running_loop()
             last_loaded_docs_path: str | None = None
 
@@ -233,6 +235,7 @@ async def chat_streaming(websocket: WebSocket):
                 *, include_volume_save: bool = True, latest_user_message: str = ""
             ) -> None:
                 await persist_session_state(
+                    state=state,
                     agent=agent,
                     session_record=session_record,
                     active_manifest_path=active_manifest_path,
@@ -277,7 +280,7 @@ async def chat_streaming(websocket: WebSocket):
                         if session_record is not None:
                             await local_persist(include_volume_save=True)
 
-                        cached = server_state.sessions.get(key)
+                        cached = state.sessions.get(key)
                         if cached is None:
                             manifest = (
                                 await _volume_load_manifest(agent, manifest_path)
@@ -295,7 +298,7 @@ async def chat_streaming(websocket: WebSocket):
                                 "session": {"state": {}, "session_id": sess_id},
                             }
                         cached["session_id"] = sess_id
-                        server_state.sessions[key] = cached
+                        state.sessions[key] = cached
                         active_key = key
                         active_manifest_path = manifest_path
                         last_loaded_docs_path = None

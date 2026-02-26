@@ -1,5 +1,7 @@
 """Chat endpoint using native DSPy async."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from fleet_rlm import runners
@@ -15,9 +17,9 @@ router = APIRouter(tags=["chat"])
 async def chat(
     request: ChatRequest,
     config: ServerRuntimeConfig = Depends(get_config),
+    planner_lm: Any = Depends(get_planner_lm),
+    delegate_lm: Any = Depends(get_delegate_lm),
 ):
-    planner_lm = get_planner_lm()
-    delegate_lm = get_delegate_lm()
     if planner_lm is None:
         raise HTTPException(503, "Planner LM not configured")
 
