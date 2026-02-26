@@ -241,3 +241,31 @@ def session_key(workspace_id: str, user_id: str, session_id: str | None = None) 
     """Build a stable in-memory key for a stateful user/workspace session."""
     resolved_session_id = (session_id or "").strip() or "__default__"
     return f"{workspace_id}:{user_id}:{resolved_session_id}"
+
+
+def require_legacy_task_routes(
+    config: ServerRuntimeConfig = Depends(get_config),
+) -> None:
+    """Gate legacy SQLite task routes behind runtime config."""
+    if not config.enable_legacy_sqlite_routes:
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Legacy SQLite task routes are disabled. "
+                "Use Neon-backed runtime APIs instead."
+            ),
+        )
+
+
+def require_legacy_session_routes(
+    config: ServerRuntimeConfig = Depends(get_config),
+) -> None:
+    """Gate legacy SQLite session CRUD routes behind runtime config."""
+    if not config.enable_legacy_sqlite_routes:
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Legacy SQLite session routes are disabled. "
+                "Use WS session state and Neon-backed APIs instead."
+            ),
+        )

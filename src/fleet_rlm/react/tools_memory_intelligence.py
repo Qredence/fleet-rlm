@@ -1,16 +1,9 @@
-"""Memory intelligence tools for sandbox-based agent operations.
-
-These tools provide memory tree inspection, action intent classification,
-structure auditing, and clarification question generation.  They delegate
-to recursive sub-agents (true recursion) instead of single-shot RLM modules.
-
-Extracted from tools_sandbox.py as part of the modularization effort
-(Linear: QRE-273).
-"""
+"""Memory intelligence tools for sandbox-based agent operations."""
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .delegate_sub_agent import parse_json_from_response, spawn_delegate_sub_agent
@@ -22,20 +15,57 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class _MemoryIntelligenceContext:
+    """Shared context for memory intelligence tool operations."""
+
+    agent: "RLMReActChatAgent"
+
+
+def _safe_depth(value: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _default_depth(ctx: _MemoryIntelligenceContext, result: dict[str, Any]) -> int:
+    return int(result.get("depth", ctx.agent._current_depth + 1))
+
+
+def _default_history(ctx: _MemoryIntelligenceContext, result: dict[str, Any]) -> int:
+    return int(result.get("sub_agent_history", 0))
+
+
+def _reload_volume_best_effort(ctx: _MemoryIntelligenceContext, *, reason: str) -> None:
+    if ctx.agent.interpreter._volume:
+        try:
+            ctx.agent.interpreter.reload()
+        except Exception as exc:
+            logger.warning(
+                "Failed to reload interpreter volume for %s: %s", reason, exc
+            )
+
+
+def _resolve_memory_root(root_path: str) -> tuple[str | None, dict[str, Any] | None]:
+    try:
+        return (
+            _resolve_volume_path(
+                root_path,
+                default_root="/data/memory",
+                allowed_root="/data",
+            ),
+            None,
+        )
+    except ValueError as exc:
+        return None, {"status": "error", "error": str(exc)}
+
+
 def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
-    """Build memory intelligence tools bound to *agent*.
+    """Build memory intelligence tools bound to a shared context object."""
+    from dspy import Tool
 
-    These tools provide intelligent analysis of the Modal Volume memory
-    structure, including:
-    - Tree-style file system snapshots
-    - Action intent classification for memory operations
-    - Structure auditing and recommendations
-    - Migration planning
-    - Clarification question generation
-
-    Returns a list of ``dspy.Tool`` wrappers ready to be appended to the
-    main tool list built by ``build_tool_list``.
-    """
+    ctx = _MemoryIntelligenceContext(agent=agent)
 
     def memory_tree(
         root_path: str = "/data/memory",
@@ -43,27 +73,16 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
         include_hidden: bool = False,
     ) -> dict[str, Any]:
         """Return a bounded tree-style snapshot of the Modal volume memory path."""
-        try:
-            resolved_path = _resolve_volume_path(
-                root_path,
-                default_root="/data/memory",
-                allowed_root="/data",
-            )
-        except ValueError as exc:
-            return {"status": "error", "error": str(exc)}
+        resolved_path, error = _resolve_memory_root(root_path)
+        if error is not None:
+            return error
 
-        if agent.interpreter._volume:
-            try:
-                agent.interpreter.reload()
-            except Exception as exc:
-                logger.warning(
-                    "Failed to reload interpreter volume for memory_tree: %s", exc
-                )
+        _reload_volume_best_effort(ctx, reason="memory_tree")
 
         prompt = (
             "List the file tree of the Modal volume.\n\n"
             f"Root path: {resolved_path}\n"
-            f"Max depth: {max(0, int(max_depth))}\n"
+            f"Max depth: {_safe_depth(max_depth)}\n"
             f"Include hidden: {bool(include_hidden)}\n\n"
             "Provide your response with:\n"
             "- nodes: list of dicts with keys path, type, size_bytes, depth\n"
@@ -72,32 +91,25 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- truncated: boolean whether the listing was truncated"
         )
 
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
-
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
         response_text = result.get("assistant_response", "")
         structured = parse_json_from_response(response_text) or {}
-
         nodes = structured.get("nodes", [])
         if not isinstance(nodes, list):
             nodes = []
-
         total_files_raw = structured.get("total_files", 0)
         try:
-            total_files = int(total_files_raw)
+            total_files = max(0, int(total_files_raw))
         except (TypeError, ValueError):
             total_files = 0
-        total_files = max(0, total_files)
-
         total_dirs_raw = structured.get("total_dirs", 0)
         try:
-            total_dirs = int(total_dirs_raw)
+            total_dirs = max(0, int(total_dirs_raw))
         except (TypeError, ValueError):
             total_dirs = 0
-        total_dirs = max(0, total_dirs)
-
         truncated = bool(structured.get("truncated", False))
 
         return {
@@ -107,8 +119,8 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "total_files": total_files,
             "total_dirs": total_dirs,
             "truncated": truncated,
-            "depth": result.get("depth", agent._current_depth + 1),
-            "sub_agent_history": result.get("sub_agent_history", 0),
+            "depth": _default_depth(ctx, result),
+            "sub_agent_history": _default_history(ctx, result),
         }
 
     def memory_action_intent(
@@ -137,8 +149,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- rationale: explanation"
         )
 
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
-
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -150,8 +161,8 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "risk_level": "medium",
             "requires_confirmation": True,
             "rationale": result.get("assistant_response", ""),
-            "depth": result.get("depth", agent._current_depth + 1),
-            "sub_agent_history": result.get("sub_agent_history", 0),
+            "depth": _default_depth(ctx, result),
+            "sub_agent_history": _default_history(ctx, result),
         }
 
     def memory_structure_audit(
@@ -178,8 +189,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- priority_fixes: list of highest-priority fixes"
         )
 
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
-
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -190,8 +200,8 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "naming_conventions": [],
             "retention_rules": [],
             "priority_fixes": [],
-            "depth": result.get("depth", agent._current_depth + 1),
-            "sub_agent_history": result.get("sub_agent_history", 0),
+            "depth": _default_depth(ctx, result),
+            "sub_agent_history": _default_history(ctx, result),
         }
 
     def memory_structure_migration_plan(
@@ -218,8 +228,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- estimated_risk: one of low, medium, high"
         )
 
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
-
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -229,8 +238,8 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "rollback_steps": [],
             "verification_checks": [],
             "estimated_risk": "medium",
-            "depth": result.get("depth", agent._current_depth + 1),
-            "sub_agent_history": result.get("sub_agent_history", 0),
+            "depth": _default_depth(ctx, result),
+            "sub_agent_history": _default_history(ctx, result),
         }
 
     def clarification_questions(
@@ -242,7 +251,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
         tree_nodes = list(tree_payload.get("nodes", []) or [])[:20]
         available_context = (
             f"memory_root=/data/memory; nodes_sample={tree_nodes}; "
-            f"history_turns={agent.history_turns()}"
+            f"history_turns={ctx.agent.history_turns()}"
         )
         risk_norm = operation_risk.strip().lower()
         if risk_norm not in {"low", "medium", "high"}:
@@ -260,28 +269,20 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- proceed_without_answer: boolean (always false for high risk)"
         )
 
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
-
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
-        proceed_without_answer = False
-        if risk_norm == "high":
-            proceed_without_answer = False
-
+        proceed_without_answer = False if risk_norm == "high" else False
         return {
             "status": "ok",
             "questions": [],
             "blocking_unknowns": [],
             "safe_default": "",
             "proceed_without_answer": proceed_without_answer,
-            "depth": result.get("depth", agent._current_depth + 1),
-            "sub_agent_history": result.get("sub_agent_history", 0),
+            "depth": _default_depth(ctx, result),
+            "sub_agent_history": _default_history(ctx, result),
         }
-
-    # -- Assemble tool list --------------------------------------------------
-
-    from dspy import Tool
 
     return [
         Tool(

@@ -1,159 +1,79 @@
-# fleet-rlm Refactor Task Tracker
+# Wave 7 Simplification Task Tracker
 
 Last updated: 2026-02-26
-Primary plan: `PLANS.md` (root canonical execution plan)
-Source plan history: `plans/refactoring-plan.md`
-Compatibility mode: full breaking cleanup
-
-## Tracking Rules
-- Use this file as the live execution checklist.
-- Mark tasks complete only after the listed validation gate passes.
-- Update status rows and checklist boxes at the end of each work session.
-- Record any scope changes directly in `PLANS.md` and reflect them here.
+Execution plan: `PLANS.md` (`Wave 7 Simplification Plan`)
+Compatibility mode: internal-only refactor with strict contract lock
 
 ## Progress Snapshot
-| Phase | Status | Dependency | Target Outcome |
-|---|---|---|---|
-| Phase 0: Planning Docs | Done | None | Root planning/tracking docs in place |
-| Phase 1: Dead Code & Duplicate Removal | Done | None | Remove dead/shim files and consolidate schemas |
-| Phase 2: Config & Interpreter Dedup | Done | None | Shared startup/env preparation helpers |
-| Phase 3: Streaming Dedup | Done | None | Remove sync/async duplication in `streaming.py` |
-| Phase 4: Server State + DB Cleanup | Done | Phase 1 | App/request-bound server state, legacy SQLite isolation |
-| Phase 5: WebSocket Decomposition | Done | Phases 1 + 4 | Smaller `ws.py`, extracted streaming loop |
-| Phase 6: Stub Router Cleanup | Done | Phase 1 | Planned routes return explicit `501` |
+| Phase | Status | Outcome |
+|---|---|---|
+| Phase 0: Contract freeze | Done | Backend + WS + frontend contract tests added |
+| Phase 1: Server runtime decomposition | Done | WS/session/execution internals split into focused modules |
+| Phase 2: React maintainability | Done | Tool builders normalized, citations split, sync/async shaping deduped |
+| Phase 3: Stateful cleanup | Done | Shared result adapters + workspace ops extracted |
+| Phase 4: Root import ergonomics | Done | Lazy top-level exports added with compatibility preserved |
+| Phase 5: Docs + guardrails | Done | `TASKS.md`/`PLANS.md`/`CHANGELOG.md` updated |
 
-## Phase 0: Planning Docs
-- [x] Create root `PLANS.md` with required section order.
-- [x] Include full source plan from `plans/refactoring-plan.md` in verbatim section.
-- [x] Add decision rationale, expected outcomes, impact analysis, and assumptions.
-- [x] Create root `TASKS.md` for execution tracking.
-- [x] Keep `PLANS.md` and `TASKS.md` synchronized as implementation progresses.
+## Phase 0: Contract Freeze
+- [x] Add `tests/ui/server/test_api_contract_routes.py`
+- [x] Add `tests/ui/ws/test_ws_contract_envelopes.py`
+- [x] Add `src/frontend/src/lib/rlm-api/__tests__/backend-contract.test.ts`
+- [x] Lock route/path/envelope/runtime endpoint assertions
 
-## Phase 1: Dead Code & Duplicate Removal
-Goal: remove duplicate and compatibility-shim files; keep one canonical schema path.
+## Phase 1: Server Runtime Decomposition
+- [x] Add `src/fleet_rlm/server/routers/ws_message_loop.py`
+- [x] Add `src/fleet_rlm/server/routers/ws_turn.py`
+- [x] Add `src/fleet_rlm/server/routers/ws_repl_hook.py`
+- [x] Add `src/fleet_rlm/server/routers/ws_session_store.py`
+- [x] Add `src/fleet_rlm/server/execution_event_sanitizer.py`
+- [x] Add `src/fleet_rlm/server/execution_step_builder.py`
+- [x] Refactor `ws.py` to endpoint shell + helper orchestration
+- [x] Refactor `ws_streaming.py` to orchestrator + helper calls
+- [x] Refactor `ws_session.py` to persistence orchestrator
+- [x] Keep `/api/v1/ws/chat` + `/api/v1/ws/execution` envelopes unchanged
 
-### Work Breakdown
-- [x] Move `AuthMeResponse` into `src/fleet_rlm/server/schemas/core.py`.
-- [x] Export `AuthMeResponse` from `src/fleet_rlm/server/schemas/__init__.py`.
-- [x] Remove `src/fleet_rlm/server/schemas.py`.
-- [x] Remove `src/fleet_rlm/server/dependencies.py`.
-- [x] Remove shim routers:
-- [x] `src/fleet_rlm/server/routers/analytics.py`
-- [x] `src/fleet_rlm/server/routers/memory.py`
-- [x] `src/fleet_rlm/server/routers/search.py`
-- [x] `src/fleet_rlm/server/routers/sandbox.py`
-- [x] `src/fleet_rlm/server/routers/taxonomy.py`
-- [x] Confirm no stale imports remain.
+## Phase 2: React Maintainability
+- [x] Normalize `react/filesystem_tools.py` with shared context + top-level impl helpers
+- [x] Normalize `react/tools_sandbox.py` with shared context/path/volume helpers
+- [x] Normalize `react/tools_memory_intelligence.py` with shared context helpers
+- [x] Normalize `react/tools_rlm_delegate.py` with shared context helpers
+- [x] Add `react/streaming_citations.py` and move citation/source assembly
+- [x] Keep `iter_chat_turn_stream` / `aiter_chat_turn_stream` signatures and semantics
+- [x] Deduplicate `chat_turn` / `achat_turn` result shaping in `react/agent.py`
 
-### Validation Gate
-- [x] `uv run ruff check src/fleet_rlm/server`
-- [x] `uv run pytest tests/unit tests/ui -q -m "not live_llm and not benchmark"`
-- [x] `uv run python -c "from fleet_rlm.server.schemas import WSMessage, AuthMeResponse, ChatRequest"`
-- [x] `uv run python -c "from fleet_rlm.server.main import create_app"`
+## Phase 3: Stateful Cleanup
+- [x] Add `src/fleet_rlm/stateful/result_adapters.py`
+- [x] Add `src/fleet_rlm/stateful/workspace_ops.py`
+- [x] Refactor `stateful/sandbox.py` workspace methods to shared ops
+- [x] Refactor `stateful/agent.py` result parsing to shared adapters
+- [x] Preserve `StatefulSandboxManager` and `AgentStateManager` external methods
 
-## Phase 2: Config & Interpreter Deduplication
-Goal: extract shared helpers to remove duplicated env/bootstrap and sandbox startup logic.
+## Phase 4: Root Import Ergonomics
+- [x] Refactor `src/fleet_rlm/__init__.py` to lazy `__getattr__` exports
+- [x] Preserve `__all__` names and import compatibility for top-level symbols
+- [x] Preserve lazy compatibility modules (`scaffold`, `tools`)
 
-### Work Breakdown
-- [x] Extract `_prepare_env()` in `src/fleet_rlm/core/config.py`.
-- [x] Replace duplicated preamble in:
-- [x] `configure_planner_from_env()`
-- [x] `get_planner_lm_from_env()`
-- [x] `get_delegate_lm_from_env()`
-- [x] Extract shared sandbox kwargs/driver command helper in `src/fleet_rlm/core/interpreter.py`.
-- [x] Refactor `start()` and `astart()` to call shared helper.
+## Impacted Areas Checklist
+- [x] Server runtime internals (`main.py`, `deps.py`, `routers/ws*.py`, execution events)
+- [x] Legacy CRUD gate behavior (`tasks`/`sessions` legacy routes still 410 when disabled)
+- [x] Schema/import surfaces and WS orchestration imports
+- [x] UI/WS/server contract tests hardened and passing
+- [x] Planned routes explicit `501` behavior preserved
+- [x] Frontend API/WS wiring (`/api/v1/*`, `/api/v1/ws/chat`, `/api/v1/ws/execution`) preserved
 
-### Validation Gate
-- [x] `uv run ruff check src/fleet_rlm/core`
-- [x] `uv run pytest tests/unit/test_config.py tests/unit/test_driver_protocol.py -q`
-- [x] `uv run python -c "from fleet_rlm.core.config import get_planner_lm_from_env"`
-- [x] `uv run python -c "from fleet_rlm.core.interpreter import ModalInterpreter"`
-
-## Phase 3: Streaming Deduplication
-Goal: remove duplicated sync/async streaming control flow in `src/fleet_rlm/react/streaming.py`.
-
-### Work Breakdown
-- [x] Extract shared fallback-event helper.
-- [x] Extract shared stream-value processing helper.
-- [x] Extract shared final-response extraction helper.
-- [x] Keep public API unchanged (`iter_chat_turn_stream`, `aiter_chat_turn_stream`).
-- [x] Preserve event kinds/payload semantics.
-
-### Validation Gate
-- [x] `uv run ruff check src/fleet_rlm/react/streaming.py`
-- [x] `uv run ty check src/fleet_rlm/react/streaming.py`
-- [x] `uv run pytest tests/unit/test_react_streaming.py -q`
-- [x] `uv run pytest tests/unit/test_react_agent.py -q`
-
-## Phase 4: Server State & Database Cleanup
-Goal: move mutable server state to app/request lifecycle and isolate legacy SQLite path cleanly.
-
-### Work Breakdown
-- [x] Introduce request/app-state accessors in `src/fleet_rlm/server/deps.py`.
-- [x] Move `ServerState` instantiation and assignment into FastAPI lifespan in `src/fleet_rlm/server/main.py`.
-- [x] Remove direct module-global state mutation patterns where practical.
-- [x] Rename/relocate `src/fleet_rlm/server/database.py` to `src/fleet_rlm/server/legacy_compat.py`.
-- [x] Gate legacy SQLite usage through runtime config (`enable_legacy_sqlite_routes`).
-- [x] Update imports in `main.py`, `deps.py`, and dependent modules.
-- [x] Update tests that currently mutate `server_state` directly.
-
-### Validation Gate
-- [x] `uv run ruff check src/fleet_rlm/server`
-- [x] `uv run pytest tests/ui -q -m "not live_llm and not benchmark"`
-- [x] `uv run pytest tests/unit/test_ws_router_imports.py tests/unit/test_ws_chat_helpers.py -q`
-- [x] Verify local server health after startup.
-
-## Phase 5: WebSocket Handler Decomposition
-Goal: reduce `ws.py` complexity by extracting streaming turn execution into `ws_streaming.py`.
-
-### Work Breakdown
-- [x] Create `src/fleet_rlm/server/routers/ws_streaming.py`.
-- [x] Move streaming loop + REPL hook queue/worker handling from `ws.py`.
-- [x] Keep session switching, message dispatch, and top-level WS control in `ws.py`.
-- [x] Ensure lifecycle and persistence behavior are preserved.
-
-### Validation Gate
-- [x] `uv run ruff check src/fleet_rlm/server/routers`
-- [x] `uv run pytest tests/ui/ws -q -m "not live_llm"`
-- [x] `uv run pytest tests/unit/test_ws_chat_helpers.py -q`
-
-## Phase 6: Stub Router Cleanup
-Goal: replace placeholder success responses with explicit not-implemented responses.
-
-### Work Breakdown
-- [x] Update `src/fleet_rlm/server/routers/planned.py` stubs to return `501` with clear details.
-- [x] Ensure response payload shape is consistent and explicit.
-- [x] Update/extend tests for changed HTTP behavior.
-
-### Validation Gate
-- [x] `uv run pytest tests/ui/server -q -m "not live_llm"`
-
-## Cross-Cutting Quality Gate (Before Merge)
-- [x] `uv run ruff check src tests`
+## Validation Evidence (Completed)
+- [x] `uv run ruff check src/fleet_rlm/react src/fleet_rlm/stateful src/fleet_rlm/server src/fleet_rlm/__init__.py tests/ui/server/test_api_contract_routes.py tests/ui/ws/test_ws_contract_envelopes.py`
 - [x] `uv run ruff format --check src tests`
 - [x] `uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"`
+- [x] `uv run pytest tests/unit/test_react_streaming.py tests/unit/test_react_agent.py tests/unit/test_tools_sandbox.py tests/unit/test_react_tools.py -q`
+- [x] `uv run pytest tests/unit/test_stateful_sandbox.py tests/unit/test_agent_state.py -q`
+- [x] `uv run pytest tests/ui/server/test_api_contract_routes.py tests/ui/ws/test_ws_contract_envelopes.py tests/unit/test_ws_router_imports.py tests/unit/test_ws_chat_helpers.py -q`
 - [x] `uv run pytest -q -m "not live_llm and not benchmark"`
+- [x] `cd src/frontend && bun x vitest run src/lib/rlm-api/__tests__/backend-contract.test.ts`
+- [x] `cd src/frontend && bun run check`
 - [x] `uv run python scripts/check_release_hygiene.py`
 - [x] `uv run python scripts/check_release_metadata.py`
 
-## Impacted Areas Checklist
-- [x] Server runtime internals updated safely (`main.py`, `deps.py`, `routers/ws*.py`, `routers/runtime.py`, `routers/health.py`, `routers/sessions.py`).
-- [x] Legacy CRUD SQLite paths verified under gating.
-- [x] Schema export consolidation completed.
-- [x] UI/WS/server tests migrated off brittle global-state assumptions.
-- [x] Planned routes now clearly signal `501` behavior.
-- [x] Breaking compatibility changes documented in release notes/changelog.
-
-Evidence:
-- Runtime internals + state lifecycle: `refactor: migrate server state to app lifecycle and isolate legacy sqlite` (`6cdcf4e`).
-- WS decomposition + planned-route behavior: `refactor: extract websocket streaming loop and harden planned stubs` (`26319da`).
-- Validation evidence: full quality gate and phase gates passed on 2026-02-26.
-
-## Session Log
-- 2026-02-26: Created root `PLANS.md` and root `TASKS.md` scaffolding for phased execution tracking.
-- 2026-02-26: Completed Phase 1 (schema consolidation + compatibility shim deletions) and passed Phase 1 validation gate.
-- 2026-02-26: Completed Phase 2 (config/interpreter deduplication) and passed Phase 2 validation gate.
-- 2026-02-26: Completed Phase 3 (streaming helper extraction and deduplication) and passed Phase 3 validation gate.
-- 2026-02-26: Completed Phase 4 (app/request-bound server state + legacy SQLite isolation) and passed Phase 4 validation gate.
-- 2026-02-26: Completed Phase 5 (WebSocket streaming loop extraction to `ws_streaming.py`) and passed Phase 5 validation gate.
-- 2026-02-26: Completed Phase 6 (planned router 501 behavior + UI tests) and passed Phase 6 validation gate.
+## Notes
+- `bun run test` is not a valid script in this frontend workspace; `bun run check` already runs type-check, lint robustness, unit tests, build, and Playwright smoke tests.
+- Runtime route tests emit known Modal async warnings from `runtime.py` smoke probes; behavior remains unchanged in this wave.

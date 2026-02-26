@@ -303,39 +303,45 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         # Invoke the DSPy module call path (`self(...)`) instead of calling
         # `forward(...)` directly to preserve DSPy module semantics.
         prediction = self(user_request=message)
-        assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
-        guardrail_warnings = list(getattr(prediction, "guardrail_warnings", []) or [])
+        assistant_response, trajectory = self._prediction_response_and_trajectory(
+            prediction
+        )
+        guardrail_warnings = self._prediction_guardrail_warnings(prediction)
         self._append_history(message, assistant_response)
-
-        return {
-            "assistant_response": assistant_response,
-            "trajectory": getattr(prediction, "trajectory", {}),
-            "history_turns": self.history_turns(),
-            "core_memory_snapshot": self.get_core_memory_snapshot(),
-            "guardrail_warnings": guardrail_warnings,
-            "effective_max_iters": int(
-                getattr(
-                    prediction, "effective_max_iters", self._current_effective_max_iters
-                )
-            ),
-            "delegate_calls_turn": int(
-                getattr(prediction, "delegate_calls_turn", self._delegate_calls_turn)
-            ),
-            "delegate_fallback_count_turn": int(
-                getattr(
-                    prediction,
-                    "delegate_fallback_count_turn",
-                    self._delegate_fallback_count_turn,
-                )
-            ),
-            "delegate_result_truncated_count_turn": int(
-                getattr(
-                    prediction,
-                    "delegate_result_truncated_count_turn",
-                    self._delegate_result_truncated_count_turn,
-                )
-            ),
-        }
+        return self._build_turn_result(
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+            guardrail_warnings=guardrail_warnings,
+            include_core_memory_snapshot=True,
+            turn_metrics={
+                "effective_max_iters": int(
+                    getattr(
+                        prediction,
+                        "effective_max_iters",
+                        self._current_effective_max_iters,
+                    )
+                ),
+                "delegate_calls_turn": int(
+                    getattr(
+                        prediction, "delegate_calls_turn", self._delegate_calls_turn
+                    )
+                ),
+                "delegate_fallback_count_turn": int(
+                    getattr(
+                        prediction,
+                        "delegate_fallback_count_turn",
+                        self._delegate_fallback_count_turn,
+                    )
+                ),
+                "delegate_result_truncated_count_turn": int(
+                    getattr(
+                        prediction,
+                        "delegate_result_truncated_count_turn",
+                        self._delegate_result_truncated_count_turn,
+                    )
+                ),
+            },
+        )
 
     def iter_chat_turn_stream(
         self,
@@ -407,25 +413,22 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             core_memory=self.fmt_core_memory(),
             max_iters=effective_max_iters,
         )
-        assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
-        trajectory = getattr(prediction, "trajectory", {})
+        assistant_response, trajectory = self._prediction_response_and_trajectory(
+            prediction
+        )
         self._finalize_turn(trajectory)
         assistant_response, warnings = self._validate_assistant_response(
             assistant_response=assistant_response,
             trajectory=trajectory,
         )
         self._append_history(message, assistant_response)
-
-        return {
-            "assistant_response": assistant_response,
-            "trajectory": trajectory,
-            "history_turns": self.history_turns(),
-            "guardrail_warnings": warnings,
-            "effective_max_iters": self._current_effective_max_iters,
-            "delegate_calls_turn": self._delegate_calls_turn,
-            "delegate_fallback_count_turn": self._delegate_fallback_count_turn,
-            "delegate_result_truncated_count_turn": self._delegate_result_truncated_count_turn,
-        }
+        return self._build_turn_result(
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+            guardrail_warnings=warnings,
+            include_core_memory_snapshot=False,
+            turn_metrics=self._turn_metrics(),
+        )
 
     async def aiter_chat_turn_stream(
         self,
@@ -553,6 +556,58 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
                 self._delegate_result_truncated_count_turn
             ),
         }
+
+    @staticmethod
+    def _prediction_response_and_trajectory(
+        prediction: dspy.Prediction,
+    ) -> tuple[str, dict[str, Any]]:
+        assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
+        trajectory = getattr(prediction, "trajectory", {})
+        if not isinstance(trajectory, dict):
+            trajectory = {}
+        return assistant_response, trajectory
+
+    @staticmethod
+    def _prediction_guardrail_warnings(prediction: dspy.Prediction) -> list[str]:
+        return list(getattr(prediction, "guardrail_warnings", []) or [])
+
+    def _build_turn_result(
+        self,
+        *,
+        assistant_response: str,
+        trajectory: dict[str, Any],
+        guardrail_warnings: list[str],
+        include_core_memory_snapshot: bool,
+        turn_metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "assistant_response": assistant_response,
+            "trajectory": trajectory,
+            "history_turns": self.history_turns(),
+            "guardrail_warnings": guardrail_warnings,
+            "effective_max_iters": int(
+                turn_metrics.get(
+                    "effective_max_iters", self._current_effective_max_iters
+                )
+            ),
+            "delegate_calls_turn": int(
+                turn_metrics.get("delegate_calls_turn", self._delegate_calls_turn)
+            ),
+            "delegate_fallback_count_turn": int(
+                turn_metrics.get(
+                    "delegate_fallback_count_turn", self._delegate_fallback_count_turn
+                )
+            ),
+            "delegate_result_truncated_count_turn": int(
+                turn_metrics.get(
+                    "delegate_result_truncated_count_turn",
+                    self._delegate_result_truncated_count_turn,
+                )
+            ),
+        }
+        if include_core_memory_snapshot:
+            payload["core_memory_snapshot"] = self.get_core_memory_snapshot()
+        return payload
 
     def _prepare_turn(self, user_request: str) -> int:
         """Initialize per-turn counters and compute effective iteration budget."""

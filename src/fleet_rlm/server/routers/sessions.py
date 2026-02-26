@@ -4,8 +4,11 @@ from typing import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server.deps import get_config, get_db, get_server_state
+from fleet_rlm.server.deps import (
+    get_db,
+    get_server_state,
+    require_legacy_session_routes,
+)
 from fleet_rlm.server.schemas.core import SessionStateResponse, SessionStateSummary
 from fleet_rlm.server.schemas.session import (
     SessionCreate,
@@ -19,19 +22,6 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 def get_session_service(db=Depends(get_db)) -> SessionService:
     return SessionService(db)
-
-
-def require_legacy_sqlite_routes(
-    config: ServerRuntimeConfig = Depends(get_config),
-) -> None:
-    if not config.enable_legacy_sqlite_routes:
-        raise HTTPException(
-            status_code=410,
-            detail=(
-                "Legacy SQLite session routes are disabled. "
-                "Use WS session state and Neon-backed APIs instead."
-            ),
-        )
 
 
 @router.get("/state", response_model=SessionStateResponse)
@@ -71,7 +61,7 @@ async def list_session_state(request: Request) -> SessionStateResponse:
 @router.post("", response_model=SessionResponse, status_code=201)
 async def create_session(
     session: SessionCreate,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_session_routes),
     service: SessionService = Depends(get_session_service),
 ):
     """Create a new session."""
@@ -82,7 +72,7 @@ async def create_session(
 async def list_sessions(
     skip: int = 0,
     limit: int = 100,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_session_routes),
     service: SessionService = Depends(get_session_service),
 ):
     """List all sessions."""
@@ -92,7 +82,7 @@ async def list_sessions(
 @router.get("/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: str,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_session_routes),
     service: SessionService = Depends(get_session_service),
 ):
     """Get a specific session by ID."""
@@ -106,7 +96,7 @@ async def get_session(
 async def update_session(
     session_id: str,
     update_data: SessionUpdate,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_session_routes),
     service: SessionService = Depends(get_session_service),
 ):
     """Update a specific session."""
@@ -119,7 +109,7 @@ async def update_session(
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(
     session_id: str,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_session_routes),
     service: SessionService = Depends(get_session_service),
 ):
     """Delete a specific session."""

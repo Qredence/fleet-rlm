@@ -4,9 +4,7 @@ from typing import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server.deps import get_config
-from fleet_rlm.server.deps import get_db
+from fleet_rlm.server.deps import get_db, require_legacy_task_routes
 from fleet_rlm.server.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 from fleet_rlm.server.services.task_service import TaskService
 
@@ -17,23 +15,10 @@ def get_task_service(db=Depends(get_db)) -> TaskService:
     return TaskService(db)
 
 
-def require_legacy_sqlite_routes(
-    config: ServerRuntimeConfig = Depends(get_config),
-) -> None:
-    if not config.enable_legacy_sqlite_routes:
-        raise HTTPException(
-            status_code=410,
-            detail=(
-                "Legacy SQLite task routes are disabled. "
-                "Use Neon-backed runtime APIs instead."
-            ),
-        )
-
-
 @router.post("", response_model=TaskResponse, status_code=201)
 async def create_task(
     task: TaskCreate,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_task_routes),
     service: TaskService = Depends(get_task_service),
 ):
     """Create a new task."""
@@ -44,7 +29,7 @@ async def create_task(
 async def list_tasks(
     skip: int = 0,
     limit: int = 100,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_task_routes),
     service: TaskService = Depends(get_task_service),
 ):
     """List all tasks."""
@@ -54,7 +39,7 @@ async def list_tasks(
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: str,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_task_routes),
     service: TaskService = Depends(get_task_service),
 ):
     """Get a specific task by ID."""
@@ -68,7 +53,7 @@ async def get_task(
 async def update_task(
     task_id: str,
     update_data: TaskUpdate,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_task_routes),
     service: TaskService = Depends(get_task_service),
 ):
     """Update a specific task."""
@@ -81,7 +66,7 @@ async def update_task(
 @router.delete("/{task_id}", status_code=204)
 async def delete_task(
     task_id: str,
-    _: None = Depends(require_legacy_sqlite_routes),
+    _: None = Depends(require_legacy_task_routes),
     service: TaskService = Depends(get_task_service),
 ):
     """Delete a specific task."""

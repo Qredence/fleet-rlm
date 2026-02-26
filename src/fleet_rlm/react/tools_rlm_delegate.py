@@ -11,6 +11,7 @@ Extracted from tools_sandbox.py as part of the modularization effort.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .delegate_sub_agent import parse_json_from_response, spawn_delegate_sub_agent
@@ -28,8 +29,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class _DelegateToolContext:
+    """Shared context for RLM delegate tool callables."""
+
+    agent: "RLMReActChatAgent"
+
+
 def _handle_sub_agent_response(
-    agent: "RLMReActChatAgent",
+    ctx: _DelegateToolContext,
     result: dict[str, Any],
     default_response: dict[str, Any],
     fallback_fields: list[str],
@@ -56,7 +64,7 @@ def _handle_sub_agent_response(
     if doc_len is not None:
         response["doc_chars"] = doc_len
 
-    response["depth"] = result.get("depth", getattr(agent, "_current_depth", 0) + 1)
+    response["depth"] = result.get("depth", getattr(ctx.agent, "_current_depth", 0) + 1)
     response["sub_agent_history"] = result.get("sub_agent_history", 0)
 
     if include_trajectory:
@@ -71,6 +79,7 @@ def _handle_sub_agent_response(
 
 def build_rlm_delegate_tools(agent: "RLMReActChatAgent") -> list[Any]:
     """Build RLM delegation tools bound to *agent*."""
+    ctx = _DelegateToolContext(agent=agent)
 
     def parallel_semantic_map(
         query: str,
@@ -79,7 +88,7 @@ def build_rlm_delegate_tools(agent: "RLMReActChatAgent") -> list[Any]:
         buffer_name: str = "findings",
     ) -> dict[str, Any]:
         """Run parallel semantic analysis over chunks via llm_query_batched."""
-        text = resolve_document(agent, "active")
+        text = resolve_document(ctx.agent, "active")
         chunks = chunk_text(
             text, chunk_strategy, size=80_000, overlap=1_000, pattern=""
         )
@@ -106,7 +115,7 @@ SUBMIT(
 )
 """
         return execute_submit(
-            agent,
+            ctx.agent,
             code,
             variables={
                 "prompts": prompts,
@@ -119,8 +128,8 @@ SUBMIT(
         query: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
         """Analyze a long document via a recursive sub-agent."""
-        agent.start()
-        document = resolve_document(agent, alias)
+        ctx.agent.start()
+        document = resolve_document(ctx.agent, alias)
         prompt = (
             f"You have a document loaded as 'active'. Analyze it thoroughly.\n\n"
             f"Query: {query}\n\n"
@@ -130,11 +139,11 @@ SUBMIT(
             "- sections_examined: number of sections you examined"
         )
         result = spawn_delegate_sub_agent(
-            agent, prompt=prompt, document=document, document_alias=alias
+            ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {"findings": [], "answer": "", "sections_examined": 0}
         return _handle_sub_agent_response(
-            agent,
+            ctx,
             result,
             default_resp,
             ["findings", "answer"],
@@ -146,8 +155,8 @@ SUBMIT(
         focus: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
         """Summarize a long document via a recursive sub-agent."""
-        agent.start()
-        document = resolve_document(agent, alias)
+        ctx.agent.start()
+        document = resolve_document(ctx.agent, alias)
         prompt = (
             f"You have a document loaded as 'active'. Summarize it.\n\n"
             f"Focus: {focus}\n\n"
@@ -157,11 +166,11 @@ SUBMIT(
             "- coverage_pct: estimated percentage of document covered (integer)"
         )
         result = spawn_delegate_sub_agent(
-            agent, prompt=prompt, document=document, document_alias=alias
+            ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {"summary": "", "key_points": [], "coverage_pct": 0}
         return _handle_sub_agent_response(
-            agent,
+            ctx,
             result,
             default_resp,
             ["summary", "key_points"],
@@ -173,8 +182,8 @@ SUBMIT(
         query: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
         """Extract structured patterns from log text via a recursive sub-agent."""
-        agent.start()
-        document = resolve_document(agent, alias)
+        ctx.agent.start()
+        document = resolve_document(ctx.agent, alias)
         prompt = (
             f"You have log text loaded as 'active'. Extract structured patterns.\n\n"
             f"Query: {query}\n\n"
@@ -184,11 +193,11 @@ SUBMIT(
             "- time_range: the time range covered"
         )
         result = spawn_delegate_sub_agent(
-            agent, prompt=prompt, document=document, document_alias=alias
+            ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {"matches": [], "patterns": [], "time_range": "unknown"}
         return _handle_sub_agent_response(
-            agent,
+            ctx,
             result,
             default_resp,
             ["matches", "patterns"],
@@ -209,8 +218,8 @@ SUBMIT(
         except (TypeError, ValueError):
             return {"status": "error", "error": "Invalid max_chunks value."}
 
-        agent.start()
-        document = resolve_document(agent, alias)
+        ctx.agent.start()
+        document = resolve_document(ctx.agent, alias)
         chunks = chunk_text(
             document, chunk_strategy, size=80_000, overlap=1_000, pattern=""
         )
@@ -230,7 +239,7 @@ SUBMIT(
             "- confidence: integer 0-100\n- coverage_notes: notes on evidence coverage"
         )
 
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -255,7 +264,7 @@ SUBMIT(
             ),
             "coverage_notes": str(structured.get("coverage_notes", "")),
             "doc_chars": len(document),
-            "depth": result.get("depth", getattr(agent, "_current_depth", 0) + 1),
+            "depth": result.get("depth", getattr(ctx.agent, "_current_depth", 0) + 1),
             "sub_agent_history": result.get("sub_agent_history", 0),
             **build_trajectory_payload(
                 {"trajectory": result.get("trajectory", {})},
@@ -270,8 +279,8 @@ SUBMIT(
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
         """Triage logs into severity, causes, impact, and actions via a recursive sub-agent."""
-        agent.start()
-        document = resolve_document(agent, alias)
+        ctx.agent.start()
+        document = resolve_document(ctx.agent, alias)
         prompt = (
             f"You have incident logs loaded as 'active'. Triage them.\n\n"
             f"Query: {query}\nService context: {service_context or 'not provided'}\n\n"
@@ -280,7 +289,7 @@ SUBMIT(
             "- recommended_actions: list of actions\n- time_range: the time range covered"
         )
         result = spawn_delegate_sub_agent(
-            agent, prompt=prompt, document=document, document_alias=alias
+            ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {
             "severity": "low",
@@ -290,7 +299,7 @@ SUBMIT(
             "time_range": "unknown",
         }
         return _handle_sub_agent_response(
-            agent,
+            ctx,
             result,
             default_resp,
             ["probable_root_causes"],
@@ -305,14 +314,14 @@ SUBMIT(
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
         """Build a structured code-change plan via a recursive sub-agent."""
-        agent.start()
+        ctx.agent.start()
         prompt = (
             f"Plan a code change.\n\nTask: {task}\nRepo context: {repo_context or 'None'}\n"
             f"Constraints: {constraints or 'Keep changes minimal.'}\n\n"
             "Provide your response with:\n- plan_steps: ordered list of implementation steps\n"
             "- files_to_touch: list of files to modify\n- validation_commands: list of commands\n- risks: list of risks"
         )
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         default_resp = {
             "plan_steps": [],
             "files_to_touch": [],
@@ -320,42 +329,42 @@ SUBMIT(
             "risks": [],
         }
         return _handle_sub_agent_response(
-            agent, result, default_resp, ["plan_steps"], include_trajectory
+            ctx, result, default_resp, ["plan_steps"], include_trajectory
         )
 
     def propose_core_memory_update(include_trajectory: bool = True) -> dict[str, Any]:
         """Propose safe updates to core memory via a recursive sub-agent."""
-        agent.start()
+        ctx.agent.start()
         turn_lines = [
             f"Turn {i}\n{turn}"
-            for i, turn in enumerate(agent.history_messages()[-20:], 1)
+            for i, turn in enumerate(ctx.agent.history_messages()[-20:], 1)
         ]
         turn_history = "\n\n".join(turn_lines) or "No recent turns."
 
         prompt = (
             "Review the conversation history and current core memory, then propose updates.\n\n"
-            f"Turn history:\n{turn_history}\n\nCurrent core memory:\n{agent.fmt_core_memory()}\n\n"
+            f"Turn history:\n{turn_history}\n\nCurrent core memory:\n{ctx.agent.fmt_core_memory()}\n\n"
             "Provide your response with:\n- keep: list of memory blocks to keep unchanged\n"
             "- update: list of memory blocks to update\n- remove: list of memory blocks to remove\n"
             "- rationale: explanation for the proposed changes"
         )
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         default_resp = {"keep": [], "update": [], "remove": [], "rationale": ""}
         return _handle_sub_agent_response(
-            agent, result, default_resp, ["rationale", "update"], include_trajectory
+            ctx, result, default_resp, ["rationale", "update"], include_trajectory
         )
 
     def rlm_query(query: str, context: str = "") -> dict[str, Any]:
         """Delegate a complex sub-task to a recursive sub-agent."""
         prompt = f"Context:\n{context}\n\nTask: {query}" if context else query
-        result = spawn_delegate_sub_agent(agent, prompt=prompt)
+        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
         return {
             "status": "ok",
             "answer": result.get("assistant_response", ""),
             "sub_agent_history": result.get("sub_agent_history", 0),
-            "depth": result.get("depth", getattr(agent, "_current_depth", 0) + 1),
+            "depth": result.get("depth", getattr(ctx.agent, "_current_depth", 0) + 1),
         }
 
     from dspy import Tool

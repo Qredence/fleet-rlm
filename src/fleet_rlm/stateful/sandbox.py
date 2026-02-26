@@ -17,9 +17,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 import dspy
-from dspy.primitives.code_interpreter import FinalOutput
 
 from ..core.interpreter import ModalInterpreter
+from .result_adapters import final_output_value
+from .workspace_ops import (
+    WorkspaceOpsContext,
+    delete_workspace_file,
+    list_workspace_files,
+    load_workspace_file,
+    save_workspace_file,
+)
 
 
 @dataclass
@@ -165,6 +172,12 @@ print(f"Workspace ready at {self.workspace_path}")
 """
         self.interpreter.execute(code)
 
+    def _workspace_ops_context(self) -> WorkspaceOpsContext:
+        return WorkspaceOpsContext(
+            interpreter=self.interpreter,
+            workspace_path=self.workspace_path,
+        )
+
     def execute_with_rlm(
         self, code_task: str, context: dict[str, Any] | None = None
     ) -> SandboxResult:
@@ -226,10 +239,8 @@ print(f"Workspace ready at {self.workspace_path}")
             )
 
             # Extract output from FinalOutput or string result
-            if isinstance(result, FinalOutput):
-                output = result.output
-            else:
-                output = str(result)
+            final_payload = final_output_value(result)
+            output = final_payload if final_payload is not None else str(result)
 
             # CRITICAL: Truncation Guard to prevent Context Rot
             MAX_CHARS = 2000
@@ -290,56 +301,11 @@ print(f"Workspace ready at {self.workspace_path}")
             Dict with status and file path information.
         """
         self.start()
-        file_path = f"{self.workspace_path}/{filename}"
-
-        code = f"""
-import os
-try:
-    # Ensure workspace directory exists
-    os.makedirs("{self.workspace_path}", exist_ok=True)
-
-    # Write content to file
-    with open("{file_path}", "w") as f:
-        f.write(content)
-
-    SUBMIT(status="ok", path="{file_path}", chars=len(content))
-except Exception as e:
-    SUBMIT(status="error", error=str(e))
-"""
-        try:
-            result = self.interpreter.execute(code, variables={"content": content})
-            if isinstance(result, FinalOutput):
-                output = result.output
-                if isinstance(output, dict):
-                    if output.get("status") == "ok":
-                        return {
-                            "status": "ok",
-                            "filename": filename,
-                            "path": file_path,
-                            "chars": int(output.get("chars", len(content))),
-                        }
-                    return {
-                        "status": "error",
-                        "filename": filename,
-                        "error": str(output.get("error", "Unknown error")),
-                    }
-            if isinstance(result, str) and "[Error]" in result:
-                return {
-                    "status": "error",
-                    "filename": filename,
-                    "error": result.strip(),
-                }
-            return {
-                "status": "error",
-                "filename": filename,
-                "error": "Unexpected result format",
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "filename": filename,
-                "error": str(e),
-            }
+        return save_workspace_file(
+            ctx=self._workspace_ops_context(),
+            filename=filename,
+            content=content,
+        )
 
     def load_from_workspace(self, filename: str) -> dict[str, Any]:
         """Load content from a file in the workspace.
@@ -351,47 +317,10 @@ except Exception as e:
             Dict with status, content, and metadata.
         """
         self.start()
-        file_path = f"{self.workspace_path}/{filename}"
-
-        code = f"""
-try:
-    with open("{file_path}", "r") as f:
-        content = f.read()
-    SUBMIT(status="ok", content=content, chars=len(content))
-except FileNotFoundError:
-    SUBMIT(status="error", error=f"File not found: {file_path}")
-except Exception as e:
-    SUBMIT(status="error", error=str(e))
-"""
-        try:
-            result = self.interpreter.execute(code)
-            if isinstance(result, FinalOutput):
-                output = result.output
-                if isinstance(output, dict):
-                    if output.get("status") == "ok":
-                        return {
-                            "status": "ok",
-                            "filename": filename,
-                            "content": output.get("content", ""),
-                            "chars": output.get("chars", 0),
-                        }
-                    else:
-                        return {
-                            "status": "error",
-                            "filename": filename,
-                            "error": output.get("error", "Unknown error"),
-                        }
-            return {
-                "status": "error",
-                "filename": filename,
-                "error": "Unexpected result format",
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "filename": filename,
-                "error": str(e),
-            }
+        return load_workspace_file(
+            ctx=self._workspace_ops_context(),
+            filename=filename,
+        )
 
     def list_workspace_files(self) -> list[str]:
         """List all files in the workspace.
@@ -400,30 +329,7 @@ except Exception as e:
             List of filenames in the workspace.
         """
         self.start()
-
-        code = f"""
-import os
-
-files = []
-try:
-    if os.path.isdir("{self.workspace_path}"):
-        files = os.listdir("{self.workspace_path}")
-    else:
-        files = []
-except Exception:
-    files = []
-
-SUBMIT(files=files, count=len(files))
-"""
-        try:
-            result = self.interpreter.execute(code)
-            if isinstance(result, FinalOutput):
-                output = result.output
-                if isinstance(output, dict):
-                    return output.get("files", [])
-            return []
-        except Exception:
-            return []
+        return list_workspace_files(ctx=self._workspace_ops_context())
 
     def delete_workspace_file(self, filename: str) -> dict[str, Any]:
         """Delete a file from the workspace.
@@ -435,42 +341,10 @@ SUBMIT(files=files, count=len(files))
             Dict with status and file path information.
         """
         self.start()
-        file_path = f"{self.workspace_path}/{filename}"
-
-        code = f"""
-import os
-
-try:
-    if os.path.exists("{file_path}"):
-        os.remove("{file_path}")
-        SUBMIT(status="ok", message=f"Deleted {file_path}")
-    else:
-        SUBMIT(status="error", error=f"File not found: {file_path}")
-except Exception as e:
-    SUBMIT(status="error", error=str(e))
-"""
-        try:
-            result = self.interpreter.execute(code)
-            if isinstance(result, FinalOutput):
-                output = result.output
-                if isinstance(output, dict):
-                    return {
-                        "status": output.get("status", "error"),
-                        "filename": filename,
-                        "message": output.get("message", ""),
-                        "error": output.get("error", ""),
-                    }
-            return {
-                "status": "error",
-                "filename": filename,
-                "error": "Unexpected result format",
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "filename": filename,
-                "error": str(e),
-            }
+        return delete_workspace_file(
+            ctx=self._workspace_ops_context(),
+            filename=filename,
+        )
 
     def get_session_history(self) -> list[dict[str, Any]]:
         """Get the execution history for this session.
