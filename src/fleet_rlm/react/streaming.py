@@ -208,7 +208,7 @@ def _extract_citations_from_output(value: Any) -> list[dict[str, Any]]:
             return []
         try:
             parsed = json.loads(text)
-        except Exception:
+        except json.JSONDecodeError:
             return []
         return _extract_citations_from_output(parsed)
 
