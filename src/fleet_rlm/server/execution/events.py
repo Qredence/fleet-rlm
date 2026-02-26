@@ -132,7 +132,9 @@ class ExecutionEventEmitter:
                 # Normal outcome: task was cancelled during disconnect teardown.
                 pass
             except Exception:
-                pass
+                logger.exception(
+                    "Unexpected error while awaiting sender_task during disconnect teardown",
+                )
 
     async def _sender_loop(self, websocket: WebSocket) -> None:
         state: ExecutionEventEmitter._ConnectionState | None = None
