@@ -1,6 +1,6 @@
 # Source Layout (`src/fleet_rlm`)
 
-This map reflects the current package layout in `v0.4.8`.
+This map reflects the current package layout.
 
 ## Top-Level Package
 
@@ -24,14 +24,14 @@ This map reflects the current package layout in `v0.4.8`.
 - `src/fleet_rlm/server/deps.py`: shared dependencies and server state
 - `src/fleet_rlm/server/routers/`: HTTP + WebSocket routers
 - `src/fleet_rlm/server/schemas/`: Pydantic schemas
-- `src/fleet_rlm/server/services/`: service layer for legacy SQLite CRUD routes
+- `src/fleet_rlm/server/services/`: legacy SQLite compatibility service layer
 - `src/fleet_rlm/server/auth/`: auth abstraction (`dev` + scaffolded `entra`)
 
 ## Data and Persistence
 
 - `src/fleet_rlm/db/`: Neon/Postgres engine, models, repository
-- `src/fleet_rlm/models/`: canonical streaming/event models (`streaming.py`, package exports)
-- `src/fleet_rlm/server/execution/`: execution observability package (`events.py`, `step_builder.py`, `sanitizer.py`)
+- `src/fleet_rlm/models/`: canonical streaming/event models
+- `src/fleet_rlm/server/execution/`: execution observability package
 - `migrations/`: Alembic migrations for Neon schema
 
 ## Optional Service Surface
@@ -54,5 +54,4 @@ Packaged templates installed by `fleet-rlm init`:
 
 ## Notes
 
-- Historical references to a `bridge/` runtime are archival and not part of the active layout.
-- The canonical API contract remains `openapi.yaml` at repository root.
+The canonical API contract remains `openapi.yaml` at repository root.

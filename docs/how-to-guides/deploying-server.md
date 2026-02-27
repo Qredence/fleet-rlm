@@ -1,6 +1,6 @@
 # Deploying the API Server
 
-This guide describes the current FastAPI server surface used by `fleet web` and API clients.
+This guide covers running the FastAPI server used by `fleet web` and API clients.
 
 ## Start the Server
 
@@ -20,9 +20,7 @@ UI/static assets are served when frontend build output is present.
 
 ## API Docs Surface
 
-When `scalar-fastapi` is available, interactive docs are served at:
-
-- `/scalar`
+When `scalar-fastapi` is available, docs are served at `/scalar`.
 
 ## Runtime Configuration
 
@@ -46,7 +44,7 @@ Important runtime controls:
 - `DATABASE_REQUIRED`
 - `LEGACY_SQLITE_ROUTES_ENABLED`
 
-See [Auth Modes](../auth.md) and [Database Architecture](../db.md).
+See [Auth Modes](../reference/auth.md) and [Database Architecture](../reference/database.md).
 
 ## Smoke Checks
 

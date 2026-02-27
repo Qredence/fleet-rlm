@@ -1,17 +1,13 @@
 # Using the MCP Server
 
-The **Model Context Protocol (MCP)** allows you to connect `fleet-rlm` directly to AI assistants like **Claude Desktop** or VS Code. This enables Claude to run RLM tasks (executing code in Modal) as if they were native tools.
+The Model Context Protocol (MCP) lets AI clients call `fleet-rlm` tools through `serve-mcp`.
 
-## What is MCP?
+## Configure Claude Desktop
 
-MCP provides a standard way for AI models to discover and call external tools. `fleet-rlm` exposes its core long-context and code-execution capabilities as MCP tools.
+Add to your MCP config file:
 
-## Configuration for Claude Desktop
-
-To use `fleet-rlm` with Claude Desktop, add the following to your config file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -20,7 +16,7 @@ To use `fleet-rlm` with Claude Desktop, add the following to your config file:
       "command": "uv",
       "args": ["run", "fleet-rlm", "serve-mcp", "--transport", "stdio"],
       "env": {
-        "DSPY_LM_MODEL": "openai/gemini-3-flash-preview",
+        "DSPY_LM_MODEL": "openai/gpt-4o-mini",
         "DSPY_LLM_API_KEY": "sk-..."
       }
     }
@@ -28,7 +24,7 @@ To use `fleet-rlm` with Claude Desktop, add the following to your config file:
 }
 ```
 
-You can tune runtime behavior with Hydra overrides when launching the server, for example:
+You can pass Hydra overrides at startup:
 
 ```bash
 uv run fleet-rlm serve-mcp --transport stdio \
@@ -36,30 +32,25 @@ uv run fleet-rlm serve-mcp --transport stdio \
   agent.guardrail_mode=warn
 ```
 
-## Available Tools
+## Tools Exposed by MCP
 
-Once connected, Claude will have access to:
+Current tool surface from `src/fleet_rlm/mcp/server.py`:
 
-### `chat_turn`
-
-Executes a single turn of the RLM ReAct loop.
-
-- **Use case**: "Write Python code to calculate the orbital period of Mars."
-- **Output**: Includes `assistant_response`, optional `trajectory`, and additive `guardrail_warnings`.
-
-### `analyze_long_document`
-
-Performs a deep scan of a document to extract specific answers.
-
-- **Use case**: "Read `report.pdf` and find all mentions of 'Q3 Revenue'."
-
-### `summarize_long_document`
-
-Generates a comprehensive summary of a long text.
-
-- **Use case**: "Summarize the key points of `transcript.txt`."
+- `chat_turn`: single ReAct turn for chat-style interaction
+- `analyze_long_document`: long-context analysis
+- `summarize_long_document`: long-context summarization
+- `grounded_answer`: chunked answer with citations
+- `triage_incident_logs`: incident/log triage workflow
+- `memory_tree`: bounded memory/volume tree inspection
+- `memory_structure_audit`: memory layout audit recommendations
+- `clarification_questions`: generate safe clarifying questions for risky operations
 
 ## Troubleshooting
 
-- **Logs**: Claude Desktop logs are found in `~/Library/Logs/Claude/mcp.log`.
-- **Latency**: RLM tasks can take 30-60 seconds. Ensure your client doesn't time out.
+- Check client logs (for Claude Desktop: `~/Library/Logs/Claude/mcp.log`).
+- Confirm MCP dependencies are installed: `uv sync --extra dev --extra mcp`.
+- Validate server launch locally:
+
+```bash
+uv run fleet-rlm serve-mcp --transport stdio
+```

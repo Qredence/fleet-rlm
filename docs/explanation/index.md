@@ -1,12 +1,8 @@
-# Explanation (Archive)
+# Explanation
 
-This section is preserved for conceptual background and historical design rationale.
+Conceptual documentation describing how the system works and why it is structured this way.
 
-It is **not** the primary source of truth for current runtime behavior.
-
-- [RLM Concepts](rlm-concepts.md)
-- [Architecture](architecture.md)
-- [Stateful Architecture](stateful-architecture.md)
-- [Memory Topology Notes](memory-topology.md)
-
-For maintained docs, start at [docs/index.md](../index.md).
+- [Concepts](concepts.md)
+- [Architecture Overview](../architecture.md)
+- [User Interaction Flows](user-flows.md)
+- [Component UML](component-uml.md)

@@ -5,6 +5,7 @@ Common issues and current recovery paths.
 ## Planner Not Configured
 
 Symptom:
+
 - chat/API fails with planner configuration errors
 
 Checks:
@@ -15,12 +16,14 @@ echo "$DSPY_LLM_API_KEY"
 ```
 
 Fix:
-- Set `DSPY_LM_MODEL` and `DSPY_LLM_API_KEY` (or `DSPY_LM_API_KEY`)
-- Restart terminal/session
+
+- set `DSPY_LM_MODEL` and `DSPY_LLM_API_KEY` (or `DSPY_LM_API_KEY`)
+- restart terminal/session
 
 ## Modal Credentials Missing
 
 Symptom:
+
 - Modal tests fail or sandbox startup errors
 
 Fix:
@@ -29,14 +32,16 @@ Fix:
 uv run modal setup
 ```
 
-Then re-run server runtime tests:
+Then re-run runtime tests:
+
 - `POST /api/v1/runtime/tests/modal`
 - `POST /api/v1/runtime/tests/lm`
 
 ## Secret/Volume Mismatch
 
 Symptom:
-- Runtime says secret or volume unavailable
+
+- runtime says secret or volume unavailable
 
 Fix:
 
@@ -48,24 +53,20 @@ uv run modal volume create rlm-volume-dspy
 ## WebSocket Auth Failures
 
 Symptom:
+
 - WS close/errors on `/api/v1/ws/chat` or `/api/v1/ws/execution`
 
 Checks:
+
 - verify `AUTH_MODE` and `AUTH_REQUIRED`
 - in dev mode, verify debug headers/token/query auth settings
 
-See [Auth Modes](../auth.md).
+See [Auth Modes](../reference/auth.md).
 
-## Legacy Routes Return 410
+## Planned vs Legacy Route Responses
 
-Symptom:
-- `/api/v1/tasks*` or `/api/v1/sessions*` returns `410 Gone`
-
-Cause:
-- `LEGACY_SQLITE_ROUTES_ENABLED=false`
-
-Action:
-- expected in stricter environments; migrate to Neon-backed/runtime routes for production paths
+- Planned scaffold routes under `/api/v1/{taxonomy|analytics|search|memory|sandbox}` return `501 Not Implemented`.
+- Legacy-gated routes (`/api/v1/tasks*`, `/api/v1/sessions*` except `/state`) can return `410 Gone` when disabled.
 
 ## Diagnostic Commands
 

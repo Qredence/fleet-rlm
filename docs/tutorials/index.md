@@ -1,6 +1,6 @@
 # Tutorials
 
-Hands-on walkthroughs for current `v0.4.8` workflows.
+Hands-on learning paths that teach workflows from first principles.
 
 - [01 Basic Usage](01-basic-usage.md)
 - [02 Document Analysis](02-doc-analysis.md)

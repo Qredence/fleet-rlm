@@ -87,25 +87,59 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
-  it("maps trajectory_step to a chain_of_thought trace render part", () => {
+  it("maps trajectory_step thought to reasoning and keeps chain_of_thought structured", () => {
     const { messages } = applyWsFrameToMessages(
       [],
       makeEvent("trajectory_step", "trace", {
         step_index: 0,
         step_data: {
           thought: "Read file",
+          action: "Inspect entrypoint",
           tool_name: "read_file",
           observation: "Found entrypoint",
         },
       }),
     );
 
+    const reasoning = messages.find((m) => m.type === "reasoning");
+    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
+    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
+      expect(reasoning.renderParts[0].parts.at(-1)?.text).toBe("Read file");
+    }
+
     const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
     expect(cot).toBeDefined();
     if (cot?.kind === "chain_of_thought") {
       expect(cot.steps).toHaveLength(1);
-      expect(cot.steps[0]?.label).toContain("Read file");
+      expect(cot.steps[0]?.label).toContain("Inspect entrypoint");
       expect(cot.steps[0]?.status).toBe("active");
+    }
+  });
+
+  it("falls back to event text for reasoning when trajectory thought is missing", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("trajectory_step", "Fallback trace text", {
+        step_index: 2,
+        step_data: {
+          thought: "   ",
+          tool_name: "grep_file",
+        },
+      }),
+    );
+
+    const reasoning = messages.find((m) => m.type === "reasoning");
+    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
+    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
+      expect(reasoning.renderParts[0].parts.at(-1)?.text).toBe(
+        "Fallback trace text",
+      );
+    }
+
+    const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
+    expect(cot).toBeDefined();
+    if (cot?.kind === "chain_of_thought") {
+      expect(cot.steps[0]?.label).toBe("Tool: grep_file");
     }
   });
 

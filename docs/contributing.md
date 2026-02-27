@@ -36,6 +36,7 @@ uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run pytest -q
 uv run python scripts/check_release_hygiene.py
 uv run python scripts/check_release_metadata.py
+uv run python scripts/check_docs_quality.py
 ```
 
 Optional frontend check (if frontend workspace is in scope):
@@ -51,8 +52,8 @@ cd ../..
 ## Documentation Rules
 
 - Update docs in the same PR when behavior changes.
-- Keep `docs/index.md` active section aligned with maintained docs.
-- Treat `docs/artifacts`, `docs/plans`, `docs/references`, and `docs/explanation` as historical/research archives unless explicitly modernizing them.
+- Keep `docs/index.md` and Diataxis section indexes aligned with active docs.
+- Historical docs are preserved under `plans/archive/docs-legacy/` and are not active runbooks.
 
 ## Validation Before Merge
 
@@ -62,9 +63,10 @@ At minimum:
 # from repo root
 uv run fleet-rlm --help
 rg -n "^  /" openapi.yaml
+uv run python scripts/check_docs_quality.py
 ```
 
-If you changed server/API docs, also verify WS route references:
+If server/API docs changed, also verify WS route references:
 
 ```bash
 rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py

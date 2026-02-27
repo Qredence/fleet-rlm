@@ -1,16 +1,21 @@
 # Reference
 
-Reference guides are technical descriptions of the machinery and how to operate it.
+Authoritative contracts, interfaces, and implementation-facing facts.
 
 ## Interfaces
 
-- **[CLI Commands](cli.md)**: Full list of command-line arguments.
-- **[HTTP API](http-api.md)**: Endpoints for the REST and WebSocket server.
-- **[Neon DB Schema](../db.md)**: Multi-tenant Postgres schema, RLS, and migration lifecycle.
-- **[Auth Modes](../auth.md)**: Dev auth bootstrap and Entra-ready auth abstraction.
-- **[Python API](python-api.md)**: Classes and functions for library usage.
-- **[Source Layout](source-layout.md)**: Directory-level map of `src/fleet_rlm`.
+- [CLI Commands](cli.md)
+- [HTTP and WebSocket API](http-api.md)
+- [Python API](python-api.md)
+- [Source Layout](source-layout.md)
+- [Frontend ↔ Backend Integration](frontend-backend-integration.md)
 
-## Internals
+## Platform and Runtime
 
-- **[Sandbox File System](sandbox-fs.md)**: Structure of the Modal sandbox filesystem.
+- [Auth Modes](auth.md)
+- [Database Architecture](database.md)
+- [Sandbox File System](sandbox-fs.md)
+
+## Internal Maps
+
+- [Codebase Map](codebase-map.md)

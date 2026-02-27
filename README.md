@@ -52,8 +52,8 @@ fleet web
 Common commands:
 
 ```bash
-# CLI demo
-fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
+# Standalone terminal chat
+fleet-rlm chat --trace-mode compact
 
 # Explicit API server
 fleet-rlm serve-api --port 8000
@@ -61,8 +61,8 @@ fleet-rlm serve-api --port 8000
 # MCP server
 fleet-rlm serve-mcp --transport stdio
 
-# Explore long-context tooling
-fleet-rlm run-long-context --help
+# Scaffold assets for Claude Code
+fleet-rlm init --list
 ```
 
 ### Terminal chat surfaces
@@ -150,6 +150,7 @@ graph TB
 ## Docs and Guides
 
 - [Documentation index](docs/index.md)
+- [Explanation index](docs/explanation/index.md)
 - [Quick install + setup](docs/how-to-guides/installation.md)
 - [Configure Modal](docs/how-to-guides/configuring-modal.md)
 - [Runtime settings (LM/Modal diagnostics)](docs/how-to-guides/runtime-settings.md)
@@ -157,6 +158,8 @@ graph TB
 - [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
 - [CLI reference](docs/reference/cli.md)
 - [HTTP API reference](docs/reference/http-api.md)
+- [Auth modes](docs/reference/auth.md)
+- [Database architecture](docs/reference/database.md)
 - [Source layout](docs/reference/source-layout.md)
 
 ## Advanced Features (Docs-First)

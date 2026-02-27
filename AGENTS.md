@@ -259,6 +259,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - CI job names for required checks: `Quality`, `Test Unit`, `Test UI`, `Test Integration`, `Frontend Check`
 - Frontend package manager is `bun` (`src/frontend/package.json` defines `packageManager: bun@...`); do not introduce npm lockfiles (`package-lock.json`) unless npm is intentionally adopted for a specific workspace
 - Keep generated artifacts scoped to their owning workspace/runtime (`dist/`, coverage, Playwright outputs); avoid committing one-off local verification scripts or root-level lockfiles that are not part of the project workflow
+- Local scratch artifacts (`*.tmp`, `.tmp*`, `tmp/`, and ad-hoc frontend smoke `.mjs` scripts) must remain untracked; release hygiene enforces a strict tracked `.mjs` allowlist
 - For packaged/local `fleet web` runs that should serve embedded UI assets, rebuild and sync frontend artifacts with `uv run python scripts/build_ui.py` (copies `src/frontend/dist` -> `src/fleet_rlm/ui/dist`)
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types

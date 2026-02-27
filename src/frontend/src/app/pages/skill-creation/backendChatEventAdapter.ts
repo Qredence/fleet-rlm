@@ -375,29 +375,47 @@ function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
   return copy;
 }
 
+function trajectoryStepData(
+  payload?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const raw = payload?.step_data;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return raw as Record<string, unknown>;
+}
+
+function extractTrajectoryThought(
+  text: string,
+  payload?: Record<string, unknown>,
+): string | undefined {
+  const stepData = trajectoryStepData(payload);
+  const thought = asOptionalText(stepData?.thought);
+  if (thought) return thought;
+  const fallback = text.trim();
+  return fallback || undefined;
+}
+
 function upsertChainOfThought(
   messages: ChatMessage[],
   text: string,
   payload?: Record<string, unknown>,
 ): ChatMessage[] {
-  const stepData =
-    payload?.step_data &&
-    typeof payload.step_data === "object" &&
-    !Array.isArray(payload.step_data)
-      ? (payload.step_data as Record<string, unknown>)
-      : undefined;
+  const stepData = trajectoryStepData(payload);
 
   const stepIndex =
     typeof payload?.step_index === "number" ? payload.step_index : undefined;
+  const action = asOptionalText(stepData?.action);
+  const toolName = asOptionalText(stepData?.tool_name);
+  const fallbackLabel = text.trim();
   const label =
-    (typeof stepData?.thought === "string" && stepData.thought.trim()) ||
-    (typeof stepData?.action === "string" && stepData.action.trim()) ||
-    text.trim() ||
-    (stepIndex != null ? `Step ${stepIndex + 1}` : "Trace step");
+    action ||
+    (toolName ? `Tool: ${toolName}` : undefined) ||
+    (stepIndex != null ? `Step ${stepIndex + 1}` : undefined) ||
+    fallbackLabel ||
+    "Trace step";
 
   const details: string[] = [];
-  if (typeof stepData?.tool_name === "string" && stepData.tool_name.trim()) {
-    details.push(`Tool: ${stepData.tool_name}`);
+  if (toolName) {
+    details.push(`Tool: ${toolName}`);
   }
   if (typeof stepData?.input === "string" && stepData.input.trim()) {
     details.push(`Input: ${stepData.input}`);
@@ -1070,8 +1088,14 @@ function applyEvent(
       };
     }
     case "trajectory_step": {
+      let next = messages;
+      const thought = extractTrajectoryThought(text, payload);
+      if (thought) {
+        next = appendReasoning(next, thought, "line");
+      }
+      next = upsertChainOfThought(next, text, payload);
       return {
-        messages: upsertChainOfThought(messages, text, payload),
+        messages: next,
         terminal: false,
         errored: false,
       };

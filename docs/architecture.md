@@ -1,6 +1,6 @@
 # Architecture Overview
 
-This document describes the maintained architecture for `fleet-rlm` `v0.4.8`.
+This document describes the maintained architecture for `fleet-rlm`.
 
 ## Entry Points
 

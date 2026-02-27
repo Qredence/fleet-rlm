@@ -1,7 +1,7 @@
 PYTHON_SOURCES = src tests config/test_responses_endpoint.py
 PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
-.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean
+.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean
 
 help:
 	@echo "Targets:"
@@ -18,6 +18,7 @@ help:
 	@echo "  make format            - Run ruff format (writes changes)"
 	@echo "  make typecheck         - Run ty check"
 	@echo "  make metadata-check    - Run release metadata/hygiene scripts"
+	@echo "  make docs-check        - Run docs quality checks"
 	@echo "  make security-check    - Run pip-audit + bandit"
 	@echo "  make frontend-check    - Run frontend checks when src/frontend exists"
 	@echo "  make quality-gate      - Run lint + format-check + typecheck + test + metadata-check + frontend-check"
@@ -69,6 +70,9 @@ metadata-check:
 	uv run python scripts/check_release_hygiene.py
 	uv run python scripts/check_release_metadata.py
 
+docs-check:
+	uv run python scripts/check_docs_quality.py
+
 security-check:
 	uvx pip-audit
 	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
@@ -80,7 +84,7 @@ frontend-check:
 		echo "No src/frontend/package.json found, skipping frontend checks."; \
 	fi
 
-quality-gate: lint format-check typecheck test-fast metadata-check frontend-check
+quality-gate: lint format-check typecheck test-fast metadata-check docs-check frontend-check
 
 check: quality-gate
 
