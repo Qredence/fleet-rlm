@@ -1,8 +1,9 @@
 import {
+  Bot,
   User,
+  Bell,
   Settings as SettingsIcon,
   CreditCard,
-  Bell,
   Paintbrush,
   Database,
   Info,
@@ -20,3 +21,12 @@ export const categories = [
 ] as const;
 
 export type Category = (typeof categories)[number]["key"];
+
+// ── Live settings sections (v0.4.8) ────────────────────────────────
+export const settingsSections = [
+  { key: "appearance", label: "Appearance", icon: Paintbrush },
+  { key: "telemetry", label: "Telemetry", icon: Bell },
+  { key: "litellm", label: "LiteLLM Integration", icon: Bot },
+] as const;
+
+export type SettingsSection = (typeof settingsSections)[number]["key"];

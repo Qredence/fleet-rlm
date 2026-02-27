@@ -45,7 +45,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
 }));
 
 describe("SettingsPaneContent", () => {
-  it("renders only the grouped v0.4.8 settings surface", () => {
+  it("renders the grouped v0.4.8 settings surface by default", () => {
     const html = renderToStaticMarkup(
       <SettingsPaneContent isDark={false} onToggleTheme={vi.fn()} />,
     );
@@ -64,5 +64,20 @@ describe("SettingsPaneContent", () => {
     expect(html).not.toContain("Billing");
     expect(html).not.toContain("Account");
     expect(html).not.toContain("Data &amp; Privacy");
+  });
+
+  it("renders telemetry-only content when section is telemetry", () => {
+    const html = renderToStaticMarkup(
+      <SettingsPaneContent
+        isDark={false}
+        onToggleTheme={vi.fn()}
+        section="telemetry"
+      />,
+    );
+
+    expect(html).toContain("Anonymous telemetry");
+    expect(html).toContain("Telemetry scope");
+    expect(html).not.toContain("Theme");
+    expect(html).not.toContain("Planner LM model");
   });
 });
