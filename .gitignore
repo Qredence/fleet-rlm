@@ -115,3 +115,4 @@ archive/
 tui-ink/package-lock.json
 src/frontend/test-results/.last-run.json
 .posthog-events.json
+src/frontend/posthog-setup-report.md
