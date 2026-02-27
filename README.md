@@ -79,6 +79,16 @@ uv sync --extra dev --extra server
 uv run fleet web
 ```
 
+Frontend build workflow (when validating packaged Web UI assets):
+
+```bash
+# from repo root
+cd src/frontend
+bun install --frozen-lockfile
+bun run build
+cd ../..
+```
+
 Use the full contributor setup (frontend builds, env/bootstrap, quality gates) in [`AGENTS.md`](AGENTS.md) and [`docs/contributing.md`](docs/contributing.md).
 
 ## Architecture Overview

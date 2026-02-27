@@ -46,7 +46,7 @@ def test_main_ok(monkeypatch, capsys):
     )
     assert check_release_hygiene.main() == 0
     out, err = capsys.readouterr()
-    assert "OK: No forbidden tracked .env files detected." in out
+    assert "OK: Release hygiene checks passed (.env/.tmp/.mjs policies)." in out
 
 
 def test_main_forbidden(monkeypatch, capsys):
