@@ -79,7 +79,7 @@ security-check:
 
 frontend-check:
 	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && bun install --frozen-lockfile && bun run type-check && bun run lint:robustness && bun run test:unit && bun run build; \
+		cd src/frontend && bun install --frozen-lockfile && bun run api:check && bun run type-check && bun run lint:robustness && bun run test:unit && bun run build; \
 	else \
 		echo "No src/frontend/package.json found, skipping frontend checks."; \
 	fi

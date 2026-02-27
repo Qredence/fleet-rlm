@@ -104,7 +104,8 @@ describe("applyWsFrameToMessages", () => {
     const reasoning = messages.find((m) => m.type === "reasoning");
     expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
     if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
-      expect(reasoning.renderParts[0].parts.at(-1)?.text).toBe("Read file");
+      const parts = reasoning.renderParts[0].parts;
+      expect(parts[parts.length - 1]?.text).toBe("Read file");
     }
 
     const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
@@ -131,9 +132,8 @@ describe("applyWsFrameToMessages", () => {
     const reasoning = messages.find((m) => m.type === "reasoning");
     expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
     if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
-      expect(reasoning.renderParts[0].parts.at(-1)?.text).toBe(
-        "Fallback trace text",
-      );
+      const parts = reasoning.renderParts[0].parts;
+      expect(parts[parts.length - 1]?.text).toBe("Fallback trace text");
     }
 
     const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");

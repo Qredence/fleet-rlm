@@ -55,12 +55,13 @@ The frontend keeps a local snapshot of backend OpenAPI and generates TS types.
 bun run api:sync-spec
 bun run api:types
 bun run api:sync
+bun run api:check
 ```
 
 `api:sync-spec` defaults to the canonical root spec at `../../openapi.yaml` unless `OPENAPI_SPEC_PATH` is set.
 
 Generated file:
-- `src/app/lib/rlm-api/generated/openapi.ts` (do not edit manually)
+- `src/lib/rlm-api/generated/openapi.ts` (do not edit manually)
 
 ## Quality Checks
 

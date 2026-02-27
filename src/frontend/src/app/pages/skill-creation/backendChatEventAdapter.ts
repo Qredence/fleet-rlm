@@ -43,9 +43,7 @@ function normalizeUrl(raw: unknown): string | undefined {
   try {
     const parsed = new URL(value);
     if (
-      parsed.protocol === "http:" ||
-      parsed.protocol === "https:" ||
-      parsed.protocol === "file:"
+      parsed.protocol === "http:" || parsed.protocol === "https:"
     ) {
       return parsed.toString();
     }

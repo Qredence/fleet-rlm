@@ -34,6 +34,12 @@ vi.mock("@/hooks/useNavigation", () => ({
   }),
 }));
 
+vi.mock("@/hooks/useAppNavigate", () => ({
+  useAppNavigate: () => ({
+    navigate: vi.fn(),
+  }),
+}));
+
 vi.mock("@/hooks/useChatHistory", () => ({
   useChatHistory: () => ({
     conversations: [],
@@ -92,6 +98,7 @@ describe("SkillCreationFlow runtime warning", () => {
     const html = renderToStaticMarkup(<SkillCreationFlow />);
     expect(html).toContain("Runtime warning:");
     expect(html).toContain("Run Runtime tests from Settings -&gt; Runtime.");
+    expect(html).toContain("Open Runtime Settings");
   });
 
   it("omits warning banner when runtime status is healthy", () => {

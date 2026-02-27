@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+_No notable changes yet._
+
+## [0.4.9] - 2026-02-27
+
 ### Changed
 
 - **Change:** Upgraded core development and runtime dependencies: fastapi[standard] to >=0.133.1, websockets to >=16, ruff to >=0.15.4, ty to >=0.0.19.

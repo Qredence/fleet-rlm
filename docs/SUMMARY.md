@@ -4,7 +4,7 @@
 * [Architecture Overview](architecture.md)
 * [Contributing to fleet-rlm](contributing.md)
 * [Documentation Entry Moved](index.md)
-* [explanation](explanation/README.md)
+* [explanation](explanation/index.md)
   * [Component UML](explanation/component-uml.md)
   * [fleet-rlm Concepts](explanation/concepts.md)
   * [Explanation](explanation/index.md)

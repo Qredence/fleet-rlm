@@ -198,12 +198,9 @@ class ExecutionEventEmitter:
             return sum(state.dropped_events for state in self._connections.values())
 
 
-def __getattr__(name: str) -> Any:
-    if name == "ExecutionStepBuilder":
-        from .step_builder import ExecutionStepBuilder
-
-        return ExecutionStepBuilder
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Late import avoids a circular dependency during module initialization while
+# still providing a concrete symbol for static analyzers and re-export users.
+from .step_builder import ExecutionStepBuilder  # noqa: E402
 
 
 __all__ = [

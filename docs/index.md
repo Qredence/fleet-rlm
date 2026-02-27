@@ -1,7 +1,5 @@
-# Documentation Entry Moved
+# Documentation Home
 
-This docs entrypoint moved to the GitBook home page:
+Welcome to the `fleet-rlm` documentation.
 
-- [Documentation Home](README.md)
-
-Use `README.md` as the canonical start page for `docs/`.
+Use [README.md](README.md) for the primary narrative guide and [SUMMARY.md](SUMMARY.md) for the full table of contents.

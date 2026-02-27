@@ -124,6 +124,19 @@ export function RuntimePane() {
     [baselineValues, formValues],
   );
   const dirtyKeys = useMemo(() => Object.keys(updates), [updates]);
+  const hasUnsavedRuntimeChanges = dirtyKeys.length > 0;
+  const status = statusQuery.data;
+  const modalTest = status?.tests?.modal;
+  const lmTest = status?.tests?.lm;
+
+  const showUnsavedRuntimeTestWarning = () => {
+    toast.error("Save runtime settings before testing", {
+      description:
+        status?.write_enabled === false
+          ? "Runtime writes are disabled outside local mode, so tests use currently active values only."
+          : "Connection tests validate active runtime credentials, not unsaved form edits.",
+    });
+  };
 
   const llmChecks = useMemo(() => {
     const source = statusQuery.data?.llm ?? {};
@@ -163,6 +176,11 @@ export function RuntimePane() {
   };
 
   const handleTestModal = () => {
+    if (hasUnsavedRuntimeChanges) {
+      showUnsavedRuntimeTestWarning();
+      return;
+    }
+
     testModalConnection.mutate(undefined, {
       onSuccess: (result) => {
         toast[result.ok ? "success" : "error"]("Modal test completed", {
@@ -178,6 +196,11 @@ export function RuntimePane() {
   };
 
   const handleTestLm = () => {
+    if (hasUnsavedRuntimeChanges) {
+      showUnsavedRuntimeTestWarning();
+      return;
+    }
+
     testLmConnection.mutate(undefined, {
       onSuccess: (result) => {
         toast[result.ok ? "success" : "error"]("LM test completed", {
@@ -193,6 +216,11 @@ export function RuntimePane() {
   };
 
   const handleTestAll = async () => {
+    if (hasUnsavedRuntimeChanges) {
+      showUnsavedRuntimeTestWarning();
+      return;
+    }
+
     try {
       const result = await testAllConnections();
       if (result.modal.ok && result.lm.ok) {
@@ -209,11 +237,8 @@ export function RuntimePane() {
     }
   };
 
-  const status = statusQuery.data;
-  const modalTest = status?.tests?.modal;
-  const lmTest = status?.tests?.lm;
   const saveDisabled =
-    dirtyKeys.length === 0 ||
+    !hasUnsavedRuntimeChanges ||
     saveSettings.isPending ||
     status?.write_enabled === false;
 
@@ -284,8 +309,8 @@ export function RuntimePane() {
       </SettingsRow>
 
       <SettingsRow
-        label="Run Connectivity Tests"
-        description="Smoke tests run preflight + live checks for Modal and LM."
+        label="Test Credentials + Connection"
+        description="Runs preflight credential checks plus live Modal + LM connectivity smoke tests."
       >
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -314,9 +339,15 @@ export function RuntimePane() {
               testModalConnection.isPending || testLmConnection.isPending
             }
           >
-            Test All
+            Test Credentials + Connection
           </Button>
         </div>
+        {hasUnsavedRuntimeChanges && (
+          <p className="text-xs text-muted-foreground mt-2">
+            Save runtime settings first so tests run against your latest
+            credentials and provider configuration.
+          </p>
+        )}
       </SettingsRow>
 
       <SettingsRow

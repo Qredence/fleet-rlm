@@ -88,7 +88,8 @@ plans/memory_concept.md
 plans/task.md
 plans/user_flows.md
 plans/walkthrough.md
-
+TASKS.md
+.neon
 .superset/config.json
 
 src/frontend/node_modules/
@@ -114,3 +115,4 @@ archive/
 tui-ink/package-lock.json
 src/frontend/test-results/.last-run.json
 .posthog-events.json
+src/frontend/posthog-setup-report.md

@@ -11,9 +11,7 @@ function safeHref(href: string): string | undefined {
   try {
     const parsed = new URL(href);
     if (
-      parsed.protocol === "http:" ||
-      parsed.protocol === "https:" ||
-      parsed.protocol === "file:"
+      parsed.protocol === "http:" || parsed.protocol === "https:"
     ) {
       return parsed.toString();
     }
