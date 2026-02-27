@@ -45,46 +45,13 @@ export type TaskResponse = {
   error?: string | null;
 };
 
-// Runtime settings/diagnostics endpoints are newer than the current generated
-// frontend OpenAPI snapshot, so keep these local types in sync with backend
-// `server/schemas/core.py` until the snapshot is regenerated.
-export type RuntimeSettingsSnapshot = {
-  env_path: string;
-  keys: string[];
-  values: Record<string, string>;
-  masked_values: Record<string, string>;
-};
-
-export type RuntimeSettingsUpdateResponse = {
-  updated: string[];
-  env_path: string;
-};
-
-export type RuntimeConnectivityTestKind = "modal" | "lm";
-
-export type RuntimeConnectivityTestResponse = {
-  kind: RuntimeConnectivityTestKind;
-  ok: boolean;
-  preflight_ok: boolean;
-  checked_at: string;
-  checks: Record<string, unknown>;
-  guidance: string[];
-  latency_ms?: number | null;
-  output_preview?: string | null;
-  error?: string | null;
-};
-
-export type RuntimeTestCache = {
-  modal: RuntimeConnectivityTestResponse | null;
-  lm: RuntimeConnectivityTestResponse | null;
-};
-
-export type RuntimeStatusResponse = {
-  app_env: string;
-  write_enabled: boolean;
-  ready: boolean;
-  llm: Record<string, unknown>;
-  modal: Record<string, unknown>;
-  tests: RuntimeTestCache;
-  guidance: string[];
-};
+export type RuntimeSettingsSnapshot =
+  components["schemas"]["RuntimeSettingsSnapshot"];
+export type RuntimeSettingsUpdateResponse =
+  components["schemas"]["RuntimeSettingsUpdateResponse"];
+export type RuntimeConnectivityTestKind =
+  components["schemas"]["RuntimeConnectivityTestResponse"]["kind"];
+export type RuntimeConnectivityTestResponse =
+  components["schemas"]["RuntimeConnectivityTestResponse"];
+export type RuntimeTestCache = components["schemas"]["RuntimeTestCache"];
+export type RuntimeStatusResponse = components["schemas"]["RuntimeStatusResponse"];

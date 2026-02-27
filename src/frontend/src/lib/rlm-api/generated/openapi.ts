@@ -3,6 +3,7 @@
  * Do not make direct changes to the file.
  */
 
+
 export interface paths {
   "/health": {
     /** Health */
@@ -177,7 +178,7 @@ export interface components {
       ok?: boolean;
       /**
        * Version
-       * @default 0.4.8
+       * @default 0.4.9
        */
       version?: string;
     };
@@ -440,6 +441,7 @@ export type $defs = Record<string, never>;
 export type external = Record<string, never>;
 
 export interface operations {
+
   /** Health */
   health_health_get: {
     responses: {

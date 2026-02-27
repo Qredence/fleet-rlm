@@ -23,21 +23,22 @@ Core backend integration targets `fleet-rlm` at:
 - Sync spec snapshot: `bun run api:sync-spec`
 - Generate TS types: `bun run api:types`
 - Full sync: `bun run api:sync`
+- Drift check (must be clean): `bun run api:check`
 
 Generated file policy:
-- `src/app/lib/rlm-api/generated/openapi.ts` is generated and must not be edited manually.
+- `src/lib/rlm-api/generated/openapi.ts` is generated and must not be edited manually.
 
 ## Frontend API Modules
-- Sole backend layer: `src/app/lib/rlm-api/*`
-- Legacy layer `src/app/lib/api/*` is removed and must not be reintroduced.
+- Sole backend layer: `src/lib/rlm-api/*`
+- Legacy layer `src/lib/api/*` is removed and must not be reintroduced.
 
 ### API Layer Ownership
-- Use `src/app/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/chat`, `/tasks/*`, `/sessions/state`, `/ws/chat`).
+- Use `src/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/chat`, `/tasks/*`, `/sessions/state`, `/ws/chat`).
 - New frontend data work must map to existing FastAPI endpoints or be gated as unsupported in UI.
 - Unsupported sections (`skills`, `taxonomy`, `memory`, `analytics`) stay visible but disabled with a capability notice.
 
 ### Runtime Conventions
-- Route modules are lazy-loaded through `src/app/lib/perf/lazyWithRetry.ts` and `src/app/lib/perf/routePreload.tsx`.
+- Route modules are lazy-loaded through `src/lib/perf/lazyWithRetry.ts` and `src/lib/perf/routePreload.tsx`.
 - Navigation preloads likely next routes on intent (`TopHeader`, `mobile-tab-bar`) to reduce first-click latency.
 - Router errors must render `RouteErrorPage` (never rely on React Router’s default crash screen).
 - Skill creation chat flow should use backend runtime only (no legacy API fallback path).
@@ -53,9 +54,10 @@ Generated file policy:
 Before finishing backend-integration changes, run:
 0. `bun install`
 1. `bun run api:sync`
-2. `bun run type-check`
-3. `bun run lint:robustness`
-4. `bun run test:unit`
-5. `bun run build`
-6. `bun run test:e2e`
-7. `bun run check`
+2. `bun run api:check`
+3. `bun run type-check`
+4. `bun run lint:robustness`
+5. `bun run test:unit`
+6. `bun run build`
+7. `bun run test:e2e`
+8. `bun run check`
