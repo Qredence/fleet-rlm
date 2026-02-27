@@ -42,11 +42,22 @@ const sectionDescriptions: Record<SettingsSection, string> = {
   telemetry: "Configure anonymous telemetry preferences.",
   litellm:
     "Manage LiteLLM-compatible runtime model and provider integration settings.",
+  runtime: "Configure runtime credentials and run Modal/LM connection tests.",
 };
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialSection?: SettingsSection;
+}
+
+function resolveInitialSection(
+  section: SettingsSection | undefined,
+): SettingsSection {
+  return section &&
+    settingsSections.some((candidate) => candidate.key === section)
+    ? section
+    : "appearance";
 }
 
 function SectionContent({
@@ -140,20 +151,25 @@ function MobileSectionNav({
  * SettingsDialog — theme and preference configuration.
  *
  * Consumes `isDark` / `toggleTheme` from NavigationContext.
- * Only `open` / `onOpenChange` remain as props (dialog-local state
- * owned by the parent header).
+ * `open` / `onOpenChange` are required props; `initialSection` optionally
+ * focuses a specific settings section when opening.
  */
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog({
+  open,
+  onOpenChange,
+  initialSection,
+}: SettingsDialogProps) {
   const { isDark, toggleTheme } = useNavigation();
   const isMobile = useIsMobile();
-  const [activeSection, setActiveSection] =
-    useState<SettingsSection>("appearance");
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() =>
+    resolveInitialSection(initialSection),
+  );
 
   useEffect(() => {
     if (open) {
-      setActiveSection("appearance");
+      setActiveSection(resolveInitialSection(initialSection));
     }
-  }, [open]);
+  }, [open, initialSection]);
 
   /* ── Mobile: iOS 26 full-screen Liquid Glass sheet ─────────────── */
   if (isMobile) {

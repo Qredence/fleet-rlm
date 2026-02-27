@@ -5,7 +5,7 @@
  * page layout within the app shell. Accessible via direct URL navigation,
  * ⌘K command palette, or user menu.
  */
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import { useNavigation } from "@/hooks/useNavigation";
@@ -20,12 +20,28 @@ import {
 import { cn } from "@/components/ui/utils";
 
 import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
+import {
+  settingsSections,
+  type SettingsSection,
+} from "@/features/settings/types";
 
 // ── Component ───────────────────────────────────────────────────────
 export function SettingsPage() {
   const { isDark, toggleTheme } = useNavigation();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const sectionFromQuery = searchParams.get("section");
+  const selectedSection =
+    sectionFromQuery &&
+    settingsSections.some((section) => section.key === sectionFromQuery)
+      ? (sectionFromQuery as SettingsSection)
+      : undefined;
+
+  const sectionTitle =
+    settingsSections.find((section) => section.key === selectedSection)?.label ??
+    "General";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -62,16 +78,20 @@ export function SettingsPage() {
           )}
         >
           <span className="text-foreground" style={typo.h4}>
-            General
+            {sectionTitle}
           </span>
           <p className="mt-1 text-sm text-muted-foreground">
-            Functional settings only for v0.4.8: theme, anonymous telemetry, and
-            LiteLLM runtime integration.
+            Functional settings only for v0.4.8: theme, anonymous telemetry,
+            LiteLLM runtime integration, and runtime connectivity diagnostics.
           </p>
         </div>
         <ScrollArea className="flex-1">
           <div className={cn(isMobile ? "px-4" : "px-6")}>
-            <SettingsPaneContent isDark={isDark} onToggleTheme={toggleTheme} />
+            <SettingsPaneContent
+              isDark={isDark}
+              onToggleTheme={toggleTheme}
+              section={selectedSection}
+            />
           </div>
         </ScrollArea>
       </div>

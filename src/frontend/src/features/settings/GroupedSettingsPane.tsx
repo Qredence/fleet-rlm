@@ -6,6 +6,7 @@ import { SettingsRow } from "@/components/shared/SettingsRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/components/ui/utils";
+import { RuntimePane } from "@/features/settings/RuntimePane";
 import { SettingsToggleRow } from "@/features/settings/SettingsToggleRow";
 import type { SettingsSection } from "@/features/settings/types";
 import {
@@ -348,6 +349,8 @@ export function GroupedSettingsPane({
           </SettingsRow>
         </>
       )}
+
+      {showSection("runtime") && <RuntimePane />}
     </div>
   );
 }

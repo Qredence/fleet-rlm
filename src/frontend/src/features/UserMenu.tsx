@@ -36,7 +36,12 @@ import { SettingsDialog } from "@/features/SettingsDialog";
 import { PricingDialog } from "@/features/PricingDialog";
 import { IntegrationsDialog } from "@/features/IntegrationsDialog";
 import { LoginDialog } from "@/features/LoginDialog";
+import type { SettingsSection } from "@/features/settings/types";
 import { cn } from "@/components/ui/utils";
+
+interface OpenSettingsEventDetail {
+  section?: SettingsSection;
+}
 
 export function UserMenu() {
   const { isAuthenticated, user, logout } = useAuth();
@@ -45,14 +50,20 @@ export function UserMenu() {
   const isMobile = useIsMobile();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<
+    SettingsSection | undefined
+  >(undefined);
   const [pricingOpen, setPricingOpen] = useState(false);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
 
   // Listen for Command Palette "open-settings" custom event
   useEffect(() => {
-    function handleOpenSettings() {
+    function handleOpenSettings(event: Event) {
+      const customEvent = event as CustomEvent<OpenSettingsEventDetail>;
+      setSettingsInitialSection(customEvent.detail?.section);
       setSettingsOpen(true);
+      customEvent.preventDefault();
     }
     document.addEventListener("open-settings", handleOpenSettings);
     return () =>
@@ -155,6 +166,7 @@ export function UserMenu() {
                 telemetry.capture("settings_opened", {
                   source: "user_menu",
                 });
+                setSettingsInitialSection(undefined);
                 setSettingsOpen(true);
               }}
               style={typo.label}
@@ -195,7 +207,11 @@ export function UserMenu() {
       </DropdownMenu>
 
       {/* Dialogs — rendered outside dropdown to avoid portal nesting */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        initialSection={settingsInitialSection}
+      />
       <PricingDialog open={pricingOpen} onOpenChange={setPricingOpen} />
       <IntegrationsDialog
         open={integrationsOpen}

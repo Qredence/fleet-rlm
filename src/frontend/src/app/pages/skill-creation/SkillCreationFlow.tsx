@@ -3,7 +3,9 @@ import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useChatHistory } from "@/hooks/useChatHistory";
+import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/components/ui/use-mobile";
+import { Button } from "@/components/ui/button";
 import { PromptInput } from "@/components/ui/prompt-input";
 import { ConversationHistory } from "@/features/ConversationHistory";
 import { ChatMessageList } from "@/app/pages/skill-creation/ChatMessageList";
@@ -24,6 +26,7 @@ import { isRlmCoreEnabled } from "@/lib/rlm-api";
  */
 export function SkillCreationFlow() {
   const isMobile = useIsMobile();
+  const { navigate } = useAppNavigate();
   const telemetry = useTelemetry();
   const { scrollRef, contentRef, isAtBottom, scrollToBottom } =
     useStickToBottom();
@@ -133,6 +136,21 @@ export function SkillCreationFlow() {
     setShowHistory(false);
   }, []);
 
+  const handleOpenRuntimeSettings = useCallback(() => {
+    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>(
+      "open-settings",
+      {
+        detail: { section: "runtime" },
+        cancelable: true,
+      },
+    );
+
+    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
+    if (!wasHandledByDialog) {
+      navigate("/settings?section=runtime");
+    }
+  }, [navigate]);
+
   const runtimeGuidance = runtimeStatus.data?.guidance ?? [];
   const showRuntimeWarning =
     backendEnabled &&
@@ -176,8 +194,18 @@ export function SkillCreationFlow() {
           <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
               <div className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                <span className="font-medium">Runtime warning:</span>{" "}
-                {runtimeGuidance[0]}
+                <div>
+                  <span className="font-medium">Runtime warning:</span>{" "}
+                  {runtimeGuidance[0]}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 rounded-lg border-amber-400/70 bg-amber-100 text-amber-950 hover:bg-amber-200"
+                  onClick={handleOpenRuntimeSettings}
+                >
+                  Open Runtime Settings
+                </Button>
               </div>
             ) : null}
             <PromptInput

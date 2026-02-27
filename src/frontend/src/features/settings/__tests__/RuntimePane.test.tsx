@@ -86,5 +86,6 @@ describe("RuntimePane", () => {
     expect(html).toContain("Preflight failed");
     expect(html).toContain("LM Smoke");
     expect(html).toContain("Pass");
+    expect(html).toContain("Test Credentials + Connection");
   });
 });

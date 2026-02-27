@@ -4,6 +4,29 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
 
 vi.mock("@/features/settings/useRuntimeSettings", () => ({
+  computeRuntimeUpdates: (
+    current: Record<string, string>,
+    baseline: Record<string, string>,
+  ) => {
+    const updates: Record<string, string> = {};
+    for (const key of [
+      "DSPY_LM_MODEL",
+      "DSPY_DELEGATE_LM_MODEL",
+      "DSPY_DELEGATE_LM_SMALL_MODEL",
+      "DSPY_LLM_API_KEY",
+      "DSPY_LM_API_BASE",
+      "DSPY_LM_MAX_TOKENS",
+      "MODAL_TOKEN_ID",
+      "MODAL_TOKEN_SECRET",
+      "SECRET_NAME",
+      "VOLUME_NAME",
+    ]) {
+      if ((current[key] ?? "") !== (baseline[key] ?? "")) {
+        updates[key] = current[key] ?? "";
+      }
+    }
+    return updates;
+  },
   computeLmRuntimeUpdates: (
     current: Record<string, string>,
     baseline: Record<string, string>,
@@ -29,8 +52,13 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
           DSPY_LM_MODEL: "openai/gpt-4o-mini",
           DSPY_DELEGATE_LM_MODEL: "openai/gpt-4.1-mini",
           DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gpt-4o-mini",
+          DSPY_LM_MAX_TOKENS: "64000",
           DSPY_LM_API_BASE: "https://litellm.example.com/v1",
           DSPY_LLM_API_KEY: "sk-test",
+          MODAL_TOKEN_ID: "modal-id",
+          MODAL_TOKEN_SECRET: "modal-secret",
+          SECRET_NAME: "LITELLM",
+          VOLUME_NAME: "rlm-volume-dspy",
         },
       },
     },
@@ -38,9 +66,40 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
       data: {
         app_env: "local",
         write_enabled: true,
+        ready: false,
+        llm: {
+          model_set: true,
+          api_key_set: true,
+          planner_configured: false,
+        },
+        modal: {
+          credentials_available: true,
+          secret_name_set: true,
+          credentials_from_env: true,
+          credentials_from_profile: false,
+        },
+        tests: {
+          modal: null,
+          lm: null,
+        },
+        guidance: ["Run Runtime tests from Settings -> Runtime."],
       },
     },
     saveSettings: { isPending: false, mutate: vi.fn() },
+    testModalConnection: {
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    },
+    testLmConnection: {
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    },
+    testAllConnections: vi.fn(async () => ({
+      modal: { ok: true },
+      lm: { ok: true },
+    })),
   }),
 }));
 
@@ -58,6 +117,9 @@ describe("SettingsPaneContent", () => {
     expect(html).toContain("Delegate small LM model");
     expect(html).toContain("Custom API endpoint");
     expect(html).toContain("API key");
+    expect(html).toContain("Runtime Status");
+    expect(html).toContain("Test Credentials + Connection");
+    expect(html).toContain("Run Runtime tests from Settings -&gt; Runtime.");
 
     expect(html).not.toContain("Notifications");
     expect(html).not.toContain("Personalization");
@@ -79,5 +141,22 @@ describe("SettingsPaneContent", () => {
     expect(html).toContain("Telemetry scope");
     expect(html).not.toContain("Theme");
     expect(html).not.toContain("Planner LM model");
+    expect(html).not.toContain("Runtime Status");
+  });
+
+  it("renders runtime-only content when section is runtime", () => {
+    const html = renderToStaticMarkup(
+      <SettingsPaneContent
+        isDark={false}
+        onToggleTheme={vi.fn()}
+        section="runtime"
+      />,
+    );
+
+    expect(html).toContain("Runtime Status");
+    expect(html).toContain("Test Credentials + Connection");
+    expect(html).toContain("Runtime Configuration");
+    expect(html).not.toContain("Anonymous telemetry");
+    expect(html).not.toContain("LiteLLM integration");
   });
 });
