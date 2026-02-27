@@ -32,7 +32,16 @@ test("opens settings from user menu without runtime exception", async ({
   await page.getByRole("button", { name: "User menu" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
 
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(
+    page.locator("h2:visible", { hasText: "Settings" }).first(),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Appearance" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Telemetry" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "LiteLLM Integration" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Telemetry" }).click();
   await expect(
     page.getByText("Anonymous telemetry", { exact: true }),
   ).toBeVisible();

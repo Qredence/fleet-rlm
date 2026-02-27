@@ -9,5 +9,9 @@ import { router } from "@/app/routes";
  * chunk loading.
  */
 export default function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <>
+      <RouterProvider router={router} />
+    </>
+  );
 }
