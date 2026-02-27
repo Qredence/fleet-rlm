@@ -69,4 +69,4 @@ When docs conflict with implementation, treat these as authoritative:
 
 Historical docs are archived and non-operational:
 
-- [plans/archive/docs-legacy](../plans/archive/docs-legacy/README.md)
+- Legacy planning docs are stored under the local-only `plans/archive/docs-legacy/` path.
