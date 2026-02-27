@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import dspy
 
 STREAM_EVENT_SCHEMA_VERSION = 2
-_ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https", "file"})
+_ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https"})
 
 
 def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:

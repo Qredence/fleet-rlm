@@ -32,8 +32,15 @@ export function GroupedSettingsPane({
   const [telemetryEnabled, setTelemetryEnabled] = useState(true);
   const [apiBase, setApiBase] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [lmModel, setLmModel] = useState("");
+  const [delegateLmModel, setDelegateLmModel] = useState("");
+  const [delegateLmSmallModel, setDelegateLmSmallModel] = useState("");
   const [baselineApiBase, setBaselineApiBase] = useState("");
   const [baselineApiKey, setBaselineApiKey] = useState("");
+  const [baselineLmModel, setBaselineLmModel] = useState("");
+  const [baselineDelegateLmModel, setBaselineDelegateLmModel] = useState("");
+  const [baselineDelegateLmSmallModel, setBaselineDelegateLmSmallModel] =
+    useState("");
 
   useEffect(() => {
     setTelemetryEnabled(telemetryClient.isAnonymousTelemetryEnabled());
@@ -42,10 +49,19 @@ export function GroupedSettingsPane({
   useEffect(() => {
     const values = settingsQuery.data?.values;
     if (!values) return;
+    const nextLmModel = values.DSPY_LM_MODEL ?? "";
+    const nextDelegateLmModel = values.DSPY_DELEGATE_LM_MODEL ?? "";
+    const nextDelegateLmSmallModel = values.DSPY_DELEGATE_LM_SMALL_MODEL ?? "";
     const nextApiBase = values.DSPY_LM_API_BASE ?? "";
     const nextApiKey = values.DSPY_LLM_API_KEY ?? "";
+    setLmModel(nextLmModel);
+    setDelegateLmModel(nextDelegateLmModel);
+    setDelegateLmSmallModel(nextDelegateLmSmallModel);
     setApiBase(nextApiBase);
     setApiKey(nextApiKey);
+    setBaselineLmModel(nextLmModel);
+    setBaselineDelegateLmModel(nextDelegateLmModel);
+    setBaselineDelegateLmSmallModel(nextDelegateLmSmallModel);
     setBaselineApiBase(nextApiBase);
     setBaselineApiKey(nextApiKey);
   }, [settingsQuery.data]);
@@ -53,15 +69,32 @@ export function GroupedSettingsPane({
   const runtimeUpdates = useMemo(() => {
     return computeLmRuntimeUpdates(
       {
+        DSPY_LM_MODEL: lmModel,
+        DSPY_DELEGATE_LM_MODEL: delegateLmModel,
+        DSPY_DELEGATE_LM_SMALL_MODEL: delegateLmSmallModel,
         DSPY_LM_API_BASE: apiBase,
         DSPY_LLM_API_KEY: apiKey,
       },
       {
+        DSPY_LM_MODEL: baselineLmModel,
+        DSPY_DELEGATE_LM_MODEL: baselineDelegateLmModel,
+        DSPY_DELEGATE_LM_SMALL_MODEL: baselineDelegateLmSmallModel,
         DSPY_LM_API_BASE: baselineApiBase,
         DSPY_LLM_API_KEY: baselineApiKey,
       },
     );
-  }, [apiBase, apiKey, baselineApiBase, baselineApiKey]);
+  }, [
+    apiBase,
+    apiKey,
+    baselineApiBase,
+    baselineApiKey,
+    baselineDelegateLmModel,
+    baselineDelegateLmSmallModel,
+    baselineLmModel,
+    delegateLmModel,
+    delegateLmSmallModel,
+    lmModel,
+  ]);
 
   const dirtyKeys = useMemo(
     () => Object.keys(runtimeUpdates),
@@ -200,6 +233,48 @@ export function GroupedSettingsPane({
           <span className="text-xs text-muted-foreground">Read-only</span>
         </SettingsRow>
       )}
+
+      <SettingsRow
+        label="Planner LM model"
+        description="Primary planner model identifier used for chat turns and planning."
+      >
+        <Input
+          type="text"
+          value={lmModel}
+          placeholder="openai/gpt-4o-mini"
+          autoComplete="off"
+          onChange={(event) => setLmModel(event.target.value)}
+          className="w-[260px] max-w-[50vw]"
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label="Delegate LM model"
+        description="Optional delegate model used for recursive or long-context sub-agent tasks."
+      >
+        <Input
+          type="text"
+          value={delegateLmModel}
+          placeholder="openai/gpt-4.1-mini"
+          autoComplete="off"
+          onChange={(event) => setDelegateLmModel(event.target.value)}
+          className="w-[260px] max-w-[50vw]"
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label="Delegate small LM model"
+        description="Optional lightweight delegate model for fast/low-cost operations."
+      >
+        <Input
+          type="text"
+          value={delegateLmSmallModel}
+          placeholder="openai/gpt-4o-mini"
+          autoComplete="off"
+          onChange={(event) => setDelegateLmSmallModel(event.target.value)}
+          className="w-[260px] max-w-[50vw]"
+        />
+      </SettingsRow>
 
       <SettingsRow
         label="Custom API endpoint"

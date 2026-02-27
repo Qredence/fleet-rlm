@@ -11,6 +11,8 @@ export const runtimeKeys = {
 
 export const RUNTIME_EDITABLE_KEYS = [
   "DSPY_LM_MODEL",
+  "DSPY_DELEGATE_LM_MODEL",
+  "DSPY_DELEGATE_LM_SMALL_MODEL",
   "DSPY_LLM_API_KEY",
   "DSPY_LM_API_BASE",
   "DSPY_LM_MAX_TOKENS",
@@ -23,6 +25,9 @@ export const RUNTIME_EDITABLE_KEYS = [
 export type RuntimeEditableKey = (typeof RUNTIME_EDITABLE_KEYS)[number];
 
 export const RUNTIME_LM_EDITABLE_KEYS = [
+  "DSPY_LM_MODEL",
+  "DSPY_DELEGATE_LM_MODEL",
+  "DSPY_DELEGATE_LM_SMALL_MODEL",
   "DSPY_LLM_API_KEY",
   "DSPY_LM_API_BASE",
 ] as const;

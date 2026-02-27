@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Test /v1/responses endpoint for models declared in config/config.yaml.
+"""Test /v1/responses endpoint for LiteLLM proxy models.
 
 Security:
 - Never hardcode API keys.
 - Never print API key values.
+
+Models are sourced from docs/litellm-models.md by default.
+A YAML config file can be provided via --config for custom model lists.
 """
 
 from __future__ import annotations
@@ -17,8 +20,19 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import aiohttp
-import yaml
 
+# Default chat models known to work with /v1/responses
+# See docs/litellm-models.md for full model availability
+DEFAULT_CHAT_MODELS = [
+    # DeepInfra
+    "deepinfra/deepseek-ai/DeepSeek-V3.2",
+    "deepinfra/nvidia/Nemotron-3-Nano-30B-A3B",
+    # Gemini (via Gemini API)
+    "gemini/gemini-3-flash-preview",
+    "gemini/gemini-3-pro-preview",
+    # Nvidia NIM
+    "nvidia_nim/qwen/qwen3-next-80b-a3b-instruct",
+]
 
 DEFAULT_PROMPT = "Respond with exactly one word: working"
 
@@ -39,7 +53,10 @@ def load_dotenv(env_path: Path) -> None:
             os.environ[key] = value
 
 
-def read_models_from_config(config_path: Path) -> list[str]:
+def read_models_from_yaml(config_path: Path) -> list[str]:
+    """Read models from a LiteLLM config YAML file."""
+    import yaml
+
     data = yaml.safe_load(config_path.read_text()) or {}
     model_list = data.get("model_list", [])
 
@@ -141,12 +158,12 @@ async def test_model(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Test LiteLLM /v1/responses for chat models in config.yaml"
+        description="Test LiteLLM /v1/responses endpoint for chat models"
     )
     parser.add_argument(
         "--config",
-        default="config/config.yaml",
-        help="Path to LiteLLM config YAML (default: config/config.yaml)",
+        default=None,
+        help="Optional path to LiteLLM config YAML. Uses built-in defaults if not provided.",
     )
     parser.add_argument(
         "--timeout",
@@ -180,24 +197,29 @@ async def main() -> int:
         print("Missing API base in .env: LITELLM_PROXY_BASE_URL")
         return 1
 
-    config_arg_path = Path(args.config)
-    config_path = (
-        config_arg_path
-        if config_arg_path.is_absolute()
-        else (repo_root / config_arg_path)
-    )
-    if not config_path.exists():
-        print(f"Config file not found: {config_path}")
-        return 1
+    # Use built-in defaults or load from config if provided
+    if args.config:
+        config_arg_path = Path(args.config)
+        config_path = (
+            config_arg_path
+            if config_arg_path.is_absolute()
+            else (repo_root / config_arg_path)
+        )
+        if not config_path.exists():
+            print(f"Config file not found: {config_path}")
+            return 1
+        models = read_models_from_yaml(config_path)
+        print(f"Config: {config_path}")
+    else:
+        models = DEFAULT_CHAT_MODELS
+        print("Using built-in model defaults (see docs/litellm-models.md)")
 
-    models = read_models_from_config(config_path)
     if not models:
-        print(f"No chat models found in {config_path}")
+        print("No chat models to test")
         return 1
 
     print("=" * 80)
-    print("Testing /v1/responses endpoint for chat models from config")
-    print(f"Config: {config_path}")
+    print("Testing /v1/responses endpoint for chat models")
     print(f".env: {env_path}")
     print(f"Proxy: {safe_proxy_label(api_base)}")
     print(f"Models to test: {len(models)}")

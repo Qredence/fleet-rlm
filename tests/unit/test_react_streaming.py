@@ -485,6 +485,12 @@ def test_build_final_payload_filters_unsafe_external_urls():
                     "title": "Safe source",
                     "url": "https://example.com/safe",
                 },
+                {
+                    "source_id": "src-file",
+                    "anchor_id": "anc-file",
+                    "title": "File source",
+                    "url": "file:///tmp/local.txt",
+                },
             ],
             attachments=[
                 {
@@ -497,6 +503,11 @@ def test_build_final_payload_filters_unsafe_external_urls():
                     "attachment_id": "att-safe",
                     "name": "Safe attachment",
                     "url": "https://example.com/file.txt",
+                },
+                {
+                    "attachment_id": "att-file",
+                    "name": "File attachment",
+                    "url": "file:///tmp/local.txt",
                 },
             ],
         ),
@@ -518,12 +529,16 @@ def test_build_final_payload_filters_unsafe_external_urls():
     assert sources[0]["canonical_url"] == "https://example.com/safe"
 
     attachments = payload["attachments"]
-    assert len(attachments) == 2
+    assert len(attachments) == 3
     unsafe = next(att for att in attachments if att["attachment_id"] == "att-unsafe")
     assert unsafe["url"] is None
     assert unsafe["preview_url"] is None
     safe = next(att for att in attachments if att["attachment_id"] == "att-safe")
     assert safe["url"] == "https://example.com/file.txt"
+    file_attachment = next(
+        att for att in attachments if att["attachment_id"] == "att-file"
+    )
+    assert file_attachment["url"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -343,6 +343,14 @@ def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
         Use ``AppConfig.rlm_settings`` via Hydra configuration instead.
         This function will be removed in version 0.6.0.
 
+        Migration guide:
+            Old: settings = load_rlm_settings()
+            New: from fleet_rlm.core.config import AppConfig
+                 settings = AppConfig.rlm_settings
+
+        The active YAML config is ``src/fleet_rlm/conf/config.yaml`` (bundled with package).
+        Override settings via CLI: ``python -m fleet_rlm cli rlm_settings.max_iterations=50``
+
     Reads the rlm_settings section from config/config.yaml and returns
     the configuration values with defaults for missing keys.
 
@@ -364,6 +372,8 @@ def load_rlm_settings(*, config_path: Path | None = None) -> dict[str, object]:
         >>> from fleet_rlm.core.config import load_rlm_settings
         >>> settings = load_rlm_settings()
         >>> print(f"Max iterations: {settings['max_iterations']}")
+
+    TODO(v0.6.0): Remove this function. All callers should use AppConfig.rlm_settings.
     """
     import warnings
     import yaml
