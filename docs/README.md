@@ -28,6 +28,7 @@ Next steps:
 
 - [Installation](how-to-guides/installation.md)
 - [Runtime settings](how-to-guides/runtime-settings.md)
+- [LiteLLM proxy model availability](litellm-models.md)
 - [Deploying the API server](how-to-guides/deploying-server.md)
 - [Troubleshooting](how-to-guides/troubleshooting.md)
 
