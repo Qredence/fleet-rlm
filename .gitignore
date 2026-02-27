@@ -30,6 +30,18 @@ venv/
 # OS/editor
 .DS_Store
 .vscode/
+
+# Temporary local scratch artifacts
+*.tmp
+.tmp*
+tmp/
+**/tmp/
+**/.tmp*/
+
+# Frontend local smoke helpers (ad-hoc scripts)
+src/frontend/smoke-*.mjs
+src/frontend/.tmp-*.mjs
+
 src/.tmp/
 src/output/
 src/output/*
