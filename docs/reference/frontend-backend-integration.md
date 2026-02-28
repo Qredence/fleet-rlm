@@ -52,6 +52,28 @@ Compatibility/stub surfaces that may still be present in UI flows:
 - Emits `event`, `command_result`, and `error` envelopes.
 - Auth claims are canonical tenant/user authority.
 
+### Chat Trajectory Render Contract
+
+Frontend chat rendering normalizes trajectory payloads from websocket events into
+AI Elements components with deterministic ordering:
+
+- supported step field aliases:
+  - `tool_args` ↔ `input`
+  - `observation` ↔ `output`
+- supported payload forms:
+  - structured `payload.step_data` with `payload.step_index`
+  - indexed flat fields such as `thought_0`, `tool_name_0`, `tool_args_0`,
+    `observation_0`
+- rendering order:
+  - sorted by step index (`0..N`)
+  - per step sequence: `Reasoning` -> `Tool` -> `ChainOfThought`
+
+Display policy:
+
+- `Reasoning` shows thought text (auto-opens while streaming).
+- `ToolInput` / `ToolOutput` render full structured payloads.
+- `ChainOfThought` remains concise summary-only metadata (no raw JSON dumps).
+
 ### `/api/v1/ws/execution`
 
 - Dedicated execution stream for artifact/step visualization.

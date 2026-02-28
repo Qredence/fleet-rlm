@@ -580,6 +580,23 @@ def test_normalize_trajectory_handles_multiple_fields():
     assert result[1]["tool_name"] == "tool2"
 
 
+def test_normalize_trajectory_handles_tool_args_and_observation_aliases():
+    """Test _normalize_trajectory alias handling for tool args/observation keys."""
+    trajectory = {
+        "tool_name_0": "glob",
+        "tool_args_0": {"path": ".", "pattern": "**/*"},
+        "observation_0": {"count": 3},
+    }
+    result = _normalize_trajectory(trajectory)
+    assert len(result) == 1
+    assert result[0]["index"] == 0
+    assert result[0]["tool_name"] == "glob"
+    assert result[0]["tool_args"] == {"path": ".", "pattern": "**/*"}
+    assert result[0]["input"] == {"path": ".", "pattern": "**/*"}
+    assert result[0]["observation"] == {"count": 3}
+    assert result[0]["output"] == {"count": 3}
+
+
 def test_normalize_trajectory_handles_structured_dict():
     """Test _normalize_trajectory with already-structured dict (future DSPy)."""
     steps = [{"index": 0, "tool_name": "finish"}]

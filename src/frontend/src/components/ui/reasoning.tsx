@@ -81,6 +81,14 @@ function Reasoning({
 
   const spring = prefersReduced ? springs.instant : springs.default;
 
+  // Auto-open while streaming so live reasoning is visible, but keep
+  // manual toggle control after streaming completes.
+  useEffect(() => {
+    if (isThinking) {
+      setIsOpen(true);
+    }
+  }, [isThinking]);
+
   // Format display duration
   const displayDuration = isThinking
     ? `${elapsed}s`

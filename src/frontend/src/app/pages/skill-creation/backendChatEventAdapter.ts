@@ -30,6 +30,16 @@ interface FinalReferenceBundle {
   attachments: ChatAttachmentItem[];
 }
 
+interface NormalizedTrajectoryStep {
+  index: number;
+  thought?: string;
+  action?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  toolOutput?: unknown;
+  label: string;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
@@ -381,58 +391,165 @@ function trajectoryStepData(
   return raw as Record<string, unknown>;
 }
 
-function extractTrajectoryThought(
+function normalizeOptionalUnknown(value: unknown): unknown | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  return value;
+}
+
+function parseTrajectoryStepIndex(
+  payload?: Record<string, unknown>,
+  stepData?: Record<string, unknown>,
+): number {
+  return (
+    asOptionalNumber(payload?.step_index) ??
+    asOptionalNumber(stepData?.index) ??
+    0
+  );
+}
+
+function normalizeTrajectoryStep(
+  raw: Record<string, unknown>,
+  index: number,
+  fallbackText?: string,
+): NormalizedTrajectoryStep {
+  const action = asOptionalText(raw.action);
+  const toolName = asOptionalText(raw.tool_name ?? raw.toolName);
+  const thought = asOptionalText(raw.thought) ?? asOptionalText(fallbackText);
+  const toolInput = normalizeOptionalUnknown(
+    raw.tool_args ?? raw.input ?? raw.tool_input ?? raw.toolInput,
+  );
+  const toolOutput = normalizeOptionalUnknown(
+    raw.output ?? raw.observation ?? raw.tool_output ?? raw.toolOutput,
+  );
+  const label =
+    action ||
+    (toolName ? `Tool: ${toolName}` : undefined) ||
+    (thought ? `Step ${index + 1}` : undefined) ||
+    `Step ${index + 1}`;
+
+  return {
+    index,
+    thought,
+    action,
+    toolName,
+    toolInput,
+    toolOutput,
+    label,
+  };
+}
+
+function extractIndexedTrajectorySteps(
+  payload?: Record<string, unknown>,
+): Map<number, Record<string, unknown>> {
+  const stepsByIndex = new Map<number, Record<string, unknown>>();
+  if (!payload) return stepsByIndex;
+
+  const pattern =
+    /^(thought|tool_name|tool_args|tool_input|input|observation|tool_output|output|action)_(\d+)$/;
+  for (const [key, value] of Object.entries(payload)) {
+    const match = key.match(pattern);
+    if (!match) continue;
+    const field = match[1];
+    if (!field) continue;
+    const index = Number(match[2]);
+    if (!Number.isFinite(index)) continue;
+    const current = stepsByIndex.get(index) ?? {};
+    current[field] = value;
+    stepsByIndex.set(index, current);
+  }
+  return stepsByIndex;
+}
+
+function normalizeTrajectorySteps(
   text: string,
   payload?: Record<string, unknown>,
-): string | undefined {
+): NormalizedTrajectoryStep[] {
+  const stepsByIndex = extractIndexedTrajectorySteps(payload);
   const stepData = trajectoryStepData(payload);
-  const thought = asOptionalText(stepData?.thought);
-  if (thought) return thought;
+
+  if (stepData) {
+    const index = parseTrajectoryStepIndex(payload, stepData);
+    const merged = {
+      ...(stepsByIndex.get(index) ?? {}),
+      ...stepData,
+    };
+    stepsByIndex.set(index, merged);
+  }
+
+  // Fallback for payloads that expose trajectory fields directly without index.
+  if (!stepData && stepsByIndex.size === 0 && payload) {
+    const inlineStep: Record<string, unknown> = {};
+    for (const field of [
+      "thought",
+      "action",
+      "tool_name",
+      "tool_args",
+      "tool_input",
+      "input",
+      "observation",
+      "tool_output",
+      "output",
+    ]) {
+      if (payload[field] !== undefined) {
+        inlineStep[field] = payload[field];
+      }
+    }
+    if (Object.keys(inlineStep).length > 0) {
+      const index = parseTrajectoryStepIndex(payload);
+      stepsByIndex.set(index, inlineStep);
+    }
+  }
+
+  const sorted = [...stepsByIndex.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([index, raw], position) =>
+      normalizeTrajectoryStep(raw, index, position === 0 ? text : undefined),
+    );
+
+  if (sorted.length > 0) {
+    return sorted;
+  }
+
   const fallback = text.trim();
-  return fallback || undefined;
+  if (!fallback) return [];
+  const fallbackIndex = parseTrajectoryStepIndex(payload, stepData);
+  return [
+    {
+      index: fallbackIndex,
+      thought: fallback,
+      label: `Step ${fallbackIndex + 1}`,
+    },
+  ];
+}
+
+function trajectoryStepDetails(step: NormalizedTrajectoryStep): string[] {
+  const details: string[] = [];
+  if (step.toolName) {
+    details.push(`Tool: ${step.toolName}`);
+  }
+  if (step.toolInput !== undefined) {
+    details.push("Input received");
+  }
+  if (step.toolOutput !== undefined) {
+    details.push("Observation received");
+  }
+  return details;
 }
 
 function upsertChainOfThought(
   messages: ChatMessage[],
-  text: string,
-  payload?: Record<string, unknown>,
+  step: NormalizedTrajectoryStep,
 ): ChatMessage[] {
-  const stepData = trajectoryStepData(payload);
-
-  const stepIndex =
-    typeof payload?.step_index === "number" ? payload.step_index : undefined;
-  const action = asOptionalText(stepData?.action);
-  const toolName = asOptionalText(stepData?.tool_name);
-  const fallbackLabel = text.trim();
-  const label =
-    action ||
-    (toolName ? `Tool: ${toolName}` : undefined) ||
-    (stepIndex != null ? `Step ${stepIndex + 1}` : undefined) ||
-    fallbackLabel ||
-    "Trace step";
-
-  const details: string[] = [];
-  if (toolName) {
-    details.push(`Tool: ${toolName}`);
-  }
-  if (typeof stepData?.input === "string" && stepData.input.trim()) {
-    details.push(`Input: ${stepData.input}`);
-  }
-  if (
-    typeof stepData?.observation === "string" &&
-    stepData.observation.trim()
-  ) {
-    details.push(`Observation: ${stepData.observation}`);
-  }
-  if (typeof stepData?.output === "string" && stepData.output.trim()) {
-    details.push(`Output: ${stepData.output}`);
-  }
-
-  const step: ChatTraceStep = {
-    id: nextId("trace-step"),
-    label,
+  const traceStep: ChatTraceStep = {
+    id: `trajectory-step-${step.index}`,
+    index: step.index,
+    label: step.label,
     status: "active",
-    details,
+    details: trajectoryStepDetails(step),
   };
 
   const idx = latestTraceIndex(
@@ -445,9 +562,9 @@ function upsertChainOfThought(
       {
         kind: "chain_of_thought",
         title: "Execution trace",
-        steps: [step],
+        steps: [traceStep],
       },
-      label,
+      step.label,
     );
   }
 
@@ -456,13 +573,81 @@ function upsertChainOfThought(
   if (!msg?.renderParts) return messages;
   const nextParts = msg.renderParts.map((part) => {
     if (part.kind !== "chain_of_thought") return part;
-    const completedSteps = part.steps.map((s) =>
-      s.status === "active" ? { ...s, status: "complete" as const } : s,
-    );
-    return { ...part, steps: [...completedSteps, step] };
+    const withoutCurrent = part.steps.filter((s) => s.index !== step.index);
+    const sortedSteps = [...withoutCurrent, traceStep].sort((left, right) => {
+      const leftIndex =
+        typeof left.index === "number" ? left.index : Number.POSITIVE_INFINITY;
+      const rightIndex =
+        typeof right.index === "number" ? right.index : Number.POSITIVE_INFINITY;
+      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+      return left.id.localeCompare(right.id);
+    });
+    const updatedSteps = sortedSteps.map((candidate) => ({
+      ...candidate,
+      status: candidate.index === step.index ? ("active" as const) : ("complete" as const),
+    }));
+    return { ...part, steps: updatedSteps };
   });
-  copy[idx] = { ...msg, content: label, renderParts: nextParts };
+  copy[idx] = { ...msg, content: step.label, renderParts: nextParts };
   return copy;
+}
+
+function upsertTrajectoryToolPart(
+  messages: ChatMessage[],
+  step: NormalizedTrajectoryStep,
+): ChatMessage[] {
+  if (
+    !step.toolName &&
+    step.toolInput === undefined &&
+    step.toolOutput === undefined
+  ) {
+    return messages;
+  }
+
+  const payload: Record<string, unknown> = {
+    step_index: step.index,
+    tool_name: step.toolName ?? `trajectory_step_${step.index + 1}`,
+  };
+  if (step.toolInput !== undefined) {
+    payload.tool_input = step.toolInput;
+    payload.tool_args = step.toolInput;
+    payload.input = step.toolInput;
+  }
+  if (step.toolOutput !== undefined) {
+    payload.tool_output = step.toolOutput;
+    payload.output = step.toolOutput;
+    payload.observation = step.toolOutput;
+  }
+
+  const stateKind: "tool_call" | "tool_result" =
+    step.toolOutput !== undefined ? "tool_result" : "tool_call";
+  const displayText = step.toolName
+    ? `Tool: ${step.toolName}`
+    : `Step ${step.index + 1}`;
+  return upsertToolLikePart(messages, stateKind, displayText, payload);
+}
+
+function applyTrajectoryStep(
+  messages: ChatMessage[],
+  step: NormalizedTrajectoryStep,
+): ChatMessage[] {
+  let next = messages;
+  if (step.thought) {
+    next = appendReasoning(next, step.thought, "line");
+  }
+  next = upsertTrajectoryToolPart(next, step);
+  next = upsertChainOfThought(next, step);
+  return next;
+}
+
+function applyTrajectoryEvent(
+  messages: ChatMessage[],
+  text: string,
+  payload?: Record<string, unknown>,
+): ChatMessage[] {
+  const steps = normalizeTrajectorySteps(text, payload);
+  if (steps.length === 0) return messages;
+  return steps.reduce<ChatMessage[]>((acc, step) => applyTrajectoryStep(acc, step), messages);
 }
 
 function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
@@ -590,10 +775,12 @@ function sandboxFromPayload(
     (typeof payload?.tool_output === "string" && payload.tool_output) ||
     text;
   const state = inferToolState(kind, text);
+  const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   return {
     kind: "sandbox",
     title: String(payload?.tool_name ?? "Sandbox"),
     state,
+    stepIndex,
     code,
     output,
     errorText: state === "output-error" ? output : undefined,
@@ -607,15 +794,56 @@ function toolFromPayload(
   payload?: Record<string, unknown>,
 ): ChatRenderPart {
   const state = inferToolState(kind, text);
+  const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   return {
     kind: "tool",
     title: String(payload?.tool_name ?? (text || "Tool")),
     toolType: String(payload?.tool_name ?? "tool"),
     state,
+    stepIndex,
     input: payload?.tool_input ?? payload?.tool_args ?? payload?.input,
     output: payload?.tool_output ?? payload?.output ?? text,
     errorText: state === "output-error" ? text || "Tool error" : undefined,
   };
+}
+
+function isOpenToolState(state: ChatRenderToolState): boolean {
+  return state === "running" || state === "input-streaming";
+}
+
+function toolNameMatches(
+  existing: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
+  toolName: string,
+): boolean {
+  if (!toolName) return true;
+  if (existing.kind === "tool") {
+    return existing.toolType === toolName || existing.title === toolName;
+  }
+  return existing.title === toolName;
+}
+
+function stepIndexMatches(
+  existing: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
+  stepIndex: number | undefined,
+): boolean {
+  if (stepIndex == null) return false;
+  return existing.stepIndex === stepIndex;
+}
+
+function findToolLikeTraceIndex(
+  messages: ChatMessage[],
+  part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
+  toolName: string,
+  stepIndex: number | undefined,
+  kind: "tool_call" | "tool_result",
+): number {
+  return latestTraceIndex(messages, (existing) => {
+    if (existing.kind !== part.kind) return false;
+    if (!toolNameMatches(existing, toolName)) return false;
+    if (stepIndexMatches(existing, stepIndex)) return true;
+    if (kind === "tool_call") return isOpenToolState(existing.state);
+    return isOpenToolState(existing.state);
+  });
 }
 
 function upsertToolLikePart(
@@ -640,73 +868,73 @@ function upsertToolLikePart(
   const part = isSandboxPayload(payload)
     ? sandboxFromPayload(kind, text, payload)
     : toolFromPayload(kind, text, payload);
-
-  if (kind === "tool_result") {
-    const toolName = String(payload?.tool_name ?? "");
-    const idx = latestTraceIndex(messages, (existing) => {
-      if (existing.kind !== part.kind) return false;
-      if (existing.kind === "tool") {
-        const open =
-          existing.state === "running" || existing.state === "input-streaming";
-        return (
-          open &&
-          (!toolName ||
-            existing.toolType === toolName ||
-            existing.title === toolName)
-        );
-      }
-      if (existing.kind === "sandbox") {
-        const open =
-          existing.state === "running" || existing.state === "input-streaming";
-        return open && (!toolName || existing.title === toolName);
-      }
-      return false;
-    });
-
-    if (idx >= 0) {
-      const copy = [...messages];
-      const msg = copy[idx];
-      if (msg?.renderParts) {
-        copy[idx] = {
-          ...msg,
-          content: text || msg.content,
-          renderParts: msg.renderParts.map((rp) => {
-            if (rp.kind !== part.kind) return rp;
-            if (rp.kind === "tool" && part.kind === "tool") {
-              const open =
-                rp.state === "running" || rp.state === "input-streaming";
-              const nameMatches =
-                !toolName || rp.toolType === toolName || rp.title === toolName;
-              if (!open || !nameMatches) return rp;
-              return {
-                ...rp,
-                state: part.state,
-                output: part.output,
-                errorText: part.errorText,
-              };
-            }
-            if (rp.kind === "sandbox" && part.kind === "sandbox") {
-              const open =
-                rp.state === "running" || rp.state === "input-streaming";
-              const nameMatches = !toolName || rp.title === toolName;
-              if (!open || !nameMatches) return rp;
-              return {
-                ...rp,
-                state: part.state,
-                output: part.output,
-                errorText: part.errorText,
-                code: part.code || rp.code,
-              };
-            }
-            return rp;
-          }),
-        };
-        return copy;
-      }
-    }
+  if (part.kind !== "tool" && part.kind !== "sandbox") {
+    return appendTracePart(messages, part, text);
   }
 
-  return appendTracePart(messages, part, text);
+  const toolName = String(payload?.tool_name ?? "");
+  const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
+  const idx = findToolLikeTraceIndex(
+    messages,
+    part,
+    toolName,
+    stepIndex,
+    kind,
+  );
+
+  if (idx < 0) {
+    return appendTracePart(messages, part, text);
+  }
+
+  const copy = [...messages];
+  const msg = copy[idx];
+  if (!msg?.renderParts) return appendTracePart(messages, part, text);
+
+  copy[idx] = {
+    ...msg,
+    content: text || msg.content,
+    renderParts: msg.renderParts.map((renderPart) => {
+      if (renderPart.kind !== part.kind) return renderPart;
+      if (!toolNameMatches(renderPart, toolName)) return renderPart;
+      if (
+        stepIndex != null &&
+        renderPart.stepIndex != null &&
+        renderPart.stepIndex !== stepIndex
+      ) {
+        return renderPart;
+      }
+
+      if (renderPart.kind === "tool" && part.kind === "tool") {
+        return {
+          ...renderPart,
+          stepIndex: part.stepIndex ?? renderPart.stepIndex,
+          state: part.state,
+          input:
+            kind === "tool_call"
+              ? (part.input ?? renderPart.input)
+              : renderPart.input,
+          output: kind === "tool_result" ? part.output : renderPart.output,
+          errorText:
+            kind === "tool_result" ? part.errorText : renderPart.errorText,
+        };
+      }
+
+      if (renderPart.kind === "sandbox" && part.kind === "sandbox") {
+        return {
+          ...renderPart,
+          stepIndex: part.stepIndex ?? renderPart.stepIndex,
+          state: part.state,
+          code: part.code || renderPart.code,
+          output: kind === "tool_result" ? part.output : renderPart.output,
+          errorText:
+            kind === "tool_result" ? part.errorText : renderPart.errorText,
+        };
+      }
+
+      return renderPart;
+    }),
+  };
+  return copy;
 }
 
 function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[] {
@@ -1086,14 +1314,8 @@ function applyEvent(
       };
     }
     case "trajectory_step": {
-      let next = messages;
-      const thought = extractTrajectoryThought(text, payload);
-      if (thought) {
-        next = appendReasoning(next, thought, "line");
-      }
-      next = upsertChainOfThought(next, text, payload);
       return {
-        messages: next,
+        messages: applyTrajectoryEvent(messages, text, payload),
         terminal: false,
         errored: false,
       };

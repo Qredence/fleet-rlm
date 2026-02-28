@@ -104,6 +104,8 @@ export type ChatRenderToolState =
 
 export interface ChatTraceStep {
   id: string;
+  /** Stable trajectory index when available (used for deterministic ordering). */
+  index?: number;
   label: string;
   status: "pending" | "active" | "complete" | "error";
   details?: string[];
@@ -200,6 +202,7 @@ export type ChatRenderPart =
       title: string;
       toolType: string;
       state: ChatRenderToolState;
+      stepIndex?: number;
       input?: unknown;
       output?: unknown;
       errorText?: string;
@@ -208,6 +211,7 @@ export type ChatRenderPart =
       kind: "sandbox";
       title: string;
       state: ChatRenderToolState;
+      stepIndex?: number;
       code?: string;
       output?: string;
       errorText?: string;
