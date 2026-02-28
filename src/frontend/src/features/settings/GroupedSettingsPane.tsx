@@ -35,12 +35,13 @@ export function GroupedSettingsPane({
 
   const [telemetryEnabled, setTelemetryEnabled] = useState(true);
   const [apiBase, setApiBase] = useState("");
-  const [apiKey, setApiKey] = useState("");
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [maskedApiKey, setMaskedApiKey] = useState("");
+  const [clearApiKeyOnSave, setClearApiKeyOnSave] = useState(false);
   const [lmModel, setLmModel] = useState("");
   const [delegateLmModel, setDelegateLmModel] = useState("");
   const [delegateLmSmallModel, setDelegateLmSmallModel] = useState("");
   const [baselineApiBase, setBaselineApiBase] = useState("");
-  const [baselineApiKey, setBaselineApiKey] = useState("");
   const [baselineLmModel, setBaselineLmModel] = useState("");
   const [baselineDelegateLmModel, setBaselineDelegateLmModel] = useState("");
   const [baselineDelegateLmSmallModel, setBaselineDelegateLmSmallModel] =
@@ -62,12 +63,13 @@ export function GroupedSettingsPane({
     setDelegateLmModel(nextDelegateLmModel);
     setDelegateLmSmallModel(nextDelegateLmSmallModel);
     setApiBase(nextApiBase);
-    setApiKey(nextApiKey);
+    setApiKeyInput("");
+    setMaskedApiKey(nextApiKey);
+    setClearApiKeyOnSave(false);
     setBaselineLmModel(nextLmModel);
     setBaselineDelegateLmModel(nextDelegateLmModel);
     setBaselineDelegateLmSmallModel(nextDelegateLmSmallModel);
     setBaselineApiBase(nextApiBase);
-    setBaselineApiKey(nextApiKey);
   }, [settingsQuery.data]);
 
   const runtimeUpdates = useMemo(() => {
@@ -77,24 +79,28 @@ export function GroupedSettingsPane({
         DSPY_DELEGATE_LM_MODEL: delegateLmModel,
         DSPY_DELEGATE_LM_SMALL_MODEL: delegateLmSmallModel,
         DSPY_LM_API_BASE: apiBase,
-        DSPY_LLM_API_KEY: apiKey,
       },
       {
         DSPY_LM_MODEL: baselineLmModel,
         DSPY_DELEGATE_LM_MODEL: baselineDelegateLmModel,
         DSPY_DELEGATE_LM_SMALL_MODEL: baselineDelegateLmSmallModel,
         DSPY_LM_API_BASE: baselineApiBase,
-        DSPY_LLM_API_KEY: baselineApiKey,
+      },
+      {
+        secretInputs: {
+          DSPY_LLM_API_KEY: apiKeyInput,
+        },
+        clearedSecrets: clearApiKeyOnSave ? ["DSPY_LLM_API_KEY"] : [],
       },
     );
   }, [
     apiBase,
-    apiKey,
+    apiKeyInput,
     baselineApiBase,
-    baselineApiKey,
     baselineDelegateLmModel,
     baselineDelegateLmSmallModel,
     baselineLmModel,
+    clearApiKeyOnSave,
     delegateLmModel,
     delegateLmSmallModel,
     lmModel,
@@ -321,12 +327,36 @@ export function GroupedSettingsPane({
           >
             <Input
               type="password"
-              value={apiKey}
+              value={apiKeyInput}
               placeholder="sk-..."
               autoComplete="off"
-              onChange={(event) => setApiKey(event.target.value)}
+              onChange={(event) => {
+                setApiKeyInput(event.target.value);
+                setClearApiKeyOnSave(false);
+              }}
               className="w-[260px] max-w-[50vw]"
             />
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                Write-only input. Configured value:{" "}
+                {maskedApiKey ? maskedApiKey : "not set"}.
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant={clearApiKeyOnSave ? "secondary" : "outline"}
+                className="rounded-lg"
+                onClick={() => {
+                  const nextClear = !clearApiKeyOnSave;
+                  setClearApiKeyOnSave(nextClear);
+                  if (nextClear) {
+                    setApiKeyInput("");
+                  }
+                }}
+              >
+                {clearApiKeyOnSave ? "Will clear on save" : "Clear saved value"}
+              </Button>
+            </div>
           </SettingsRow>
 
           <SettingsRow

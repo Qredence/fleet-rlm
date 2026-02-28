@@ -14,6 +14,7 @@ export {
   BACKEND_CAPABILITY_BANNER_TITLE,
 } from "@/lib/rlm-api/messages";
 export { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
+export { authEndpoints } from "@/lib/rlm-api/auth";
 export { rlmCoreEndpoints } from "@/lib/rlm-api/endpoints";
 export {
   streamChatOverWs,
@@ -39,6 +40,9 @@ export type {
   OpenApiPaths,
   HealthResponse,
   ReadyResponse,
+  AuthLoginResponse,
+  AuthLogoutResponse,
+  AuthMeResponse,
   ChatRequest,
   ChatResponse,
   TaskRequest,

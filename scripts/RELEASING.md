@@ -54,8 +54,8 @@ All commands below assume zsh and are run from the repository root.
 ```bash
 # from repo root
 uv run pytest
-uv run ruff check src tests config/test_responses_endpoint.py
-uv run ruff format --check src tests config/test_responses_endpoint.py
+uv run ruff check src tests
+uv run ruff format --check src tests
 uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run python scripts/check_release_hygiene.py
 uv run python scripts/check_release_metadata.py

@@ -29,6 +29,16 @@ Runtime setup surfaces:
 - `POST /api/v1/runtime/tests/lm`
 - `GET /api/v1/runtime/status`
 
+Runtime settings behavior:
+
+- `PATCH /api/v1/runtime/settings` writes are local-only (`APP_ENV=local`).
+- frontend runtime secret inputs are write-only; secrets are sent only when explicitly rotated or explicitly cleared.
+- runtime model changes are hot-applied in-process and can be verified via:
+  - `GET /api/v1/runtime/status`
+  - `active_models.planner`
+  - `active_models.delegate`
+  - `active_models.delegate_small`
+
 Compatibility/stub surfaces that may still be present in UI flows:
 
 - Legacy-gated: `/api/v1/tasks*`, `/api/v1/sessions*`
@@ -78,3 +88,8 @@ bun run check
 ## Change Policy
 
 If backend routes or payload shapes change, update this file in the same PR as the code change.
+
+## Frontend API Layer Policy
+
+- Canonical backend contracts for runtime/chat/auth should use `src/frontend/src/lib/rlm-api/*`.
+- Legacy `src/frontend/src/lib/api` auth/chat endpoint helpers are intentionally defensive/deprecated to prevent stale-contract reuse.

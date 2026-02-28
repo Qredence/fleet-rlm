@@ -6,6 +6,17 @@ All notable changes to this project are documented in this file.
 
 _No notable changes yet._
 
+## [0.4.92] - 2026-02-28
+
+### Changed
+
+- **Change:** Aligned package metadata/version exports and hardened root lazy-export surface in `fleet_rlm.__init__`.
+  **Outcome:** `__version__` now matches project metadata and static analysis tooling can resolve package exports without changing lazy import behavior.
+- **Change:** Modernized FastAPI server contracts for `fastapi>=0.134.0,<1` by introducing reusable `Annotated` dependency aliases and explicit route return/response models.
+  **Outcome:** Cleaner dependency injection, tighter OpenAPI fidelity (including `/api/v1/chat` and `/api/v1/auth/*`), and improved generated frontend typing.
+- **Change:** Marked legacy SQLite compatibility CRUD endpoints (`/api/v1/tasks*`, `/api/v1/sessions*` except `/api/v1/sessions/state`) as deprecated in API schema and documented v0.5.0 removal intent.
+  **Outcome:** Existing behavior remains intact while making migration and cleanup policy explicit for the next release cycle.
+
 ## [0.4.9] - 2026-02-27
 
 ### Changed

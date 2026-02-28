@@ -1,4 +1,8 @@
-"""Task service for executing business logic and database CRUD."""
+"""Legacy SQLite task service for compatibility CRUD endpoints.
+
+Deprecated:
+    This service is scheduled for removal in `v0.5.0`.
+"""
 
 from typing import Optional, Sequence
 
@@ -10,7 +14,7 @@ from fleet_rlm.server.schemas.task import TaskCreate, TaskUpdate
 
 
 class TaskService:
-    """Service layer for Task operations."""
+    """Legacy compatibility service layer for task CRUD operations."""
 
     def __init__(self, session: AsyncSession):
         self._session = session

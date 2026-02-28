@@ -37,6 +37,8 @@ fleet web
 - `fleet web` is the primary interactive interface.
 - Plain `fleet-rlm` installs are intended to support `fleet web`.
 - Runtime settings (LM / Modal) can be configured from the Web UI Settings surface in local development.
+- Runtime model updates from Settings are hot-applied in-process (`/api/v1/runtime/settings`) and verified via active model fields on `/api/v1/runtime/status`.
+- Secret settings inputs in the web Runtime UI are write-only; enter a new value to rotate, or use explicit clear-on-save.
 - Full setup for Modal secrets, Neon DB, auth modes, and deployment is linked below.
 
 ## Why `fleet-rlm`
@@ -58,6 +60,10 @@ fleet-rlm chat --trace-mode compact
 # Explicit API server
 fleet-rlm serve-api --port 8000
 
+# FastAPI CLI (uses [tool.fastapi] entrypoint)
+fastapi dev
+fastapi run
+
 # MCP server
 fleet-rlm serve-mcp --transport stdio
 
@@ -77,6 +83,7 @@ fleet-rlm init --list
 # from repo root
 uv sync --extra dev --extra server
 uv run fleet web
+uv run fastapi dev
 ```
 
 Frontend build workflow (when validating packaged Web UI assets):

@@ -1,9 +1,14 @@
 from importlib.metadata import version
 
 from fleet_rlm.server.schemas import (
+    AuthLoginResponse,
+    AuthLogoutResponse,
     ChatRequest,
     ChatResponse,
     HealthResponse,
+    RuntimeActiveModels,
+    RuntimeStatusResponse,
+    RuntimeTestCache,
     TaskRequest,
     WSMessage,
 )
@@ -31,6 +36,25 @@ def test_task_request_defaults():
     req = TaskRequest(task_type="basic", question="test")
     assert req.max_iterations == 15
     assert req.timeout == 600
+
+
+def test_auth_response_defaults():
+    login = AuthLoginResponse(token="dummy")
+    logout = AuthLogoutResponse()
+    assert login.token == "dummy"
+    assert logout.status == "ok"
+
+
+def test_runtime_status_shape():
+    status = RuntimeStatusResponse(
+        app_env="local",
+        write_enabled=True,
+        ready=False,
+        active_models=RuntimeActiveModels(planner="openai/gpt-4o-mini"),
+        tests=RuntimeTestCache(),
+    )
+    assert status.active_models.planner == "openai/gpt-4o-mini"
+    assert status.active_models.delegate == ""
 
 
 def test_ws_message_defaults():

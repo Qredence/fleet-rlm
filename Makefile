@@ -1,4 +1,4 @@
-PYTHON_SOURCES = src tests config/test_responses_endpoint.py
+PYTHON_SOURCES = src tests
 PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
 .PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean

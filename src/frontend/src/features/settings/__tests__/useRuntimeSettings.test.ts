@@ -16,7 +16,7 @@ describe("computeRuntimeUpdates", () => {
     expect(computeRuntimeUpdates({ ...baseline }, baseline)).toEqual({});
   });
 
-  it("includes changed values in the update payload", () => {
+  it("includes changed non-secret values in the update payload", () => {
     const baseline = {
       DSPY_LM_MODEL: "openai/gpt-4o-mini",
       SECRET_NAME: "LITELLM",
@@ -34,7 +34,7 @@ describe("computeRuntimeUpdates", () => {
     });
   });
 
-  it("keeps explicit empty-string updates for cleared values", () => {
+  it("keeps explicit empty-string updates for cleared non-secret values", () => {
     const baseline = {
       VOLUME_NAME: "rlm-volume-dspy",
     };
@@ -46,6 +46,47 @@ describe("computeRuntimeUpdates", () => {
       VOLUME_NAME: "",
     });
   });
+
+  it("does not include secret keys unless explicitly rotated or cleared", () => {
+    const baseline = {
+      DSPY_LM_MODEL: "openai/gpt-4o-mini",
+      DSPY_LLM_API_KEY: "sk-...yz",
+    };
+    const current = {
+      DSPY_LM_MODEL: "openai/gpt-4o-mini",
+      DSPY_LLM_API_KEY: "",
+    };
+
+    expect(computeRuntimeUpdates(current, baseline)).toEqual({});
+  });
+
+  it("includes secret keys when a new secret is entered", () => {
+    const updates = computeRuntimeUpdates(
+      {},
+      {},
+      {
+        secretInputs: {
+          DSPY_LLM_API_KEY: "sk-new",
+        },
+      },
+    );
+    expect(updates).toEqual({
+      DSPY_LLM_API_KEY: "sk-new",
+    });
+  });
+
+  it("includes explicit secret clear operations", () => {
+    const updates = computeRuntimeUpdates(
+      {},
+      {},
+      {
+        clearedSecrets: ["DSPY_LLM_API_KEY"],
+      },
+    );
+    expect(updates).toEqual({
+      DSPY_LLM_API_KEY: "",
+    });
+  });
 });
 
 describe("computeLmRuntimeUpdates", () => {
@@ -55,7 +96,6 @@ describe("computeLmRuntimeUpdates", () => {
       DSPY_DELEGATE_LM_MODEL: "openai/gpt-4.1-mini",
       DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gpt-4o-mini",
       DSPY_LM_API_BASE: "https://proxy.example/v1",
-      DSPY_LLM_API_KEY: "sk-old",
       SECRET_NAME: "LITELLM",
       MODAL_TOKEN_ID: "modal-id",
     };
@@ -82,20 +122,46 @@ describe("computeLmRuntimeUpdates", () => {
       DSPY_DELEGATE_LM_MODEL: "openai/gpt-4.1-mini",
       DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gpt-4o-mini",
       DSPY_LM_API_BASE: "https://proxy.example/v1",
-      DSPY_LLM_API_KEY: "sk-live",
     };
     const current = {
       DSPY_LM_MODEL: "",
       DSPY_DELEGATE_LM_MODEL: "openai/gpt-4.1-mini",
       DSPY_DELEGATE_LM_SMALL_MODEL: "",
       DSPY_LM_API_BASE: "",
-      DSPY_LLM_API_KEY: "sk-live",
     };
 
     expect(computeLmRuntimeUpdates(current, baseline)).toEqual({
       DSPY_LM_MODEL: "",
       DSPY_DELEGATE_LM_SMALL_MODEL: "",
       DSPY_LM_API_BASE: "",
+    });
+  });
+
+  it("includes LM API key only when explicitly rotated", () => {
+    const updates = computeLmRuntimeUpdates(
+      {},
+      {},
+      {
+        secretInputs: {
+          DSPY_LLM_API_KEY: "sk-rotated",
+        },
+      },
+    );
+    expect(updates).toEqual({
+      DSPY_LLM_API_KEY: "sk-rotated",
+    });
+  });
+
+  it("includes LM API key when explicitly cleared", () => {
+    const updates = computeLmRuntimeUpdates(
+      {},
+      {},
+      {
+        clearedSecrets: ["DSPY_LLM_API_KEY"],
+      },
+    );
+    expect(updates).toEqual({
+      DSPY_LLM_API_KEY: "",
     });
   });
 });

@@ -72,6 +72,9 @@ class ServerRuntimeConfig(BaseModel):
     agent_delegate_model: str | None = Field(
         default_factory=lambda: os.getenv("DSPY_DELEGATE_LM_MODEL") or None
     )
+    agent_delegate_small_model: str | None = Field(
+        default_factory=lambda: os.getenv("DSPY_DELEGATE_LM_SMALL_MODEL") or None
+    )
     agent_delegate_max_tokens: int = Field(
         default_factory=lambda: _env_int(
             os.getenv("DSPY_DELEGATE_LM_MAX_TOKENS"), default=64000

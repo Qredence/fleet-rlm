@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator
+from typing import TYPE_CHECKING, Annotated, Any, AsyncGenerator, AsyncIterator
 
 from fastapi import Depends, HTTPException, Request, WebSocket
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -12,8 +12,10 @@ from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
-from .legacy_compat import get_db_session
 from .execution import ExecutionEventEmitter
+from .legacy_compat import get_db_session
+from .services.session_service import SessionService
+from .services.task_service import TaskService
 
 if TYPE_CHECKING:
     from fleet_rlm.react.agent import RLMReActChatAgent
@@ -86,6 +88,13 @@ def get_delegate_lm(request: Request) -> Any:
     return get_server_state(request).delegate_lm
 
 
+ServerStateDep = Annotated[ServerState, Depends(get_server_state)]
+RequestConfigDep = Annotated[ServerRuntimeConfig, Depends(get_config)]
+ServerConfigDep = Annotated[ServerRuntimeConfig, Depends(get_server_config)]
+PlannerLMDep = Annotated[Any, Depends(get_planner_lm)]
+DelegateLMDep = Annotated[Any, Depends(get_delegate_lm)]
+
+
 def get_db_manager(request: Request) -> DatabaseManager | None:
     return get_server_state(request).db_manager
 
@@ -145,6 +154,9 @@ async def require_http_identity(request: Request) -> NormalizedIdentity:
     return identity
 
 
+HTTPIdentityDep = Annotated[NormalizedIdentity, Depends(require_http_identity)]
+
+
 def get_request_identity(request: Request) -> NormalizedIdentity | None:
     identity = getattr(request.state, "identity", None)
     if isinstance(identity, NormalizedIdentity):
@@ -176,9 +188,26 @@ async def get_db(
         raise HTTPException(status_code=410, detail=detail) from exc
 
 
+LegacyDBSessionDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_task_service(db: LegacyDBSessionDep) -> TaskService:
+    """Build the legacy task service from a request-scoped SQLite session."""
+    return TaskService(db)
+
+
+def get_session_service(db: LegacyDBSessionDep) -> SessionService:
+    """Build the legacy session service from a request-scoped SQLite session."""
+    return SessionService(db)
+
+
+TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
+
+
 async def get_react_agent(
     request: Request,
-    config: ServerRuntimeConfig = Depends(get_server_config),
+    config: ServerConfigDep,
 ) -> AsyncIterator["RLMReActChatAgent"]:
     """Provide a configured RLMReActChatAgent for the request lifecycle."""
     from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
@@ -244,7 +273,7 @@ def session_key(workspace_id: str, user_id: str, session_id: str | None = None) 
 
 
 def require_legacy_task_routes(
-    config: ServerRuntimeConfig = Depends(get_config),
+    config: RequestConfigDep,
 ) -> None:
     """Gate legacy SQLite task routes behind runtime config."""
     if not config.enable_legacy_sqlite_routes:
@@ -258,7 +287,7 @@ def require_legacy_task_routes(
 
 
 def require_legacy_session_routes(
-    config: ServerRuntimeConfig = Depends(get_config),
+    config: RequestConfigDep,
 ) -> None:
     """Gate legacy SQLite session CRUD routes behind runtime config."""
     if not config.enable_legacy_sqlite_routes:
@@ -269,3 +298,7 @@ def require_legacy_session_routes(
                 "Use WS session state and Neon-backed APIs instead."
             ),
         )
+
+
+LegacyTaskRoutesDep = Annotated[None, Depends(require_legacy_task_routes)]
+LegacySessionRoutesDep = Annotated[None, Depends(require_legacy_session_routes)]

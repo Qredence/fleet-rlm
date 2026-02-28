@@ -44,6 +44,8 @@ uv run fleet web
 uv run fleet-rlm code-chat --opentui
 uv run fleet-rlm serve-api --port 8000
 uv run fleet-rlm serve-api interpreter.volume_name=my-volume --port 8000
+uv run fastapi dev
+uv run fastapi run
 uv run fleet-rlm serve-mcp --transport stdio
 uv run python scripts/build_ui.py
 uv run python scripts/db_init.py
@@ -264,6 +266,8 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
 - Runtime settings endpoints are served from `/api/v1/runtime/*`; writes (`PATCH /api/v1/runtime/settings`) are local-only (`APP_ENV=local`) while read/test endpoints remain available across environments
+- Runtime settings model updates (`DSPY_LM_MODEL`, `DSPY_DELEGATE_LM_MODEL`) are hot-applied to in-memory server config before LM rebuild; verify effective values via `/api/v1/runtime/status.active_models`
+- Frontend runtime secret inputs are write-only; secret keys are only sent when explicitly rotated or explicitly cleared in settings UI
 - ReAct document tools (`load_document`, `read_file_slice`) support PDF ingestion via MarkItDown with pypdf fallback; scanned/image-only PDFs require OCR before analysis
 - `load_document` / `docs_path` also support public `http(s)` URLs (including best-effort GitHub Gist page URL -> raw URL rewrite); `fetch_web_document` is a thin explicit alias for agent tool discoverability. Local/private-network URL targets are blocked by default for safety unless explicitly enabled via URL document fetch env overrides
 - Neon/Postgres is the canonical multi-tenant app state store for API runtime state (`runs`, `run_steps`, `artifacts`, `memory_items`, `jobs`, etc.); the legacy skills taxonomy tables were removed in v0.4.8 schema cleanup (`QRE-311`)
@@ -273,6 +277,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `AUTH_REQUIRED` controls route enforcement in dev (`false` by default for local iteration, `true` for strict enforcement); `entra` remains fail-closed until JWKS verification wiring is implemented
 - `AUTH_MODE=entra` is scaffolded and fail-closed until JWKS verification wiring is implemented
 - Legacy SQLite CRUD routes (`/api/v1/tasks`, `/api/v1/sessions` except `/api/v1/sessions/state`) are compatibility-only and should be gated off outside local development (`LEGACY_SQLITE_ROUTES_ENABLED=false`)
+- Legacy SQLite compatibility modules/routes are deprecated and targeted for removal in `v0.5.0`; avoid adding new dependencies on `server/legacy_compat.py`, `server/legacy_models.py`, or `server/services/{task_service,session_service}.py`
 - ReAct long-context delegate tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`, etc.) use true recursive sub-agents via `spawn_delegate_sub_agent()` — each spawns a new `RLMReActChatAgent` at `depth + 1` with full tool access
 - Demo-only runner exports in `src/fleet_rlm/runners.py` are gated by `FLEET_DEMO_TASKS_ENABLED` (default disabled); `run_long_context` remains available by default as a production-supported path
 - Additive signature tools are available for advanced workflows:

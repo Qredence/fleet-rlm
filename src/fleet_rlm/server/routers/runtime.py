@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.server.runtime_settings import (
@@ -20,9 +20,10 @@ from fleet_rlm.server.runtime_settings import (
 )
 from fleet_rlm.utils.modal import load_modal_config
 
-from ..deps import get_server_state
+from ..deps import ServerStateDep
 from ..schemas.core import (
     RuntimeConnectivityTestResponse,
+    RuntimeActiveModels,
     RuntimeSettingsSnapshot,
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,
@@ -46,6 +47,14 @@ def _runtime_setting_overrides(
         "SECRET_NAME": secret_name,
         "VOLUME_NAME": volume_name or "",
     }
+
+
+def _resolve_active_model(value: str | None, env_key: str) -> str:
+    direct = (value or "").strip()
+    if direct:
+        return direct
+    fallback = (os.environ.get(env_key) or "").strip()
+    return fallback
 
 
 def _sanitize_error(exc: Exception) -> str:
@@ -138,8 +147,7 @@ def _lm_preflight() -> tuple[dict[str, bool], list[str]]:
 
 
 @router.get("/settings", response_model=RuntimeSettingsSnapshot)
-async def get_runtime_settings(request: Request) -> RuntimeSettingsSnapshot:
-    state = get_server_state(request)
+async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot:
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
         extra_values=_runtime_setting_overrides(
@@ -152,10 +160,9 @@ async def get_runtime_settings(request: Request) -> RuntimeSettingsSnapshot:
 
 @router.patch("/settings", response_model=RuntimeSettingsUpdateResponse)
 async def patch_runtime_settings(
-    request_scope: Request,
+    state: ServerStateDep,
     request: RuntimeSettingsUpdateRequest,
 ) -> RuntimeSettingsUpdateResponse:
-    state = get_server_state(request_scope)
     config = state.config
     if config.app_env != "local":
         raise HTTPException(
@@ -181,6 +188,20 @@ async def patch_runtime_settings(
         resolved_volume_name = normalized["VOLUME_NAME"].strip()
         config.volume_name = resolved_volume_name or None
 
+    if "DSPY_LM_MODEL" in normalized:
+        resolved_planner_model = normalized["DSPY_LM_MODEL"].strip()
+        config.agent_model = resolved_planner_model or None
+
+    if "DSPY_DELEGATE_LM_MODEL" in normalized:
+        resolved_delegate_model = normalized["DSPY_DELEGATE_LM_MODEL"].strip()
+        config.agent_delegate_model = resolved_delegate_model or None
+
+    if "DSPY_DELEGATE_LM_SMALL_MODEL" in normalized:
+        resolved_delegate_small_model = normalized[
+            "DSPY_DELEGATE_LM_SMALL_MODEL"
+        ].strip()
+        config.agent_delegate_small_model = resolved_delegate_small_model or None
+
     # Rebuild planner LM in-process to apply updated env values immediately.
     state.planner_lm = get_planner_lm_from_env(model_name=config.agent_model)
     state.delegate_lm = get_delegate_lm_from_env(
@@ -192,8 +213,9 @@ async def patch_runtime_settings(
 
 
 @router.post("/tests/modal", response_model=RuntimeConnectivityTestResponse)
-async def test_modal_connection(request: Request) -> RuntimeConnectivityTestResponse:
-    state = get_server_state(request)
+async def test_modal_connection(
+    state: ServerStateDep,
+) -> RuntimeConnectivityTestResponse:
     checks, guidance = _modal_preflight(secret_name=state.config.secret_name)
     preflight_ok = checks["credentials_available"] and checks["secret_name_set"]
 
@@ -260,8 +282,7 @@ async def test_modal_connection(request: Request) -> RuntimeConnectivityTestResp
 
 
 @router.post("/tests/lm", response_model=RuntimeConnectivityTestResponse)
-async def test_lm_connection(request: Request) -> RuntimeConnectivityTestResponse:
-    state = get_server_state(request)
+async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestResponse:
     checks, guidance = _lm_preflight()
     preflight_ok = checks["model_set"] and checks["api_key_set"]
 
@@ -335,8 +356,7 @@ async def test_lm_connection(request: Request) -> RuntimeConnectivityTestRespons
 
 
 @router.get("/status", response_model=RuntimeStatusResponse)
-async def get_runtime_status(request: Request) -> RuntimeStatusResponse:
-    state = get_server_state(request)
+async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
     llm_checks, llm_guidance = _lm_preflight()
     modal_checks, modal_guidance = _modal_preflight(
         secret_name=state.config.secret_name
@@ -370,6 +390,16 @@ async def get_runtime_status(request: Request) -> RuntimeStatusResponse:
         app_env=state.config.app_env,
         write_enabled=state.config.app_env == "local",
         ready=ready,
+        active_models=RuntimeActiveModels(
+            planner=_resolve_active_model(state.config.agent_model, "DSPY_LM_MODEL"),
+            delegate=_resolve_active_model(
+                state.config.agent_delegate_model, "DSPY_DELEGATE_LM_MODEL"
+            ),
+            delegate_small=_resolve_active_model(
+                state.config.agent_delegate_small_model,
+                "DSPY_DELEGATE_LM_SMALL_MODEL",
+            ),
+        ),
         llm={
             **llm_checks,
             "planner_configured": state.planner_lm is not None,

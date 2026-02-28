@@ -61,7 +61,7 @@ async def execution_stream(
     workspace_id: str | None = None,
     user_id: str | None = None,
     session_id: str | None = None,
-):
+) -> None:
     """Dedicated execution stream for Artifact Canvas consumers."""
     state = get_server_state_from_websocket(websocket)
     identity = await _authenticate_websocket(websocket, state)
@@ -97,7 +97,7 @@ async def execution_stream(
 
 
 @router.websocket("/ws/chat")
-async def chat_streaming(websocket: WebSocket):
+async def chat_streaming(websocket: WebSocket) -> None:
     """Streaming WebSocket endpoint with native DSPy async streaming."""
     state = get_server_state_from_websocket(websocket)
     identity = await _authenticate_websocket(websocket, state)

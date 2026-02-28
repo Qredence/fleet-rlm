@@ -65,6 +65,7 @@ This document is the canonical architecture and ownership map after Wave 7.2 dea
 ### Frontend transport sources
 - REST client layer: `src/frontend/src/lib/api/*`
 - Core backend client layer: `src/frontend/src/lib/rlm-api/*`
+- Policy: auth/chat/runtime integrations should use `lib/rlm-api`; legacy `lib/api` auth/chat helpers are defensive/deprecated to avoid stale contract drift.
 
 ### Fixed backend contracts used by frontend
 - WebSockets:

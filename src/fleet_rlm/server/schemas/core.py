@@ -19,6 +19,12 @@ class ChatResponse(BaseModel):
     assistant_response: str
     trajectory: dict[str, Any] | None = None
     history_turns: int = 0
+    guardrail_warnings: list[str] = Field(default_factory=list)
+    effective_max_iters: int | None = None
+    delegate_calls_turn: int | None = None
+    delegate_fallback_count_turn: int | None = None
+    delegate_result_truncated_count_turn: int | None = None
+    core_memory_snapshot: dict[str, Any] | None = None
 
 
 class HealthResponse(BaseModel):
@@ -42,6 +48,14 @@ class AuthMeResponse(BaseModel):
     name: str | None = None
     tenant_id: str | None = None
     user_id: str | None = None
+
+
+class AuthLoginResponse(BaseModel):
+    token: str
+
+
+class AuthLogoutResponse(BaseModel):
+    status: Literal["ok"] = "ok"
 
 
 class TaskRequest(BaseModel):
@@ -154,10 +168,17 @@ class RuntimeTestCache(BaseModel):
     lm: RuntimeConnectivityTestResponse | None = None
 
 
+class RuntimeActiveModels(BaseModel):
+    planner: str = ""
+    delegate: str = ""
+    delegate_small: str = ""
+
+
 class RuntimeStatusResponse(BaseModel):
     app_env: str
     write_enabled: bool
     ready: bool
+    active_models: RuntimeActiveModels
     llm: dict[str, Any] = Field(default_factory=dict)
     modal: dict[str, Any] = Field(default_factory=dict)
     tests: RuntimeTestCache

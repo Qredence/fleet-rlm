@@ -1,25 +1,22 @@
 """Chat endpoint using native DSPy async."""
 
-from typing import Any
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from fleet_rlm import runners
 
-from ..config import ServerRuntimeConfig
-from ..deps import get_config, get_delegate_lm, get_planner_lm
-from ..schemas.core import ChatRequest
+from ..deps import DelegateLMDep, PlannerLMDep, RequestConfigDep
+from ..schemas.core import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])
 
 
-@router.post("/chat")
+@router.post("/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    config: ServerRuntimeConfig = Depends(get_config),
-    planner_lm: Any = Depends(get_planner_lm),
-    delegate_lm: Any = Depends(get_delegate_lm),
-):
+    config: RequestConfigDep,
+    planner_lm: PlannerLMDep,
+    delegate_lm: DelegateLMDep,
+) -> ChatResponse:
     if planner_lm is None:
         raise HTTPException(503, "Planner LM not configured")
 
@@ -46,6 +43,6 @@ async def chat(
             delegate_max_calls_per_turn=config.delegate_max_calls_per_turn,
             delegate_result_truncation_chars=config.delegate_result_truncation_chars,
         )
-        return result
+        return ChatResponse.model_validate(result)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

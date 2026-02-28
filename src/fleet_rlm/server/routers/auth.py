@@ -1,21 +1,28 @@
 """Stub router for Authentication."""
 
-from typing import Any
 from fastapi import APIRouter
+
+from ..deps import HTTPIdentityDep
+from ..schemas.core import AuthLoginResponse, AuthLogoutResponse, AuthMeResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/login")
-async def login() -> dict[str, Any]:
-    return {"token": "dummy_token"}
+@router.post("/login", response_model=AuthLoginResponse)
+async def login() -> AuthLoginResponse:
+    return AuthLoginResponse(token="dummy_token")
 
 
-@router.post("/logout")
-async def logout() -> dict[str, Any]:
-    return {"status": "ok"}
+@router.post("/logout", response_model=AuthLogoutResponse)
+async def logout() -> AuthLogoutResponse:
+    return AuthLogoutResponse(status="ok")
 
 
-@router.get("/me")
-async def get_me() -> dict[str, Any]:
-    return {"id": "user-1", "name": "Admin User"}
+@router.get("/me", response_model=AuthMeResponse)
+async def get_me(identity: HTTPIdentityDep) -> AuthMeResponse:
+    return AuthMeResponse(
+        tenant_claim=identity.tenant_claim,
+        user_claim=identity.user_claim,
+        email=identity.email,
+        name=identity.name,
+    )

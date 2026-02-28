@@ -1,4 +1,8 @@
-"""Session service for executing business logic and database CRUD."""
+"""Legacy SQLite session service for compatibility CRUD endpoints.
+
+Deprecated:
+    This service is scheduled for removal in `v0.5.0`.
+"""
 
 from typing import Optional, Sequence
 
@@ -10,7 +14,7 @@ from fleet_rlm.server.schemas.session import SessionCreate, SessionUpdate
 
 
 class SessionService:
-    """Service layer for Session operations."""
+    """Legacy compatibility service layer for session CRUD operations."""
 
     def __init__(self, session: AsyncSession):
         self._session = session

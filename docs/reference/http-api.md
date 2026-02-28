@@ -35,6 +35,12 @@ See [Auth Modes](auth.md).
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
+Response contracts:
+
+- `POST /api/v1/auth/login` → `{"token": "<string>"}`
+- `POST /api/v1/auth/logout` → `{"status": "ok"}`
+- `GET /api/v1/auth/me` → identity envelope with `tenant_claim`, `user_claim`, optional `email`, `name`, `tenant_id`, `user_id`
+
 ### Chat
 
 - `POST /api/v1/chat`
@@ -61,6 +67,13 @@ Notes:
 
 - `PATCH /api/v1/runtime/settings` is local-only (`APP_ENV=local`).
 - Read/test endpoints remain available across environments.
+- Runtime settings model updates are hot-applied in-process before LM rebuild:
+  - `DSPY_LM_MODEL` updates planner model selection
+  - `DSPY_DELEGATE_LM_MODEL` updates delegate model selection
+- `GET /api/v1/runtime/status` includes `active_models`:
+  - `active_models.planner`
+  - `active_models.delegate`
+  - `active_models.delegate_small`
 
 ### Legacy SQLite Compatibility Routes
 
