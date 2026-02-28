@@ -61,7 +61,7 @@ class AgentConfig(BaseModel):
         description="Maximum number of ReAct loop iterations per turn.",
     )
     model: str = Field(
-        default="openai/gemini-3.1-pro",
+        default="openai/gemini/gemini-3.1-pro-preview",
         description="LLM model identifier to use. Must include LiteLLM provider prefix e.g. 'openai/model-name'.",
     )
     temperature: float = Field(

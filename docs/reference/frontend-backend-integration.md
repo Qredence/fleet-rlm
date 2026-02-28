@@ -92,4 +92,4 @@ If backend routes or payload shapes change, update this file in the same PR as t
 ## Frontend API Layer Policy
 
 - Canonical backend contracts for runtime/chat/auth should use `src/frontend/src/lib/rlm-api/*`.
-- Legacy `src/frontend/src/lib/api` auth/chat endpoint helpers are intentionally defensive/deprecated to prevent stale-contract reuse.
+- Legacy `src/frontend/src/lib/api` auth/chat endpoint helpers have been removed. Do not reintroduce auth/chat contracts in that layer.

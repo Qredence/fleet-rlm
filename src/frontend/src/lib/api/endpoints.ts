@@ -17,14 +17,7 @@
 
 import { apiClient } from "@/lib/api/client";
 
-// Adjust if the backend uses a different prefix
 const API_PREFIX = "/api/v1";
-
-function raiseLegacyContractError(endpoint: string): never {
-  throw new Error(
-    `[legacy-api] ${endpoint} is deprecated and intentionally disabled. Use "@/lib/rlm-api" typed endpoints.`,
-  );
-}
 
 // ── Tasks (→ Skills) ────────────────────────────────────────────────
 
@@ -149,66 +142,6 @@ export const sessionEndpoints = {
   },
 };
 
-// ── Chat ────────────────────────────────────────────────────────────
-
-export const chatEndpoints = {
-  /**
-   * @deprecated Legacy chat REST helpers drift from the canonical backend chat contract.
-   * Use `rlmCoreEndpoints.chat()` and WS helpers from `@/lib/rlm-api` instead.
-   */
-  /** POST /api/v1/chat — Send a chat message (non-streaming) */
-  send(body: {
-    sessionId: string;
-    message: string;
-    context?: Record<string, unknown>;
-  }) {
-    void body;
-    return raiseLegacyContractError("chatEndpoints.send");
-  },
-
-  /**
-   * @deprecated Legacy SSE streaming route is no longer canonical for Fleet-RLM web chat.
-   * Use `streamChatOverWs` from `@/lib/rlm-api`.
-   */
-  /** POST /api/v1/chat/stream — Send a chat message with SSE streaming */
-  stream(
-    body: {
-      sessionId: string;
-      message: string;
-      context?: Record<string, unknown>;
-    },
-    signal?: AbortSignal,
-  ) {
-    void body;
-    void signal;
-    return raiseLegacyContractError("chatEndpoints.stream");
-  },
-
-  /**
-   * @deprecated Legacy HITL REST route is not part of current backend contract.
-   * Use WS command dispatch via `sendCommandOverWs` from `@/lib/rlm-api`.
-   */
-  /** POST /api/v1/chat/hitl — Respond to an HITL prompt */
-  resolveHitl(body: { sessionId: string; messageId: string; action: string }) {
-    void body;
-    return raiseLegacyContractError("chatEndpoints.resolveHitl");
-  },
-
-  /**
-   * @deprecated Legacy clarification REST route is not part of current backend contract.
-   * Use WS command/event flows via `@/lib/rlm-api`.
-   */
-  /** POST /api/v1/chat/clarification — Respond to a clarification */
-  resolveClarification(body: {
-    sessionId: string;
-    messageId: string;
-    answer: string;
-  }) {
-    void body;
-    return raiseLegacyContractError("chatEndpoints.resolveClarification");
-  },
-};
-
 // ── Analytics ───────────────────────────────────────────────────────
 
 export const analyticsEndpoints = {
@@ -228,37 +161,6 @@ export const analyticsEndpoints = {
       undefined,
       signal,
     );
-  },
-};
-
-// ── Auth ────────────────────────────────────────────────────────────
-
-export const authEndpoints = {
-  /**
-   * @deprecated This legacy API layer expects stale auth payload contracts.
-   * Use `authEndpoints` from `@/lib/rlm-api/auth` instead.
-   */
-  /** POST /api/v1/auth/login — Authenticate user */
-  login(body: { email: string; password: string }) {
-    void body;
-    return raiseLegacyContractError("authEndpoints.login");
-  },
-
-  /**
-   * @deprecated Use typed `@/lib/rlm-api/auth` endpoints.
-   */
-  /** POST /api/v1/auth/logout — Invalidate session */
-  logout() {
-    return raiseLegacyContractError("authEndpoints.logout");
-  },
-
-  /**
-   * @deprecated Use typed `@/lib/rlm-api/auth` endpoints.
-   */
-  /** GET /api/v1/auth/me — Get current user profile */
-  me(signal?: AbortSignal) {
-    void signal;
-    return raiseLegacyContractError("authEndpoints.me");
   },
 };
 

@@ -198,7 +198,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
     DSPy with a language model based on the loaded configuration.
 
     Required environment variables:
-        - DSPY_LM_MODEL: The model identifier (e.g., "openai/gemini-3.1-pro")
+        - DSPY_LM_MODEL: The model identifier (e.g., "openai/gemini/gemini-3.1-pro-preview")
         - DSPY_LLM_API_KEY or DSPY_LM_API_KEY: API key for the model provider
 
     Optional environment variables:
