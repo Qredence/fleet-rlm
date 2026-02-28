@@ -1,12 +1,12 @@
 """Router for Session management."""
 
-from typing import Sequence
+from typing import Annotated, Sequence
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fleet_rlm.server.deps import (
-    get_db,
-    get_server_state,
+    ServerStateDep,
+    SessionServiceDep,
     require_legacy_session_routes,
 )
 from fleet_rlm.server.schemas.core import SessionStateResponse, SessionStateSummary
@@ -15,26 +15,27 @@ from fleet_rlm.server.schemas.session import (
     SessionResponse,
     SessionUpdate,
 )
-from fleet_rlm.server.services.session_service import SessionService
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
-
-
-def get_session_service(db=Depends(get_db)) -> SessionService:
-    return SessionService(db)
+_LEGACY_CRUD_DEPENDENCIES = [Depends(require_legacy_session_routes)]
 
 
 @router.get("/state", response_model=SessionStateResponse)
-async def list_session_state(request: Request) -> SessionStateResponse:
+async def list_session_state(state: ServerStateDep) -> SessionStateResponse:
     """Return lightweight summaries of active/restored in-memory session state."""
-    state = get_server_state(request)
     summaries: list[SessionStateSummary] = []
     for key, payload in state.sessions.items():
         manifest = payload.get("manifest", {}) if isinstance(payload, dict) else {}
         session = payload.get("session", {}) if isinstance(payload, dict) else {}
-        state = session.get("state", {}) if isinstance(session, dict) else {}
-        history = state.get("history", []) if isinstance(state, dict) else []
-        documents = state.get("documents", {}) if isinstance(state, dict) else {}
+        session_state = session.get("state", {}) if isinstance(session, dict) else {}
+        history = (
+            session_state.get("history", []) if isinstance(session_state, dict) else []
+        )
+        documents = (
+            session_state.get("documents", {})
+            if isinstance(session_state, dict)
+            else {}
+        )
         memory = manifest.get("memory", []) if isinstance(manifest, dict) else []
         logs = manifest.get("logs", []) if isinstance(manifest, dict) else []
         artifacts = manifest.get("artifacts", []) if isinstance(manifest, dict) else []
@@ -58,61 +59,85 @@ async def list_session_state(request: Request) -> SessionStateResponse:
     return SessionStateResponse(ok=True, sessions=summaries)
 
 
-@router.post("", response_model=SessionResponse, status_code=201)
+@router.post(
+    "",
+    response_model=SessionResponse,
+    status_code=201,
+    dependencies=_LEGACY_CRUD_DEPENDENCIES,
+    deprecated=True,
+)
 async def create_session(
     session: SessionCreate,
-    _: None = Depends(require_legacy_session_routes),
-    service: SessionService = Depends(get_session_service),
-):
+    service: SessionServiceDep,
+) -> SessionResponse:
     """Create a new session."""
-    return await service.create_session(session)
+    created = await service.create_session(session)
+    return SessionResponse.model_validate(created)
 
 
-@router.get("", response_model=Sequence[SessionResponse])
+@router.get(
+    "",
+    response_model=Sequence[SessionResponse],
+    dependencies=_LEGACY_CRUD_DEPENDENCIES,
+    deprecated=True,
+)
 async def list_sessions(
-    skip: int = 0,
-    limit: int = 100,
-    _: None = Depends(require_legacy_session_routes),
-    service: SessionService = Depends(get_session_service),
-):
+    service: SessionServiceDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1)] = 100,
+) -> Sequence[SessionResponse]:
     """List all sessions."""
-    return await service.get_sessions(skip=skip, limit=limit)
+    sessions = await service.get_sessions(skip=skip, limit=limit)
+    return [SessionResponse.model_validate(item) for item in sessions]
 
 
-@router.get("/{session_id}", response_model=SessionResponse)
+@router.get(
+    "/{session_id}",
+    response_model=SessionResponse,
+    dependencies=_LEGACY_CRUD_DEPENDENCIES,
+    deprecated=True,
+)
 async def get_session(
     session_id: str,
-    _: None = Depends(require_legacy_session_routes),
-    service: SessionService = Depends(get_session_service),
-):
+    service: SessionServiceDep,
+) -> SessionResponse:
     """Get a specific session by ID."""
     session = await service.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    return session
+    return SessionResponse.model_validate(session)
 
 
-@router.patch("/{session_id}", response_model=SessionResponse)
+@router.patch(
+    "/{session_id}",
+    response_model=SessionResponse,
+    dependencies=_LEGACY_CRUD_DEPENDENCIES,
+    deprecated=True,
+)
 async def update_session(
     session_id: str,
     update_data: SessionUpdate,
-    _: None = Depends(require_legacy_session_routes),
-    service: SessionService = Depends(get_session_service),
-):
+    service: SessionServiceDep,
+) -> SessionResponse:
     """Update a specific session."""
     session = await service.update_session(session_id, update_data)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    return session
+    return SessionResponse.model_validate(session)
 
 
-@router.delete("/{session_id}", status_code=204)
+@router.delete(
+    "/{session_id}",
+    status_code=204,
+    dependencies=_LEGACY_CRUD_DEPENDENCIES,
+    deprecated=True,
+)
 async def delete_session(
     session_id: str,
-    _: None = Depends(require_legacy_session_routes),
-    service: SessionService = Depends(get_session_service),
-):
+    service: SessionServiceDep,
+) -> None:
     """Delete a specific session."""
     success = await service.delete_session(session_id)
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
+    return None

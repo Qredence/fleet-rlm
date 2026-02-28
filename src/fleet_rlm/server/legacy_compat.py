@@ -2,6 +2,10 @@
 
 This module is intentionally lazy: no SQLite engine/session factory is created
 until legacy routes are explicitly enabled and used.
+
+Deprecated:
+    This compatibility path is scheduled for removal in `v0.5.0`.
+    Prefer Neon-backed runtime APIs for all new integrations.
 """
 
 import logging

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.4.9
+  version: 0.4.92
 paths:
   /health:
     get:
@@ -41,9 +41,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Login Api V1 Auth Login Post
+                $ref: '#/components/schemas/AuthLoginResponse'
   /api/v1/auth/logout:
     post:
       tags:
@@ -56,9 +54,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Logout Api V1 Auth Logout Post
+                $ref: '#/components/schemas/AuthLogoutResponse'
   /api/v1/auth/me:
     get:
       tags:
@@ -71,9 +67,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Get Me Api V1 Auth Me Get
+                $ref: '#/components/schemas/AuthMeResponse'
   /api/v1/chat:
     post:
       tags:
@@ -91,7 +85,8 @@ paths:
           description: Successful Response
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
         '422':
           description: Validation Error
           content:
@@ -105,6 +100,7 @@ paths:
       summary: Create Task
       description: Create a new task.
       operationId: create_task_api_v1_tasks_post
+      deprecated: true
       requestBody:
         required: true
         content:
@@ -130,12 +126,14 @@ paths:
       summary: List Tasks
       description: List all tasks.
       operationId: list_tasks_api_v1_tasks_get
+      deprecated: true
       parameters:
       - name: skip
         in: query
         required: false
         schema:
           type: integer
+          minimum: 0
           default: 0
           title: Skip
       - name: limit
@@ -143,6 +141,7 @@ paths:
         required: false
         schema:
           type: integer
+          minimum: 1
           default: 100
           title: Limit
       responses:
@@ -168,6 +167,7 @@ paths:
       summary: Get Task
       description: Get a specific task by ID.
       operationId: get_task_api_v1_tasks__task_id__get
+      deprecated: true
       parameters:
       - name: task_id
         in: path
@@ -194,6 +194,7 @@ paths:
       summary: Update Task
       description: Update a specific task.
       operationId: update_task_api_v1_tasks__task_id__patch
+      deprecated: true
       parameters:
       - name: task_id
         in: path
@@ -226,6 +227,7 @@ paths:
       summary: Delete Task
       description: Delete a specific task.
       operationId: delete_task_api_v1_tasks__task_id__delete
+      deprecated: true
       parameters:
       - name: task_id
         in: path
@@ -264,6 +266,7 @@ paths:
       summary: Create Session
       description: Create a new session.
       operationId: create_session_api_v1_sessions_post
+      deprecated: true
       requestBody:
         required: true
         content:
@@ -289,12 +292,14 @@ paths:
       summary: List Sessions
       description: List all sessions.
       operationId: list_sessions_api_v1_sessions_get
+      deprecated: true
       parameters:
       - name: skip
         in: query
         required: false
         schema:
           type: integer
+          minimum: 0
           default: 0
           title: Skip
       - name: limit
@@ -302,6 +307,7 @@ paths:
         required: false
         schema:
           type: integer
+          minimum: 1
           default: 100
           title: Limit
       responses:
@@ -327,6 +333,7 @@ paths:
       summary: Get Session
       description: Get a specific session by ID.
       operationId: get_session_api_v1_sessions__session_id__get
+      deprecated: true
       parameters:
       - name: session_id
         in: path
@@ -353,6 +360,7 @@ paths:
       summary: Update Session
       description: Update a specific session.
       operationId: update_session_api_v1_sessions__session_id__patch
+      deprecated: true
       parameters:
       - name: session_id
         in: path
@@ -385,6 +393,7 @@ paths:
       summary: Delete Session
       description: Delete a specific session.
       operationId: delete_session_api_v1_sessions__session_id__delete
+      deprecated: true
       parameters:
       - name: session_id
         in: path
@@ -640,6 +649,57 @@ paths:
                 title: Response Get Sandbox File Api V1 Sandbox File Get
 components:
   schemas:
+    AuthLoginResponse:
+      properties:
+        token:
+          type: string
+          title: Token
+      type: object
+      required:
+      - token
+      title: AuthLoginResponse
+    AuthLogoutResponse:
+      properties:
+        status:
+          type: string
+          const: ok
+          title: Status
+          default: ok
+      type: object
+      title: AuthLogoutResponse
+    AuthMeResponse:
+      properties:
+        tenant_claim:
+          type: string
+          title: Tenant Claim
+        user_claim:
+          type: string
+          title: User Claim
+        email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Email
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        tenant_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+      type: object
+      required:
+      - tenant_claim
+      - user_claim
+      title: AuthMeResponse
     ChatRequest:
       properties:
         message:
@@ -658,6 +718,56 @@ components:
       required:
       - message
       title: ChatRequest
+    ChatResponse:
+      properties:
+        assistant_response:
+          type: string
+          title: Assistant Response
+        trajectory:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Trajectory
+        history_turns:
+          type: integer
+          title: History Turns
+          default: 0
+        guardrail_warnings:
+          items:
+            type: string
+          type: array
+          title: Guardrail Warnings
+        effective_max_iters:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Effective Max Iters
+        delegate_calls_turn:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Delegate Calls Turn
+        delegate_fallback_count_turn:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Delegate Fallback Count Turn
+        delegate_result_truncated_count_turn:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Delegate Result Truncated Count Turn
+        core_memory_snapshot:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Core Memory Snapshot
+      type: object
+      required:
+      - assistant_response
+      title: ChatResponse
     HTTPValidationError:
       properties:
         detail:
@@ -676,7 +786,7 @@ components:
         version:
           type: string
           title: Version
-          default: 0.4.9
+          default: 0.4.92
       type: object
       title: HealthResponse
     ReadyResponse:
@@ -716,6 +826,22 @@ components:
       - database_required
       - sandbox_provider
       title: ReadyResponse
+    RuntimeActiveModels:
+      properties:
+        planner:
+          type: string
+          title: Planner
+          default: ''
+        delegate:
+          type: string
+          title: Delegate
+          default: ''
+        delegate_small:
+          type: string
+          title: Delegate Small
+          default: ''
+      type: object
+      title: RuntimeActiveModels
     RuntimeConnectivityTestResponse:
       properties:
         kind:
@@ -821,6 +947,8 @@ components:
         ready:
           type: boolean
           title: Ready
+        active_models:
+          $ref: '#/components/schemas/RuntimeActiveModels'
         llm:
           additionalProperties: true
           type: object
@@ -841,6 +969,7 @@ components:
       - app_env
       - write_enabled
       - ready
+      - active_models
       - tests
       title: RuntimeStatusResponse
     RuntimeTestCache:

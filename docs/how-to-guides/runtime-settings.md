@@ -22,6 +22,12 @@ The Runtime pane edits these allowlisted keys:
 
 Secret-like values are always returned masked by the API and rendered as masked values in the UI.
 
+The Runtime UI uses **write-only secret inputs**:
+
+- secret fields are never prefilled as editable values
+- entering a value rotates that secret on save
+- use **Clear saved value** to send an explicit empty-string clear on save
+
 ## Runtime Test Buttons
 
 The Runtime pane provides:
@@ -34,6 +40,7 @@ The pane also shows:
 
 - preflight check badges (`configured` / `missing`)
 - last smoke result and timestamp
+- active planner/delegate model resolution from `/api/v1/runtime/status`
 - backend guidance text for remediation
 
 ## Local-Only Settings Writes
@@ -43,6 +50,8 @@ Runtime settings updates are intentionally restricted to local development:
 - `PATCH /api/v1/runtime/settings` succeeds only when `APP_ENV=local`.
 - Non-local environments return `403` for runtime writes.
 - Read and test endpoints remain available in all environments.
+
+When local writes are enabled, model-related updates (`DSPY_LM_MODEL`, `DSPY_DELEGATE_LM_MODEL`) are also applied to in-memory runtime config before LM clients are rebuilt, so new values take effect immediately.
 
 ## Expected Remediation Steps
 

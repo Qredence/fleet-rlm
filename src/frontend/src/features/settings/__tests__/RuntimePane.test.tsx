@@ -19,7 +19,16 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
           SECRET_NAME: "LITELLM",
           VOLUME_NAME: "rlm-volume-dspy",
         },
-        masked_values: {},
+        masked_values: {
+          DSPY_LM_MODEL: "openai/gemini-3-flash-preview",
+          DSPY_LLM_API_KEY: "sk-...yz",
+          DSPY_LM_API_BASE: "https://api.example.com/v1",
+          DSPY_LM_MAX_TOKENS: "64000",
+          MODAL_TOKEN_ID: "tok...12",
+          MODAL_TOKEN_SECRET: "***",
+          SECRET_NAME: "LITELLM",
+          VOLUME_NAME: "rlm-volume-dspy",
+        },
       },
     },
     statusQuery: {
@@ -27,6 +36,11 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
         app_env: "local",
         write_enabled: true,
         ready: false,
+        active_models: {
+          planner: "openai/gemini-3-flash-preview",
+          delegate: "openai/gemini-3-flash-preview",
+          delegate_small: "openai/gemini-3-flash-preview",
+        },
         llm: { model_set: true, api_key_set: true, planner_configured: false },
         modal: { credentials_available: true, secret_name_set: false },
         tests: {
@@ -81,7 +95,11 @@ describe("RuntimePane", () => {
 
     expect(html).toContain("Runtime Status");
     expect(html).toContain("Needs Attention");
+    expect(html).toContain("Active Models");
+    expect(html).toContain("Planner: openai/gemini-3-flash-preview");
     expect(html).toContain("sk-...yz");
+    expect(html).toContain("Write-only input. Configured value");
+    expect(html).toContain("Clear saved value");
     expect(html).toContain("Modal Smoke");
     expect(html).toContain("Preflight failed");
     expect(html).toContain("LM Smoke");

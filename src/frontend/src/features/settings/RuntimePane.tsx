@@ -9,6 +9,7 @@ import {
   computeRuntimeUpdates,
   useRuntimeSettings,
   type RuntimeEditableKey,
+  type RuntimeSecretEditableKey,
 } from "@/features/settings/useRuntimeSettings";
 import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
 
@@ -72,6 +73,20 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   },
 ];
 
+const RUNTIME_SECRET_KEYS: RuntimeSecretEditableKey[] = [
+  "DSPY_LLM_API_KEY",
+  "MODAL_TOKEN_ID",
+  "MODAL_TOKEN_SECRET",
+];
+
+const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(
+  RUNTIME_SECRET_KEYS,
+);
+
+function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditableKey {
+  return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
+}
+
 function formatCheckLabel(key: string): string {
   return key
     .split("_")
@@ -107,27 +122,56 @@ export function RuntimePane() {
   } = useRuntimeSettings();
 
   const initialValues = settingsQuery.data?.values ?? {};
+  const maskedValues = settingsQuery.data?.masked_values ?? initialValues;
   const [baselineValues, setBaselineValues] =
     useState<Record<string, string>>(initialValues);
   const [formValues, setFormValues] =
     useState<Record<string, string>>(initialValues);
+  const [clearSecretFlags, setClearSecretFlags] = useState<
+    Partial<Record<RuntimeSecretEditableKey, boolean>>
+  >({});
 
   useEffect(() => {
     const snapshot = settingsQuery.data;
     if (!snapshot) return;
-    setBaselineValues(snapshot.values ?? {});
-    setFormValues(snapshot.values ?? {});
+    const nextBaseline = snapshot.values ?? {};
+    const nextFormValues = { ...nextBaseline };
+    for (const key of RUNTIME_SECRET_KEYS) {
+      nextFormValues[key] = "";
+    }
+    setBaselineValues(nextBaseline);
+    setFormValues(nextFormValues);
+    setClearSecretFlags({});
   }, [settingsQuery.data]);
 
+  const clearedSecrets = useMemo(
+    () =>
+      RUNTIME_SECRET_KEYS.filter((key) => clearSecretFlags[key] === true),
+    [clearSecretFlags],
+  );
+
+  const secretInputs = useMemo(
+    () =>
+      Object.fromEntries(
+        RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""]),
+      ) as Partial<Record<RuntimeSecretEditableKey, string>>,
+    [formValues],
+  );
+
   const updates = useMemo(
-    () => computeRuntimeUpdates(formValues, baselineValues),
-    [baselineValues, formValues],
+    () =>
+      computeRuntimeUpdates(formValues, baselineValues, {
+        secretInputs,
+        clearedSecrets,
+      }),
+    [baselineValues, clearedSecrets, formValues, secretInputs],
   );
   const dirtyKeys = useMemo(() => Object.keys(updates), [updates]);
   const hasUnsavedRuntimeChanges = dirtyKeys.length > 0;
   const status = statusQuery.data;
   const modalTest = status?.tests?.modal;
   const lmTest = status?.tests?.lm;
+  const activeModels = status?.active_models;
 
   const showUnsavedRuntimeTestWarning = () => {
     toast.error("Save runtime settings before testing", {
@@ -259,6 +303,17 @@ export function RuntimePane() {
         </Badge>
       </SettingsRow>
 
+      <SettingsRow
+        label="Active Models"
+        description="Resolved runtime model identifiers currently used for planner/delegate execution."
+      >
+        <div className="text-xs text-muted-foreground text-right">
+          <div>Planner: {activeModels?.planner || "not set"}</div>
+          <div>Delegate: {activeModels?.delegate || "not set"}</div>
+          <div>Delegate small: {activeModels?.delegate_small || "not set"}</div>
+        </div>
+      </SettingsRow>
+
       {status?.write_enabled === false && (
         <SettingsRow
           label="Write Protection"
@@ -274,25 +329,64 @@ export function RuntimePane() {
         </span>
       </div>
 
-      {RUNTIME_FIELDS.map((field) => (
-        <SettingsRow
-          key={field.key}
-          label={field.label}
-          description={field.description}
-        >
-          <Input
-            type={field.isSecret ? "password" : "text"}
-            value={formValues[field.key] ?? ""}
-            placeholder={field.placeholder}
-            autoComplete="off"
-            onChange={(event) => {
-              const value = event.target.value;
-              setFormValues((prev) => ({ ...prev, [field.key]: value }));
-            }}
-            className="w-[260px] max-w-[50vw]"
-          />
-        </SettingsRow>
-      ))}
+      {RUNTIME_FIELDS.map((field) => {
+        const secretKey = isRuntimeSecretKey(field.key) ? field.key : null;
+        return (
+          <SettingsRow
+            key={field.key}
+            label={field.label}
+            description={field.description}
+          >
+            <div className="flex flex-col items-start gap-2">
+              <Input
+                type={field.isSecret ? "password" : "text"}
+                value={formValues[field.key] ?? ""}
+                placeholder={field.placeholder}
+                autoComplete="off"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFormValues((prev) => ({ ...prev, [field.key]: value }));
+                  if (field.isSecret && secretKey) {
+                    setClearSecretFlags((prev) => ({
+                      ...prev,
+                      [secretKey]: false,
+                    }));
+                  }
+                }}
+                className="w-[260px] max-w-[50vw]"
+              />
+              {field.isSecret && secretKey && (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Write-only input. Configured value:{" "}
+                    {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={clearSecretFlags[secretKey] ? "secondary" : "outline"}
+                    className="rounded-lg"
+                    onClick={() => {
+                      const nextClear = !(clearSecretFlags[secretKey] ?? false);
+                      setClearSecretFlags((prev) => ({
+                        ...prev,
+                        [secretKey]: nextClear,
+                      }));
+                      if (nextClear) {
+                        setFormValues((prev) => ({ ...prev, [secretKey]: "" }));
+                      }
+                    }}
+                  >
+                    {clearSecretFlags[secretKey]
+                      ? "Will clear on save"
+                      : "Clear saved value"}
+                  </Button>
+                </>
+              )}
+            </div>
+          </SettingsRow>
+        );
+      })}
 
       <SettingsRow
         label="Save Runtime Settings"

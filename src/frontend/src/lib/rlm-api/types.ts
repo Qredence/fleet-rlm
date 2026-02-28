@@ -9,11 +9,13 @@ export type OpenApiPaths = paths;
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type ReadyResponse = components["schemas"]["ReadyResponse"];
 export type ChatRequest = components["schemas"]["ChatRequest"];
+export type AuthLoginResponse = components["schemas"]["AuthLoginResponse"];
+export type AuthLogoutResponse = components["schemas"]["AuthLogoutResponse"];
+export type AuthMeResponse = components["schemas"]["AuthMeResponse"];
 export type SessionStateResponse =
   components["schemas"]["SessionStateResponse"];
 export type SessionStateSummary = components["schemas"]["SessionStateSummary"];
 
-// `/api/v1/chat` currently returns an untyped object in the backend OpenAPI schema.
 export type ChatResponse =
   operations["chat_api_v1_chat_post"]["responses"][200]["content"]["application/json"];
 

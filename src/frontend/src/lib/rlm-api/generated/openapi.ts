@@ -32,11 +32,13 @@ export interface paths {
   "/api/v1/tasks": {
     /**
      * List Tasks
+     * @deprecated
      * @description List all tasks.
      */
     get: operations["list_tasks_api_v1_tasks_get"];
     /**
      * Create Task
+     * @deprecated
      * @description Create a new task.
      */
     post: operations["create_task_api_v1_tasks_post"];
@@ -44,16 +46,19 @@ export interface paths {
   "/api/v1/tasks/{task_id}": {
     /**
      * Get Task
+     * @deprecated
      * @description Get a specific task by ID.
      */
     get: operations["get_task_api_v1_tasks__task_id__get"];
     /**
      * Delete Task
+     * @deprecated
      * @description Delete a specific task.
      */
     delete: operations["delete_task_api_v1_tasks__task_id__delete"];
     /**
      * Update Task
+     * @deprecated
      * @description Update a specific task.
      */
     patch: operations["update_task_api_v1_tasks__task_id__patch"];
@@ -68,11 +73,13 @@ export interface paths {
   "/api/v1/sessions": {
     /**
      * List Sessions
+     * @deprecated
      * @description List all sessions.
      */
     get: operations["list_sessions_api_v1_sessions_get"];
     /**
      * Create Session
+     * @deprecated
      * @description Create a new session.
      */
     post: operations["create_session_api_v1_sessions_post"];
@@ -80,16 +87,19 @@ export interface paths {
   "/api/v1/sessions/{session_id}": {
     /**
      * Get Session
+     * @deprecated
      * @description Get a specific session by ID.
      */
     get: operations["get_session_api_v1_sessions__session_id__get"];
     /**
      * Delete Session
+     * @deprecated
      * @description Delete a specific session.
      */
     delete: operations["delete_session_api_v1_sessions__session_id__delete"];
     /**
      * Update Session
+     * @deprecated
      * @description Update a specific session.
      */
     patch: operations["update_session_api_v1_sessions__session_id__patch"];
@@ -152,6 +162,35 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /** AuthLoginResponse */
+    AuthLoginResponse: {
+      /** Token */
+      token: string;
+    };
+    /** AuthLogoutResponse */
+    AuthLogoutResponse: {
+      /**
+       * Status
+       * @default ok
+       * @constant
+       */
+      status?: "ok";
+    };
+    /** AuthMeResponse */
+    AuthMeResponse: {
+      /** Tenant Claim */
+      tenant_claim: string;
+      /** User Claim */
+      user_claim: string;
+      /** Email */
+      email?: string | null;
+      /** Name */
+      name?: string | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** User Id */
+      user_id?: string | null;
+    };
     /** ChatRequest */
     ChatRequest: {
       /** Message */
@@ -163,6 +202,34 @@ export interface components {
        * @default false
        */
       trace?: boolean;
+    };
+    /** ChatResponse */
+    ChatResponse: {
+      /** Assistant Response */
+      assistant_response: string;
+      /** Trajectory */
+      trajectory?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * History Turns
+       * @default 0
+       */
+      history_turns?: number;
+      /** Guardrail Warnings */
+      guardrail_warnings?: string[];
+      /** Effective Max Iters */
+      effective_max_iters?: number | null;
+      /** Delegate Calls Turn */
+      delegate_calls_turn?: number | null;
+      /** Delegate Fallback Count Turn */
+      delegate_fallback_count_turn?: number | null;
+      /** Delegate Result Truncated Count Turn */
+      delegate_result_truncated_count_turn?: number | null;
+      /** Core Memory Snapshot */
+      core_memory_snapshot?: {
+        [key: string]: unknown;
+      } | null;
     };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -178,7 +245,7 @@ export interface components {
       ok?: boolean;
       /**
        * Version
-       * @default 0.4.9
+       * @default 0.4.92
        */
       version?: string;
     };
@@ -202,6 +269,24 @@ export interface components {
       database_required: boolean;
       /** Sandbox Provider */
       sandbox_provider: string;
+    };
+    /** RuntimeActiveModels */
+    RuntimeActiveModels: {
+      /**
+       * Planner
+       * @default
+       */
+      planner?: string;
+      /**
+       * Delegate
+       * @default
+       */
+      delegate?: string;
+      /**
+       * Delegate Small
+       * @default
+       */
+      delegate_small?: string;
     };
     /** RuntimeConnectivityTestResponse */
     RuntimeConnectivityTestResponse: {
@@ -266,6 +351,7 @@ export interface components {
       write_enabled: boolean;
       /** Ready */
       ready: boolean;
+      active_models: components["schemas"]["RuntimeActiveModels"];
       /** Llm */
       llm?: {
         [key: string]: unknown;
@@ -470,9 +556,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": {
-            [key: string]: unknown;
-          };
+          "application/json": components["schemas"]["AuthLoginResponse"];
         };
       };
     };
@@ -483,9 +567,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": {
-            [key: string]: unknown;
-          };
+          "application/json": components["schemas"]["AuthLogoutResponse"];
         };
       };
     };
@@ -496,9 +578,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": {
-            [key: string]: unknown;
-          };
+          "application/json": components["schemas"]["AuthMeResponse"];
         };
       };
     };
@@ -514,7 +594,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["ChatResponse"];
         };
       };
       /** @description Validation Error */
@@ -527,6 +607,7 @@ export interface operations {
   };
   /**
    * List Tasks
+   * @deprecated
    * @description List all tasks.
    */
   list_tasks_api_v1_tasks_get: {
@@ -553,6 +634,7 @@ export interface operations {
   };
   /**
    * Create Task
+   * @deprecated
    * @description Create a new task.
    */
   create_task_api_v1_tasks_post: {
@@ -578,6 +660,7 @@ export interface operations {
   };
   /**
    * Get Task
+   * @deprecated
    * @description Get a specific task by ID.
    */
   get_task_api_v1_tasks__task_id__get: {
@@ -603,6 +686,7 @@ export interface operations {
   };
   /**
    * Delete Task
+   * @deprecated
    * @description Delete a specific task.
    */
   delete_task_api_v1_tasks__task_id__delete: {
@@ -626,6 +710,7 @@ export interface operations {
   };
   /**
    * Update Task
+   * @deprecated
    * @description Update a specific task.
    */
   update_task_api_v1_tasks__task_id__patch: {
@@ -670,6 +755,7 @@ export interface operations {
   };
   /**
    * List Sessions
+   * @deprecated
    * @description List all sessions.
    */
   list_sessions_api_v1_sessions_get: {
@@ -696,6 +782,7 @@ export interface operations {
   };
   /**
    * Create Session
+   * @deprecated
    * @description Create a new session.
    */
   create_session_api_v1_sessions_post: {
@@ -721,6 +808,7 @@ export interface operations {
   };
   /**
    * Get Session
+   * @deprecated
    * @description Get a specific session by ID.
    */
   get_session_api_v1_sessions__session_id__get: {
@@ -746,6 +834,7 @@ export interface operations {
   };
   /**
    * Delete Session
+   * @deprecated
    * @description Delete a specific session.
    */
   delete_session_api_v1_sessions__session_id__delete: {
@@ -769,6 +858,7 @@ export interface operations {
   };
   /**
    * Update Session
+   * @deprecated
    * @description Update a specific session.
    */
   update_session_api_v1_sessions__session_id__patch: {

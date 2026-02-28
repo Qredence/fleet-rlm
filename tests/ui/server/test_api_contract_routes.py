@@ -93,3 +93,31 @@ def test_legacy_routes_keep_410_when_disabled(
 
     assert tasks.status_code == 410
     assert sessions.status_code == 410
+
+
+def test_legacy_crud_routes_are_marked_deprecated(local_client: TestClient) -> None:
+    route_map = {
+        (route.path, frozenset(route.methods or [])): route
+        for route in local_client.app.routes
+        if isinstance(route, APIRoute)
+    }
+
+    deprecated_route_keys = {
+        ("/api/v1/tasks", frozenset({"POST"})),
+        ("/api/v1/tasks", frozenset({"GET"})),
+        ("/api/v1/tasks/{task_id}", frozenset({"GET"})),
+        ("/api/v1/tasks/{task_id}", frozenset({"PATCH"})),
+        ("/api/v1/tasks/{task_id}", frozenset({"DELETE"})),
+        ("/api/v1/sessions", frozenset({"POST"})),
+        ("/api/v1/sessions", frozenset({"GET"})),
+        ("/api/v1/sessions/{session_id}", frozenset({"GET"})),
+        ("/api/v1/sessions/{session_id}", frozenset({"PATCH"})),
+        ("/api/v1/sessions/{session_id}", frozenset({"DELETE"})),
+    }
+
+    for key in deprecated_route_keys:
+        route = route_map[key]
+        assert route.deprecated is True
+
+    state_route = route_map[("/api/v1/sessions/state", frozenset({"GET"}))]
+    assert state_route.deprecated is not True

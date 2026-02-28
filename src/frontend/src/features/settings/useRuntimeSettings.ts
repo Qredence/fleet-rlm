@@ -23,6 +23,13 @@ export const RUNTIME_EDITABLE_KEYS = [
 ] as const;
 
 export type RuntimeEditableKey = (typeof RUNTIME_EDITABLE_KEYS)[number];
+export const RUNTIME_SECRET_EDITABLE_KEYS = [
+  "DSPY_LLM_API_KEY",
+  "MODAL_TOKEN_ID",
+  "MODAL_TOKEN_SECRET",
+] as const;
+export type RuntimeSecretEditableKey =
+  (typeof RUNTIME_SECRET_EDITABLE_KEYS)[number];
 
 export const RUNTIME_LM_EDITABLE_KEYS = [
   "DSPY_LM_MODEL",
@@ -33,13 +40,55 @@ export const RUNTIME_LM_EDITABLE_KEYS = [
 ] as const;
 
 export type RuntimeLmEditableKey = (typeof RUNTIME_LM_EDITABLE_KEYS)[number];
+export const RUNTIME_LM_SECRET_EDITABLE_KEYS = ["DSPY_LLM_API_KEY"] as const;
+export type RuntimeLmSecretEditableKey =
+  (typeof RUNTIME_LM_SECRET_EDITABLE_KEYS)[number];
+
+export interface RuntimeUpdateComputationOptions<
+  SecretKey extends RuntimeSecretEditableKey,
+> {
+  secretInputs?: Partial<Record<SecretKey, string>>;
+  clearedSecrets?: Iterable<SecretKey>;
+}
+
+function toSecretSet<SecretKey extends RuntimeSecretEditableKey>(
+  options?: RuntimeUpdateComputationOptions<SecretKey>,
+): Set<SecretKey> {
+  if (!options?.clearedSecrets) return new Set<SecretKey>();
+  return new Set(options.clearedSecrets);
+}
+
+function computeSecretUpdate<SecretKey extends RuntimeSecretEditableKey>(
+  key: SecretKey,
+  updates: Record<string, string>,
+  options?: RuntimeUpdateComputationOptions<SecretKey>,
+): void {
+  const nextSecretValue = options?.secretInputs?.[key] ?? "";
+  const clearedSecretSet = toSecretSet(options);
+  if (nextSecretValue.trim() !== "") {
+    updates[key] = nextSecretValue;
+    return;
+  }
+  if (clearedSecretSet.has(key)) {
+    updates[key] = "";
+  }
+}
 
 export function computeRuntimeUpdates(
   current: Record<string, string>,
   baseline: Record<string, string>,
+  options?: RuntimeUpdateComputationOptions<RuntimeSecretEditableKey>,
 ): Record<string, string> {
   const updates: Record<string, string> = {};
   for (const key of RUNTIME_EDITABLE_KEYS) {
+    if ((RUNTIME_SECRET_EDITABLE_KEYS as readonly string[]).includes(key)) {
+      computeSecretUpdate(
+        key as RuntimeSecretEditableKey,
+        updates,
+        options as RuntimeUpdateComputationOptions<RuntimeSecretEditableKey>,
+      );
+      continue;
+    }
     const next = current[key] ?? "";
     const prev = baseline[key] ?? "";
     if (next !== prev) {
@@ -52,9 +101,18 @@ export function computeRuntimeUpdates(
 export function computeLmRuntimeUpdates(
   current: Record<string, string>,
   baseline: Record<string, string>,
+  options?: RuntimeUpdateComputationOptions<RuntimeLmSecretEditableKey>,
 ): Record<string, string> {
   const updates: Record<string, string> = {};
   for (const key of RUNTIME_LM_EDITABLE_KEYS) {
+    if ((RUNTIME_LM_SECRET_EDITABLE_KEYS as readonly string[]).includes(key)) {
+      computeSecretUpdate(
+        key as RuntimeLmSecretEditableKey,
+        updates,
+        options as RuntimeUpdateComputationOptions<RuntimeLmSecretEditableKey>,
+      );
+      continue;
+    }
     const next = current[key] ?? "";
     const prev = baseline[key] ?? "";
     if (next !== prev) {

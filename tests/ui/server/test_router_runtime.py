@@ -28,9 +28,26 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     monkeypatch: pytest.MonkeyPatch,
 ):
     planner = object()
+    delegate = object()
+    planner_calls: list[str | None] = []
+    delegate_calls: list[str | None] = []
+
+    def _planner_factory(model_name=None):
+        planner_calls.append(model_name)
+        return planner
+
+    def _delegate_factory(model_name=None, default_max_tokens=None):
+        _ = default_max_tokens
+        delegate_calls.append(model_name)
+        return delegate
+
     monkeypatch.setattr(
         "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
-        lambda model_name=None: planner,
+        _planner_factory,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.runtime.get_delegate_lm_from_env",
+        _delegate_factory,
     )
 
     response = local_client.patch(
@@ -38,6 +55,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
         json={
             "updates": {
                 "DSPY_LM_MODEL": "openai/gpt-4o-mini",
+                "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4.1-mini",
                 "DSPY_LLM_API_KEY": "sk-test",
                 "SECRET_NAME": "ALT_SECRET",
                 "VOLUME_NAME": "alt-volume",
@@ -49,14 +67,20 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
 
     assert set(payload["updated"]) == {
         "DSPY_LM_MODEL",
+        "DSPY_DELEGATE_LM_MODEL",
         "DSPY_LLM_API_KEY",
         "SECRET_NAME",
         "VOLUME_NAME",
     }
     state = local_client.app.state.server_state
+    assert state.config.agent_model == "openai/gpt-4o-mini"
+    assert state.config.agent_delegate_model == "openai/gpt-4.1-mini"
     assert state.config.secret_name == "ALT_SECRET"
     assert state.config.volume_name == "alt-volume"
     assert state.planner_lm is planner
+    assert state.delegate_lm is delegate
+    assert planner_calls[-1] == "openai/gpt-4o-mini"
+    assert delegate_calls[-1] == "openai/gpt-4.1-mini"
     assert os.environ.get("SECRET_NAME") == "ALT_SECRET"
 
 
@@ -211,3 +235,4 @@ def test_runtime_status_uses_cached_results(
     assert payload["ready"] is True
     assert payload["tests"]["modal"]["ok"] is True
     assert payload["tests"]["lm"]["ok"] is True
+    assert payload["active_models"]["planner"] == "openai/gpt-4o-mini"

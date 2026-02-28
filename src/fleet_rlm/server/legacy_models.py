@@ -1,4 +1,9 @@
-"""Database models using SQLModel."""
+"""Legacy SQLite compatibility models using SQLModel.
+
+Deprecated:
+    These compatibility models are scheduled for removal in `v0.5.0`.
+    Use Neon-backed canonical models under `fleet_rlm.db.models`.
+"""
 
 import uuid
 from datetime import datetime, timezone
