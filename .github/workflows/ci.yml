@@ -49,8 +49,8 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          uv run ruff check src tests config/test_responses_endpoint.py
-          uv run ruff format --check src tests config/test_responses_endpoint.py
+          uv run ruff check src tests
+          uv run ruff format --check src tests
 
       - name: Type-check with ty
         run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"

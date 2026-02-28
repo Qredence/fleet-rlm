@@ -196,6 +196,12 @@ async def patch_runtime_settings(
         resolved_delegate_model = normalized["DSPY_DELEGATE_LM_MODEL"].strip()
         config.agent_delegate_model = resolved_delegate_model or None
 
+    if "DSPY_DELEGATE_LM_SMALL_MODEL" in normalized:
+        resolved_delegate_small_model = normalized[
+            "DSPY_DELEGATE_LM_SMALL_MODEL"
+        ].strip()
+        config.agent_delegate_small_model = resolved_delegate_small_model or None
+
     # Rebuild planner LM in-process to apply updated env values immediately.
     state.planner_lm = get_planner_lm_from_env(model_name=config.agent_model)
     state.delegate_lm = get_delegate_lm_from_env(
@@ -389,9 +395,10 @@ async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
             delegate=_resolve_active_model(
                 state.config.agent_delegate_model, "DSPY_DELEGATE_LM_MODEL"
             ),
-            delegate_small=(
-                os.environ.get("DSPY_DELEGATE_LM_SMALL_MODEL") or ""
-            ).strip(),
+            delegate_small=_resolve_active_model(
+                state.config.agent_delegate_small_model,
+                "DSPY_DELEGATE_LM_SMALL_MODEL",
+            ),
         ),
         llm={
             **llm_checks,

@@ -56,6 +56,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
             "updates": {
                 "DSPY_LM_MODEL": "openai/gpt-4o-mini",
                 "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4.1-mini",
+                "DSPY_DELEGATE_LM_SMALL_MODEL": "openai/gpt-4.1-nano",
                 "DSPY_LLM_API_KEY": "sk-test",
                 "SECRET_NAME": "ALT_SECRET",
                 "VOLUME_NAME": "alt-volume",
@@ -68,6 +69,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     assert set(payload["updated"]) == {
         "DSPY_LM_MODEL",
         "DSPY_DELEGATE_LM_MODEL",
+        "DSPY_DELEGATE_LM_SMALL_MODEL",
         "DSPY_LLM_API_KEY",
         "SECRET_NAME",
         "VOLUME_NAME",
@@ -75,6 +77,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     state = local_client.app.state.server_state
     assert state.config.agent_model == "openai/gpt-4o-mini"
     assert state.config.agent_delegate_model == "openai/gpt-4.1-mini"
+    assert state.config.agent_delegate_small_model == "openai/gpt-4.1-nano"
     assert state.config.secret_name == "ALT_SECRET"
     assert state.config.volume_name == "alt-volume"
     assert state.planner_lm is planner
@@ -224,6 +227,8 @@ def test_runtime_status_uses_cached_results(
     }
 
     monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "openai/gpt-4.1-mini")
+    monkeypatch.setenv("DSPY_DELEGATE_LM_SMALL_MODEL", "openai/gpt-4.1-nano")
     monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-test")
     monkeypatch.setenv("MODAL_TOKEN_ID", "token-id")
     monkeypatch.setenv("MODAL_TOKEN_SECRET", "token-secret")
@@ -236,3 +241,5 @@ def test_runtime_status_uses_cached_results(
     assert payload["tests"]["modal"]["ok"] is True
     assert payload["tests"]["lm"]["ok"] is True
     assert payload["active_models"]["planner"] == "openai/gpt-4o-mini"
+    assert payload["active_models"]["delegate"] == "openai/gpt-4.1-mini"
+    assert payload["active_models"]["delegate_small"] == "openai/gpt-4.1-nano"
