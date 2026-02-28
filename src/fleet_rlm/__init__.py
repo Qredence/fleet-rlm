@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 __version__ = "0.4.9"
 
@@ -52,6 +52,107 @@ __all__ = [
     "PostHogConfig",
     "PostHogLLMCallback",
 ]
+
+# Keep lazy exports while making symbol definitions visible to static analyzers
+# (including CodeQL's py/undefined-export) without eager runtime imports.
+if TYPE_CHECKING:
+    from .analytics import PostHogConfig, PostHogLLMCallback, configure_analytics
+    from .chunking import (
+        chunk_by_headers,
+        chunk_by_json_keys,
+        chunk_by_size,
+        chunk_by_timestamps,
+    )
+    from .core import (
+        ModalInterpreter,
+        configure_planner_from_env,
+        get_planner_lm_from_env,
+        sandbox_driver,
+    )
+    from .react import (
+        COMMAND_DISPATCH,
+        RLMReActChatAgent,
+        RLMReActChatSignature,
+        build_tool_list,
+        execute_command,
+        list_react_tool_names,
+    )
+    from .react.signatures import (
+        AnalyzeLongDocument,
+        ClarificationQuestionSignature,
+        CodeChangePlan,
+        CoreMemoryUpdateProposal,
+        ExtractFromLogs,
+        GroundedAnswerWithCitations,
+        IncidentTriageFromLogs,
+        MemoryActionIntentSignature,
+        MemoryStructureAuditSignature,
+        MemoryStructureMigrationPlanSignature,
+        SummarizeLongDocument,
+        VolumeFileTreeSignature,
+    )
+    from .stateful import (
+        AgentStateManager,
+        AnalysisResult,
+        CodeScript,
+        ExecutionRecord,
+        SandboxResult,
+        StatefulSandboxManager,
+    )
+    from .utils import (
+        get_scaffold_dir,
+        install_agents,
+        install_all,
+        install_skills,
+        list_agents,
+        list_skills,
+        regex_extract,
+    )
+
+    _TYPE_CHECK_EXPORTS = (
+        configure_planner_from_env,
+        get_planner_lm_from_env,
+        sandbox_driver,
+        ModalInterpreter,
+        RLMReActChatAgent,
+        RLMReActChatSignature,
+        build_tool_list,
+        list_react_tool_names,
+        COMMAND_DISPATCH,
+        execute_command,
+        AgentStateManager,
+        AnalysisResult,
+        CodeScript,
+        StatefulSandboxManager,
+        ExecutionRecord,
+        SandboxResult,
+        AnalyzeLongDocument,
+        SummarizeLongDocument,
+        ExtractFromLogs,
+        GroundedAnswerWithCitations,
+        IncidentTriageFromLogs,
+        CodeChangePlan,
+        CoreMemoryUpdateProposal,
+        VolumeFileTreeSignature,
+        MemoryActionIntentSignature,
+        MemoryStructureAuditSignature,
+        MemoryStructureMigrationPlanSignature,
+        ClarificationQuestionSignature,
+        regex_extract,
+        chunk_by_size,
+        chunk_by_headers,
+        chunk_by_timestamps,
+        chunk_by_json_keys,
+        get_scaffold_dir,
+        install_agents,
+        install_all,
+        install_skills,
+        list_agents,
+        list_skills,
+        configure_analytics,
+        PostHogConfig,
+        PostHogLLMCallback,
+    )
 
 _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "chunk_by_headers": ("fleet_rlm.chunking", "chunk_by_headers"),
