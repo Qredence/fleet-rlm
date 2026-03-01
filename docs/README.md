@@ -34,7 +34,7 @@ Next steps:
 
 ## Contribute to the project
 
-- [Contributing guide](contributing.md)
+- [Contributing guide](../CONTRIBUTING.md)
 
 ## Build integrations
 

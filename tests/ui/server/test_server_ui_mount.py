@@ -45,7 +45,6 @@ def test_create_app_serves_spa_index_from_frontend_dist(tmp_path, monkeypatch):
         config=ServerRuntimeConfig(
             app_env="local",
             database_required=False,
-            enable_legacy_sqlite_routes=False,
         )
     )
     client = TestClient(app)

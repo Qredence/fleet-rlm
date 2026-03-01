@@ -42,7 +42,6 @@ Important runtime controls:
 - `AUTH_REQUIRED`
 - `DATABASE_URL`
 - `DATABASE_REQUIRED`
-- `LEGACY_SQLITE_ROUTES_ENABLED`
 
 See [Auth Modes](../reference/auth.md) and [Database Architecture](../reference/database.md).
 

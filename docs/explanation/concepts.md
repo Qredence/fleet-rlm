@@ -48,7 +48,6 @@ The system emits:
 
 Persistence model:
 - canonical multi-tenant state in Neon/Postgres
-- compatibility SQLite CRUD routes available only when explicitly enabled
 
 ## 6. Auth and Environment Guardrails
 
@@ -57,6 +56,5 @@ Runtime behavior is environment-sensitive via config:
 - `AUTH_MODE`
 - `AUTH_REQUIRED`
 - `DATABASE_REQUIRED`
-- `LEGACY_SQLITE_ROUTES_ENABLED`
 
-These controls determine whether auth, persistence, and legacy compatibility routes are enforced.
+These controls determine whether auth and persistence guardrails are enforced.

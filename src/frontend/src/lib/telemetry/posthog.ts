@@ -9,7 +9,6 @@ export const PROJECT_POSTHOG_DEFAULT_API_KEY: string | null = null;
 
 export type PostHogKeySource =
   | "canonical_env"
-  | "legacy_alias_env"
   | "project_default"
   | "none";
 
@@ -34,7 +33,6 @@ export function resolvePostHogWebConfig(
   overrides: ResolveOverrides = {},
 ): ResolvedPostHogWebConfig {
   const canonical = readNonEmpty(env.VITE_PUBLIC_POSTHOG_API_KEY);
-  const legacyAlias = readNonEmpty(env.VITE_PUBLIC_POSTHOG_KEY);
   const projectDefault = readNonEmpty(
     overrides.projectDefaultApiKey ?? PROJECT_POSTHOG_DEFAULT_API_KEY,
   );
@@ -43,9 +41,6 @@ export function resolvePostHogWebConfig(
 
   if (canonical) {
     return { apiKey: canonical, host, keySource: "canonical_env" };
-  }
-  if (legacyAlias) {
-    return { apiKey: legacyAlias, host, keySource: "legacy_alias_env" };
   }
   if (projectDefault) {
     return { apiKey: projectDefault, host, keySource: "project_default" };

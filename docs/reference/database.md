@@ -43,13 +43,7 @@ Server startup behavior (`src/fleet_rlm/server/main.py` + config):
 - if `DATABASE_REQUIRED=true` and URL missing, startup fails
 - if database is optional and missing, runtime continues with persistence-disabled warnings
 
-## Legacy SQLite Compatibility Surface
+## Removed Legacy SQLite Compatibility Surface
 
-A separate local compatibility model exists under:
-
-- `src/fleet_rlm/server/legacy_models.py`
-- `src/fleet_rlm/server/services/*`
-- `src/fleet_rlm/server/routers/tasks.py`
-- `src/fleet_rlm/server/routers/sessions.py`
-
-These routes are gated by `LEGACY_SQLITE_ROUTES_ENABLED` and are not the canonical multi-tenant persistence path.
+Legacy SQLite compatibility modules and CRUD routes were removed.
+The canonical persistence path is Neon/Postgres via `fleet_rlm.db.*`.

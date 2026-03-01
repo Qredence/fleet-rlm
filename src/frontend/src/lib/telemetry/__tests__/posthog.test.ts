@@ -5,10 +5,9 @@ import * as posthogConfig from "@/lib/telemetry/posthog";
 const HOST = "https://eu.i.posthog.com";
 
 describe("resolvePostHogWebConfig", () => {
-  it("prefers canonical env key over legacy alias", () => {
+  it("uses canonical env key", () => {
     const resolved = posthogConfig.resolvePostHogWebConfig({
       VITE_PUBLIC_POSTHOG_API_KEY: "phc_canonical",
-      VITE_PUBLIC_POSTHOG_KEY: "phc_legacy",
       VITE_PUBLIC_POSTHOG_HOST: HOST,
     });
 
@@ -16,18 +15,6 @@ describe("resolvePostHogWebConfig", () => {
       apiKey: "phc_canonical",
       host: HOST,
       keySource: "canonical_env",
-    });
-  });
-
-  it("supports legacy alias when canonical key is absent", () => {
-    const resolved = posthogConfig.resolvePostHogWebConfig({
-      VITE_PUBLIC_POSTHOG_KEY: "phc_legacy",
-    });
-
-    expect(resolved).toEqual({
-      apiKey: "phc_legacy",
-      host: posthogConfig.PROJECT_POSTHOG_DEFAULT_HOST,
-      keySource: "legacy_alias_env",
     });
   });
 

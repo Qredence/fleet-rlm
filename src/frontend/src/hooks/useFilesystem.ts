@@ -5,7 +5,8 @@
  * in consumer components. Returns the stable `FsNode[]` type.
  *
  * In mock mode (no VITE_FLEET_API_URL), returns mock data immediately.
- * In API mode, fetches from `/api/v1/sandbox` and adapts the response.
+ * In non-mock mode, falls back to local mock data because deprecated sandbox
+ * REST endpoints were removed from the backend.
  *
  * @example
  * ```tsx
@@ -16,9 +17,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { isMockMode } from "@/lib/api/config";
 import { mockFilesystem } from "@/lib/data/mock-skills";
-import { filesystemEndpoints } from "@/lib/api/endpoints";
-import { adaptFsTree } from "@/lib/api/adapters";
-import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
+import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
 import type { FsNode } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -64,25 +63,16 @@ export function useFilesystem(): UseFilesystemReturn {
         return {
           volumes: mockFilesystem,
           dataSource: "mock" as const,
+          degradedReason: undefined,
         } satisfies FilesystemPayload;
       }
 
       const capability = await getCapabilityStatus("filesystem", signal);
       if (!capability.available) {
-        return {
-          volumes: mockFilesystem,
-          dataSource: "fallback" as const,
-          degradedReason:
-            capability.reason ??
-            "Filesystem endpoint is unavailable, using local mock data.",
-        } satisfies FilesystemPayload;
+        return createFallbackPayload("volumes", mockFilesystem, capability, "Filesystem");
       }
 
-      const response = await filesystemEndpoints.getTree(signal);
-      return {
-        volumes: adaptFsTree(response as Parameters<typeof adaptFsTree>[0]),
-        dataSource: "api" as const,
-      } satisfies FilesystemPayload;
+      return createFallbackPayload("volumes", mockFilesystem, capability, "Filesystem");
     },
     staleTime: mock ? Infinity : undefined,
   });
@@ -145,7 +135,11 @@ export function useFileContent(path: string | null): UseFileContentReturn {
         };
       }
 
-      return filesystemEndpoints.getFileContent(path, signal);
+      return {
+        content: "",
+        mime: "text/plain",
+        size: 0,
+      };
     },
     enabled: !!path,
     staleTime: mock ? Infinity : undefined,

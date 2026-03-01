@@ -5,7 +5,8 @@
  * in consumer components. Returns the same `Skill[]` type.
  *
  * In mock mode (no VITE_FLEET_API_URL), returns mock data immediately.
- * In API mode, fetches from `/api/v1/tasks` and adapts the response.
+ * In non-mock mode, falls back to local mock data because deprecated skill/task
+ * REST endpoints were removed from the backend.
  *
  * @example
  * ```tsx
@@ -16,9 +17,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { isMockMode } from "@/lib/api/config";
 import { mockSkills, generatedSkillMd } from "@/lib/data/mock-skills";
-import { taskEndpoints, type TaskListParams } from "@/lib/api/endpoints";
-import { adaptTask } from "@/lib/api/adapters";
-import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
+import type { TaskListParams } from "@/lib/api/endpoints";
+import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
 import type { Skill } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -96,27 +96,16 @@ export function useSkills(options?: UseSkillsOptions): UseSkillsReturn {
         return {
           skills: mockSkills,
           dataSource: "mock" as const,
+          degradedReason: undefined,
         } satisfies SkillsPayload;
       }
 
       const capability = await getCapabilityStatus("skills", signal);
       if (!capability.available) {
-        return {
-          skills: mockSkills,
-          dataSource: "fallback" as const,
-          degradedReason:
-            capability.reason ??
-            "Skills endpoint is unavailable, using local mock data.",
-        } satisfies SkillsPayload;
+        return createFallbackPayload("skills", mockSkills, capability, "Skills");
       }
 
-      const response = await taskEndpoints.list(params, signal);
-      return {
-        skills: (response.items || []).map((item) =>
-          adaptTask(item as Parameters<typeof adaptTask>[0]),
-        ),
-        dataSource: "api" as const,
-      } satisfies SkillsPayload;
+      return createFallbackPayload("skills", mockSkills, capability, "Skills");
     },
     enabled: options?.enabled !== false,
     // In mock mode, data never goes stale
@@ -156,8 +145,7 @@ export function useSkill(id: string | null): UseSkillReturn {
         return mockSkills.find((s) => s.id === id) ?? null;
       }
 
-      const response = await taskEndpoints.get(id, signal);
-      return adaptTask(response as Parameters<typeof adaptTask>[0]);
+      return mockSkills.find((s) => s.id === id) ?? null;
     },
     enabled: !!id,
     staleTime: mock ? Infinity : undefined,
@@ -194,8 +182,7 @@ export function useSkillContent(id: string | null): UseSkillContentReturn {
         return generatedSkillMd;
       }
 
-      const response = await taskEndpoints.getContent(id, signal);
-      return response.content || "";
+      return generatedSkillMd;
     },
     enabled: !!id,
     staleTime: mock ? Infinity : undefined,

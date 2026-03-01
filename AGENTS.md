@@ -223,7 +223,7 @@ uv build
 - `src/fleet_rlm/cli_commands/`: CLI subcommand modules (`init_cmd.py`, `serve_cmds.py`)
 - `src/fleet_rlm/terminal/`: terminal chat runtime/helpers (`chat.py`, `commands.py`, `settings.py`, `ui.py`)
 - `src/fleet_rlm/runners.py`: high-level task runners
-- `src/fleet_rlm/server/`: optional FastAPI server (`/api/v1/ws/chat`, `/api/v1/ws/execution`, `/api/v1/runtime/*`, `/api/v1/chat`, `/api/v1/tasks/basic`, `/api/v1/auth/me`)
+- `src/fleet_rlm/server/`: optional FastAPI server (`/api/v1/ws/chat`, `/api/v1/ws/execution`, `/api/v1/runtime/*`, `/api/v1/chat`, `/api/v1/sessions/state`, `/api/v1/auth/me`)
 - `src/fleet_rlm/server/routers/runtime.py`: runtime settings + connectivity diagnostics endpoints (`/api/v1/runtime/*`)
 - `src/fleet_rlm/server/routers/ws/`: canonical websocket package (`api.py`, `helpers.py`, `session.py`, `lifecycle.py`, `commands.py`, `streaming.py`, etc.)
 - `src/fleet_rlm/server/execution/`: canonical execution observability package (`events.py`, `step_builder.py`, `sanitizer.py`)
@@ -277,8 +277,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Server auth defaults to `AUTH_MODE=dev` and supports debug headers or local HS256 bearer JWT only when debug auth toggles are enabled; query auth (`debug_tenant_id`, `debug_user_id`, optional `debug_email`, `debug_name`, or `access_token`) is intended for local development
 - `AUTH_REQUIRED` controls route enforcement in dev (`false` by default for local iteration, `true` for strict enforcement); `entra` remains fail-closed until JWKS verification wiring is implemented
 - `AUTH_MODE=entra` is scaffolded and fail-closed until JWKS verification wiring is implemented
-- Legacy SQLite CRUD routes (`/api/v1/tasks`, `/api/v1/sessions` except `/api/v1/sessions/state`) are compatibility-only and should be gated off outside local development (`LEGACY_SQLITE_ROUTES_ENABLED=false`)
-- Legacy SQLite compatibility modules/routes are deprecated and targeted for removal in `v0.5.0`; avoid adding new dependencies on `server/legacy_compat.py`, `server/legacy_models.py`, or `server/services/{task_service,session_service}.py`
+- Deprecated/planned REST surfaces were removed: `/api/v1/tasks*`, `/api/v1/sessions*` CRUD, and `/api/v1/{taxonomy|analytics|search|memory|sandbox}*`; keep clients on `/api/v1/chat`, `/api/v1/sessions/state`, `/api/v1/runtime/*`, and websocket routes.
 - ReAct long-context delegate tools (`analyze_long_document`, `summarize_long_document`, `extract_from_logs`, etc.) use true recursive sub-agents via `spawn_delegate_sub_agent()` — each spawns a new `RLMReActChatAgent` at `depth + 1` with full tool access
 - Demo-only runner exports in `src/fleet_rlm/runners.py` are gated by `FLEET_DEMO_TASKS_ENABLED` (default disabled); `run_long_context` remains available by default as a production-supported path
 - Additive signature tools are available for advanced workflows:

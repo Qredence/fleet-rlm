@@ -19,3 +19,9 @@ Authoritative contracts, interfaces, and implementation-facing facts.
 ## Internal Maps
 
 - [Codebase Map](codebase-map.md)
+
+## Code Health
+
+- [Code Health Map (Used Code and Files)](code-health-map.md)
+- [Code Health Unused and Unnecessary Review](code-health-unused-review.md)
+- [Code Health Complexity Heatmap](code-health-complexity-heatmap.md)

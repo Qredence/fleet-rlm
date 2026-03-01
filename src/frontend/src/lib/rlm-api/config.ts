@@ -5,6 +5,8 @@
  * backend development when values are provided.
  */
 
+import { parseBool } from "@/lib/utils/env";
+
 function trimOrEmpty(value: string | undefined): string {
   return value?.trim() ?? "";
 }
@@ -22,16 +24,6 @@ function deriveWsUrl(apiUrl: string, path: string): string {
   } catch {
     return "";
   }
-}
-
-function parseBool(value: string | undefined, fallback: boolean): boolean {
-  if (value == null) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1" || normalized === "yes")
-    return true;
-  if (normalized === "false" || normalized === "0" || normalized === "no")
-    return false;
-  return fallback;
 }
 
 const baseUrl = trimOrEmpty(

@@ -1,4 +1,4 @@
-import { apiConfig, isMockMode } from "@/lib/api/config";
+import { isMockMode } from "@/lib/api/config";
 
 export type ApiCapabilityKey =
   | "skills"
@@ -11,116 +11,29 @@ export type DataSource = "api" | "mock" | "fallback";
 
 export interface ApiCapabilityStatus {
   available: boolean;
-  path: string;
   status?: number;
   reason?: string;
 }
 
 export type ApiCapabilities = Record<ApiCapabilityKey, ApiCapabilityStatus>;
 
-const API_PREFIX = "/api/v1";
+const CAPABILITY_KEYS: ApiCapabilityKey[] = ["skills", "memory", "taxonomy", "analytics", "filesystem"];
 
-const CAPABILITY_PATHS: Record<ApiCapabilityKey, string> = {
-  skills: `${API_PREFIX}/tasks`,
-  memory: `${API_PREFIX}/memory`,
-  taxonomy: `${API_PREFIX}/taxonomy`,
-  analytics: `${API_PREFIX}/analytics`,
-  filesystem: `${API_PREFIX}/sandbox`,
-};
-
-const DEFAULT_TIMEOUT_MS = 2500;
-const MIN_CACHE_TTL_MS = 15_000;
+const REMOVED_REASON =
+  "Endpoint family was removed from backend during deprecated/planned cleanup.";
 
 let cachedCapabilities: ApiCapabilities | null = null;
-let cacheExpiryMs = 0;
-let inFlightCapabilities: Promise<ApiCapabilities> | null = null;
 
-function buildCapabilityUrl(path: string): string {
-  return new URL(path, apiConfig.baseUrl).toString();
+function allAvailableCapabilities(reason = "Mock mode active"): ApiCapabilities {
+  return Object.fromEntries(
+    CAPABILITY_KEYS.map((key) => [key, { available: true, reason }])
+  ) as ApiCapabilities;
 }
 
-function isSupportedStatus(status: number): boolean {
-  // 404 is definitive unsupported path. Other statuses (401/403/405/5xx)
-  // still prove the route exists and should not trigger mock fallback.
-  return status !== 404;
-}
-
-async function probePath(
-  path: string,
-  signal?: AbortSignal,
-): Promise<ApiCapabilityStatus> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-  const combined = signal
-    ? anySignal([signal, controller.signal])
-    : controller.signal;
-
-  try {
-    const response = await fetch(buildCapabilityUrl(path), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: combined,
-    });
-
-    return {
-      available: isSupportedStatus(response.status),
-      path,
-      status: response.status,
-      reason: isSupportedStatus(response.status)
-        ? undefined
-        : `Endpoint ${path} responded with 404`,
-    };
-  } catch (error) {
-    const detail =
-      error instanceof Error ? error.message : "Unknown network error";
-    return {
-      available: false,
-      path,
-      reason: `Unable to reach ${path}: ${detail}`,
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function anySignal(signals: AbortSignal[]): AbortSignal {
-  const controller = new AbortController();
-
-  for (const source of signals) {
-    if (source.aborted) {
-      controller.abort(source.reason);
-      return controller.signal;
-    }
-
-    source.addEventListener("abort", () => controller.abort(source.reason), {
-      once: true,
-    });
-  }
-
-  return controller.signal;
-}
-
-function allAvailableCapabilities(
-  reason = "Mock mode active",
-): ApiCapabilities {
-  return {
-    skills: { available: true, path: CAPABILITY_PATHS.skills, reason },
-    memory: { available: true, path: CAPABILITY_PATHS.memory, reason },
-    taxonomy: { available: true, path: CAPABILITY_PATHS.taxonomy, reason },
-    analytics: { available: true, path: CAPABILITY_PATHS.analytics, reason },
-    filesystem: { available: true, path: CAPABILITY_PATHS.filesystem, reason },
-  };
-}
-
-function allUnavailableCapabilities(reason: string): ApiCapabilities {
-  return {
-    skills: { available: false, path: CAPABILITY_PATHS.skills, reason },
-    memory: { available: false, path: CAPABILITY_PATHS.memory, reason },
-    taxonomy: { available: false, path: CAPABILITY_PATHS.taxonomy, reason },
-    analytics: { available: false, path: CAPABILITY_PATHS.analytics, reason },
-    filesystem: { available: false, path: CAPABILITY_PATHS.filesystem, reason },
-  };
+function allUnavailableCapabilities(reason = REMOVED_REASON): ApiCapabilities {
+  return Object.fromEntries(
+    CAPABILITY_KEYS.map((key) => [key, { available: false, reason }])
+  ) as ApiCapabilities;
 }
 
 function buildFallbackReason(
@@ -131,16 +44,14 @@ function buildFallbackReason(
     return `${feature} data is using local mock fallback because ${status.reason}.`;
   }
 
-  return `${feature} data is using local mock fallback because ${status.path} is unavailable.`;
+  return `${feature} data is using local mock fallback because the endpoint is unavailable.`;
 }
 
 export function resetApiCapabilitiesCache(): void {
   cachedCapabilities = null;
-  cacheExpiryMs = 0;
-  inFlightCapabilities = null;
 }
 
-export async function getApiCapabilities(options?: {
+export async function getApiCapabilities(_options?: {
   forceRefresh?: boolean;
   signal?: AbortSignal;
   ttlMs?: number;
@@ -148,63 +59,31 @@ export async function getApiCapabilities(options?: {
   if (isMockMode()) {
     const mockCaps = allAvailableCapabilities();
     cachedCapabilities = mockCaps;
-    cacheExpiryMs = Date.now() + MIN_CACHE_TTL_MS;
     return mockCaps;
   }
 
-  if (!apiConfig.enableLegacyApiProbes) {
-    const disabledCaps = allUnavailableCapabilities(
-      "Legacy API probing is disabled by default. Set VITE_FLEET_ENABLE_LEGACY_API_PROBES=true to enable /api/v1 capability probes.",
-    );
-    cachedCapabilities = disabledCaps;
-    cacheExpiryMs = Date.now() + MIN_CACHE_TTL_MS;
-    return disabledCaps;
-  }
-
-  const now = Date.now();
-  const forceRefresh = options?.forceRefresh === true;
-  const ttlMs = Math.max(options?.ttlMs ?? 60_000, MIN_CACHE_TTL_MS);
-
-  if (!forceRefresh && cachedCapabilities && now < cacheExpiryMs) {
+  if (cachedCapabilities) {
     return cachedCapabilities;
   }
 
-  if (!forceRefresh && inFlightCapabilities) {
-    return inFlightCapabilities;
-  }
-
-  inFlightCapabilities = (async () => {
-    const entries = await Promise.all(
-      (
-        Object.entries(CAPABILITY_PATHS) as Array<[ApiCapabilityKey, string]>
-      ).map(async ([feature, path]) => {
-        const status = await probePath(path, options?.signal);
-        return [feature, status] as const;
-      }),
-    );
-
-    const next = Object.fromEntries(entries) as ApiCapabilities;
-    cachedCapabilities = next;
-    cacheExpiryMs = Date.now() + ttlMs;
-    inFlightCapabilities = null;
-
-    return next;
-  })();
-
-  return inFlightCapabilities;
+  const unavailable = allUnavailableCapabilities();
+  cachedCapabilities = unavailable;
+  return unavailable;
 }
 
 export async function getCapabilityStatus(
   feature: ApiCapabilityKey,
   signal?: AbortSignal,
 ): Promise<ApiCapabilityStatus> {
-  const capabilities = await getApiCapabilities({ signal });
+  void signal;
+  const capabilities = await getApiCapabilities();
   return capabilities[feature];
 }
 
 export function dataSourceForCapability(
   mockMode: boolean,
   status: ApiCapabilityStatus,
+  feature: ApiCapabilityKey,
 ): { dataSource: DataSource; degradedReason?: string } {
   if (mockMode) {
     return { dataSource: "mock" };
@@ -216,15 +95,19 @@ export function dataSourceForCapability(
 
   return {
     dataSource: "fallback",
-    degradedReason: buildFallbackReason(
-      (Object.keys(CAPABILITY_PATHS) as ApiCapabilityKey[]).find(
-        (k) => CAPABILITY_PATHS[k] === status.path,
-      ) ?? "skills",
-      status,
-    ),
+    degradedReason: buildFallbackReason(feature, status),
   };
 }
 
-export function getCapabilityPath(feature: ApiCapabilityKey): string {
-  return CAPABILITY_PATHS[feature];
+export function createFallbackPayload<K extends PropertyKey, T>(
+  dataKey: K,
+  data: T,
+  capability: ApiCapabilityStatus,
+  featureName: string
+) {
+  return {
+    [dataKey]: data,
+    dataSource: "fallback" as const,
+    degradedReason: capability.reason ?? `${featureName} endpoint is unavailable, using local mock data.`,
+  } as Record<K, T> & { dataSource: "fallback"; degradedReason: string };
 }

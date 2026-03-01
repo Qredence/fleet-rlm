@@ -99,31 +99,16 @@ Notes:
   - `active_models.delegate`
   - `active_models.delegate_small`
 
-### Legacy SQLite Compatibility Routes
+### Session State
 
-These routes are guarded by `LEGACY_SQLITE_ROUTES_ENABLED`.
+- `GET /api/v1/sessions/state`
 
-- When enabled, they serve compatibility CRUD behavior.
-- When disabled, they can return `410 Gone` with migration guidance.
+### Removed Deprecated/Planned Surfaces
 
-Routes:
+The following deprecated or planned-only routes were removed:
 
-- `POST /api/v1/tasks`
-- `GET /api/v1/tasks`
-- `GET /api/v1/tasks/{task_id}`
-- `PATCH /api/v1/tasks/{task_id}`
-- `DELETE /api/v1/tasks/{task_id}`
-- `GET /api/v1/sessions/state` (always available)
-- `POST /api/v1/sessions`
-- `GET /api/v1/sessions`
-- `GET /api/v1/sessions/{session_id}`
-- `PATCH /api/v1/sessions/{session_id}`
-- `DELETE /api/v1/sessions/{session_id}`
-
-### Planned/Scaffold Route Groups
-
-These endpoints currently return `501 Not Implemented`:
-
+- `/api/v1/tasks*`
+- `/api/v1/sessions*` CRUD (state summary endpoint remains)
 - `/api/v1/taxonomy*`
 - `/api/v1/analytics*`
 - `/api/v1/search`

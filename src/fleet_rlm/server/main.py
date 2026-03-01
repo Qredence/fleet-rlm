@@ -19,16 +19,13 @@ from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
 from .deps import ServerState
 from .execution import ExecutionEventEmitter
-from .legacy_compat import init_db, set_legacy_sqlite_enabled
 from .middleware import add_middlewares
 from .routers import (
     auth,
     chat,
     health,
-    planned,
     runtime,
     sessions,
-    tasks,
     ws,
 )
 
@@ -106,11 +103,7 @@ def _build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
 
 
 async def _initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) -> None:
-    """Initialize legacy and Neon persistence paths based on runtime config."""
-    set_legacy_sqlite_enabled(cfg.enable_legacy_sqlite_routes)
-    if cfg.enable_legacy_sqlite_routes:
-        await init_db()
-
+    """Initialize Neon persistence paths based on runtime config."""
     if cfg.database_url:
         db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
         if cfg.db_validate_on_startup or cfg.database_required:
@@ -152,14 +145,8 @@ def _register_api_routes(app: FastAPI) -> None:
     api_router.include_router(auth.router)
     api_router.include_router(chat.router)
     api_router.include_router(ws.router)
-    api_router.include_router(tasks.router)
     api_router.include_router(sessions.router)
-    api_router.include_router(planned.taxonomy_router)
-    api_router.include_router(planned.analytics_router)
-    api_router.include_router(planned.search_router)
-    api_router.include_router(planned.memory_router)
     api_router.include_router(runtime.router)
-    api_router.include_router(planned.sandbox_router)
     app.include_router(api_router)
 
 

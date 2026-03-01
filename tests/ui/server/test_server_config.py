@@ -25,7 +25,6 @@ def test_default_config(monkeypatch: pytest.MonkeyPatch):
     assert cfg.auth_mode == "dev"
     assert cfg.database_required is False
     assert cfg.db_validate_on_startup is False
-    assert cfg.enable_legacy_sqlite_routes is True
     assert cfg.allow_debug_auth is True
     assert cfg.allow_query_auth_tokens is True
     assert cfg.cors_allowed_origins == ["*"]
@@ -55,7 +54,6 @@ def test_custom_config():
         dev_jwt_secret="secret",
         database_url="postgresql://localhost:5432/test",
         database_required=True,
-        enable_legacy_sqlite_routes=False,
         ws_execution_max_queue=512,
         ws_execution_drop_policy="drop_newest",
         db_validate_on_startup=True,
@@ -72,7 +70,6 @@ def test_custom_config():
     assert cfg.dev_jwt_secret == "secret"
     assert cfg.database_url == "postgresql://localhost:5432/test"
     assert cfg.database_required is True
-    assert cfg.enable_legacy_sqlite_routes is False
     assert cfg.allow_debug_auth is False
     assert cfg.allow_query_auth_tokens is False
     assert cfg.cors_allowed_origins == ["https://app.example.com"]

@@ -63,29 +63,10 @@ Checks:
 
 See [Auth Modes](../reference/auth.md).
 
-## Execution Graph Payload Appears Clipped
+## Removed Deprecated/Planned Routes
 
-Symptom:
-
-- Artifact Graph/Timeline/Preview shows `[truncated]` markers from execution
-  stream payloads.
-
-Fix:
-
-- increase execution stream payload limits for your environment:
-
-```bash
-export WS_EXECUTION_MAX_TEXT_CHARS=120000
-export WS_EXECUTION_MAX_COLLECTION_ITEMS=1000
-export WS_EXECUTION_MAX_RECURSION_DEPTH=16
-```
-
-- Restart the API server after changing these values.
-
-## Planned vs Legacy Route Responses
-
-- Planned scaffold routes under `/api/v1/{taxonomy|analytics|search|memory|sandbox}` return `501 Not Implemented`.
-- Legacy-gated routes (`/api/v1/tasks*`, `/api/v1/sessions*` except `/state`) can return `410 Gone` when disabled.
+- Deprecated and planned/stub REST surfaces were removed.
+- Requests to `/api/v1/tasks*`, `/api/v1/sessions*` CRUD, and `/api/v1/{taxonomy|analytics|search|memory|sandbox}*` now return `404 Not Found`.
 
 ## Diagnostic Commands
 
