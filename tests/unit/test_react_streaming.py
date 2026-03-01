@@ -597,6 +597,23 @@ def test_normalize_trajectory_handles_tool_args_and_observation_aliases():
     assert result[0]["output"] == {"count": 3}
 
 
+def test_normalize_trajectory_handles_input_and_output_alias_backfill():
+    """Test _normalize_trajectory backfills alias keys from canonical fields."""
+    trajectory = {
+        "tool_name_0": "read_file",
+        "input_0": {"path": "README.md"},
+        "output_0": {"content": "ok"},
+    }
+    result = _normalize_trajectory(trajectory)
+    assert len(result) == 1
+    assert result[0]["index"] == 0
+    assert result[0]["tool_name"] == "read_file"
+    assert result[0]["input"] == {"path": "README.md"}
+    assert result[0]["tool_args"] == {"path": "README.md"}
+    assert result[0]["output"] == {"content": "ok"}
+    assert result[0]["observation"] == {"content": "ok"}
+
+
 def test_normalize_trajectory_handles_structured_dict():
     """Test _normalize_trajectory with already-structured dict (future DSPy)."""
     steps = [{"index": 0, "tool_name": "finish"}]

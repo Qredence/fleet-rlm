@@ -45,19 +45,16 @@ def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
         if tool_name is not None:
             step["tool_name"] = tool_name
 
-        if input_value is None and tool_args is not None:
-            input_value = tool_args
-        if input_value is not None:
-            step["input"] = input_value
-        if tool_args is not None:
-            step["tool_args"] = tool_args
+        # Keep canonical/alias fields symmetric for downstream consumers.
+        final_input = input_value if input_value is not None else tool_args
+        if final_input is not None:
+            step["input"] = final_input
+            step["tool_args"] = final_input
 
-        if output is None and observation is not None:
-            output = observation
-        if output is not None:
-            step["output"] = output
-        if observation is not None:
-            step["observation"] = observation
+        final_output = output if output is not None else observation
+        if final_output is not None:
+            step["output"] = final_output
+            step["observation"] = final_output
         steps.append(step)
     return steps
 
