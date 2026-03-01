@@ -10,6 +10,7 @@ from .sanitizer import _truncate_text, sanitize_event_payload
 from .events import ExecutionStep
 
 ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
+ExecutionActorKind = Literal["root_rlm", "sub_agent", "delegate", "unknown"]
 
 
 def _extract_depth(payload: dict[str, Any]) -> int | None:
@@ -49,6 +50,83 @@ def _extract_parent_hint(payload: dict[str, Any]) -> str | None:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
+
+
+def _iter_actor_sources(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    step_data = payload.get("step_data")
+    if isinstance(step_data, dict):
+        return (payload, step_data)
+    return (payload,)
+
+
+def _extract_actor_id(payload: dict[str, Any]) -> str | None:
+    for source in _iter_actor_sources(payload):
+        for key in ("actor_id", "delegate_id", "sub_agent_id", "agent_id"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _extract_actor_kind(
+    payload: dict[str, Any],
+    *,
+    depth: int | None,
+) -> ExecutionActorKind:
+    def _from_text(value: str) -> ExecutionActorKind | None:
+        lowered = value.strip().lower()
+        if not lowered:
+            return None
+        if lowered in {"root", "root_rlm", "root-rlm", "root agent"}:
+            return "root_rlm"
+        if lowered in {"sub_agent", "sub-agent", "subagent"}:
+            return "sub_agent"
+        if lowered in {"delegate", "rlm_delegate", "rlm-delegate"}:
+            return "delegate"
+        return None
+
+    for source in _iter_actor_sources(payload):
+        for key in ("actor_kind", "actor", "agent_kind", "agent_role"):
+            value = source.get(key)
+            if isinstance(value, str):
+                mapped = _from_text(value)
+                if mapped is not None:
+                    return mapped
+
+    execution_profile = str(payload.get("execution_profile", "")).strip().upper()
+    if execution_profile == "RLM_DELEGATE":
+        return "delegate"
+
+    for key in ("delegate_depth", "delegate_id"):
+        value = payload.get(key)
+        if isinstance(value, (int, float)) or (
+            isinstance(value, str) and value.strip()
+        ):
+            return "delegate"
+
+    for key in ("sub_agent_depth", "sub_agent_id"):
+        value = payload.get(key)
+        if isinstance(value, (int, float)) or (
+            isinstance(value, str) and value.strip()
+        ):
+            return "sub_agent"
+
+    if depth is not None:
+        return "sub_agent" if depth > 0 else "root_rlm"
+
+    return "unknown"
+
+
+def _derive_lane_key(
+    actor_kind: ExecutionActorKind,
+    actor_id: str | None,
+    depth: int | None,
+) -> str:
+    if actor_id:
+        return f"{actor_kind}:{actor_id}"
+    if depth is not None:
+        return f"{actor_kind}:depth-{depth}"
+    return actor_kind
 
 
 def _extract_tool_name(text: str, payload: dict[str, Any]) -> str | None:
@@ -120,11 +198,23 @@ class ExecutionStepBuilder:
         parent_id: str | None = None,
         raw_payload: dict[str, Any] | None = None,
     ) -> ExecutionStep:
+        resolved_parent_id = parent_id or self.root_id
+        depth = _extract_depth(raw_payload or {})
+        actor_kind = _extract_actor_kind(raw_payload or {}, depth=depth)
+        if actor_kind == "unknown" and resolved_parent_id == self.root_id:
+            actor_kind = "root_rlm"
+            if depth is None:
+                depth = 0
+        actor_id = _extract_actor_id(raw_payload or {})
         step = ExecutionStep(
             id=self._next_id(),
-            parent_id=parent_id or self.root_id,
+            parent_id=resolved_parent_id,
             type=step_type,
-            label=_truncate_text(label, max_chars=200),
+            label=_truncate_text(label),
+            depth=depth,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            lane_key=_derive_lane_key(actor_kind, actor_id, depth),
             input=sanitize_event_payload(input_payload),
             output=sanitize_event_payload(output_payload),
             timestamp=timestamp,
@@ -300,7 +390,7 @@ class ExecutionStepBuilder:
                 output_payload=None,
                 timestamp=timestamp,
                 parent_id=self.root_id,
-                raw_payload={},
+                raw_payload=payload,
             )
             if code_hash:
                 self._repl_parent_by_hash[code_hash] = step.id
@@ -315,7 +405,7 @@ class ExecutionStepBuilder:
                 output_payload=payload,
                 timestamp=timestamp,
                 parent_id=parent_id,
-                raw_payload={},
+                raw_payload=payload,
             )
 
         return None

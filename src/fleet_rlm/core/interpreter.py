@@ -20,6 +20,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import os
 import queue
 import threading
 import time
@@ -203,8 +204,15 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         """Return deterministic code hash and compact preview text."""
         digest = hashlib.sha256((code or "").encode("utf-8")).hexdigest()[:16]
         compact = " ".join((code or "").split())
-        if len(compact) > 240:
-            compact = f"{compact[:240]}...[truncated]"
+        raw_limit = os.getenv("WS_EXECUTION_MAX_TEXT_CHARS")
+        try:
+            limit = int(raw_limit) if raw_limit is not None else 65536
+        except (TypeError, ValueError):
+            limit = 65536
+        if limit <= 0:
+            limit = 65536
+        if len(compact) > limit:
+            compact = f"{compact[:limit]}...[truncated]"
         return digest, compact
 
     def _emit_execution_event(self, payload: dict[str, Any]) -> None:

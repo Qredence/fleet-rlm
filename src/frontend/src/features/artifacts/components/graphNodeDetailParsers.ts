@@ -162,7 +162,7 @@ function summarizeAction(record: Record<string, unknown>): string | undefined {
     stringify(record.input).trim();
   if (!action) return;
   if (!args || args === "{}") return action;
-  return `${action}: ${args.length > 140 ? `${args.slice(0, 140)}…` : args}`;
+  return `${action}: ${args}`;
 }
 
 function summarizeObservation(
@@ -174,7 +174,7 @@ function summarizeObservation(
     asString(record.output) ??
     stringify(record.output).trim();
   if (!raw || raw === "{}") return;
-  return raw.length > 220 ? `${raw.slice(0, 220)}…` : raw;
+  return raw;
 }
 
 export function extractTrajectoryChain(payload: {

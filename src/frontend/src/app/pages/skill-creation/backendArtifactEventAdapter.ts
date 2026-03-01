@@ -1,5 +1,6 @@
 import type { WsServerMessage } from "@/lib/rlm-api";
 import {
+  type ArtifactActorKind,
   useArtifactStore,
   type ArtifactStepType,
   type ExecutionStep,
@@ -48,6 +49,29 @@ function normalizeStepType(value: unknown): ArtifactStepType {
   if (raw === "memory") return "memory";
   if (raw === "output") return "output";
   return "llm";
+}
+
+function normalizeActorKind(value: unknown): ArtifactActorKind | undefined {
+  const raw = asText(value).trim().toLowerCase();
+  if (raw === "root_rlm" || raw === "root-rlm" || raw === "root")
+    return "root_rlm";
+  if (raw === "sub_agent" || raw === "sub-agent" || raw === "subagent")
+    return "sub_agent";
+  if (raw === "delegate" || raw === "rlm_delegate" || raw === "rlm-delegate")
+    return "delegate";
+  if (raw === "unknown") return "unknown";
+  return undefined;
+}
+
+function normalizeDepth(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.trunc(parsed));
+  }
+  return undefined;
 }
 
 function findStepById(
@@ -105,12 +129,19 @@ function normalizeExecutionStepFromPayload(
   const type = normalizeStepType(step.type);
   const label = asText(step.label) || `${type.toUpperCase()} step`;
   const parentIdRaw = asText(step.parent_id).trim();
+  const actorKind = normalizeActorKind(step.actor_kind);
+  const actorIdRaw = asText(step.actor_id).trim();
+  const laneKeyRaw = asText(step.lane_key).trim();
 
   return {
     id,
     type,
     label,
     parent_id: parentIdRaw || undefined,
+    depth: normalizeDepth(step.depth),
+    actor_kind: actorKind,
+    actor_id: actorIdRaw || undefined,
+    lane_key: laneKeyRaw || undefined,
     input: step.input,
     output: step.output,
     timestamp: toEpochMs(step.timestamp ?? fallbackTimestamp),

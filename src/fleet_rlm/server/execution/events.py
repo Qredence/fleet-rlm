@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .step_builder import ExecutionStepBuilder
 
 ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
+ExecutionActorKind = Literal["root_rlm", "sub_agent", "delegate", "unknown"]
 ExecutionEventType = Literal[
     "execution_started",
     "execution_step",
@@ -37,6 +38,10 @@ class ExecutionStep(BaseModel):
     parent_id: str | None = None
     type: ExecutionStepType
     label: str
+    depth: int | None = None
+    actor_kind: ExecutionActorKind | None = None
+    actor_id: str | None = None
+    lane_key: str | None = None
     input: Any | None = None
     output: Any | None = None
     timestamp: float
@@ -206,6 +211,7 @@ from .step_builder import ExecutionStepBuilder  # noqa: E402
 __all__ = [
     "ExecutionEvent",
     "ExecutionEventEmitter",
+    "ExecutionActorKind",
     "ExecutionEventType",
     "ExecutionStep",
     "ExecutionStepBuilder",

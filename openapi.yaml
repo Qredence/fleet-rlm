@@ -73,6 +73,14 @@ paths:
       tags:
       - chat
       summary: Chat
+      description: 'Compatibility HTTP chat endpoint.
+
+
+        Product UX is WS-first via ``/api/v1/ws/chat``. This HTTP route remains
+
+        available temporarily for compatibility and is scheduled for removal in
+
+        ``v0.4.93``.'
       operationId: chat_api_v1_chat_post
       requestBody:
         content:
@@ -93,6 +101,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      deprecated: true
   /api/v1/tasks:
     post:
       tags:

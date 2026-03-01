@@ -63,6 +63,25 @@ Checks:
 
 See [Auth Modes](../reference/auth.md).
 
+## Execution Graph Payload Appears Clipped
+
+Symptom:
+
+- Artifact Graph/Timeline/Preview shows `[truncated]` markers from execution
+  stream payloads.
+
+Fix:
+
+- increase execution stream payload limits for your environment:
+
+```bash
+export WS_EXECUTION_MAX_TEXT_CHARS=65536
+export WS_EXECUTION_MAX_COLLECTION_ITEMS=500
+export WS_EXECUTION_MAX_RECURSION_DEPTH=12
+```
+
+- Restart the API server after changing these values.
+
 ## Planned vs Legacy Route Responses
 
 - Planned scaffold routes under `/api/v1/{taxonomy|analytics|search|memory|sandbox}` return `501 Not Implemented`.

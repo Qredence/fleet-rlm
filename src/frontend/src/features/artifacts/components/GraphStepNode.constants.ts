@@ -13,6 +13,6 @@ const STEP_TYPE_META: Record<
   output: { color: "var(--accent)", label: "Output", Icon: FileOutput },
 };
 
-const NODE_WIDTH = 220;
+const NODE_WIDTH = 320;
 
 export { NODE_WIDTH, STEP_TYPE_META };

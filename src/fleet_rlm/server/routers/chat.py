@@ -1,6 +1,6 @@
 """Chat endpoint using native DSPy async."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from fleet_rlm import runners
 
@@ -10,13 +10,20 @@ from ..schemas.core import ChatRequest, ChatResponse
 router = APIRouter(tags=["chat"])
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, deprecated=True)
 async def chat(
     request: ChatRequest,
     config: RequestConfigDep,
     planner_lm: PlannerLMDep,
     delegate_lm: DelegateLMDep,
+    response: Response,
 ) -> ChatResponse:
+    """Compatibility HTTP chat endpoint.
+
+    Product UX is WS-first via ``/api/v1/ws/chat``. This HTTP route remains
+    available temporarily for compatibility and is scheduled for removal in
+    ``v0.4.93``.
+    """
     if planner_lm is None:
         raise HTTPException(503, "Planner LM not configured")
 
@@ -43,6 +50,9 @@ async def chat(
             delegate_max_calls_per_turn=config.delegate_max_calls_per_turn,
             delegate_result_truncation_chars=config.delegate_result_truncation_chars,
         )
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = '</api/v1/ws/chat>; rel="successor-version"'
+        response.headers["X-Fleet-Removal-Version"] = "0.4.93"
         return ChatResponse.model_validate(result)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
