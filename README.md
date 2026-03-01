@@ -96,7 +96,7 @@ bun run build
 cd ../..
 ```
 
-Use the full contributor setup (frontend builds, env/bootstrap, quality gates) in [`AGENTS.md`](AGENTS.md) and [`docs/contributing.md`](docs/contributing.md).
+Use the full contributor setup (frontend builds, env/bootstrap, quality gates) in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Architecture Overview
 

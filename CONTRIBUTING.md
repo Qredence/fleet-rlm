@@ -34,6 +34,7 @@ This project adheres to a code of conduct that all contributors are expected to 
 
 - Python >= 3.10
 - `uv` package manager (see [UV Docs](https://docs.astral.sh/uv/))
+- `bun` runtime (for frontend development, see [Bun Docs](https://bun.sh/))
 - Git
 - A Modal account (for sandbox execution)
 
@@ -217,6 +218,12 @@ def test_env_loading_with_quotes(monkeypatch):
 - Add docstrings for all new functions and classes
 - Update inline comments for complex logic
 
+### Documentation Maintenance
+
+- Update docs in the same PR when behavior changes
+- Keep `docs/index.md` and Diataxis section indexes aligned with active docs
+- Historical docs are preserved under `plans/archive/docs-legacy/` and are not active runbooks
+
 ---
 
 ## Commit Messages
@@ -299,32 +306,78 @@ Include the following information:
 
 ## Development Commands Reference
 
+### Quality Gate (Before PR)
+
 ```bash
-# Dependency Management
+# Python backend - from repo root
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+uv run pytest -q
+uv run python scripts/check_release_hygiene.py
+uv run python scripts/check_release_metadata.py
+uv run python scripts/check_docs_quality.py
+```
+
+### Frontend Check (if frontend workspace is in scope)
+
+```bash
+# from repo root
+cd src/frontend
+bun install --frozen-lockfile
+bun run check
+cd ../..
+```
+
+### Validation Before Merge
+
+At minimum:
+
+```bash
+uv run fleet-rlm --help
+rg -n "^  /" openapi.yaml
+uv run python scripts/check_docs_quality.py
+```
+
+If server/API docs changed, also verify WS route references:
+
+```bash
+rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
+```
+
+### Dependency Management
+
+```bash
 uv sync                    # Install dependencies
 uv sync --extra dev        # Install with dev dependencies
-uv add <package>          # Add a new dependency
+uv add <package>           # Add a new dependency
+```
 
-# Code Quality
-make format               # Format code with ruff
-make lint                 # Check linting
-make check                # Run lint + tests
-make release-check        # Run lint + tests + build + twine checks
+### Testing
 
-# Testing
-make test                 # Run all tests
-uv run pytest             # Run tests directly
-uv run pytest -v          # Verbose test output
+```bash
+uv run pytest              # Run tests directly
+uv run pytest -v           # Verbose test output
+uv run pytest --cov=fleet_rlm --cov-report=html  # With coverage
+```
 
-# Pre-commit
-make precommit-install    # Install git hooks
-make precommit-run        # Run pre-commit manually
+### Pre-commit
 
-# CLI Testing
-make cli-help             # Show CLI help
+```bash
+uv run pre-commit install  # Install git hooks
+uv run pre-commit run --all-files  # Run pre-commit manually
+```
+
+### CLI Testing
+
+```bash
 uv run fleet-rlm --help   # Direct CLI help
+uv run fleet --help       # Shorthand CLI help
+```
 
-# Modal Setup
+### Modal Setup
+
+```bash
 uv run modal setup        # Authenticate Modal
 uv run modal volume create rlm-volume-dspy  # Create volume
 ```
