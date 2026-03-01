@@ -9,6 +9,11 @@ import type {
   TaskResponse,
 } from "@/lib/rlm-api/types";
 
+const CHAT_HTTP_DEPRECATION_WARNING =
+  "rlmCoreEndpoints.chat() is deprecated and compatibility-only. " +
+  "Use WebSocket chat via streamChatOverWs()/chatStore (WS /api/v1/ws/chat). " +
+  "Removal target: v0.4.93.";
+
 const DEFAULT_TASK_BODY: Omit<TaskRequest, "task_type" | "docs_path"> = {
   question: "",
   query: "",
@@ -56,7 +61,11 @@ export const rlmCoreEndpoints = {
     return rlmApiClient.get<ReadyResponse>("/ready", signal);
   },
 
+  /**
+   * @deprecated Compatibility-only HTTP chat helper. Product chat is WS-first.
+   */
   chat(input: ChatInput, signal?: AbortSignal) {
+    console.warn(CHAT_HTTP_DEPRECATION_WARNING);
     const body: ChatRequest = {
       message: input.message,
       docs_path: input.docs_path ?? null,

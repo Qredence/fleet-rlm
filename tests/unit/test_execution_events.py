@@ -35,7 +35,7 @@ def test_sanitize_event_payload_redacts_and_truncates():
         "api_key": "abc123",
         "nested": {
             "token": "secret-value",
-            "text": "x" * 3000,
+            "text": "x" * 70000,
         },
     }
 
@@ -43,6 +43,41 @@ def test_sanitize_event_payload_redacts_and_truncates():
     assert sanitized["api_key"] == "<redacted>"
     assert sanitized["nested"]["token"] == "<redacted>"
     assert sanitized["nested"]["text"].endswith("...[truncated]")
+
+
+def test_sanitize_event_payload_honors_env_limits(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("WS_EXECUTION_MAX_TEXT_CHARS", "16")
+    monkeypatch.setenv("WS_EXECUTION_MAX_COLLECTION_ITEMS", "8")
+    monkeypatch.setenv("WS_EXECUTION_MAX_RECURSION_DEPTH", "2")
+
+    payload = {
+        "text": "abcdefghijklmnopqrstuvwxyz",
+        "nested": {"a": {"b": {"c": "too-deep"}}},
+    }
+    sanitized = sanitize_event_payload(payload)
+    assert sanitized["text"].endswith("...[truncated]")
+    assert sanitized["nested"]["a"] == "<max-depth>"
+
+
+def test_sanitize_event_payload_honors_collection_limit(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("WS_EXECUTION_MAX_COLLECTION_ITEMS", "2")
+
+    sanitized = sanitize_event_payload([1, 2, 3, 4])
+    assert sanitized[-1] == "<truncated:2>"
+
+
+def test_sanitize_event_payload_invalid_env_uses_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("WS_EXECUTION_MAX_TEXT_CHARS", "invalid")
+    monkeypatch.setenv("WS_EXECUTION_MAX_COLLECTION_ITEMS", "0")
+    monkeypatch.setenv("WS_EXECUTION_MAX_RECURSION_DEPTH", "-3")
+
+    payload = {"text": "x" * 70000}
+    sanitized = sanitize_event_payload(payload)
+    assert sanitized["text"].endswith("...[truncated]")
 
 
 @pytest.mark.asyncio
@@ -127,9 +162,55 @@ def test_execution_step_builder_builds_deterministic_ids_and_parents():
     assert call_step is not None
     assert call_step.id == "run-1:s1"
     assert call_step.type == "memory"
+    assert call_step.actor_kind == "root_rlm"
+    assert call_step.depth == 0
     assert result_step is not None
     assert result_step.id == "run-1:s2"
     assert result_step.parent_id == call_step.id
+
+
+def test_execution_step_builder_annotates_delegate_actor_metadata():
+    builder = ExecutionStepBuilder(run_id="run-actor")
+
+    step = builder.from_stream_event(
+        kind="tool_call",
+        text="Calling tool: read_file_slice",
+        payload={
+            "tool_name": "read_file_slice",
+            "delegate_depth": 2,
+            "delegate_id": "delegate-42",
+        },
+        timestamp=3.0,
+    )
+
+    assert step is not None
+    assert step.actor_kind == "delegate"
+    assert step.depth == 2
+    assert step.actor_id == "delegate-42"
+    assert step.lane_key == "delegate:delegate-42"
+
+
+def test_execution_step_builder_reads_actor_hints_from_step_data():
+    builder = ExecutionStepBuilder(run_id="run-actor-step-data")
+
+    step = builder.from_stream_event(
+        kind="tool_call",
+        text="Calling tool: read_file_slice",
+        payload={
+            "tool_name": "read_file_slice",
+            "step_data": {
+                "delegate_depth": 3,
+                "delegate_id": "delegate-step-data",
+            },
+        },
+        timestamp=3.0,
+    )
+
+    assert step is not None
+    assert step.actor_kind == "delegate"
+    assert step.depth == 3
+    assert step.actor_id == "delegate-step-data"
+    assert step.lane_key == "delegate:delegate-step-data"
 
 
 def test_execution_step_builder_links_repl_start_and_complete():

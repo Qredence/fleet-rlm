@@ -1,6 +1,7 @@
 """Execution observability package."""
 
 from .events import (
+    ExecutionActorKind,
     ExecutionEvent,
     ExecutionEventEmitter,
     ExecutionEventType,
@@ -13,6 +14,7 @@ from .events import (
 from .step_builder import ExecutionStepBuilder
 
 __all__ = [
+    "ExecutionActorKind",
     "ExecutionEvent",
     "ExecutionEventEmitter",
     "ExecutionEventType",

@@ -28,15 +28,17 @@ export function asText(value: unknown): string {
   }
 }
 
-function compact(value: string, max = 120): string {
-  const compacted = value.replace(/\s+/g, " ").trim();
+function compact(value: string, _max = 120): string {
+  const compacted = value.trim();
   if (!compacted) return "";
-  return compacted.length > max ? `${compacted.slice(0, max)}…` : compacted;
+  return compacted;
 }
 
 function firstLine(value: string, max = 160): string {
-  const line = value.split(/\r?\n/, 1)[0] ?? "";
-  return compact(line, max);
+  const normalized = compact(value, max);
+  if (!normalized) return "";
+  const [line] = normalized.split(/\r?\n/, 1);
+  return line?.trim() ?? "";
 }
 
 function summarizeToolStep(step: ExecutionStep): string | undefined {

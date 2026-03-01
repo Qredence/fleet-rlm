@@ -4,7 +4,11 @@ import { ArtifactTimeline } from "@/features/artifacts/components/ArtifactTimeli
 import type { ExecutionStep } from "@/stores/artifactStore";
 
 describe("ArtifactTimeline contextual summaries", () => {
-  it("renders type-aware summaries for tool/repl/trajectory/output events", () => {
+  it("renders type-aware summaries without truncating payload content", () => {
+    const fullThought =
+      "Need to inspect files and preserve full context for trace readability across the entire chain.";
+    const fullObservation =
+      "Found files: README.md, src/main.py, src/router.py, src/runtime.py, tests/test_runtime.py";
     const steps: ExecutionStep[] = [
       {
         id: "tool-1",
@@ -28,9 +32,9 @@ describe("ArtifactTimeline contextual summaries", () => {
         label: "Trajectory step",
         output: {
           trajectory_step: {
-            thought: "Need to inspect files",
+            thought: fullThought,
             tool_name: "list_files",
-            output: "Found 3 files",
+            output: fullObservation,
           },
         },
         timestamp: 3000,
@@ -54,6 +58,9 @@ describe("ArtifactTimeline contextual summaries", () => {
     expect(html).toContain("list_files");
     expect(html).toContain("REPL code:");
     expect(html).toContain("Thought:");
+    expect(html).toContain(fullThought);
+    expect(html).toContain(fullObservation);
     expect(html).toContain("Structured output");
+    expect(html).not.toContain("…");
   });
 });

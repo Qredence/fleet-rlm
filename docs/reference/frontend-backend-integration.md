@@ -17,9 +17,10 @@ Backend serves:
 
 Primary interactive/chat surfaces:
 
-- `POST /api/v1/chat`
-- `WS /api/v1/ws/chat`
-- `WS /api/v1/ws/execution`
+- Canonical: `WS /api/v1/ws/chat`
+- Observability: `WS /api/v1/ws/execution`
+- Compatibility-only (deprecated): `POST /api/v1/chat`
+  - removal target: `v0.4.93`
 
 Runtime setup surfaces:
 
@@ -84,6 +85,33 @@ Display policy:
 - Dedicated execution stream for artifact/step visualization.
 - Filters by subscription identity (`workspace_id`, `user_id`, `session_id`).
 - Emits `execution_started`, `execution_step`, `execution_completed`.
+- `execution_step.step` now carries additive actor metadata:
+  - `depth` (optional)
+  - `actor_kind` (`root_rlm | sub_agent | delegate | unknown`, optional)
+  - `actor_id` (optional)
+  - `lane_key` (optional)
+
+### Execution Graph Semantics
+
+Artifact graph rendering maps execution steps into actor swimlanes:
+
+- `Root RLM` lane: root planner/orchestrator execution.
+- `Sub-agent` lanes: recursive/delegated agent depth contexts.
+- `Delegate` lanes: delegate profile execution contexts.
+- `Unknown` lane: fallback when actor hints are unavailable.
+
+Ordering and edge rules:
+
+- Step order is deterministic by `(timestamp, id)`.
+- Parent-child edges are causal (primary).
+- Chronological edges are dashed temporal hints (secondary).
+
+Content policy:
+
+- Graph, Timeline, and Preview surfaces do not intentionally truncate artifact
+  text content.
+- Large payloads may be shown in scrollable regions, but full text remains
+  accessible in-place.
 
 ## Environment Variables
 
@@ -94,6 +122,12 @@ Frontend connectivity is typically driven by:
 - `VITE_FLEET_WORKSPACE_ID`
 - `VITE_FLEET_USER_ID`
 - `VITE_FLEET_TRACE`
+
+Execution stream payload-size controls (backend):
+
+- `WS_EXECUTION_MAX_TEXT_CHARS` (default `65536`)
+- `WS_EXECUTION_MAX_COLLECTION_ITEMS` (default `500`)
+- `WS_EXECUTION_MAX_RECURSION_DEPTH` (default `12`)
 
 ## Validation Checklist
 

@@ -11,6 +11,7 @@ vi.mock("reactflow", () => {
       {
         "data-testid": "reactflow",
         "data-edges": JSON.stringify(props.edges ?? []),
+        "data-nodes": JSON.stringify(props.nodes ?? []),
       },
       props.children as React.ReactNode,
     );
@@ -31,7 +32,7 @@ vi.mock("reactflow", () => {
 });
 
 describe("ArtifactGraph edge elapsed labels", () => {
-  it("attaches formatted elapsed labels to sequential edges", () => {
+  it("attaches formatted elapsed labels to chronological edges", () => {
     const steps: ExecutionStep[] = [
       {
         id: "a",
@@ -39,6 +40,8 @@ describe("ArtifactGraph edge elapsed labels", () => {
         label: "Planner",
         output: { text: "thinking" },
         timestamp: 1000,
+        actor_kind: "root_rlm",
+        depth: 0,
       },
       {
         id: "b",
@@ -48,6 +51,8 @@ describe("ArtifactGraph edge elapsed labels", () => {
         output: { result: "ok" },
         timestamp: 1350,
         parent_id: "a",
+        actor_kind: "sub_agent",
+        depth: 1,
       },
       {
         id: "c",
@@ -56,6 +61,8 @@ describe("ArtifactGraph edge elapsed labels", () => {
         output: { text: "done" },
         timestamp: 3400,
         parent_id: "b",
+        actor_kind: "delegate",
+        depth: 2,
       },
     ];
 
@@ -66,5 +73,46 @@ describe("ArtifactGraph edge elapsed labels", () => {
     expect(html).toContain('data-testid="reactflow"');
     expect(html).toContain("&quot;label&quot;:&quot;350ms&quot;");
     expect(html).toContain("&quot;label&quot;:&quot;2.0s&quot;");
+    expect(html).toContain("Root RLM");
+    expect(html).toContain("Sub-agent (depth 1)");
+    expect(html).toContain("Delegate (depth 2)");
+  });
+
+  it("does not collapse contiguous tool steps into grouped nodes", () => {
+    const steps: ExecutionStep[] = [
+      {
+        id: "llm-1",
+        type: "llm",
+        label: "Planner",
+        output: { text: "reasoning" },
+        timestamp: 1000,
+      },
+      {
+        id: "tool-1",
+        type: "tool",
+        label: "Tool: list_files",
+        input: { tool_name: "list_files" },
+        output: { result: "first" },
+        parent_id: "llm-1",
+        timestamp: 1100,
+      },
+      {
+        id: "tool-2",
+        type: "tool",
+        label: "Tool: list_files",
+        input: { tool_name: "list_files" },
+        output: { result: "second" },
+        parent_id: "llm-1",
+        timestamp: 1200,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ArtifactGraph steps={steps} onSelectStep={() => {}} />,
+    );
+    expect(html).toContain('data-testid="reactflow"');
+    expect(html).toContain("&quot;id&quot;:&quot;node-llm-1&quot;");
+    expect(html).toContain("&quot;id&quot;:&quot;node-tool-1&quot;");
+    expect(html).toContain("&quot;id&quot;:&quot;node-tool-2&quot;");
   });
 });

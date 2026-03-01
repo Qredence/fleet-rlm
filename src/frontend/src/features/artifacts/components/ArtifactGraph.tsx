@@ -10,9 +10,12 @@ import ReactFlow, {
   type NodeTypes,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import dagre from "@dagrejs/dagre";
 
-import type { ArtifactStepType, ExecutionStep } from "@/stores/artifactStore";
+import type {
+  ArtifactActorKind,
+  ArtifactStepType,
+  ExecutionStep,
+} from "@/stores/artifactStore";
 import {
   NODE_WIDTH,
   STEP_TYPE_META,
@@ -22,8 +25,7 @@ import {
   type GraphStepNodeData,
 } from "@/features/artifacts/components/GraphStepNode";
 import { extractToolBadgeFromStep } from "@/features/artifacts/components/graphToolBadge";
-
-// ── Props ───────────────────────────────────────────────────────────
+import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 
 interface ArtifactGraphProps {
   steps: ExecutionStep[];
@@ -31,32 +33,55 @@ interface ArtifactGraphProps {
   onSelectStep: (id: string) => void;
 }
 
-// ── Custom node type registry (stable ref) ──────────────────────────
-
 const nodeTypes: NodeTypes = { step: GraphStepNode };
 
-// ── Layout constants ────────────────────────────────────────────────
+const ROW_HEIGHT = 230;
+const LANE_WIDTH = NODE_WIDTH + 120;
 
-const NODE_HEIGHT = 90;
-const DAGRE_NODE_SEP = 16;
-const DAGRE_RANK_SEP = 50;
+const ACTOR_PRIORITY: Record<ArtifactActorKind, number> = {
+  root_rlm: 0,
+  sub_agent: 1,
+  delegate: 2,
+  unknown: 3,
+};
 
-// ── Helpers ─────────────────────────────────────────────────────────
+interface LaneMeta {
+  key: string;
+  label: string;
+  actorKind: ArtifactActorKind;
+  depth?: number;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value))
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
+  }
   return value as Record<string, unknown>;
 }
 
-import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
-
-function summarizeStep(step: ExecutionStep): string {
-  return summarizeArtifactStep(step);
+function normalizeActorKind(value: unknown): ArtifactActorKind {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "root_rlm" || raw === "root-rlm" || raw === "root") {
+    return "root_rlm";
+  }
+  if (raw === "sub_agent" || raw === "sub-agent" || raw === "subagent") {
+    return "sub_agent";
+  }
+  if (raw === "delegate" || raw === "rlm_delegate" || raw === "rlm-delegate") {
+    return "delegate";
+  }
+  return "unknown";
 }
 
-function normalizeLabel(label: string): string {
-  return label.trim().toLowerCase().replace(/\s+/g, " ");
+function normalizeDepth(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.trunc(parsed));
+  }
+  return undefined;
 }
 
 function inferStatus(step: ExecutionStep): "streaming" | "complete" | "error" {
@@ -90,178 +115,72 @@ function formatElapsedLabel(ms: number | undefined): string | undefined {
   return `${mins}m ${rem}s`;
 }
 
-// ── Depth index ─────────────────────────────────────────────────────
+function summarizeStep(step: ExecutionStep): string {
+  return summarizeArtifactStep(step);
+}
 
-function buildDepthIndex(steps: ExecutionStep[]): Map<string, number> {
-  const byId = new Map(steps.map((step) => [step.id, step]));
-  const depthById = new Map<string, number>();
-
-  const walk = (step: ExecutionStep): number => {
-    const cached = depthById.get(step.id);
-    if (cached != null) return cached;
-
-    const parent = step.parent_id ? byId.get(step.parent_id) : undefined;
-    const depth = parent ? walk(parent) + 1 : 0;
-    depthById.set(step.id, depth);
-    return depth;
-  };
-
-  for (const step of steps) {
-    walk(step);
+function laneLabel(kind: ArtifactActorKind, depth?: number): string {
+  if (kind === "root_rlm") return "Root RLM";
+  if (kind === "delegate") {
+    return typeof depth === "number" ? `Delegate (depth ${depth})` : "Delegate";
   }
-
-  return depthById;
+  if (kind === "sub_agent") {
+    return typeof depth === "number"
+      ? `Sub-agent (depth ${depth})`
+      : "Sub-agent";
+  }
+  return typeof depth === "number" ? `Unknown (depth ${depth})` : "Unknown";
 }
 
-// ── Display groups ──────────────────────────────────────────────────
+function deriveLane(step: ExecutionStep): LaneMeta {
+  let actorKind = normalizeActorKind(step.actor_kind);
+  let depth = normalizeDepth(step.depth);
+  if (actorKind === "unknown" && depth == null && !step.parent_id) {
+    actorKind = "root_rlm";
+    depth = 0;
+  }
+  const actorId =
+    typeof step.actor_id === "string" && step.actor_id.trim()
+      ? step.actor_id.trim()
+      : undefined;
 
-interface DisplayGroup {
-  id: string;
-  type: ArtifactStepType;
-  baseLabel: string;
-  summary: string;
-  count: number;
-  depth: number;
-  timestamp: number;
-  representativeStepId: string;
-  parentStepId?: string;
-  normalizedLabel: string;
-  toolName?: string;
-  toolNameSource?: "payload" | "label";
-  status: "streaming" | "complete" | "error";
-  elapsedMs?: number;
-  representativeInput?: unknown;
-  representativeOutput?: unknown;
+  const key =
+    (typeof step.lane_key === "string" && step.lane_key.trim()) ||
+    (actorId ? `${actorKind}:${actorId}` : `${actorKind}:depth-${depth ?? "na"}`);
+
+  const label = actorId
+    ? `${laneLabel(actorKind, depth)} · ${actorId}`
+    : laneLabel(actorKind, depth);
+
+  return { key, label, actorKind, depth };
 }
 
-function buildDisplayGroups(ordered: ExecutionStep[]): {
-  groups: DisplayGroup[];
-  stepToGroupId: Map<string, string>;
-} {
-  const depthById = buildDepthIndex(ordered);
-  const groups: DisplayGroup[] = [];
-  const stepToGroupId = new Map<string, string>();
+function sortStepsChronologically(steps: ExecutionStep[]): ExecutionStep[] {
+  return [...steps].sort((a, b) => {
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+    return a.id.localeCompare(b.id);
+  });
+}
 
-  let currentToolGroup: DisplayGroup | null = null;
-
-  const closeToolGroup = () => {
-    if (!currentToolGroup) return;
-    groups.push(currentToolGroup);
-    currentToolGroup = null;
-  };
-
-  const createGroupFromStep = (step: ExecutionStep): DisplayGroup => {
-    const toolBadge = extractToolBadgeFromStep(step);
-    return {
-      ...toolBadge,
-      id: `group-${step.id}`,
-      type: step.type,
-      baseLabel: step.label,
-      summary: summarizeStep(step),
-      count: 1,
-      depth: depthById.get(step.id) ?? 0,
-      timestamp: step.timestamp,
-      representativeStepId: step.id,
-      parentStepId: step.parent_id,
-      normalizedLabel: normalizeLabel(step.label),
-      status: inferStatus(step),
-      representativeInput: step.input,
-      representativeOutput: step.output,
-    };
-  };
-
+function buildLanes(ordered: ExecutionStep[]): LaneMeta[] {
+  const byKey = new Map<string, LaneMeta>();
   for (const step of ordered) {
-    if (step.type !== "tool") {
-      closeToolGroup();
-      const group = createGroupFromStep(step);
-      groups.push(group);
-      stepToGroupId.set(step.id, group.id);
-      continue;
-    }
-
-    const nl = normalizeLabel(step.label);
-    const parentStepId = step.parent_id;
-
-    if (
-      currentToolGroup &&
-      currentToolGroup.type === "tool" &&
-      currentToolGroup.parentStepId === parentStepId &&
-      currentToolGroup.normalizedLabel === nl
-    ) {
-      currentToolGroup.count += 1;
-      currentToolGroup.summary = summarizeStep(step);
-      currentToolGroup.timestamp = step.timestamp;
-      currentToolGroup.representativeStepId = step.id;
-      currentToolGroup.status = inferStatus(step);
-      currentToolGroup.representativeInput = step.input;
-      currentToolGroup.representativeOutput = step.output;
-      if (!currentToolGroup.toolName) {
-        const nextToolBadge = extractToolBadgeFromStep(step);
-        currentToolGroup.toolName = nextToolBadge.toolName;
-        currentToolGroup.toolNameSource = nextToolBadge.toolNameSource;
-      }
-      stepToGroupId.set(step.id, currentToolGroup.id);
-      continue;
-    }
-
-    closeToolGroup();
-    currentToolGroup = createGroupFromStep(step);
-    stepToGroupId.set(step.id, currentToolGroup.id);
-  }
-
-  closeToolGroup();
-
-  // Compute elapsed time (delta to next sibling)
-  for (let i = 0; i < groups.length; i++) {
-    const current = groups[i]!;
-    const next = groups[i + 1];
-    if (next) {
-      current.elapsedMs = next.timestamp - current.timestamp;
+    const lane = deriveLane(step);
+    if (!byKey.has(lane.key)) {
+      byKey.set(lane.key, lane);
     }
   }
 
-  return { groups, stepToGroupId };
-}
-
-// ── Dagre auto-layout ───────────────────────────────────────────────
-
-function applyDagreLayout(
-  nodes: Node<GraphStepNodeData>[],
-  edges: Edge[],
-): Node<GraphStepNodeData>[] {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({
-    rankdir: "TB",
-    nodesep: DAGRE_NODE_SEP,
-    ranksep: DAGRE_RANK_SEP,
-    marginx: 20,
-    marginy: 20,
-  });
-
-  for (const node of nodes) {
-    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
-  }
-
-  for (const edge of edges) {
-    g.setEdge(edge.source, edge.target);
-  }
-
-  dagre.layout(g);
-
-  return nodes.map((node) => {
-    const pos = g.node(node.id);
-    return {
-      ...node,
-      position: {
-        x: pos.x - NODE_WIDTH / 2,
-        y: pos.y - NODE_HEIGHT / 2,
-      },
-    };
+  return [...byKey.values()].sort((a, b) => {
+    if (a.actorKind !== b.actorKind) {
+      return ACTOR_PRIORITY[a.actorKind] - ACTOR_PRIORITY[b.actorKind];
+    }
+    if ((a.depth ?? -1) !== (b.depth ?? -1)) {
+      return (a.depth ?? -1) - (b.depth ?? -1);
+    }
+    return a.label.localeCompare(b.label);
   });
 }
-
-// ── Legend ───────────────────────────────────────────────────────────
 
 const LEGEND_TYPES: ArtifactStepType[] = [
   "llm",
@@ -279,11 +198,7 @@ function GraphLegend() {
         const Icon = meta.Icon;
         return (
           <div key={type} className="flex items-center gap-1.5">
-            <Icon
-              className="size-3"
-              style={{ color: meta.color }}
-              aria-hidden
-            />
+            <Icon className="size-3" style={{ color: meta.color }} aria-hidden />
             <span>{meta.label}</span>
           </div>
         );
@@ -292,7 +207,21 @@ function GraphLegend() {
   );
 }
 
-// ── Main component ──────────────────────────────────────────────────
+function LaneLegend({ lanes }: { lanes: LaneMeta[] }) {
+  if (lanes.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground border-b border-border-subtle bg-card/40">
+      {lanes.map((lane) => (
+        <span
+          key={lane.key}
+          className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-2 py-0.5 text-[11px] text-foreground/90"
+        >
+          {lane.label}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function ArtifactGraph({
   steps,
@@ -301,114 +230,112 @@ export function ArtifactGraph({
 }: ArtifactGraphProps) {
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
 
-  const { nodes, edges } = useMemo(() => {
-    const ordered = [...steps].sort((a, b) => a.timestamp - b.timestamp);
-    const { groups, stepToGroupId } = buildDisplayGroups(ordered);
-    const activeGroupId = activeStepId
-      ? stepToGroupId.get(activeStepId)
-      : undefined;
+  const { nodes, edges, lanes } = useMemo(() => {
+    const ordered = sortStepsChronologically(steps);
+    const lanes = buildLanes(ordered);
+    const laneIndexByKey = new Map(lanes.map((lane, index) => [lane.key, index]));
 
     const graphNodes: Node<GraphStepNodeData>[] = [];
     const graphEdges: Edge[] = [];
-    const seenEdges = new Set<string>();
+    const nodeIdByStepId = new Map<string, string>();
 
-    for (const group of groups) {
-      const isActive = group.id === activeGroupId;
-      const label =
-        group.count > 1
-          ? `${group.baseLabel} ×${group.count}`
-          : group.baseLabel;
-      const summary =
-        group.count > 1
-          ? `${group.count} contiguous steps. Latest: ${group.summary}`
-          : group.summary;
+    for (let index = 0; index < ordered.length; index += 1) {
+      const step = ordered[index]!;
+      const lane = deriveLane(step);
+      const laneIndex = laneIndexByKey.get(lane.key) ?? 0;
+      const toolBadge = extractToolBadgeFromStep(step);
+      const nodeId = `node-${step.id}`;
+
+      nodeIdByStepId.set(step.id, nodeId);
 
       graphNodes.push({
-        id: group.id,
+        id: nodeId,
         type: "step",
         data: {
-          label,
-          type: group.type,
-          summary,
-          count: group.count,
-          representativeStepId: group.representativeStepId,
-          toolName: group.toolName,
-          toolNameSource: group.toolNameSource,
-          elapsedMs: group.elapsedMs,
-          status: group.status,
-          expanded: group.id === expandedNodeId,
-          input: group.representativeInput,
-          output: group.representativeOutput,
+          label: step.label,
+          type: step.type,
+          actorKind: lane.actorKind,
+          actorId: typeof step.actor_id === "string" ? step.actor_id : null,
+          depth: normalizeDepth(step.depth) ?? null,
+          laneLabel: lane.label,
+          summary: summarizeStep(step),
+          count: 1,
+          representativeStepId: step.id,
+          toolName: toolBadge.toolName,
+          toolNameSource: toolBadge.toolNameSource,
+          status: inferStatus(step),
+          expanded: step.id === expandedNodeId,
+          input: step.input,
+          output: step.output,
         },
-        position: { x: 0, y: 0 },
-        selected: isActive,
+        position: {
+          x: laneIndex * LANE_WIDTH,
+          y: index * ROW_HEIGHT,
+        },
+        selected: step.id === activeStepId,
       });
+    }
 
-      if (!group.parentStepId) continue;
-      const sourceGroupId = stepToGroupId.get(group.parentStepId);
-      if (!sourceGroupId || sourceGroupId === group.id) continue;
+    for (const step of ordered) {
+      if (!step.parent_id) continue;
+      const source = nodeIdByStepId.get(step.parent_id);
+      const target = nodeIdByStepId.get(step.id);
+      if (!source || !target || source === target) continue;
 
-      const edgeId = `${sourceGroupId}-${group.id}`;
-      if (seenEdges.has(edgeId)) continue;
-      seenEdges.add(edgeId);
-
-      const edgeColor = STEP_TYPE_META[group.type]?.color ?? "var(--border)";
-
+      const edgeColor = STEP_TYPE_META[step.type]?.color ?? "var(--border)";
       graphEdges.push({
-        id: edgeId,
-        source: sourceGroupId,
-        target: group.id,
+        id: `parent-${source}-${target}`,
+        source,
+        target,
         type: "smoothstep",
-        animated: group.id === activeGroupId,
-        style: { stroke: edgeColor, strokeWidth: 1.5 },
+        animated: step.id === activeStepId,
+        style: { stroke: edgeColor, strokeWidth: 1.8 },
       });
     }
 
-    // Always chain ALL groups sequentially to force a single vertical
-    // column layout.  Parent→child edges above are kept as secondary
-    // visual hints but are NOT fed into Dagre so siblings don't spread
-    // horizontally.
-    const layoutEdges: Edge[] = [];
-    if (graphNodes.length > 1) {
-      for (let i = 0; i < graphNodes.length - 1; i++) {
-        const src = graphNodes[i]!;
-        const tgt = graphNodes[i + 1]!;
-        layoutEdges.push({
-          id: `seq-${src.id}-${tgt.id}`,
-          source: src.id,
-          target: tgt.id,
-          type: "smoothstep",
-          animated: tgt.selected === true,
-          style: { stroke: "var(--border)", strokeWidth: 1 },
-          label: formatElapsedLabel(src.data.elapsedMs),
-          labelShowBg: true,
-          labelBgStyle: {
-            fill: "color-mix(in srgb, var(--background) 85%, transparent)",
-            opacity: 0.95,
-          },
-          labelStyle: {
-            fontSize: 10,
-            fill: "var(--muted-foreground)",
-            fontVariantNumeric: "tabular-nums",
-          },
-        });
-      }
+    for (let index = 1; index < ordered.length; index += 1) {
+      const previous = ordered[index - 1]!;
+      const current = ordered[index]!;
+      const source = nodeIdByStepId.get(previous.id);
+      const target = nodeIdByStepId.get(current.id);
+      if (!source || !target || source === target) continue;
+
+      const elapsedLabel = formatElapsedLabel(current.timestamp - previous.timestamp);
+      graphEdges.push({
+        id: `chrono-${source}-${target}`,
+        source,
+        target,
+        type: "smoothstep",
+        animated: false,
+        style: {
+          stroke: "var(--muted-foreground)",
+          strokeWidth: 1,
+          strokeDasharray: "4 4",
+          opacity: 0.7,
+        },
+        label: elapsedLabel,
+        labelShowBg: true,
+        labelBgStyle: {
+          fill: "color-mix(in srgb, var(--background) 85%, transparent)",
+          opacity: 0.95,
+        },
+        labelStyle: {
+          fontSize: 10,
+          fill: "var(--muted-foreground)",
+          fontVariantNumeric: "tabular-nums",
+        },
+      });
     }
 
-    // Use only sequential edges for Dagre layout (vertical column),
-    // then expose both sequential + parent→child edges for rendering.
-    const layoutNodes = applyDagreLayout(graphNodes, layoutEdges);
-    const allEdges = [...layoutEdges, ...graphEdges];
-    return { nodes: layoutNodes, edges: allEdges };
+    return { nodes: graphNodes, edges: graphEdges, lanes };
   }, [activeStepId, expandedNodeId, steps]);
 
   const onNodeClick = useCallback<NodeMouseHandler>(
     (_event, node) => {
       const graphNode = node as Node<GraphStepNodeData>;
-      onSelectStep(graphNode.data.representativeStepId || graphNode.id);
-      setExpandedNodeId((prev) =>
-        prev === graphNode.id ? null : graphNode.id,
-      );
+      const stepId = graphNode.data.representativeStepId;
+      onSelectStep(stepId);
+      setExpandedNodeId((prev) => (prev === stepId ? null : stepId));
     },
     [onSelectStep],
   );
@@ -424,13 +351,14 @@ export function ArtifactGraph({
   return (
     <div className="h-full w-full rounded-card border border-border-subtle overflow-hidden flex flex-col">
       <GraphLegend />
+      <LaneLegend lanes={lanes} />
       <div className="flex-1 min-h-0">
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.25, maxZoom: 1.2 }}
+          fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
           nodesDraggable={false}
           nodesConnectable={false}
           panOnScroll
