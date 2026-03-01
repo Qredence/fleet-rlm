@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Annotated, Any, AsyncGenerator, AsyncIterator
+from typing import TYPE_CHECKING, Annotated, Any, AsyncIterator
 
 from fastapi import Depends, HTTPException, Request, WebSocket
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .execution import ExecutionEventEmitter
-from .legacy_compat import get_db_session
-from .services.session_service import SessionService
-from .services.task_service import TaskService
 
 if TYPE_CHECKING:
     from fleet_rlm.react.agent import RLMReActChatAgent
@@ -164,47 +159,6 @@ def get_request_identity(request: Request) -> NormalizedIdentity | None:
     return None
 
 
-async def get_db(
-    request: Request,
-) -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for providing database sessions."""
-    try:
-        async for session in get_db_session():
-            yield session
-    except RuntimeError as exc:
-        path = request.url.path
-        if "/tasks" in path:
-            detail = (
-                "Legacy SQLite task routes are disabled. "
-                "Use Neon-backed runtime APIs instead."
-            )
-        elif "/sessions" in path:
-            detail = (
-                "Legacy SQLite session routes are disabled. "
-                "Use WS session state and Neon-backed APIs instead."
-            )
-        else:
-            detail = str(exc)
-        raise HTTPException(status_code=410, detail=detail) from exc
-
-
-LegacyDBSessionDep = Annotated[AsyncSession, Depends(get_db)]
-
-
-def get_task_service(db: LegacyDBSessionDep) -> TaskService:
-    """Build the legacy task service from a request-scoped SQLite session."""
-    return TaskService(db)
-
-
-def get_session_service(db: LegacyDBSessionDep) -> SessionService:
-    """Build the legacy session service from a request-scoped SQLite session."""
-    return SessionService(db)
-
-
-TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
-SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
-
-
 async def get_react_agent(
     request: Request,
     config: ServerConfigDep,
@@ -270,35 +224,3 @@ def session_key(workspace_id: str, user_id: str, session_id: str | None = None) 
     """Build a stable in-memory key for a stateful user/workspace session."""
     resolved_session_id = (session_id or "").strip() or "__default__"
     return f"{workspace_id}:{user_id}:{resolved_session_id}"
-
-
-def require_legacy_task_routes(
-    config: RequestConfigDep,
-) -> None:
-    """Gate legacy SQLite task routes behind runtime config."""
-    if not config.enable_legacy_sqlite_routes:
-        raise HTTPException(
-            status_code=410,
-            detail=(
-                "Legacy SQLite task routes are disabled. "
-                "Use Neon-backed runtime APIs instead."
-            ),
-        )
-
-
-def require_legacy_session_routes(
-    config: RequestConfigDep,
-) -> None:
-    """Gate legacy SQLite session CRUD routes behind runtime config."""
-    if not config.enable_legacy_sqlite_routes:
-        raise HTTPException(
-            status_code=410,
-            detail=(
-                "Legacy SQLite session routes are disabled. "
-                "Use WS session state and Neon-backed APIs instead."
-            ),
-        )
-
-
-LegacyTaskRoutesDep = Annotated[None, Depends(require_legacy_task_routes)]
-LegacySessionRoutesDep = Annotated[None, Depends(require_legacy_session_routes)]

@@ -4,7 +4,7 @@
  * Re-exports everything consumers need from a single entry point:
  *
  * ```ts
- * import { isMockMode, apiClient, taskEndpoints, adaptTask } from '@/lib/api';
+ * import { isMockMode, apiClient } from '@/lib/api';
  * ```
  */
 
@@ -25,15 +25,14 @@ export {
 
 // ── Endpoints ───────────────────────────────────────────────────────
 export {
-  taskEndpoints,
-  taxonomyEndpoints,
-  sessionEndpoints,
-  analyticsEndpoints,
-  searchEndpoints,
-  memoryEndpoints,
-  filesystemEndpoints,
+  sessionStateEndpoints,
 } from "@/lib/api/endpoints";
-export type { TaskListParams, MemoryListParams } from "@/lib/api/endpoints";
+export type {
+  TaskListParams,
+  MemoryListParams,
+  SessionStateResponse,
+  SessionStateSummary,
+} from "@/lib/api/endpoints";
 
 // ── Adapters ────────────────────────────────────────────────────────
 export {

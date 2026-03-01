@@ -39,10 +39,15 @@ Runtime settings behavior:
   - `active_models.delegate`
   - `active_models.delegate_small`
 
-Compatibility/stub surfaces that may still be present in UI flows:
+Deprecated/planned surfaces removed from backend:
 
-- Legacy-gated: `/api/v1/tasks*`, `/api/v1/sessions*`
-- Planned/stub: `/api/v1/taxonomy*`, `/api/v1/analytics*`, `/api/v1/search`, `/api/v1/memory*`, `/api/v1/sandbox*`
+- `/api/v1/tasks*`
+- `/api/v1/sessions*` CRUD (state summary endpoint remains)
+- `/api/v1/taxonomy*`
+- `/api/v1/analytics*`
+- `/api/v1/search`
+- `/api/v1/memory*`
+- `/api/v1/sandbox*`
 
 ## WebSocket Behavior
 

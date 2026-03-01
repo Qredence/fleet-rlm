@@ -15,13 +15,7 @@ _REQUIRED_HTTP_PATHS = {
     "/api/v1/runtime/tests/modal",
     "/api/v1/runtime/tests/lm",
     "/api/v1/runtime/status",
-    "/api/v1/tasks",
-    "/api/v1/sessions",
     "/api/v1/sessions/state",
-    "/api/v1/analytics",
-    "/api/v1/search",
-    "/api/v1/memory",
-    "/api/v1/sandbox",
 }
 
 _REQUIRED_WS_PATHS = {
@@ -72,52 +66,25 @@ def test_runtime_contract_endpoints_remain_available(
     assert lm.status_code == 200
 
 
-def test_planned_routes_keep_explicit_501(local_client: TestClient) -> None:
-    for path in (
+def test_removed_deprecated_and_planned_routes_absent(
+    local_client: TestClient,
+) -> None:
+    http_paths = {
+        route.path for route in local_client.app.routes if isinstance(route, APIRoute)
+    }
+    removed_paths = {
+        "/api/v1/tasks",
+        "/api/v1/tasks/{task_id}",
+        "/api/v1/sessions",
+        "/api/v1/sessions/{session_id}",
+        "/api/v1/taxonomy",
+        "/api/v1/taxonomy/{path}",
         "/api/v1/analytics",
+        "/api/v1/analytics/skills/{skill_id}",
         "/api/v1/search",
         "/api/v1/memory",
         "/api/v1/sandbox",
-    ):
-        response = local_client.get(path)
-        assert response.status_code == 501
-        assert "not yet implemented" in response.json()["detail"]
-
-
-def test_legacy_routes_keep_410_when_disabled(
-    legacy_disabled_client: TestClient,
-    auth_headers: dict[str, str],
-) -> None:
-    tasks = legacy_disabled_client.get("/api/v1/tasks", headers=auth_headers)
-    sessions = legacy_disabled_client.get("/api/v1/sessions", headers=auth_headers)
-
-    assert tasks.status_code == 410
-    assert sessions.status_code == 410
-
-
-def test_legacy_crud_routes_are_marked_deprecated(local_client: TestClient) -> None:
-    route_map = {
-        (route.path, frozenset(route.methods or [])): route
-        for route in local_client.app.routes
-        if isinstance(route, APIRoute)
+        "/api/v1/sandbox/file",
     }
-
-    deprecated_route_keys = {
-        ("/api/v1/tasks", frozenset({"POST"})),
-        ("/api/v1/tasks", frozenset({"GET"})),
-        ("/api/v1/tasks/{task_id}", frozenset({"GET"})),
-        ("/api/v1/tasks/{task_id}", frozenset({"PATCH"})),
-        ("/api/v1/tasks/{task_id}", frozenset({"DELETE"})),
-        ("/api/v1/sessions", frozenset({"POST"})),
-        ("/api/v1/sessions", frozenset({"GET"})),
-        ("/api/v1/sessions/{session_id}", frozenset({"GET"})),
-        ("/api/v1/sessions/{session_id}", frozenset({"PATCH"})),
-        ("/api/v1/sessions/{session_id}", frozenset({"DELETE"})),
-    }
-
-    for key in deprecated_route_keys:
-        route = route_map[key]
-        assert route.deprecated is True
-
-    state_route = route_map[("/api/v1/sessions/state", frozenset({"GET"}))]
-    assert state_route.deprecated is not True
+    assert removed_paths.isdisjoint(http_paths)
+    assert removed_paths.isdisjoint(set(local_client.app.openapi().get("paths", {})))

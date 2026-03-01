@@ -13,9 +13,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { isMockMode } from "@/lib/api/config";
 import { analyticsData as mockAnalyticsData } from "@/lib/data/mock-skills";
-import { analyticsEndpoints } from "@/lib/api/endpoints";
-import { adaptAnalytics, type AnalyticsData } from "@/lib/api/adapters";
-import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
+import type { AnalyticsData } from "@/lib/api/adapters";
+import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
 
 // ── Query Keys ──────────────────────────────────────────────────────
 
@@ -72,27 +71,16 @@ export function useAnalytics(): UseAnalyticsReturn {
         return {
           analytics: mockAnalyticsData as AnalyticsData,
           dataSource: "mock" as const,
+          degradedReason: undefined,
         } satisfies AnalyticsPayload;
       }
 
       const capability = await getCapabilityStatus("analytics", signal);
       if (!capability.available) {
-        return {
-          analytics: mockAnalyticsData as AnalyticsData,
-          dataSource: "fallback" as const,
-          degradedReason:
-            capability.reason ??
-            "Analytics endpoint is unavailable, using local mock data.",
-        } satisfies AnalyticsPayload;
+        return createFallbackPayload("analytics", mockAnalyticsData as AnalyticsData, capability, "Analytics");
       }
 
-      const response = await analyticsEndpoints.getDashboard(signal);
-      return {
-        analytics: adaptAnalytics(
-          response as Parameters<typeof adaptAnalytics>[0],
-        ),
-        dataSource: "api" as const,
-      } satisfies AnalyticsPayload;
+      return createFallbackPayload("analytics", mockAnalyticsData as AnalyticsData, capability, "Analytics");
     },
     staleTime: mock ? Infinity : undefined,
   });

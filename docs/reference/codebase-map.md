@@ -27,10 +27,9 @@ This document is the canonical architecture and ownership map after Wave 7.2 dea
 - Execution observability package: `execution/`
   - `events.py`, `step_builder.py`, `sanitizer.py`
 - Router package root: `routers/`
-  - HTTP routers: `auth.py`, `chat.py`, `health.py`, `runtime.py`, `tasks.py`, `sessions.py`, `planned.py`
+  - HTTP routers: `auth.py`, `chat.py`, `health.py`, `runtime.py`, `sessions.py`
   - WebSocket package (canonical): `routers/ws/`
     - `api.py`, `helpers.py`, `message_loop.py`, `turn.py`, `streaming.py`, `lifecycle.py`, `session.py`, `session_store.py`, `commands.py`, `repl_hook.py`
-- Legacy SQLite support still contract-preserved: `legacy_compat.py`, `legacy_models.py`, `services/`
 
 ### `src/fleet_rlm/stateful/`
 - Stateful wrappers and managers: `agent.py`, `sandbox.py`
@@ -58,7 +57,6 @@ This document is the canonical architecture and ownership map after Wave 7.2 dea
 - WebSocket API surface and turn orchestration: `fleet_rlm.server.routers.ws.*`
 - Execution stream models/sanitization/step building: `fleet_rlm.server.execution.*`
 - Streaming event/state models: `fleet_rlm.models`
-- Legacy SQLite CRUD compatibility models: `fleet_rlm.server.legacy_models`
 
 ## Frontend → Backend Contract Map
 
@@ -77,9 +75,7 @@ This document is the canonical architecture and ownership map after Wave 7.2 dea
   - `POST /api/v1/runtime/tests/modal`
   - `POST /api/v1/runtime/tests/lm`
   - `GET /api/v1/runtime/status`
-- Task/session contracts currently consumed by frontend:
-  - `/api/v1/tasks`
-  - `/api/v1/sessions`
+- Session state contract consumed by frontend:
   - `/api/v1/sessions/state`
 
 ### Frontend environment semantics (unchanged)
@@ -123,7 +119,6 @@ This document is the canonical architecture and ownership map after Wave 7.2 dea
 | `fleet_rlm.signatures` | `fleet_rlm.react.signatures` | Removed in Wave 7.2 |
 | `fleet_rlm.terminal_chat` | `fleet_rlm.terminal.chat` | Removed in Wave 7.2 |
 | `fleet_rlm.models.models` | `fleet_rlm.models` / `fleet_rlm.models.streaming` | Removed in Wave 7.2 |
-| `fleet_rlm.server.models` | `fleet_rlm.server.legacy_models` | Removed in Wave 7.2 |
 | `fleet_rlm.server.execution_events` | `fleet_rlm.server.execution.events` | Removed in Wave 7.2 |
 | `fleet_rlm.server.execution_step_builder` | `fleet_rlm.server.execution.step_builder` | Removed in Wave 7.2 |
 | `fleet_rlm.server.execution_event_sanitizer` | `fleet_rlm.server.execution.sanitizer` | Removed in Wave 7.2 |

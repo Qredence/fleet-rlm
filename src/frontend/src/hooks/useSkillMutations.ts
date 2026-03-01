@@ -17,12 +17,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { isMockMode } from "@/lib/api/config";
-import { taskEndpoints } from "@/lib/api/endpoints";
-import { adaptTask } from "@/lib/api/adapters";
 import { createLocalId } from "@/lib/id";
 import { skillKeys } from "@/hooks/useSkills";
 import type { Skill } from "@/lib/data/types";
+import { isMockMode } from "@/lib/api/config";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -87,19 +85,14 @@ function createMockSkill(input: CreateSkillInput): Skill {
 export function useSkillMutations() {
   const queryClient = useQueryClient();
   const telemetry = useTelemetry();
-  const mock = isMockMode();
 
   // ── Create ──────────────────────────────────────────────────────
   const createSkill = useMutation({
     mutationFn: async (input: CreateSkillInput): Promise<Skill> => {
-      if (mock) {
+      if (isMockMode()) {
         await mockDelay();
-        return createMockSkill(input);
       }
-      const response = await taskEndpoints.create(
-        input as unknown as Record<string, unknown>,
-      );
-      return adaptTask(response as Parameters<typeof adaptTask>[0]);
+      return createMockSkill(input);
     },
     onSuccess: (newSkill) => {
       // Add to cache
@@ -125,19 +118,14 @@ export function useSkillMutations() {
   // ── Update ──────────────────────────────────────────────────────
   const updateSkill = useMutation({
     mutationFn: async ({ id, data }: UpdateSkillInput): Promise<Skill> => {
-      if (mock) {
+      if (isMockMode()) {
         await mockDelay();
-        // Return merged data
-        const existing = queryClient.getQueryData<Skill[]>(skillKeys.lists());
-        const found = existing?.find((s) => s.id === id);
-        if (!found) throw new Error("Skill not found");
-        return { ...found, ...data };
       }
-      const response = await taskEndpoints.update(
-        id,
-        data as unknown as Record<string, unknown>,
-      );
-      return adaptTask(response as Parameters<typeof adaptTask>[0]);
+      // Return merged data
+      const existing = queryClient.getQueryData<Skill[]>(skillKeys.lists());
+      const found = existing?.find((s) => s.id === id);
+      if (!found) throw new Error("Skill not found");
+      return { ...found, ...data };
     },
     // Optimistic update
     onMutate: async ({ id, data }) => {
@@ -170,11 +158,9 @@ export function useSkillMutations() {
   // ── Delete ──────────────────────────────────────────────────────
   const deleteSkill = useMutation({
     mutationFn: async (id: string): Promise<string> => {
-      if (mock) {
+      if (isMockMode()) {
         await mockDelay();
-        return id;
       }
-      await taskEndpoints.delete(id);
       return id;
     },
     // Optimistic removal

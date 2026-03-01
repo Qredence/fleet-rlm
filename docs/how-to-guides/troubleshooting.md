@@ -63,10 +63,10 @@ Checks:
 
 See [Auth Modes](../reference/auth.md).
 
-## Planned vs Legacy Route Responses
+## Removed Deprecated/Planned Routes
 
-- Planned scaffold routes under `/api/v1/{taxonomy|analytics|search|memory|sandbox}` return `501 Not Implemented`.
-- Legacy-gated routes (`/api/v1/tasks*`, `/api/v1/sessions*` except `/state`) can return `410 Gone` when disabled.
+- Deprecated and planned/stub REST surfaces were removed.
+- Requests to `/api/v1/tasks*`, `/api/v1/sessions*` CRUD, and `/api/v1/{taxonomy|analytics|search|memory|sandbox}*` now return `404 Not Found`.
 
 ## Diagnostic Commands
 

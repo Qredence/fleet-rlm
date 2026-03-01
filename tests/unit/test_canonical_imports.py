@@ -18,7 +18,6 @@ def test_server_canonical_imports() -> None:
         "fleet_rlm.server.execution.sanitizer"
     )
     runtime_settings = importlib.import_module("fleet_rlm.server.runtime_settings")
-    legacy_models = importlib.import_module("fleet_rlm.server.legacy_models")
 
     assert ws_pkg.router is not None
     assert ws_pkg.chat_streaming is not None
@@ -30,8 +29,6 @@ def test_server_canonical_imports() -> None:
     assert execution_step_builder.ExecutionStepBuilder is not None
     assert callable(execution_sanitizer.sanitize_event_payload)
     assert callable(runtime_settings.get_settings_snapshot)
-    assert legacy_models.Session is not None
-    assert legacy_models.Task is not None
 
 
 def test_react_canonical_imports() -> None:

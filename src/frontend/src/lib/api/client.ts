@@ -15,7 +15,7 @@
  * ```ts
  * import { apiClient } from '@/lib/api/client';
  *
- * const tasks = await apiClient.get<ApiTaskListResponse>('/api/v1/tasks');
+ * const state = await apiClient.get('/api/v1/sessions/state');
  * ```
  */
 

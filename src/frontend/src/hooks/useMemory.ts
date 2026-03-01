@@ -5,7 +5,8 @@
  * in consumer components. Returns the stable `MemoryEntry[]` type.
  *
  * In mock mode (no VITE_FLEET_API_URL), returns mock data immediately.
- * In API mode, fetches from `/api/v1/memory` and adapts the response.
+ * In non-mock mode, falls back to local mock data because deprecated memory
+ * REST endpoints were removed from the backend.
  *
  * @example
  * ```tsx
@@ -14,11 +15,11 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { isMockMode } from "@/lib/api/config";
-import { memoryEndpoints, type MemoryListParams } from "@/lib/api/endpoints";
-import { adaptMemoryEntry } from "@/lib/api/adapters";
-import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
+import type { MemoryListParams } from "@/lib/api/endpoints";
+import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
 import { useMockStateStore } from "@/stores/mockStateStore";
 import type { MemoryEntry, MemoryType } from "@/lib/data/types";
+import { createLocalId } from "@/lib/id";
 
 // ── Query Keys ──────────────────────────────────────────────────────
 
@@ -139,33 +140,20 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
         return {
           entries: filterEntries(memoryEntries),
           dataSource: "mock" as const,
+          degradedReason: undefined,
         } satisfies MemoryPayload;
       }
 
       const capability = await getCapabilityStatus("memory", signal);
       if (!capability.available) {
-        return {
-          entries: filterEntries(memoryEntries),
-          dataSource: "fallback" as const,
-          degradedReason:
-            capability.reason ??
-            "Memory endpoint is unavailable, using local mock data.",
-        } satisfies MemoryPayload;
+        return createFallbackPayload("entries", filterEntries(memoryEntries), capability, "Memory");
       }
 
-      const response = await memoryEndpoints.list(params, signal);
-      return {
-        entries: (response.items || []).map((item) =>
-          adaptMemoryEntry(item as Parameters<typeof adaptMemoryEntry>[0]),
-        ),
-        dataSource: "api" as const,
-      } satisfies MemoryPayload;
+      return createFallbackPayload("entries", filterEntries(memoryEntries), capability, "Memory");
     },
     enabled: options?.enabled !== false,
     staleTime: mock ? Infinity : undefined,
   });
-
-  const isMockBacked = mock || query.data?.dataSource === "fallback";
 
   // ── Create mutation ───────────────────────────────────────────────
 
@@ -177,36 +165,20 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
       tags?: string[];
       pinned?: boolean;
     }) => {
-      if (isMockBacked) {
-        const now = new Date().toISOString();
-        const newEntry: MemoryEntry = {
-          id:
-            typeof crypto !== "undefined" && "randomUUID" in crypto
-              ? `mem-mock-${crypto.randomUUID()}`
-              : `mem-mock-${Date.now()}`,
-          type: entry.type,
-          content: entry.content,
-          source: entry.source || "User: Manual Entry",
-          createdAt: now,
-          updatedAt: now,
-          relevance: 80,
-          tags: entry.tags || [],
-          pinned: entry.pinned ?? false,
-        };
-        addMemoryEntry(newEntry);
-        return newEntry;
-      }
-
-      const response = await memoryEndpoints.create({
+      const now = new Date().toISOString();
+      const newEntry: MemoryEntry = {
+        id: createLocalId("mem-mock"),
         type: entry.type,
         content: entry.content,
-        source: entry.source,
-        tags: entry.tags,
-        pinned: entry.pinned,
-      });
-      return adaptMemoryEntry(
-        response as Parameters<typeof adaptMemoryEntry>[0],
-      );
+        source: entry.source || "User: Manual Entry",
+        createdAt: now,
+        updatedAt: now,
+        relevance: 80,
+        tags: entry.tags || [],
+        pinned: entry.pinned ?? false,
+      };
+      addMemoryEntry(newEntry);
+      return newEntry;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memoryKeys.all });
@@ -225,18 +197,8 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
         Pick<MemoryEntry, "content" | "tags" | "pinned" | "relevance">
       >;
     }) => {
-      if (isMockBacked) {
-        updateMemoryEntry(id, patch);
-        return memoryEntries.find((e) => e.id === id)!;
-      }
-
-      const response = await memoryEndpoints.update(
-        id,
-        patch as Record<string, unknown>,
-      );
-      return adaptMemoryEntry(
-        response as Parameters<typeof adaptMemoryEntry>[0],
-      );
+      updateMemoryEntry(id, patch);
+      return useMockStateStore.getState().memoryEntries.find((e) => e.id === id)!;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memoryKeys.all });
@@ -247,12 +209,7 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      if (isMockBacked) {
-        removeMemoryEntry(id);
-        return;
-      }
-
-      await memoryEndpoints.delete(id);
+      removeMemoryEntry(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memoryKeys.all });
@@ -263,15 +220,8 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
 
   const bulkPinMutation = useMutation({
     mutationFn: async ({ ids, pinned }: { ids: string[]; pinned: boolean }) => {
-      if (isMockBacked) {
-        bulkUpdateMemoryPinned(ids, pinned);
-        return memoryEntries.filter((e) => ids.includes(e.id));
-      }
-
-      const response = await memoryEndpoints.bulkPin(ids, pinned);
-      return response.map((item) =>
-        adaptMemoryEntry(item as Parameters<typeof adaptMemoryEntry>[0]),
-      );
+      bulkUpdateMemoryPinned(ids, pinned);
+      return memoryEntries.filter((e) => ids.includes(e.id));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memoryKeys.all });
@@ -282,12 +232,7 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
 
   const bulkRemoveMutation = useMutation({
     mutationFn: async (ids: string[]) => {
-      if (isMockBacked) {
-        bulkRemoveMemoryEntries(ids);
-        return;
-      }
-
-      await memoryEndpoints.bulkDelete(ids);
+      bulkRemoveMemoryEntries(ids);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memoryKeys.all });

@@ -9,7 +9,6 @@
  *   VITE_FLEET_API_URL    — Base URL for fleet-rlm API (e.g. "http://localhost:8000")
  *   VITE_FLEET_WS_URL     — WebSocket URL (e.g. "ws://localhost:8000")
  *   VITE_FLEET_API_KEY    — Optional API key for authenticated requests
- *   VITE_FLEET_ENABLE_LEGACY_API_PROBES — Enable probing legacy /api/v1/* endpoints
  *
  * @example
  * ```ts
@@ -18,21 +17,11 @@
  * if (isMockMode()) {
  *   return mockSkills; // Figma Make or local dev without backend
  * }
- * const url = `${apiConfig.baseUrl}/api/v1/tasks`;
+ * const url = `${apiConfig.baseUrl}/api/v1/sessions/state`;
  * ```
  */
 
-function parseBool(value: string | undefined, fallback: boolean): boolean {
-  if (value == null) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1" || normalized === "yes") {
-    return true;
-  }
-  if (normalized === "false" || normalized === "0" || normalized === "no") {
-    return false;
-  }
-  return fallback;
-}
+import { parseBool } from "@/lib/utils/env";
 
 // ── Configuration Object ────────────────────────────────────────────
 
@@ -49,12 +38,6 @@ export const apiConfig = {
   /** Explicitly toggle mock mode. If true, the data layer uses local mock data. */
   mockMode: parseBool(
     import.meta.env.VITE_MOCK_MODE as string | undefined,
-    false,
-  ),
-
-  /** Opt-in probing for legacy `/api/v1/*` endpoints. */
-  enableLegacyApiProbes: parseBool(
-    import.meta.env.VITE_FLEET_ENABLE_LEGACY_API_PROBES as string | undefined,
     false,
   ),
 

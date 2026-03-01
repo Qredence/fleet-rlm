@@ -227,14 +227,6 @@ def build_tool_list(
     # Sandbox / RLM / buffer / volume tools
     tools.extend(build_sandbox_tools(agent))
 
-    # Evolutive memory intelligence tools
-    try:
-        from ...core.memory_tools import search_evolutive_memory
-
-        tools.append(Tool(search_evolutive_memory))
-    except Exception as e:
-        logger.warning(f"Failed to load evolutive memory tools: {e}")
-
     # Wrap extra tools with dspy.Tool if not already wrapped
     if extra_tools:
         for et in extra_tools:

@@ -9,12 +9,6 @@ import { resolvePostHogWebConfig } from "@/lib/telemetry/posthog";
 
 const posthogConfig = resolvePostHogWebConfig(import.meta.env);
 
-if (posthogConfig.keySource === "legacy_alias_env") {
-  console.warn(
-    "[fleet-rlm] VITE_PUBLIC_POSTHOG_KEY is deprecated; use VITE_PUBLIC_POSTHOG_API_KEY",
-  );
-}
-
 if (posthogConfig.apiKey) {
   posthog.init(posthogConfig.apiKey, {
     api_host: posthogConfig.host,

@@ -12,9 +12,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { isMockMode } from "@/lib/api/config";
 import { mockTaxonomy } from "@/lib/data/mock-skills";
-import { taxonomyEndpoints } from "@/lib/api/endpoints";
-import { adaptTaxonomy } from "@/lib/api/adapters";
-import { getCapabilityStatus, type DataSource } from "@/lib/api/capabilities";
+import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
 import type { TaxonomyNode } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -60,27 +58,16 @@ export function useTaxonomy(): UseTaxonomyReturn {
         return {
           taxonomy: mockTaxonomy,
           dataSource: "mock" as const,
+          degradedReason: undefined,
         } satisfies TaxonomyPayload;
       }
 
       const capability = await getCapabilityStatus("taxonomy", signal);
       if (!capability.available) {
-        return {
-          taxonomy: mockTaxonomy,
-          dataSource: "fallback" as const,
-          degradedReason:
-            capability.reason ??
-            "Taxonomy endpoint is unavailable, using local mock data.",
-        } satisfies TaxonomyPayload;
+        return createFallbackPayload("taxonomy", mockTaxonomy, capability, "Taxonomy");
       }
 
-      const response = await taxonomyEndpoints.getTree(signal);
-      return {
-        taxonomy: adaptTaxonomy(
-          response as Parameters<typeof adaptTaxonomy>[0],
-        ),
-        dataSource: "api" as const,
-      } satisfies TaxonomyPayload;
+      return createFallbackPayload("taxonomy", mockTaxonomy, capability, "Taxonomy");
     },
     staleTime: mock ? Infinity : undefined,
   });

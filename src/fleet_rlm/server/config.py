@@ -91,12 +91,6 @@ class ServerRuntimeConfig(BaseModel):
     )
     db_echo: bool = False
     db_validate_on_startup: bool = False
-    enable_legacy_sqlite_routes: bool = Field(
-        default_factory=lambda: _env_bool(
-            os.getenv("LEGACY_SQLITE_ROUTES_ENABLED"),
-            default=_env_app_env() == "local",
-        )
-    )
     allow_debug_auth: bool = Field(
         default_factory=lambda: _env_bool(
             os.getenv("ALLOW_DEBUG_AUTH"),

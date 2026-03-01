@@ -45,7 +45,6 @@ def local_client() -> TestClient:
         config=ServerRuntimeConfig(
             app_env="local",
             database_required=False,
-            enable_legacy_sqlite_routes=False,
         )
     )
     with TestClient(app) as client:
@@ -68,7 +67,6 @@ def staging_client() -> TestClient:
             allow_query_auth_tokens=False,
             cors_allowed_origins=["https://example.com"],
             dev_jwt_secret="staging-test-secret",
-            enable_legacy_sqlite_routes=False,
         )
     )
     with TestClient(app) as client:
