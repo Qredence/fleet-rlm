@@ -35,7 +35,10 @@ function compact(value: string, _max = 120): string {
 }
 
 function firstLine(value: string, max = 160): string {
-  return compact(value, max);
+  const normalized = compact(value, max);
+  if (!normalized) return "";
+  const [line] = normalized.split(/\r?\n/, 1);
+  return line?.trim() ?? "";
 }
 
 function summarizeToolStep(step: ExecutionStep): string | undefined {

@@ -97,19 +97,20 @@ def _extract_actor_kind(
     if execution_profile == "RLM_DELEGATE":
         return "delegate"
 
-    for key in ("delegate_depth", "delegate_id"):
-        value = payload.get(key)
-        if isinstance(value, (int, float)) or (
-            isinstance(value, str) and value.strip()
-        ):
-            return "delegate"
+    for source in _iter_actor_sources(payload):
+        for key in ("delegate_depth", "delegate_id"):
+            value = source.get(key)
+            if isinstance(value, (int, float)) or (
+                isinstance(value, str) and value.strip()
+            ):
+                return "delegate"
 
-    for key in ("sub_agent_depth", "sub_agent_id"):
-        value = payload.get(key)
-        if isinstance(value, (int, float)) or (
-            isinstance(value, str) and value.strip()
-        ):
-            return "sub_agent"
+        for key in ("sub_agent_depth", "sub_agent_id"):
+            value = source.get(key)
+            if isinstance(value, (int, float)) or (
+                isinstance(value, str) and value.strip()
+            ):
+                return "sub_agent"
 
     if depth is not None:
         return "sub_agent" if depth > 0 else "root_rlm"

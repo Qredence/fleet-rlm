@@ -75,9 +75,9 @@ Fix:
 - increase execution stream payload limits for your environment:
 
 ```bash
-export WS_EXECUTION_MAX_TEXT_CHARS=65536
-export WS_EXECUTION_MAX_COLLECTION_ITEMS=500
-export WS_EXECUTION_MAX_RECURSION_DEPTH=12
+export WS_EXECUTION_MAX_TEXT_CHARS=120000
+export WS_EXECUTION_MAX_COLLECTION_ITEMS=1000
+export WS_EXECUTION_MAX_RECURSION_DEPTH=16
 ```
 
 - Restart the API server after changing these values.

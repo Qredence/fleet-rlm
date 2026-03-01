@@ -190,6 +190,29 @@ def test_execution_step_builder_annotates_delegate_actor_metadata():
     assert step.lane_key == "delegate:delegate-42"
 
 
+def test_execution_step_builder_reads_actor_hints_from_step_data():
+    builder = ExecutionStepBuilder(run_id="run-actor-step-data")
+
+    step = builder.from_stream_event(
+        kind="tool_call",
+        text="Calling tool: read_file_slice",
+        payload={
+            "tool_name": "read_file_slice",
+            "step_data": {
+                "delegate_depth": 3,
+                "delegate_id": "delegate-step-data",
+            },
+        },
+        timestamp=3.0,
+    )
+
+    assert step is not None
+    assert step.actor_kind == "delegate"
+    assert step.depth == 3
+    assert step.actor_id == "delegate-step-data"
+    assert step.lane_key == "delegate:delegate-step-data"
+
+
 def test_execution_step_builder_links_repl_start_and_complete():
     builder = ExecutionStepBuilder(run_id="run-2")
     repl_start = builder.from_interpreter_hook(
