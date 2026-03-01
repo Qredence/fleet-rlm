@@ -31,6 +31,19 @@ function findFirstPart(
   return undefined;
 }
 
+function findAllParts(
+  messages: ChatMessage[],
+  predicate: (part: ChatRenderPart) => boolean,
+): ChatRenderPart[] {
+  const results: ChatRenderPart[] = [];
+  for (const message of messages) {
+    for (const part of message.renderParts ?? []) {
+      if (predicate(part)) results.push(part);
+    }
+  }
+  return results;
+}
+
 describe("applyWsFrameToMessages", () => {
   it("appends a backend error system message and closes open reasoning", () => {
     const initial: ChatMessage[] = [
@@ -143,6 +156,80 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("normalizes indexed trajectory payloads and renders sorted step order", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("trajectory_step", "trace", {
+        thought_1: "Second thought",
+        tool_name_1: "glob_search",
+        tool_args_1: { path: ".", pattern: "**/*" },
+        observation_1: { count: 2 },
+        thought_0: "First thought",
+        tool_name_0: "list_files",
+        tool_args_0: { path: "src" },
+        observation_0: ["a.py", "b.py"],
+      }),
+    );
+
+    const reasoning = messages.find((m) => m.type === "reasoning");
+    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
+    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
+      expect(reasoning.renderParts[0].parts.map((part) => part.text)).toEqual([
+        "First thought",
+        "Second thought",
+      ]);
+    }
+
+    const tools = findAllParts(messages, (part) => part.kind === "tool");
+    expect(tools).toHaveLength(2);
+    if (tools[0]?.kind === "tool" && tools[1]?.kind === "tool") {
+      expect(tools[0].toolType).toBe("list_files");
+      expect(tools[1].toolType).toBe("glob_search");
+      expect(tools[0].input).toEqual({ path: "src" });
+      expect(tools[1].input).toEqual({ path: ".", pattern: "**/*" });
+      expect(tools[0].output).toEqual(["a.py", "b.py"]);
+      expect(tools[1].output).toEqual({ count: 2 });
+    }
+
+    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    expect(cot).toBeDefined();
+    if (cot?.kind === "chain_of_thought") {
+      expect(cot.steps).toHaveLength(2);
+      expect(cot.steps[0]?.index).toBe(0);
+      expect(cot.steps[1]?.index).toBe(1);
+      expect(cot.steps[0]?.details).toContain("Input received");
+      expect(cot.steps[0]?.details).toContain("Observation received");
+      expect(cot.steps[0]?.details?.join(" ")).not.toContain("pattern");
+    }
+  });
+
+  it("keeps chain_of_thought sorted by index even when events arrive out of order", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("trajectory_step", "late step", {
+        step_index: 1,
+        step_data: { thought: "second", tool_name: "tool_2" },
+      }),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("trajectory_step", "early step", {
+        step_index: 0,
+        step_data: { thought: "first", tool_name: "tool_1" },
+      }),
+    ).messages;
+
+    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    expect(cot).toBeDefined();
+    if (cot?.kind === "chain_of_thought") {
+      expect(cot.steps.map((step) => step.index)).toEqual([0, 1]);
+      expect(cot.steps[0]?.label).toBe("Tool: tool_1");
+      expect(cot.steps[1]?.label).toBe("Tool: tool_2");
+    }
+  });
+
   it("maps plan_update to a queue trace part and closes reasoning", () => {
     let msgs: ChatMessage[] = [];
     msgs = applyWsFrameToMessages(
@@ -215,6 +302,36 @@ describe("applyWsFrameToMessages", () => {
     if (tool?.kind === "tool") {
       expect(tool.state).toBe("output-available");
       expect(String(tool.output)).toContain("match line");
+    }
+  });
+
+  it("updates trajectory-derived tool cards with explicit tool_result without duplicates", () => {
+    let messages = applyWsFrameToMessages(
+      [],
+      makeEvent("trajectory_step", "trace", {
+        step_index: 0,
+        step_data: {
+          thought: "Run grep",
+          tool_name: "grep",
+          tool_args: { pattern: "foo" },
+        },
+      }),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("tool_result", "Done", {
+        step_index: 0,
+        tool_name: "grep",
+        tool_output: { matches: 3 },
+      }),
+    ).messages;
+
+    const tools = findAllParts(messages, (part) => part.kind === "tool");
+    expect(tools).toHaveLength(1);
+    if (tools[0]?.kind === "tool") {
+      expect(tools[0].state).toBe("output-available");
+      expect(tools[0].output).toEqual({ matches: 3 });
     }
   });
 

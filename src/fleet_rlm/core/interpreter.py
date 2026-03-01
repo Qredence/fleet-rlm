@@ -33,6 +33,7 @@ from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
 
 from .driver import sandbox_driver
 from . import driver_factories, sandbox_tools, session_history, volume_tools
+from fleet_rlm.execution_limits import execution_max_text_chars
 from .llm_tools import LLMQueryMixin
 from .output_utils import (
     _redact_sensitive_text,
@@ -203,8 +204,9 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         """Return deterministic code hash and compact preview text."""
         digest = hashlib.sha256((code or "").encode("utf-8")).hexdigest()[:16]
         compact = " ".join((code or "").split())
-        if len(compact) > 240:
-            compact = f"{compact[:240]}...[truncated]"
+        limit = execution_max_text_chars()
+        if len(compact) > limit:
+            compact = f"{compact[:limit]}...[truncated]"
         return digest, compact
 
     def _emit_execution_event(self, payload: dict[str, Any]) -> None:

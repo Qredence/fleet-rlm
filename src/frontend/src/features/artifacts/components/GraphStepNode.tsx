@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import type { ArtifactStepType } from "@/stores/artifactStore";
+import type { ArtifactActorKind, ArtifactStepType } from "@/stores/artifactStore";
 import { cn } from "@/components/ui/utils";
 import {
   NODE_WIDTH,
@@ -17,6 +17,10 @@ import {
 export interface GraphStepNodeData {
   label: string;
   type: ArtifactStepType;
+  actorKind?: ArtifactActorKind | null;
+  actorId?: string | null;
+  depth?: number | null;
+  laneLabel?: string;
   summary: string;
   count: number;
   representativeStepId: string;
@@ -27,6 +31,13 @@ export interface GraphStepNodeData {
   expanded?: boolean;
   input?: unknown;
   output?: unknown;
+}
+
+function formatActorLabel(actorKind: ArtifactActorKind | null | undefined): string {
+  if (actorKind === "delegate") return "Delegate";
+  if (actorKind === "sub_agent") return "Sub-agent";
+  if (actorKind === "root_rlm") return "Root RLM";
+  return "Unknown";
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -98,9 +109,7 @@ const GraphStepNode = memo(function GraphStepNode({
         <div className="flex-1 min-w-0">
           {/* Header row */}
           <div className="flex items-center gap-1.5 min-w-0">
-            <span
-              className={cn("text-xs font-semibold", !isExpanded && "truncate")}
-            >
+            <span className="text-xs font-semibold whitespace-pre-wrap break-words">
               {data.label}
             </span>
             {data.count > 1 && (
@@ -116,13 +125,29 @@ const GraphStepNode = memo(function GraphStepNode({
             )}
           </div>
 
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-1.5 py-px text-[10px] font-medium leading-tight text-foreground/90">
+              {formatActorLabel(data.actorKind)}
+            </span>
+            {typeof data.depth === "number" && (
+              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-1.5 py-px text-[10px] font-medium leading-tight text-foreground/90">
+                Depth {data.depth}
+              </span>
+            )}
+            {data.actorId && (
+              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-1.5 py-px text-[10px] font-medium leading-tight text-foreground/90 whitespace-pre-wrap break-words">
+                {data.actorId}
+              </span>
+            )}
+          </div>
+
           {data.toolName && (data.type === "tool" || data.type === "repl") && (
             <div className="mt-1 min-w-0">
               <span
                 className="inline-flex max-w-full items-center rounded-full border border-border-subtle bg-muted/50 px-1.5 py-px text-[10px] font-medium leading-tight text-foreground/90"
                 title={data.toolName}
               >
-                <span className="truncate">{data.toolName}</span>
+                <span className="whitespace-pre-wrap break-words">{data.toolName}</span>
               </span>
             </div>
           )}
@@ -130,10 +155,7 @@ const GraphStepNode = memo(function GraphStepNode({
           {/* Summary */}
           {data.summary && (
             <p
-              className={cn(
-                "mt-0.5 text-[11px] leading-snug text-muted-foreground",
-                !isExpanded && "line-clamp-2",
-              )}
+              className="mt-0.5 text-[11px] leading-snug text-muted-foreground whitespace-pre-wrap break-words"
             >
               {data.summary}
             </p>
@@ -221,10 +243,26 @@ const GraphStepNode = memo(function GraphStepNode({
                 className="inline-flex max-w-full items-center rounded-full border border-border-subtle bg-muted/50 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90"
                 title={data.toolName}
               >
-                <span className="truncate">{data.toolName}</span>
+                <span className="whitespace-pre-wrap break-words">{data.toolName}</span>
               </span>
             </div>
           )}
+
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90">
+              {formatActorLabel(data.actorKind)}
+            </span>
+            {typeof data.depth === "number" && (
+              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90">
+                Depth {data.depth}
+              </span>
+            )}
+            {data.actorId && (
+              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90 whitespace-pre-wrap break-words">
+                {data.actorId}
+              </span>
+            )}
+          </div>
 
           {data.summary && (
             <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word mb-2">

@@ -45,6 +45,16 @@ Response contracts:
 
 - `POST /api/v1/chat`
 
+Compatibility/deprecation policy:
+
+- Canonical product chat interface: `WS /api/v1/ws/chat`
+- `POST /api/v1/chat` remains compatibility-only and is deprecated.
+- Removal target: `v0.4.93`
+- Compatibility responses include:
+  - `Deprecation: true`
+  - `Link: </api/v1/ws/chat>; rel="successor-version"`
+  - `X-Fleet-Removal-Version: 0.4.93`
+
 Request body:
 
 ```json
@@ -52,6 +62,20 @@ Request body:
   "message": "Summarize this file",
   "docs_path": "README.md",
   "trace": false
+}
+```
+
+Equivalent WebSocket message frame:
+
+```json
+{
+  "type": "message",
+  "content": "Summarize this file",
+  "docs_path": "README.md",
+  "trace": false,
+  "workspace_id": "default",
+  "user_id": "anonymous",
+  "session_id": "session-123"
 }
 ```
 
@@ -163,6 +187,20 @@ Event types:
 - `execution_started`
 - `execution_step`
 - `execution_completed`
+
+`execution_step` payload shape is additive and includes:
+
+- `step.id`, `step.parent_id`, `step.type`, `step.label`, `step.timestamp`
+- optional `step.depth`
+- optional `step.actor_kind` (`root_rlm | sub_agent | delegate | unknown`)
+- optional `step.actor_id`
+- optional `step.lane_key`
+
+Execution payload sanitization is tunable via environment variables:
+
+- `WS_EXECUTION_MAX_TEXT_CHARS` (default: `65536`)
+- `WS_EXECUTION_MAX_COLLECTION_ITEMS` (default: `500`)
+- `WS_EXECUTION_MAX_RECURSION_DEPTH` (default: `12`)
 
 ## Contract Verification
 

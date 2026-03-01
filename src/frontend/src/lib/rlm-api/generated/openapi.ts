@@ -26,7 +26,15 @@ export interface paths {
     get: operations["get_me_api_v1_auth_me_get"];
   };
   "/api/v1/chat": {
-    /** Chat */
+    /**
+     * Chat
+     * @deprecated
+     * @description Compatibility HTTP chat endpoint.
+     *
+     * Product UX is WS-first via ``/api/v1/ws/chat``. This HTTP route remains
+     * available temporarily for compatibility and is scheduled for removal in
+     * ``v0.4.93``.
+     */
     post: operations["chat_api_v1_chat_post"];
   };
   "/api/v1/tasks": {
@@ -583,7 +591,15 @@ export interface operations {
       };
     };
   };
-  /** Chat */
+  /**
+   * Chat
+   * @deprecated
+   * @description Compatibility HTTP chat endpoint.
+   *
+   * Product UX is WS-first via ``/api/v1/ws/chat``. This HTTP route remains
+   * available temporarily for compatibility and is scheduled for removal in
+   * ``v0.4.93``.
+   */
   chat_api_v1_chat_post: {
     requestBody: {
       content: {

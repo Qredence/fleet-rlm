@@ -21,7 +21,15 @@ describe("ChatMessageList (AI Elements render parts)", () => {
           {
             kind: "chain_of_thought",
             title: "Execution trace",
-            steps: [{ id: "s1", label: "Inspect adapter", status: "complete" }],
+            steps: [
+              {
+                id: "s1",
+                index: 0,
+                label: "Inspect adapter",
+                status: "complete",
+                details: ["Tool: read_file", "Input received", "Observation received"],
+              },
+            ],
           },
           {
             kind: "queue",
@@ -138,6 +146,8 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     );
 
     expect(html).toContain("Execution trace");
+    expect(html).toContain("Input received");
+    expect(html).toContain("Observation received");
     expect(html).toContain("Render queue");
     expect(html).toContain("Executing PythonInterpreter");
     expect(html).toContain("grep");

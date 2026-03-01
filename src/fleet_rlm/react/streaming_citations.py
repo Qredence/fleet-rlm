@@ -33,10 +33,31 @@ def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
     steps = []
     for i in sorted(indices):
         step: dict[str, Any] = {"index": i}
-        for field in ("thought", "tool_name", "input", "output", "observation"):
-            val = raw.get(f"{field}_{i}")
-            if val is not None:
-                step[field] = val
+        thought = raw.get(f"thought_{i}")
+        tool_name = raw.get(f"tool_name_{i}")
+        tool_args = raw.get(f"tool_args_{i}")
+        input_value = raw.get(f"input_{i}")
+        observation = raw.get(f"observation_{i}")
+        output = raw.get(f"output_{i}")
+
+        if thought is not None:
+            step["thought"] = thought
+        if tool_name is not None:
+            step["tool_name"] = tool_name
+
+        if input_value is None and tool_args is not None:
+            input_value = tool_args
+        if input_value is not None:
+            step["input"] = input_value
+        if tool_args is not None:
+            step["tool_args"] = tool_args
+
+        if output is None and observation is not None:
+            output = observation
+        if output is not None:
+            step["output"] = output
+        if observation is not None:
+            step["observation"] = observation
         steps.append(step)
     return steps
 

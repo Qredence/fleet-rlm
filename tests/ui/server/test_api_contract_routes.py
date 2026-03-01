@@ -46,6 +46,16 @@ def test_required_http_and_websocket_routes_are_registered(
     assert _REQUIRED_WS_PATHS.issubset(ws_paths)
 
 
+def test_http_chat_route_is_deprecated(local_client: TestClient) -> None:
+    route_map = {
+        (route.path, frozenset(route.methods or [])): route
+        for route in local_client.app.routes
+        if isinstance(route, APIRoute)
+    }
+    route = route_map[("/api/v1/chat", frozenset({"POST"}))]
+    assert route.deprecated is True
+
+
 def test_runtime_contract_endpoints_remain_available(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

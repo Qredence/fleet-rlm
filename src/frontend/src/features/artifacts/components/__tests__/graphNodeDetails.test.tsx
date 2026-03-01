@@ -67,6 +67,11 @@ describe("GraphStepNode detail surfaces", () => {
   });
 
   it("renders trajectory Thought/Action/Observation chain", () => {
+    const longInput =
+      "path=src pattern=**/* include_hidden=true output_mode=content stable_sort=true";
+    const longObservation =
+      "Found files: src/app/main.py, src/app/router.py, src/core/runtime.py, src/core/state.py";
+
     const html = renderNode({
       label: "Trajectory step",
       type: "tool",
@@ -75,12 +80,14 @@ describe("GraphStepNode detail surfaces", () => {
       representativeStepId: "traj-1",
       status: "complete",
       expanded: true,
+      actorKind: "sub_agent",
+      depth: 2,
       output: {
         trajectory_step: {
           thought: "Need to inspect files",
           tool_name: "list_files",
-          input: { path: "." },
-          output: "Found 42 files",
+          input: longInput,
+          output: longObservation,
         },
       },
     });
@@ -90,7 +97,11 @@ describe("GraphStepNode detail surfaces", () => {
     expect(html).toContain("Need to inspect files");
     expect(html).toContain("Action");
     expect(html).toContain("list_files");
+    expect(html).toContain(longInput);
     expect(html).toContain("Observation");
-    expect(html).toContain("Found 42 files");
+    expect(html).toContain(longObservation);
+    expect(html).toContain("Sub-agent");
+    expect(html).toContain("Depth 2");
+    expect(html).not.toContain("…");
   });
 });

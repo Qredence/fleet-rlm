@@ -15,6 +15,7 @@ export {
 } from "@/lib/rlm-api/messages";
 export { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
+// Includes compatibility-only `chat()` helper (deprecated, removal target v0.4.93).
 export { rlmCoreEndpoints } from "@/lib/rlm-api/endpoints";
 export {
   streamChatOverWs,
