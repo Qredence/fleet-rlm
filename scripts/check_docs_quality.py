@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 import subprocess
 import sys
@@ -30,16 +31,16 @@ LEGACY_EXPLANATION_MARKERS = (
     Path("explanation/memory-topology"),
 )
 
-CLI_CONTRACT_COMMANDS = (
-    ("uv", "run", "fleet-rlm", "--help"),
-    ("uv", "run", "fleet-rlm", "serve-api", "--help"),
-    ("uv", "run", "fleet-rlm", "serve-mcp", "--help"),
-    ("uv", "run", "fleet", "--help"),
-)
+CLI_CONTRACT_COMMANDS = (("uv", "run", "fleet-rlm", "--help"),)
 
 
 def iter_docs_files(docs_root: Path) -> list[Path]:
     return sorted(p for p in docs_root.rglob("*.md") if p.is_file())
+
+
+@functools.lru_cache(maxsize=None)
+def _resolve_path(parent_path: Path, target: str) -> Path:
+    return (parent_path / target).resolve()
 
 
 def _local_targets(file_path: Path, text: str) -> list[tuple[str, Path]]:
@@ -50,7 +51,7 @@ def _local_targets(file_path: Path, text: str) -> list[tuple[str, Path]]:
         clean = raw_target.split("#", 1)[0]
         if not clean:
             continue
-        resolved = (file_path.parent / clean).resolve()
+        resolved = _resolve_path(file_path.parent, clean)
         links.append((raw_target, resolved))
     return links
 

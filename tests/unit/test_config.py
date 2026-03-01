@@ -18,7 +18,7 @@ def test_configure_planner_from_env_with_quotes(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env"
     env_file.write_text(
         'DSPY_LM_MODEL="openai/test-model"\n'
-        "DSPY_LLM_API_KEY='sk-test'\n"
+        "DSPY_LM_API_KEY='sk-test'\n"
         "DSPY_LM_API_BASE=https://example.test\n"
         "DSPY_LM_MAX_TOKENS=1234\n"
     )
@@ -31,11 +31,14 @@ def test_configure_planner_from_env_with_quotes(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)
     monkeypatch.setattr(config.dspy, "configure", fake_configure)
 
-    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
-    monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
-    monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
-    monkeypatch.delenv("DSPY_LM_API_BASE", raising=False)
-    monkeypatch.delenv("DSPY_LM_MAX_TOKENS", raising=False)
+    for key in (
+        "DSPY_LM_MODEL",
+        "DSPY_LLM_API_KEY",
+        "DSPY_LM_API_KEY",
+        "DSPY_LM_API_BASE",
+        "DSPY_LM_MAX_TOKENS",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
     assert config.configure_planner_from_env(env_file=env_file) is True
     lm = captured["lm"]
@@ -52,9 +55,8 @@ def test_configure_planner_from_env_fallback_api_key(monkeypatch, tmp_path: Path
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)
     monkeypatch.setattr(config.dspy, "configure", lambda *, lm: None)
 
-    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
-    monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
-    monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
+    for key in ("DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "DSPY_LM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
 
     assert config.configure_planner_from_env(env_file=env_file) is True
 
@@ -63,9 +65,8 @@ def test_configure_planner_from_env_missing_vars(monkeypatch, tmp_path: Path):
     env_file = tmp_path / ".env"
     env_file.write_text("")
 
-    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
-    monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
-    monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
+    for key in ("DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "DSPY_LM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
 
     assert config.configure_planner_from_env(env_file=env_file) is False
 
@@ -165,9 +166,12 @@ def test_get_delegate_lm_from_env_uses_delegate_model(monkeypatch, tmp_path: Pat
     )
 
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)
-    monkeypatch.delenv("DSPY_DELEGATE_LM_MODEL", raising=False)
-    monkeypatch.delenv("DSPY_DELEGATE_LM_API_KEY", raising=False)
-    monkeypatch.delenv("DSPY_DELEGATE_LM_API_BASE", raising=False)
+    for key in (
+        "DSPY_DELEGATE_LM_MODEL",
+        "DSPY_DELEGATE_LM_API_KEY",
+        "DSPY_DELEGATE_LM_API_BASE",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
     lm = config.get_delegate_lm_from_env(env_file=env_file, default_max_tokens=2048)
     assert lm is not None
@@ -190,8 +194,8 @@ def test_get_delegate_lm_from_env_returns_none_on_init_error(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(config.dspy, "LM", _raise_lm)
-    monkeypatch.delenv("DSPY_DELEGATE_LM_MODEL", raising=False)
-    monkeypatch.delenv("DSPY_DELEGATE_LM_API_KEY", raising=False)
+    for key in ("DSPY_DELEGATE_LM_MODEL", "DSPY_DELEGATE_LM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
 
     lm = config.get_delegate_lm_from_env(env_file=env_file)
     assert lm is None
