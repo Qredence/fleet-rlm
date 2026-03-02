@@ -33,20 +33,15 @@ _URL_SUFFIX_BY_CONTENT_TYPE = {
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    from fleet_rlm._env_utils import env_bool
+
+    return env_bool(os.getenv(name), default=default)
 
 
 def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
+    from fleet_rlm._env_utils import env_int
+
+    return env_int(os.getenv(name), default=default)
 
 
 def is_http_url(value: str) -> bool:

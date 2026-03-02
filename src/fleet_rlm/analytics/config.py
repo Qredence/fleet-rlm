@@ -6,20 +6,10 @@ import os
 
 from pydantic import BaseModel, Field
 
+from fleet_rlm._env_utils import env_bool as _env_bool
+
 PROJECT_POSTHOG_DEFAULT_HOST = "https://eu.i.posthog.com"
 PROJECT_POSTHOG_DEFAULT_API_KEY: str | None = None
-
-
-def _env_bool(value: str | None, *, default: bool) -> bool:
-    """Parse booleans from environment-friendly strings."""
-    if value is None:
-        return default
-    candidate = value.strip().lower()
-    if candidate in {"1", "true", "yes", "on"}:
-        return True
-    if candidate in {"0", "false", "no", "off"}:
-        return False
-    return default
 
 
 class PostHogConfig(BaseModel):
