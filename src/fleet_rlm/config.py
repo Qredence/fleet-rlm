@@ -5,7 +5,8 @@ and memory systems. It is designed to be used with Hydra for hierarchical
 configuration management (YAML -> Dict -> Pydantic).
 """
 
-from typing import Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .analytics.config import PostHogConfig
@@ -35,7 +36,7 @@ class InterpreterConfig(BaseModel):
         default="python:3.13-slim-bookworm",
         description="Base Docker image for the sandbox.",
     )
-    volume_name: Optional[str] = Field(
+    volume_name: str | None = Field(
         default=None,
         description="Name of the Modal Volume to mount (e.g., 'agent-volume').",
     )
@@ -57,7 +58,7 @@ class AgentConfig(BaseModel):
     """Configuration for the RLMReActChatAgent."""
 
     max_iters: int = Field(
-        default=35,
+        default=60,
         description="Maximum number of ReAct loop iterations per turn.",
     )
     model: str = Field(
@@ -101,11 +102,11 @@ class RlmSettings(BaseModel):
         description="Maximum recursion depth for RLM subagents.",
     )
     max_iters: int = Field(
-        default=15,
+        default=60,
         description="Maximum iterations for ReAct agent.",
     )
     deep_max_iters: int = Field(
-        default=35,
+        default=60,
         description="Escalated iteration budget for deep-analysis turns.",
     )
     enable_adaptive_iters: bool = Field(
@@ -113,7 +114,7 @@ class RlmSettings(BaseModel):
         description="Enable adaptive turn budgets based on intent and tool errors.",
     )
     max_iterations: int = Field(
-        default=30,
+        default=60,
         description="Maximum iterations for RLM code execution.",
     )
     max_llm_calls: int = Field(
@@ -121,7 +122,7 @@ class RlmSettings(BaseModel):
         description="Maximum LLM calls per task.",
     )
     max_output_chars: int = Field(
-        default=10000,
+        default=100000,
         description="Maximum output characters.",
     )
     delegate_max_calls_per_turn: int = Field(
