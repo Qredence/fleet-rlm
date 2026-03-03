@@ -179,6 +179,69 @@ def _new_chat_session_state(
     )
 
 
+async def _process_chat_message(
+    *,
+    websocket: WebSocket,
+    msg: Any,
+    agent: Any,
+    interpreter: Any,
+    session: _ChatSessionState,
+    local_persist: Any,
+    runtime: _PreparedChatRuntime,
+    workspace_id: str,
+    user_id: str,
+    sess_id: str | None,
+    execution_emitter: Any,
+) -> str | None:
+    """Process one ``message`` payload and return the loaded docs path."""
+    message = str(msg.content or "").strip()
+    if not message:
+        await websocket.send_json(
+            {"type": "error", "message": "Message content cannot be empty"}
+        )
+        return session.last_loaded_docs_path
+
+    await local_persist(include_volume_save=True, latest_user_message=message)
+    session.cancel_flag["cancelled"] = False
+    turn_index = agent.history_turns() + 1
+    (
+        session.lifecycle,
+        step_builder,
+        _run_id,
+        session.active_run_db_id,
+    ) = await initialize_turn_lifecycle(
+        planner_lm=runtime.planner_lm,
+        cfg=runtime.cfg,
+        repository=runtime.repository,
+        identity_rows=runtime.identity_rows,
+        persistence_required=runtime.persistence_required,
+        execution_emitter=execution_emitter,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        sess_id=sess_id,
+        turn_index=turn_index,
+        session_record=session.session_record,
+    )
+
+    def cancel_check() -> bool:
+        return session.cancel_flag["cancelled"]
+
+    return await run_streaming_turn(
+        websocket=websocket,
+        agent=agent,
+        message=message,
+        docs_path=msg.docs_path,
+        trace=bool(msg.trace),
+        cancel_check=cancel_check,
+        lifecycle=session.lifecycle,
+        step_builder=step_builder,
+        interpreter=interpreter,
+        last_loaded_docs_path=session.last_loaded_docs_path,
+        analytics_enabled=getattr(msg, "analytics_enabled", None),
+        persist_session_state=local_persist,
+    )
+
+
 async def _chat_message_loop(
     *,
     websocket: WebSocket,
@@ -247,51 +310,18 @@ async def _chat_message_loop(
                 )
                 continue
 
-            message = str(msg.content or "").strip()
-            if not message:
-                await websocket.send_json(
-                    {"type": "error", "message": "Message content cannot be empty"}
-                )
-                continue
-
-            await local_persist(include_volume_save=True, latest_user_message=message)
-            session.cancel_flag["cancelled"] = False
-            turn_index = agent.history_turns() + 1
-            (
-                session.lifecycle,
-                step_builder,
-                _run_id,
-                session.active_run_db_id,
-            ) = await initialize_turn_lifecycle(
-                planner_lm=runtime.planner_lm,
-                cfg=runtime.cfg,
-                repository=runtime.repository,
-                identity_rows=runtime.identity_rows,
-                persistence_required=runtime.persistence_required,
-                execution_emitter=execution_emitter,
+            session.last_loaded_docs_path = await _process_chat_message(
+                websocket=websocket,
+                msg=msg,
+                agent=agent,
+                interpreter=interpreter,
+                session=session,
+                local_persist=local_persist,
+                runtime=runtime,
                 workspace_id=workspace_id,
                 user_id=user_id,
                 sess_id=sess_id,
-                turn_index=turn_index,
-                session_record=session.session_record,
-            )
-
-            def cancel_check() -> bool:
-                return session.cancel_flag["cancelled"]
-
-            session.last_loaded_docs_path = await run_streaming_turn(
-                websocket=websocket,
-                agent=agent,
-                message=message,
-                docs_path=msg.docs_path,
-                trace=bool(msg.trace),
-                cancel_check=cancel_check,
-                lifecycle=session.lifecycle,
-                step_builder=step_builder,
-                interpreter=interpreter,
-                last_loaded_docs_path=session.last_loaded_docs_path,
-                analytics_enabled=getattr(msg, "analytics_enabled", None),
-                persist_session_state=local_persist,
+                execution_emitter=execution_emitter,
             )
     except WebSocketDisconnect:
         session.cancel_flag["cancelled"] = True

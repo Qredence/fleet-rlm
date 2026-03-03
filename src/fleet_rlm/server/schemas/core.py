@@ -183,3 +183,36 @@ class RuntimeStatusResponse(BaseModel):
     modal: dict[str, Any] = Field(default_factory=dict)
     tests: RuntimeTestCache
     guidance: list[str] = Field(default_factory=list)
+
+
+class VolumeTreeNode(BaseModel):
+    """A single node in the volume file tree."""
+
+    id: str
+    name: str
+    path: str
+    type: Literal["volume", "directory", "file"]
+    children: list["VolumeTreeNode"] = Field(default_factory=list)
+    size: int | None = None
+    modified_at: str | None = None
+
+
+class VolumeTreeResponse(BaseModel):
+    """Response for the volume tree listing endpoint."""
+
+    volume_name: str
+    root_path: str
+    nodes: list[VolumeTreeNode]
+    total_files: int = 0
+    total_dirs: int = 0
+    truncated: bool = False
+
+
+class VolumeFileContentResponse(BaseModel):
+    """Response for runtime volume file-content preview endpoint."""
+
+    path: str
+    mime: str
+    size: int
+    content: str
+    truncated: bool = False

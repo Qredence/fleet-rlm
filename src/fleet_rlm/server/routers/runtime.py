@@ -6,9 +6,10 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
-from typing import Any
+from pathlib import PurePosixPath
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.server.runtime_settings import (
@@ -29,6 +30,8 @@ from ..schemas.core import (
     RuntimeSettingsUpdateResponse,
     RuntimeStatusResponse,
     RuntimeTestCache,
+    VolumeFileContentResponse,
+    VolumeTreeResponse,
 )
 
 router = APIRouter(prefix="/runtime", tags=["runtime"])
@@ -412,3 +415,79 @@ async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
         tests=RuntimeTestCache(modal=modal_test, lm=lm_test),
         guidance=guidance,
     )
+
+
+@router.get("/volume/tree", response_model=VolumeTreeResponse)
+async def get_volume_tree(
+    state: ServerStateDep,
+    root_path: Annotated[str, Query()] = "/",
+    max_depth: Annotated[int, Query(ge=1, le=10)] = 3,
+) -> VolumeTreeResponse:
+    """List the file tree of the configured Modal Volume."""
+    volume_name = state.config.volume_name
+    if not volume_name:
+        raise HTTPException(
+            status_code=422,
+            detail="No Modal Volume configured (interpreter.volume_name is unset).",
+        )
+
+    import asyncio
+
+    from fleet_rlm.core.volume_ops import list_volume_tree
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(list_volume_tree, volume_name, root_path, max_depth),
+            timeout=30,
+        )
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Volume listing timed out.")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Volume listing failed: {exc}")
+
+    return VolumeTreeResponse(**result)
+
+
+@router.get("/volume/file", response_model=VolumeFileContentResponse)
+async def get_volume_file_content(
+    state: ServerStateDep,
+    path: Annotated[str, Query(min_length=1)],
+    max_bytes: Annotated[int, Query(ge=1, le=1_000_000)] = 200_000,
+) -> VolumeFileContentResponse:
+    """Read a volume file as UTF-8 text for frontend preview."""
+    volume_name = state.config.volume_name
+    if not volume_name:
+        raise HTTPException(
+            status_code=422,
+            detail="No Modal Volume configured (interpreter.volume_name is unset).",
+        )
+
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    if ".." in PurePosixPath(normalized_path).parts:
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
+    import asyncio
+
+    from fleet_rlm.core.volume_ops import read_volume_file_text
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                read_volume_file_text,
+                volume_name,
+                normalized_path,
+                max_bytes,
+            ),
+            timeout=30,
+        )
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Volume file read timed out.")
+    except Exception as exc:
+        message = str(exc).lower()
+        if "no such file" in message or "not found" in message:
+            raise HTTPException(status_code=404, detail="File not found.")
+        if "directory" in message:
+            raise HTTPException(status_code=400, detail="Path must point to a file.")
+        raise HTTPException(status_code=502, detail=f"Volume file read failed: {exc}")
+
+    return VolumeFileContentResponse(**result)
