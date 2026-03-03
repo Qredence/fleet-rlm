@@ -78,8 +78,8 @@ def test_rlm_settings_defaults():
     settings = RlmSettings()
     assert settings.max_depth == 2
     assert settings.max_llm_calls == 50
-    assert settings.max_iters == 15
-    assert settings.deep_max_iters == 35
+    assert settings.max_iters == 60
+    assert settings.deep_max_iters == 60
     assert settings.enable_adaptive_iters is True
     assert settings.delegate_max_calls_per_turn == 8
     assert settings.delegate_result_truncation_chars == 8000
@@ -121,7 +121,7 @@ def test_agent_config_guardrail_defaults():
     from fleet_rlm.config import AgentConfig
 
     agent = AgentConfig()
-    assert agent.max_iters == 35
+    assert agent.max_iters == 60
     assert agent.temperature == 1.0
     assert agent.delegate_model is None
     assert agent.delegate_max_tokens == 64000
