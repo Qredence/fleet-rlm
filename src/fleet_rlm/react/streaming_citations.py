@@ -12,6 +12,42 @@ STREAM_EVENT_SCHEMA_VERSION = 2
 _ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https"})
 
 
+def _extract_step_indices(raw: dict[str, Any]) -> list[int]:
+    indices: set[int] = set()
+    for key in raw:
+        parts = key.rsplit("_", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            indices.add(int(parts[1]))
+    return sorted(indices)
+
+
+def _build_flat_trajectory_step(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    step: dict[str, Any] = {"index": index}
+    thought = raw.get(f"thought_{index}")
+    tool_name = raw.get(f"tool_name_{index}")
+    tool_args = raw.get(f"tool_args_{index}")
+    input_value = raw.get(f"input_{index}")
+    observation = raw.get(f"observation_{index}")
+    output = raw.get(f"output_{index}")
+
+    if thought is not None:
+        step["thought"] = thought
+    if tool_name is not None:
+        step["tool_name"] = tool_name
+
+    final_input = input_value if input_value is not None else tool_args
+    if final_input is not None:
+        step["input"] = final_input
+        step["tool_args"] = final_input
+
+    final_output = output if output is not None else observation
+    if final_output is not None:
+        step["output"] = final_output
+        step["observation"] = final_output
+
+    return step
+
+
 def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Convert DSPy ReAct flat trajectory to structured step list."""
     if not raw:
@@ -23,40 +59,9 @@ def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
     if "trajectory" in raw and isinstance(raw["trajectory"], list):
         return raw["trajectory"]
 
-    # Extract step indices from keys like "thought_0", "tool_name_1"
-    indices: set[int] = set()
-    for key in raw:
-        parts = key.rsplit("_", 1)
-        if len(parts) == 2 and parts[1].isdigit():
-            indices.add(int(parts[1]))
-
-    steps = []
-    for i in sorted(indices):
-        step: dict[str, Any] = {"index": i}
-        thought = raw.get(f"thought_{i}")
-        tool_name = raw.get(f"tool_name_{i}")
-        tool_args = raw.get(f"tool_args_{i}")
-        input_value = raw.get(f"input_{i}")
-        observation = raw.get(f"observation_{i}")
-        output = raw.get(f"output_{i}")
-
-        if thought is not None:
-            step["thought"] = thought
-        if tool_name is not None:
-            step["tool_name"] = tool_name
-
-        # Keep canonical/alias fields symmetric for downstream consumers.
-        final_input = input_value if input_value is not None else tool_args
-        if final_input is not None:
-            step["input"] = final_input
-            step["tool_args"] = final_input
-
-        final_output = output if output is not None else observation
-        if final_output is not None:
-            step["output"] = final_output
-            step["observation"] = final_output
-        steps.append(step)
-    return steps
+    return [
+        _build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)
+    ]
 
 
 def _as_text(value: Any) -> str | None:
@@ -78,6 +83,42 @@ def _sanitize_external_url(value: Any) -> str | None:
     return url
 
 
+def _normalize_citation_title(item: dict[str, Any], number: str) -> str:
+    return (
+        _as_text(item.get("title"))
+        or _as_text(item.get("source_title"))
+        or _as_text(item.get("source"))
+        or f"Source {number}"
+    )
+
+
+def _normalize_citation_ids(item: dict[str, Any], index: int) -> tuple[str, str]:
+    source_id = _as_text(item.get("source_id")) or f"source-{index + 1}"
+    anchor_id = _as_text(item.get("anchor_id")) or f"anchor-{index + 1}"
+    return source_id, anchor_id
+
+
+def _append_optional_citation_fields(
+    normalized: dict[str, Any],
+    item: dict[str, Any],
+) -> None:
+    description = _as_text(item.get("description"))
+    if description:
+        normalized["description"] = description
+
+    quote = _as_text(item.get("quote"))
+    evidence = _as_text(item.get("evidence"))
+    if quote:
+        normalized["quote"] = quote
+    elif evidence:
+        normalized["quote"] = evidence
+
+    if isinstance(item.get("start_char"), int):
+        normalized["start_char"] = item["start_char"]
+    if isinstance(item.get("end_char"), int):
+        normalized["end_char"] = item["end_char"]
+
+
 def _normalize_citation_entry(item: Any, *, index: int) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
@@ -89,14 +130,8 @@ def _normalize_citation_entry(item: Any, *, index: int) -> dict[str, Any] | None
         return None
 
     number = _as_text(item.get("number")) or str(index + 1)
-    title = (
-        _as_text(item.get("title"))
-        or _as_text(item.get("source_title"))
-        or _as_text(item.get("source"))
-        or f"Source {number}"
-    )
-    source_id = _as_text(item.get("source_id")) or f"source-{index + 1}"
-    anchor_id = _as_text(item.get("anchor_id")) or f"anchor-{index + 1}"
+    title = _normalize_citation_title(item, number)
+    source_id, anchor_id = _normalize_citation_ids(item, index)
 
     normalized: dict[str, Any] = {
         "number": number,
@@ -105,16 +140,7 @@ def _normalize_citation_entry(item: Any, *, index: int) -> dict[str, Any] | None
         "source_id": source_id,
         "anchor_id": anchor_id,
     }
-    if _as_text(item.get("description")):
-        normalized["description"] = _as_text(item.get("description"))
-    if _as_text(item.get("quote")):
-        normalized["quote"] = _as_text(item.get("quote"))
-    if _as_text(item.get("evidence")) and "quote" not in normalized:
-        normalized["quote"] = _as_text(item.get("evidence"))
-    if isinstance(item.get("start_char"), int):
-        normalized["start_char"] = item["start_char"]
-    if isinstance(item.get("end_char"), int):
-        normalized["end_char"] = item["end_char"]
+    _append_optional_citation_fields(normalized, item)
     return normalized
 
 
@@ -141,38 +167,48 @@ def _extract_citations_from_output(value: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _extract_final_citations(
-    *, final_prediction: dspy.Prediction | None, trajectory: dict[str, Any]
+def _prediction_citations(
+    final_prediction: dspy.Prediction | None,
 ) -> list[dict[str, Any]]:
-    candidate_lists: list[list[dict[str, Any]]] = []
+    if final_prediction is None:
+        return []
+    raw = getattr(final_prediction, "citations", None)
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
 
-    if final_prediction is not None:
-        raw_from_prediction = getattr(final_prediction, "citations", None)
-        if isinstance(raw_from_prediction, list):
-            candidate_lists.append(
-                [item for item in raw_from_prediction if isinstance(item, dict)]
-            )
 
-    raw_from_trajectory = trajectory.get("citations")
-    if isinstance(raw_from_trajectory, list):
-        candidate_lists.append(
-            [item for item in raw_from_trajectory if isinstance(item, dict)]
-        )
+def _trajectory_citations(trajectory: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = trajectory.get("citations")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
 
+
+def _trajectory_step_citation_candidates(
+    trajectory: dict[str, Any],
+) -> list[list[dict[str, Any]]]:
+    candidates: list[list[dict[str, Any]]] = []
     for step in _normalize_trajectory(trajectory):
         if not isinstance(step, dict):
             continue
-        candidate = _extract_citations_from_output(step.get("output"))
-        if candidate:
-            candidate_lists.append(
-                [item for item in candidate if isinstance(item, dict)]
-            )
+        citations = _extract_citations_from_output(step.get("output"))
+        if citations:
+            candidates.append([item for item in citations if isinstance(item, dict)])
+    return candidates
 
+
+def _merge_citation_candidates(
+    candidate_lists: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     for candidate in candidate_lists:
         merged.extend(candidate)
+    return merged
 
-    normalized = []
+
+def _dedupe_normalized_citations(merged: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     for idx, item in enumerate(merged):
         normalized_item = _normalize_citation_entry(item, index=idx)
@@ -188,8 +224,25 @@ def _extract_final_citations(
             continue
         seen_keys.add(dedupe_key)
         normalized.append(normalized_item)
-
     return normalized
+
+
+def _extract_final_citations(
+    *, final_prediction: dspy.Prediction | None, trajectory: dict[str, Any]
+) -> list[dict[str, Any]]:
+    candidate_lists: list[list[dict[str, Any]]] = []
+
+    prediction = _prediction_citations(final_prediction)
+    if prediction:
+        candidate_lists.append(prediction)
+
+    direct = _trajectory_citations(trajectory)
+    if direct:
+        candidate_lists.append(direct)
+
+    candidate_lists.extend(_trajectory_step_citation_candidates(trajectory))
+    merged = _merge_citation_candidates(candidate_lists)
+    return _dedupe_normalized_citations(merged)
 
 
 def _build_sources_from_citations(
@@ -216,8 +269,10 @@ def _build_sources_from_citations(
     return list(sources_by_key.values())
 
 
-def _extract_final_attachments(
-    *, final_prediction: dspy.Prediction | None, trajectory: dict[str, Any]
+def _collect_attachment_candidates(
+    *,
+    final_prediction: dspy.Prediction | None,
+    trajectory: dict[str, Any],
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     if final_prediction is not None:
@@ -229,6 +284,35 @@ def _extract_final_attachments(
         candidates.extend(
             item for item in raw_from_trajectory if isinstance(item, dict)
         )
+    return candidates
+
+
+def _normalize_attachment_entry(item: dict[str, Any], index: int) -> dict[str, Any]:
+    attachment_id = (
+        _as_text(item.get("attachment_id") or item.get("id")) or f"att-{index + 1}"
+    )
+    return {
+        "attachment_id": attachment_id,
+        "name": _as_text(item.get("name") or item.get("title")) or "Attachment",
+        "url": _sanitize_external_url(item.get("url") or item.get("download_url")),
+        "preview_url": _sanitize_external_url(item.get("preview_url")),
+        "mime_type": _as_text(item.get("mime_type") or item.get("mimeType")),
+        "media_type": _as_text(item.get("media_type") or item.get("mediaType")),
+        "size_bytes": item.get("size_bytes")
+        if isinstance(item.get("size_bytes"), int)
+        else None,
+        "kind": _as_text(item.get("kind")),
+        "description": _as_text(item.get("description")),
+    }
+
+
+def _extract_final_attachments(
+    *, final_prediction: dspy.Prediction | None, trajectory: dict[str, Any]
+) -> list[dict[str, Any]]:
+    candidates = _collect_attachment_candidates(
+        final_prediction=final_prediction,
+        trajectory=trajectory,
+    )
 
     normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -239,23 +323,7 @@ def _extract_final_attachments(
         if attachment_id in seen:
             continue
         seen.add(attachment_id)
-        normalized.append(
-            {
-                "attachment_id": attachment_id,
-                "name": _as_text(item.get("name") or item.get("title")) or "Attachment",
-                "url": _sanitize_external_url(
-                    item.get("url") or item.get("download_url")
-                ),
-                "preview_url": _sanitize_external_url(item.get("preview_url")),
-                "mime_type": _as_text(item.get("mime_type") or item.get("mimeType")),
-                "media_type": _as_text(item.get("media_type") or item.get("mediaType")),
-                "size_bytes": item.get("size_bytes")
-                if isinstance(item.get("size_bytes"), int)
-                else None,
-                "kind": _as_text(item.get("kind")),
-                "description": _as_text(item.get("description")),
-            }
-        )
+        normalized.append(_normalize_attachment_entry(item, idx))
     return normalized
 
 

@@ -2,7 +2,6 @@
 
 from . import (
     auth,
-    chat,
     health,
     runtime,
     sessions,
@@ -12,7 +11,6 @@ from . import (
 __all__ = [
     "health",
     "auth",
-    "chat",
     "ws",
     "sessions",
     "runtime",

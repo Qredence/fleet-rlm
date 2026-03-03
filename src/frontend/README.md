@@ -17,7 +17,7 @@ bun run dev
 ## FastAPI Backend Integration (fleet-rlm)
 
 This frontend is FastAPI-only and targets the current backend surface:
-- REST: `/health`, `/ready`, `/api/v1/chat`, `/api/v1/sessions/state`
+- REST: `/health`, `/ready`, `/api/v1/sessions/state`
 - WebSocket: `/api/v1/ws/chat`, `/api/v1/ws/execution`
 
 Unsupported sections remain visible in navigation but are intentionally disabled:

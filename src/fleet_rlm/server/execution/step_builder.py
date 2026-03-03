@@ -73,49 +73,75 @@ def _extract_actor_kind(
     *,
     depth: int | None,
 ) -> ExecutionActorKind:
-    def _from_text(value: str) -> ExecutionActorKind | None:
-        lowered = value.strip().lower()
-        if not lowered:
-            return None
-        if lowered in {"root", "root_rlm", "root-rlm", "root agent"}:
-            return "root_rlm"
-        if lowered in {"sub_agent", "sub-agent", "subagent"}:
-            return "sub_agent"
-        if lowered in {"delegate", "rlm_delegate", "rlm-delegate"}:
-            return "delegate"
-        return None
+    mapped = _extract_actor_kind_from_text(payload)
+    if mapped is not None:
+        return mapped
 
+    if _is_delegate_execution_profile(payload):
+        return "delegate"
+
+    marker_kind = _extract_actor_kind_from_markers(payload)
+    if marker_kind is not None:
+        return marker_kind
+
+    return _actor_kind_from_depth(depth)
+
+
+def _map_actor_kind_text(value: str) -> ExecutionActorKind | None:
+    lowered = value.strip().lower()
+    if not lowered:
+        return None
+    if lowered in {"root", "root_rlm", "root-rlm", "root agent"}:
+        return "root_rlm"
+    if lowered in {"sub_agent", "sub-agent", "subagent"}:
+        return "sub_agent"
+    if lowered in {"delegate", "rlm_delegate", "rlm-delegate"}:
+        return "delegate"
+    return None
+
+
+def _extract_actor_kind_from_text(payload: dict[str, Any]) -> ExecutionActorKind | None:
     for source in _iter_actor_sources(payload):
         for key in ("actor_kind", "actor", "agent_kind", "agent_role"):
             value = source.get(key)
-            if isinstance(value, str):
-                mapped = _from_text(value)
-                if mapped is not None:
-                    return mapped
+            if not isinstance(value, str):
+                continue
+            mapped = _map_actor_kind_text(value)
+            if mapped is not None:
+                return mapped
+    return None
 
+
+def _is_delegate_execution_profile(payload: dict[str, Any]) -> bool:
     execution_profile = str(payload.get("execution_profile", "")).strip().upper()
-    if execution_profile == "RLM_DELEGATE":
-        return "delegate"
+    return execution_profile == "RLM_DELEGATE"
 
+
+def _has_actor_marker(source: dict[str, Any], keys: tuple[str, ...]) -> bool:
+    for key in keys:
+        value = source.get(key)
+        if isinstance(value, (int, float)):
+            return True
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def _extract_actor_kind_from_markers(
+    payload: dict[str, Any],
+) -> ExecutionActorKind | None:
     for source in _iter_actor_sources(payload):
-        for key in ("delegate_depth", "delegate_id"):
-            value = source.get(key)
-            if isinstance(value, (int, float)) or (
-                isinstance(value, str) and value.strip()
-            ):
-                return "delegate"
+        if _has_actor_marker(source, ("delegate_depth", "delegate_id")):
+            return "delegate"
+        if _has_actor_marker(source, ("sub_agent_depth", "sub_agent_id")):
+            return "sub_agent"
+    return None
 
-        for key in ("sub_agent_depth", "sub_agent_id"):
-            value = source.get(key)
-            if isinstance(value, (int, float)) or (
-                isinstance(value, str) and value.strip()
-            ):
-                return "sub_agent"
 
-    if depth is not None:
-        return "sub_agent" if depth > 0 else "root_rlm"
-
-    return "unknown"
+def _actor_kind_from_depth(depth: int | None) -> ExecutionActorKind:
+    if depth is None:
+        return "unknown"
+    return "sub_agent" if depth > 0 else "root_rlm"
 
 
 def _derive_lane_key(
@@ -224,6 +250,152 @@ class ExecutionStepBuilder:
             self._remember_depth_parent(raw_payload, step.id)
         return step
 
+    def _build_output_like_step(
+        self,
+        *,
+        kind: str,
+        text: str,
+        payload_obj: dict[str, Any],
+        timestamp: float,
+    ) -> ExecutionStep:
+        label = "assistant_output" if kind == "final" else kind
+        return self._build_step(
+            step_type="output",
+            label=label,
+            input_payload={"event_kind": kind},
+            output_payload={"text": text, "payload": payload_obj},
+            timestamp=timestamp,
+            parent_id=self._resolve_parent(payload_obj),
+            raw_payload=payload_obj,
+        )
+
+    def _build_simple_event_step(
+        self,
+        *,
+        kind: str,
+        text: str,
+        payload_obj: dict[str, Any],
+        timestamp: float,
+    ) -> ExecutionStep:
+        step_type: ExecutionStepType
+        label: str
+        if kind == "reasoning_step":
+            step_type = "llm"
+            label = text or "reasoning"
+        elif kind == "plan_update":
+            step_type = "llm"
+            label = "plan_update"
+        elif kind == "rlm_executing":
+            step_type = "repl"
+            label = "rlm_executing"
+        else:
+            step_type = "memory"
+            label = "memory_update"
+
+        input_payload = (
+            payload_obj if kind == "reasoning_step" else {"event_kind": kind}
+        )
+        output_payload = {"text": text}
+        if kind != "reasoning_step":
+            output_payload["payload"] = payload_obj
+
+        return self._build_step(
+            step_type=step_type,
+            label=label,
+            input_payload=input_payload,
+            output_payload=output_payload,
+            timestamp=timestamp,
+            parent_id=self._resolve_parent(payload_obj),
+            raw_payload=payload_obj,
+        )
+
+    def _build_status_step(
+        self,
+        *,
+        text: str,
+        payload_obj: dict[str, Any],
+        timestamp: float,
+    ) -> ExecutionStep | None:
+        if not text:
+            return None
+        if text.startswith("Calling tool:") or text == "Tool finished.":
+            return None
+        return self._build_step(
+            step_type="llm",
+            label=text,
+            input_payload={"event_kind": "status"},
+            output_payload={"text": text},
+            timestamp=timestamp,
+            parent_id=self._resolve_parent(payload_obj),
+            raw_payload=payload_obj,
+        )
+
+    def _build_tool_call_step(
+        self,
+        *,
+        text: str,
+        payload_obj: dict[str, Any],
+        timestamp: float,
+    ) -> ExecutionStep:
+        tool_name = _extract_tool_name(text, payload_obj)
+        step = self._build_step(
+            step_type=_tool_step_type(tool_name),
+            label=tool_name or text or "tool_call",
+            input_payload=payload_obj,
+            output_payload=None,
+            timestamp=timestamp,
+            parent_id=self._resolve_parent(payload_obj),
+            raw_payload=payload_obj,
+        )
+        self._last_tool_step_id = step.id
+        return step
+
+    def _build_tool_result_step(
+        self,
+        *,
+        text: str,
+        payload_obj: dict[str, Any],
+        timestamp: float,
+    ) -> ExecutionStep:
+        tool_name = _extract_tool_name(text, payload_obj)
+        parent_id = self._last_tool_step_id or self._resolve_parent(payload_obj)
+        return self._build_step(
+            step_type=_tool_step_type(tool_name),
+            label=(tool_name or text or "tool_result"),
+            input_payload={"event_kind": "tool_result", "tool_name": tool_name},
+            output_payload=payload_obj,
+            timestamp=timestamp,
+            parent_id=parent_id,
+            raw_payload=payload_obj,
+        )
+
+    def _build_trajectory_step(
+        self,
+        *,
+        text: str,
+        payload_obj: dict[str, Any],
+        timestamp: float,
+    ) -> ExecutionStep:
+        step_data = payload_obj.get("step_data")
+        step_dict = step_data if isinstance(step_data, dict) else {}
+        tool_name = _extract_tool_name(text, step_dict)
+        label = (
+            tool_name
+            or str(step_dict.get("thought", "")).strip()
+            or str(step_dict.get("action", "")).strip()
+            or text
+            or "trajectory_step"
+        )
+        return self._build_step(
+            step_type=_tool_step_type(tool_name) if tool_name else "llm",
+            label=label,
+            input_payload=step_dict.get("input", step_dict),
+            output_payload=step_dict.get("output", step_dict.get("observation")),
+            timestamp=timestamp,
+            parent_id=self._resolve_parent(payload_obj),
+            raw_payload=payload_obj,
+        )
+
     def from_stream_event(
         self,
         *,
@@ -239,135 +411,47 @@ class ExecutionStepBuilder:
             return None
 
         if kind == "status":
-            if not stripped_text:
-                return None
-            if (
-                stripped_text.startswith("Calling tool:")
-                or stripped_text == "Tool finished."
-            ):
-                return None
-            return self._build_step(
-                step_type="llm",
-                label=stripped_text,
-                input_payload={"event_kind": kind},
-                output_payload={"text": stripped_text},
+            return self._build_status_step(
+                text=stripped_text,
+                payload_obj=payload_obj,
                 timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
             )
 
-        if kind == "reasoning_step":
-            return self._build_step(
-                step_type="llm",
-                label=stripped_text or "reasoning",
-                input_payload=payload_obj or {"event_kind": kind},
-                output_payload={"text": stripped_text},
+        if kind in {"reasoning_step", "plan_update", "rlm_executing", "memory_update"}:
+            return self._build_simple_event_step(
+                kind=kind,
+                text=stripped_text,
+                payload_obj=payload_obj,
                 timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
             )
 
         if kind == "tool_call":
-            tool_name = _extract_tool_name(stripped_text, payload_obj)
-            step = self._build_step(
-                step_type=_tool_step_type(tool_name),
-                label=tool_name or stripped_text or "tool_call",
-                input_payload=payload_obj,
-                output_payload=None,
+            return self._build_tool_call_step(
+                text=stripped_text,
+                payload_obj=payload_obj,
                 timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
             )
-            self._last_tool_step_id = step.id
-            return step
 
         if kind == "tool_result":
-            tool_name = _extract_tool_name(stripped_text, payload_obj)
-            parent_id = self._last_tool_step_id or self._resolve_parent(payload_obj)
-            return self._build_step(
-                step_type=_tool_step_type(tool_name),
-                label=(tool_name or stripped_text or "tool_result"),
-                input_payload={"event_kind": kind, "tool_name": tool_name},
-                output_payload=payload_obj,
+            return self._build_tool_result_step(
+                text=stripped_text,
+                payload_obj=payload_obj,
                 timestamp=timestamp,
-                parent_id=parent_id,
-                raw_payload=payload_obj,
             )
 
         if kind == "trajectory_step":
-            step_data = payload_obj.get("step_data")
-            step_dict = step_data if isinstance(step_data, dict) else {}
-            tool_name = _extract_tool_name(stripped_text, step_dict)
-            label = (
-                tool_name
-                or str(step_dict.get("thought", "")).strip()
-                or str(step_dict.get("action", "")).strip()
-                or stripped_text
-                or "trajectory_step"
-            )
-            return self._build_step(
-                step_type=_tool_step_type(tool_name) if tool_name else "llm",
-                label=label,
-                input_payload=step_dict.get("input", step_dict),
-                output_payload=step_dict.get("output", step_dict.get("observation")),
+            return self._build_trajectory_step(
+                text=stripped_text,
+                payload_obj=payload_obj,
                 timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
             )
 
-        if kind == "final":
-            return self._build_step(
-                step_type="output",
-                label="assistant_output",
-                input_payload={"event_kind": kind},
-                output_payload={"text": stripped_text, "payload": payload_obj},
+        if kind in {"final", "cancelled", "error"}:
+            return self._build_output_like_step(
+                kind=kind,
+                text=stripped_text,
+                payload_obj=payload_obj,
                 timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
-            )
-
-        if kind in {"cancelled", "error"}:
-            return self._build_step(
-                step_type="output",
-                label=kind,
-                input_payload={"event_kind": kind},
-                output_payload={"text": stripped_text, "payload": payload_obj},
-                timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
-            )
-
-        if kind == "plan_update":
-            return self._build_step(
-                step_type="llm",
-                label="plan_update",
-                input_payload={"event_kind": kind},
-                output_payload={"text": stripped_text, "payload": payload_obj},
-                timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
-            )
-
-        if kind == "rlm_executing":
-            return self._build_step(
-                step_type="repl",
-                label="rlm_executing",
-                input_payload={"event_kind": kind},
-                output_payload={"text": stripped_text, "payload": payload_obj},
-                timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
-            )
-
-        if kind == "memory_update":
-            return self._build_step(
-                step_type="memory",
-                label="memory_update",
-                input_payload={"event_kind": kind},
-                output_payload={"text": stripped_text, "payload": payload_obj},
-                timestamp=timestamp,
-                parent_id=self._resolve_parent(payload_obj),
-                raw_payload=payload_obj,
             )
 
         return None

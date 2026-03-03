@@ -178,6 +178,25 @@ def _build_fallback_events(
     )
 
 
+def _build_cancelled_event(
+    *,
+    agent: RLMReActChatAgent,
+    message: str,
+    assistant_chunks: list[str],
+) -> StreamEvent:
+    partial = "".join(assistant_chunks).strip()
+    marked_partial = f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
+    agent._append_history(message, marked_partial)
+    return StreamEvent(
+        kind="cancelled",
+        text=marked_partial,
+        payload={
+            "history_turns": agent.history_turns(),
+            **agent._turn_metrics(),
+        },
+    )
+
+
 def _process_stream_value(
     *,
     value: Any,
@@ -352,18 +371,10 @@ def iter_chat_turn_stream(
             )
             for value in stream:
                 if cancel_check is not None and cancel_check():
-                    partial = "".join(assistant_chunks).strip()
-                    marked_partial = (
-                        f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
-                    )
-                    agent._append_history(message, marked_partial)
-                    yield StreamEvent(
-                        kind="cancelled",
-                        text=marked_partial,
-                        payload={
-                            "history_turns": agent.history_turns(),
-                            **agent._turn_metrics(),
-                        },
+                    yield _build_cancelled_event(
+                        agent=agent,
+                        message=message,
+                        assistant_chunks=assistant_chunks,
                     )
                     return
 
@@ -501,18 +512,10 @@ async def aiter_chat_turn_stream(
         )
         async for value in output_stream:
             if cancel_check is not None and cancel_check():
-                partial = "".join(assistant_chunks).strip()
-                marked_partial = (
-                    f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
-                )
-                agent._append_history(message, marked_partial)
-                yield StreamEvent(
-                    kind="cancelled",
-                    text=marked_partial,
-                    payload={
-                        "history_turns": agent.history_turns(),
-                        **agent._turn_metrics(),
-                    },
+                yield _build_cancelled_event(
+                    agent=agent,
+                    message=message,
+                    assistant_chunks=assistant_chunks,
                 )
                 return
 

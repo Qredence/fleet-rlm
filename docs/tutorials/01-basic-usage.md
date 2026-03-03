@@ -27,14 +27,12 @@ uv run fleet web
 
 Open `http://localhost:8000`.
 
-## 4. Single-Turn API Call
+## 4. Session State API Call
 
-With server running, call REST chat endpoint:
+With server running, call a REST status endpoint:
 
 ```bash
-curl -sS http://127.0.0.1:8000/api/v1/chat \
-  -H 'content-type: application/json' \
-  -d '{"message":"Summarize this project","trace":false}'
+curl -sS http://127.0.0.1:8000/api/v1/sessions/state
 ```
 
 ## 5. Python Runner Example

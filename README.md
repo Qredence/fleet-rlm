@@ -35,7 +35,7 @@ fleet web
 ```
 
 - `fleet web` is the primary interactive interface.
-- Product chat transport is WS-first (`/api/v1/ws/chat`); `POST /api/v1/chat` is compatibility-only and deprecated (removal target `v0.4.93`).
+- Product chat transport is WS-first (`/api/v1/ws/chat`).
 - Plain `fleet-rlm` installs are intended to support `fleet web`.
 - Runtime settings (LM / Modal) can be configured from the Web UI Settings surface in local development.
 - Runtime model updates from Settings are hot-applied in-process (`/api/v1/runtime/settings`) and verified via active model fields on `/api/v1/runtime/status`.
@@ -136,7 +136,7 @@ graph TB
         Volume[("💾 Persistent Volume<br/>/data/<br/>• workspaces<br/>• artifacts<br/>• memory<br/>• session state")]
     end
 
-    WebUI -->|"WS-first (REST compat)"| API
+    WebUI -->|"WS-first"| API
     CLI --> Agent
     API --> Agent
     TUI --> Agent

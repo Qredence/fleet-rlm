@@ -19,8 +19,6 @@ Primary interactive/chat surfaces:
 
 - Canonical: `WS /api/v1/ws/chat`
 - Observability: `WS /api/v1/ws/execution`
-- Compatibility-only (deprecated): `POST /api/v1/chat`
-  - removal target: `v0.4.93`
 
 Runtime setup surfaces:
 
@@ -42,6 +40,7 @@ Runtime settings behavior:
 
 Deprecated/planned surfaces removed from backend:
 
+- `/api/v1/chat`
 - `/api/v1/tasks*`
 - `/api/v1/sessions*` CRUD (state summary endpoint remains)
 - `/api/v1/taxonomy*`

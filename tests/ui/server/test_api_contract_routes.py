@@ -10,7 +10,6 @@ _REQUIRED_HTTP_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/logout",
     "/api/v1/auth/me",
-    "/api/v1/chat",
     "/api/v1/runtime/settings",
     "/api/v1/runtime/tests/modal",
     "/api/v1/runtime/tests/lm",
@@ -40,14 +39,14 @@ def test_required_http_and_websocket_routes_are_registered(
     assert _REQUIRED_WS_PATHS.issubset(ws_paths)
 
 
-def test_http_chat_route_is_deprecated(local_client: TestClient) -> None:
+def test_http_chat_route_is_absent(local_client: TestClient) -> None:
     route_map = {
         (route.path, frozenset(route.methods or [])): route
         for route in local_client.app.routes
         if isinstance(route, APIRoute)
     }
-    route = route_map[("/api/v1/chat", frozenset({"POST"}))]
-    assert route.deprecated is True
+    assert ("/api/v1/chat", frozenset({"POST"})) not in route_map
+    assert "/api/v1/chat" not in set(local_client.app.openapi().get("paths", {}))
 
 
 def test_runtime_contract_endpoints_remain_available(
@@ -83,6 +82,7 @@ def test_removed_deprecated_and_planned_routes_absent(
         route.path for route in local_client.app.routes if isinstance(route, APIRoute)
     }
     removed_paths = {
+        "/api/v1/chat",
         "/api/v1/tasks",
         "/api/v1/tasks/{task_id}",
         "/api/v1/sessions",
