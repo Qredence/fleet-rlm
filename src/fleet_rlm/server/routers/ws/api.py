@@ -190,7 +190,7 @@ async def _process_chat_message(
     runtime: _PreparedChatRuntime,
     workspace_id: str,
     user_id: str,
-    sess_id: str | None,
+    sess_id: str,
     execution_emitter: Any,
 ) -> str | None:
     """Process one ``message`` payload and return the loaded docs path."""
