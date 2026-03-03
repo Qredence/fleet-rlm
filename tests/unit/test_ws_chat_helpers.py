@@ -32,7 +32,7 @@ def test_enqueue_latest_nonblocking_drops_oldest_when_full() -> None:
 def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper() -> None:
     source = inspect.getsource(ws_router.chat_streaming)
     start = source.index("async def local_persist(")
-    end = source.index("\n            try:", start)
+    end = source.index("\n            await _chat_message_loop(", start)
     local_persist_block = source[start:end]
 
     assert "await persist_session_state(" in local_persist_block

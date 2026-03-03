@@ -68,39 +68,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthMeResponse'
-  /api/v1/chat:
-    post:
-      tags:
-      - chat
-      summary: Chat
-      description: 'Compatibility HTTP chat endpoint.
-
-
-        Product UX is WS-first via ``/api/v1/ws/chat``. This HTTP route remains
-
-        available temporarily for compatibility and is scheduled for removal in
-
-        ``v0.4.93``.'
-      operationId: chat_api_v1_chat_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ChatRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChatResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/sessions/state:
     get:
       tags:
@@ -245,74 +212,6 @@ components:
       - tenant_claim
       - user_claim
       title: AuthMeResponse
-    ChatRequest:
-      properties:
-        message:
-          type: string
-          title: Message
-        docs_path:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Docs Path
-        trace:
-          type: boolean
-          title: Trace
-          default: false
-      type: object
-      required:
-      - message
-      title: ChatRequest
-    ChatResponse:
-      properties:
-        assistant_response:
-          type: string
-          title: Assistant Response
-        trajectory:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Trajectory
-        history_turns:
-          type: integer
-          title: History Turns
-          default: 0
-        guardrail_warnings:
-          items:
-            type: string
-          type: array
-          title: Guardrail Warnings
-        effective_max_iters:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Effective Max Iters
-        delegate_calls_turn:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Delegate Calls Turn
-        delegate_fallback_count_turn:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Delegate Fallback Count Turn
-        delegate_result_truncated_count_turn:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Delegate Result Truncated Count Turn
-        core_memory_snapshot:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Core Memory Snapshot
-      type: object
-      required:
-      - assistant_response
-      title: ChatResponse
     HTTPValidationError:
       properties:
         detail:

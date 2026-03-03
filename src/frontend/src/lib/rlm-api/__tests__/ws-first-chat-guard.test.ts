@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const CHAT_HELPER_CALL = "rlmCoreEndpoints.chat(";
+const LEGACY_HELPER_CALL = "rlmCoreEndpoints.";
 
 function stripStringsAndComments(source: string): string {
   let output = "";
@@ -125,7 +125,7 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
 }
 
 describe("ws-first chat guard", () => {
-  it("prevents non-test usage of rlmCoreEndpoints.chat()", async () => {
+  it("prevents non-test usage of removed rlmCoreEndpoints helper", async () => {
     const thisDir = path.dirname(fileURLToPath(import.meta.url));
     const srcRoot = path.resolve(thisDir, "../../../");
     const files = await collectSourceFiles(srcRoot);
@@ -133,15 +133,29 @@ describe("ws-first chat guard", () => {
 
     for (const file of files) {
       const relPath = path.relative(srcRoot, file);
-      if (relPath === "lib/rlm-api/endpoints.ts") continue;
-
       const content = await fs.readFile(file, "utf8");
       const stripped = stripStringsAndComments(content);
-      if (stripped.includes(CHAT_HELPER_CALL)) {
+      if (stripped.includes(LEGACY_HELPER_CALL)) {
         offenders.push(relPath);
       }
     }
 
     expect(offenders).toEqual([]);
+  });
+
+  it("does not export rlmCoreEndpoints from rlm-api barrel", async () => {
+    const module = await import("@/lib/rlm-api");
+    expect("rlmCoreEndpoints" in module).toBe(false);
+  });
+
+  it("ensures generated OpenAPI no longer contains /api/v1/chat", async () => {
+    const thisDir = path.dirname(fileURLToPath(import.meta.url));
+    const srcRoot = path.resolve(thisDir, "../../../");
+    const generatedPath = path.resolve(
+      srcRoot,
+      "lib/rlm-api/generated/openapi.ts",
+    );
+    const generated = await fs.readFile(generatedPath, "utf8");
+    expect(generated.includes('"/api/v1/chat"')).toBe(false);
   });
 });

@@ -25,18 +25,6 @@ export interface paths {
     /** Get Me */
     get: operations["get_me_api_v1_auth_me_get"];
   };
-  "/api/v1/chat": {
-    /**
-     * Chat
-     * @deprecated
-     * @description Compatibility HTTP chat endpoint.
-     *
-     * Product UX is WS-first via ``/api/v1/ws/chat``. This HTTP route remains
-     * available temporarily for compatibility and is scheduled for removal in
-     * ``v0.4.93``.
-     */
-    post: operations["chat_api_v1_chat_post"];
-  };
   "/api/v1/sessions/state": {
     /**
      * List Session State
@@ -96,46 +84,6 @@ export interface components {
       tenant_id?: string | null;
       /** User Id */
       user_id?: string | null;
-    };
-    /** ChatRequest */
-    ChatRequest: {
-      /** Message */
-      message: string;
-      /** Docs Path */
-      docs_path?: string | null;
-      /**
-       * Trace
-       * @default false
-       */
-      trace?: boolean;
-    };
-    /** ChatResponse */
-    ChatResponse: {
-      /** Assistant Response */
-      assistant_response: string;
-      /** Trajectory */
-      trajectory?: {
-        [key: string]: unknown;
-      } | null;
-      /**
-       * History Turns
-       * @default 0
-       */
-      history_turns?: number;
-      /** Guardrail Warnings */
-      guardrail_warnings?: string[];
-      /** Effective Max Iters */
-      effective_max_iters?: number | null;
-      /** Delegate Calls Turn */
-      delegate_calls_turn?: number | null;
-      /** Delegate Fallback Count Turn */
-      delegate_fallback_count_turn?: number | null;
-      /** Delegate Result Truncated Count Turn */
-      delegate_result_truncated_count_turn?: number | null;
-      /** Core Memory Snapshot */
-      core_memory_snapshot?: {
-        [key: string]: unknown;
-      } | null;
     };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -401,36 +349,6 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["AuthMeResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Chat
-   * @deprecated
-   * @description Compatibility HTTP chat endpoint.
-   *
-   * Product UX is WS-first via ``/api/v1/ws/chat``. This HTTP route remains
-   * available temporarily for compatibility and is scheduled for removal in
-   * ``v0.4.93``.
-   */
-  chat_api_v1_chat_post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ChatRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ChatResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

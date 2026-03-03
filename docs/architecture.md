@@ -22,9 +22,7 @@ flowchart LR
   Agent --> LM["Planner/Delegate LMs"]
 ```
 
-The same agent/runtime stack powers terminal chat and WebSocket chat, with
-HTTP chat retained only as compatibility (`POST /api/v1/chat`, deprecated;
-removal target `v0.4.93`).
+The same agent/runtime stack powers terminal chat and WebSocket chat.
 
 ## Core Layers
 
@@ -76,6 +74,5 @@ Responsibilities:
 - REST contract source: `openapi.yaml`
 - WS chat stream (canonical): `/api/v1/ws/chat`
 - WS execution stream: `/api/v1/ws/execution`
-- HTTP chat (compatibility-only, deprecated): `/api/v1/chat`
 
 Execution stream events are additive observability and do not replace chat envelopes.

@@ -4,7 +4,30 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-_No notable changes yet._
+### Highlights (User Impact)
+
+- Completed the WS-first migration by removing remaining deprecated HTTP chat compatibility surfaces.
+- Improved execution tracing maintainability and readability across streaming, step-building, and websocket chat orchestration.
+- Added deterministic frontend smoke coverage for execution canvas lane rendering and untruncated payload display.
+
+### Added
+
+- **Change:** Added `execution-canvas-smoke.spec.ts` end-to-end coverage for graph lane labels, elapsed timing, and full-output rendering.
+  **Outcome:** Reduced regression risk for Artifact Canvas readability and payload truncation behavior in browser flows.
+
+### Changed
+
+- **Change:** Refactored websocket chat internals into smaller runtime/session helpers in `ws/api.py` without changing endpoint contracts.
+  **Outcome:** Lower complexity in the main chat handler and safer maintenance of session lifecycle/persistence flow.
+- **Change:** Refactored execution step and citation normalization helpers (`step_builder.py`, `streaming_citations.py`, `streaming.py`) for clearer event construction paths.
+  **Outcome:** Better long-term maintainability for execution timeline/event shaping with preserved runtime behavior.
+- **Change:** Updated backend/frontend docs and API contract tests to align with current WS-first routes and generated OpenAPI surfaces.
+  **Outcome:** Less documentation drift and clearer integration expectations for client consumers.
+
+### Removed
+
+- **Change:** Removed deprecated HTTP chat router and legacy frontend `rlm-api` compatibility exports/types (`/api/v1/chat`, `rlmCoreEndpoints` surface).
+  **Outcome:** Smaller API/client surface area and reduced risk of accidental dependence on removed legacy paths.
 
 ## [0.4.93] - 2026-03-03
 

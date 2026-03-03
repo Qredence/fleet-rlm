@@ -22,7 +22,6 @@ from .execution import ExecutionEventEmitter
 from .middleware import add_middlewares
 from .routers import (
     auth,
-    chat,
     health,
     runtime,
     sessions,
@@ -143,7 +142,6 @@ def _register_api_routes(app: FastAPI) -> None:
 
     api_router = APIRouter(prefix="/api/v1")
     api_router.include_router(auth.router)
-    api_router.include_router(chat.router)
     api_router.include_router(ws.router)
     api_router.include_router(sessions.router)
     api_router.include_router(runtime.router)

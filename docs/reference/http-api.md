@@ -43,29 +43,9 @@ Response contracts:
 
 ### Chat
 
-- `POST /api/v1/chat`
+Canonical product chat interface: `WS /api/v1/ws/chat`.
 
-Compatibility/deprecation policy:
-
-- Canonical product chat interface: `WS /api/v1/ws/chat`
-- `POST /api/v1/chat` remains compatibility-only and is deprecated.
-- Removal target: `v0.4.93`
-- Compatibility responses include:
-  - `Deprecation: true`
-  - `Link: </api/v1/ws/chat>; rel="successor-version"`
-  - `X-Fleet-Removal-Version: 0.4.93`
-
-Request body:
-
-```json
-{
-  "message": "Summarize this file",
-  "docs_path": "README.md",
-  "trace": false
-}
-```
-
-Equivalent WebSocket message frame:
+WebSocket message frame:
 
 ```json
 {
@@ -107,6 +87,7 @@ Notes:
 
 The following deprecated or planned-only routes were removed:
 
+- `/api/v1/chat`
 - `/api/v1/tasks*`
 - `/api/v1/sessions*` CRUD (state summary endpoint remains)
 - `/api/v1/taxonomy*`

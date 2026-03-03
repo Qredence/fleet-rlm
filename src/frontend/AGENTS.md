@@ -33,7 +33,7 @@ Generated file policy:
 - Legacy layer `src/lib/api/*` is removed and must not be reintroduced.
 
 ### API Layer Ownership
-- Use `src/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/chat`, `/tasks/*`, `/sessions/state`, `/ws/chat`).
+- Use `src/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/api/v1/sessions/state`, `/api/v1/runtime/*`, `/api/v1/ws/chat`, `/api/v1/ws/execution`).
 - New frontend data work must map to existing FastAPI endpoints or be gated as unsupported in UI.
 - Unsupported sections (`skills`, `taxonomy`, `memory`, `analytics`) stay visible but disabled with a capability notice.
 
