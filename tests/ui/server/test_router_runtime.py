@@ -243,3 +243,89 @@ def test_runtime_status_uses_cached_results(
     assert payload["active_models"]["planner"] == "openai/gpt-4o-mini"
     assert payload["active_models"]["delegate"] == "openai/gpt-4.1-mini"
     assert payload["active_models"]["delegate_small"] == "openai/gpt-4.1-nano"
+
+
+def test_runtime_volume_tree_maps_backend_errors_to_502(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.list_volume_tree",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
+    )
+
+    response = local_client.get("/api/v1/runtime/volume/tree")
+
+    assert response.status_code == 502
+    assert "Volume listing failed" in response.json().get("detail", "")
+
+
+def test_runtime_volume_file_maps_not_found_errors_to_404(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
+    )
+
+    response = local_client.get("/api/v1/runtime/volume/file", params={"path": "/x"})
+
+    assert response.status_code == 404
+    assert response.json().get("detail") == "File not found."
+
+
+def test_runtime_volume_file_maps_directory_errors_to_400(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
+    )
+
+    response = local_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/folder"},
+    )
+
+    assert response.status_code == 400
+    assert response.json().get("detail") == "Path must point to a file."
+
+
+def test_runtime_volume_file_maps_unknown_errors_to_502(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),
+    )
+
+    response = local_client.get("/api/v1/runtime/volume/file", params={"path": "/x"})
+
+    assert response.status_code == 502
+    assert "Volume file read failed" in response.json().get("detail", "")
+
+
+def test_runtime_volume_tree_rejects_invalid_max_depth(
+    local_client: TestClient,
+) -> None:
+    response = local_client.get("/api/v1/runtime/volume/tree", params={"max_depth": 0})
+
+    assert response.status_code == 422
+
+
+def test_runtime_volume_file_rejects_invalid_max_bytes(
+    local_client: TestClient,
+) -> None:
+    response = local_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/x", "max_bytes": 0},
+    )
+
+    assert response.status_code == 422

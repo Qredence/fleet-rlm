@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
-def test_removed_chat_route_returns_404(
+def test_removed_chat_route_returns_404_or_405(
     default_client: TestClient,
     auth_headers: dict[str, str],
 ) -> None:
