@@ -2,7 +2,7 @@
 
 from contextlib import nullcontext
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -171,6 +171,7 @@ def test_rlm_query_spawns_sub_agent(mock_agent):
     mock_instance = MockAgentClass.return_value
     # DSPy 3.1.3 uses 'assistant_response' key
     mock_instance.chat_turn.return_value = {"assistant_response": "42"}
+    mock_instance.achat_turn = AsyncMock(return_value={"assistant_response": "42"})
     mock_instance.history.messages = ["a", "b"]
 
     mock_agent.__class__ = MockAgentClass
@@ -186,7 +187,7 @@ def test_rlm_query_spawns_sub_agent(mock_agent):
     # Verify chat_turn call
     # The prompt should combine context and query
     expected_prompt = "Context:\nDeep thought\n\nTask: Calculate life"
-    mock_instance.chat_turn.assert_called_with(expected_prompt)
+    mock_instance.achat_turn.assert_called_with(expected_prompt)
 
     # Verify result
     assert result["status"] == "ok"
@@ -198,6 +199,7 @@ def test_rlm_query_enforces_max_depth(mock_agent):
     MockAgentClass = MagicMock()
     mock_instance = MockAgentClass.return_value
     mock_instance.chat_turn.return_value = {"assistant_response": "test"}
+    mock_instance.achat_turn = AsyncMock(return_value={"assistant_response": "test"})
     mock_instance.history.messages = []
 
     mock_agent.__class__ = MockAgentClass
@@ -236,6 +238,9 @@ def test_rlm_query_extracts_answer_correctly(mock_agent):
     mock_instance = MockAgentClass.return_value
     # DSPy 3.1.3 uses 'assistant_response' key
     mock_instance.chat_turn.return_value = {"assistant_response": "The answer is 42"}
+    mock_instance.achat_turn = AsyncMock(
+        return_value={"assistant_response": "The answer is 42"}
+    )
     mock_instance.history.messages = []
 
     mock_agent.__class__ = MockAgentClass
@@ -262,6 +267,9 @@ def _setup_sub_agent_mock(mock_agent, response_text="sub-agent response"):
     MockAgentClass = MagicMock()
     mock_instance = MockAgentClass.return_value
     mock_instance.chat_turn.return_value = {"assistant_response": response_text}
+    mock_instance.achat_turn = AsyncMock(
+        return_value={"assistant_response": response_text}
+    )
     mock_instance.history_turns.return_value = 1
     mock_instance._set_document = MagicMock()
     # Set up interpreter mock with start/shutdown methods
@@ -280,7 +288,7 @@ def test_analyze_long_document_spawns_sub_agent_and_keeps_response_shape(mock_ag
 
     # Sub-agent was spawned and received the document
     sub._set_document.assert_called_once()
-    sub.chat_turn.assert_called_once()
+    sub.achat_turn.assert_called_once()
     assert result["status"] == "ok"
     assert set(result).issuperset(
         {"status", "findings", "answer", "doc_chars", "depth", "sub_agent_history"}
@@ -303,7 +311,7 @@ def test_grounded_answer_spawns_sub_agent_with_citations(mock_agent):
     grounded_tool = next(t for t in tools if t.name == "grounded_answer")
     result = grounded_tool(query="q", include_trajectory=True)
 
-    sub.chat_turn.assert_called_once()
+    sub.achat_turn.assert_called_once()
     assert result["status"] == "ok"
     assert result["answer"] == "grounded answer"
     assert result["citations"] == [
@@ -334,7 +342,7 @@ def test_triage_incident_logs_spawns_sub_agent(mock_agent):
     result = triage_tool(query="why 500s?", service_context="prod")
 
     sub._set_document.assert_called_once()
-    sub.chat_turn.assert_called_once()
+    sub.achat_turn.assert_called_once()
     assert result["status"] == "ok"
     assert "severity" in result
     assert "depth" in result
@@ -347,7 +355,7 @@ def test_plan_code_change_spawns_sub_agent(mock_agent):
     plan_tool = next(t for t in tools if t.name == "plan_code_change")
     result = plan_tool(task="add feature", repo_context="ctx", constraints="c")
 
-    sub.chat_turn.assert_called_once()
+    sub.achat_turn.assert_called_once()
     assert result["status"] == "ok"
     assert "plan_steps" in result
     assert "depth" in result
@@ -360,7 +368,7 @@ def test_propose_core_memory_update_spawns_sub_agent(mock_agent):
     memory_tool = next(t for t in tools if t.name == "propose_core_memory_update")
     result = memory_tool()
 
-    sub.chat_turn.assert_called_once()
+    sub.achat_turn.assert_called_once()
     assert result["status"] == "ok"
     assert "keep" in result
     assert "update" in result
@@ -380,7 +388,7 @@ def test_memory_tree_spawns_sub_agent(mock_agent):
     tree_tool = next(t for t in tools if t.name == "memory_tree")
     result = tree_tool()
 
-    sub.chat_turn.assert_called_once()
+    sub.achat_turn.assert_called_once()
     assert result["status"] == "ok"
     assert result["nodes"] == [
         {"path": "/data/memory/a.txt", "type": "file", "size_bytes": 4, "depth": 1}

@@ -14,6 +14,9 @@ We use __getattr__ to dynamically dispatch to the underlying tool.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+from functools import wraps
 from typing import TYPE_CHECKING, Any, Callable
 
 import dspy
@@ -86,8 +89,31 @@ def get_tool_by_name(agent: "RLMReActChatAgent", name: str) -> Callable[..., Any
         tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
         if tool_name == name:
             # Return the underlying callable for dspy.Tool wrappers
-            return tool.func if isinstance(tool, dspy.Tool) else tool
+            fn = tool.func if isinstance(tool, dspy.Tool) else tool
+            return _sync_compatible_tool_callable(fn)
     raise AttributeError(f"No tool named {name!r}")
+
+
+def _sync_compatible_tool_callable(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Return *fn* with sync-call compatibility for async callables.
+
+    - If *fn* is synchronous, return it unchanged.
+    - If *fn* is async, run it via ``asyncio.run`` when no loop is running.
+      When called from within a running event loop, return the coroutine so
+      async callers can ``await`` it.
+    """
+    if not inspect.iscoroutinefunction(fn):
+        return fn
+
+    @wraps(fn)
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(fn(*args, **kwargs))
+        return fn(*args, **kwargs)
+
+    return _wrapper
 
 
 class ToolDelegationMixin:
@@ -128,8 +154,8 @@ class ToolDelegationMixin:
                 if tool_name == name:
                     # Return the underlying callable for dspy.Tool wrappers
                     if isinstance(tool, dspy.Tool):
-                        return tool.func
-                    return tool
+                        return _sync_compatible_tool_callable(tool.func)
+                    return _sync_compatible_tool_callable(tool)
 
             raise AttributeError(f"Tool {name!r} not found in react_tools")
 

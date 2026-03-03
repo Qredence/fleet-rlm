@@ -174,6 +174,18 @@ export interface ChatAttachmentItem {
   description?: string;
 }
 
+// ── Runtime Context (enriched by backend StreamingContext) ──────────
+
+/** Subset of backend StreamingContext fields surfaced in event payloads. */
+export interface RuntimeContext {
+  depth: number;
+  maxDepth: number;
+  executionProfile: string;
+  sandboxActive: boolean;
+  effectiveMaxIters: number;
+  volumeName?: string;
+}
+
 export type ChatRenderPart =
   | {
       kind: "reasoning";
@@ -185,6 +197,7 @@ export type ChatRenderPart =
       kind: "chain_of_thought";
       title?: string;
       steps: ChatTraceStep[];
+      runtimeContext?: RuntimeContext;
     }
   | {
       kind: "queue";
@@ -206,6 +219,7 @@ export type ChatRenderPart =
       input?: unknown;
       output?: unknown;
       errorText?: string;
+      runtimeContext?: RuntimeContext;
     }
   | {
       kind: "sandbox";
@@ -216,6 +230,7 @@ export type ChatRenderPart =
       output?: string;
       errorText?: string;
       language?: string;
+      runtimeContext?: RuntimeContext;
     }
   | {
       kind: "environment_variables";

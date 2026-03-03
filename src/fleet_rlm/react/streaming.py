@@ -18,6 +18,7 @@ from dspy.streaming.streaming_listener import StreamListener
 
 from ..models import StreamEvent
 from .streaming_citations import _build_final_payload, _normalize_trajectory
+from .streaming_context import StreamingContext
 
 if TYPE_CHECKING:
     from .agent import RLMReActChatAgent
@@ -183,6 +184,7 @@ def _process_stream_value(
     trace: bool,
     assistant_chunks: list[str],
     last_tool_name_ref: list[str | None],
+    ctx: StreamingContext | None = None,
 ) -> Iterable[StreamEvent]:
     if isinstance(value, StreamResponse):
         if value.signature_field_name == "assistant_response":
@@ -212,7 +214,7 @@ def _process_stream_value(
                     parsed_name if isinstance(parsed_name, str) else None
                 ),
                 text=tool_call,
-                payload=tool_payload,
+                payload=ctx.enrich(tool_payload) if ctx else tool_payload,
             )
 
         tool_result = parse_tool_result_status(text)
@@ -223,12 +225,13 @@ def _process_stream_value(
             yield StreamEvent(
                 kind="tool_result",
                 text=tool_result,
-                payload=result_payload,
+                payload=ctx.enrich(result_payload) if ctx else result_payload,
             )
 
 
 def _emit_prediction_trajectory_events(
     final_prediction: dspy.Prediction,
+    ctx: StreamingContext | None = None,
 ) -> Iterable[StreamEvent]:
     trajectory = getattr(final_prediction, "trajectory", {})
     if not trajectory or not isinstance(trajectory, dict):
@@ -242,15 +245,16 @@ def _emit_prediction_trajectory_events(
         if not isinstance(step, dict):
             continue
         step_text = step.get("thought", step.get("action", str(step)))
+        step_payload: dict[str, Any] = {
+            "step_index": idx,
+            "step_data": step,
+            "total_steps": len(steps),
+        }
         yield StreamEvent(
             kind="trajectory_step",
             flush_tokens=True,
             text=step_text,
-            payload={
-                "step_index": idx,
-                "step_data": step,
-                "total_steps": len(steps),
-            },
+            payload=ctx.enrich(step_payload) if ctx else step_payload,
         )
 
 
@@ -297,6 +301,7 @@ def iter_chat_turn_stream(
 
     agent.start()
     effective_max_iters = agent._prepare_turn(message)
+    ctx = StreamingContext.from_agent(agent, effective_max_iters=effective_max_iters)
 
     stream_listeners = [StreamListener(signature_field_name="assistant_response")]
     if trace:
@@ -312,6 +317,7 @@ def iter_chat_turn_stream(
                 status_message_provider=ReActStatusProvider(),
                 stream_listeners=stream_listeners,
                 include_final_prediction_in_output_stream=True,
+                is_async_program=False,
                 async_streaming=False,
             ),
         )
@@ -337,39 +343,41 @@ def iter_chat_turn_stream(
     last_tool_name_ref: list[str | None] = [None]
 
     try:
-        stream = stream_program(
-            user_request=message,
-            history=agent.history,
-            core_memory=agent.fmt_core_memory(),
-            max_iters=effective_max_iters,
-        )
-        for value in stream:
-            if cancel_check is not None and cancel_check():
-                partial = "".join(assistant_chunks).strip()
-                marked_partial = (
-                    f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
-                )
-                agent._append_history(message, marked_partial)
-                yield StreamEvent(
-                    kind="cancelled",
-                    text=marked_partial,
-                    payload={
-                        "history_turns": agent.history_turns(),
-                        **agent._turn_metrics(),
-                    },
-                )
-                return
+        with dspy.context(allow_tool_async_sync_conversion=True):
+            stream = stream_program(
+                user_request=message,
+                history=agent.history,
+                core_memory=agent.fmt_core_memory(),
+                max_iters=effective_max_iters,
+            )
+            for value in stream:
+                if cancel_check is not None and cancel_check():
+                    partial = "".join(assistant_chunks).strip()
+                    marked_partial = (
+                        f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
+                    )
+                    agent._append_history(message, marked_partial)
+                    yield StreamEvent(
+                        kind="cancelled",
+                        text=marked_partial,
+                        payload={
+                            "history_turns": agent.history_turns(),
+                            **agent._turn_metrics(),
+                        },
+                    )
+                    return
 
-            if isinstance(value, dspy.Prediction):
-                final_prediction = value
-                yield from _emit_prediction_trajectory_events(final_prediction)
-            else:
-                yield from _process_stream_value(
-                    value=value,
-                    trace=trace,
-                    assistant_chunks=assistant_chunks,
-                    last_tool_name_ref=last_tool_name_ref,
-                )
+                if isinstance(value, dspy.Prediction):
+                    final_prediction = value
+                    yield from _emit_prediction_trajectory_events(final_prediction, ctx)
+                else:
+                    yield from _process_stream_value(
+                        value=value,
+                        trace=trace,
+                        assistant_chunks=assistant_chunks,
+                        last_tool_name_ref=last_tool_name_ref,
+                        ctx=ctx,
+                    )
     except Exception as exc:
         logger.error(
             "Streaming error, falling back: %s",
@@ -404,17 +412,19 @@ def iter_chat_turn_stream(
         kind="final",
         flush_tokens=True,
         text=assistant_response,
-        payload={
-            **_build_final_payload(
-                final_prediction=final_prediction,
-                trajectory=cast(dict[str, Any], trajectory or {}),
-                history_turns=agent.history_turns(),
-                guardrail_warnings=guardrail_warnings,
-                turn_metrics=agent._turn_metrics(),
-                fallback=False,
-            ),
-            "final_reasoning": final_reasoning,
-        },
+        payload=ctx.enrich(
+            {
+                **_build_final_payload(
+                    final_prediction=final_prediction,
+                    trajectory=cast(dict[str, Any], trajectory or {}),
+                    history_turns=agent.history_turns(),
+                    guardrail_warnings=guardrail_warnings,
+                    turn_metrics=agent._turn_metrics(),
+                    fallback=False,
+                ),
+                "final_reasoning": final_reasoning,
+            }
+        ),
     )
 
 
@@ -440,6 +450,7 @@ async def aiter_chat_turn_stream(
 
     agent.start()
     effective_max_iters = agent._prepare_turn(message)
+    ctx = StreamingContext.from_agent(agent, effective_max_iters=effective_max_iters)
 
     stream_listeners = [StreamListener(signature_field_name="assistant_response")]
     if trace:
@@ -455,6 +466,7 @@ async def aiter_chat_turn_stream(
                 status_message_provider=ReActStatusProvider(),
                 stream_listeners=stream_listeners,
                 include_final_prediction_in_output_stream=True,
+                is_async_program=True,
                 async_streaming=True,
             ),
         )
@@ -506,7 +518,7 @@ async def aiter_chat_turn_stream(
 
             if isinstance(value, dspy.Prediction):
                 final_prediction = value
-                for event in _emit_prediction_trajectory_events(final_prediction):
+                for event in _emit_prediction_trajectory_events(final_prediction, ctx):
                     yield event
             else:
                 for event in _process_stream_value(
@@ -514,6 +526,7 @@ async def aiter_chat_turn_stream(
                     trace=trace,
                     assistant_chunks=assistant_chunks,
                     last_tool_name_ref=last_tool_name_ref,
+                    ctx=ctx,
                 ):
                     yield event
     except Exception as exc:
@@ -551,15 +564,17 @@ async def aiter_chat_turn_stream(
         kind="final",
         flush_tokens=True,
         text=assistant_response,
-        payload={
-            **_build_final_payload(
-                final_prediction=final_prediction,
-                trajectory=cast(dict[str, Any], trajectory or {}),
-                history_turns=agent.history_turns(),
-                guardrail_warnings=guardrail_warnings,
-                turn_metrics=agent._turn_metrics(),
-                fallback=False,
-            ),
-            "final_reasoning": final_reasoning,
-        },
+        payload=ctx.enrich(
+            {
+                **_build_final_payload(
+                    final_prediction=final_prediction,
+                    trajectory=cast(dict[str, Any], trajectory or {}),
+                    history_turns=agent.history_turns(),
+                    guardrail_warnings=guardrail_warnings,
+                    turn_metrics=agent._turn_metrics(),
+                    fallback=False,
+                ),
+                "final_reasoning": final_reasoning,
+            }
+        ),
     )

@@ -14,7 +14,11 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..delegate_sub_agent import parse_json_from_response, spawn_delegate_sub_agent
+from ..delegate_sub_agent import (
+    parse_json_from_response,
+    spawn_delegate_sub_agent_async,
+)
+from ..tool_delegation import _sync_compatible_tool_callable
 from . import (
     build_trajectory_payload,
     chunk_text,
@@ -124,7 +128,7 @@ SUBMIT(
             },
         )
 
-    def analyze_long_document(
+    async def analyze_long_document(
         query: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
         """Analyze a long document via a recursive sub-agent."""
@@ -138,7 +142,7 @@ SUBMIT(
             "- answer: a comprehensive answer to the query\n"
             "- sections_examined: number of sections you examined"
         )
-        result = spawn_delegate_sub_agent(
+        result = await spawn_delegate_sub_agent_async(
             ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {"findings": [], "answer": "", "sections_examined": 0}
@@ -151,7 +155,7 @@ SUBMIT(
             len(document),
         )
 
-    def summarize_long_document(
+    async def summarize_long_document(
         focus: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
         """Summarize a long document via a recursive sub-agent."""
@@ -165,7 +169,7 @@ SUBMIT(
             "- key_points: a list of key points\n"
             "- coverage_pct: estimated percentage of document covered (integer)"
         )
-        result = spawn_delegate_sub_agent(
+        result = await spawn_delegate_sub_agent_async(
             ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {"summary": "", "key_points": [], "coverage_pct": 0}
@@ -178,7 +182,7 @@ SUBMIT(
             len(document),
         )
 
-    def extract_from_logs(
+    async def extract_from_logs(
         query: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
         """Extract structured patterns from log text via a recursive sub-agent."""
@@ -192,7 +196,7 @@ SUBMIT(
             "- patterns: a list of identified patterns\n"
             "- time_range: the time range covered"
         )
-        result = spawn_delegate_sub_agent(
+        result = await spawn_delegate_sub_agent_async(
             ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {"matches": [], "patterns": [], "time_range": "unknown"}
@@ -205,7 +209,7 @@ SUBMIT(
             len(document),
         )
 
-    def grounded_answer(
+    async def grounded_answer(
         query: str,
         alias: str = "active",
         chunk_strategy: str = "headers",
@@ -239,7 +243,7 @@ SUBMIT(
             "- confidence: integer 0-100\n- coverage_notes: notes on evidence coverage"
         )
 
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -272,7 +276,7 @@ SUBMIT(
             ),
         }
 
-    def triage_incident_logs(
+    async def triage_incident_logs(
         query: str,
         alias: str = "active",
         service_context: str = "",
@@ -288,7 +292,7 @@ SUBMIT(
             "- probable_root_causes: list of causes\n- impacted_components: list of affected components\n"
             "- recommended_actions: list of actions\n- time_range: the time range covered"
         )
-        result = spawn_delegate_sub_agent(
+        result = await spawn_delegate_sub_agent_async(
             ctx.agent, prompt=prompt, document=document, document_alias=alias
         )
         default_resp = {
@@ -307,7 +311,7 @@ SUBMIT(
             len(document),
         )
 
-    def plan_code_change(
+    async def plan_code_change(
         task: str,
         repo_context: str = "",
         constraints: str = "",
@@ -321,7 +325,7 @@ SUBMIT(
             "Provide your response with:\n- plan_steps: ordered list of implementation steps\n"
             "- files_to_touch: list of files to modify\n- validation_commands: list of commands\n- risks: list of risks"
         )
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         default_resp = {
             "plan_steps": [],
             "files_to_touch": [],
@@ -332,7 +336,9 @@ SUBMIT(
             ctx, result, default_resp, ["plan_steps"], include_trajectory
         )
 
-    def propose_core_memory_update(include_trajectory: bool = True) -> dict[str, Any]:
+    async def propose_core_memory_update(
+        include_trajectory: bool = True,
+    ) -> dict[str, Any]:
         """Propose safe updates to core memory via a recursive sub-agent."""
         ctx.agent.start()
         turn_lines = [
@@ -348,16 +354,16 @@ SUBMIT(
             "- update: list of memory blocks to update\n- remove: list of memory blocks to remove\n"
             "- rationale: explanation for the proposed changes"
         )
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         default_resp = {"keep": [], "update": [], "remove": [], "rationale": ""}
         return _handle_sub_agent_response(
             ctx, result, default_resp, ["rationale", "update"], include_trajectory
         )
 
-    def rlm_query(query: str, context: str = "") -> dict[str, Any]:
+    async def rlm_query(query: str, context: str = "") -> dict[str, Any]:
         """Delegate a complex sub-task to a recursive sub-agent."""
         prompt = f"Context:\n{context}\n\nTask: {query}" if context else query
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
         return {
@@ -371,12 +377,26 @@ SUBMIT(
 
     return [
         Tool(parallel_semantic_map, name="parallel_semantic_map"),
-        Tool(analyze_long_document, name="analyze_long_document"),
-        Tool(summarize_long_document, name="summarize_long_document"),
-        Tool(extract_from_logs, name="extract_from_logs"),
-        Tool(grounded_answer, name="grounded_answer"),
-        Tool(triage_incident_logs, name="triage_incident_logs"),
-        Tool(plan_code_change, name="plan_code_change"),
-        Tool(propose_core_memory_update, name="propose_core_memory_update"),
-        Tool(rlm_query, name="rlm_query"),
+        Tool(
+            _sync_compatible_tool_callable(analyze_long_document),
+            name="analyze_long_document",
+        ),
+        Tool(
+            _sync_compatible_tool_callable(summarize_long_document),
+            name="summarize_long_document",
+        ),
+        Tool(
+            _sync_compatible_tool_callable(extract_from_logs), name="extract_from_logs"
+        ),
+        Tool(_sync_compatible_tool_callable(grounded_answer), name="grounded_answer"),
+        Tool(
+            _sync_compatible_tool_callable(triage_incident_logs),
+            name="triage_incident_logs",
+        ),
+        Tool(_sync_compatible_tool_callable(plan_code_change), name="plan_code_change"),
+        Tool(
+            _sync_compatible_tool_callable(propose_core_memory_update),
+            name="propose_core_memory_update",
+        ),
+        Tool(_sync_compatible_tool_callable(rlm_query), name="rlm_query"),
     ]

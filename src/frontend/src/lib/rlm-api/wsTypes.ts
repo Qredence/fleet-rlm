@@ -69,6 +69,16 @@ export interface WsEventPayload {
   event_id?: string;
 }
 
+/** Runtime context snapshot attached to enriched events by the backend. */
+export interface WsRuntimeContext {
+  depth: number;
+  max_depth: number;
+  execution_profile: string;
+  sandbox_active: boolean;
+  effective_max_iters: number;
+  volume_name?: string;
+}
+
 export interface WsServerEvent {
   type: "event";
   data: WsEventPayload;

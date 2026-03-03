@@ -261,12 +261,13 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         """
         self.start()
         effective_max_iters = self._prepare_turn(user_request)
-        prediction = self.react(
-            user_request=user_request,
-            history=history or self.history,
-            core_memory=self.fmt_core_memory(),
-            max_iters=effective_max_iters,
-        )
+        with dspy.context(allow_tool_async_sync_conversion=True):
+            prediction = self.react(
+                user_request=user_request,
+                history=history or self.history,
+                core_memory=self.fmt_core_memory(),
+                max_iters=effective_max_iters,
+            )
         assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
         trajectory = getattr(prediction, "trajectory", {})
         self._finalize_turn(trajectory)

@@ -7,6 +7,7 @@ functions, and :func:`execute_command` which resolves and invokes them.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -177,9 +178,17 @@ async def execute_command(
     tool_fn = _resolve_tool(agent, tool_name)
 
     if command in _BLOCKING_COMMANDS:
-        return await asyncio.to_thread(tool_fn, **kwargs)
+        if inspect.iscoroutinefunction(tool_fn):
+            return await tool_fn(**kwargs)
+        result = await asyncio.to_thread(tool_fn, **kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
-    return tool_fn(**kwargs)
+    result = tool_fn(**kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def _resolve_tool(agent: RLMReActChatAgent, tool_name: str) -> Any:

@@ -92,6 +92,8 @@ TASKS.md
 
 .neon
 
+.playwright-mcp/
+
 
 src/frontend/node_modules/
 src/frontend/dist/
