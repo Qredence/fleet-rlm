@@ -8,10 +8,35 @@ _No notable changes yet._
 
 ## [0.4.93] - 2026-03-03
 
+### Highlights (User Impact)
+
+- Improved ReAct responsiveness with async-first DSPy delegation and realtime reasoning stream fixes.
+- Removed deprecated legacy API surfaces and compatibility layers to reduce contract drift and maintenance overhead.
+- Hardened config/env parsing and made server imports lazier so config modules can be imported without requiring FastAPI/uvicorn.
+
+### Changed
+
+- **Change:** Migrated ReAct delegation/streaming paths to async-first DSPy flow and updated frontend reasoning event adapters.
+  **Outcome:** More reliable realtime reasoning updates and smoother long-running interactive sessions.
+- **Change:** Consolidated on canonical backend/frontend API paths and removed obsolete legacy routes/modules.
+  **Outcome:** Smaller supported surface area with clearer runtime contracts and less accidental integration with deprecated endpoints.
+- **Change:** Centralized duplicated environment parsing helpers and reused them across analytics/core/server config modules.
+  **Outcome:** Lower config drift and easier long-term maintenance.
+
 ### Fixed
 
+- **Change:** Resolved reasoning-stream consistency issues in the realtime event pipeline.
+  **Outcome:** Reasoning output is delivered more consistently in chat/streaming clients.
+- **Change:** Made `fleet_rlm.server` imports lazy for config-only consumers.
+  **Outcome:** Importing runtime config no longer hard-requires FastAPI/uvicorn in non-server contexts.
 - **Change:** Aligned `fleet_rlm.__version__` with project metadata in `pyproject.toml`.
   **Outcome:** Restored release metadata consistency and unblocked release/UI schema CI checks.
+
+### Merged Pull Requests
+
+- [#90](https://github.com/Qredence/fleet-rlm/pull/90): Remove deprecated legacy API surfaces and clean up unused paths.
+- [#91](https://github.com/Qredence/fleet-rlm/pull/91): Refactor env parsing helpers and harden config imports.
+- [#92](https://github.com/Qredence/fleet-rlm/pull/92): Async-first DSPy delegation + realtime reasoning stream fixes.
 
 ## [0.4.92] - 2026-02-28
 

@@ -276,6 +276,46 @@ jobs:
             git push origin "$TAG"
           fi
 
+      - name: Build GitHub release notes from CHANGELOG
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.normalized_version }}
+        run: |
+          python <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          version = os.environ["RELEASE_VERSION"]
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+          section_header = re.compile(rf"^## \[{re.escape(version)}\] - .*$", re.MULTILINE)
+          match = section_header.search(changelog)
+          if not match:
+              print(f"::error::Could not find CHANGELOG section for version {version}")
+              sys.exit(1)
+
+          next_header = re.compile(r"^## \[", re.MULTILINE)
+          next_match = next_header.search(changelog, match.end())
+          section = changelog[match.start() : next_match.start()].strip() if next_match else changelog[match.start() :].strip()
+
+          body = "\n".join(
+              [
+                  f"## Release v{version}",
+                  "",
+                  section,
+                  "",
+                  "### Installation",
+                  "",
+                  "```bash",
+                  f"pip install fleet-rlm=={version}",
+                  "```",
+              ]
+          ).rstrip() + "\n"
+
+          pathlib.Path("release_notes.md").write_text(body, encoding="utf-8")
+          PY
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
@@ -284,23 +324,4 @@ jobs:
           draft: false
           prerelease: false
           files: dist/*
-          body: |
-            ## Release ${{ needs.preflight.outputs.tag_version }}
-
-            ### Installation
-
-            ```bash
-            pip install fleet-rlm==${{ needs.preflight.outputs.normalized_version }}
-            ```
-
-            ### CLI Usage
-
-            ```bash
-            fleet-rlm --help
-            ```
-
-            ### What's Changed
-
-            See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for the full list of changes in this release.
-
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ needs.preflight.outputs.tag_version }}...main
+          body_path: release_notes.md
