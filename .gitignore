@@ -89,8 +89,9 @@ plans/task.md
 plans/user_flows.md
 plans/walkthrough.md
 TASKS.md
+
 .neon
-.superset/config.json
+
 
 src/frontend/node_modules/
 src/frontend/dist/

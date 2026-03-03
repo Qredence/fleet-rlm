@@ -185,6 +185,44 @@ def test_fetch_url_document_content_rewrites_gist_page_and_follows_redirect(
     assert meta["final_url"].endswith("/raw/abcdef/file.txt")
 
 
+def test_fetch_url_document_content_zero_redirect_limit_uses_default(monkeypatch):
+    fake_client = _FakeClient(
+        [
+            _FakeStreamResponse(
+                url="https://example.com/source",
+                status_code=302,
+                headers={"location": "/next"},
+            ),
+            _FakeStreamResponse(
+                url="https://example.com/next",
+                headers={"content-type": "text/plain"},
+                body=b"redirected content",
+            ),
+        ]
+    )
+    monkeypatch.setenv("FLEET_URL_DOCUMENT_MAX_REDIRECTS", "0")
+    monkeypatch.setattr(
+        "fleet_rlm.react.document_sources._resolve_host_ips",
+        lambda hostname, port: _public_ip_set(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.react.document_sources.httpx.Client",
+        lambda **kwargs: fake_client,
+    )
+
+    text, meta = fetch_url_document_content(
+        "https://example.com/source",
+        read_document_content=lambda path: ("unused", {}),
+    )
+
+    assert text == "redirected content"
+    assert fake_client.calls == [
+        "https://example.com/source",
+        "https://example.com/next",
+    ]
+    assert meta["final_url"] == "https://example.com/next"
+
+
 def test_fetch_url_document_content_blocks_private_targets_by_default(monkeypatch):
     monkeypatch.setattr(
         "fleet_rlm.react.document_sources._resolve_host_ips",

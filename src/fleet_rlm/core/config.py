@@ -14,6 +14,8 @@ import dspy
 
 from dotenv import load_dotenv
 
+from fleet_rlm._env_utils import env_bool as _env_bool
+
 load_dotenv()  # Load .env from current working directory by default
 logger = logging.getLogger(__name__)
 
@@ -67,16 +69,7 @@ def _load_dotenv(path: Path) -> None:
             os.environ[key] = value
 
 
-def _env_bool(value: str | None, *, default: bool) -> bool:
-    """Parse a boolean value from common environment string forms."""
-    if value is None:
-        return default
-    candidate = value.strip().lower()
-    if candidate in {"1", "true", "yes", "on"}:
-        return True
-    if candidate in {"0", "false", "no", "off"}:
-        return False
-    return default
+# _env_bool imported from fleet_rlm._env_utils
 
 
 def load_posthog_settings_from_env() -> dict[str, object]:
