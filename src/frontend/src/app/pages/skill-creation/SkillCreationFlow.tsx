@@ -7,7 +7,7 @@ import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/components/ui/use-mobile";
 import { Button } from "@/components/ui/button";
 import { PromptInput } from "@/components/ui/prompt-input";
-import { ConversationHistory } from "@/features/ConversationHistory";
+import { ConversationHistory } from "@/features/chat/ConversationHistory";
 import { ChatMessageList } from "@/app/pages/skill-creation/ChatMessageList";
 import { useBackendChatRuntime } from "@/app/pages/skill-creation/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
@@ -145,7 +145,8 @@ export function SkillCreationFlow() {
       },
     );
 
-    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
+    const wasHandledByDialog =
+      document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigate("/settings?section=runtime");
     }
@@ -189,8 +190,8 @@ export function SkillCreationFlow() {
       />
 
       {/* Input composer */}
-      <div className="px-4 md:px-6 pb-6 md:pb-10 shrink-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
-        <div className="max-w-[800px] w-full mx-auto">
+      <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 pt-6 md:px-6 md:pb-10">
+        <div className="mx-auto w-full max-w-200">
           <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
               <div className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-950">

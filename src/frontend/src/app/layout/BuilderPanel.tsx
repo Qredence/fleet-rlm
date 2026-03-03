@@ -12,8 +12,9 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { cn } from "@/components/ui/utils";
-import { CanvasSwitcher, type CanvasMode } from "@/features/CanvasSwitcher";
-import { CodeArtifact } from "@/features/CodeArtifact";
+import { CanvasSwitcher, type CanvasMode } from "@/features/artifacts/CanvasSwitcher";
+import { CodeArtifact } from "@/features/artifacts/CodeArtifact";
+import { FileDetail } from "@/features/artifacts/FileDetail";
 import { ArtifactCanvas } from "@/features/artifacts/components/ArtifactCanvas";
 import {
   isRlmCoreEnabled,
@@ -64,7 +65,7 @@ function navLabel(nav: string): string {
     case "skills":
       return "Skills";
     case "taxonomy":
-      return "Taxonomy";
+      return "Volumes";
     case "memory":
       return "Memory";
     case "analytics":
@@ -82,6 +83,8 @@ function getHeaderLabel(mode: CanvasMode): string {
       return "Execution";
     case "code-artifact":
       return "Code Sandbox";
+    case "file-detail":
+      return "File Preview";
     default:
       return "Canvas";
   }
@@ -97,8 +100,13 @@ function getHeaderIcon(mode: CanvasMode) {
 }
 
 export function BuilderPanel() {
-  const { activeNav, creationPhase, closeCanvas, activeFeatures } =
-    useNavigation();
+  const {
+    activeNav,
+    creationPhase,
+    closeCanvas,
+    activeFeatures,
+    selectedFileNode,
+  } = useNavigation();
   const { navigateTo } = useAppNavigate();
   const isMobile = useIsMobile();
 
@@ -112,12 +120,16 @@ export function BuilderPanel() {
     !showCreation &&
     activeFeatures.has("contextMemory") &&
     !isUnsupportedNav;
+  const showFileDetail =
+    activeNav === "taxonomy" && !!selectedFileNode && !isUnsupportedNav;
 
   const canvasMode: CanvasMode = showCreation
     ? "creation"
     : showCodeArtifact
       ? "code-artifact"
-      : "empty";
+      : showFileDetail
+        ? "file-detail"
+        : "empty";
 
   const handleSelectView = useCallback(
     (mode: CanvasMode) => {
@@ -130,6 +142,9 @@ export function BuilderPanel() {
           break;
         case "creation":
           navigateTo("new");
+          break;
+        case "file-detail":
+          navigateTo("taxonomy");
           break;
         default:
           break;
@@ -197,6 +212,10 @@ export function BuilderPanel() {
         ) : showCodeArtifact ? (
           <ErrorBoundary name="Code Artifact">
             <CodeArtifact />
+          </ErrorBoundary>
+        ) : showFileDetail && selectedFileNode ? (
+          <ErrorBoundary name="File Detail">
+            <FileDetail file={selectedFileNode} />
           </ErrorBoundary>
         ) : (
           <EmptyCanvas />

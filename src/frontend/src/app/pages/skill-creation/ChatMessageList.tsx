@@ -107,7 +107,7 @@ import {
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { ClarificationCard } from "@/features/ClarificationCard";
+import { ClarificationCard } from "@/features/chat/ClarificationCard";
 import { SuggestionChip } from "@/components/ui/suggestion-chip";
 import {
   SuggestionIconBolt,
@@ -602,7 +602,7 @@ export function ChatMessageList({
                 isMobile && "pt-10",
               )}
             >
-              <div className="flex flex-col justify-center pb-[5px] w-full mb-10">
+              <div className="flex flex-col justify-center pb-1.25 w-full mb-10">
                 <h2
                   className="text-foreground w-full"
                   style={{

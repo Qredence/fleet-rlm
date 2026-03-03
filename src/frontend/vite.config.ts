@@ -70,7 +70,7 @@ export default defineConfig({
             "@radix-ui/react-dialog",
             "@radix-ui/react-dropdown-menu",
             "lucide-react",
-            "framer-motion",
+            "motion",
           ],
           "vendor-editor": ["@monaco-editor/react", "codemirror"],
           "vendor-state": ["zustand", "@tanstack/react-query", "react-router"],

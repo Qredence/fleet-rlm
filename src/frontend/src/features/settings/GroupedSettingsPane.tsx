@@ -272,10 +272,10 @@ export function GroupedSettingsPane({
             <Input
               type="text"
               value={lmModel}
-              placeholder="openai/gpt-4o-mini"
+              placeholder=""
               autoComplete="off"
               onChange={(event) => setLmModel(event.target.value)}
-              className="w-[260px] max-w-[50vw]"
+              className="w-65 max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -286,10 +286,10 @@ export function GroupedSettingsPane({
             <Input
               type="text"
               value={delegateLmModel}
-              placeholder="openai/gpt-4.1-mini"
+              placeholder=""
               autoComplete="off"
               onChange={(event) => setDelegateLmModel(event.target.value)}
-              className="w-[260px] max-w-[50vw]"
+              className="w-65 max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -300,10 +300,10 @@ export function GroupedSettingsPane({
             <Input
               type="text"
               value={delegateLmSmallModel}
-              placeholder="openai/gpt-4o-mini"
+              placeholder=""
               autoComplete="off"
               onChange={(event) => setDelegateLmSmallModel(event.target.value)}
-              className="w-[260px] max-w-[50vw]"
+              className="w-65 max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -314,10 +314,10 @@ export function GroupedSettingsPane({
             <Input
               type="text"
               value={apiBase}
-              placeholder="https://your-litellm.example.com/v1"
+              placeholder=""
               autoComplete="off"
               onChange={(event) => setApiBase(event.target.value)}
-              className="w-[260px] max-w-[50vw]"
+              className="w-65 max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -328,13 +328,13 @@ export function GroupedSettingsPane({
             <Input
               type="password"
               value={apiKeyInput}
-              placeholder="sk-..."
+              placeholder=""
               autoComplete="off"
               onChange={(event) => {
                 setApiKeyInput(event.target.value);
                 setClearApiKeyOnSave(false);
               }}
-              className="w-[260px] max-w-[50vw]"
+              className="w-65 max-w-[50vw]"
             />
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">

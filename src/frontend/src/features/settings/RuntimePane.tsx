@@ -25,7 +25,8 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "DSPY_LM_MODEL",
     label: "LM Model",
-    description: "Planner model identifier (for example: openai/gpt-4o-mini).",
+    description:
+      "Planner model identifier (for example: openai/gemini-3.1-pro).",
   },
   {
     key: "DSPY_LLM_API_KEY",
@@ -83,7 +84,9 @@ const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(
   RUNTIME_SECRET_KEYS,
 );
 
-function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditableKey {
+function isRuntimeSecretKey(
+  key: RuntimeEditableKey,
+): key is RuntimeSecretEditableKey {
   return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
 }
 
@@ -145,8 +148,7 @@ export function RuntimePane() {
   }, [settingsQuery.data]);
 
   const clearedSecrets = useMemo(
-    () =>
-      RUNTIME_SECRET_KEYS.filter((key) => clearSecretFlags[key] === true),
+    () => RUNTIME_SECRET_KEYS.filter((key) => clearSecretFlags[key] === true),
     [clearSecretFlags],
   );
 
@@ -353,18 +355,23 @@ export function RuntimePane() {
                     }));
                   }
                 }}
-                className="w-[260px] max-w-[50vw]"
+                className="w-65 max-w-[50vw]"
               />
               {field.isSecret && secretKey && (
                 <>
                   <p className="text-xs text-muted-foreground">
                     Write-only input. Configured value:{" "}
-                    {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
+                    {maskedValues[secretKey]
+                      ? maskedValues[secretKey]
+                      : "not set"}
+                    .
                   </p>
                   <Button
                     type="button"
                     size="sm"
-                    variant={clearSecretFlags[secretKey] ? "secondary" : "outline"}
+                    variant={
+                      clearSecretFlags[secretKey] ? "secondary" : "outline"
+                    }
                     className="rounded-lg"
                     onClick={() => {
                       const nextClear = !(clearSecretFlags[secretKey] ?? false);

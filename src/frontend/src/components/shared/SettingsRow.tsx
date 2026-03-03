@@ -26,9 +26,8 @@ interface SettingsRowProps {
  * on the right via `children`. Renders `border-b border-border-subtle`
  * by default; pass `noBorder` to suppress for the final row.
  *
- * Typography is driven entirely by `data-slot` selectors in `theme.css`
- * (`settings-row-label` and `settings-row-description`), so the look
- * can be re-themed from CSS alone.
+ * Typography is now utility-class driven so sizing/weight remain stable
+ * even when theme slot rules are reduced.
  *
  * @example
  * ```tsx
@@ -58,13 +57,16 @@ const SettingsRow = memo(function SettingsRow({
       )}
     >
       <div className="flex-1 min-w-0 mr-4">
-        <span data-slot="settings-row-label" className="text-foreground">
+        <span
+          data-slot="settings-row-label"
+          className="text-sm font-medium leading-5 text-foreground"
+        >
           {label}
         </span>
         {description && (
           <p
             data-slot="settings-row-description"
-            className="text-muted-foreground mt-0.5"
+            className="mt-0.5 text-xs leading-4 text-muted-foreground"
           >
             {description}
           </p>

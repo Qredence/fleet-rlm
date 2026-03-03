@@ -1,12 +1,9 @@
 /**
- * React Query hooks for sandbox filesystem data.
+ * React Query hooks for Modal Volume filesystem data.
  *
- * Replaces direct `import { mockFilesystem } from '@/lib/data/mock-skills'`
- * in consumer components. Returns the stable `FsNode[]` type.
- *
- * In mock mode (no VITE_FLEET_API_URL), returns mock data immediately.
- * In non-mock mode, falls back to local mock data because deprecated sandbox
- * REST endpoints were removed from the backend.
+ * Fetches the real volume tree from the backend endpoint
+ * GET /api/v1/runtime/volume/tree. Falls back to local mock data
+ * when the backend is unreachable or in mock mode.
  *
  * @example
  * ```tsx
@@ -15,10 +12,54 @@
  * ```
  */
 import { useQuery } from "@tanstack/react-query";
-import { isMockMode } from "@/lib/api/config";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
+import { apiClient, ApiClientError } from "@/lib/api/client";
 import { mockFilesystem } from "@/lib/data/mock-skills";
-import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
+import type { DataSource } from "@/lib/api/capabilities";
 import type { FsNode } from "@/lib/data/types";
+
+// ── API response types ──────────────────────────────────────────────
+
+interface VolumeTreeNode {
+  id: string;
+  name: string;
+  path: string;
+  type: "volume" | "directory" | "file";
+  children: VolumeTreeNode[];
+  size?: number | null;
+  modifiedAt?: string | null;
+}
+
+interface VolumeTreeResponse {
+  volumeName: string;
+  rootPath: string;
+  nodes: VolumeTreeNode[];
+  totalFiles: number;
+  totalDirs: number;
+  truncated: boolean;
+}
+
+interface VolumeFileContentResponse {
+  path: string;
+  content: string;
+  mime: string;
+  size: number;
+  truncated: boolean;
+}
+
+// ── Conversion ──────────────────────────────────────────────────────
+
+function toFsNode(node: VolumeTreeNode): FsNode {
+  return {
+    id: node.id,
+    name: node.name,
+    path: node.path,
+    type: node.type,
+    children: node.children?.map(toFsNode),
+    size: node.size ?? undefined,
+    modifiedAt: node.modifiedAt ?? undefined,
+  };
+}
 
 // ── Query Keys ──────────────────────────────────────────────────────
 
@@ -48,7 +89,7 @@ interface UseFilesystemReturn {
 }
 
 export function useFilesystem(): UseFilesystemReturn {
-  const mock = isMockMode();
+  const mock = rlmApiConfig.mockMode;
 
   type FilesystemPayload = {
     volumes: FsNode[];
@@ -58,23 +99,39 @@ export function useFilesystem(): UseFilesystemReturn {
 
   const query = useQuery({
     queryKey: filesystemKeys.tree(),
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal }): Promise<FilesystemPayload> => {
       if (mock) {
         return {
           volumes: mockFilesystem,
-          dataSource: "mock" as const,
+          dataSource: "mock",
           degradedReason: undefined,
-        } satisfies FilesystemPayload;
+        };
       }
 
-      const capability = await getCapabilityStatus("filesystem", signal);
-      if (!capability.available) {
-        return createFallbackPayload("volumes", mockFilesystem, capability, "Filesystem");
+      try {
+        const resp = await apiClient.get<VolumeTreeResponse>(
+          "/api/v1/runtime/volume/tree",
+          { maxDepth: 4 },
+          signal,
+        );
+        return {
+          volumes: resp.nodes.map(toFsNode),
+          dataSource: "api",
+        };
+      } catch (err) {
+        const reason =
+          err instanceof ApiClientError
+            ? `Volume API returned ${err.status}: ${err.detail}`
+            : "Volume API unreachable, showing mock data.";
+        return {
+          volumes: mockFilesystem,
+          dataSource: "fallback",
+          degradedReason: reason,
+        };
       }
-
-      return createFallbackPayload("volumes", mockFilesystem, capability, "Filesystem");
     },
-    staleTime: mock ? Infinity : undefined,
+    staleTime: mock ? Infinity : 30_000,
+    retry: false,
   });
 
   return {
@@ -112,37 +169,31 @@ interface UseFileContentReturn {
  * component has its own MOCK_FILE_CONTENT map for preview purposes.
  */
 export function useFileContent(path: string | null): UseFileContentReturn {
-  const mock = isMockMode();
+  const mock = rlmApiConfig.mockMode;
 
   const query = useQuery({
     queryKey: filesystemKeys.fileContent(path ?? ""),
     queryFn: async ({ signal }) => {
       if (!path) return { content: "", mime: "", size: 0 };
-      if (mock) {
-        return {
-          content: "",
-          mime: "text/plain",
-          size: 0,
-        };
-      }
 
-      const capability = await getCapabilityStatus("filesystem", signal);
-      if (!capability.available) {
-        return {
-          content: "",
-          mime: "text/plain",
-          size: 0,
-        };
-      }
+      const resp = await apiClient.get<VolumeFileContentResponse>(
+        "/api/v1/runtime/volume/file",
+        {
+          path,
+          maxBytes: 200_000,
+        },
+        signal,
+      );
 
       return {
-        content: "",
-        mime: "text/plain",
-        size: 0,
+        content: resp.content,
+        mime: resp.mime,
+        size: resp.size,
       };
     },
     enabled: !!path,
     staleTime: mock ? Infinity : undefined,
+    retry: false,
   });
 
   return {

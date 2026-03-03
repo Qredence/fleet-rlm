@@ -14,7 +14,7 @@
  * ```
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { isMockMode } from "@/lib/api/config";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
 import type { MemoryListParams } from "@/lib/api/endpoints";
 import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
 import { useMockStateStore } from "@/stores/mockStateStore";
@@ -87,7 +87,7 @@ interface UseMemoryReturn {
 }
 
 export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
-  const mock = isMockMode();
+  const mock = rlmApiConfig.mockMode;
   const queryClient = useQueryClient();
   const {
     memoryEntries,

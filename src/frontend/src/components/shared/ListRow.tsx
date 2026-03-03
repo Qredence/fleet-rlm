@@ -26,9 +26,8 @@ interface ListRowProps {
  *
  * Renders: `[leading] [label + subtitle] [trailing]`
  *
- * Typography is driven by `data-slot` selectors in `theme.css`
- * (`list-row-label` and `list-row-subtitle`), so the look can be
- * re-themed from CSS alone.
+ * Typography is utility-class driven for predictable rendering across
+ * theme variants.
  *
  * @example
  * ```tsx
@@ -61,14 +60,14 @@ const ListRow = memo(function ListRow({
       <div className="flex-1 min-w-0">
         <span
           data-slot="list-row-label"
-          className="text-foreground block truncate"
+          className="block truncate text-sm font-medium leading-5 text-foreground"
         >
           {label}
         </span>
         {subtitle && (
           <span
             data-slot="list-row-subtitle"
-            className="text-muted-foreground block truncate"
+            className="block truncate text-xs leading-4 text-muted-foreground"
           >
             {subtitle}
           </span>

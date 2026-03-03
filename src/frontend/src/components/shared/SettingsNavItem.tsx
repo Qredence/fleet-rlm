@@ -25,8 +25,7 @@ interface SettingsNavItemProps {
  * SettingsNavItem -- a sidebar / tab-bar navigation button used in
  * SettingsDialog and SettingsPage.
  *
- * Typography is driven by the `data-slot="settings-nav-item-label"`
- * selector in `theme.css`, so the look can be re-themed from CSS alone.
+ * Typography is utility-class driven for consistent sizing/weight.
  *
  * On mobile the item renders as a horizontal touch-target pill; on
  * desktop it renders as a left-aligned sidebar row.
@@ -64,7 +63,12 @@ function SettingsNavItem({
       onClick={onClick}
     >
       <Icon className="w-4 h-4 shrink-0" />
-      <span data-slot="settings-nav-item-label">{label}</span>
+      <span
+        data-slot="settings-nav-item-label"
+        className="text-sm font-medium leading-5"
+      >
+        {label}
+      </span>
     </Button>
   );
 }

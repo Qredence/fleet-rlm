@@ -6,6 +6,18 @@ interface Props {
   content: string;
 }
 
+function safeHref(href: string): string | undefined {
+  try {
+    const parsed = new URL(href);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Lightweight, zero-dependency Markdown renderer ─────────────────
 // Supports: headings, paragraphs, bold, italic, inline code,
 // fenced code blocks, unordered/ordered lists, blockquotes, links,
@@ -70,17 +82,22 @@ function parseInline(text: string): ReactNode[] {
       result.push(<em key={match.index}>{match[5].slice(1, -1)}</em>);
     } else if (match[6]) {
       // Link [text](url)
-      result.push(
-        <a
-          key={match.index}
-          href={match[8]}
-          className="text-accent hover:underline cursor-pointer"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {match[7]}
-        </a>,
-      );
+      const href = safeHref(match[8] ?? "");
+      if (href) {
+        result.push(
+          <a
+            key={match.index}
+            href={href}
+            className="text-accent hover:underline cursor-pointer"
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+          >
+            {match[7]}
+          </a>,
+        );
+      } else {
+        result.push(match[7] ?? "");
+      }
     }
 
     lastIndex = match.index + match[0].length;

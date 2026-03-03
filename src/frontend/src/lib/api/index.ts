@@ -24,9 +24,7 @@ export {
 } from "@/lib/api/client";
 
 // ── Endpoints ───────────────────────────────────────────────────────
-export {
-  sessionStateEndpoints,
-} from "@/lib/api/endpoints";
+export { sessionStateEndpoints } from "@/lib/api/endpoints";
 export type {
   TaskListParams,
   MemoryListParams,
@@ -48,7 +46,6 @@ export {
   adaptFsNode,
   adaptFsTree,
 } from "@/lib/api/adapters";
-export type { AnalyticsData } from "@/lib/api/adapters";
 
 // ── Backend Types ───────────────────────────────────────────────────
 export type {

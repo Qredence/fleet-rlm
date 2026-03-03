@@ -20,7 +20,7 @@ import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { createLocalId } from "@/lib/id";
 import { skillKeys } from "@/hooks/useSkills";
 import type { Skill } from "@/lib/data/types";
-import { isMockMode } from "@/lib/api/config";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ export function useSkillMutations() {
   // ── Create ──────────────────────────────────────────────────────
   const createSkill = useMutation({
     mutationFn: async (input: CreateSkillInput): Promise<Skill> => {
-      if (isMockMode()) {
+      if (rlmApiConfig.mockMode) {
         await mockDelay();
       }
       return createMockSkill(input);
@@ -118,7 +118,7 @@ export function useSkillMutations() {
   // ── Update ──────────────────────────────────────────────────────
   const updateSkill = useMutation({
     mutationFn: async ({ id, data }: UpdateSkillInput): Promise<Skill> => {
-      if (isMockMode()) {
+      if (rlmApiConfig.mockMode) {
         await mockDelay();
       }
       // Return merged data
@@ -158,7 +158,7 @@ export function useSkillMutations() {
   // ── Delete ──────────────────────────────────────────────────────
   const deleteSkill = useMutation({
     mutationFn: async (id: string): Promise<string> => {
-      if (isMockMode()) {
+      if (rlmApiConfig.mockMode) {
         await mockDelay();
       }
       return id;
