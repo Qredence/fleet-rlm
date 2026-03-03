@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.4.93"
+__version__ = "0.4.94"
 
 __all__ = [
     "__version__",

@@ -90,13 +90,17 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/fleet-rlm/json
 # from repo root
 rm -rf dist build
 uv build
+uv run python scripts/check_wheel_frontend_sync.py
 uvx twine check dist/*
 ```
 
+`uv build` now runs frontend bundling automatically when `src/frontend` exists.
+In repository checkouts, ensure `bun` is installed for release builds.
+
 Expected outputs:
 
-- `dist/fleet_rlm-0.4.6.tar.gz`
-- `dist/fleet_rlm-0.4.6-py3-none-any.whl`
+- `dist/fleet_rlm-0.4.94.tar.gz`
+- `dist/fleet_rlm-0.4.94-py3-none-any.whl`
 
 ## 3) Upload to TestPyPI
 
@@ -123,7 +127,7 @@ uv venv .venv-release-smoke
 uv pip install --python .venv-release-smoke/bin/python \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple \
-  fleet-rlm==0.4.6
+  fleet-rlm==0.4.94
 source .venv-release-smoke/bin/activate
 fleet-rlm --help
 deactivate
@@ -151,8 +155,8 @@ uvx twine upload dist/*
 
 ```bash
 # from repo root
-git tag v0.4.6
-git push origin v0.4.6
+git tag v0.4.94
+git push origin v0.4.94
 ```
 
 Then update changelog/release notes with:

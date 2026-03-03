@@ -97,6 +97,7 @@ sync-scaffold:
 release-check: clean quality-gate security-check
 	rm -rf dist build
 	uv build
+	uv run python scripts/check_wheel_frontend_sync.py
 	uvx twine check dist/*
 
 clean:

@@ -48,13 +48,14 @@ def _prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
 def _resolve_ui_dist_dir() -> Path | None:
     """Return the frontend build directory if one exists.
 
-    Supports both the legacy in-package UI layout and the current repo layout
-    (`src/frontend/dist`) used by `fleet web` during local development.
+    In source checkouts, prefer `src/frontend/dist` so `fleet web` reflects the
+    latest local frontend build. For installed packages, fall back to in-package
+    assets at `fleet_rlm/ui/dist`.
     """
     repo_root = Path(__file__).resolve().parents[3]
     candidates = [
-        Path(__file__).parent.parent / "ui" / "dist",  # legacy/in-package layout
         repo_root / "src" / "frontend" / "dist",  # current repo layout
+        Path(__file__).parent.parent / "ui" / "dist",  # packaged fallback
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -171,6 +172,11 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
     assets_dir = ui_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+    branding_dir = ui_dir / "branding"
+    if branding_dir.exists():
+        app.mount(
+            "/branding", StaticFiles(directory=str(branding_dir)), name="branding"
+        )
 
     ui_root = ui_dir.resolve()
 

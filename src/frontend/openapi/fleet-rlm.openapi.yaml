@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.4.93
+  version: 0.4.94
 paths:
   /health:
     get:
@@ -230,7 +230,7 @@ components:
         version:
           type: string
           title: Version
-          default: 0.4.93
+          default: 0.4.94
       type: object
       title: HealthResponse
     ReadyResponse:

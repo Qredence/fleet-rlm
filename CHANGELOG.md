@@ -4,16 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+_No notable changes yet._
+
+## [0.4.94] - 2026-03-03
+
 ### Highlights (User Impact)
 
 - Completed the WS-first migration by removing remaining deprecated HTTP chat compatibility surfaces.
 - Improved execution tracing maintainability and readability across streaming, step-building, and websocket chat orchestration.
-- Added deterministic frontend smoke coverage for execution canvas lane rendering and untruncated payload display.
+- Packaging now guarantees published wheels bundle synchronized frontend assets, so `fleet web` installs include the latest UI.
 
 ### Added
 
 - **Change:** Added `execution-canvas-smoke.spec.ts` end-to-end coverage for graph lane labels, elapsed timing, and full-output rendering.
   **Outcome:** Reduced regression risk for Artifact Canvas readability and payload truncation behavior in browser flows.
+- **Change:** Added release artifact integrity check script `scripts/check_wheel_frontend_sync.py` and wired it into release workflows.
+  **Outcome:** Release builds now verify wheel UI payload correctness and prevent unintended frontend package leakage.
 
 ### Changed
 
@@ -23,11 +29,23 @@ All notable changes to this project are documented in this file.
   **Outcome:** Better long-term maintainability for execution timeline/event shaping with preserved runtime behavior.
 - **Change:** Updated backend/frontend docs and API contract tests to align with current WS-first routes and generated OpenAPI surfaces.
   **Outcome:** Less documentation drift and clearer integration expectations for client consumers.
+- **Change:** `uv build` now runs frontend bundling in release/source builds, and local source `fleet web` now prefers `src/frontend/dist` when available.
+  **Outcome:** End users get up-to-date packaged UI assets and contributors see latest local frontend output without manual asset sync.
+
+### Fixed
+
+- **Change:** Mounted frontend `branding/` static assets in FastAPI alongside `/assets` for Web UI serving.
+  **Outcome:** Brand/logo assets (for example `/branding/logo-mark.svg`) now load correctly instead of falling through to SPA HTML fallback.
 
 ### Removed
 
 - **Change:** Removed deprecated HTTP chat router and legacy frontend `rlm-api` compatibility exports/types (`/api/v1/chat`, `rlmCoreEndpoints` surface).
   **Outcome:** Smaller API/client surface area and reduced risk of accidental dependence on removed legacy paths.
+
+### Merged Pull Requests
+
+- [#94](https://github.com/Qredence/fleet-rlm/pull/94): Remove deprecated HTTP chat compatibility and related cleanup.
+- [#95](https://github.com/Qredence/fleet-rlm/pull/95): Filesystem UI and follow-up fixes across frontend/backend surfaces.
 
 ## [0.4.93] - 2026-03-03
 

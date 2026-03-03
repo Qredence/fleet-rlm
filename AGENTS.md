@@ -263,7 +263,8 @@ Tests mock Modal APIs and should run without cloud credentials.
 - Frontend package manager is `bun` (`src/frontend/package.json` defines `packageManager: bun@...`); do not introduce npm lockfiles (`package-lock.json`) unless npm is intentionally adopted for a specific workspace
 - Keep generated artifacts scoped to their owning workspace/runtime (`dist/`, coverage, Playwright outputs); avoid committing one-off local verification scripts or root-level lockfiles that are not part of the project workflow
 - Local scratch artifacts (`*.tmp`, `.tmp*`, `tmp/`, and ad-hoc frontend smoke `.mjs` scripts) must remain untracked; release hygiene enforces a strict tracked `.mjs` allowlist
-- For packaged/local `fleet web` runs that should serve embedded UI assets, rebuild and sync frontend artifacts with `uv run python scripts/build_ui.py` (copies `src/frontend/dist` -> `src/fleet_rlm/ui/dist`)
+- `uv build` now runs frontend bundling/sync automatically via `scripts/build_ui.py` when `src/frontend` exists; release/source builds therefore require `bun`, while end-user installs from wheel do not
+- Local source `fleet web` prefers `src/frontend/dist` when available, then falls back to packaged `src/fleet_rlm/ui/dist`
 - `serve-api` defaults to persistent Modal volume `rlm-volume-dspy` when no `interpreter.volume_name` is provided
 - Canonical API spec is `openapi.yaml` at repository root; frontend syncs it to `src/frontend/openapi/fleet-rlm.openapi.yaml` before generating types
 - Runtime settings endpoints are served from `/api/v1/runtime/*`; writes (`PATCH /api/v1/runtime/settings`) are local-only (`APP_ENV=local`) while read/test endpoints remain available across environments

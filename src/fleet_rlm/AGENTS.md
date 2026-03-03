@@ -1,14 +1,14 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-From the repo root, core Python code lives in `src/fleet_rlm/` (notably `core/`, `react/`, `server/`, `terminal/`, `models/`, and `analytics/`). Tests are in `tests/` and split by intent: `unit/`, `ui/`, `integration/`, and `e2e/`. Operational scripts (release checks, DB/bootstrap, perf, env validation) are in `scripts/`. The web client is in `src/frontend/` and built assets are synced to `src/fleet_rlm/ui/dist`. API contract source is `openapi.yaml`; schema migrations are in `migrations/`.
+From the repo root, core Python code lives in `src/fleet_rlm/` (notably `core/`, `react/`, `server/`, `terminal/`, `models/`, and `analytics/`). Tests are in `tests/` and split by intent: `unit/`, `ui/`, `integration/`, and `e2e/`. Operational scripts (release checks, DB/bootstrap, perf, env validation) are in `scripts/`. The web client is in `src/frontend/`; release/source packaging runs `scripts/build_ui.py` to sync built assets into `src/fleet_rlm/ui/dist`. API contract source is `openapi.yaml`; schema migrations are in `migrations/`.
 
 ## Build, Test, and Development Commands
 - `uv sync --extra dev --extra server`: install Python deps for local dev + API work.
 - `uv run fleet-rlm --help`: verify CLI entrypoint.
 - `make test-fast`: quick default suite (`not live_llm and not benchmark`).
 - `make quality-gate`: lint, format check, type check, tests, docs/metadata, frontend checks.
-- `make release-check`: full pre-release validation (`clean`, quality, security, build, twine check).
+- `make release-check`: full pre-release validation (`clean`, quality, security, build, wheel frontend sync check, twine check).
 - Frontend (when touched): `cd src/frontend && bun install --frozen-lockfile && bun run build`.
 
 ## Coding Style & Naming Conventions

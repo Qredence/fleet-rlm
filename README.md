@@ -14,45 +14,37 @@
 
 ---
 
-## Quick Start (Web UI First)
+## Quick Start
 
-Fastest path: install and launch the built-in Web UI.
+Install and launch the Web UI in under a minute:
 
 ```bash
-# Install as a runnable CLI tool
+# Option 1: install as a runnable tool
 uv tool install fleet-rlm
+fleet web
+```
 
-# Launch the Web UI server
+Or in your active environment:
+
+```bash
+# Option 2: regular environment install
+uv pip install fleet-rlm
 fleet web
 ```
 
 Open `http://localhost:8000` in your browser.
 
-- Prefer a regular environment install instead of `uv tool`?
-```bash
-uv pip install fleet-rlm
-fleet web
-```
+`fleet web` is the primary interactive interface. The published package already includes the built frontend assets, so end users do not need `bun` or a separate frontend toolchain.
 
-- `fleet web` is the primary interactive interface.
-- Product chat transport is WS-first (`/api/v1/ws/chat`).
-- Plain `fleet-rlm` installs are intended to support `fleet web`.
-- Runtime settings (LM / Modal) can be configured from the Web UI Settings surface in local development.
-- Runtime model updates from Settings are hot-applied in-process (`/api/v1/runtime/settings`) and verified via active model fields on `/api/v1/runtime/status`.
-- Secret settings inputs in the web Runtime UI are write-only; enter a new value to rotate, or use explicit clear-on-save.
-- Full setup for Modal secrets, Neon DB, auth modes, and deployment is linked below.
+## What You Get
 
-## Why `fleet-rlm`
+- Browser-first RLM chat (`fleet web`)
+- Secure Modal-backed long-context execution for code/doc workflows
+- WS-first runtime streaming for chat and execution events
+- Runtime configuration and diagnostics from the Web UI settings
+- Optional MCP server surface (`fleet-rlm serve-mcp`)
 
-- Chat with an RLM-powered agent in the browser (`fleet web`)
-- Run recursive long-context tasks with a secure Modal sandbox
-- Analyze documents (including PDF ingestion with MarkItDown/pypdf fallback)
-- Stream execution events and trajectories for observability/debugging
-- Expose capabilities as an MCP server (`fleet-rlm serve-mcp`)
-
-## Other Ways to Run It
-
-Common commands:
+## Common Commands
 
 ```bash
 # Standalone terminal chat
@@ -61,10 +53,6 @@ fleet-rlm chat --trace-mode compact
 # Explicit API server
 fleet-rlm serve-api --port 8000
 
-# FastAPI CLI (uses [tool.fastapi] entrypoint)
-fastapi dev
-fastapi run
-
 # MCP server
 fleet-rlm serve-mcp --transport stdio
 
@@ -72,11 +60,11 @@ fleet-rlm serve-mcp --transport stdio
 fleet-rlm init --list
 ```
 
-### Terminal chat surfaces
+## Runtime Notes
 
-- `fleet` starts the standalone interactive chat launcher (Ink runtime path).
-- `fleet-rlm chat` starts the in-process terminal chat.
-- OpenTUI workflows and setup are documented in the guides (see links below) because they require additional local tooling.
+- Product chat transport is WS-first (`/api/v1/ws/chat`).
+- Runtime model updates from Settings are hot-applied in-process (`/api/v1/runtime/settings`) and reflected on `/api/v1/runtime/status`.
+- Secret inputs in Runtime Settings are write-only.
 
 ## Running From Source (Contributors)
 
@@ -87,17 +75,9 @@ uv run fleet web
 uv run fastapi dev
 ```
 
-Frontend build workflow (when validating packaged Web UI assets):
+For release/packaging workflows, `uv build` now runs frontend build sync automatically (requires `bun` in repo checkouts that include `src/frontend`).
 
-```bash
-# from repo root
-cd src/frontend
-bun install --frozen-lockfile
-bun run build
-cd ../..
-```
-
-Use the full contributor setup (frontend builds, env/bootstrap, quality gates) in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Use full contributor setup and quality gates in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Architecture Overview
 

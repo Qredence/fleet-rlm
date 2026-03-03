@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.4.93"
+version = "0.4.94"
 description = "Recursive Language Models with DSPy + Modal and an integrated Web UI for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -112,6 +112,8 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["fleet_rlm*"]
+namespaces = false
 
 [tool.setuptools.package-data]
 "fleet_rlm._scaffold" = ["**/*.md", "**/*.py", "**/*.json"]

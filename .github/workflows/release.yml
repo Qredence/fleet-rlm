@@ -129,11 +129,19 @@ jobs:
         with:
           version: "latest"
 
+      - name: Set up Bun for frontend packaging
+        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
+        with:
+          bun-version: "1.2.10"
+
       - name: Clean previous builds
         run: rm -rf dist build
 
       - name: Build distributions
         run: uv build
+
+      - name: Verify packaged frontend assets
+        run: uv run python scripts/check_wheel_frontend_sync.py
 
       - name: Verify distributions
         run: uvx twine check dist/*
