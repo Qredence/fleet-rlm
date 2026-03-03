@@ -33,9 +33,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SettingsDialog } from "@/features/SettingsDialog";
-import { PricingDialog } from "@/features/PricingDialog";
-import { IntegrationsDialog } from "@/features/IntegrationsDialog";
-import { LoginDialog } from "@/features/LoginDialog";
+import { PricingDialog } from "./PricingDialog";
+import { IntegrationsDialog } from "./IntegrationsDialog";
+import { LoginDialog } from "./LoginDialog";
 import type { SettingsSection } from "@/features/settings/types";
 import { cn } from "@/components/ui/utils";
 
@@ -98,7 +98,7 @@ export function UserMenu() {
           <button
             className={cn(
               "flex items-center gap-1.5 rounded-lg p-1 transition-colors",
-              "hover:bg-muted focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+              "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               isMobile && "touch-target justify-center",
             )}
             aria-label="User menu"
@@ -121,7 +121,7 @@ export function UserMenu() {
           </button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="end" className="w-[220px]">
+        <DropdownMenuContent align="end" className="w-55">
           {/* User info header */}
           <DropdownMenuLabel className="p-3">
             <div className="flex items-center gap-2.5">

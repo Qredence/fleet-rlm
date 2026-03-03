@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -61,12 +62,63 @@ _SENSITIVE_KEY_MARKERS = (
 )
 
 
-def resolve_env_path() -> Path:
-    """Resolve the project-local .env path by searching for pyproject.toml."""
-    for parent in [Path.cwd(), *Path.cwd().parents]:
-        if (parent / "pyproject.toml").exists():
-            return parent / ".env"
-    return Path.cwd() / ".env"
+def resolve_env_path(*, start_paths: Sequence[Path] | None = None) -> Path:
+    """Resolve the project-local .env path by searching for pyproject.toml.
+
+    Priority order:
+    1) Explicit ``FLEET_RLM_ENV_PATH`` override (if set)
+    2) Upward search from provided ``start_paths`` (or current working directory)
+    3) Fallback to ``<first-start-path>/.env``
+    """
+    explicit = (os.getenv("FLEET_RLM_ENV_PATH") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+
+    roots = list(start_paths) if start_paths else [Path.cwd()]
+    seen: set[Path] = set()
+    for root in roots:
+        normalized = root if root.is_dir() else root.parent
+        for parent in [normalized, *normalized.parents]:
+            if parent in seen:
+                continue
+            seen.add(parent)
+            if (parent / "pyproject.toml").exists():
+                return parent / ".env"
+
+    fallback_root = roots[0] if roots else Path.cwd()
+    fallback_root = fallback_root if fallback_root.is_dir() else fallback_root.parent
+    return fallback_root / ".env"
+
+
+def _read_env_file_values(path: Path) -> dict[str, str]:
+    """Best-effort .env parser used for runtime snapshot precedence."""
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+
+        value = value.strip()
+        if len(value) >= 2 and (
+            (value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")
+        ):
+            value = value[1:-1]
+
+        values[key] = value
+
+    return values
 
 
 def requested_keys(
@@ -104,13 +156,18 @@ def get_settings_snapshot(
     *,
     keys: list[str],
     extra_values: Mapping[str, str | None] | None = None,
+    env_path: Path | None = None,
 ) -> dict[str, Any]:
     """Build a masked settings snapshot for the requested keys."""
     extras = dict(extra_values or {})
+    resolved_env_path = env_path or resolve_env_path()
+    file_values = _read_env_file_values(resolved_env_path)
     raw_values: dict[str, str] = {}
 
     for key in keys:
-        env_value = os.environ.get(key)
+        env_value = file_values.get(key)
+        if env_value is None:
+            env_value = os.environ.get(key)
         if env_value is not None:
             raw_values[key] = env_value
             continue
@@ -121,10 +178,8 @@ def get_settings_snapshot(
         key: mask_secret(value) if should_mask_key(key) else value
         for key, value in raw_values.items()
     }
-    env_path = resolve_env_path()
-
     return {
-        "env_path": str(env_path),
+        "env_path": str(resolved_env_path),
         "keys": keys,
         "values": masked_values,
         "masked_values": masked_values,

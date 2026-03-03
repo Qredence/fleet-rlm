@@ -18,7 +18,7 @@ import { AppProviders } from "@/app/providers/AppProviders";
 import { DesktopShell } from "@/app/layout/DesktopShell";
 import { MobileShell } from "@/app/layout/MobileShell";
 import { RouteSync } from "@/app/layout/RouteSync";
-import { CommandPalette } from "@/features/CommandPalette";
+import { CommandPalette } from "@/features/shell/CommandPalette";
 import { useIsMobile } from "@/components/ui/use-mobile";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -63,7 +63,7 @@ export function RootHydrateFallback() {
     >
       <div className="flex flex-col items-center gap-4">
         {/* Pulsing skeleton blocks that match the app's visual language */}
-        <div className="flex flex-col gap-3 w-[280px]">
+        <div className="flex w-70 flex-col gap-3">
           <div className="h-3 w-20 rounded-md bg-muted animate-pulse mx-auto" />
           <div className="h-2 w-40 rounded-md bg-muted animate-pulse mx-auto" />
         </div>

@@ -10,9 +10,12 @@
  * ```
  */
 import { useQuery } from "@tanstack/react-query";
-import { isMockMode } from "@/lib/api/config";
-import { mockTaxonomy } from "@/lib/data/mock-skills";
-import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
+import {
+  getCapabilityStatus,
+  type DataSource,
+  createFallbackPayload,
+} from "@/lib/api/capabilities";
 import type { TaxonomyNode } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -43,7 +46,7 @@ interface UseTaxonomyReturn {
 }
 
 export function useTaxonomy(): UseTaxonomyReturn {
-  const mock = isMockMode();
+  const mock = rlmApiConfig.mockMode;
 
   type TaxonomyPayload = {
     taxonomy: TaxonomyNode[];
@@ -56,7 +59,7 @@ export function useTaxonomy(): UseTaxonomyReturn {
     queryFn: async ({ signal }) => {
       if (mock) {
         return {
-          taxonomy: mockTaxonomy,
+          taxonomy: [],
           dataSource: "mock" as const,
           degradedReason: undefined,
         } satisfies TaxonomyPayload;
@@ -64,10 +67,10 @@ export function useTaxonomy(): UseTaxonomyReturn {
 
       const capability = await getCapabilityStatus("taxonomy", signal);
       if (!capability.available) {
-        return createFallbackPayload("taxonomy", mockTaxonomy, capability, "Taxonomy");
+        return createFallbackPayload("taxonomy", [], capability, "Taxonomy");
       }
 
-      return createFallbackPayload("taxonomy", mockTaxonomy, capability, "Taxonomy");
+      return createFallbackPayload("taxonomy", [], capability, "Taxonomy");
     },
     staleTime: mock ? Infinity : undefined,
   });

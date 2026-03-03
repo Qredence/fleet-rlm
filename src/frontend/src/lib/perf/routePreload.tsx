@@ -72,7 +72,7 @@ const navPreloadMap: Partial<Record<NavItem, RouteKey>> = {
 function RouteFallback() {
   return (
     <div
-      className="flex min-h-[240px] w-full items-center justify-center"
+      className="flex min-h-60 w-full items-center justify-center"
       style={{ fontFamily: "var(--font-family)" }}
     >
       <div className="flex flex-col items-center gap-3">

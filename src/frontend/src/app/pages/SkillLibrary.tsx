@@ -8,7 +8,7 @@ import { typo } from "@/lib/config/typo";
 import type { Skill } from "@/lib/data/types";
 import { SkillLibraryHeaderControls } from "@/features/skill-library/SkillLibraryHeaderControls";
 import { PullToRefreshIndicator } from "@/features/skill-library/PullToRefreshIndicator";
-import { SkillCard } from "@/features/SkillCard";
+import { SkillCard } from "@/features/skill-library/SkillCard";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useSkills } from "@/hooks/useSkills";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
@@ -236,7 +236,7 @@ export function SkillLibrary() {
           <div
             className={cn(
               "w-full min-w-0 mx-auto",
-              isMobile ? "px-4 py-4" : "px-6 py-6 max-w-[800px]",
+              isMobile ? "px-4 py-4" : "px-6 py-6 max-w-200",
             )}
           >
             {isDegradedData && (

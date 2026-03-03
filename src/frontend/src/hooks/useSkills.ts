@@ -15,7 +15,7 @@
  * ```
  */
 import { useQuery } from "@tanstack/react-query";
-import { isMockMode } from "@/lib/api/config";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { mockSkills, generatedSkillMd } from "@/lib/data/mock-skills";
 import type { TaskListParams } from "@/lib/api/endpoints";
 import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
@@ -70,7 +70,7 @@ interface UseSkillsReturn {
 }
 
 export function useSkills(options?: UseSkillsOptions): UseSkillsReturn {
-  const mock = isMockMode();
+  const mock = rlmApiConfig.mockMode;
 
   const params: TaskListParams | undefined = options
     ? {
@@ -132,7 +132,7 @@ interface UseSkillReturn {
 }
 
 export function useSkill(id: string | null): UseSkillReturn {
-  const mock = isMockMode();
+  const mock = rlmApiConfig.mockMode;
 
   const query = useQuery({
     queryKey: skillKeys.detail(id ?? ""),
@@ -167,7 +167,7 @@ interface UseSkillContentReturn {
 }
 
 export function useSkillContent(id: string | null): UseSkillContentReturn {
-  const mock = isMockMode();
+  const mock = rlmApiConfig.mockMode;
 
   const query = useQuery({
     queryKey: skillKeys.content(id ?? ""),

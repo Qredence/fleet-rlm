@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import sys
 from types import SimpleNamespace
 
@@ -32,12 +33,18 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     planner_calls: list[str | None] = []
     delegate_calls: list[str | None] = []
 
-    def _planner_factory(model_name=None):
+    def _planner_factory(*, model_name=None, env_file=None):
+        _ = env_file
         planner_calls.append(model_name)
         return planner
 
-    def _delegate_factory(model_name=None, default_max_tokens=None):
-        _ = default_max_tokens
+    def _delegate_factory(
+        *,
+        model_name=None,
+        env_file=None,
+        default_max_tokens=None,
+    ):
+        _ = env_file, default_max_tokens
         delegate_calls.append(model_name)
         return delegate
 
@@ -85,6 +92,25 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     assert planner_calls[-1] == "openai/gpt-4o-mini"
     assert delegate_calls[-1] == "openai/gpt-4.1-mini"
     assert os.environ.get("SECRET_NAME") == "ALT_SECRET"
+
+
+def test_runtime_settings_patch_writes_to_configured_env_path(
+    local_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env"
+    local_client.app.state.server_state.config.env_path = env_path
+
+    response = local_client.patch(
+        "/api/v1/runtime/settings",
+        json={"updates": {"DSPY_LM_MODEL": "openai/gpt-4.1-mini"}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["env_path"] == str(env_path)
+    assert env_path.exists()
+    assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in env_path.read_text()
 
 
 def test_runtime_settings_patch_non_local_forbidden(staging_client: TestClient):
@@ -184,7 +210,7 @@ def test_runtime_lm_smoke_success(
 
     monkeypatch.setattr(
         "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
-        lambda model_name=None: _FakeLM(),
+        lambda model_name=None, env_file=None: _FakeLM(),
     )
 
     response = local_client.post("/api/v1/runtime/tests/lm")
@@ -201,6 +227,10 @@ def test_runtime_status_uses_cached_results(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    local_client.app.state.server_state.config.agent_model = None
+    local_client.app.state.server_state.config.agent_delegate_model = None
+    local_client.app.state.server_state.config.agent_delegate_small_model = None
+
     local_client.app.state.server_state.runtime_test_results = {
         "modal": {
             "kind": "modal",
@@ -243,3 +273,89 @@ def test_runtime_status_uses_cached_results(
     assert payload["active_models"]["planner"] == "openai/gpt-4o-mini"
     assert payload["active_models"]["delegate"] == "openai/gpt-4.1-mini"
     assert payload["active_models"]["delegate_small"] == "openai/gpt-4.1-nano"
+
+
+def test_runtime_volume_tree_maps_backend_errors_to_502(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.list_volume_tree",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
+    )
+
+    response = local_client.get("/api/v1/runtime/volume/tree")
+
+    assert response.status_code == 502
+    assert "Volume listing failed" in response.json().get("detail", "")
+
+
+def test_runtime_volume_file_maps_not_found_errors_to_404(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
+    )
+
+    response = local_client.get("/api/v1/runtime/volume/file", params={"path": "/x"})
+
+    assert response.status_code == 404
+    assert response.json().get("detail") == "File not found."
+
+
+def test_runtime_volume_file_maps_directory_errors_to_400(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
+    )
+
+    response = local_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/folder"},
+    )
+
+    assert response.status_code == 400
+    assert response.json().get("detail") == "Path must point to a file."
+
+
+def test_runtime_volume_file_maps_unknown_errors_to_502(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_client.app.state.server_state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),
+    )
+
+    response = local_client.get("/api/v1/runtime/volume/file", params={"path": "/x"})
+
+    assert response.status_code == 502
+    assert "Volume file read failed" in response.json().get("detail", "")
+
+
+def test_runtime_volume_tree_rejects_invalid_max_depth(
+    local_client: TestClient,
+) -> None:
+    response = local_client.get("/api/v1/runtime/volume/tree", params={"max_depth": 0})
+
+    assert response.status_code == 422
+
+
+def test_runtime_volume_file_rejects_invalid_max_bytes(
+    local_client: TestClient,
+) -> None:
+    response = local_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/x", "max_bytes": 0},
+    )
+
+    assert response.status_code == 422

@@ -11,6 +11,7 @@ import {
   type RuntimeEditableKey,
   type RuntimeSecretEditableKey,
 } from "@/features/settings/useRuntimeSettings";
+import { shouldHydrateRuntimeForm } from "@/features/settings/runtimePaneHydration";
 import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
 
 type RuntimeField = {
@@ -25,7 +26,8 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "DSPY_LM_MODEL",
     label: "LM Model",
-    description: "Planner model identifier (for example: openai/gpt-4o-mini).",
+    description:
+      "Planner model identifier (for example: openai/gemini-3.1-pro).",
   },
   {
     key: "DSPY_LLM_API_KEY",
@@ -83,7 +85,9 @@ const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(
   RUNTIME_SECRET_KEYS,
 );
 
-function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditableKey {
+function isRuntimeSecretKey(
+  key: RuntimeEditableKey,
+): key is RuntimeSecretEditableKey {
   return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
 }
 
@@ -131,22 +135,8 @@ export function RuntimePane() {
     Partial<Record<RuntimeSecretEditableKey, boolean>>
   >({});
 
-  useEffect(() => {
-    const snapshot = settingsQuery.data;
-    if (!snapshot) return;
-    const nextBaseline = snapshot.values ?? {};
-    const nextFormValues = { ...nextBaseline };
-    for (const key of RUNTIME_SECRET_KEYS) {
-      nextFormValues[key] = "";
-    }
-    setBaselineValues(nextBaseline);
-    setFormValues(nextFormValues);
-    setClearSecretFlags({});
-  }, [settingsQuery.data]);
-
   const clearedSecrets = useMemo(
-    () =>
-      RUNTIME_SECRET_KEYS.filter((key) => clearSecretFlags[key] === true),
+    () => RUNTIME_SECRET_KEYS.filter((key) => clearSecretFlags[key] === true),
     [clearSecretFlags],
   );
 
@@ -172,6 +162,20 @@ export function RuntimePane() {
   const modalTest = status?.tests?.modal;
   const lmTest = status?.tests?.lm;
   const activeModels = status?.active_models;
+
+  useEffect(() => {
+    const snapshot = settingsQuery.data;
+    if (!snapshot) return;
+    if (!shouldHydrateRuntimeForm(snapshot, hasUnsavedRuntimeChanges)) return;
+    const nextBaseline = snapshot.values ?? {};
+    const nextFormValues = { ...nextBaseline };
+    for (const key of RUNTIME_SECRET_KEYS) {
+      nextFormValues[key] = "";
+    }
+    setBaselineValues(nextBaseline);
+    setFormValues(nextFormValues);
+    setClearSecretFlags({});
+  }, [hasUnsavedRuntimeChanges, settingsQuery.data]);
 
   const showUnsavedRuntimeTestWarning = () => {
     toast.error("Save runtime settings before testing", {
@@ -204,6 +208,20 @@ export function RuntimePane() {
     saveSettings.mutate(updates, {
       onSuccess: (result) => {
         const updated = result.updated ?? [];
+        if (updated.length > 0) {
+          setBaselineValues((prev) => ({
+            ...prev,
+            ...updates,
+          }));
+        }
+        setFormValues((prev) => {
+          const next = { ...prev };
+          for (const key of RUNTIME_SECRET_KEYS) {
+            next[key] = "";
+          }
+          return next;
+        });
+        setClearSecretFlags({});
         toast.success("Runtime settings saved", {
           description:
             updated.length > 0
@@ -353,18 +371,23 @@ export function RuntimePane() {
                     }));
                   }
                 }}
-                className="w-[260px] max-w-[50vw]"
+                className="w-65 max-w-[50vw]"
               />
               {field.isSecret && secretKey && (
                 <>
                   <p className="text-xs text-muted-foreground">
                     Write-only input. Configured value:{" "}
-                    {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
+                    {maskedValues[secretKey]
+                      ? maskedValues[secretKey]
+                      : "not set"}
+                    .
                   </p>
                   <Button
                     type="button"
                     size="sm"
-                    variant={clearSecretFlags[secretKey] ? "secondary" : "outline"}
+                    variant={
+                      clearSecretFlags[secretKey] ? "secondary" : "outline"
+                    }
                     className="rounded-lg"
                     onClick={() => {
                       const nextClear = !(clearSecretFlags[secretKey] ?? false);

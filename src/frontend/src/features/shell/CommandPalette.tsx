@@ -8,7 +8,7 @@ import {
   Search,
   Zap,
   BarChart3,
-  GitFork,
+  HardDrive,
   Brain,
   Plus,
   Moon,
@@ -39,7 +39,7 @@ interface PageItem {
 const pages: PageItem[] = [
   { key: "new", label: "Chat", icon: Zap },
   { key: "skills", label: "Skill Library", icon: Layers },
-  { key: "taxonomy", label: "Taxonomy Browser", icon: GitFork },
+  { key: "taxonomy", label: "Volume Browser", icon: HardDrive },
   { key: "memory", label: "Memory", icon: Brain },
   { key: "analytics", label: "Analytics Dashboard", icon: BarChart3 },
 ];
@@ -104,7 +104,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100]">
+    <div className="fixed inset-0 z-100">
       <div
         className="absolute inset-0"
         style={{ backgroundColor: "var(--glass-overlay)" }}
@@ -114,7 +114,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
       <div className="absolute inset-0 flex items-start justify-center pt-[min(20vh,120px)] px-4">
         <div
-          className="w-full max-w-[560px] overflow-hidden border border-border-subtle"
+          className="w-full max-w-140 overflow-hidden border border-border-subtle"
           style={{
             borderRadius: "var(--radius-card)",
             backgroundColor: "var(--popover)",
@@ -148,7 +148,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             </div>
 
             <Command.List
-              className="max-h-[360px] overflow-y-auto p-2"
+              className="max-h-90 overflow-y-auto p-2"
               style={{ overscrollBehavior: "contain" }}
             >
               <Command.Empty
@@ -178,7 +178,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       title={supported ? undefined : BACKEND_CAPABILITY_TOOLTIP}
                       onSelect={() => navigateToPage(page.key)}
                       className={cn(
-                        "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-[40px]",
+                        "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-10",
                         "text-foreground data-[selected=true]:bg-muted",
                         !supported && "opacity-50",
                       )}
@@ -212,7 +212,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     close();
                   }}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-[40px]",
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-10",
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
@@ -232,7 +232,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     close();
                   }}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-[40px]",
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-10",
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
@@ -257,7 +257,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     close();
                   }}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-[40px]",
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-10",
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >

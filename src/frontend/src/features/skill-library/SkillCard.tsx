@@ -4,7 +4,7 @@ import type { Skill } from "@/lib/data/types";
 import { springs } from "@/lib/config/motion-config";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/components/ui/utils";
-import { SkillBadge } from "@/features/SkillBadge";
+import { SkillBadge } from "./SkillBadge";
 
 const statusVariantMap: Record<
   string,

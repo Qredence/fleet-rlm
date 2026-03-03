@@ -18,8 +18,7 @@ interface ResolvedChipProps {
  * ResolvedChip — a compact, muted pill that shows a resolved/confirmed
  * answer in HITL and clarification flows.
  *
- * Typography is driven by `data-slot="resolved-chip"` in `theme.css`
- * so it can be re-themed from CSS alone.
+ * Typography is utility-class driven for consistency across themes.
  *
  * @example
  * ```tsx
@@ -47,7 +46,12 @@ function ResolvedChip({ icon, children, className }: ResolvedChipProps) {
           {icon}
         </span>
       )}
-      <span data-slot="resolved-chip-label">{children}</span>
+      <span
+        data-slot="resolved-chip-label"
+        className="text-sm font-medium leading-5"
+      >
+        {children}
+      </span>
     </div>
   );
 }

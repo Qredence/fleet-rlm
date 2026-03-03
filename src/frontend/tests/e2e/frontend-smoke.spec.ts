@@ -10,7 +10,7 @@ test("loads app shell without router crash", async ({ page }) => {
     page.getByRole("button", { name: "Skills", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Taxonomy", exact: true }),
+    page.getByRole("button", { name: "Volumes", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Memory", exact: true }),
@@ -57,7 +57,7 @@ test("navigates primary tabs without hitting route error boundary", async ({
 
   const tabExpectations = [
     { label: "Skills", content: "Skill Library" },
-    { label: "Taxonomy", content: "Skill Taxonomy" },
+    { label: "Volumes", content: "Volume Browser" },
     { label: "Memory", content: "Memory" },
     { label: "Analytics", content: "Analytics" },
   ];

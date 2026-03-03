@@ -107,7 +107,7 @@ function Reasoning({
         onClick={() => setIsOpen((prev) => !prev)}
         className={cn(
           "group flex items-center gap-1.5 w-full py-1.5 cursor-pointer",
-          "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50 rounded-sm",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded-sm",
           "transition-colors duration-150",
         )}
         aria-expanded={isOpen}
@@ -158,7 +158,7 @@ function Reasoning({
             }
             className="overflow-hidden"
           >
-            <div className="border-l-2 border-border-subtle ml-[6px] pl-3 pb-1 pt-1 space-y-2">
+            <div className="border-l-2 border-border-subtle ml-1.5 pl-3 pb-1 pt-1 space-y-2">
               {parts.map((part, i) => (
                 <div
                   key={i}

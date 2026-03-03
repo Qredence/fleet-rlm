@@ -4,6 +4,7 @@ import pytest
 
 def test_default_config(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("VOLUME_NAME", raising=False)
+    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
     monkeypatch.delenv("DSPY_DELEGATE_LM_MODEL", raising=False)
     monkeypatch.delenv("DSPY_DELEGATE_LM_MAX_TOKENS", raising=False)
     cfg = ServerRuntimeConfig()
@@ -15,6 +16,7 @@ def test_default_config(monkeypatch: pytest.MonkeyPatch):
     assert cfg.enable_adaptive_iters is True
     assert cfg.delegate_max_calls_per_turn == 8
     assert cfg.delegate_result_truncation_chars == 8000
+    assert cfg.agent_model is None
     assert cfg.agent_delegate_model is None
     assert cfg.agent_delegate_max_tokens == 64000
     assert cfg.rlm_max_depth == 2
@@ -36,6 +38,12 @@ def test_default_config_uses_volume_name_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VOLUME_NAME", "alt-volume")
     cfg = ServerRuntimeConfig()
     assert cfg.volume_name == "alt-volume"
+
+
+def test_default_config_uses_agent_model_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4.1-mini")
+    cfg = ServerRuntimeConfig()
+    assert cfg.agent_model == "openai/gpt-4.1-mini"
 
 
 def test_custom_config():

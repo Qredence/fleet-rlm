@@ -48,6 +48,8 @@ src/output/*
 output/
 output/*
 artifacts/
+!src/frontend/src/features/artifacts/
+!src/frontend/src/features/artifacts/*.tsx
 # Local agent/tooling state
 .claude/
 .claude/team/inboxes/

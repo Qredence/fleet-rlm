@@ -139,7 +139,7 @@ export function TaxonomyGraph() {
               onClick={() => applyLayout(mode)}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-button transition-colors",
-                "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                 isActive
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/50",

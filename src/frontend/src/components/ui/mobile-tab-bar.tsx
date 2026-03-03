@@ -1,7 +1,7 @@
 import {
   MessageSquare,
   Library,
-  GitFork,
+  HardDrive,
   Brain,
   BarChart3,
 } from "lucide-react";
@@ -20,7 +20,7 @@ import { cn } from "@/components/ui/utils";
 const tabs: { key: NavItem; label: string; icon: typeof MessageSquare }[] = [
   { key: "new", label: "Chat", icon: MessageSquare },
   { key: "skills", label: "Skills", icon: Library },
-  { key: "taxonomy", label: "Taxonomy", icon: GitFork },
+  { key: "taxonomy", label: "Volumes", icon: HardDrive },
   { key: "memory", label: "Memory", icon: Brain },
   { key: "analytics", label: "Analytics", icon: BarChart3 },
 ];
@@ -61,7 +61,7 @@ export function MobileTabBar() {
       >
         {/* Glass highlight — top edge specular rim */}
         <div
-          className="absolute inset-x-0 top-0 h-[1px] pointer-events-none"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px"
           style={{
             background:
               "linear-gradient(90deg, transparent 8%, var(--glass-tab-highlight) 50%, transparent 92%)",
@@ -102,7 +102,7 @@ export function MobileTabBar() {
                 }}
                 className={cn(
                   "relative flex-1 flex flex-col items-center justify-center gap-0.5",
-                  "touch-target min-w-[52px]",
+                  "touch-target min-w-13",
                   "transition-colors",
                   !isSupported && "opacity-50",
                 )}
@@ -110,7 +110,7 @@ export function MobileTabBar() {
               >
                 <Icon
                   className={cn(
-                    "size-[22px] transition-colors",
+                    "size-5.5 transition-colors",
                     isActive ? "text-accent" : "text-muted-foreground",
                   )}
                   strokeWidth={isActive ? 2.2 : 1.8}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,8 +17,14 @@ def _ui_server_state_isolation(reset_server_state):
 
 
 @pytest.fixture(autouse=True)
-def _stub_server_lm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_server_lm_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """Keep UI/server tests deterministic and fast by skipping env LM loading."""
+    env_path = tmp_path / ".env"
+    env_path.touch(exist_ok=True)
+    monkeypatch.setenv("FLEET_RLM_ENV_PATH", str(env_path))
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
     monkeypatch.setattr(

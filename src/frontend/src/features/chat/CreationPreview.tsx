@@ -34,7 +34,7 @@ import {
   QueueItemDescription,
 } from "@/components/ui/queue";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PhaseIndicator } from "@/features/PhaseIndicator";
+import { PhaseIndicator } from "./PhaseIndicator";
 
 interface Props {
   phase: CreationPhase;
@@ -294,7 +294,7 @@ export function CreationPreview({ phase, className }: Props) {
                           </div>
                           <Progress
                             value={score}
-                            className="h-1.5 [&>[data-slot=progress-indicator]]:bg-accent"
+                            className="h-1.5 *:data-[slot=progress-indicator]:bg-accent"
                           />
                         </div>
                       ))}

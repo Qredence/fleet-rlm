@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const HISTORY_KEY = "hax-fleet:chat-history:v1";
+const HISTORY_KEY = "hax-fleet:chat-history";
 const TAIL_FRAGMENT = "TAIL_FRAGMENT_EXECUTION_CANVAS_NO_TRUNCATION";
 const LONG_OUTPUT_TEXT =
   "Execution canvas deterministic payload for no-truncation verification. " +

@@ -11,17 +11,17 @@
     "type-check": "tsc -p tsconfig.app.json --noEmit",
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",
     "lint": "eslint src/",
-    "lint:robustness": "eslint src/components/shared/ToggleSwitch.tsx src/lib/api/capabilities.ts src/hooks/useSkills.ts src/hooks/useMemory.ts src/hooks/useTaxonomy.ts src/hooks/useAnalytics.ts src/hooks/useFilesystem.ts src/app/pages/SkillLibrary.tsx src/app/pages/MemoryPage.tsx src/app/pages/TaxonomyBrowser.tsx src/app/pages/AnalyticsDashboard.tsx src/app/pages/RouteErrorPage.tsx src/app/routes.ts src/lib/perf/lazyWithRetry.ts src/lib/perf/routePreload.tsx src/app/layout/TopHeader.tsx src/components/ui/mobile-tab-bar.tsx src/components/ui/nav-tab.tsx src/main.tsx",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "test:e2e": "playwright test",
-    "test:unit": "vitest run src",
-    "test:coverage": "vitest run src --coverage",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "api:sync-spec": "mkdir -p openapi && OPENAPI_SPEC_PATH=\"${OPENAPI_SPEC_PATH:-../../openapi.yaml}\" && cp \"$OPENAPI_SPEC_PATH\" openapi/fleet-rlm.openapi.yaml",
     "api:types": "openapi-typescript openapi/fleet-rlm.openapi.yaml -o src/lib/rlm-api/generated/openapi.ts",
     "api:sync": "bun run api:sync-spec && bun run api:types",
     "api:check": "bun run api:sync && git diff --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts && git diff --cached --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts",
-    "check": "bun run type-check && bun run lint:robustness && bun run test:unit && bun run build && bun run test:e2e"
+    "check": "bun run type-check && bun run lint && bun run test:unit && bun run build && bun run test:e2e"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.0",
@@ -36,7 +36,6 @@
     "@lezer/python": "^1.1.18",
     "@marijn/find-cluster-break": "^1.0.2",
     "@monaco-editor/react": "^4.7.0",
-    "@popperjs/core": "2.11.8",
     "@posthog/react": "^1.8.0",
     "@radix-ui/react-accordion": "1.2.3",
     "@radix-ui/react-alert-dialog": "1.1.6",
@@ -70,22 +69,15 @@
     "cmdk": "1.1.1",
     "codemirror": "^6.0.2",
     "crelt": "^1.0.6",
-    "date-fns": "3.6.0",
-    "embla-carousel-react": "8.6.0",
-    "input-otp": "1.4.2",
     "lucide-react": "^0.575.0",
     "motion": "12.34.3",
     "next-themes": "0.4.6",
     "posthog-js": "^1.353.1",
     "react": "^19.2.4",
-    "react-day-picker": "8.10.1",
     "react-dom": "^19.2.4",
-    "react-hook-form": "7.55.0",
     "react-resizable-panels": "2.1.7",
-    "react-responsive-masonry": "2.7.1",
     "react-router": "^7.13.1",
     "reactflow": "^11.11.4",
-    "recharts": "2.15.2",
     "sonner": "2.0.7",
     "streamdown": "^2.3.0",
     "style-mod": "^4.1.3",
@@ -105,6 +97,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.2.3",
     "@vitest/coverage-v8": "^3.2.4",
+    "jsdom": "^26.1.0",
     "autoprefixer": "^10.4.24",
     "eslint": "^9.39.3",
     "eslint-plugin-react-hooks": "^5.2.0",
@@ -118,12 +111,6 @@
     "typescript-eslint": "^8.56.0",
     "vite": "^7.3.1",
     "vitest": "^3.2.4"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "^7.0.0",
-      "react-router": "~7.5.2"
-    }
   },
   "trustedDependencies": [
     "@tailwindcss/oxide",

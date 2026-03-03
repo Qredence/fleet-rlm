@@ -62,9 +62,9 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "web":
         # Check if required Web UI/API dependencies are available.
         try:
-            import uvicorn  # noqa: F401
             import fastapi  # noqa: F401
             import jwt  # noqa: F401
+            import uvicorn  # noqa: F401
         except ImportError:
             print(
                 "Error: Required Web UI dependencies not found. "

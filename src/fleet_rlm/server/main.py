@@ -8,12 +8,14 @@ from fastapi import FastAPI, APIRouter
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
+from dotenv import load_dotenv
 
 from fleet_rlm import __version__
 from fleet_rlm.analytics.client import get_posthog_client, shutdown_posthog_client
 from fleet_rlm.analytics.config import PostHogConfig
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.db import DatabaseManager, FleetRepository
+from fleet_rlm.server.runtime_settings import resolve_env_path
 
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
@@ -29,6 +31,18 @@ from .routers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
+    """Load configured .env into process env before runtime initialization.
+
+    Local app sessions prioritize `.env` values to prevent stale inherited shell
+    variables from overriding persisted runtime settings.
+    """
+    load_dotenv(
+        dotenv_path=str(cfg.env_path),
+        override=cfg.app_env == "local",
+    )
 
 
 def _resolve_ui_dist_dir() -> Path | None:
@@ -127,10 +141,14 @@ def _initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
     """Load planner/delegate LMs into process state."""
     model_name = cfg.agent_model
     if model_name is None:
-        state.planner_lm = get_planner_lm_from_env()
+        state.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
     else:
-        state.planner_lm = get_planner_lm_from_env(model_name=model_name)
+        state.planner_lm = get_planner_lm_from_env(
+            env_file=cfg.env_path,
+            model_name=model_name,
+        )
     state.delegate_lm = get_delegate_lm_from_env(
+        env_file=cfg.env_path,
         model_name=cfg.agent_delegate_model,
         default_max_tokens=cfg.agent_delegate_max_tokens,
     )
@@ -167,7 +185,19 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
-    cfg = config or ServerRuntimeConfig()
+    if config is None:
+        env_path = resolve_env_path(
+            start_paths=[
+                Path(__file__).resolve().parent,
+                Path.cwd(),
+            ]
+        )
+        app_env = (os.getenv("APP_ENV") or "local").strip().lower()
+        load_dotenv(dotenv_path=str(env_path), override=app_env == "local")
+        cfg = ServerRuntimeConfig(env_path=env_path)
+    else:
+        cfg = config
+
     cfg.validate_startup_or_raise()
 
     @asynccontextmanager
@@ -175,6 +205,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         state = _build_server_state(cfg)
         app.state.server_state = state
 
+        _prime_runtime_env(cfg)
         await _initialize_persistence(state, cfg)
         _initialize_lms(state, cfg)
 

@@ -26,8 +26,9 @@ import {
 import { toast } from "sonner";
 import { typo } from "@/lib/config/typo";
 import type { FsNode } from "@/lib/data/types";
-import { isMockMode } from "@/lib/api/config";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { useFileContent } from "@/hooks/useFilesystem";
+import { SkillMarkdown } from "@/components/shared/SkillMarkdown";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -96,6 +97,14 @@ function isTextFile(name: string, mime?: string): boolean {
   return (
     textExts.some((ext) => name.endsWith(ext)) ||
     (mime?.startsWith("text/") ?? false)
+  );
+}
+
+function isMarkdownFile(name: string, mime?: string): boolean {
+  return (
+    name.endsWith(".md") ||
+    name.endsWith(".markdown") ||
+    mime === "text/markdown"
   );
 }
 
@@ -236,7 +245,8 @@ interface FileDetailProps {
 export function FileDetail({ file, className }: FileDetailProps) {
   const isMobile = useIsMobile();
   const isText = isTextFile(file.name, file.mime);
-  const mock = isMockMode();
+  const isMarkdown = isMarkdownFile(file.name, file.mime);
+  const mock = rlmApiConfig.mockMode;
 
   // In mock mode, use the static MOCK_FILE_CONTENT map for known paths.
   // In API mode, fetch real content via the useFileContent hook.
@@ -267,7 +277,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
 
   return (
     <ScrollArea className={cn("h-full", className)}>
-      <div className={cn("max-w-[800px] mx-auto", isMobile ? "p-4" : "p-6")}>
+      <div className={cn("max-w-200 mx-auto", isMobile ? "p-4" : "p-6")}>
         {/* File header */}
         <div className="flex items-start gap-3 mb-4">
           <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
@@ -385,17 +395,23 @@ export function FileDetail({ file, className }: FileDetailProps) {
 
               {/* Content display */}
               {resolvedContent && !isContentLoading ? (
-                <pre
-                  className="p-4 overflow-x-auto text-foreground whitespace-pre-wrap break-words"
-                  style={{
-                    fontFamily: "var(--font-family-mono)",
-                    fontSize: "var(--text-helper)",
-                    fontWeight: "var(--font-weight-regular)",
-                    lineHeight: "1.6",
-                  }}
-                >
-                  {resolvedContent}
-                </pre>
+                isMarkdown ? (
+                  <div className="p-4">
+                    <SkillMarkdown content={resolvedContent} />
+                  </div>
+                ) : (
+                  <pre
+                    className="p-4 overflow-x-auto text-foreground whitespace-pre-wrap wrap-break-word"
+                    style={{
+                      fontFamily: "var(--font-family-mono)",
+                      fontSize: "var(--text-helper)",
+                      fontWeight: "var(--font-weight-regular)",
+                      lineHeight: "1.6",
+                    }}
+                  >
+                    {resolvedContent}
+                  </pre>
+                )
               ) : !isContentLoading && !contentError ? (
                 /* No content available (mock mode, path not in map) */
                 <div className="p-4 flex flex-col items-center gap-2 text-center">
@@ -421,7 +437,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                 Binary file
               </p>
               <p
-                className="text-muted-foreground max-w-[300px]"
+                className="text-muted-foreground max-w-75"
                 style={typo.caption}
               >
                 This file cannot be previewed in the browser. Download it or

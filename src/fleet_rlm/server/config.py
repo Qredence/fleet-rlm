@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Literal, cast
 
 from pydantic import BaseModel, Field
@@ -12,13 +13,25 @@ from fleet_rlm._env_utils import (
     env_csv as _env_csv,
     env_int as _env_int,
 )
+from fleet_rlm.server.runtime_settings import resolve_env_path
 
 
 def _env_app_env() -> str:
     return (os.getenv("APP_ENV") or "local").strip().lower()
 
 
+def _resolve_server_env_path() -> Path:
+    """Resolve a stable .env path for server runtime settings."""
+    return resolve_env_path(
+        start_paths=[
+            Path(__file__).resolve().parent,
+            Path.cwd(),
+        ]
+    )
+
+
 class ServerRuntimeConfig(BaseModel):
+    env_path: Path = Field(default_factory=_resolve_server_env_path)
     app_env: Literal["local", "staging", "production"] = cast(
         Literal["local", "staging", "production"],
         _env_app_env(),
@@ -45,7 +58,9 @@ class ServerRuntimeConfig(BaseModel):
     ws_enforce_react_interlocutor: bool = True
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
     sandbox_provider: str = "modal"  # "modal", "local", "daytona"
-    agent_model: str | None = None  # Model identifier to use for the agent
+    agent_model: str | None = Field(
+        default_factory=lambda: os.getenv("DSPY_LM_MODEL") or None
+    )  # Model identifier to use for the agent
     agent_delegate_model: str | None = Field(
         default_factory=lambda: os.getenv("DSPY_DELEGATE_LM_MODEL") or None
     )
