@@ -11,6 +11,7 @@ import {
   type RuntimeEditableKey,
   type RuntimeSecretEditableKey,
 } from "@/features/settings/useRuntimeSettings";
+import { shouldHydrateRuntimeForm } from "@/features/settings/runtimePaneHydration";
 import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
 
 type RuntimeField = {
@@ -134,19 +135,6 @@ export function RuntimePane() {
     Partial<Record<RuntimeSecretEditableKey, boolean>>
   >({});
 
-  useEffect(() => {
-    const snapshot = settingsQuery.data;
-    if (!snapshot) return;
-    const nextBaseline = snapshot.values ?? {};
-    const nextFormValues = { ...nextBaseline };
-    for (const key of RUNTIME_SECRET_KEYS) {
-      nextFormValues[key] = "";
-    }
-    setBaselineValues(nextBaseline);
-    setFormValues(nextFormValues);
-    setClearSecretFlags({});
-  }, [settingsQuery.data]);
-
   const clearedSecrets = useMemo(
     () => RUNTIME_SECRET_KEYS.filter((key) => clearSecretFlags[key] === true),
     [clearSecretFlags],
@@ -174,6 +162,20 @@ export function RuntimePane() {
   const modalTest = status?.tests?.modal;
   const lmTest = status?.tests?.lm;
   const activeModels = status?.active_models;
+
+  useEffect(() => {
+    const snapshot = settingsQuery.data;
+    if (!snapshot) return;
+    if (!shouldHydrateRuntimeForm(snapshot, hasUnsavedRuntimeChanges)) return;
+    const nextBaseline = snapshot.values ?? {};
+    const nextFormValues = { ...nextBaseline };
+    for (const key of RUNTIME_SECRET_KEYS) {
+      nextFormValues[key] = "";
+    }
+    setBaselineValues(nextBaseline);
+    setFormValues(nextFormValues);
+    setClearSecretFlags({});
+  }, [hasUnsavedRuntimeChanges, settingsQuery.data]);
 
   const showUnsavedRuntimeTestWarning = () => {
     toast.error("Save runtime settings before testing", {
@@ -206,6 +208,20 @@ export function RuntimePane() {
     saveSettings.mutate(updates, {
       onSuccess: (result) => {
         const updated = result.updated ?? [];
+        if (updated.length > 0) {
+          setBaselineValues((prev) => ({
+            ...prev,
+            ...updates,
+          }));
+        }
+        setFormValues((prev) => {
+          const next = { ...prev };
+          for (const key of RUNTIME_SECRET_KEYS) {
+            next[key] = "";
+          }
+          return next;
+        });
+        setClearSecretFlags({});
         toast.success("Runtime settings saved", {
           description:
             updated.length > 0

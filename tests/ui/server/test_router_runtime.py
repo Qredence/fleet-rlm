@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import sys
 from types import SimpleNamespace
 
@@ -32,12 +33,18 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     planner_calls: list[str | None] = []
     delegate_calls: list[str | None] = []
 
-    def _planner_factory(model_name=None):
+    def _planner_factory(*, model_name=None, env_file=None):
+        _ = env_file
         planner_calls.append(model_name)
         return planner
 
-    def _delegate_factory(model_name=None, default_max_tokens=None):
-        _ = default_max_tokens
+    def _delegate_factory(
+        *,
+        model_name=None,
+        env_file=None,
+        default_max_tokens=None,
+    ):
+        _ = env_file, default_max_tokens
         delegate_calls.append(model_name)
         return delegate
 
@@ -85,6 +92,25 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     assert planner_calls[-1] == "openai/gpt-4o-mini"
     assert delegate_calls[-1] == "openai/gpt-4.1-mini"
     assert os.environ.get("SECRET_NAME") == "ALT_SECRET"
+
+
+def test_runtime_settings_patch_writes_to_configured_env_path(
+    local_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env"
+    local_client.app.state.server_state.config.env_path = env_path
+
+    response = local_client.patch(
+        "/api/v1/runtime/settings",
+        json={"updates": {"DSPY_LM_MODEL": "openai/gpt-4.1-mini"}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["env_path"] == str(env_path)
+    assert env_path.exists()
+    assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in env_path.read_text()
 
 
 def test_runtime_settings_patch_non_local_forbidden(staging_client: TestClient):
@@ -184,7 +210,7 @@ def test_runtime_lm_smoke_success(
 
     monkeypatch.setattr(
         "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
-        lambda model_name=None: _FakeLM(),
+        lambda model_name=None, env_file=None: _FakeLM(),
     )
 
     response = local_client.post("/api/v1/runtime/tests/lm")
@@ -201,6 +227,10 @@ def test_runtime_status_uses_cached_results(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    local_client.app.state.server_state.config.agent_model = None
+    local_client.app.state.server_state.config.agent_delegate_model = None
+    local_client.app.state.server_state.config.agent_delegate_small_model = None
+
     local_client.app.state.server_state.runtime_test_results = {
         "modal": {
             "kind": "modal",

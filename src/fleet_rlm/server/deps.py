@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Annotated, Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, WebSocket
+
 from fleet_rlm.db import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
@@ -174,11 +176,12 @@ async def get_react_agent(
 
     # Use the globally configured planner_lm if available, otherwise fetch a fresh one
     planner_lm = state.planner_lm or get_planner_lm_from_env(
-        model_name=config.agent_model
+        env_file=config.env_path, model_name=config.agent_model
     )
     if planner_lm is None:
         raise HTTPException(status_code=503, detail="Planner LM not configured")
     delegate_lm = state.delegate_lm or get_delegate_lm_from_env(
+        env_file=config.env_path,
         model_name=config.agent_delegate_model,
         default_max_tokens=config.agent_delegate_max_tokens,
     )

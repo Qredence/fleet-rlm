@@ -157,6 +157,7 @@ async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot
             secret_name=state.config.secret_name,
             volume_name=state.config.volume_name,
         ),
+        env_path=state.config.env_path,
     )
     return RuntimeSettingsSnapshot(**snapshot)
 
@@ -181,7 +182,7 @@ async def patch_runtime_settings(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    result = apply_env_updates(updates=normalized)
+    result = apply_env_updates(updates=normalized, env_path=config.env_path)
 
     if "SECRET_NAME" in normalized:
         resolved_secret_name = normalized["SECRET_NAME"].strip()
@@ -206,8 +207,12 @@ async def patch_runtime_settings(
         config.agent_delegate_small_model = resolved_delegate_small_model or None
 
     # Rebuild planner LM in-process to apply updated env values immediately.
-    state.planner_lm = get_planner_lm_from_env(model_name=config.agent_model)
+    state.planner_lm = get_planner_lm_from_env(
+        env_file=config.env_path,
+        model_name=config.agent_model,
+    )
     state.delegate_lm = get_delegate_lm_from_env(
+        env_file=config.env_path,
         model_name=config.agent_delegate_model,
         default_max_tokens=config.agent_delegate_max_tokens,
     )
@@ -310,7 +315,10 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
 
     started = time.perf_counter()
     try:
-        planner_lm = get_planner_lm_from_env(model_name=state.config.agent_model)
+        planner_lm = get_planner_lm_from_env(
+            env_file=state.config.env_path,
+            model_name=state.config.agent_model,
+        )
         if planner_lm is None:
             raise RuntimeError(
                 "Failed to construct planner LM from environment settings."
@@ -327,6 +335,7 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
         ok = bool(output_preview)
         state.planner_lm = planner_lm
         state.delegate_lm = get_delegate_lm_from_env(
+            env_file=state.config.env_path,
             model_name=state.config.agent_delegate_model,
             default_max_tokens=state.config.agent_delegate_max_tokens,
         )

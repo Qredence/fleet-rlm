@@ -13,7 +13,13 @@ from fleet_rlm.server.runtime_settings import (
 )
 
 
-def test_get_settings_snapshot_masks_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_settings_snapshot_masks_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.touch(exist_ok=True)
+    monkeypatch.setenv("FLEET_RLM_ENV_PATH", str(env_path))
     monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o-mini")
     monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-super-secret-key")
     monkeypatch.delenv("SECRET_NAME", raising=False)
@@ -27,6 +33,28 @@ def test_get_settings_snapshot_masks_secrets(monkeypatch: pytest.MonkeyPatch) ->
     assert snapshot["values"]["DSPY_LLM_API_KEY"] != "sk-super-secret-key"
     assert "..." in snapshot["values"]["DSPY_LLM_API_KEY"]
     assert snapshot["values"]["SECRET_NAME"] == "LITELLM"
+
+
+def test_get_settings_snapshot_prefers_configured_env_file_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "DSPY_LM_MODEL=openai/gpt-4.1\nDSPY_LLM_API_KEY=sk-from-file\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-from-env")
+
+    snapshot = get_settings_snapshot(
+        keys=["DSPY_LM_MODEL", "DSPY_LLM_API_KEY"],
+        env_path=env_path,
+    )
+
+    assert snapshot["env_path"] == str(env_path)
+    assert snapshot["values"]["DSPY_LM_MODEL"] == "openai/gpt-4.1"
+    assert snapshot["values"]["DSPY_LLM_API_KEY"] != "sk-from-env"
 
 
 def test_normalize_updates_enforces_allowlist() -> None:

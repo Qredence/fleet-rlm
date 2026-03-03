@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RuntimePane } from "@/features/settings/RuntimePane";
+import { shouldHydrateRuntimeForm } from "@/features/settings/runtimePaneHydration";
 
 vi.mock("@/features/settings/useRuntimeSettings", () => ({
   useRuntimeSettings: () => ({
@@ -90,6 +91,12 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
 }));
 
 describe("RuntimePane", () => {
+  it("hydrates runtime form only when snapshot exists and no unsaved edits", () => {
+    expect(shouldHydrateRuntimeForm(undefined, false)).toBe(false);
+    expect(shouldHydrateRuntimeForm({ values: {} }, true)).toBe(false);
+    expect(shouldHydrateRuntimeForm({ values: {} }, false)).toBe(true);
+  });
+
   it("renders masked runtime values and smoke-test states", () => {
     const html = renderToStaticMarkup(<RuntimePane />);
 
