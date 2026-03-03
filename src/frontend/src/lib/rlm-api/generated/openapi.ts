@@ -151,7 +151,7 @@ export interface components {
       ok?: boolean;
       /**
        * Version
-       * @default 0.4.92
+       * @default 0.4.93
        */
       version?: string;
     };

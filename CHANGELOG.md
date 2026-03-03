@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file.
 
 _No notable changes yet._
 
+## [0.4.93] - 2026-03-03
+
+### Fixed
+
+- **Change:** Aligned `fleet_rlm.__version__` with project metadata in `pyproject.toml`.
+  **Outcome:** Restored release metadata consistency and unblocked release/UI schema CI checks.
+
 ## [0.4.92] - 2026-02-28
 
 ### Changed
