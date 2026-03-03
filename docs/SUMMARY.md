@@ -32,6 +32,7 @@
   * [HTTP and WebSocket API Reference](reference/http-api.md)
   * [Reference](reference/index.md)
   * [Python API Reference](reference/python-api.md)
+  * [fleet-rlm v0.4.94 Release Notes](reference/release-notes-0.4.94.md)
   * [Sandbox File System](reference/sandbox-fs.md)
   * [Source Layout (src/fleet\_rlm)](reference/source-layout.md)
 * [tutorials](tutorials/README.md)
