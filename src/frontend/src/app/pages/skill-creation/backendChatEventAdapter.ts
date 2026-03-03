@@ -8,6 +8,7 @@ import type {
   ChatRenderToolState,
   ChatSourceItem,
   ChatTraceStep,
+  RuntimeContext,
 } from "@/lib/data/types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
 import { createLocalId } from "@/lib/id";
@@ -41,7 +42,8 @@ interface NormalizedTrajectoryStep {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   return value as Record<string, unknown>;
 }
 
@@ -52,9 +54,7 @@ function normalizeUrl(raw: unknown): string | undefined {
 
   try {
     const parsed = new URL(value);
-    if (
-      parsed.protocol === "http:" || parsed.protocol === "https:"
-    ) {
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
       return parsed.toString();
     }
     return undefined;
@@ -76,6 +76,25 @@ function asOptionalNumber(value: unknown): number | undefined {
     if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
+}
+
+function parseRuntimeContext(
+  payload?: Record<string, unknown>,
+): RuntimeContext | undefined {
+  const raw = asRecord(payload?.runtime);
+  if (!raw) return undefined;
+  const depth = asOptionalNumber(raw.depth);
+  const maxDepth = asOptionalNumber(raw.max_depth);
+  const executionProfile = asOptionalText(raw.execution_profile);
+  if (depth == null || maxDepth == null || !executionProfile) return undefined;
+  return {
+    depth,
+    maxDepth,
+    executionProfile,
+    sandboxActive: raw.sandbox_active === true,
+    effectiveMaxIters: asOptionalNumber(raw.effective_max_iters) ?? 10,
+    volumeName: asOptionalText(raw.volume_name),
+  };
 }
 
 function nextId(prefix: string): string {
@@ -578,13 +597,18 @@ function upsertChainOfThought(
       const leftIndex =
         typeof left.index === "number" ? left.index : Number.POSITIVE_INFINITY;
       const rightIndex =
-        typeof right.index === "number" ? right.index : Number.POSITIVE_INFINITY;
+        typeof right.index === "number"
+          ? right.index
+          : Number.POSITIVE_INFINITY;
       if (leftIndex !== rightIndex) return leftIndex - rightIndex;
       return left.id.localeCompare(right.id);
     });
     const updatedSteps = sortedSteps.map((candidate) => ({
       ...candidate,
-      status: candidate.index === step.index ? ("active" as const) : ("complete" as const),
+      status:
+        candidate.index === step.index
+          ? ("active" as const)
+          : ("complete" as const),
     }));
     return { ...part, steps: updatedSteps };
   });
@@ -595,6 +619,7 @@ function upsertChainOfThought(
 function upsertTrajectoryToolPart(
   messages: ChatMessage[],
   step: NormalizedTrajectoryStep,
+  parentPayload?: Record<string, unknown>,
 ): ChatMessage[] {
   if (
     !step.toolName &&
@@ -608,6 +633,11 @@ function upsertTrajectoryToolPart(
     step_index: step.index,
     tool_name: step.toolName ?? `trajectory_step_${step.index + 1}`,
   };
+  // Forward runtime context from the parent trajectory_step event
+  const parentRuntime = asRecord(parentPayload?.runtime);
+  if (parentRuntime) {
+    payload.runtime = parentRuntime;
+  }
   if (step.toolInput !== undefined) {
     payload.tool_input = step.toolInput;
     payload.tool_args = step.toolInput;
@@ -630,12 +660,13 @@ function upsertTrajectoryToolPart(
 function applyTrajectoryStep(
   messages: ChatMessage[],
   step: NormalizedTrajectoryStep,
+  parentPayload?: Record<string, unknown>,
 ): ChatMessage[] {
   let next = messages;
   if (step.thought) {
     next = appendReasoning(next, step.thought, "line");
   }
-  next = upsertTrajectoryToolPart(next, step);
+  next = upsertTrajectoryToolPart(next, step, parentPayload);
   next = upsertChainOfThought(next, step);
   return next;
 }
@@ -647,7 +678,10 @@ function applyTrajectoryEvent(
 ): ChatMessage[] {
   const steps = normalizeTrajectorySteps(text, payload);
   if (steps.length === 0) return messages;
-  return steps.reduce<ChatMessage[]>((acc, step) => applyTrajectoryStep(acc, step), messages);
+  return steps.reduce<ChatMessage[]>(
+    (acc, step) => applyTrajectoryStep(acc, step, payload),
+    messages,
+  );
 }
 
 function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
@@ -776,6 +810,7 @@ function sandboxFromPayload(
     text;
   const state = inferToolState(kind, text);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
+  const runtimeContext = parseRuntimeContext(payload);
   return {
     kind: "sandbox",
     title: String(payload?.tool_name ?? "Sandbox"),
@@ -785,6 +820,7 @@ function sandboxFromPayload(
     output,
     errorText: state === "output-error" ? output : undefined,
     language: "text",
+    ...(runtimeContext ? { runtimeContext } : {}),
   };
 }
 
@@ -795,6 +831,7 @@ function toolFromPayload(
 ): ChatRenderPart {
   const state = inferToolState(kind, text);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
+  const runtimeContext = parseRuntimeContext(payload);
   return {
     kind: "tool",
     title: String(payload?.tool_name ?? (text || "Tool")),
@@ -804,6 +841,7 @@ function toolFromPayload(
     input: payload?.tool_input ?? payload?.tool_args ?? payload?.input,
     output: payload?.tool_output ?? payload?.output ?? text,
     errorText: state === "output-error" ? text || "Tool error" : undefined,
+    ...(runtimeContext ? { runtimeContext } : {}),
   };
 }
 
@@ -874,13 +912,7 @@ function upsertToolLikePart(
 
   const toolName = String(payload?.tool_name ?? "");
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
-  const idx = findToolLikeTraceIndex(
-    messages,
-    part,
-    toolName,
-    stepIndex,
-    kind,
-  );
+  const idx = findToolLikeTraceIndex(messages, part, toolName, stepIndex, kind);
 
   if (idx < 0) {
     return appendTracePart(messages, part, text);
@@ -937,7 +969,9 @@ function upsertToolLikePart(
   return copy;
 }
 
-function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[] {
+function parseCitations(
+  payload?: Record<string, unknown>,
+): ChatInlineCitation[] {
   const raw = payload?.citations;
   if (!Array.isArray(raw) || raw.length === 0) return [];
 
@@ -978,7 +1012,8 @@ function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[]
     const endChar = asOptionalNumber(anchor.end_char ?? anchor.endChar);
     const value = { number, startChar, endChar };
     if (anchorId) anchorsById.set(anchorId, value);
-    if (sourceId && number) anchorsBySourceAndNumber.set(`${sourceId}|${number}`, value);
+    if (sourceId && number)
+      anchorsBySourceAndNumber.set(`${sourceId}|${number}`, value);
   }
 
   const citations = raw
@@ -1013,7 +1048,8 @@ function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[]
           )
         : undefined;
       const anchorData = anchorFromId ?? anchorFromSource;
-      const finalNumber = anchorData?.number ?? rawNumberText ?? String(index + 1);
+      const finalNumber =
+        anchorData?.number ?? rawNumberText ?? String(index + 1);
       const startChar =
         asOptionalNumber(rec.start_char ?? rec.startChar) ??
         anchorData?.startChar;
@@ -1050,7 +1086,8 @@ function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[]
     const bNumber = Number(b.number);
     const aHasNumber = Number.isFinite(aNumber);
     const bHasNumber = Number.isFinite(bNumber);
-    if (aHasNumber && bHasNumber && aNumber !== bNumber) return aNumber - bNumber;
+    if (aHasNumber && bHasNumber && aNumber !== bNumber)
+      return aNumber - bNumber;
     if (aHasNumber !== bHasNumber) return aHasNumber ? -1 : 1;
     const aStart = a.startChar ?? Number.POSITIVE_INFINITY;
     const bStart = b.startChar ?? Number.POSITIVE_INFINITY;
@@ -1150,9 +1187,7 @@ function parseAttachments(
         asOptionalText(rec.id) ??
         nextId("attachment");
       const name =
-        asOptionalText(rec.name) ??
-        asOptionalText(rec.title) ??
-        "Attachment";
+        asOptionalText(rec.name) ?? asOptionalText(rec.title) ?? "Attachment";
 
       return {
         attachmentId,
@@ -1253,7 +1288,12 @@ function resolveHitlByMessageId(
 ): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
+    if (
+      changed ||
+      msg.id !== messageId ||
+      msg.type !== "hitl" ||
+      !msg.hitlData
+    ) {
       return msg;
     }
     changed = true;
@@ -1275,7 +1315,12 @@ function rollbackHitlByMessageId(
 ): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
+    if (
+      changed ||
+      msg.id !== messageId ||
+      msg.type !== "hitl" ||
+      !msg.hitlData
+    ) {
       return msg;
     }
     changed = true;
@@ -1385,7 +1430,9 @@ function applyEvent(
     case "hitl_request": {
       const hitlPayload = asRecord(payload?.hitl ?? payload);
       const question =
-        asOptionalText(hitlPayload?.question) || text.trim() || "Approval needed";
+        asOptionalText(hitlPayload?.question) ||
+        text.trim() ||
+        "Approval needed";
       const messageId =
         asOptionalText(hitlPayload?.message_id ?? hitlPayload?.messageId) ??
         nextId("hitl");
@@ -1439,7 +1486,9 @@ function applyEvent(
       };
     }
     case "hitl_resolved": {
-      const messageId = asOptionalText(payload?.message_id ?? payload?.messageId);
+      const messageId = asOptionalText(
+        payload?.message_id ?? payload?.messageId,
+      );
       const resolution =
         asOptionalText(payload?.resolution) ??
         asOptionalText(payload?.label) ??
@@ -1456,7 +1505,12 @@ function applyEvent(
 
       let updated = false;
       const next = messages.map((msg) => {
-        if (updated || msg.type !== "hitl" || !msg.hitlData || msg.hitlData.resolved) {
+        if (
+          updated ||
+          msg.type !== "hitl" ||
+          !msg.hitlData ||
+          msg.hitlData.resolved
+        ) {
           return msg;
         }
         updated = true;
@@ -1476,7 +1530,8 @@ function applyEvent(
       const result = asRecord(payload?.result);
       const messageId = asOptionalText(result?.message_id ?? result?.messageId);
       const resolution =
-        asOptionalText(result?.resolution) ?? asOptionalText(result?.action_label);
+        asOptionalText(result?.resolution) ??
+        asOptionalText(result?.action_label);
       let next = messages;
       if (command === "resolve_hitl" && messageId && resolution) {
         next = resolveHitlByMessageId(next, messageId, resolution);

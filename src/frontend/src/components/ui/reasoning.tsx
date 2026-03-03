@@ -165,7 +165,10 @@ function Reasoning({
                   className="text-muted-foreground"
                   style={typo.caption}
                 >
-                  <Streamdown content={part.text} streaming={false} />
+                  <Streamdown
+                    content={part.text}
+                    streaming={isThinking && i === parts.length - 1}
+                  />
                 </div>
               ))}
             </div>

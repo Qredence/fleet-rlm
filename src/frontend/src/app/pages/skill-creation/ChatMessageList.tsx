@@ -1,7 +1,11 @@
 import { type RefObject, type ReactNode } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { Clock } from "lucide-react";
-import type { ChatMessage, ChatRenderPart } from "@/lib/data/types";
+import type {
+  ChatMessage,
+  ChatRenderPart,
+  RuntimeContext,
+} from "@/lib/data/types";
 import { typo } from "@/lib/config/typo";
 import { cn } from "@/components/ui/utils";
 import { Streamdown } from "@/components/ui/streamdown";
@@ -171,6 +175,29 @@ function hitlConfirmationState(
   const label = String(data.resolvedLabel ?? "").toLowerCase();
   if (/(reject|deny|decline|cancel|no)/.test(label)) return "rejected";
   return "approved";
+}
+
+function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {
+  if (!ctx) return null;
+  const pills: string[] = [];
+  if (ctx.depth > 0) pills.push(`depth ${ctx.depth}/${ctx.maxDepth}`);
+  if (ctx.sandboxActive) pills.push("sandbox");
+  if (ctx.volumeName) pills.push(ctx.volumeName);
+  if (ctx.executionProfile !== "ROOT_INTERLOCUTOR")
+    pills.push(ctx.executionProfile.toLowerCase().replace(/_/g, " "));
+  if (pills.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 px-1 pb-1">
+      {pills.map((pill) => (
+        <span
+          key={pill}
+          className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-1.5 py-0.5 text-[10px] leading-tight text-muted-foreground"
+        >
+          {pill}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function renderInlineCitations(
@@ -358,6 +385,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
             toolType={part.title || part.toolType}
             state={part.state}
           />
+          <RuntimeContextBadge ctx={part.runtimeContext} />
           <ToolContent>
             {part.input != null ? <ToolInput input={part.input} /> : null}
             <ToolOutput
@@ -382,6 +410,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       return (
         <Sandbox key={key} defaultOpen={part.state !== "running"}>
           <SandboxHeader title={part.title} state={part.state} />
+          <RuntimeContextBadge ctx={part.runtimeContext} />
           <SandboxContent>
             <SandboxTabs defaultValue="output">
               <SandboxTabsBar>
@@ -675,7 +704,9 @@ export function ChatMessageList({
               </Message>
             )}
 
-            {(msg.type === "assistant" || msg.type === "trace") && (
+            {(msg.type === "assistant" ||
+              msg.type === "trace" ||
+              msg.type === "reasoning") && (
               <Message from="assistant" className="mb-4">
                 <MessageContent className="w-full space-y-3">
                   {msg.renderParts?.map((part, idx) =>

@@ -6,7 +6,11 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..delegate_sub_agent import parse_json_from_response, spawn_delegate_sub_agent
+from ..delegate_sub_agent import (
+    parse_json_from_response,
+    spawn_delegate_sub_agent_async,
+)
+from ..tool_delegation import _sync_compatible_tool_callable
 from .sandbox_helpers import _resolve_volume_path
 
 if TYPE_CHECKING:
@@ -67,7 +71,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
 
     ctx = _MemoryIntelligenceContext(agent=agent)
 
-    def memory_tree(
+    async def memory_tree(
         root_path: str = "/data/memory",
         max_depth: int = 4,
         include_hidden: bool = False,
@@ -91,7 +95,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- truncated: boolean whether the listing was truncated"
         )
 
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -123,12 +127,12 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "sub_agent_history": _default_history(ctx, result),
         }
 
-    def memory_action_intent(
+    async def memory_action_intent(
         user_request: str,
         policy_constraints: str = "",
     ) -> dict[str, Any]:
         """Classify intended memory action and risk; this tool never mutates state."""
-        tree_payload = memory_tree()
+        tree_payload = await memory_tree()
         current_tree = list(tree_payload.get("nodes", []) or [])
         constraints_text = (
             policy_constraints
@@ -149,7 +153,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- rationale: explanation"
         )
 
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -165,11 +169,11 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "sub_agent_history": _default_history(ctx, result),
         }
 
-    def memory_structure_audit(
+    async def memory_structure_audit(
         usage_goals: str = "",
     ) -> dict[str, Any]:
         """Audit memory structure and return organization recommendations."""
-        tree_payload = memory_tree()
+        tree_payload = await memory_tree()
         if tree_payload.get("status") != "ok":
             return tree_payload
         tree_snapshot = list(tree_payload.get("nodes", []) or [])
@@ -189,7 +193,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- priority_fixes: list of highest-priority fixes"
         )
 
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -204,11 +208,11 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "sub_agent_history": _default_history(ctx, result),
         }
 
-    def memory_structure_migration_plan(
+    async def memory_structure_migration_plan(
         approved_constraints: str = "",
     ) -> dict[str, Any]:
         """Generate a reversible migration plan from current memory audit findings."""
-        audit = memory_structure_audit()
+        audit = await memory_structure_audit()
         if audit.get("status") != "ok":
             return audit
         findings = list(audit.get("issues", []) or [])
@@ -228,7 +232,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- estimated_risk: one of low, medium, high"
         )
 
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -242,12 +246,12 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "sub_agent_history": _default_history(ctx, result),
         }
 
-    def clarification_questions(
+    async def clarification_questions(
         request: str,
         operation_risk: str = "medium",
     ) -> dict[str, Any]:
         """Generate clarification questions for ambiguous/high-risk operations."""
-        tree_payload = memory_tree()
+        tree_payload = await memory_tree()
         tree_nodes = list(tree_payload.get("nodes", []) or [])[:20]
         available_context = (
             f"memory_root=/data/memory; nodes_sample={tree_nodes}; "
@@ -269,7 +273,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
             "- proceed_without_answer: boolean (always false for high risk)"
         )
 
-        result = spawn_delegate_sub_agent(ctx.agent, prompt=prompt)
+        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
         if result.get("status") == "error":
             return result
 
@@ -286,27 +290,27 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
 
     return [
         Tool(
-            memory_tree,
+            _sync_compatible_tool_callable(memory_tree),
             name="memory_tree",
             desc="Return a bounded file-tree snapshot for a path in Modal volume memory",
         ),
         Tool(
-            memory_action_intent,
+            _sync_compatible_tool_callable(memory_action_intent),
             name="memory_action_intent",
             desc="Infer memory action intent, risk, and confirmation needs from a request",
         ),
         Tool(
-            memory_structure_audit,
+            _sync_compatible_tool_callable(memory_structure_audit),
             name="memory_structure_audit",
             desc="Audit memory layout and recommend structure conventions",
         ),
         Tool(
-            memory_structure_migration_plan,
+            _sync_compatible_tool_callable(memory_structure_migration_plan),
             name="memory_structure_migration_plan",
             desc="Generate reversible migration operations from memory audit findings",
         ),
         Tool(
-            clarification_questions,
+            _sync_compatible_tool_callable(clarification_questions),
             name="clarification_questions",
             desc="Generate clarification questions for ambiguous or risky memory operations",
         ),

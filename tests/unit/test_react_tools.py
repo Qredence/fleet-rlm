@@ -452,7 +452,7 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
-    def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
+    async def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
         return {
             "assistant_response": "analysis answer",
             "trajectory": [{"reasoning": "step1", "code": "pass", "output": "ok"}],
@@ -461,7 +461,7 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent", _fake_spawn
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async", _fake_spawn
     )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
@@ -477,7 +477,7 @@ def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
-    def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
+    async def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
         return {
             "assistant_response": "analysis answer",
             "trajectory": [{"reasoning": "step1"}],
@@ -486,7 +486,7 @@ def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent", _fake_spawn
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async", _fake_spawn
     )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
@@ -503,7 +503,7 @@ def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
-    def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
+    async def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
         return {
             "assistant_response": "sub-agent response",
             "trajectory": [{"reasoning": "step"}],
@@ -512,7 +512,7 @@ def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent", _fake_spawn
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async", _fake_spawn
     )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
