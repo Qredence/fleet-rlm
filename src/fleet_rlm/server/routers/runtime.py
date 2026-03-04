@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Annotated, Any
@@ -23,8 +23,8 @@ from fleet_rlm.utils.modal import load_modal_config
 
 from ..deps import ServerStateDep
 from ..schemas.core import (
-    RuntimeConnectivityTestResponse,
     RuntimeActiveModels,
+    RuntimeConnectivityTestResponse,
     RuntimeSettingsSnapshot,
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,
@@ -328,9 +328,9 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
             response = planner_lm("Reply with exactly OK")
             return _extract_lm_text(response)
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_invoke)
-            output_preview = future.result(timeout=_RUNTIME_TEST_TIMEOUT_SECONDS)
+        output_preview = await asyncio.wait_for(
+            asyncio.to_thread(_invoke), timeout=_RUNTIME_TEST_TIMEOUT_SECONDS
+        )
 
         ok = bool(output_preview)
         state.planner_lm = planner_lm
@@ -339,7 +339,7 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
             model_name=state.config.agent_delegate_model,
             default_max_tokens=state.config.agent_delegate_max_tokens,
         )
-    except FutureTimeoutError:
+    except asyncio.TimeoutError:
         error = (
             f"LM test timed out after {_RUNTIME_TEST_TIMEOUT_SECONDS}s. "
             "Check API connectivity and credentials."

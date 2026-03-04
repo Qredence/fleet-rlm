@@ -13,12 +13,16 @@ Classes:
 
 from __future__ import annotations
 
+import contextvars
 import threading
 from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
+)
+from concurrent.futures import (
     TimeoutError as FutureTimeoutError,
 )
+
 import dspy
 
 
@@ -106,7 +110,8 @@ class LLMQueryMixin:
                 self._sub_lm_executor = ThreadPoolExecutor(max_workers=1)
             executor = self._sub_lm_executor
 
-        future = executor.submit(_execute_lm)
+        ctx = contextvars.copy_context()
+        future = executor.submit(ctx.run, _execute_lm)
         try:
             return future.result(timeout=self.llm_call_timeout)
         except FutureTimeoutError as exc:
@@ -173,7 +178,13 @@ class LLMQueryMixin:
 
         with ThreadPoolExecutor(max_workers=adaptive_workers) as executor:
             future_to_idx = {
-                executor.submit(self._query_sub_lm, p): i for i, p in enumerate(prompts)
+                # Copy a fresh context per task. Reusing one Context object
+                # across concurrent threads can raise:
+                # "RuntimeError: cannot enter context ... is already entered".
+                executor.submit(
+                    contextvars.copy_context().run, self._query_sub_lm, p
+                ): i
+                for i, p in enumerate(prompts)
             }
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]

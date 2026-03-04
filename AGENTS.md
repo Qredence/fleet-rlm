@@ -244,7 +244,7 @@ Tests mock Modal APIs and should run without cloud credentials.
 - `tests/unit/test_tools_sandbox.py`, `test_tools.py`, `test_memory_tools.py`
 - `tests/unit/test_context_manager.py`
 - `tests/unit/test_terminal_chat_helpers.py`
-- `tests/unit/test_ws_router_imports.py`, `test_ws_chat_helpers.py`
+- `tests/ui/server/test_api_contract_routes.py`, `tests/unit/test_ws_chat_helpers.py`
 - `tests/unit/test_runtime_settings.py`
 - `tests/unit/test_dspy_rlm_trajectory.py`
 - `tests/ui/server/test_router_*.py`, `test_server_*.py`

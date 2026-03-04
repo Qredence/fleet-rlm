@@ -223,6 +223,32 @@ def test_runtime_lm_smoke_success(
     assert payload["output_preview"] == "OK"
 
 
+def test_runtime_lm_smoke_handles_planner_init_error(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-test")
+
+    def _planner_factory(*, model_name=None, env_file=None):
+        _ = model_name, env_file
+        raise RuntimeError("planner init failed")
+
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
+        _planner_factory,
+    )
+
+    response = local_client.post("/api/v1/runtime/tests/lm")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["kind"] == "lm"
+    assert payload["preflight_ok"] is True
+    assert payload["ok"] is False
+    assert payload["error"] == "planner init failed"
+
+
 def test_runtime_status_uses_cached_results(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

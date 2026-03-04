@@ -57,7 +57,7 @@ def _build_sub_agent(
         enable_adaptive_iters=getattr(agent, "enable_adaptive_iters", True),
         rlm_max_iterations=getattr(agent, "rlm_max_iterations", 30),
         rlm_max_llm_calls=getattr(agent, "rlm_max_llm_calls", 50),
-        verbose=getattr(agent, "verbose", False),
+        verbose=getattr(agent, "verbose", True),
         history_max_turns=getattr(agent, "history_max_turns", None),
         interpreter=agent.interpreter,
         max_depth=agent._max_depth,

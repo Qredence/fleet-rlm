@@ -1,7 +1,7 @@
 # fleet-rlm
 
 [![PyPI version](https://img.shields.io/pypi/v/fleet-rlm.svg)](https://pypi.org/project/fleet-rlm/)
-[![Python versions](https://img.shields.io/pypi/pyversions/fleet-rlm.svg)](https://pypi.org/project/fleet-rlm/)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml/badge.svg)](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/fleet-rlm?period=monthly&units=INTERNATIONAL_SYSTEM&left_color=MAGENTA&right_color=BLACK&left_text=downloads%2Fmonth)](https://pepy.tech/projects/fleet-rlm)
@@ -86,7 +86,7 @@ Read this after the quick start if you want the full system picture (entry point
 ```mermaid
 graph TB
     subgraph entry ["🚪 Entry Points"]
-        CLI["CLI (Typer)"]
+        CLI["fleet / fleet-rlm CLI"]
         WebUI["Web UI<br/>(React SPA)"]
         API["FastAPI<br/>(WS/REST)"]
         TUI["Ink TUI<br/>(standalone runtime)"]
@@ -95,6 +95,7 @@ graph TB
 
     subgraph orchestration ["🧠 Orchestration Layer"]
         Agent["RLMReActChatAgent<br/>(dspy.Module)"]
+        LMs["Planner / Delegate LMs"]
         History["Chat History"]
         Memory["Core Memory<br/>(Persona/Human/Scratchpad)"]
         DocCache["Document Cache"]
@@ -111,17 +112,20 @@ graph TB
         Profiles["Execution Profiles:<br/>ROOT | DELEGATE | MAINTENANCE"]
     end
 
-    subgraph cloud ["☁️ Modal Cloud"]
-        Sandbox["Sandbox Driver<br/>(Python REPL)"]
-        Volume[("💾 Persistent Volume<br/>/data/<br/>• workspaces<br/>• artifacts<br/>• memory<br/>• session state")]
+    subgraph cloud ["☁️ Cloud & Persistence"]
+        Sandbox["Modal Sandbox<br/>(Python REPL + Driver)"]
+        Volume[("💾 Modal Volume<br/>/data/<br/>• workspaces<br/>• docs/metadata")]
+        Neon[("🐘 Neon Postgres<br/>• runs / steps<br/>• artifacts<br/>• tenants")]
+        PostHog["📈 PostHog<br/>(LLM Observability)"]
     end
 
-    WebUI -->|"WS-first"| API
+    WebUI -->|"WS / REST"| API
     CLI --> Agent
     API --> Agent
     TUI --> Agent
     MCP --> Agent
 
+    Agent --> LMs
     Agent --> History
     Agent --> Memory
     Agent --> DocCache
@@ -129,6 +133,9 @@ graph TB
     Agent --> DocTools
     Agent --> RecursiveTools
     Agent --> ExecTools
+
+    API -.->|"Persistence"| Neon
+    Agent -.->|"Traces"| PostHog
 
     DocTools --> Interpreter
     RecursiveTools --> Interpreter
