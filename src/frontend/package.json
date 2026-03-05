@@ -11,6 +11,7 @@
     "type-check": "tsc -p tsconfig.app.json --noEmit",
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",
     "lint": "eslint src/",
+    "lint:robustness": "bun run lint",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "test:e2e": "playwright test",

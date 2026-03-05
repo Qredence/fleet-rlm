@@ -5,7 +5,6 @@ import { useNavigation } from "@/hooks/useNavigation";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/components/ui/use-mobile";
 import { UserMenu } from "@/features/shell/UserMenu";
-import { NotificationCenter } from "@/features/shell/NotificationCenter";
 import { BrandMark } from "@/components/shared/BrandMark";
 import {
   Tooltip,
@@ -160,9 +159,6 @@ export function TopHeader() {
             {isCanvasOpen ? "Close side panel" : "Open side panel"}
           </TooltipContent>
         </Tooltip>
-
-        {/* Notification Center */}
-        <NotificationCenter />
 
         {/* User Menu (replaces standalone Settings gear icon) */}
         <UserMenu />

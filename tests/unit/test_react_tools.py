@@ -451,21 +451,19 @@ def test_read_file_slice_binary_file_returns_user_friendly_error(monkeypatch, tm
 def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    async def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
-        return {
-            "assistant_response": "analysis answer",
-            "trajectory": [{"reasoning": "step1", "code": "pass", "output": "ok"}],
-            "depth": 1,
-            "sub_agent_history": 1,
-        }
-
-    monkeypatch.setattr(
-        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async", _fake_spawn
-    )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
+    agent.get_runtime_module = lambda _name: (
+        lambda **_kwargs: SimpleNamespace(
+            findings=["key finding"],
+            answer="analysis answer",
+            sections_examined=2,
+            trajectory=[{"reasoning": "step1", "code": "pass", "output": "ok"}],
+            depth=1,
+            sub_agent_history=0,
+        )
+    )
 
     result = agent.analyze_long_document("question")
     assert result["trajectory_steps"] == 1
@@ -476,21 +474,17 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
 def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    async def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
-        return {
-            "assistant_response": "analysis answer",
-            "trajectory": [{"reasoning": "step1"}],
-            "depth": 1,
-            "sub_agent_history": 1,
-        }
-
-    monkeypatch.setattr(
-        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async", _fake_spawn
-    )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
+    agent.get_runtime_module = lambda _name: (
+        lambda **_kwargs: SimpleNamespace(
+            findings=["key finding"],
+            answer="analysis answer",
+            sections_examined=1,
+            trajectory=[{"reasoning": "step1"}],
+        )
+    )
 
     result = agent.analyze_long_document("question", include_trajectory=False)
     assert "trajectory_steps" not in result
@@ -502,21 +496,24 @@ def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
 ):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    async def _fake_spawn(agent, *, prompt, document=None, document_alias="active"):
-        return {
-            "assistant_response": "sub-agent response",
-            "trajectory": [{"reasoning": "step"}],
-            "depth": 1,
-            "sub_agent_history": 1,
-        }
-
-    monkeypatch.setattr(
-        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async", _fake_spawn
-    )
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
+    module_outputs = {
+        "summarize_long_document": SimpleNamespace(
+            summary="summary",
+            key_points=["p1"],
+            coverage_pct=75,
+            trajectory=[{"reasoning": "step"}],
+        ),
+        "extract_from_logs": SimpleNamespace(
+            matches=["m1"],
+            patterns={"error": "m1"},
+            time_range="last hour",
+            trajectory=[{"reasoning": "step"}],
+        ),
+    }
+    agent.get_runtime_module = lambda name: lambda **_kwargs: module_outputs[name]
 
     summary = agent.summarize_long_document("focus")
     logs = agent.extract_from_logs("query")

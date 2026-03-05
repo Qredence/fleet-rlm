@@ -4,7 +4,32 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-_No notable changes yet._
+### Highlights (User Impact)
+
+- Replaced recursive delegate sub-agent flows for long-context and memory-intelligence tools with cached runtime RLM modules, reducing orchestration overhead while preserving tool response contracts.
+- Simplified package/API surface by removing deprecated `fleet_rlm.stateful` exports and implementation modules that were no longer part of the active runtime path.
+- Hardened delegate result normalization and fallback metadata so tool outputs remain machine-consumable even when runtime modules return loosely typed payloads.
+
+### Added
+
+- **Change:** Added frontend script `lint:robustness` as an explicit alias for lint gate execution.
+  **Outcome:** Frontend lint entrypoints are clearer and easier to reuse across CI/local workflows.
+
+### Changed
+
+- **Change:** Refactored `react/tools/delegate.py` and `react/tools/memory_intelligence.py` to execute through runtime modules (`agent.get_runtime_module`) with delegate budget/depth guards and typed output coercion.
+  **Outcome:** More predictable delegate behavior with lower recursion overhead and safer response shaping.
+- **Change:** Updated `core/llm_tools.py` query paths to coerce non-string LM returns to strings and normalize async result indexing.
+  **Outcome:** Callers now receive consistently typed `str` outputs from LLM query helpers.
+- **Change:** Removed `NotificationCenter` usage from the top-header shell layout and aligned related frontend tests/mocks.
+  **Outcome:** Header surface is simplified and ReactFlow test coverage no longer emits console-error noise from incomplete mocks.
+
+### Removed
+
+- **Change:** Removed the deprecated `fleet_rlm.stateful` module tree and associated unit tests.
+  **Outcome:** Reduced dead-code maintenance burden and eliminated obsolete stateful sandbox abstractions from the package.
+- **Change:** Removed unused server service package stub and request-scoped `get_react_agent` dependency provider from `server/deps.py`.
+  **Outcome:** Leaner server dependency surface with less legacy wiring.
 
 ## [0.4.94] - 2026-03-03
 

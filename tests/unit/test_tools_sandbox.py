@@ -1,6 +1,7 @@
 """Unit tests for sandbox tools (edit_file)."""
 
 from contextlib import nullcontext
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -79,8 +80,12 @@ def mock_agent():
     agent = MagicMock(spec=RLMReActChatAgent)
     agent.interpreter = _FakeInterpreter()
     agent.start = MagicMock()
+    agent.delegate_lm = None
     agent.active_alias = "active"
     agent._get_document = MagicMock(return_value="line1\nline2")
+    agent.get_runtime_module = MagicMock()
+    agent._claim_delegate_slot = MagicMock(return_value=(True, 8))
+    agent._record_delegate_fallback = MagicMock()
     agent.rlm_max_iterations = 30
     agent.rlm_max_llm_calls = 50
     agent.verbose = False
@@ -257,38 +262,50 @@ def test_rlm_query_extracts_answer_correctly(mock_agent):
     assert result["answer"] == "The answer is 42"
 
 
-def _setup_sub_agent_mock(mock_agent, response_text="sub-agent response"):
-    """Configure mock_agent so spawn_delegate_sub_agent works.
+def _configure_runtime_modules(
+    mock_agent: MagicMock, modules: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    calls: dict[str, list[dict[str, Any]]] = {name: [] for name in modules}
 
-    Sets ``__class__`` to a callable mock whose instances have
-    ``_set_document``, ``chat_turn``, and ``history_turns`` stubs.
-    Returns the mock sub-agent instance for further assertions.
-    """
-    MockAgentClass = MagicMock()
-    mock_instance = MockAgentClass.return_value
-    mock_instance.chat_turn.return_value = {"assistant_response": response_text}
-    mock_instance.achat_turn = AsyncMock(
-        return_value={"assistant_response": response_text}
+    def _factory(name: str):
+        if name not in modules:
+            raise AssertionError(f"Unexpected runtime module: {name}")
+
+        module_output = modules[name]
+
+        def _module(**kwargs):
+            calls[name].append(kwargs)
+            if callable(module_output):
+                return module_output(**kwargs)
+            return module_output
+
+        return _module
+
+    mock_agent.get_runtime_module = MagicMock(side_effect=_factory)
+    return calls
+
+
+def test_analyze_long_document_uses_runtime_module_and_keeps_response_shape(mock_agent):
+    """Long-document analysis should use runtime modules and keep top-level keys."""
+    module_calls = _configure_runtime_modules(
+        mock_agent,
+        {
+            "analyze_long_document": SimpleNamespace(
+                findings=["f1", "f2"],
+                answer="analysis result",
+                sections_examined=3,
+                trajectory=[{"reasoning": "step1"}],
+                depth=1,
+                sub_agent_history=0,
+            )
+        },
     )
-    mock_instance.history_turns.return_value = 1
-    mock_instance._set_document = MagicMock()
-    # Set up interpreter mock with start/shutdown methods
-    mock_instance.interpreter = _FakeInterpreter()
-    mock_agent.__class__ = MockAgentClass
-    return mock_instance
-
-
-def test_analyze_long_document_spawns_sub_agent_and_keeps_response_shape(mock_agent):
-    """Long-document analysis should spawn a sub-agent and keep top-level keys."""
-    sub = _setup_sub_agent_mock(mock_agent, "analysis result")
 
     tools = build_tool_list(mock_agent)
     analyze_tool = next(t for t in tools if t.name == "analyze_long_document")
     result = analyze_tool(query="q", alias="active", include_trajectory=True)
 
-    # Sub-agent was spawned and received the document
-    sub._set_document.assert_called_once()
-    sub.achat_turn.assert_called_once()
+    assert len(module_calls["analyze_long_document"]) == 1
     assert result["status"] == "ok"
     assert set(result).issuperset(
         {"status", "findings", "answer", "doc_chars", "depth", "sub_agent_history"}
@@ -296,14 +313,25 @@ def test_analyze_long_document_spawns_sub_agent_and_keeps_response_shape(mock_ag
     assert result["answer"] == "analysis result"
 
 
-def test_grounded_answer_spawns_sub_agent_with_citations(mock_agent):
-    sub = _setup_sub_agent_mock(
+def test_grounded_answer_uses_runtime_module_with_citations(mock_agent):
+    module_calls = _configure_runtime_modules(
         mock_agent,
-        (
-            '{"answer":"grounded answer","citations":[{"source":"doc.md","chunk_id":1,'
-            '"evidence":"text","reason":"match"}],"confidence":87,'
-            '"coverage_notes":"covered"}'
-        ),
+        {
+            "grounded_answer": SimpleNamespace(
+                answer="grounded answer",
+                citations=[
+                    {
+                        "source": "doc.md",
+                        "chunk_id": 1,
+                        "evidence": "text",
+                        "reason": "match",
+                    }
+                ],
+                confidence=87,
+                coverage_notes="covered",
+                depth=1,
+            )
+        },
     )
     mock_agent._get_document.return_value = "# H1\nA\n\n# H2\nB"
 
@@ -311,7 +339,7 @@ def test_grounded_answer_spawns_sub_agent_with_citations(mock_agent):
     grounded_tool = next(t for t in tools if t.name == "grounded_answer")
     result = grounded_tool(query="q", include_trajectory=True)
 
-    sub.achat_turn.assert_called_once()
+    assert len(module_calls["grounded_answer"]) == 1
     assert result["status"] == "ok"
     assert result["answer"] == "grounded answer"
     assert result["citations"] == [
@@ -324,7 +352,7 @@ def test_grounded_answer_spawns_sub_agent_with_citations(mock_agent):
 
 def test_grounded_answer_rejects_invalid_max_chunks(mock_agent):
     """grounded_answer should reject non-positive max_chunks."""
-    _setup_sub_agent_mock(mock_agent)
+    _configure_runtime_modules(mock_agent, {})
     mock_agent._get_document.return_value = "# H1\nA"
 
     tools = build_tool_list(mock_agent)
@@ -334,61 +362,103 @@ def test_grounded_answer_rejects_invalid_max_chunks(mock_agent):
     assert result["status"] == "error"
 
 
-def test_triage_incident_logs_spawns_sub_agent(mock_agent):
-    sub = _setup_sub_agent_mock(mock_agent, "triage result")
+def test_triage_incident_logs_uses_runtime_module(mock_agent):
+    module_calls = _configure_runtime_modules(
+        mock_agent,
+        {
+            "triage_incident_logs": SimpleNamespace(
+                severity="high",
+                probable_root_causes=["database saturation"],
+                impacted_components=["api"],
+                recommended_actions=["scale db"],
+                time_range="5m",
+            )
+        },
+    )
 
     tools = build_tool_list(mock_agent)
     triage_tool = next(t for t in tools if t.name == "triage_incident_logs")
     result = triage_tool(query="why 500s?", service_context="prod")
 
-    sub._set_document.assert_called_once()
-    sub.achat_turn.assert_called_once()
+    assert len(module_calls["triage_incident_logs"]) == 1
     assert result["status"] == "ok"
     assert "severity" in result
     assert "depth" in result
 
 
-def test_plan_code_change_spawns_sub_agent(mock_agent):
-    sub = _setup_sub_agent_mock(mock_agent, "plan result")
+def test_plan_code_change_uses_runtime_module(mock_agent):
+    module_calls = _configure_runtime_modules(
+        mock_agent,
+        {
+            "plan_code_change": SimpleNamespace(
+                plan_steps=["step1"],
+                files_to_touch=["src/a.py"],
+                validation_commands=["uv run pytest"],
+                risks=["none"],
+            )
+        },
+    )
 
     tools = build_tool_list(mock_agent)
     plan_tool = next(t for t in tools if t.name == "plan_code_change")
     result = plan_tool(task="add feature", repo_context="ctx", constraints="c")
 
-    sub.achat_turn.assert_called_once()
+    assert len(module_calls["plan_code_change"]) == 1
     assert result["status"] == "ok"
     assert "plan_steps" in result
     assert "depth" in result
 
 
-def test_propose_core_memory_update_spawns_sub_agent(mock_agent):
-    sub = _setup_sub_agent_mock(mock_agent, "memory update proposal")
+def test_propose_core_memory_update_uses_runtime_module(mock_agent):
+    module_calls = _configure_runtime_modules(
+        mock_agent,
+        {
+            "propose_core_memory_update": SimpleNamespace(
+                keep=["persona"],
+                update=["scratchpad"],
+                remove=[],
+                rationale="new facts",
+            )
+        },
+    )
 
     tools = build_tool_list(mock_agent)
     memory_tool = next(t for t in tools if t.name == "propose_core_memory_update")
     result = memory_tool()
 
-    sub.achat_turn.assert_called_once()
+    assert len(module_calls["propose_core_memory_update"]) == 1
     assert result["status"] == "ok"
     assert "keep" in result
     assert "update" in result
     assert "depth" in result
 
 
-def test_memory_tree_spawns_sub_agent(mock_agent):
-    sub = _setup_sub_agent_mock(
+def test_memory_tree_uses_runtime_module(mock_agent):
+    module_calls = _configure_runtime_modules(
         mock_agent,
-        (
-            '{"nodes":[{"path":"/data/memory/a.txt","type":"file","size_bytes":4,'
-            '"depth":1}],"total_files":1,"total_dirs":0,"truncated":false}'
-        ),
+        {
+            "memory_tree": SimpleNamespace(
+                nodes=[
+                    {
+                        "path": "/data/memory/a.txt",
+                        "type": "file",
+                        "size_bytes": 4,
+                        "depth": 1,
+                    }
+                ],
+                total_files=1,
+                total_dirs=0,
+                truncated=False,
+                depth=1,
+            )
+        },
     )
 
     tools = build_tool_list(mock_agent)
     tree_tool = next(t for t in tools if t.name == "memory_tree")
     result = tree_tool()
 
-    sub.achat_turn.assert_called_once()
+    assert len(module_calls["memory_tree"]) == 1
     assert result["status"] == "ok"
     assert result["nodes"] == [
         {"path": "/data/memory/a.txt", "type": "file", "size_bytes": 4, "depth": 1}
@@ -399,8 +469,21 @@ def test_memory_tree_spawns_sub_agent(mock_agent):
     assert "depth" in result
 
 
-def test_memory_action_intent_spawns_sub_agent(mock_agent):
-    _setup_sub_agent_mock(mock_agent, "intent classification")
+def test_memory_action_intent_uses_runtime_modules(mock_agent):
+    _configure_runtime_modules(
+        mock_agent,
+        {
+            "memory_tree": SimpleNamespace(nodes=[], total_files=0, total_dirs=0),
+            "memory_action_intent": SimpleNamespace(
+                action_type="delete",
+                target_paths=["/data/memory/tmp.log"],
+                content_plan=["remove stale file"],
+                risk_level="high",
+                requires_confirmation=True,
+                rationale="destructive action",
+            ),
+        },
+    )
 
     tools = build_tool_list(mock_agent)
     intent_tool = next(t for t in tools if t.name == "memory_action_intent")
@@ -412,8 +495,20 @@ def test_memory_action_intent_spawns_sub_agent(mock_agent):
     assert "depth" in result
 
 
-def test_memory_structure_audit_spawns_sub_agent(mock_agent):
-    _setup_sub_agent_mock(mock_agent, "audit result")
+def test_memory_structure_audit_uses_runtime_modules(mock_agent):
+    _configure_runtime_modules(
+        mock_agent,
+        {
+            "memory_tree": SimpleNamespace(nodes=[], total_files=0, total_dirs=0),
+            "memory_structure_audit": SimpleNamespace(
+                issues=["flat namespace"],
+                recommended_layout=["/data/memory/projects"],
+                naming_conventions=["kebab-case"],
+                retention_rules=["archive stale files after 90d"],
+                priority_fixes=["create project folders"],
+            ),
+        },
+    )
 
     tools = build_tool_list(mock_agent)
     audit_tool = next(t for t in tools if t.name == "memory_structure_audit")
@@ -425,8 +520,26 @@ def test_memory_structure_audit_spawns_sub_agent(mock_agent):
     assert "depth" in result
 
 
-def test_memory_structure_migration_plan_spawns_sub_agent(mock_agent):
-    _setup_sub_agent_mock(mock_agent, "migration plan")
+def test_memory_structure_migration_plan_uses_runtime_modules(mock_agent):
+    _configure_runtime_modules(
+        mock_agent,
+        {
+            "memory_tree": SimpleNamespace(nodes=[], total_files=0, total_dirs=0),
+            "memory_structure_audit": SimpleNamespace(
+                issues=["flat namespace"],
+                recommended_layout=[],
+                naming_conventions=[],
+                retention_rules=[],
+                priority_fixes=[],
+            ),
+            "memory_structure_migration_plan": SimpleNamespace(
+                operations=[{"op": "mkdir", "dst": "/data/memory/projects"}],
+                rollback_steps=["rmdir /data/memory/projects"],
+                verification_checks=["ls /data/memory"],
+                estimated_risk="low",
+            ),
+        },
+    )
 
     tools = build_tool_list(mock_agent)
     migrate_tool = next(t for t in tools if t.name == "memory_structure_migration_plan")
@@ -439,7 +552,18 @@ def test_memory_structure_migration_plan_spawns_sub_agent(mock_agent):
 
 
 def test_clarification_questions_high_risk_blocks_proceed(mock_agent):
-    _setup_sub_agent_mock(mock_agent, "clarification")
+    _configure_runtime_modules(
+        mock_agent,
+        {
+            "memory_tree": SimpleNamespace(nodes=[], total_files=0, total_dirs=0),
+            "clarification_questions": SimpleNamespace(
+                questions=["Which directory should be cleaned?"],
+                blocking_unknowns=["target scope"],
+                safe_default="no-op",
+                proceed_without_answer=True,
+            ),
+        },
+    )
 
     tools = build_tool_list(mock_agent)
     clarify_tool = next(t for t in tools if t.name == "clarification_questions")

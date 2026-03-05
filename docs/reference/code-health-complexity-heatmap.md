@@ -18,12 +18,10 @@ Wave 1 priority: ReAct + Server WS. Target complexity threshold for refactor ass
 | L2   | 591 | `src/fleet_rlm/terminal/commands.py`                                        |
 | L2   | 565 | `src/fleet_rlm/react/streaming.py`                                          |
 | L2   | 560 | `src/fleet_rlm/terminal/chat.py`                                            |
-| L2   | 544 | `src/fleet_rlm/stateful/agent.py`                                           |
 | L2   | 526 | `src/fleet_rlm/runners.py`                                                  |
 | L2   | 514 | `src/fleet_rlm/db/repository.py`                                            |
 | L3   | 474 | `src/fleet_rlm/react/tools/sandbox.py`                                      |
 | L3   | 446 | `src/fleet_rlm/terminal/ui.py`                                              |
-| L3   | 421 | `src/fleet_rlm/stateful/sandbox.py`                                         |
 | L3   | 414 | `src/fleet_rlm/server/routers/runtime.py`                                   |
 | L3   | 408 | `src/fleet_rlm/core/config.py`                                              |
 | L3   | 408 | `src/fleet_rlm/utils/scaffold.py`                                           |

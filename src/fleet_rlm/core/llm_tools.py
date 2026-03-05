@@ -113,7 +113,8 @@ class LLMQueryMixin:
         ctx = contextvars.copy_context()
         future = executor.submit(ctx.run, _execute_lm)
         try:
-            return future.result(timeout=self.llm_call_timeout)
+            result = future.result(timeout=self.llm_call_timeout)
+            return result if isinstance(result, str) else str(result)
         except FutureTimeoutError as exc:
             future.cancel()
             raise RuntimeError(
@@ -187,9 +188,10 @@ class LLMQueryMixin:
                 for i, p in enumerate(prompts)
             }
             for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
+                idx = int(future_to_idx[future])
                 try:
-                    results[idx] = future.result()
+                    value = future.result()
+                    results[idx] = value if isinstance(value, str) else str(value)
                 except Exception as exc:
                     errors.append((idx, exc))
 

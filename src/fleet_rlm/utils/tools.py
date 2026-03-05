@@ -26,13 +26,13 @@ from .modal import (
 )
 
 __all__ = [
-    "regex_extract",
     "create_interpreter",
     "ensure_volume_exists",
     "get_default_volume_name",
     "get_memory_path",
     "get_workspace_volume_name",
     "load_modal_config",
+    "regex_extract",
     "sanitize_key",
     "setup_modal_env",
 ]
