@@ -1,4 +1,5 @@
 import { parseWsServerFrame, createWsError } from "@/lib/rlm-api/wsFrameParser";
+import { getAccessToken } from "@/lib/auth/tokenStore";
 import type {
   WsClientMessage,
   StreamWsOptions,
@@ -89,10 +90,7 @@ export async function createReconnectingWs(
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
       const wsUrlObj = new URL(options.url);
-      const token =
-        typeof localStorage !== "undefined"
-          ? localStorage.getItem("fleet_access_token")
-          : null;
+      const token = getAccessToken();
       if (token) {
         wsUrlObj.searchParams.set("access_token", token);
       }

@@ -13,9 +13,9 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
-import { apiClient, ApiClientError } from "@/lib/api/client";
+import { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 import { mockFilesystem } from "@/lib/data/mock-skills";
-import type { DataSource } from "@/lib/api/capabilities";
+import type { DataSource } from "@/lib/rlm-api/dataCapabilities";
 import type { FsNode } from "@/lib/data/types";
 
 // ── API response types ──────────────────────────────────────────────
@@ -59,6 +59,16 @@ function toFsNode(node: VolumeTreeNode): FsNode {
     size: node.size ?? undefined,
     modifiedAt: node.modifiedAt ?? undefined,
   };
+}
+
+function buildVolumeTreePath(maxDepth: number): string {
+  const params = new URLSearchParams({ maxDepth: String(maxDepth) });
+  return `/api/v1/runtime/volume/tree?${params.toString()}`;
+}
+
+function buildVolumeFilePath(path: string, maxBytes: number): string {
+  const params = new URLSearchParams({ path, maxBytes: String(maxBytes) });
+  return `/api/v1/runtime/volume/file?${params.toString()}`;
 }
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -109,9 +119,8 @@ export function useFilesystem(): UseFilesystemReturn {
       }
 
       try {
-        const resp = await apiClient.get<VolumeTreeResponse>(
-          "/api/v1/runtime/volume/tree",
-          { maxDepth: 4 },
+        const resp = await rlmApiClient.get<VolumeTreeResponse>(
+          buildVolumeTreePath(4),
           signal,
         );
         return {
@@ -120,7 +129,7 @@ export function useFilesystem(): UseFilesystemReturn {
         };
       } catch (err) {
         const reason =
-          err instanceof ApiClientError
+          err instanceof RlmApiError
             ? `Volume API returned ${err.status}: ${err.detail}`
             : "Volume API unreachable, showing mock data.";
         return {
@@ -176,12 +185,8 @@ export function useFileContent(path: string | null): UseFileContentReturn {
     queryFn: async ({ signal }) => {
       if (!path) return { content: "", mime: "", size: 0 };
 
-      const resp = await apiClient.get<VolumeFileContentResponse>(
-        "/api/v1/runtime/volume/file",
-        {
-          path,
-          maxBytes: 200_000,
-        },
+      const resp = await rlmApiClient.get<VolumeFileContentResponse>(
+        buildVolumeFilePath(path, 200_000),
         signal,
       );
 

@@ -44,8 +44,11 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
 
   await page.getByRole("button", { name: "View recent conversations" }).click();
   await page
-    .getByRole("button", { name: /^Execution canvas deterministic run\b/ })
+    .getByRole("button", {
+      name: /^Open conversation:\s*Execution canvas deterministic run\b/,
+    })
     .click();
+  await page.waitForLoadState("domcontentloaded");
 
   const closeSidePanelButton = page.getByRole("button", {
     name: "Close side panel",

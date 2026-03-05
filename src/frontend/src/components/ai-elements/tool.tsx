@@ -43,29 +43,38 @@ function ToolHeader({
   toolType: string;
   state: ToolState;
 }) {
+  const normalizedState = state.replace(/-/g, " ");
+
   const icon =
     state === "running" || state === "input-streaming" ? (
-      <LoaderCircle className="size-4 animate-spin text-amber-500" />
+      <LoaderCircle
+        className="size-4 animate-spin text-amber-500"
+        aria-hidden="true"
+      />
     ) : state === "output-error" ? (
-      <AlertCircle className="size-4 text-destructive" />
+      <AlertCircle className="size-4 text-destructive" aria-hidden="true" />
     ) : (
-      <CheckCircle2 className="size-4 text-emerald-500" />
+      <CheckCircle2 className="size-4 text-emerald-500" aria-hidden="true" />
     );
 
   return (
     <CollapsibleTrigger
+      aria-label={`${toolType} tool (${normalizedState})`}
       className={cn(
         "group flex w-full items-center gap-2 px-3 py-2 text-left",
         className,
       )}
       {...props}
     >
-      <Wrench className="size-4 text-muted-foreground" />
+      <Wrench className="size-4 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
         {toolType}
       </span>
       {icon}
-      <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+      <ChevronDown
+        className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
+        aria-hidden="true"
+      />
     </CollapsibleTrigger>
   );
 }

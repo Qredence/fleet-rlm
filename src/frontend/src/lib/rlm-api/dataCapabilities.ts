@@ -1,4 +1,4 @@
-import { isMockMode } from "@/lib/api/config";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
 
 export type ApiCapabilityKey =
   | "skills"
@@ -64,7 +64,7 @@ export async function getApiCapabilities(_options?: {
   signal?: AbortSignal;
   ttlMs?: number;
 }): Promise<ApiCapabilities> {
-  if (isMockMode()) {
+  if (rlmApiConfig.mockMode) {
     const mockCaps = allAvailableCapabilities();
     cachedCapabilities = mockCaps;
     return mockCaps;

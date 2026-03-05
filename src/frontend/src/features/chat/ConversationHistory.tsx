@@ -139,7 +139,7 @@ export function ConversationHistory({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
       transition={prefersReduced ? springs.instant : springs.default}
-      className="flex flex-col w-full max-w-[800px] mx-auto"
+      className="flex flex-col w-full max-w-200 mx-auto"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-1 mb-4">
@@ -167,7 +167,10 @@ export function ConversationHistory({
             <TooltipTrigger asChild>
               <span className="inline-flex">
                 <IconButton onClick={onClose} aria-label="Close history">
-                  <X className="size-4 text-muted-foreground" />
+                  <X
+                    className="size-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
                 </IconButton>
               </span>
             </TooltipTrigger>
@@ -193,7 +196,7 @@ export function ConversationHistory({
           </p>
         </div>
       ) : (
-        <ScrollArea className="max-h-[400px]">
+        <ScrollArea className="max-h-100">
           <div className="flex flex-col gap-5 pr-2">
             <AnimatePresence>
               {groups.map(({ group, items }) => (
@@ -214,9 +217,8 @@ export function ConversationHistory({
                     ).length;
 
                     return (
-                      <motion.button
+                      <motion.div
                         key={conv.id}
-                        type="button"
                         layout={!prefersReduced}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -224,93 +226,87 @@ export function ConversationHistory({
                         transition={
                           prefersReduced ? springs.instant : springs.snappy
                         }
-                        className="group flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg hover:bg-secondary/60 transition-colors border border-transparent hover:border-border-subtle focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
-                        onClick={() => onSelect(conv.id)}
+                        className="group flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-secondary/60 transition-colors border border-transparent hover:border-border-subtle"
                       >
-                        {/* Icon */}
-                        <div className="size-8 rounded-md bg-muted flex items-center justify-center shrink-0">
-                          <MessageSquare
-                            className="size-4 text-muted-foreground"
-                            aria-hidden="true"
-                          />
-                        </div>
+                        <button
+                          type="button"
+                          className="flex flex-1 min-w-0 items-center gap-3 text-left rounded-[inherit] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                          onClick={() => onSelect(conv.id)}
+                          aria-label={`Open conversation: ${conv.title}`}
+                        >
+                          {/* Icon */}
+                          <div className="size-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+                            <MessageSquare
+                              className="size-4 text-muted-foreground"
+                              aria-hidden="true"
+                            />
+                          </div>
 
-                        {/* Content */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="text-foreground truncate"
-                              style={typo.label}
-                            >
-                              {conv.title}
-                            </span>
-                            {badge && (
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
                               <span
-                                className={cn(
-                                  "shrink-0 px-1.5 py-0.5 rounded-sm",
-                                  conv.phase === "complete"
-                                    ? "bg-accent/10 text-accent"
-                                    : "bg-muted text-muted-foreground",
-                                )}
-                                style={typo.micro}
+                                className="text-foreground truncate"
+                                style={typo.label}
                               >
-                                {badge}
+                                {conv.title}
                               </span>
-                            )}
+                              {badge && (
+                                <span
+                                  className={cn(
+                                    "shrink-0 px-1.5 py-0.5 rounded-sm",
+                                    conv.phase === "complete"
+                                      ? "bg-accent/10 text-accent"
+                                      : "bg-muted text-muted-foreground",
+                                  )}
+                                  style={typo.micro}
+                                >
+                                  {badge}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span
+                                className="text-muted-foreground"
+                                style={typo.helper}
+                              >
+                                {msgCount} messages
+                              </span>
+                              <span
+                                className="text-muted-foreground"
+                                style={typo.helper}
+                              >
+                                &middot;
+                              </span>
+                              <span
+                                className="text-muted-foreground"
+                                style={typo.helper}
+                              >
+                                {relativeTime(conv.updatedAt)}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span
-                              className="text-muted-foreground"
-                              style={typo.helper}
-                            >
-                              {msgCount} messages
-                            </span>
-                            <span
-                              className="text-muted-foreground"
-                              style={typo.helper}
-                            >
-                              &middot;
-                            </span>
-                            <span
-                              className="text-muted-foreground"
-                              style={typo.helper}
-                            >
-                              {relativeTime(conv.updatedAt)}
-                            </span>
-                          </div>
-                        </div>
+                        </button>
 
                         {/* Delete */}
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span
-                              className="inline-flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDelete(conv.id);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.stopPropagation();
-                                  e.preventDefault();
-                                  onDelete(conv.id);
-                                }
-                              }}
-                              role="button"
-                              tabIndex={0}
-                              aria-label={`Delete conversation: ${conv.title}`}
-                            >
+                            <span className="inline-flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                               <IconButton
-                                aria-label="Delete"
+                                aria-label={`Delete conversation: ${conv.title}`}
                                 className="text-muted-foreground hover:text-destructive"
+                                onClick={() => onDelete(conv.id)}
                               >
-                                <Trash2 className="size-3.5" />
+                                <Trash2
+                                  className="size-3.5"
+                                  aria-hidden="true"
+                                />
                               </IconButton>
                             </span>
                           </TooltipTrigger>
                           <TooltipContent side="left">Delete</TooltipContent>
                         </Tooltip>
-                      </motion.button>
+                      </motion.div>
                     );
                   })}
                 </div>

@@ -60,13 +60,16 @@ function SourcesTrigger({
       {...props}
     >
       <span className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <Link2 className="size-3.5" />
+        <Link2 className="size-3.5" aria-hidden="true" />
         Sources
         <span className="rounded-full border border-border-subtle px-1.5 py-0 text-[10px]">
           {count}
         </span>
       </span>
-      <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+      <ChevronDown
+        className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
+        aria-hidden="true"
+      />
     </CollapsibleTrigger>
   );
 }
@@ -100,7 +103,10 @@ function Source({
           {sourceTitle}
         </span>
         {hrefSafe ? (
-          <ExternalLink className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+          <ExternalLink
+            className="ml-auto size-3.5 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
         ) : null}
       </div>
       {hrefSafe ? (

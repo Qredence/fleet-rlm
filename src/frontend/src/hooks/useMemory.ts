@@ -15,22 +15,27 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
-import type { MemoryListParams } from "@/lib/api/endpoints";
 import {
   getCapabilityStatus,
   type DataSource,
   createFallbackPayload,
-} from "@/lib/api/capabilities";
+} from "@/lib/rlm-api/dataCapabilities";
 import { useMockStateStore } from "@/stores/mockStateStore";
 import type { MemoryEntry, MemoryType } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
+
+type MemoryQueryParams = {
+  type?: MemoryType;
+  search?: string;
+  pinned?: boolean;
+};
 
 // ── Query Keys ──────────────────────────────────────────────────────
 
 export const memoryKeys = {
   all: ["memory"] as const,
   lists: () => [...memoryKeys.all, "list"] as const,
-  list: (params?: MemoryListParams) =>
+  list: (params?: MemoryQueryParams) =>
     [...memoryKeys.lists(), params ?? {}] as const,
   detail: (id: string) => [...memoryKeys.all, "detail", id] as const,
 };
@@ -102,7 +107,7 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
     bulkRemoveMemoryEntries,
   } = useMockStateStore();
 
-  const params: MemoryListParams | undefined = options
+  const params: MemoryQueryParams | undefined = options
     ? {
         type: options.type,
         search: options.search,
@@ -149,15 +154,6 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
       }
 
       const capability = await getCapabilityStatus("memory", signal);
-      if (!capability.available) {
-        return createFallbackPayload(
-          "entries",
-          filterEntries(memoryEntries),
-          capability,
-          "Memory",
-        );
-      }
-
       return createFallbackPayload(
         "entries",
         filterEntries(memoryEntries),

@@ -1,32 +1,7 @@
-import {
-  createContext,
-  useContext,
-  useRef,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useRef, type ReactNode } from "react";
 
 import { cn } from "@/components/ui/utils";
-
-interface PromptInputContextValue {
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-  isLoading: boolean;
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
-}
-
-const PromptInputContext = createContext<PromptInputContextValue | undefined>(
-  undefined,
-);
-
-function usePromptInput(): PromptInputContextValue {
-  const ctx = useContext(PromptInputContext);
-  if (!ctx) {
-    throw new Error("usePromptInput must be used within <PromptInput>");
-  }
-  return ctx;
-}
+import { PromptInputContext } from "./PromptInputContext";
 
 interface PromptInputProps {
   value: string;
@@ -37,7 +12,7 @@ interface PromptInputProps {
   children: ReactNode;
 }
 
-function PromptInput({
+export function PromptInput({
   value,
   onChange,
   onSubmit,
@@ -55,5 +30,3 @@ function PromptInput({
     </PromptInputContext.Provider>
   );
 }
-
-export { PromptInput, usePromptInput };

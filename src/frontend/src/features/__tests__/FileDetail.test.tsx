@@ -4,16 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FileDetail } from "@/features/artifacts/FileDetail";
 import type { FsNode } from "@/lib/data/types";
 
-let mockMode = false;
 let contentState: {
   content: string;
   isLoading: boolean;
   error: Error | null;
 };
-
-vi.mock("@/lib/api/config", () => ({
-  isMockMode: () => mockMode,
-}));
 
 vi.mock("@/hooks/useFilesystem", () => ({
   useFileContent: () => contentState,
@@ -31,7 +26,6 @@ vi.mock("sonner", () => ({
 
 describe("FileDetail markdown rendering", () => {
   beforeEach(() => {
-    mockMode = false;
     contentState = {
       content: "",
       isLoading: false,
