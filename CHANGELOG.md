@@ -55,6 +55,10 @@ All notable changes to this project are documented in this file.
 - **Change:** Removed unused server service package stub and request-scoped `get_react_agent` dependency provider from `server/deps.py`.
   **Outcome:** Leaner server dependency surface with less legacy wiring.
 
+### Merged Pull Requests
+
+- [#96](https://github.com/Qredence/fleet-rlm/pull/96): Release v0.4.95 preparation, runtime/tooling cleanup, and frontend/chat UX refinements.
+
 ## [0.4.94] - 2026-03-03
 
 ### Highlights (User Impact)
