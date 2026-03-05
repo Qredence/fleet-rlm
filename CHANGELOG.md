@@ -4,16 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.4.95] - 2026-03-05
+
 ### Highlights (User Impact)
 
 - Replaced recursive delegate sub-agent flows for long-context and memory-intelligence tools with cached runtime RLM modules, reducing orchestration overhead while preserving tool response contracts.
 - Simplified package/API surface by removing deprecated `fleet_rlm.stateful` exports and implementation modules that were no longer part of the active runtime path.
 - Hardened delegate result normalization and fallback metadata so tool outputs remain machine-consumable even when runtime modules return loosely typed payloads.
+- Introduced a new chat composer stack (`ChatInput`) with attachment chips, agent selection, and per-message "Think" trace toggling wired into WS message payloads.
+- Improved WebSocket startup failure UX by surfacing actionable Modal auth guidance when malformed token credentials are detected.
+- Synced release/version metadata to `0.4.95` and tightened core runtime dependency bounds to reduce resolver ambiguity across install extras.
 
 ### Added
 
 - **Change:** Added frontend script `lint:robustness` as an explicit alias for lint gate execution.
   **Outcome:** Frontend lint entrypoints are clearer and easier to reuse across CI/local workflows.
+- **Change:** Added modular chat composer components under `src/frontend/src/components/chat/` (`ChatInput`, prompt-input primitives, attachment/agent/settings controls).
+  **Outcome:** The skill-creation composer now supports richer controls while keeping input UX composable and testable.
+- **Change:** Added dedicated regex helper module `src/fleet_rlm/utils/regex.py`.
+  **Outcome:** Regex utilities now have a clearer, purpose-specific import path decoupled from broader tool helper surfaces.
 
 ### Changed
 
@@ -23,6 +32,21 @@ All notable changes to this project are documented in this file.
   **Outcome:** Callers now receive consistently typed `str` outputs from LLM query helpers.
 - **Change:** Removed `NotificationCenter` usage from the top-header shell layout and aligned related frontend tests/mocks.
   **Outcome:** Header surface is simplified and ReactFlow test coverage no longer emits console-error noise from incomplete mocks.
+- **Change:** Replaced `PromptInput` usage in `SkillCreationFlow` with the new `ChatInput` surface and threaded `traceEnabled` / attachment metadata through submit handlers.
+  **Outcome:** Frontend runtime can toggle tracing per message and stage attachment metadata without changing the current backend message contract.
+- **Change:** Updated WS chat store payload construction to support per-message trace override (`trace_mode: "compact"` vs `"off"`), with matching store tests.
+  **Outcome:** Trace emission behavior now aligns directly with composer-level "Think" intent.
+- **Change:** Updated docs (`AGENTS.md`, `docs/reference/source-layout.md`, `docs/reference/code-health-map.md`) to clarify core host-vs-sandbox boundaries and utility module ownership.
+  **Outcome:** Lower documentation drift and clearer module-level onboarding guidance.
+- **Change:** Updated `pyproject.toml` dependency constraints to align base, `server`, and `full` extras for `asyncpg`, `sqlalchemy`, `greenlet`, `psycopg`, and `uvicorn` (with explicit `<major>` upper bounds), and refreshed `uv.lock`.
+  **Outcome:** More consistent dependency resolution across installation modes and lower risk of accidental cross-environment drift.
+
+### Fixed
+
+- **Change:** Added compatibility shim behavior in `fleet_rlm.utils.tools` while re-exporting modal helpers and `regex_extract` from canonical modules.
+  **Outcome:** Legacy `fleet_rlm.utils.tools` imports continue working during the transition to `fleet_rlm.utils.regex` and `fleet_rlm.utils.modal`.
+- **Change:** Synchronized `src/fleet_rlm/__init__.py::__version__` with project metadata in `pyproject.toml` (`0.4.95`).
+  **Outcome:** Package runtime version introspection now matches build metadata and lockfile state.
 
 ### Removed
 
