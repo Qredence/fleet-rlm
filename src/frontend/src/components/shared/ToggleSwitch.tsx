@@ -225,7 +225,7 @@ export function ToggleSwitch({
         {showFlash && !prefersReduced && (
           <motion.div
             key="toggle-flash"
-            className="absolute inset-0 rounded-full z-5 pointer-events-none"
+            className="absolute inset-0 rounded-full z-[5] pointer-events-none"
             initial={{ opacity: 0 }}
             animate={{ opacity: [0, 0.25, 0] }}
             exit={{ opacity: 0 }}

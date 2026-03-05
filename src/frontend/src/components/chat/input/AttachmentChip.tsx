@@ -15,7 +15,7 @@ function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
   const isImage = attachment.file.type.startsWith("image/");
 
   return (
-    <div className="relative group flex items-center gap-1.5 rounded-lg bg-accent/60 px-2 py-1 text-xs text-foreground shrink-0 max-w-45">
+    <div className="relative group flex items-center gap-1.5 rounded-lg bg-accent/60 px-2 py-1 text-xs text-foreground shrink-0 max-w-[180px]">
       {isImage && attachment.previewUrl ? (
         <img
           src={attachment.previewUrl}

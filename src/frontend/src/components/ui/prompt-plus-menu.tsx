@@ -88,7 +88,7 @@ export function PromptPlusMenu({
         side="top"
         align="start"
         sideOffset={8}
-        className="w-55 p-1.5 rounded-xl"
+        className="w-[220px] p-1.5 rounded-xl"
       >
         {featureItems.map((item) => {
           const Icon = item.icon;
@@ -110,7 +110,7 @@ export function PromptPlusMenu({
             >
               <Icon
                 className={cn(
-                  "size-4.5 shrink-0",
+                  "size-[18px] shrink-0",
                   isActive ? "text-accent" : "text-muted-foreground",
                 )}
               />
@@ -144,7 +144,7 @@ export function PromptPlusMenu({
             setOpen(false);
           }}
         >
-          <MoreHorizontal className="size-4.5 text-muted-foreground shrink-0" />
+          <MoreHorizontal className="size-[18px] text-muted-foreground shrink-0" />
           <span className="flex-1 text-left" style={typo.label}>
             More
           </span>

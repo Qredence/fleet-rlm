@@ -161,7 +161,7 @@ function ModeChip({
         side="top"
         align="start"
         sideOffset={8}
-        className="w-65 p-1.5 rounded-xl"
+        className="w-[260px] p-1.5 rounded-xl"
       >
         <div className="mb-1.5 px-2">
           <span className="text-muted-foreground" style={typo.helper}>
@@ -230,7 +230,7 @@ function ContextMemoryChip() {
         side="top"
         align="start"
         sideOffset={8}
-        className="w-65 p-3 rounded-xl"
+        className="w-[260px] p-3 rounded-xl"
       >
         <div className="mb-2">
           <span className="text-foreground block" style={typo.label}>
