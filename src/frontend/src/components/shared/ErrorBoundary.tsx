@@ -2,7 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { telemetryClient } from "@/lib/telemetry/client";
 
 // ── Types ───────────────────────────────────────────────────────────

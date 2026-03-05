@@ -10,7 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "error";
 

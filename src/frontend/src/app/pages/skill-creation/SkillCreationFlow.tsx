@@ -4,7 +4,7 @@ import { useNavigation } from "@/hooks/useNavigation";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useChatHistory } from "@/hooks/useChatHistory";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
 import { ConversationHistory } from "@/features/chat/ConversationHistory";

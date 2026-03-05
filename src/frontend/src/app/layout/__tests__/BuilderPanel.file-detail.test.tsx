@@ -27,7 +27,7 @@ vi.mock("@/hooks/useAppNavigate", () => ({
   useAppNavigate: () => ({ navigateTo: vi.fn() }),
 }));
 
-vi.mock("@/components/ui/use-mobile", () => ({
+vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 

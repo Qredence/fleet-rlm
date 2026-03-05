@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { typo } from "@/lib/config/typo";
 import { Badge } from "@/components/ui/badge";
 

@@ -34,7 +34,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { typo } from "@/lib/config/typo";
 
 // ── Queue (root) ────────────────────────────────────────────────────

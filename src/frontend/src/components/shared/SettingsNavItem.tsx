@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 // ── Types ───────────────────────────────────────────────────────────
 

@@ -18,6 +18,7 @@
 import { create } from "zustand";
 import { mockMemoryEntries } from "@/lib/data/mock-skills";
 import type { MemoryEntry } from "@/lib/data/types";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -86,44 +87,72 @@ export const useMockStateStore = create<MockState>((set) => ({
 
   // Memory actions
   addMemoryEntry: (entry) =>
-    set((state) => ({
-      memoryEntries: [entry, ...state.memoryEntries],
-    })),
+    set((state) =>
+      rlmApiConfig.mockMode
+        ? {
+            memoryEntries: [entry, ...state.memoryEntries],
+          }
+        : state,
+    ),
 
   updateMemoryEntry: (id, patch) =>
-    set((state) => ({
-      memoryEntries: state.memoryEntries.map((e) =>
-        e.id === id
-          ? { ...e, ...patch, updatedAt: new Date().toISOString() }
-          : e,
-      ),
-    })),
+    set((state) =>
+      rlmApiConfig.mockMode
+        ? {
+            memoryEntries: state.memoryEntries.map((e) =>
+              e.id === id
+                ? { ...e, ...patch, updatedAt: new Date().toISOString() }
+                : e,
+            ),
+          }
+        : state,
+    ),
 
   removeMemoryEntry: (id) =>
-    set((state) => ({
-      memoryEntries: state.memoryEntries.filter((e) => e.id !== id),
-    })),
+    set((state) =>
+      rlmApiConfig.mockMode
+        ? {
+            memoryEntries: state.memoryEntries.filter((e) => e.id !== id),
+          }
+        : state,
+    ),
 
   bulkUpdateMemoryPinned: (ids, pinned) =>
-    set((state) => ({
-      memoryEntries: state.memoryEntries.map((e) =>
-        ids.includes(e.id)
-          ? { ...e, pinned, updatedAt: new Date().toISOString() }
-          : e,
-      ),
-    })),
+    set((state) =>
+      rlmApiConfig.mockMode
+        ? {
+            memoryEntries: state.memoryEntries.map((e) =>
+              ids.includes(e.id)
+                ? { ...e, pinned, updatedAt: new Date().toISOString() }
+                : e,
+            ),
+          }
+        : state,
+    ),
 
   bulkRemoveMemoryEntries: (ids) =>
-    set((state) => ({
-      memoryEntries: state.memoryEntries.filter((e) => !ids.includes(e.id)),
-    })),
+    set((state) =>
+      rlmApiConfig.mockMode
+        ? {
+            memoryEntries: state.memoryEntries.filter((e) => !ids.includes(e.id)),
+          }
+        : state,
+    ),
 
   // Session actions
   addSession: (session) =>
-    set((state) => ({
-      sessions: [...state.sessions, session],
-    })),
+    set((state) =>
+      rlmApiConfig.mockMode
+        ? {
+            sessions: [...state.sessions, session],
+          }
+        : state,
+    ),
 
   // Reset
-  reset: () => set(createInitialState()),
+  reset: () => {
+    if (rlmApiConfig.mockMode) {
+      set(createInitialState());
+    }
+  },
 }));

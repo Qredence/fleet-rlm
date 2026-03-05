@@ -1,7 +1,7 @@
 import { typo } from "@/lib/config/typo";
 import { Badge } from "@/components/ui/badge";
 import { badgeVariants } from "@/components/ui/badge-variants";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import type { VariantProps } from "class-variance-authority";
 
 type BadgeVariant = VariantProps<typeof badgeVariants>["variant"];

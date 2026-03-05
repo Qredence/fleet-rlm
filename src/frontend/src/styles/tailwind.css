@@ -3,6 +3,9 @@
 
 @import "tw-animate-css";
 
+/* shadcn v4 dark-mode class variant (must live alongside tailwind imports) */
+@custom-variant dark (&:is(.dark *));
+
 /* Utility: hide scrollbar on horizontal overflow */
 @utility no-scrollbar {
   -ms-overflow-style: none;

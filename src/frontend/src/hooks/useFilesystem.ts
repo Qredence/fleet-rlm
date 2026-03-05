@@ -15,7 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 import { mockFilesystem } from "@/lib/data/mock-skills";
-import type { DataSource } from "@/lib/rlm-api/dataCapabilities";
+import type { DataSource } from "@/lib/rlm-api/capabilities";
 import type { FsNode } from "@/lib/data/types";
 
 // ── API response types ──────────────────────────────────────────────
@@ -59,16 +59,6 @@ function toFsNode(node: VolumeTreeNode): FsNode {
     size: node.size ?? undefined,
     modifiedAt: node.modifiedAt ?? undefined,
   };
-}
-
-function buildVolumeTreePath(maxDepth: number): string {
-  const params = new URLSearchParams({ maxDepth: String(maxDepth) });
-  return `/api/v1/runtime/volume/tree?${params.toString()}`;
-}
-
-function buildVolumeFilePath(path: string, maxBytes: number): string {
-  const params = new URLSearchParams({ path, maxBytes: String(maxBytes) });
-  return `/api/v1/runtime/volume/file?${params.toString()}`;
 }
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -119,8 +109,13 @@ export function useFilesystem(): UseFilesystemReturn {
       }
 
       try {
+        const url = new URL(
+          "/api/v1/runtime/volume/tree",
+          window.location.origin,
+        );
+        url.searchParams.set("max_depth", "4");
         const resp = await rlmApiClient.get<VolumeTreeResponse>(
-          buildVolumeTreePath(4),
+          url.pathname + url.search,
           signal,
         );
         return {
@@ -185,8 +180,9 @@ export function useFileContent(path: string | null): UseFileContentReturn {
     queryFn: async ({ signal }) => {
       if (!path) return { content: "", mime: "", size: 0 };
 
+      const qs = new URLSearchParams({ path, maxBytes: "200000" }).toString();
       const resp = await rlmApiClient.get<VolumeFileContentResponse>(
-        buildVolumeFilePath(path, 200_000),
+        `/api/v1/runtime/volume/file?${qs}`,
         signal,
       );
 

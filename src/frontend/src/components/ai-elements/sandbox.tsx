@@ -5,7 +5,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import type { ToolState } from "@/components/ai-elements/tool";
 
 function Sandbox(props: React.ComponentProps<typeof Collapsible>) {

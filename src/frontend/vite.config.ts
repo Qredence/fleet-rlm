@@ -62,6 +62,7 @@ export default defineConfig({
   },
 
   build: {
+    minify: "oxc",
     rollupOptions: {
       output: {
         manualChunks: {
@@ -72,7 +73,7 @@ export default defineConfig({
             "lucide-react",
             "motion",
           ],
-          "vendor-editor": ["@monaco-editor/react", "codemirror"],
+          "vendor-editor": ["codemirror"],
           "vendor-state": ["zustand", "@tanstack/react-query", "react-router"],
         },
       },

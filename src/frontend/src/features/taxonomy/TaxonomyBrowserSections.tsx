@@ -15,7 +15,7 @@ import { typo } from "@/lib/config/typo";
 import type { FsNode, Skill, TaxonomyNode } from "@/lib/data/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { countFiles, formatDate, formatFileSize } from "@/lib/taxonomy/browser";
 
 function fileIcon(name: string, _mime?: string) {

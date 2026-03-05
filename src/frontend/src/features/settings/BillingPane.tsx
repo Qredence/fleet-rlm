@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { SettingsRow } from "@/components/shared/SettingsRow";
 import { ListRow } from "@/components/shared/ListRow";
 

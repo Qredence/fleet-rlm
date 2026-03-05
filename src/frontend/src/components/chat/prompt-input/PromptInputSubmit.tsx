@@ -1,7 +1,7 @@
 import { ArrowUp } from "lucide-react";
 
 import { IconButton } from "@/components/ui/icon-button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 import { usePromptInput } from "./usePromptInput";
 

@@ -5,7 +5,7 @@
  * - Expose them to Tailwind through `@theme inline`.
  * - Keep component slot typography/theme rules colocated here for reuse.
  */
-@custom-variant dark (&:is(.dark *));
+/* @custom-variant dark is declared in tailwind.css */
 
 :root {
   --font-size: 16px;

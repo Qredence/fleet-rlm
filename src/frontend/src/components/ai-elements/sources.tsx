@@ -4,7 +4,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 function safeHref(href: string | undefined): string | undefined {
   if (!href) return undefined;

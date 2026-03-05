@@ -1,6 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { SkillCardSkeleton } from "@/components/shared/SkillCardSkeleton";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 /**
  * Suspense fallback for the lazy-loaded SkillLibrary page.

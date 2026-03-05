@@ -3,7 +3,7 @@ import { typo } from "@/lib/config/typo";
 import type { Skill } from "@/lib/data/types";
 import { springs } from "@/lib/config/motion-config";
 import { Card } from "@/components/ui/card";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { SkillBadge } from "./SkillBadge";
 
 const statusVariantMap: Record<

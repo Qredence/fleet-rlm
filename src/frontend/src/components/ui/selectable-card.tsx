@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -58,8 +58,8 @@ function SelectableCard({
       data-slot="selectable-card"
       className={cn(
         "border-border-subtle group transition-colors",
-        highlighted && !selected && "border-accent/30 bg-accent/[0.02]",
-        selectable && selected && "border-primary/40 bg-primary/[0.03]",
+        highlighted && !selected && "border-accent/30 bg-accent/2",
+        selectable && selected && "border-primary/40 bg-primary/3",
         selectable && "cursor-pointer",
         className,
       )}

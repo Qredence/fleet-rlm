@@ -1,4 +1,4 @@
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 interface ShimmerProps extends React.HTMLAttributes<HTMLDivElement> {
   lines?: number;

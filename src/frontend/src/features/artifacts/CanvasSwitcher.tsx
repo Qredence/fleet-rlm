@@ -9,7 +9,7 @@
 import { useState, useMemo, type ReactNode } from "react";
 import { GitBranch, Brain, FileText, Check, Layers } from "lucide-react";
 import { typo } from "@/lib/config/typo";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";

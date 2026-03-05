@@ -16,8 +16,8 @@ import { SkillCardSkeleton } from "@/components/shared/SkillCardSkeleton";
 import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/components/ui/utils";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { cn } from "@/lib/utils/cn";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   buildDomainCounts,
   domains,
@@ -236,7 +236,7 @@ export function SkillLibrary() {
           <div
             className={cn(
               "w-full min-w-0 mx-auto",
-              isMobile ? "px-4 py-4" : "px-6 py-6 max-w-[800px]",
+              isMobile ? "px-4 py-4" : "px-6 py-6 max-w-200",
             )}
           >
             {isDegradedData && (

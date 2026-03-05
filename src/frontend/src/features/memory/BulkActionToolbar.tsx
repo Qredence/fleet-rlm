@@ -3,7 +3,7 @@ import { MinusSquare, Pin, CheckSquare, Trash2, X } from "lucide-react";
 import { springs } from "@/lib/config/motion-config";
 import { typo } from "@/lib/config/typo";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 export interface BulkActionToolbarProps {
   selectedCount: number;

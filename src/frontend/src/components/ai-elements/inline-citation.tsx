@@ -5,7 +5,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 function safeHref(href: string): string | undefined {
   try {

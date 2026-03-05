@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { type SortKey, sortOptions } from "@/lib/skills/library";
 
 export function SkillLibraryHeaderControls({

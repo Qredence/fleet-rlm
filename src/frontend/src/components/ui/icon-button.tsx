@@ -1,4 +1,4 @@
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 // ── Types ───────────────────────────────────────────────────────────
 interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -26,7 +26,7 @@ function IconButton({
       data-slot="icon-button"
       className={cn(
         "flex items-center justify-center p-1 rounded-lg transition-colors",
-        "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         "disabled:pointer-events-none disabled:opacity-50",
         isActive
           ? "bg-accent/10 text-accent"

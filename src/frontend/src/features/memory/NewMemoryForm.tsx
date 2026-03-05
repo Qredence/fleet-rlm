@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { motion } from "motion/react";
 import { Check, X } from "lucide-react";
 import { toast } from "sonner";
@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 export interface NewMemoryFormProps {
   onSubmit: (data: {
@@ -35,10 +35,6 @@ export function NewMemoryForm({
   isMobile,
   reduced,
 }: NewMemoryFormProps) {
-  const typeLabelId = useId();
-  const contentId = useId();
-  const tagsId = useId();
-
   const [type, setType] = useState<MemoryType>("fact");
   const [content, setContent] = useState("");
   const [tagsStr, setTagsStr] = useState("");
@@ -63,7 +59,7 @@ export function NewMemoryForm({
       transition={reduced ? springs.instant : springs.default}
       className="overflow-hidden"
     >
-      <Card className="border-accent/30 bg-accent/[.02]">
+      <Card className="border-accent/30 bg-accent/2">
         <CardContent className={cn("p-4 space-y-3", isMobile && "p-3")}>
           <div className="flex items-center justify-between">
             <span className="text-foreground" style={typo.label}>
@@ -75,13 +71,12 @@ export function NewMemoryForm({
               onClick={onCancel}
               aria-label="Cancel"
             >
-              <X className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+              <X className="w-4 h-4 text-muted-foreground" />
             </Button>
           </div>
 
           <div>
             <label
-              id={typeLabelId}
               className="text-muted-foreground mb-1.5 block"
               style={typo.helper}
             >
@@ -92,7 +87,6 @@ export function NewMemoryForm({
               onValueChange={(v) => setType(v as MemoryType)}
             >
               <SelectTrigger
-                aria-labelledby={typeLabelId}
                 className={cn("w-full", isMobile && "touch-target")}
                 style={typo.label}
               >
@@ -105,10 +99,7 @@ export function NewMemoryForm({
                   return (
                     <SelectItem key={t} value={t}>
                       <div className="flex items-center gap-2">
-                        <MIcon
-                          className={cn("w-3.5 h-3.5", meta.color)}
-                          aria-hidden="true"
-                        />
+                        <MIcon className={cn("w-3.5 h-3.5", meta.color)} />
                         <span>{meta.label}</span>
                       </div>
                     </SelectItem>
@@ -120,14 +111,12 @@ export function NewMemoryForm({
 
           <div>
             <label
-              htmlFor={contentId}
               className="text-muted-foreground mb-1.5 block"
               style={typo.helper}
             >
               Content
             </label>
             <textarea
-              id={contentId}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="What should the agent remember?"
@@ -143,13 +132,12 @@ export function NewMemoryForm({
                 fontWeight: "var(--font-weight-regular)",
                 lineHeight: "1.5",
               }}
-              autoFocus={!isMobile}
+              autoFocus
             />
           </div>
 
           <div>
             <label
-              htmlFor={tagsId}
               className="text-muted-foreground mb-1.5 block"
               style={typo.helper}
             >
@@ -159,7 +147,6 @@ export function NewMemoryForm({
               </span>
             </label>
             <Input
-              id={tagsId}
               value={tagsStr}
               onChange={(e) => setTagsStr(e.target.value)}
               placeholder="testing, policy, preference"
@@ -178,7 +165,7 @@ export function NewMemoryForm({
               onClick={handleSubmit}
               disabled={!content.trim()}
             >
-              <Check className="w-4 h-4" aria-hidden="true" />
+              <Check className="w-4 h-4" />
               <span style={typo.label}>Save</span>
             </Button>
             <Button

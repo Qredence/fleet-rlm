@@ -3,7 +3,7 @@ import { PanelRight, SquarePen } from "lucide-react";
 import type { NavItem } from "@/lib/data/types";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { UserMenu } from "@/features/shell/UserMenu";
 import { BrandMark } from "@/components/shared/BrandMark";
 import {
@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { NavTab } from "@/components/ui/nav-tab";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
 import { BACKEND_CAPABILITY_TOOLTIP, isSectionSupported } from "@/lib/rlm-api";
 

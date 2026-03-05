@@ -36,7 +36,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { useCodeMirror } from "@/hooks/useCodeMirror";
 
 // ── Mock artifacts ──────────────────────────────────────────────────

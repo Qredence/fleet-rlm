@@ -11,11 +11,14 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
+import { rlmApiClient } from "@/lib/rlm-api/client";
+import { adaptTaxonomy } from "@/lib/rlm-api/adapters";
 import {
   getCapabilityStatus,
-  type DataSource,
   createFallbackPayload,
-} from "@/lib/rlm-api/dataCapabilities";
+  type DataSource,
+} from "@/lib/rlm-api/capabilities";
+import type { ApiTaxonomyNode } from "@/lib/rlm-api/types";
 import type { TaxonomyNode } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -66,7 +69,28 @@ export function useTaxonomy(): UseTaxonomyReturn {
       }
 
       const capability = await getCapabilityStatus("taxonomy", signal);
-      return createFallbackPayload("taxonomy", [], capability, "Taxonomy");
+      if (!capability.available) {
+        return createFallbackPayload("taxonomy", [], capability, "Taxonomy");
+      }
+
+      try {
+        const response = await rlmApiClient.get<ApiTaxonomyNode[]>(
+          "/api/v1/taxonomy",
+          signal,
+        );
+        return {
+          taxonomy: adaptTaxonomy(response),
+          dataSource: "api" as const,
+          degradedReason: undefined,
+        } satisfies TaxonomyPayload;
+      } catch {
+        return createFallbackPayload(
+          "taxonomy",
+          [],
+          { available: false, reason: "taxonomy endpoint request failed" },
+          "Taxonomy",
+        );
+      }
     },
     staleTime: mock ? Infinity : undefined,
   });

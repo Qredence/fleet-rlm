@@ -7,7 +7,7 @@ import type {
   RuntimeContext,
 } from "@/lib/data/types";
 import { typo } from "@/lib/config/typo";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { Streamdown } from "@/components/ui/streamdown";
 import {
   Conversation,

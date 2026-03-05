@@ -13,7 +13,7 @@ import {
   PanelTabPanels,
 } from "@/components/ui/panel-tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 // ── Types ───────────────────────────────────────────────────────────
 interface Props {

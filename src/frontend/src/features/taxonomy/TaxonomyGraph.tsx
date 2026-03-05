@@ -31,7 +31,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 const layoutModes: { mode: LayoutMode; label: string; icon: typeof Network }[] =
   [

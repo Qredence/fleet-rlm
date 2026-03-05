@@ -16,7 +16,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { springs } from "@/lib/config/motion-config";
 import { typo } from "@/lib/config/typo";
 import type { PromptFeature, PromptMode } from "@/lib/data/types";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { IconButton } from "@/components/ui/icon-button";
 import { PromptPlusMenu } from "@/components/ui/prompt-plus-menu";
 import { PromptToolbar } from "@/components/ui/prompt-toolbar";

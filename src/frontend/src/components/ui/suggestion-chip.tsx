@@ -1,6 +1,6 @@
 import { type ComponentType } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 // ── Types ───────────────────────────────────────────────────────────
 

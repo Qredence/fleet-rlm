@@ -15,7 +15,7 @@ import {
   BACKEND_CAPABILITY_TOOLTIP,
   isSectionSupported,
 } from "@/lib/rlm-api";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 const tabs: { key: NavItem; label: string; icon: typeof MessageSquare }[] = [
   { key: "new", label: "Chat", icon: MessageSquare },
