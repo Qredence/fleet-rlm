@@ -74,23 +74,13 @@ jobs:
       - name: Run unit tests
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-        run: |
-          uv run python - <<'PY'
-          import os
-          import pytest
-
-          code = pytest.main(
-              [
-                  "-q",
-                  "tests/unit",
-                  "-p",
-                  "pytest_asyncio.plugin",
-                  "-m",
-                  "not live_llm and not benchmark",
-              ]
-          )
-          os._exit(code)
-          PY
+        run: >
+          uv run pytest -q tests/unit
+          -p pytest_asyncio.plugin
+          -p pytest_timeout
+          --timeout=120
+          --timeout-method=thread
+          -m "not live_llm and not benchmark"
 
   test-ui:
     name: Test UI
