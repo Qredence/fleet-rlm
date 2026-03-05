@@ -79,7 +79,13 @@ jobs:
         run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 
       - name: Run tests
-        run: uv run pytest
+        env:
+          MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
+        run: >
+          uv run pytest -q
+          -p pytest_timeout
+          --timeout=120
+          --timeout-method=thread
 
       - name: Set up Bun for frontend checks
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
