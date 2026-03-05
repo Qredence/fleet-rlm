@@ -26,10 +26,7 @@ async function loadWsClientModule() {
 
 interface MockWebSocketInstance {
   readyState: number;
-  addEventListener: (
-    event: string,
-    cb: (...args: unknown[]) => void,
-  ) => void;
+  addEventListener: (event: string, cb: (...args: unknown[]) => void) => void;
   removeEventListener: import("vitest").Mock;
   send: import("vitest").Mock;
   close: import("vitest").Mock;

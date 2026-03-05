@@ -191,7 +191,10 @@ describe("applyWsFrameToMessages", () => {
       expect(tools[1].output).toEqual({ count: 2 });
     }
 
-    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      messages,
+      (part) => part.kind === "chain_of_thought",
+    );
     expect(cot).toBeDefined();
     if (cot?.kind === "chain_of_thought") {
       expect(cot.steps).toHaveLength(2);
@@ -221,7 +224,10 @@ describe("applyWsFrameToMessages", () => {
       }),
     ).messages;
 
-    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      messages,
+      (part) => part.kind === "chain_of_thought",
+    );
     expect(cot).toBeDefined();
     if (cot?.kind === "chain_of_thought") {
       expect(cot.steps.map((step) => step.index)).toEqual([0, 1]);
@@ -467,9 +473,9 @@ describe("applyWsFrameToMessages", () => {
     expect(assistant?.renderParts?.some((p) => p.kind === "sources")).toBe(
       true,
     );
-    expect(
-      assistant?.renderParts?.some((p) => p.kind === "attachments"),
-    ).toBe(true);
+    expect(assistant?.renderParts?.some((p) => p.kind === "attachments")).toBe(
+      true,
+    );
     const citationGroup = assistant?.renderParts?.find(
       (p) => p.kind === "inline_citation_group",
     );

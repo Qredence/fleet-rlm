@@ -10,9 +10,7 @@ import { cn } from "@/components/ui/utils";
 function safeHref(href: string): string | undefined {
   try {
     const parsed = new URL(href);
-    if (
-      parsed.protocol === "http:" || parsed.protocol === "https:"
-    ) {
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
       return parsed.toString();
     }
     return undefined;

@@ -88,7 +88,7 @@ export function PromptPlusMenu({
         side="top"
         align="start"
         sideOffset={8}
-        className="w-[220px] p-1.5 rounded-xl"
+        className="w-55 p-1.5 rounded-xl"
       >
         {featureItems.map((item) => {
           const Icon = item.icon;
@@ -100,7 +100,7 @@ export function PromptPlusMenu({
               type="button"
               className={cn(
                 "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-colors",
-                "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                 isActive
                   ? "text-accent bg-accent/8"
                   : "text-foreground hover:bg-muted",
@@ -110,7 +110,7 @@ export function PromptPlusMenu({
             >
               <Icon
                 className={cn(
-                  "size-[18px] shrink-0",
+                  "size-4.5 shrink-0",
                   isActive ? "text-accent" : "text-muted-foreground",
                 )}
               />
@@ -134,7 +134,7 @@ export function PromptPlusMenu({
           className={cn(
             "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-colors",
             "text-foreground hover:bg-muted",
-            "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
           )}
           onClick={() => {
             toast("More features coming soon", {
@@ -144,7 +144,7 @@ export function PromptPlusMenu({
             setOpen(false);
           }}
         >
-          <MoreHorizontal className="size-[18px] text-muted-foreground shrink-0" />
+          <MoreHorizontal className="size-4.5 text-muted-foreground shrink-0" />
           <span className="flex-1 text-left" style={typo.label}>
             More
           </span>

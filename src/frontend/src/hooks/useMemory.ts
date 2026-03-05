@@ -16,7 +16,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import type { MemoryListParams } from "@/lib/api/endpoints";
-import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
+import {
+  getCapabilityStatus,
+  type DataSource,
+  createFallbackPayload,
+} from "@/lib/api/capabilities";
 import { useMockStateStore } from "@/stores/mockStateStore";
 import type { MemoryEntry, MemoryType } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
@@ -146,10 +150,20 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
 
       const capability = await getCapabilityStatus("memory", signal);
       if (!capability.available) {
-        return createFallbackPayload("entries", filterEntries(memoryEntries), capability, "Memory");
+        return createFallbackPayload(
+          "entries",
+          filterEntries(memoryEntries),
+          capability,
+          "Memory",
+        );
       }
 
-      return createFallbackPayload("entries", filterEntries(memoryEntries), capability, "Memory");
+      return createFallbackPayload(
+        "entries",
+        filterEntries(memoryEntries),
+        capability,
+        "Memory",
+      );
     },
     enabled: options?.enabled !== false,
     staleTime: mock ? Infinity : undefined,
@@ -198,7 +212,9 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
       >;
     }) => {
       updateMemoryEntry(id, patch);
-      return useMockStateStore.getState().memoryEntries.find((e) => e.id === id)!;
+      return useMockStateStore
+        .getState()
+        .memoryEntries.find((e) => e.id === id)!;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memoryKeys.all });

@@ -19,7 +19,9 @@ describe("backend contract lock", () => {
 
     const { config } = await loadModules();
 
-    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/chat");
+    expect(config.rlmApiConfig.wsUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/chat",
+    );
     expect(config.rlmApiConfig.wsExecutionUrl).toBe(
       "ws://localhost:8000/api/v1/ws/execution",
     );
@@ -31,7 +33,9 @@ describe("backend contract lock", () => {
 
     const { config } = await loadModules();
 
-    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/chat");
+    expect(config.rlmApiConfig.wsUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/chat",
+    );
     expect(config.rlmApiConfig.wsExecutionUrl).toBe(
       "ws://localhost:8000/api/v1/ws/execution",
     );

@@ -46,10 +46,14 @@ describe("api capabilities", () => {
   it("maps fallback data source with explicit reason", async () => {
     const { dataSourceForCapability } = await loadCapabilitiesModule();
 
-    const next = dataSourceForCapability(false, {
-      available: false,
-      reason: "Memory API was removed from backend.",
-    }, "memory");
+    const next = dataSourceForCapability(
+      false,
+      {
+        available: false,
+        reason: "Memory API was removed from backend.",
+      },
+      "memory",
+    );
 
     expect(next.dataSource).toBe("fallback");
     expect(next.degradedReason).toContain(

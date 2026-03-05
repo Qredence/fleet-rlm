@@ -148,7 +148,7 @@ export function PromptInput({
               "w-full bg-transparent border-0 outline-none resize-none",
               "text-foreground placeholder:text-muted-foreground",
               "disabled:opacity-50 disabled:cursor-not-allowed",
-              "min-h-[32px]",
+              "min-h-8",
             )}
             style={inputTextStyle}
             disabled={disabled}
@@ -162,7 +162,7 @@ export function PromptInput({
             <PromptPlusMenu
               activeFeatures={activeFeatures}
               onToggleFeature={onToggleFeature}
-              className="min-h-[36px] min-w-[36px]"
+              className="min-h-9 min-w-9"
             />
           </div>
 

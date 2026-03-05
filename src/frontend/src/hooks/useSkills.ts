@@ -18,7 +18,11 @@ import { useQuery } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { mockSkills, generatedSkillMd } from "@/lib/data/mock-skills";
 import type { TaskListParams } from "@/lib/api/endpoints";
-import { getCapabilityStatus, type DataSource, createFallbackPayload } from "@/lib/api/capabilities";
+import {
+  getCapabilityStatus,
+  type DataSource,
+  createFallbackPayload,
+} from "@/lib/api/capabilities";
 import type { Skill } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -102,7 +106,12 @@ export function useSkills(options?: UseSkillsOptions): UseSkillsReturn {
 
       const capability = await getCapabilityStatus("skills", signal);
       if (!capability.available) {
-        return createFallbackPayload("skills", mockSkills, capability, "Skills");
+        return createFallbackPayload(
+          "skills",
+          mockSkills,
+          capability,
+          "Skills",
+        );
       }
 
       return createFallbackPayload("skills", mockSkills, capability, "Skills");

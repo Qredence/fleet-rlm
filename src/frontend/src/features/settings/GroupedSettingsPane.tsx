@@ -236,7 +236,9 @@ export function GroupedSettingsPane({
             description="No account/billing/profile settings are exposed here in v0.4.8. This surface is intentionally limited to functional runtime and privacy controls."
             noBorder={section === "telemetry"}
           >
-            <span className="text-xs text-muted-foreground">Anonymous-only</span>
+            <span className="text-xs text-muted-foreground">
+              Anonymous-only
+            </span>
           </SettingsRow>
         </>
       )}

@@ -1,6 +1,9 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import type { ArtifactActorKind, ArtifactStepType } from "@/stores/artifactStore";
+import type {
+  ArtifactActorKind,
+  ArtifactStepType,
+} from "@/stores/artifactStore";
 import { cn } from "@/components/ui/utils";
 import {
   NODE_WIDTH,
@@ -33,7 +36,9 @@ export interface GraphStepNodeData {
   output?: unknown;
 }
 
-function formatActorLabel(actorKind: ArtifactActorKind | null | undefined): string {
+function formatActorLabel(
+  actorKind: ArtifactActorKind | null | undefined,
+): string {
   if (actorKind === "delegate") return "Delegate";
   if (actorKind === "sub_agent") return "Sub-agent";
   if (actorKind === "root_rlm") return "Root RLM";
@@ -109,7 +114,7 @@ const GraphStepNode = memo(function GraphStepNode({
         <div className="flex-1 min-w-0">
           {/* Header row */}
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-xs font-semibold whitespace-pre-wrap break-words">
+            <span className="text-xs font-semibold whitespace-pre-wrap wrap-break-word">
               {data.label}
             </span>
             {data.count > 1 && (
@@ -135,7 +140,7 @@ const GraphStepNode = memo(function GraphStepNode({
               </span>
             )}
             {data.actorId && (
-              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-1.5 py-px text-[10px] font-medium leading-tight text-foreground/90 whitespace-pre-wrap break-words">
+              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-1.5 py-px text-[10px] font-medium leading-tight text-foreground/90 whitespace-pre-wrap wrap-break-word">
                 {data.actorId}
               </span>
             )}
@@ -147,16 +152,16 @@ const GraphStepNode = memo(function GraphStepNode({
                 className="inline-flex max-w-full items-center rounded-full border border-border-subtle bg-muted/50 px-1.5 py-px text-[10px] font-medium leading-tight text-foreground/90"
                 title={data.toolName}
               >
-                <span className="whitespace-pre-wrap break-words">{data.toolName}</span>
+                <span className="whitespace-pre-wrap wrap-break-word">
+                  {data.toolName}
+                </span>
               </span>
             </div>
           )}
 
           {/* Summary */}
           {data.summary && (
-            <p
-              className="mt-0.5 text-[11px] leading-snug text-muted-foreground whitespace-pre-wrap break-words"
-            >
+            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground whitespace-pre-wrap wrap-break-word">
               {data.summary}
             </p>
           )}
@@ -243,7 +248,9 @@ const GraphStepNode = memo(function GraphStepNode({
                 className="inline-flex max-w-full items-center rounded-full border border-border-subtle bg-muted/50 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90"
                 title={data.toolName}
               >
-                <span className="whitespace-pre-wrap break-words">{data.toolName}</span>
+                <span className="whitespace-pre-wrap wrap-break-word">
+                  {data.toolName}
+                </span>
               </span>
             </div>
           )}
@@ -258,7 +265,7 @@ const GraphStepNode = memo(function GraphStepNode({
               </span>
             )}
             {data.actorId && (
-              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90 whitespace-pre-wrap break-words">
+              <span className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90 whitespace-pre-wrap wrap-break-word">
                 {data.actorId}
               </span>
             )}
