@@ -40,8 +40,8 @@ export function SettingsPage() {
       : undefined;
 
   const sectionTitle =
-    settingsSections.find((section) => section.key === selectedSection)?.label ??
-    "General";
+    settingsSections.find((section) => section.key === selectedSection)
+      ?.label ?? "General";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

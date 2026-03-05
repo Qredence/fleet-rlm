@@ -179,6 +179,27 @@ def _new_chat_session_state(
     )
 
 
+def _chat_startup_error_payload(exc: Exception) -> dict[str, Any]:
+    """Build a stable websocket error envelope for startup failures."""
+    error_code = _classify_stream_failure(exc)
+    lowered = str(exc).lower()
+
+    if "token id is malformed" in lowered and "modal" in lowered:
+        message = (
+            "Modal authentication failed: Token ID is malformed. "
+            "Update MODAL_TOKEN_ID / MODAL_TOKEN_SECRET or run `uv run modal token set`, "
+            "then restart the server."
+        )
+    else:
+        message = f"Server error: {str(exc)}"
+
+    return _error_envelope(
+        code=error_code,
+        message=message,
+        details={"error_type": type(exc).__name__},
+    )
+
+
 async def _process_chat_message(
     *,
     websocket: WebSocket,
@@ -432,38 +453,43 @@ async def chat_streaming(websocket: WebSocket) -> None:
     agent_context = _build_chat_agent_context(runtime)
 
     analytics_distinct_id = (identity.user_claim or "").strip() or None
-    with (
-        runtime_distinct_id_context(analytics_distinct_id),
-        dspy.context(lm=runtime.planner_lm),
-    ):
-        async with agent_context as agent:
-            interpreter = getattr(agent, "interpreter", None)
-            _set_interpreter_default_profile(interpreter, runtime.cfg)
-            session = _new_chat_session_state(runtime, identity)
+    try:
+        with (
+            runtime_distinct_id_context(analytics_distinct_id),
+            dspy.context(lm=runtime.planner_lm),
+        ):
+            async with agent_context as agent:
+                interpreter = getattr(agent, "interpreter", None)
+                _set_interpreter_default_profile(interpreter, runtime.cfg)
+                session = _new_chat_session_state(runtime, identity)
 
-            async def local_persist(
-                *, include_volume_save: bool = True, latest_user_message: str = ""
-            ) -> None:
-                await persist_session_state(
+                async def local_persist(
+                    *, include_volume_save: bool = True, latest_user_message: str = ""
+                ) -> None:
+                    await persist_session_state(
+                        state=state,
+                        agent=agent,
+                        session_record=session.session_record,
+                        active_manifest_path=session.active_manifest_path,
+                        active_run_db_id=session.active_run_db_id,
+                        interpreter=interpreter,
+                        repository=runtime.repository,
+                        identity_rows=runtime.identity_rows,
+                        persistence_required=runtime.persistence_required,
+                        include_volume_save=include_volume_save,
+                        latest_user_message=latest_user_message,
+                    )
+
+                await _chat_message_loop(
+                    websocket=websocket,
                     state=state,
+                    runtime=runtime,
                     agent=agent,
-                    session_record=session.session_record,
-                    active_manifest_path=session.active_manifest_path,
-                    active_run_db_id=session.active_run_db_id,
                     interpreter=interpreter,
-                    repository=runtime.repository,
-                    identity_rows=runtime.identity_rows,
-                    persistence_required=runtime.persistence_required,
-                    include_volume_save=include_volume_save,
-                    latest_user_message=latest_user_message,
+                    session=session,
+                    local_persist=local_persist,
                 )
-
-            await _chat_message_loop(
-                websocket=websocket,
-                state=state,
-                runtime=runtime,
-                agent=agent,
-                interpreter=interpreter,
-                session=session,
-                local_persist=local_persist,
-            )
+    except Exception as exc:
+        logger.exception("WebSocket chat startup failed: %s", _sanitize_for_log(exc))
+        await websocket.send_json(_chat_startup_error_payload(exc))
+        await websocket.close(code=1011)

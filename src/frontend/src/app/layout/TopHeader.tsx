@@ -5,7 +5,6 @@ import { useNavigation } from "@/hooks/useNavigation";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/components/ui/use-mobile";
 import { UserMenu } from "@/features/shell/UserMenu";
-import { NotificationCenter } from "@/features/shell/NotificationCenter";
 import { BrandMark } from "@/components/shared/BrandMark";
 import {
   Tooltip,
@@ -69,7 +68,7 @@ export function TopHeader() {
     >
       {/* ── Logo ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 shrink-0">
-        <BrandMark className="w-4.5 h-4.25 shrink-0 text-foreground" />
+        <BrandMark className="h-[17px] w-[18px] shrink-0 text-foreground" />
       </div>
 
       {/* ── Navigation tabs (desktop only) ─────────────────────── */}
@@ -160,9 +159,6 @@ export function TopHeader() {
             {isCanvasOpen ? "Close side panel" : "Open side panel"}
           </TooltipContent>
         </Tooltip>
-
-        {/* Notification Center */}
-        <NotificationCenter />
 
         {/* User Menu (replaces standalone Settings gear icon) */}
         <UserMenu />

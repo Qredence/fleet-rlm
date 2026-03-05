@@ -1,7 +1,4 @@
-import type {
-  components,
-  paths,
-} from "@/lib/rlm-api/generated/openapi";
+import type { components, paths } from "@/lib/rlm-api/generated/openapi";
 
 export type OpenApiPaths = paths;
 
@@ -23,4 +20,5 @@ export type RuntimeConnectivityTestKind =
 export type RuntimeConnectivityTestResponse =
   components["schemas"]["RuntimeConnectivityTestResponse"];
 export type RuntimeTestCache = components["schemas"]["RuntimeTestCache"];
-export type RuntimeStatusResponse = components["schemas"]["RuntimeStatusResponse"];
+export type RuntimeStatusResponse =
+  components["schemas"]["RuntimeStatusResponse"];

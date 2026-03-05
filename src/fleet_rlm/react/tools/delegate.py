@@ -1,23 +1,21 @@
 """RLM delegation tools for sandbox-based agent operations.
 
-These tools delegate work to recursive sub-agents \u2014 each tool spawns a new
-``RLMReActChatAgent`` at ``current_depth + 1`` (true recursion), mirroring
-the ``rlm_query`` pattern.  The sub-agent receives a structured prompt and
-has access to the full ReAct tool set.
-
-Extracted from tools_sandbox.py as part of the modularization effort.
+Heavy long-context tools in this module use cached ``dspy.RLM`` runtime
+modules (via ``agent.get_runtime_module``) instead of spawning recursive
+sub-agents per call. ``rlm_query`` remains the explicit true-recursion
+escape hatch for advanced delegation.
 """
 
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..delegate_sub_agent import (
-    parse_json_from_response,
-    spawn_delegate_sub_agent_async,
-)
+import dspy
+
+from ..delegate_sub_agent import spawn_delegate_sub_agent_async
 from ..tool_delegation import _sync_compatible_tool_callable
 from . import (
     build_trajectory_payload,
@@ -40,45 +38,160 @@ class _DelegateToolContext:
     agent: "RLMReActChatAgent"
 
 
-def _handle_sub_agent_response(
+def _coerce_int(
+    value: Any,
+    *,
+    default: int = 0,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
+
+
+def _prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
+    if isinstance(prediction, dict):
+        return prediction.get(field_name, default)
+    return getattr(prediction, field_name, default)
+
+
+def _claim_delegate_slot_or_error(agent: "RLMReActChatAgent") -> dict[str, Any] | None:
+    if agent._current_depth >= agent._max_depth:
+        return {
+            "status": "error",
+            "error": (
+                f"Max recursion depth ({agent._max_depth}) reached. "
+                "Cannot run delegate operation."
+            ),
+        }
+
+    claim_slot = getattr(agent, "_claim_delegate_slot", None)
+    if not callable(claim_slot):
+        return None
+
+    claim_result = claim_slot()
+    if (
+        isinstance(claim_result, tuple)
+        and len(claim_result) == 2
+        and isinstance(claim_result[0], bool)
+    ):
+        allowed = bool(claim_result[0])
+        limit = _coerce_int(claim_result[1], default=1, minimum=1)
+        if not allowed:
+            return {
+                "status": "error",
+                "error": (
+                    "Delegate call budget reached for this turn. "
+                    f"Maximum delegate calls per turn is {limit}."
+                ),
+                "delegate_max_calls_per_turn": limit,
+            }
+
+    return None
+
+
+def _run_runtime_module(
     ctx: _DelegateToolContext,
-    result: dict[str, Any],
-    default_response: dict[str, Any],
-    fallback_fields: list[str],
-    include_trajectory: bool,
-    doc_len: int | None = None,
-) -> dict[str, Any]:
-    """Generic handler for mapping sub-agent responses to expected tool dicts."""
-    if result.get("status") == "error":
-        return result
+    module_name: str,
+    **kwargs: Any,
+) -> tuple[Any | None, dict[str, Any] | None, bool]:
+    guard_error = _claim_delegate_slot_or_error(ctx.agent)
+    if guard_error is not None:
+        return None, guard_error, False
 
-    response_text = result.get("assistant_response", "")
-    trajectory = result.get("trajectory", {})
+    ctx.agent.start()
 
-    response = default_response.copy()
-    response["status"] = "ok"
-
-    if response_text:
-        for field in fallback_fields:
-            if field in response and isinstance(response[field], list):
-                response[field] = [response_text]
-            else:
-                response[field] = response_text
-
-    if doc_len is not None:
-        response["doc_chars"] = doc_len
-
-    response["depth"] = result.get("depth", getattr(ctx.agent, "_current_depth", 0) + 1)
-    response["sub_agent_history"] = result.get("sub_agent_history", 0)
-
-    if include_trajectory:
-        response.update(
-            build_trajectory_payload(
-                {"trajectory": trajectory}, include_trajectory=True
-            )
+    try:
+        module = ctx.agent.get_runtime_module(module_name)
+    except Exception as exc:
+        return (
+            None,
+            {
+                "status": "error",
+                "error": (
+                    f"Failed to load runtime module '{module_name}': "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            },
+            False,
         )
 
-    return response
+    delegate_lm = getattr(ctx.agent, "delegate_lm", None)
+    parent_lm = getattr(dspy.settings, "lm", None)
+
+    fallback_used = False
+    if delegate_lm is None:
+        fallback_used = True
+        record_fallback = getattr(ctx.agent, "_record_delegate_fallback", None)
+        if callable(record_fallback):
+            record_fallback()
+
+    try:
+        if delegate_lm is not None:
+            lm_context = dspy.context(lm=delegate_lm)
+        elif parent_lm is not None:
+            lm_context = dspy.context(lm=parent_lm)
+        else:
+            lm_context = nullcontext()
+
+        with lm_context:
+            prediction = module(**kwargs)
+    except Exception as exc:
+        if delegate_lm is not None and parent_lm is not None:
+            record_fallback = getattr(ctx.agent, "_record_delegate_fallback", None)
+            if callable(record_fallback):
+                record_fallback()
+            fallback_used = True
+            with dspy.context(lm=parent_lm):
+                prediction = module(**kwargs)
+        else:
+            return (
+                None,
+                {
+                    "status": "error",
+                    "error": (
+                        f"Runtime module '{module_name}' failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                },
+                fallback_used,
+            )
+
+    return prediction, None, fallback_used
+
+
+def _runtime_metadata(
+    ctx: _DelegateToolContext,
+    prediction: Any,
+    *,
+    fallback_used: bool,
+) -> dict[str, Any]:
+    return {
+        "depth": _coerce_int(
+            _prediction_value(prediction, "depth", ctx.agent._current_depth + 1),
+            default=ctx.agent._current_depth + 1,
+            minimum=0,
+        ),
+        "sub_agent_history": _coerce_int(
+            _prediction_value(prediction, "sub_agent_history", 0),
+            default=0,
+            minimum=0,
+        ),
+        "delegate_lm_fallback": bool(fallback_used),
+    }
 
 
 def build_rlm_delegate_tools(agent: "RLMReActChatAgent") -> list[Any]:
@@ -131,83 +244,100 @@ SUBMIT(
     async def analyze_long_document(
         query: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
-        """Analyze a long document via a recursive sub-agent."""
-        ctx.agent.start()
+        """Analyze a long document via the runtime RLM module."""
         document = resolve_document(ctx.agent, alias)
-        prompt = (
-            f"You have a document loaded as 'active'. Analyze it thoroughly.\n\n"
-            f"Query: {query}\n\n"
-            "Provide your response with:\n"
-            "- findings: a list of key findings\n"
-            "- answer: a comprehensive answer to the query\n"
-            "- sections_examined: number of sections you examined"
-        )
-        result = await spawn_delegate_sub_agent_async(
-            ctx.agent, prompt=prompt, document=document, document_alias=alias
-        )
-        default_resp = {"findings": [], "answer": "", "sections_examined": 0}
-        return _handle_sub_agent_response(
+        prediction, error, fallback_used = _run_runtime_module(
             ctx,
-            result,
-            default_resp,
-            ["findings", "answer"],
-            include_trajectory,
-            len(document),
+            "analyze_long_document",
+            document=document,
+            query=query,
         )
+        if error is not None:
+            return error
+
+        return {
+            "status": "ok",
+            "findings": _coerce_str_list(_prediction_value(prediction, "findings", [])),
+            "answer": str(_prediction_value(prediction, "answer", "")),
+            "sections_examined": _coerce_int(
+                _prediction_value(prediction, "sections_examined", 0),
+                default=0,
+                minimum=0,
+            ),
+            "doc_chars": len(document),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
+            **build_trajectory_payload(
+                prediction, include_trajectory=include_trajectory
+            ),
+        }
 
     async def summarize_long_document(
         focus: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
-        """Summarize a long document via a recursive sub-agent."""
-        ctx.agent.start()
+        """Summarize a long document via the runtime RLM module."""
         document = resolve_document(ctx.agent, alias)
-        prompt = (
-            f"You have a document loaded as 'active'. Summarize it.\n\n"
-            f"Focus: {focus}\n\n"
-            "Provide your response with:\n"
-            "- summary: a concise summary\n"
-            "- key_points: a list of key points\n"
-            "- coverage_pct: estimated percentage of document covered (integer)"
-        )
-        result = await spawn_delegate_sub_agent_async(
-            ctx.agent, prompt=prompt, document=document, document_alias=alias
-        )
-        default_resp = {"summary": "", "key_points": [], "coverage_pct": 0}
-        return _handle_sub_agent_response(
+        prediction, error, fallback_used = _run_runtime_module(
             ctx,
-            result,
-            default_resp,
-            ["summary", "key_points"],
-            include_trajectory,
-            len(document),
+            "summarize_long_document",
+            document=document,
+            focus=focus,
         )
+        if error is not None:
+            return error
+
+        return {
+            "status": "ok",
+            "summary": str(_prediction_value(prediction, "summary", "")),
+            "key_points": _coerce_str_list(
+                _prediction_value(prediction, "key_points", [])
+            ),
+            "coverage_pct": _coerce_int(
+                _prediction_value(prediction, "coverage_pct", 0),
+                default=0,
+                minimum=0,
+                maximum=100,
+            ),
+            "doc_chars": len(document),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
+            **build_trajectory_payload(
+                prediction, include_trajectory=include_trajectory
+            ),
+        }
 
     async def extract_from_logs(
         query: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
-        """Extract structured patterns from log text via a recursive sub-agent."""
-        ctx.agent.start()
+        """Extract structured patterns from log text via the runtime RLM module."""
         document = resolve_document(ctx.agent, alias)
-        prompt = (
-            f"You have log text loaded as 'active'. Extract structured patterns.\n\n"
-            f"Query: {query}\n\n"
-            "Provide your response with:\n"
-            "- matches: a list of matching entries\n"
-            "- patterns: a list of identified patterns\n"
-            "- time_range: the time range covered"
-        )
-        result = await spawn_delegate_sub_agent_async(
-            ctx.agent, prompt=prompt, document=document, document_alias=alias
-        )
-        default_resp = {"matches": [], "patterns": [], "time_range": "unknown"}
-        return _handle_sub_agent_response(
+        prediction, error, fallback_used = _run_runtime_module(
             ctx,
-            result,
-            default_resp,
-            ["matches", "patterns"],
-            include_trajectory,
-            len(document),
+            "extract_from_logs",
+            logs=document,
+            query=query,
         )
+        if error is not None:
+            return error
+
+        raw_patterns = _prediction_value(prediction, "patterns", {})
+        patterns: dict[str, str] | list[str]
+        if isinstance(raw_patterns, dict):
+            patterns = {str(key): str(value) for key, value in raw_patterns.items()}
+        elif isinstance(raw_patterns, list):
+            patterns = _coerce_str_list(raw_patterns)
+        else:
+            patterns = {}
+
+        return {
+            "status": "ok",
+            "matches": _coerce_str_list(_prediction_value(prediction, "matches", [])),
+            "patterns": patterns,
+            "time_range": str(_prediction_value(prediction, "time_range", "unknown")),
+            "doc_chars": len(document),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
+            **build_trajectory_payload(
+                prediction, include_trajectory=include_trajectory
+            ),
+        }
 
     async def grounded_answer(
         query: str,
@@ -216,13 +346,11 @@ SUBMIT(
         max_chunks: int = 24,
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
-        """Answer a query with explicit machine-readable citations via a recursive sub-agent."""
-        try:
-            max_chunks_int = int(max_chunks)
-        except (TypeError, ValueError):
+        """Answer a query with explicit machine-readable citations."""
+        max_chunks_int = _coerce_int(max_chunks, default=-1)
+        if max_chunks_int <= 0:
             return {"status": "error", "error": "Invalid max_chunks value."}
 
-        ctx.agent.start()
         document = resolve_document(ctx.agent, alias)
         chunks = chunk_text(
             document, chunk_strategy, size=80_000, overlap=1_000, pattern=""
@@ -231,47 +359,38 @@ SUBMIT(
         if not evidence_chunks:
             return {"status": "error", "error": "No evidence chunks available."}
 
-        chunks_text = "\n\n---CHUNK BOUNDARY---\n\n".join(
-            f"[Chunk {i}]\n{c}" for i, c in enumerate(evidence_chunks)
+        prediction, error, fallback_used = _run_runtime_module(
+            ctx,
+            "grounded_answer",
+            query=query,
+            evidence_chunks=evidence_chunks,
+            response_style="concise",
         )
+        if error is not None:
+            return error
 
-        prompt = (
-            "You have evidence chunks from a document. Answer the query with explicit citations.\n\n"
-            f"Query: {query}\n\nEvidence chunks:\n{chunks_text}\n\n"
-            "Provide your response with:\n- answer: your grounded answer\n"
-            "- citations: list of dicts with keys source, chunk_id, evidence, reason\n"
-            "- confidence: integer 0-100\n- coverage_notes: notes on evidence coverage"
-        )
-
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        if result.get("status") == "error":
-            return result
-
-        response_text = result.get("assistant_response", "")
-        structured = parse_json_from_response(response_text) or {}
+        raw_citations = _prediction_value(prediction, "citations", [])
+        citations: list[dict[str, Any]] = []
+        if isinstance(raw_citations, list):
+            for item in raw_citations:
+                if isinstance(item, dict):
+                    citations.append(dict(item))
 
         return {
             "status": "ok",
-            "answer": str(structured.get("answer", response_text)),
-            "citations": structured.get("citations", [])
-            if isinstance(structured.get("citations"), list)
-            else [],
-            "confidence": max(
-                0,
-                min(
-                    100,
-                    int(structured.get("confidence", 0))
-                    if isinstance(structured.get("confidence"), (int, str))
-                    and str(structured.get("confidence")).isdigit()
-                    else 0,
-                ),
+            "answer": str(_prediction_value(prediction, "answer", "")),
+            "citations": citations,
+            "confidence": _coerce_int(
+                _prediction_value(prediction, "confidence", 0),
+                default=0,
+                minimum=0,
+                maximum=100,
             ),
-            "coverage_notes": str(structured.get("coverage_notes", "")),
+            "coverage_notes": str(_prediction_value(prediction, "coverage_notes", "")),
             "doc_chars": len(document),
-            "depth": result.get("depth", getattr(ctx.agent, "_current_depth", 0) + 1),
-            "sub_agent_history": result.get("sub_agent_history", 0),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
             **build_trajectory_payload(
-                {"trajectory": result.get("trajectory", {})},
+                prediction,
                 include_trajectory=include_trajectory,
             ),
         }
@@ -282,34 +401,41 @@ SUBMIT(
         service_context: str = "",
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
-        """Triage logs into severity, causes, impact, and actions via a recursive sub-agent."""
-        ctx.agent.start()
+        """Triage logs into severity, causes, impact, and actions."""
         document = resolve_document(ctx.agent, alias)
-        prompt = (
-            f"You have incident logs loaded as 'active'. Triage them.\n\n"
-            f"Query: {query}\nService context: {service_context or 'not provided'}\n\n"
-            "Provide your response with:\n- severity: one of low, medium, high, critical\n"
-            "- probable_root_causes: list of causes\n- impacted_components: list of affected components\n"
-            "- recommended_actions: list of actions\n- time_range: the time range covered"
-        )
-        result = await spawn_delegate_sub_agent_async(
-            ctx.agent, prompt=prompt, document=document, document_alias=alias
-        )
-        default_resp = {
-            "severity": "low",
-            "probable_root_causes": [],
-            "impacted_components": [],
-            "recommended_actions": [],
-            "time_range": "unknown",
-        }
-        return _handle_sub_agent_response(
+        prediction, error, fallback_used = _run_runtime_module(
             ctx,
-            result,
-            default_resp,
-            ["probable_root_causes"],
-            include_trajectory,
-            len(document),
+            "triage_incident_logs",
+            logs=document,
+            service_context=service_context,
+            query=query,
         )
+        if error is not None:
+            return error
+
+        severity = str(_prediction_value(prediction, "severity", "low")).strip().lower()
+        if severity not in {"low", "medium", "high", "critical"}:
+            severity = "low"
+
+        return {
+            "status": "ok",
+            "severity": severity,
+            "probable_root_causes": _coerce_str_list(
+                _prediction_value(prediction, "probable_root_causes", [])
+            ),
+            "impacted_components": _coerce_str_list(
+                _prediction_value(prediction, "impacted_components", [])
+            ),
+            "recommended_actions": _coerce_str_list(
+                _prediction_value(prediction, "recommended_actions", [])
+            ),
+            "time_range": str(_prediction_value(prediction, "time_range", "unknown")),
+            "doc_chars": len(document),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
+            **build_trajectory_payload(
+                prediction, include_trajectory=include_trajectory
+            ),
+        }
 
     async def plan_code_change(
         task: str,
@@ -317,48 +443,64 @@ SUBMIT(
         constraints: str = "",
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
-        """Build a structured code-change plan via a recursive sub-agent."""
-        ctx.agent.start()
-        prompt = (
-            f"Plan a code change.\n\nTask: {task}\nRepo context: {repo_context or 'None'}\n"
-            f"Constraints: {constraints or 'Keep changes minimal.'}\n\n"
-            "Provide your response with:\n- plan_steps: ordered list of implementation steps\n"
-            "- files_to_touch: list of files to modify\n- validation_commands: list of commands\n- risks: list of risks"
+        """Build a structured code-change plan via runtime RLM module."""
+        prediction, error, fallback_used = _run_runtime_module(
+            ctx,
+            "plan_code_change",
+            task=task,
+            repo_context=repo_context,
+            constraints=constraints or "Keep changes minimal.",
         )
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        default_resp = {
-            "plan_steps": [],
-            "files_to_touch": [],
-            "validation_commands": [],
-            "risks": [],
+        if error is not None:
+            return error
+
+        return {
+            "status": "ok",
+            "plan_steps": _coerce_str_list(
+                _prediction_value(prediction, "plan_steps", [])
+            ),
+            "files_to_touch": _coerce_str_list(
+                _prediction_value(prediction, "files_to_touch", [])
+            ),
+            "validation_commands": _coerce_str_list(
+                _prediction_value(prediction, "validation_commands", [])
+            ),
+            "risks": _coerce_str_list(_prediction_value(prediction, "risks", [])),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
+            **build_trajectory_payload(
+                prediction, include_trajectory=include_trajectory
+            ),
         }
-        return _handle_sub_agent_response(
-            ctx, result, default_resp, ["plan_steps"], include_trajectory
-        )
 
     async def propose_core_memory_update(
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
-        """Propose safe updates to core memory via a recursive sub-agent."""
-        ctx.agent.start()
+        """Propose safe updates to core memory via runtime RLM module."""
         turn_lines = [
             f"Turn {i}\n{turn}"
             for i, turn in enumerate(ctx.agent.history_messages()[-20:], 1)
         ]
         turn_history = "\n\n".join(turn_lines) or "No recent turns."
+        prediction, error, fallback_used = _run_runtime_module(
+            ctx,
+            "propose_core_memory_update",
+            turn_history=turn_history,
+            current_memory=ctx.agent.fmt_core_memory(),
+        )
+        if error is not None:
+            return error
 
-        prompt = (
-            "Review the conversation history and current core memory, then propose updates.\n\n"
-            f"Turn history:\n{turn_history}\n\nCurrent core memory:\n{ctx.agent.fmt_core_memory()}\n\n"
-            "Provide your response with:\n- keep: list of memory blocks to keep unchanged\n"
-            "- update: list of memory blocks to update\n- remove: list of memory blocks to remove\n"
-            "- rationale: explanation for the proposed changes"
-        )
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        default_resp = {"keep": [], "update": [], "remove": [], "rationale": ""}
-        return _handle_sub_agent_response(
-            ctx, result, default_resp, ["rationale", "update"], include_trajectory
-        )
+        return {
+            "status": "ok",
+            "keep": _coerce_str_list(_prediction_value(prediction, "keep", [])),
+            "update": _coerce_str_list(_prediction_value(prediction, "update", [])),
+            "remove": _coerce_str_list(_prediction_value(prediction, "remove", [])),
+            "rationale": str(_prediction_value(prediction, "rationale", "")),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
+            **build_trajectory_payload(
+                prediction, include_trajectory=include_trajectory
+            ),
+        }
 
     async def rlm_query(query: str, context: str = "") -> dict[str, Any]:
         """Delegate a complex sub-task to a recursive sub-agent."""

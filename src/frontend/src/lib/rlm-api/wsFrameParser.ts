@@ -148,7 +148,12 @@ function parseExecutionEnvelope(
 
   const kind = normalizeExecutionStepKind(step);
   const text = asText(
-    step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? kind,
+    step.label ??
+      step.output ??
+      step.input ??
+      step.content ??
+      step.message ??
+      kind,
   );
 
   return {

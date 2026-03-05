@@ -10,9 +10,7 @@ function safeHref(href: string | undefined): string | undefined {
   if (!href) return undefined;
   try {
     const parsed = new URL(href);
-    if (
-      parsed.protocol === "http:" || parsed.protocol === "https:"
-    ) {
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
       return href;
     }
     return undefined;
@@ -38,7 +36,10 @@ function Sources({
     <Collapsible
       data-slot="sources"
       defaultOpen={defaultOpen}
-      className={cn("rounded-lg border border-border-subtle bg-card", className)}
+      className={cn(
+        "rounded-lg border border-border-subtle bg-card",
+        className,
+      )}
       {...props}
     />
   );

@@ -57,11 +57,23 @@ export interface ChatSimulation {
   setInputValue: (v: string) => void;
   phase: CreationPhase;
   isTyping: boolean;
-  handleSubmit: () => void;
+  handleSubmit: (options?: ChatSubmitOptions) => void;
   resolveHitl: (msgId: string, actionLabel: string) => void;
   resolveClarification: (msgId: string, answer: string) => void;
   /** Load a previously saved conversation into the chat. */
   loadConversation: (conversation: Conversation) => void;
+}
+
+export interface ChatSubmitAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+export interface ChatSubmitOptions {
+  traceEnabled?: boolean;
+  attachments?: ChatSubmitAttachment[];
 }
 
 // ── Hook ────────────────────────────────────────────────────────────
@@ -452,13 +464,16 @@ export function useChatSimulation(): ChatSimulation {
 
   // ── Submit ──────────────────────────────────────────────────────
 
-  const handleSubmit = useCallback(() => {
-    if (!inputValue.trim()) return;
-    const text = inputValue.trim();
-    setInputValue("");
-    addMessage({ type: "user", content: text });
-    if (phase === "idle") runPhase1(text);
-  }, [inputValue, phase, addMessage, runPhase1]);
+  const handleSubmit = useCallback(
+    (_options?: ChatSubmitOptions) => {
+      if (!inputValue.trim()) return;
+      const text = inputValue.trim();
+      setInputValue("");
+      addMessage({ type: "user", content: text });
+      if (phase === "idle") runPhase1(text);
+    },
+    [inputValue, phase, addMessage, runPhase1],
+  );
 
   // ── Load conversation ───────────────────────────────────────────
 

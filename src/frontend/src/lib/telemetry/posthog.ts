@@ -7,10 +7,7 @@ export const PROJECT_POSTHOG_DEFAULT_HOST = "https://eu.i.posthog.com";
 // available, while code/tests/documentation all share the same fallback path.
 export const PROJECT_POSTHOG_DEFAULT_API_KEY: string | null = null;
 
-export type PostHogKeySource =
-  | "canonical_env"
-  | "project_default"
-  | "none";
+export type PostHogKeySource = "canonical_env" | "project_default" | "none";
 
 export type ResolvedPostHogWebConfig = {
   apiKey: string | null;

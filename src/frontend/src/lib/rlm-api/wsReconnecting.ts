@@ -49,7 +49,10 @@ export function createBackendSessionId(): string {
 
 export async function createReconnectingWs(
   message: WsClientMessage | null,
-  options: StreamWsOptions & { url: string; terminalEventKinds?: WsEventKind[] },
+  options: StreamWsOptions & {
+    url: string;
+    terminalEventKinds?: WsEventKind[];
+  },
 ): Promise<void> {
   const {
     signal,

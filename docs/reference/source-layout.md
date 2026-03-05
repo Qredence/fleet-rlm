@@ -13,9 +13,10 @@ This map reflects the current package layout.
 ## Core Runtime
 
 - `src/fleet_rlm/core/`: interpreter runtime, sandbox driver, config helpers
+  Host-side adapters: `interpreter.py`, `llm_tools.py`, `volume_ops.py`, `config.py`
+  Sandbox-side protocol/helpers: `driver.py`, `driver_factories.py`, `sandbox_tools.py`, `volume_tools.py`, `session_history.py`
 - `src/fleet_rlm/react/`: ReAct agent, tool registry, command dispatch, streaming
 - `src/fleet_rlm/chunking/`: chunking utilities
-- `src/fleet_rlm/stateful/`: stateful wrappers and sandbox state models
 
 ## Server Surface
 
@@ -24,7 +25,6 @@ This map reflects the current package layout.
 - `src/fleet_rlm/server/deps.py`: shared dependencies and server state
 - `src/fleet_rlm/server/routers/`: HTTP + WebSocket routers
 - `src/fleet_rlm/server/schemas/`: Pydantic schemas
-- `src/fleet_rlm/server/services/`: legacy SQLite compatibility service layer
 - `src/fleet_rlm/server/auth/`: auth abstraction (`dev` + scaffolded `entra`)
 
 ## Data and Persistence
@@ -37,6 +37,11 @@ This map reflects the current package layout.
 ## Optional Service Surface
 
 - `src/fleet_rlm/mcp/`: FastMCP server runtime
+
+## Utilities
+
+- `src/fleet_rlm/utils/modal.py`: Modal helper utilities
+- `src/fleet_rlm/utils/regex.py`: regex extraction helper(s)
 
 ## Scaffold Assets
 
@@ -55,3 +60,9 @@ Packaged templates installed by `fleet-rlm init`:
 ## Notes
 
 The canonical API contract remains `openapi.yaml` at repository root.
+
+Suggested import boundaries:
+
+- FastAPI-only code lives under `src/fleet_rlm/server/`.
+- Modal primitives (`modal.*`) should remain in `src/fleet_rlm/core/` (and narrowly-scoped helpers).
+- DSPy signatures/modules live under `src/fleet_rlm/react/`; server code can use `dspy.context(...)` but should avoid defining DSPy programs.

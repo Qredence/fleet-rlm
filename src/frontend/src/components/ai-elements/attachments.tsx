@@ -165,7 +165,9 @@ function Attachment({
 function useAttachmentContext(): AttachmentItemContextValue {
   const ctx = useContext(AttachmentItemContext);
   if (!ctx) {
-    throw new Error("Attachment subcomponent must be used within <Attachment />");
+    throw new Error(
+      "Attachment subcomponent must be used within <Attachment />",
+    );
   }
   return ctx;
 }
@@ -228,7 +230,10 @@ function AttachmentInfo({
       className={cn("space-y-0.5", className)}
       {...props}
     >
-      <div className="truncate text-xs font-medium text-foreground" title={label}>
+      <div
+        className="truncate text-xs font-medium text-foreground"
+        title={label}
+      >
         {label}
       </div>
       {showMediaType || size ? (

@@ -170,16 +170,7 @@ Generated from runtime-entrypoint reachability, static imports, lazy export maps
 | `src/fleet_rlm/server/schemas/core.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
 | `src/fleet_rlm/server/schemas/session.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
 | `src/fleet_rlm/server/schemas/task.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/services/__init__.py` | server | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/server/services/session_service.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/services/task_service.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
 | `src/fleet_rlm/server/utils.py` | server | no | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/stateful/__init__.py` | stateful | no | no | no | stateful-runtime | USED_TEST_ONLY | imported by tests/scripts only |
-| `src/fleet_rlm/stateful/agent.py` | stateful | no | no | no | stateful-runtime | UNCONFIRMED | - |
-| `src/fleet_rlm/stateful/models.py` | stateful | no | yes | no | stateful-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/stateful/result_adapters.py` | stateful | no | yes | no | stateful-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/stateful/sandbox.py` | stateful | no | yes | no | stateful-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/stateful/workspace_ops.py` | stateful | no | yes | no | stateful-runtime | USED_RUNTIME | - |
 | `src/fleet_rlm/terminal/__init__.py` | terminal | yes | yes | no | terminal-runtime | USED_RUNTIME | - |
 | `src/fleet_rlm/terminal/chat.py` | terminal | yes | yes | no | terminal-runtime | USED_RUNTIME | - |
 | `src/fleet_rlm/terminal/commands.py` | terminal | no | yes | no | terminal-runtime | USED_RUNTIME | - |
@@ -189,7 +180,6 @@ Generated from runtime-entrypoint reachability, static imports, lazy export maps
 | `src/fleet_rlm/utils/__init__.py` | other | no | no | no | platform | UNCONFIRMED | - |
 | `src/fleet_rlm/utils/modal.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
 | `src/fleet_rlm/utils/scaffold.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/utils/tools.py` | other | no | no | no | platform | USED_TEST_ONLY | imported by tests/scripts only |
 | `src/frontend/src/app/App.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
 | `src/frontend/src/app/layout/BuilderPanel.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
 | `src/frontend/src/app/layout/ChatPanel.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |

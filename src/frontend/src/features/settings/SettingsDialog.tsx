@@ -197,7 +197,7 @@ export function SettingsDialog({
             {/* iOS 26 grab handle */}
             <div className="flex items-center justify-center py-2 shrink-0">
               <div
-                className="h-1.25 w-9 rounded-full"
+                className="h-[5px] w-9 rounded-full"
                 style={{ backgroundColor: "var(--glass-sheet-handle)" }}
                 aria-hidden="true"
               />
@@ -244,7 +244,7 @@ export function SettingsDialog({
   /* ── Desktop: standard dialog ──────────────────────────────────── */
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 md:max-h-130 md:max-w-195 lg:max-w-215">
+      <DialogContent className="overflow-hidden p-0 md:max-h-[520px] md:max-w-[780px] lg:max-w-[860px]">
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">
           Configure Skill Fleet preferences and appearance
@@ -285,7 +285,7 @@ export function SettingsDialog({
             </SidebarContent>
           </Sidebar>
 
-          <main className="flex h-125 min-h-0 flex-1 flex-col overflow-hidden">
+          <main className="flex h-[500px] min-h-0 flex-1 flex-col overflow-hidden">
             <SectionContent
               isDark={isDark}
               onToggleTheme={toggleTheme}

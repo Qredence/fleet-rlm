@@ -6,7 +6,9 @@ import { SlidersHorizontal, Sparkles, Zap } from "lucide-react";
 
 /** Lightning bolt — "Create / generate" affordance. */
 export function SuggestionIconBolt() {
-  return <Zap className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
+  return (
+    <Zap className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+  );
 }
 
 /** Sliders / tune — "Configure / build" affordance. */
@@ -22,6 +24,9 @@ export function SuggestionIconTune() {
 /** Sparkle / magic — "Design / imagine" affordance. */
 export function SuggestionIconSparkle() {
   return (
-    <Sparkles className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <Sparkles
+      className="size-4 shrink-0 text-muted-foreground"
+      aria-hidden="true"
+    />
   );
 }

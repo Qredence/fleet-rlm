@@ -104,7 +104,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-100">
+    <div className="fixed inset-0 z-[100]">
       <div
         className="absolute inset-0"
         style={{ backgroundColor: "var(--glass-overlay)" }}
@@ -114,7 +114,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
       <div className="absolute inset-0 flex items-start justify-center pt-[min(20vh,120px)] px-4">
         <div
-          className="w-full max-w-140 overflow-hidden border border-border-subtle"
+          className="w-full max-w-[560px] overflow-hidden border border-border-subtle"
           style={{
             borderRadius: "var(--radius-card)",
             backgroundColor: "var(--popover)",

@@ -100,7 +100,7 @@ export function PromptPlusMenu({
               type="button"
               className={cn(
                 "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-colors",
-                "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                 isActive
                   ? "text-accent bg-accent/8"
                   : "text-foreground hover:bg-muted",
@@ -134,7 +134,7 @@ export function PromptPlusMenu({
           className={cn(
             "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-colors",
             "text-foreground hover:bg-muted",
-            "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
           )}
           onClick={() => {
             toast("More features coming soon", {

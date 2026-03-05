@@ -5,12 +5,18 @@ import React from "react";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 
 vi.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Dialog: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
   DialogDescription: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
 }));
 
 vi.mock("@/hooks/useNavigation", () => ({
@@ -81,11 +87,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
 describe("SettingsDialog", () => {
   it("activates the runtime section when initialSection is runtime", () => {
     const html = renderToStaticMarkup(
-      <SettingsDialog
-        open
-        onOpenChange={vi.fn()}
-        initialSection="runtime"
-      />,
+      <SettingsDialog open onOpenChange={vi.fn()} initialSection="runtime" />,
     );
 
     expect(html).toContain("Runtime");

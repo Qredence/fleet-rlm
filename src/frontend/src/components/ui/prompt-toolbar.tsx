@@ -112,7 +112,7 @@ function ToolbarChip({
       type="button"
       className={cn(
         "flex items-center gap-1.5 h-7 px-2.5 rounded-full transition-colors shrink-0",
-        "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         variant === "accent"
           ? "bg-accent/10 text-accent"
           : "bg-muted/60 hover:bg-muted text-foreground",
@@ -178,7 +178,7 @@ function ModeChip({
               type="button"
               className={cn(
                 "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-colors",
-                "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                 isActive
                   ? "bg-accent/8 text-accent"
                   : "text-foreground hover:bg-muted",
@@ -321,7 +321,7 @@ function SkillsChip({ selectedSkills }: { selectedSkills: string[] }) {
           )}
         </div>
 
-        <ScrollArea className="max-h-[240px]">
+        <ScrollArea className="max-h-60">
           <div className="px-2.5 py-3">
             <span className="text-muted-foreground block" style={typo.caption}>
               Skills selection is unavailable. {UNSUPPORTED_SECTION_REASON}

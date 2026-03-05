@@ -27,7 +27,11 @@ describe("ChatMessageList (AI Elements render parts)", () => {
                 index: 0,
                 label: "Inspect adapter",
                 status: "complete",
-                details: ["Tool: read_file", "Input received", "Observation received"],
+                details: [
+                  "Tool: read_file",
+                  "Input received",
+                  "Observation received",
+                ],
               },
             ],
           },

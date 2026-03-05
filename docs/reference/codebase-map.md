@@ -34,12 +34,6 @@ This document is the canonical architecture and ownership map after Wave 7.2 dea
   - WebSocket package (canonical): `routers/ws/`
     - `api.py`, `helpers.py`, `message_loop.py`, `turn.py`, `streaming.py`, `lifecycle.py`, `session.py`, `session_store.py`, `commands.py`, `repl_hook.py`
 
-### `src/fleet_rlm/stateful/`
-
-- Stateful wrappers and managers: `agent.py`, `sandbox.py`
-- Shared helpers: `result_adapters.py`, `workspace_ops.py`
-- Stateful data models: `models.py`
-
 ### `src/fleet_rlm/db/`
 
 - Canonical Neon/Postgres persistence: `engine.py`, `repository.py`, `models.py`, `types.py`

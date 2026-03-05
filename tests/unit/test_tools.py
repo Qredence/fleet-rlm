@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from fleet_rlm.utils.tools import regex_extract
+from fleet_rlm.utils.regex import regex_extract
 
 
 def test_regex_extract_basic_matches():

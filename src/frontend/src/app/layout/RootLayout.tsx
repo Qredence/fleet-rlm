@@ -63,7 +63,7 @@ export function RootHydrateFallback() {
     >
       <div className="flex flex-col items-center gap-4">
         {/* Pulsing skeleton blocks that match the app's visual language */}
-        <div className="flex w-70 flex-col gap-3">
+        <div className="flex w-[280px] flex-col gap-3">
           <div className="h-3 w-20 rounded-md bg-muted animate-pulse mx-auto" />
           <div className="h-2 w-40 rounded-md bg-muted animate-pulse mx-auto" />
         </div>

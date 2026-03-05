@@ -113,6 +113,45 @@ def test_runtime_settings_patch_writes_to_configured_env_path(
     assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in env_path.read_text()
 
 
+def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
+    local_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "DSPY_LLM_API_KEY=supersecret66",
+                "MODAL_TOKEN_ID=modaltokenN2",
+                "MODAL_TOKEN_SECRET=modalsecretg4",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    local_client.app.state.server_state.config.env_path = env_path
+
+    response = local_client.patch(
+        "/api/v1/runtime/settings",
+        json={
+            "updates": {
+                "DSPY_LLM_API_KEY": "sup...66",
+                "MODAL_TOKEN_ID": "mod...N2",
+                "MODAL_TOKEN_SECRET": "mod...g4",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updated"] == []
+
+    text = env_path.read_text(encoding="utf-8")
+    assert "DSPY_LLM_API_KEY=supersecret66" in text
+    assert "MODAL_TOKEN_ID=modaltokenN2" in text
+    assert "MODAL_TOKEN_SECRET=modalsecretg4" in text
+
+
 def test_runtime_settings_patch_non_local_forbidden(staging_client: TestClient):
     response = staging_client.patch(
         "/api/v1/runtime/settings",

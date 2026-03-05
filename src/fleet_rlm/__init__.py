@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.4.94"
+__version__ = "0.4.95"
 
 __all__ = [
     "__version__",
@@ -19,12 +19,6 @@ __all__ = [
     "list_react_tool_names",
     "COMMAND_DISPATCH",
     "execute_command",
-    "AgentStateManager",
-    "AnalysisResult",
-    "CodeScript",
-    "StatefulSandboxManager",
-    "ExecutionRecord",
-    "SandboxResult",
     "AnalyzeLongDocument",
     "SummarizeLongDocument",
     "ExtractFromLogs",
@@ -91,14 +85,6 @@ if TYPE_CHECKING:
         SummarizeLongDocument,
         VolumeFileTreeSignature,
     )
-    from .stateful import (
-        AgentStateManager,
-        AnalysisResult,
-        CodeScript,
-        ExecutionRecord,
-        SandboxResult,
-        StatefulSandboxManager,
-    )
     from .utils import (
         get_scaffold_dir,
         install_agents,
@@ -120,12 +106,6 @@ if TYPE_CHECKING:
         list_react_tool_names,
         COMMAND_DISPATCH,
         execute_command,
-        AgentStateManager,
-        AnalysisResult,
-        CodeScript,
-        StatefulSandboxManager,
-        ExecutionRecord,
-        SandboxResult,
         AnalyzeLongDocument,
         SummarizeLongDocument,
         ExtractFromLogs,
@@ -176,12 +156,6 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "install_skills": ("fleet_rlm.utils", "install_skills"),
     "list_agents": ("fleet_rlm.utils", "list_agents"),
     "list_skills": ("fleet_rlm.utils", "list_skills"),
-    "AgentStateManager": ("fleet_rlm.stateful", "AgentStateManager"),
-    "AnalysisResult": ("fleet_rlm.stateful", "AnalysisResult"),
-    "CodeScript": ("fleet_rlm.stateful", "CodeScript"),
-    "ExecutionRecord": ("fleet_rlm.stateful", "ExecutionRecord"),
-    "SandboxResult": ("fleet_rlm.stateful", "SandboxResult"),
-    "StatefulSandboxManager": ("fleet_rlm.stateful", "StatefulSandboxManager"),
     "AnalyzeLongDocument": ("fleet_rlm.react.signatures", "AnalyzeLongDocument"),
     "CodeChangePlan": ("fleet_rlm.react.signatures", "CodeChangePlan"),
     "ClarificationQuestionSignature": (
@@ -222,7 +196,6 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
 
 _LAZY_MODULES: dict[str, str] = {
     "scaffold": "fleet_rlm.utils.scaffold",
-    "tools": "fleet_rlm.utils.tools",
 }
 
 

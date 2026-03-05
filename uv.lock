@@ -1575,7 +1575,7 @@ wheels = [
 
 [[package]]
 name = "fleet-rlm"
-version = "0.4.94"
+version = "0.4.95"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -1652,14 +1652,19 @@ server = [
     { name = "websockets" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest-timeout" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "alembic", marker = "extra == 'full'", specifier = ">=1.13,<2" },
     { name = "alembic", marker = "extra == 'server'", specifier = ">=1.13,<2" },
-    { name = "asyncpg", specifier = ">=0.31.0" },
-    { name = "asyncpg", marker = "extra == 'full'", specifier = ">=0.29,<1" },
-    { name = "asyncpg", marker = "extra == 'server'", specifier = ">=0.29,<1" },
+    { name = "asyncpg", specifier = ">=0.31.0,<1" },
+    { name = "asyncpg", marker = "extra == 'full'", specifier = ">=0.31.0,<1" },
+    { name = "asyncpg", marker = "extra == 'server'", specifier = ">=0.31.0,<1" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "dspy", specifier = "==3.1.3" },
     { name = "dspy-ai", specifier = ">=3.1.3" },
@@ -1668,9 +1673,9 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.134.0,<1" },
     { name = "fastmcp", marker = "extra == 'full'", specifier = ">=2.14.0,<4" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=2.14.0,<4" },
-    { name = "greenlet", specifier = ">=3.3.1" },
-    { name = "greenlet", marker = "extra == 'full'", specifier = ">=3.0,<4" },
-    { name = "greenlet", marker = "extra == 'server'", specifier = ">=3.0,<4" },
+    { name = "greenlet", specifier = ">=3.3.1,<4" },
+    { name = "greenlet", marker = "extra == 'full'", specifier = ">=3.3.1,<4" },
+    { name = "greenlet", marker = "extra == 'server'", specifier = ">=3.3.1,<4" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'full'", specifier = ">=0.28.1,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'mcp'", specifier = ">=0.28.1,<1" },
     { name = "hydra-core", specifier = ">=1.3,<2" },
@@ -1683,9 +1688,9 @@ requires-dist = [
     { name = "posthog", specifier = ">=7.9.6" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "prompt-toolkit", specifier = ">=3.0.50,<4" },
-    { name = "psycopg", specifier = ">=3.3.2" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'full'", specifier = ">=3.2,<4" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'server'", specifier = ">=3.2,<4" },
+    { name = "psycopg", specifier = ">=3.3.2,<4" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'full'", specifier = ">=3.3.2,<4" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'server'", specifier = ">=3.3.2,<4" },
     { name = "pydantic", specifier = ">=2.12.5,<3" },
     { name = "pydantic", marker = "extra == 'full'", specifier = ">=2.12.5,<3" },
     { name = "pydantic", marker = "extra == 'mcp'", specifier = ">=2.12.5,<3" },
@@ -1701,23 +1706,26 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.4" },
     { name = "scalar-fastapi", marker = "extra == 'full'", specifier = ">=1.5.0,<2" },
     { name = "scalar-fastapi", marker = "extra == 'server'", specifier = ">=1.5.0,<2" },
-    { name = "sqlalchemy", specifier = ">=2.0.46" },
-    { name = "sqlalchemy", marker = "extra == 'full'", specifier = ">=2,<3" },
-    { name = "sqlalchemy", marker = "extra == 'server'", specifier = ">=2,<3" },
+    { name = "sqlalchemy", specifier = ">=2.0.46,<3" },
+    { name = "sqlalchemy", marker = "extra == 'full'", specifier = ">=2.0.46,<3" },
+    { name = "sqlalchemy", marker = "extra == 'server'", specifier = ">=2.0.46,<3" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "structlog", specifier = ">=24.1.0,<26" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.0" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.1" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.19" },
     { name = "typer", specifier = ">=0.21.1,<1" },
-    { name = "uvicorn", specifier = ">=0.40.0" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'full'", specifier = ">=0.32,<1" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.32,<1" },
+    { name = "uvicorn", specifier = ">=0.40.0,<1" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'full'", specifier = ">=0.40.0,<1" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.40.0,<1" },
     { name = "websockets", specifier = ">=16" },
     { name = "websockets", marker = "extra == 'full'", specifier = ">=16" },
     { name = "websockets", marker = "extra == 'server'", specifier = ">=16" },
 ]
 provides-extras = ["dev", "mcp", "server", "full"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest-timeout", specifier = ">=2.4.0" }]
 
 [[package]]
 name = "fonttools"
@@ -4942,6 +4950,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
+]
+
+[[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382, upload-time = "2025-05-05T19:44:33.502Z" },
 ]
 
 [[package]]

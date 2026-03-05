@@ -717,7 +717,7 @@ li {
 
 /* ── Textarea ───────────────────────────────────────────────────── */
 [data-slot="textarea"] {
-  font-size: var(--text-label);
+  font-size: var(--text-base);
   font-weight: var(--font-weight-regular);
   line-height: 1.5;
 }

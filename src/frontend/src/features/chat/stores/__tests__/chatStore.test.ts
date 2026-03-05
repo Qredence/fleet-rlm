@@ -242,6 +242,34 @@ describe("useChatStore — streamMessage", () => {
     });
   });
 
+  it("uses trace override=false to disable websocket trace mode", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+
+    await useChatStore
+      .getState()
+      .streamMessage("test", undefined, undefined, { traceEnabled: false });
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      trace: false,
+      trace_mode: "off",
+    });
+  });
+
+  it("uses trace override=true to enable compact trace mode", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+
+    await useChatStore
+      .getState()
+      .streamMessage("test", undefined, undefined, { traceEnabled: true });
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      trace: true,
+      trace_mode: "compact",
+    });
+  });
+
   it("calls onFrameCallback for every yielded frame", async () => {
     const fakeFrame = {
       type: "event" as const,

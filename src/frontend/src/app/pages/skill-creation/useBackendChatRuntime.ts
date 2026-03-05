@@ -6,7 +6,10 @@ import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import type { Conversation } from "@/hooks/useChatHistory";
 import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/app/pages/skill-creation/backendArtifactEventAdapter";
-import type { ChatSimulation } from "@/app/pages/skill-creation/useChatSimulation";
+import type {
+  ChatSimulation,
+  ChatSubmitOptions,
+} from "@/app/pages/skill-creation/useChatSimulation";
 import { useArtifactStore } from "@/stores/artifactStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
@@ -164,68 +167,79 @@ export function useBackendChatRuntime(): ChatSimulation {
     [setCreationPhase],
   );
 
-  const handleSubmit = useCallback(async () => {
-    const text = inputValue.trim();
-    if (!text || isTyping || isStreaming) return;
+  const handleSubmit = useCallback(
+    async (options?: ChatSubmitOptions) => {
+      const text = inputValue.trim();
+      if (!text || isTyping || isStreaming) return;
 
-    setInputValue("");
-    addMessage(toUserMessage(text));
-    setPhase("understanding");
-    setCreationPhase("understanding");
-    setIsTyping(true);
-    clearArtifactSteps();
-    if (!isCanvasOpen) openCanvas();
+      if ((options?.attachments?.length ?? 0) > 0) {
+        toast("Attachments added locally", {
+          description:
+            "This backend currently does not accept binary upload payloads. Send continues with text only.",
+        });
+      }
 
-    let terminalSeen = false;
+      setInputValue("");
+      addMessage(toUserMessage(text));
+      setPhase("understanding");
+      setCreationPhase("understanding");
+      setIsTyping(true);
+      clearArtifactSteps();
+      if (!isCanvasOpen) openCanvas();
 
-    try {
-      await streamMessage(
-        text,
-        (frame) => {
-          if (isTerminalFrame(frame)) terminalSeen = true;
-          onFrame(frame);
-        },
-        queryClient,
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown streaming error";
-      if (!terminalSeen) {
-        applyWsFrameToArtifacts({ type: "error", message });
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: createLocalMessageId("sys"),
-            type: "system",
-            content: `Backend error: ${message}`,
-            phase: 1,
+      let terminalSeen = false;
+
+      try {
+        await streamMessage(
+          text,
+          (frame) => {
+            if (isTerminalFrame(frame)) terminalSeen = true;
+            onFrame(frame);
           },
-        ]);
-        setPhase("idle");
-        setCreationPhase("idle");
+          queryClient,
+          { traceEnabled: options?.traceEnabled },
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown streaming error";
+        if (!terminalSeen) {
+          applyWsFrameToArtifacts({ type: "error", message });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: createLocalMessageId("sys"),
+              type: "system",
+              content: `Backend error: ${message}`,
+              phase: 1,
+            },
+          ]);
+          setPhase("idle");
+          setCreationPhase("idle");
+        }
+        toast.error("Backend stream failed", { description: message });
+      } finally {
+        setIsTyping(false);
+        if (!terminalSeen) {
+          setPhase("idle");
+          setCreationPhase("idle");
+        }
       }
-      toast.error("Backend stream failed", { description: message });
-    } finally {
-      setIsTyping(false);
-      if (!terminalSeen) {
-        setPhase("idle");
-        setCreationPhase("idle");
-      }
-    }
-  }, [
-    clearArtifactSteps,
-    inputValue,
-    isCanvasOpen,
-    isTyping,
-    isStreaming,
-    onFrame,
-    openCanvas,
-    queryClient,
-    setCreationPhase,
-    addMessage,
-    streamMessage,
-    setMessages,
-  ]);
+    },
+    [
+      clearArtifactSteps,
+      inputValue,
+      isCanvasOpen,
+      isTyping,
+      isStreaming,
+      onFrame,
+      openCanvas,
+      queryClient,
+      streamMessage,
+      setCreationPhase,
+      addMessage,
+      setMessages,
+    ],
+  );
 
   const resolveHitl = useCallback(
     async (msgId: string, actionLabel: string) => {

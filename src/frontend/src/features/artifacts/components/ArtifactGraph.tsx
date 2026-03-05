@@ -60,7 +60,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function normalizeActorKind(value: unknown): ArtifactActorKind {
-  const raw = String(value ?? "").trim().toLowerCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (raw === "root_rlm" || raw === "root-rlm" || raw === "root") {
     return "root_rlm";
   }
@@ -146,7 +148,9 @@ function deriveLane(step: ExecutionStep): LaneMeta {
 
   const key =
     (typeof step.lane_key === "string" && step.lane_key.trim()) ||
-    (actorId ? `${actorKind}:${actorId}` : `${actorKind}:depth-${depth ?? "na"}`);
+    (actorId
+      ? `${actorKind}:${actorId}`
+      : `${actorKind}:depth-${depth ?? "na"}`);
 
   const label = actorId
     ? `${laneLabel(actorKind, depth)} · ${actorId}`
@@ -198,7 +202,11 @@ function GraphLegend() {
         const Icon = meta.Icon;
         return (
           <div key={type} className="flex items-center gap-1.5">
-            <Icon className="size-3" style={{ color: meta.color }} aria-hidden />
+            <Icon
+              className="size-3"
+              style={{ color: meta.color }}
+              aria-hidden
+            />
             <span>{meta.label}</span>
           </div>
         );
@@ -233,7 +241,9 @@ export function ArtifactGraph({
   const { nodes, edges, lanes } = useMemo(() => {
     const ordered = sortStepsChronologically(steps);
     const lanes = buildLanes(ordered);
-    const laneIndexByKey = new Map(lanes.map((lane, index) => [lane.key, index]));
+    const laneIndexByKey = new Map(
+      lanes.map((lane, index) => [lane.key, index]),
+    );
 
     const graphNodes: Node<GraphStepNodeData>[] = [];
     const graphEdges: Edge[] = [];
@@ -300,7 +310,9 @@ export function ArtifactGraph({
       const target = nodeIdByStepId.get(current.id);
       if (!source || !target || source === target) continue;
 
-      const elapsedLabel = formatElapsedLabel(current.timestamp - previous.timestamp);
+      const elapsedLabel = formatElapsedLabel(
+        current.timestamp - previous.timestamp,
+      );
       graphEdges.push({
         id: `chrono-${source}-${target}`,
         source,

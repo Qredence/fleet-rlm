@@ -17,22 +17,30 @@ export interface ApiCapabilityStatus {
 
 export type ApiCapabilities = Record<ApiCapabilityKey, ApiCapabilityStatus>;
 
-const CAPABILITY_KEYS: ApiCapabilityKey[] = ["skills", "memory", "taxonomy", "analytics", "filesystem"];
+const CAPABILITY_KEYS: ApiCapabilityKey[] = [
+  "skills",
+  "memory",
+  "taxonomy",
+  "analytics",
+  "filesystem",
+];
 
 const REMOVED_REASON =
   "Endpoint family was removed from backend during deprecated/planned cleanup.";
 
 let cachedCapabilities: ApiCapabilities | null = null;
 
-function allAvailableCapabilities(reason = "Mock mode active"): ApiCapabilities {
+function allAvailableCapabilities(
+  reason = "Mock mode active",
+): ApiCapabilities {
   return Object.fromEntries(
-    CAPABILITY_KEYS.map((key) => [key, { available: true, reason }])
+    CAPABILITY_KEYS.map((key) => [key, { available: true, reason }]),
   ) as ApiCapabilities;
 }
 
 function allUnavailableCapabilities(reason = REMOVED_REASON): ApiCapabilities {
   return Object.fromEntries(
-    CAPABILITY_KEYS.map((key) => [key, { available: false, reason }])
+    CAPABILITY_KEYS.map((key) => [key, { available: false, reason }]),
   ) as ApiCapabilities;
 }
 
@@ -103,11 +111,13 @@ export function createFallbackPayload<K extends PropertyKey, T>(
   dataKey: K,
   data: T,
   capability: ApiCapabilityStatus,
-  featureName: string
+  featureName: string,
 ) {
   return {
     [dataKey]: data,
     dataSource: "fallback" as const,
-    degradedReason: capability.reason ?? `${featureName} endpoint is unavailable, using local mock data.`,
+    degradedReason:
+      capability.reason ??
+      `${featureName} endpoint is unavailable, using local mock data.`,
   } as Record<K, T> & { dataSource: "fallback"; degradedReason: string };
 }

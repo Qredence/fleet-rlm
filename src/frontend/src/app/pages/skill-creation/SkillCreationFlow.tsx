@@ -6,7 +6,7 @@ import { useChatHistory } from "@/hooks/useChatHistory";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/components/ui/use-mobile";
 import { Button } from "@/components/ui/button";
-import { PromptInput } from "@/components/ui/prompt-input";
+import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
 import { ConversationHistory } from "@/features/chat/ConversationHistory";
 import { ChatMessageList } from "@/app/pages/skill-creation/ChatMessageList";
 import { useBackendChatRuntime } from "@/app/pages/skill-creation/useBackendChatRuntime";
@@ -48,26 +48,38 @@ export function SkillCreationFlow() {
     loadConversation,
   } = chatRuntime;
 
-  // Wrap handleSubmit to capture chat session start event on first message
-  const handleSubmit = useCallback(() => {
-    if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
-      telemetry.capture("chat_session_started", {
-        prompt_length: inputValue.length,
-      });
-    }
-    originalHandleSubmit();
-  }, [phase, messages.length, inputValue, telemetry, originalHandleSubmit]);
+  const [selectedAgent, setSelectedAgent] = useState("auto");
+  const [thinkEnabled, setThinkEnabled] = useState(false);
 
-  // Prompt feature state (persisted in NavigationContext)
-  const {
-    activeFeatures,
-    toggleFeature,
-    promptMode,
-    setPromptMode,
-    selectedPromptSkills,
-    togglePromptSkill,
-    sessionId,
-  } = useNavigation();
+  // Wrap handleSubmit to capture chat session start event on first message
+  const handleSubmit = useCallback(
+    (attachments: AttachedFile[]) => {
+      if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
+        telemetry.capture("chat_session_started", {
+          prompt_length: inputValue.length,
+        });
+      }
+      originalHandleSubmit({
+        traceEnabled: thinkEnabled,
+        attachments: attachments.map((attachment) => ({
+          id: attachment.id,
+          name: attachment.file.name,
+          mimeType: attachment.file.type,
+          sizeBytes: attachment.file.size,
+        })),
+      });
+    },
+    [
+      phase,
+      messages.length,
+      inputValue,
+      telemetry,
+      originalHandleSubmit,
+      thinkEnabled,
+    ],
+  );
+
+  const { sessionId } = useNavigation();
 
   // Chat history
   const {
@@ -191,7 +203,7 @@ export function SkillCreationFlow() {
 
       {/* Input composer */}
       <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 pt-6 md:px-6 md:pb-10">
-        <div className="mx-auto w-full max-w-200">
+        <div className="mx-auto w-full max-w-[800px]">
           <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
               <div className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-950">
@@ -209,10 +221,10 @@ export function SkillCreationFlow() {
                 </Button>
               </div>
             ) : null}
-            <PromptInput
+            <ChatInput
               value={inputValue}
               onChange={setInputValue}
-              onSubmit={handleSubmit}
+              onSend={handleSubmit}
               placeholder={
                 !backendEnabled
                   ? "Configure FastAPI backend to start chatting\u2026"
@@ -220,14 +232,12 @@ export function SkillCreationFlow() {
                     ? "Ask anything\u2026"
                     : "Ask a follow-up\u2026"
               }
-              disabled={isTyping || !backendEnabled}
-              activeFeatures={activeFeatures}
-              onToggleFeature={toggleFeature}
-              mode={promptMode}
-              onSetMode={setPromptMode}
-              selectedSkills={selectedPromptSkills}
-              onToggleSkill={togglePromptSkill}
-              className="w-full rounded-full border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
+              isLoading={isTyping || !backendEnabled}
+              selectedAgent={selectedAgent}
+              onAgentChange={setSelectedAgent}
+              thinkEnabled={thinkEnabled}
+              onThinkToggle={() => setThinkEnabled((prev) => !prev)}
+              className="w-full rounded-3xl border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
             />
           </div>
         </div>

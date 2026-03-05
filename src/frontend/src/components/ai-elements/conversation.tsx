@@ -63,7 +63,7 @@ function ConversationContent({
 }: ConversationContentProps) {
   return (
     <div {...props} className={cn("px-4 py-6 md:px-6 md:py-8", className)}>
-      <div className="mx-auto w-full max-w-200 space-y-6">{children}</div>
+      <div className="mx-auto w-full max-w-[800px] space-y-6">{children}</div>
     </div>
   );
 }

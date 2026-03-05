@@ -152,6 +152,35 @@ def should_mask_key(key: str) -> bool:
     )
 
 
+def _is_masked_secret_round_trip(
+    *,
+    key: str,
+    candidate_value: str,
+    current_raw_value: str | None,
+) -> bool:
+    """Detect masked secret placeholders sent back from runtime settings clients.
+
+    Runtime settings snapshots intentionally return masked values for secret-like
+    keys (for example ``sk-...yz``). If a client sends those masked display values
+    back during a PATCH call, persisting them would overwrite real credentials.
+    """
+    if not should_mask_key(key):
+        return False
+
+    value = candidate_value.strip()
+    if not value:
+        return False
+
+    # Common fully-redacted placeholder style (e.g. "***").
+    if set(value) == {"*"}:
+        return True
+
+    if current_raw_value:
+        return value == mask_secret(current_raw_value)
+
+    return False
+
+
 def get_settings_snapshot(
     *,
     keys: list[str],
@@ -228,9 +257,26 @@ def apply_env_updates(
     if not normalized_updates:
         return {"updated": [], "env_path": str(target)}
 
-    target.touch(exist_ok=True)
+    current_file_values = _read_env_file_values(target)
+    effective_updates: dict[str, str] = {}
     for key, value in normalized_updates.items():
+        current_raw_value = current_file_values.get(key)
+        if current_raw_value is None:
+            current_raw_value = os.environ.get(key)
+        if _is_masked_secret_round_trip(
+            key=key,
+            candidate_value=value,
+            current_raw_value=current_raw_value,
+        ):
+            continue
+        effective_updates[key] = value
+
+    if not effective_updates:
+        return {"updated": [], "env_path": str(target)}
+
+    target.touch(exist_ok=True)
+    for key, value in effective_updates.items():
         set_key(str(target), key, value)
         os.environ[key] = value
 
-    return {"updated": sorted(normalized_updates.keys()), "env_path": str(target)}
+    return {"updated": sorted(effective_updates.keys()), "env_path": str(target)}

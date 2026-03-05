@@ -110,7 +110,7 @@ export function MobileTabBar() {
               >
                 <Icon
                   className={cn(
-                    "size-5.5 transition-colors",
+                    "size-[22px] transition-colors",
                     isActive ? "text-accent" : "text-muted-foreground",
                   )}
                   strokeWidth={isActive ? 2.2 : 1.8}

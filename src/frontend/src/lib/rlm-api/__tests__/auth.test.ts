@@ -41,7 +41,9 @@ describe("authEndpoints", () => {
 
   it("calls /api/v1/auth/logout", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
-    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ status: "ok" }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockJsonResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const { authEndpoints } = await loadAuthModule();

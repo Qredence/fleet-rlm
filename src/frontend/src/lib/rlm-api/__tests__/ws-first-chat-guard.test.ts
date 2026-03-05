@@ -117,7 +117,8 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
 
     if (!entry.isFile()) continue;
     if (!/\.(ts|tsx)$/.test(entry.name)) continue;
-    if (entry.name.includes(".test.") || entry.name.includes(".spec.")) continue;
+    if (entry.name.includes(".test.") || entry.name.includes(".spec."))
+      continue;
     files.push(absPath);
   }
 

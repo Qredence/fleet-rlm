@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..delegate_sub_agent import (
-    parse_json_from_response,
-    spawn_delegate_sub_agent_async,
-)
+import dspy
+
 from ..tool_delegation import _sync_compatible_tool_callable
 from .sandbox_helpers import _resolve_volume_path
 
@@ -26,19 +25,160 @@ class _MemoryIntelligenceContext:
     agent: "RLMReActChatAgent"
 
 
-def _safe_depth(value: int) -> int:
+def _coerce_int(
+    value: Any,
+    *,
+    default: int = 0,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
     try:
-        return max(0, int(value))
+        parsed = int(value)
     except (TypeError, ValueError):
-        return 0
+        parsed = default
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
 
 
-def _default_depth(ctx: _MemoryIntelligenceContext, result: dict[str, Any]) -> int:
-    return int(result.get("depth", ctx.agent._current_depth + 1))
+def _coerce_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
 
 
-def _default_history(ctx: _MemoryIntelligenceContext, result: dict[str, Any]) -> int:
-    return int(result.get("sub_agent_history", 0))
+def _prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
+    if isinstance(prediction, dict):
+        return prediction.get(field_name, default)
+    return getattr(prediction, field_name, default)
+
+
+def _claim_delegate_slot_or_error(agent: "RLMReActChatAgent") -> dict[str, Any] | None:
+    if agent._current_depth >= agent._max_depth:
+        return {
+            "status": "error",
+            "error": (
+                f"Max recursion depth ({agent._max_depth}) reached. "
+                "Cannot run delegate operation."
+            ),
+        }
+
+    claim_slot = getattr(agent, "_claim_delegate_slot", None)
+    if not callable(claim_slot):
+        return None
+
+    claim_result = claim_slot()
+    if (
+        isinstance(claim_result, tuple)
+        and len(claim_result) == 2
+        and isinstance(claim_result[0], bool)
+    ):
+        allowed = bool(claim_result[0])
+        limit = _coerce_int(claim_result[1], default=1, minimum=1)
+        if not allowed:
+            return {
+                "status": "error",
+                "error": (
+                    "Delegate call budget reached for this turn. "
+                    f"Maximum delegate calls per turn is {limit}."
+                ),
+                "delegate_max_calls_per_turn": limit,
+            }
+
+    return None
+
+
+def _run_runtime_module(
+    ctx: _MemoryIntelligenceContext,
+    module_name: str,
+    **kwargs: Any,
+) -> tuple[Any | None, dict[str, Any] | None, bool]:
+    guard_error = _claim_delegate_slot_or_error(ctx.agent)
+    if guard_error is not None:
+        return None, guard_error, False
+
+    ctx.agent.start()
+
+    try:
+        module = ctx.agent.get_runtime_module(module_name)
+    except Exception as exc:
+        return (
+            None,
+            {
+                "status": "error",
+                "error": (
+                    f"Failed to load runtime module '{module_name}': "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            },
+            False,
+        )
+
+    delegate_lm = getattr(ctx.agent, "delegate_lm", None)
+    parent_lm = getattr(dspy.settings, "lm", None)
+
+    fallback_used = False
+    if delegate_lm is None:
+        fallback_used = True
+        record_fallback = getattr(ctx.agent, "_record_delegate_fallback", None)
+        if callable(record_fallback):
+            record_fallback()
+
+    try:
+        if delegate_lm is not None:
+            lm_context = dspy.context(lm=delegate_lm)
+        elif parent_lm is not None:
+            lm_context = dspy.context(lm=parent_lm)
+        else:
+            lm_context = nullcontext()
+
+        with lm_context:
+            prediction = module(**kwargs)
+    except Exception as exc:
+        if delegate_lm is not None and parent_lm is not None:
+            record_fallback = getattr(ctx.agent, "_record_delegate_fallback", None)
+            if callable(record_fallback):
+                record_fallback()
+            fallback_used = True
+            with dspy.context(lm=parent_lm):
+                prediction = module(**kwargs)
+        else:
+            return (
+                None,
+                {
+                    "status": "error",
+                    "error": (
+                        f"Runtime module '{module_name}' failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                },
+                fallback_used,
+            )
+
+    return prediction, None, fallback_used
+
+
+def _runtime_metadata(
+    ctx: _MemoryIntelligenceContext,
+    prediction: Any,
+    *,
+    fallback_used: bool,
+) -> dict[str, Any]:
+    return {
+        "depth": _coerce_int(
+            _prediction_value(prediction, "depth", ctx.agent._current_depth + 1),
+            default=ctx.agent._current_depth + 1,
+            minimum=0,
+        ),
+        "sub_agent_history": _coerce_int(
+            _prediction_value(prediction, "sub_agent_history", 0),
+            default=0,
+            minimum=0,
+        ),
+        "delegate_lm_fallback": bool(fallback_used),
+    }
 
 
 def _reload_volume_best_effort(ctx: _MemoryIntelligenceContext, *, reason: str) -> None:
@@ -65,6 +205,24 @@ def _resolve_memory_root(root_path: str) -> tuple[str | None, dict[str, Any] | N
         return None, {"status": "error", "error": str(exc)}
 
 
+def _normalize_tree_nodes(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    nodes: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        normalized = {
+            "path": str(item.get("path", "")),
+            "type": str(item.get("type", "")),
+            "size_bytes": _coerce_int(item.get("size_bytes", 0), minimum=0),
+            "depth": _coerce_int(item.get("depth", 0), minimum=0),
+        }
+        nodes.append(normalized)
+    return nodes
+
+
 def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
     """Build memory intelligence tools bound to a shared context object."""
     from dspy import Tool
@@ -83,48 +241,40 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
 
         _reload_volume_best_effort(ctx, reason="memory_tree")
 
-        prompt = (
-            "List the file tree of the Modal volume.\n\n"
-            f"Root path: {resolved_path}\n"
-            f"Max depth: {_safe_depth(max_depth)}\n"
-            f"Include hidden: {bool(include_hidden)}\n\n"
-            "Provide your response with:\n"
-            "- nodes: list of dicts with keys path, type, size_bytes, depth\n"
-            "- total_files: integer count of files\n"
-            "- total_dirs: integer count of directories\n"
-            "- truncated: boolean whether the listing was truncated"
+        prediction, runtime_error, fallback_used = _run_runtime_module(
+            ctx,
+            "memory_tree",
+            root_path=resolved_path,
+            max_depth=_coerce_int(max_depth, default=4, minimum=0, maximum=12),
+            include_hidden=bool(include_hidden),
         )
+        if runtime_error is not None:
+            return runtime_error
 
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        if result.get("status") == "error":
-            return result
-
-        response_text = result.get("assistant_response", "")
-        structured = parse_json_from_response(response_text) or {}
-        nodes = structured.get("nodes", [])
-        if not isinstance(nodes, list):
-            nodes = []
-        total_files_raw = structured.get("total_files", 0)
-        try:
-            total_files = max(0, int(total_files_raw))
-        except (TypeError, ValueError):
-            total_files = 0
-        total_dirs_raw = structured.get("total_dirs", 0)
-        try:
-            total_dirs = max(0, int(total_dirs_raw))
-        except (TypeError, ValueError):
-            total_dirs = 0
-        truncated = bool(structured.get("truncated", False))
+        nodes = _normalize_tree_nodes(_prediction_value(prediction, "nodes", []))
 
         return {
             "status": "ok",
             "root_path": resolved_path,
             "nodes": nodes,
-            "total_files": total_files,
-            "total_dirs": total_dirs,
-            "truncated": truncated,
-            "depth": _default_depth(ctx, result),
-            "sub_agent_history": _default_history(ctx, result),
+            "total_files": _coerce_int(
+                _prediction_value(
+                    prediction,
+                    "total_files",
+                    len([n for n in nodes if n["type"] == "file"]),
+                ),
+                minimum=0,
+            ),
+            "total_dirs": _coerce_int(
+                _prediction_value(
+                    prediction,
+                    "total_dirs",
+                    len([n for n in nodes if n["type"] == "dir"]),
+                ),
+                minimum=0,
+            ),
+            "truncated": bool(_prediction_value(prediction, "truncated", False)),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
         }
 
     async def memory_action_intent(
@@ -133,40 +283,45 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
     ) -> dict[str, Any]:
         """Classify intended memory action and risk; this tool never mutates state."""
         tree_payload = await memory_tree()
-        current_tree = list(tree_payload.get("nodes", []) or [])
+        if tree_payload.get("status") != "ok":
+            return tree_payload
+
         constraints_text = (
             policy_constraints
             or "Prefer non-destructive operations and ask for confirmation on risky actions."
         )
 
-        prompt = (
-            "Classify the intended memory action from the user request.\n\n"
-            f"User request: {user_request}\n"
-            f"Current tree: {current_tree}\n"
-            f"Policy constraints: {constraints_text}\n\n"
-            "Provide your response with:\n"
-            "- action_type: one of read, write, append, move, delete, mkdir, tree, audit, migrate, noop\n"
-            "- target_paths: list of target paths\n"
-            "- content_plan: list of content operations\n"
-            "- risk_level: one of low, medium, high\n"
-            "- requires_confirmation: boolean\n"
-            "- rationale: explanation"
+        prediction, runtime_error, fallback_used = _run_runtime_module(
+            ctx,
+            "memory_action_intent",
+            user_request=user_request,
+            current_tree=list(tree_payload.get("nodes", []) or []),
+            policy_constraints=constraints_text,
         )
+        if runtime_error is not None:
+            return runtime_error
 
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        if result.get("status") == "error":
-            return result
+        risk_level = (
+            str(_prediction_value(prediction, "risk_level", "medium")).strip().lower()
+        )
+        if risk_level not in {"low", "medium", "high"}:
+            risk_level = "medium"
 
         return {
             "status": "ok",
-            "action_type": "noop",
-            "target_paths": [],
-            "content_plan": [],
-            "risk_level": "medium",
-            "requires_confirmation": True,
-            "rationale": result.get("assistant_response", ""),
-            "depth": _default_depth(ctx, result),
-            "sub_agent_history": _default_history(ctx, result),
+            "action_type": str(_prediction_value(prediction, "action_type", "noop")),
+            "target_paths": _coerce_str_list(
+                _prediction_value(prediction, "target_paths", [])
+            ),
+            "content_plan": _coerce_str_list(
+                _prediction_value(prediction, "content_plan", [])
+            ),
+            "risk_level": risk_level,
+            "requires_confirmation": bool(
+                _prediction_value(prediction, "requires_confirmation", True)
+            ),
+            "rationale": str(_prediction_value(prediction, "rationale", "")),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
         }
 
     async def memory_structure_audit(
@@ -176,36 +331,36 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
         tree_payload = await memory_tree()
         if tree_payload.get("status") != "ok":
             return tree_payload
-        tree_snapshot = list(tree_payload.get("nodes", []) or [])
+
         goals = (
             usage_goals or "Keep memory discoverable, consistent, and easy to maintain."
         )
 
-        prompt = (
-            "Audit the memory structure and recommend improvements.\n\n"
-            f"Tree snapshot: {tree_snapshot}\n"
-            f"Usage goals: {goals}\n\n"
-            "Provide your response with:\n"
-            "- issues: list of identified issues\n"
-            "- recommended_layout: list of recommended paths\n"
-            "- naming_conventions: list of naming rules\n"
-            "- retention_rules: list of retention policies\n"
-            "- priority_fixes: list of highest-priority fixes"
+        prediction, runtime_error, fallback_used = _run_runtime_module(
+            ctx,
+            "memory_structure_audit",
+            tree_snapshot=list(tree_payload.get("nodes", []) or []),
+            usage_goals=goals,
         )
-
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        if result.get("status") == "error":
-            return result
+        if runtime_error is not None:
+            return runtime_error
 
         return {
             "status": "ok",
-            "issues": [],
-            "recommended_layout": [],
-            "naming_conventions": [],
-            "retention_rules": [],
-            "priority_fixes": [],
-            "depth": _default_depth(ctx, result),
-            "sub_agent_history": _default_history(ctx, result),
+            "issues": _coerce_str_list(_prediction_value(prediction, "issues", [])),
+            "recommended_layout": _coerce_str_list(
+                _prediction_value(prediction, "recommended_layout", [])
+            ),
+            "naming_conventions": _coerce_str_list(
+                _prediction_value(prediction, "naming_conventions", [])
+            ),
+            "retention_rules": _coerce_str_list(
+                _prediction_value(prediction, "retention_rules", [])
+            ),
+            "priority_fixes": _coerce_str_list(
+                _prediction_value(prediction, "priority_fixes", [])
+            ),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
         }
 
     async def memory_structure_migration_plan(
@@ -215,35 +370,47 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
         audit = await memory_structure_audit()
         if audit.get("status") != "ok":
             return audit
-        findings = list(audit.get("issues", []) or [])
+
         constraints = (
             approved_constraints
             or "No destructive operation without explicit confirmation and rollback."
         )
 
-        prompt = (
-            "Generate a reversible migration plan for the memory structure.\n\n"
-            f"Audit findings: {findings}\n"
-            f"Approved constraints: {constraints}\n\n"
-            "Provide your response with:\n"
-            "- operations: list of dicts with keys op, src, dst, reason\n"
-            "- rollback_steps: list of rollback instructions\n"
-            "- verification_checks: list of verification commands\n"
-            "- estimated_risk: one of low, medium, high"
+        prediction, runtime_error, fallback_used = _run_runtime_module(
+            ctx,
+            "memory_structure_migration_plan",
+            audit_findings=list(audit.get("issues", []) or []),
+            approved_constraints=constraints,
         )
+        if runtime_error is not None:
+            return runtime_error
 
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        if result.get("status") == "error":
-            return result
+        raw_operations = _prediction_value(prediction, "operations", [])
+        operations: list[dict[str, str]] = []
+        if isinstance(raw_operations, list):
+            for item in raw_operations:
+                if isinstance(item, dict):
+                    operations.append({str(k): str(v) for k, v in item.items()})
+
+        estimated_risk = (
+            str(_prediction_value(prediction, "estimated_risk", "medium"))
+            .strip()
+            .lower()
+        )
+        if estimated_risk not in {"low", "medium", "high"}:
+            estimated_risk = "medium"
 
         return {
             "status": "ok",
-            "operations": [],
-            "rollback_steps": [],
-            "verification_checks": [],
-            "estimated_risk": "medium",
-            "depth": _default_depth(ctx, result),
-            "sub_agent_history": _default_history(ctx, result),
+            "operations": operations,
+            "rollback_steps": _coerce_str_list(
+                _prediction_value(prediction, "rollback_steps", [])
+            ),
+            "verification_checks": _coerce_str_list(
+                _prediction_value(prediction, "verification_checks", [])
+            ),
+            "estimated_risk": estimated_risk,
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
         }
 
     async def clarification_questions(
@@ -252,40 +419,46 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
     ) -> dict[str, Any]:
         """Generate clarification questions for ambiguous/high-risk operations."""
         tree_payload = await memory_tree()
+        if tree_payload.get("status") != "ok":
+            return tree_payload
+
         tree_nodes = list(tree_payload.get("nodes", []) or [])[:20]
         available_context = (
             f"memory_root=/data/memory; nodes_sample={tree_nodes}; "
             f"history_turns={ctx.agent.history_turns()}"
         )
+
         risk_norm = operation_risk.strip().lower()
         if risk_norm not in {"low", "medium", "high"}:
             risk_norm = "medium"
 
-        prompt = (
-            "Generate clarification questions for an ambiguous or risky operation.\n\n"
-            f"Request: {request}\n"
-            f"Available context: {available_context}\n"
-            f"Operation risk: {risk_norm}\n\n"
-            "Provide your response with:\n"
-            "- questions: list of clarification questions\n"
-            "- blocking_unknowns: list of unknowns that block execution\n"
-            "- safe_default: a safe default action\n"
-            "- proceed_without_answer: boolean (always false for high risk)"
+        prediction, runtime_error, fallback_used = _run_runtime_module(
+            ctx,
+            "clarification_questions",
+            ambiguous_request=request,
+            available_context=available_context,
+            operation_risk=risk_norm,
         )
+        if runtime_error is not None:
+            return runtime_error
 
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
-        if result.get("status") == "error":
-            return result
+        proceed_without_answer = bool(
+            _prediction_value(prediction, "proceed_without_answer", False)
+        )
+        if risk_norm == "high":
+            proceed_without_answer = False
 
-        proceed_without_answer = False if risk_norm == "high" else False
         return {
             "status": "ok",
-            "questions": [],
-            "blocking_unknowns": [],
-            "safe_default": "",
+            "questions": _coerce_str_list(
+                _prediction_value(prediction, "questions", [])
+            ),
+            "blocking_unknowns": _coerce_str_list(
+                _prediction_value(prediction, "blocking_unknowns", [])
+            ),
+            "safe_default": str(_prediction_value(prediction, "safe_default", "")),
             "proceed_without_answer": proceed_without_answer,
-            "depth": _default_depth(ctx, result),
-            "sub_agent_history": _default_history(ctx, result),
+            **_runtime_metadata(ctx, prediction, fallback_used=fallback_used),
         }
 
     return [

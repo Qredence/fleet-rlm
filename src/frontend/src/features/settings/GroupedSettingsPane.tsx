@@ -236,7 +236,9 @@ export function GroupedSettingsPane({
             description="No account/billing/profile settings are exposed here in v0.4.8. This surface is intentionally limited to functional runtime and privacy controls."
             noBorder={section === "telemetry"}
           >
-            <span className="text-xs text-muted-foreground">Anonymous-only</span>
+            <span className="text-xs text-muted-foreground">
+              Anonymous-only
+            </span>
           </SettingsRow>
         </>
       )}
@@ -275,7 +277,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setLmModel(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -289,7 +291,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setDelegateLmModel(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -303,7 +305,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setDelegateLmSmallModel(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -317,7 +319,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setApiBase(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -334,7 +336,7 @@ export function GroupedSettingsPane({
                 setApiKeyInput(event.target.value);
                 setClearApiKeyOnSave(false);
               }}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
