@@ -83,7 +83,6 @@ jobs:
           MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
         run: >
           uv run pytest -q
-          -p pytest_timeout
           --timeout=120
           --timeout-method=thread
 
