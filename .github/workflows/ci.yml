@@ -72,7 +72,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
       - name: Run unit tests
-        run: uv run pytest -q tests/unit -m "not live_llm and not benchmark"
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: >
+          uv run pytest -q tests/unit -p pytest_asyncio.plugin
+          -m "not live_llm and not benchmark"
 
   test-ui:
     name: Test UI
