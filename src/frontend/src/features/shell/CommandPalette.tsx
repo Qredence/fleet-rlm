@@ -104,7 +104,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100]">
+    <div className="fixed inset-0 z-100">
       <div
         className="absolute inset-0"
         style={{ backgroundColor: "var(--glass-overlay)" }}
@@ -112,9 +112,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         aria-hidden="true"
       />
 
-      <div className="absolute inset-0 flex items-start justify-center pt-[min(20vh,120px)] px-4">
+      <div
+        className="absolute inset-0 flex items-start justify-center pt-[min(20vh,120px)] px-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+      >
         <div
-          className="w-full max-w-[560px] overflow-hidden border border-border-subtle"
+          className="w-full max-w-140 overflow-hidden border border-border-subtle"
           style={{
             borderRadius: "var(--radius-card)",
             backgroundColor: "var(--popover)",
@@ -129,13 +134,16 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               if (e.key === "Escape") close();
             }}
           >
-            <div className="flex items-center gap-2 px-4 border-b border-border-subtle">
-              <Search className="size-4 text-muted-foreground shrink-0" />
+            <div className="flex items-center gap-2 px-4 border-b border-border-subtle focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/50">
+              <Search
+                className="size-4 text-muted-foreground shrink-0"
+                aria-hidden="true"
+              />
               <Command.Input
                 value={search}
                 onValueChange={setSearch}
                 placeholder="Search pages and actions..."
-                className="flex-1 h-12 bg-transparent text-foreground placeholder:text-muted-foreground outline-none border-0"
+                className="flex-1 h-12 bg-transparent text-foreground placeholder:text-muted-foreground border-0 focus-visible:outline-none"
                 style={typo.label}
                 autoFocus
               />
@@ -183,7 +191,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                         !supported && "opacity-50",
                       )}
                     >
-                      <Icon className="size-4 text-muted-foreground shrink-0" />
+                      <Icon
+                        className="size-4 text-muted-foreground shrink-0"
+                        aria-hidden="true"
+                      />
                       <span style={typo.label}>{page.label}</span>
                     </Command.Item>
                   );
@@ -216,7 +227,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
-                  <Plus className="size-4 text-muted-foreground shrink-0" />
+                  <Plus
+                    className="size-4 text-muted-foreground shrink-0"
+                    aria-hidden="true"
+                  />
                   <span style={typo.label}>New Session</span>
                 </Command.Item>
 
@@ -237,9 +251,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   )}
                 >
                   {isDark ? (
-                    <Sun className="size-4 text-muted-foreground shrink-0" />
+                    <Sun
+                      className="size-4 text-muted-foreground shrink-0"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <Moon className="size-4 text-muted-foreground shrink-0" />
+                    <Moon
+                      className="size-4 text-muted-foreground shrink-0"
+                      aria-hidden="true"
+                    />
                   )}
                   <span style={typo.label}>
                     Switch to {isDark ? "Light" : "Dark"} Mode
@@ -261,7 +281,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
-                  <Settings className="size-4 text-muted-foreground shrink-0" />
+                  <Settings
+                    className="size-4 text-muted-foreground shrink-0"
+                    aria-hidden="true"
+                  />
                   <span style={typo.label}>Open Settings</span>
                 </Command.Item>
               </Command.Group>

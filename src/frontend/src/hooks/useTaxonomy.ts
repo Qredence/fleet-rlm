@@ -15,7 +15,7 @@ import {
   getCapabilityStatus,
   type DataSource,
   createFallbackPayload,
-} from "@/lib/api/capabilities";
+} from "@/lib/rlm-api/dataCapabilities";
 import type { TaxonomyNode } from "@/lib/data/types";
 
 // ── Query Keys ──────────────────────────────────────────────────────
@@ -66,10 +66,6 @@ export function useTaxonomy(): UseTaxonomyReturn {
       }
 
       const capability = await getCapabilityStatus("taxonomy", signal);
-      if (!capability.available) {
-        return createFallbackPayload("taxonomy", [], capability, "Taxonomy");
-      }
-
       return createFallbackPayload("taxonomy", [], capability, "Taxonomy");
     },
     staleTime: mock ? Infinity : undefined,

@@ -1,4 +1,5 @@
-export { PromptInput, usePromptInput } from "./PromptInput";
+export { PromptInput } from "./PromptInput";
+export { usePromptInput } from "./usePromptInput";
 export { PromptInputHeader } from "./PromptInputHeader";
 export { PromptInputBody } from "./PromptInputBody";
 export { PromptInputTextarea } from "./PromptInputTextarea";

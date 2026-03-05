@@ -2,7 +2,7 @@ import { useEffect, type KeyboardEvent } from "react";
 
 import { Textarea } from "@/components/ui/textarea";
 
-import { usePromptInput } from "@/components/chat/prompt-input/PromptInput";
+import { usePromptInput } from "./usePromptInput";
 
 interface PromptInputTextareaProps {
   placeholder?: string;
