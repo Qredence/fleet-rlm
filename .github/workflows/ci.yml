@@ -74,6 +74,7 @@ jobs:
       - name: Run unit tests
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
         run: >
           uv run pytest -q tests/unit
           -p pytest_asyncio.plugin
