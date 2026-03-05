@@ -13,6 +13,8 @@ This map reflects the current package layout.
 ## Core Runtime
 
 - `src/fleet_rlm/core/`: interpreter runtime, sandbox driver, config helpers
+  Host-side adapters: `interpreter.py`, `llm_tools.py`, `volume_ops.py`, `config.py`
+  Sandbox-side protocol/helpers: `driver.py`, `driver_factories.py`, `sandbox_tools.py`, `volume_tools.py`, `session_history.py`
 - `src/fleet_rlm/react/`: ReAct agent, tool registry, command dispatch, streaming
 - `src/fleet_rlm/chunking/`: chunking utilities
 
@@ -35,6 +37,11 @@ This map reflects the current package layout.
 ## Optional Service Surface
 
 - `src/fleet_rlm/mcp/`: FastMCP server runtime
+
+## Utilities
+
+- `src/fleet_rlm/utils/modal.py`: Modal helper utilities
+- `src/fleet_rlm/utils/regex.py`: regex extraction helper(s)
 
 ## Scaffold Assets
 

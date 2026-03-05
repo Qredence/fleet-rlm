@@ -180,7 +180,6 @@ Generated from runtime-entrypoint reachability, static imports, lazy export maps
 | `src/fleet_rlm/utils/__init__.py` | other | no | no | no | platform | UNCONFIRMED | - |
 | `src/fleet_rlm/utils/modal.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
 | `src/fleet_rlm/utils/scaffold.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/utils/tools.py` | other | no | no | no | platform | USED_TEST_ONLY | imported by tests/scripts only |
 | `src/frontend/src/app/App.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
 | `src/frontend/src/app/layout/BuilderPanel.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
 | `src/frontend/src/app/layout/ChatPanel.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
