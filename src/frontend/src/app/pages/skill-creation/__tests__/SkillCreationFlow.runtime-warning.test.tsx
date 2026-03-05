@@ -14,7 +14,7 @@ vi.mock("@posthog/react", () => ({
   usePostHog: () => ({ capture: vi.fn() }),
 }));
 
-vi.mock("@/components/ui/use-mobile", () => ({
+vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 

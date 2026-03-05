@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { PromptInputContext } from "./PromptInputContext";
 
 interface PromptInputProps {

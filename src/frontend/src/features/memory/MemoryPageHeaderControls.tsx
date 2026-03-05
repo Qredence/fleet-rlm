@@ -4,7 +4,7 @@ import type { MemoryType } from "@/lib/data/types";
 import { ALL_TYPES, TYPE_META } from "@/lib/memory/metadata";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 export interface MemoryHeaderStats {
   total: number;

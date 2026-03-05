@@ -4,7 +4,7 @@ import {
   type ReactNode,
   type HTMLAttributes,
 } from "react";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 export type ConfirmationState = "approval-requested" | "approved" | "rejected";
 

@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 export interface NewMemoryFormProps {
   onSubmit: (data: {
@@ -35,9 +35,10 @@ export function NewMemoryForm({
   isMobile,
   reduced,
 }: NewMemoryFormProps) {
-  const typeLabelId = useId();
-  const contentId = useId();
-  const tagsId = useId();
+  const formId = useId();
+  const typeLabelId = `${formId}-type-label`;
+  const contentId = `${formId}-content`;
+  const tagsId = `${formId}-tags`;
 
   const [type, setType] = useState<MemoryType>("fact");
   const [content, setContent] = useState("");
@@ -63,7 +64,7 @@ export function NewMemoryForm({
       transition={reduced ? springs.instant : springs.default}
       className="overflow-hidden"
     >
-      <Card className="border-accent/30 bg-accent/[.02]">
+      <Card className="border-accent/30 bg-accent/2">
         <CardContent className={cn("p-4 space-y-3", isMobile && "p-3")}>
           <div className="flex items-center justify-between">
             <span className="text-foreground" style={typo.label}>
@@ -75,7 +76,7 @@ export function NewMemoryForm({
               onClick={onCancel}
               aria-label="Cancel"
             >
-              <X className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+              <X className="w-4 h-4 text-muted-foreground" />
             </Button>
           </div>
 
@@ -105,10 +106,7 @@ export function NewMemoryForm({
                   return (
                     <SelectItem key={t} value={t}>
                       <div className="flex items-center gap-2">
-                        <MIcon
-                          className={cn("w-3.5 h-3.5", meta.color)}
-                          aria-hidden="true"
-                        />
+                        <MIcon className={cn("w-3.5 h-3.5", meta.color)} />
                         <span>{meta.label}</span>
                       </div>
                     </SelectItem>
@@ -178,7 +176,7 @@ export function NewMemoryForm({
               onClick={handleSubmit}
               disabled={!content.trim()}
             >
-              <Check className="w-4 h-4" aria-hidden="true" />
+              <Check className="w-4 h-4" />
               <span style={typo.label}>Save</span>
             </Button>
             <Button

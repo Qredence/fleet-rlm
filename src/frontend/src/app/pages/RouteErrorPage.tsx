@@ -9,7 +9,7 @@ import {
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 function extractErrorMessage(error: unknown): string {
   if (isRouteErrorResponse(error)) {

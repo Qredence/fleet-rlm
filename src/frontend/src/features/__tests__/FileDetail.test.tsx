@@ -14,7 +14,7 @@ vi.mock("@/hooks/useFilesystem", () => ({
   useFileContent: () => contentState,
 }));
 
-vi.mock("@/components/ui/use-mobile", () => ({
+vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 

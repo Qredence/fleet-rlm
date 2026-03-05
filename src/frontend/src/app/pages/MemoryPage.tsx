@@ -33,8 +33,8 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/components/ui/utils";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { cn } from "@/lib/utils/cn";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   MemoryEntryCard,
   NewMemoryForm,

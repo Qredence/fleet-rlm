@@ -1,7 +1,7 @@
 import { Brain, Terminal, Wrench, Database, FileOutput } from "lucide-react";
 
 import type { ArtifactStepType, ExecutionStep } from "@/stores/artifactStore";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 import {
   ChainOfThought,

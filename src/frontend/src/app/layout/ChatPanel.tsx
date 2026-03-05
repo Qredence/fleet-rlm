@@ -12,7 +12,7 @@ import { Suspense } from "react";
 import { Outlet, useLocation } from "react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { fades } from "@/lib/config/motion-config";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageSkeleton } from "@/components/shared/PageSkeleton";
 

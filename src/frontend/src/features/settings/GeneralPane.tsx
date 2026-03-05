@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Sun, Moon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { SettingsRow } from "@/components/shared/SettingsRow";
 import { SettingsSelectField } from "@/features/settings/SettingsSelectField";
 import { SettingsToggleRow } from "@/features/settings/SettingsToggleRow";

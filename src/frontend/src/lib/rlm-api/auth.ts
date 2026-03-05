@@ -1,3 +1,4 @@
+import { clearAccessToken, setAccessToken } from "@/lib/auth/tokenStore";
 import { rlmApiClient } from "@/lib/rlm-api/client";
 import type {
   AuthLoginResponse,
@@ -6,23 +7,37 @@ import type {
 } from "@/lib/rlm-api/types";
 
 export const authEndpoints = {
-  login(signal?: AbortSignal) {
-    return rlmApiClient.post<AuthLoginResponse>(
+  async login(signal?: AbortSignal) {
+    const response = await rlmApiClient.post<AuthLoginResponse>(
       "/api/v1/auth/login",
       undefined,
       signal,
     );
+    setAccessToken(response.token);
+    return response;
   },
 
-  logout(signal?: AbortSignal) {
-    return rlmApiClient.post<AuthLogoutResponse>(
-      "/api/v1/auth/logout",
-      undefined,
-      signal,
-    );
+  async logout(signal?: AbortSignal) {
+    try {
+      return await rlmApiClient.post<AuthLogoutResponse>(
+        "/api/v1/auth/logout",
+        undefined,
+        signal,
+      );
+    } finally {
+      clearAccessToken();
+    }
   },
 
   me(signal?: AbortSignal) {
     return rlmApiClient.get<AuthMeResponse>("/api/v1/auth/me", signal);
+  },
+
+  clearLocalAuth() {
+    clearAccessToken();
+  },
+
+  setToken(token: string | null) {
+    setAccessToken(token);
   },
 };

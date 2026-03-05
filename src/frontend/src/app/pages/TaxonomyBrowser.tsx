@@ -13,13 +13,13 @@ import { typo } from "@/lib/config/typo";
 import type { FsNode } from "@/lib/data/types";
 import { useFilesystem } from "@/hooks/useFilesystem";
 import { useNavigation } from "@/hooks/useNavigation";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { FsItem } from "@/features/taxonomy/TaxonomyBrowserSections";
 import {
   collectExpandableIds,

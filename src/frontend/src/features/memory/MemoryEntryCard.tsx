@@ -10,7 +10,7 @@ import { CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { SelectableCard } from "@/components/ui/selectable-card";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 const springIn = (delay: number, reduced?: boolean | null) => ({
   initial: { opacity: 0, y: reduced ? 0 : 6 } as const,

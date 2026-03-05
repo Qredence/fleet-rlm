@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import { typo } from "@/lib/config/typo";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -11,7 +11,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import {
   CanvasSwitcher,
   type CanvasMode,

@@ -18,6 +18,7 @@
 import { create } from "zustand";
 import { mockMemoryEntries } from "@/lib/data/mock-skills";
 import type { MemoryEntry } from "@/lib/data/types";
+import { rlmApiConfig } from "@/lib/rlm-api/config";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -85,45 +86,61 @@ export const useMockStateStore = create<MockState>((set) => ({
   ...createInitialState(),
 
   // Memory actions
-  addMemoryEntry: (entry) =>
+  addMemoryEntry: (entry) => {
+    if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       memoryEntries: [entry, ...state.memoryEntries],
-    })),
+    }));
+  },
 
-  updateMemoryEntry: (id, patch) =>
+  updateMemoryEntry: (id, patch) => {
+    if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       memoryEntries: state.memoryEntries.map((e) =>
         e.id === id
           ? { ...e, ...patch, updatedAt: new Date().toISOString() }
           : e,
       ),
-    })),
+    }));
+  },
 
-  removeMemoryEntry: (id) =>
+  removeMemoryEntry: (id) => {
+    if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       memoryEntries: state.memoryEntries.filter((e) => e.id !== id),
-    })),
+    }));
+  },
 
-  bulkUpdateMemoryPinned: (ids, pinned) =>
+  bulkUpdateMemoryPinned: (ids, pinned) => {
+    if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       memoryEntries: state.memoryEntries.map((e) =>
         ids.includes(e.id)
           ? { ...e, pinned, updatedAt: new Date().toISOString() }
           : e,
       ),
-    })),
+    }));
+  },
 
-  bulkRemoveMemoryEntries: (ids) =>
+  bulkRemoveMemoryEntries: (ids) => {
+    if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       memoryEntries: state.memoryEntries.filter((e) => !ids.includes(e.id)),
-    })),
+    }));
+  },
 
   // Session actions
-  addSession: (session) =>
+  addSession: (session) => {
+    if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       sessions: [...state.sessions, session],
-    })),
+    }));
+  },
 
   // Reset
-  reset: () => set(createInitialState()),
+  reset: () => {
+    if (rlmApiConfig.mockMode) {
+      set(createInitialState());
+    }
+  },
 }));

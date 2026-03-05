@@ -6,7 +6,7 @@ import {
 } from "react";
 import { ChevronDown, Download, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 interface ConversationContextValue {
   isAtBottom?: boolean;

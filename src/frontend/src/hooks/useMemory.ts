@@ -15,27 +15,24 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
+import { rlmApiClient } from "@/lib/rlm-api/client";
+import { adaptMemoryEntries } from "@/lib/rlm-api/adapters";
+import type { MemoryListParams, DataSource } from "@/lib/rlm-api/capabilities";
 import {
   getCapabilityStatus,
-  type DataSource,
   createFallbackPayload,
-} from "@/lib/rlm-api/dataCapabilities";
+} from "@/lib/rlm-api/capabilities";
+import type { ApiMemoryListResponse } from "@/lib/rlm-api/types";
 import { useMockStateStore } from "@/stores/mockStateStore";
 import type { MemoryEntry, MemoryType } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
-
-type MemoryQueryParams = {
-  type?: MemoryType;
-  search?: string;
-  pinned?: boolean;
-};
 
 // ── Query Keys ──────────────────────────────────────────────────────
 
 export const memoryKeys = {
   all: ["memory"] as const,
   lists: () => [...memoryKeys.all, "list"] as const,
-  list: (params?: MemoryQueryParams) =>
+  list: (params?: MemoryListParams) =>
     [...memoryKeys.lists(), params ?? {}] as const,
   detail: (id: string) => [...memoryKeys.all, "detail", id] as const,
 };
@@ -107,7 +104,7 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
     bulkRemoveMemoryEntries,
   } = useMockStateStore();
 
-  const params: MemoryQueryParams | undefined = options
+  const params: MemoryListParams | undefined = options
     ? {
         type: options.type,
         search: options.search,
@@ -154,12 +151,44 @@ export function useMemory(options?: UseMemoryOptions): UseMemoryReturn {
       }
 
       const capability = await getCapabilityStatus("memory", signal);
-      return createFallbackPayload(
-        "entries",
-        filterEntries(memoryEntries),
-        capability,
-        "Memory",
-      );
+      if (!capability.available) {
+        return createFallbackPayload(
+          "entries",
+          filterEntries(memoryEntries),
+          capability,
+          "Memory",
+        );
+      }
+
+      try {
+        const qs = new URLSearchParams();
+        if (params?.type) qs.set("type", params.type);
+        if (params?.search) qs.set("search", params.search);
+        if (typeof params?.pinned === "boolean") {
+          qs.set("pinned", String(params.pinned));
+        }
+        if (params?.sortBy) qs.set("sort_by", params.sortBy);
+        if (params?.sortOrder) qs.set("sort_order", params.sortOrder);
+
+        const path = qs.toString() ? `/api/v1/memory?${qs}` : "/api/v1/memory";
+        const response = await rlmApiClient.get<ApiMemoryListResponse>(
+          path,
+          signal,
+        );
+
+        return {
+          entries: adaptMemoryEntries(response.items),
+          dataSource: "api" as const,
+          degradedReason: undefined,
+        } satisfies MemoryPayload;
+      } catch {
+        return createFallbackPayload(
+          "entries",
+          filterEntries(memoryEntries),
+          { available: false, reason: "memory endpoint request failed" },
+          "Memory",
+        );
+      }
     },
     enabled: options?.enabled !== false,
     staleTime: mock ? Infinity : undefined,

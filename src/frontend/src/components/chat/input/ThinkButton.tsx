@@ -6,7 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 interface ThinkButtonProps {
   enabled: boolean;

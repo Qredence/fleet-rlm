@@ -19,7 +19,7 @@ import { DesktopShell } from "@/app/layout/DesktopShell";
 import { MobileShell } from "@/app/layout/MobileShell";
 import { RouteSync } from "@/app/layout/RouteSync";
 import { CommandPalette } from "@/features/shell/CommandPalette";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { Toaster } from "@/components/ui/sonner";
 
 /**

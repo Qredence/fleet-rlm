@@ -19,7 +19,7 @@ import { typo } from "@/lib/config/typo";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +37,7 @@ import { PricingDialog } from "./PricingDialog";
 import { IntegrationsDialog } from "./IntegrationsDialog";
 import { LoginDialog } from "./LoginDialog";
 import type { SettingsSection } from "@/features/settings/types";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 interface OpenSettingsEventDetail {
   section?: SettingsSection;
@@ -84,6 +84,12 @@ export function UserMenu() {
         </Button>
 
         <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+
+        <SettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          initialSection={settingsInitialSection}
+        />
       </>
     );
   }

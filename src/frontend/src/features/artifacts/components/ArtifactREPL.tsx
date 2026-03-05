@@ -1,7 +1,6 @@
-import Editor from "@monaco-editor/react";
+import { useCodeMirror } from "@/hooks/useCodeMirror";
 
 import type { ExecutionStep } from "@/stores/artifactStore";
-import { useNavigation } from "@/hooks/useNavigation";
 import {
   Sandbox,
   SandboxHeader,
@@ -14,6 +13,22 @@ import {
 } from "@/components/ai-elements/sandbox";
 import { ToolOutput } from "@/components/ai-elements/tool";
 import type { ToolState } from "@/components/ai-elements/tool";
+
+// ── Read-only CodeMirror code viewer ───────────────────────────────
+
+interface CodeViewerProps {
+  code: string;
+}
+
+function CodeViewer({ code }: CodeViewerProps) {
+  const { containerRef } = useCodeMirror({ value: code, readOnly: true });
+  return (
+    <div
+      ref={containerRef}
+      className="text-xs font-mono overflow-auto min-h-50"
+    />
+  );
+}
 
 interface ArtifactReplProps {
   steps: ExecutionStep[];
@@ -130,7 +145,6 @@ function inferToolState(step: ExecutionStep | undefined): ToolState {
 }
 
 export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
-  const { isDark } = useNavigation();
   const target =
     steps.find((step) => step.id === activeStepId) ??
     [...steps]
@@ -175,20 +189,9 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
             </SandboxTabsBar>
 
             <SandboxTabContent value="code">
-              <div className="rounded-card border border-border-subtle overflow-hidden min-h-[180px]">
-                <Editor
-                  language="python"
-                  value={code || "# No executable code captured for this step"}
-                  theme={isDark ? "vs-dark" : "light"}
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    lineNumbers: "on",
-                    fontSize: 13,
-                    scrollBeyondLastLine: false,
-                    wordWrap: "on",
-                  }}
-                  height="200px"
+              <div className="rounded-card border border-border-subtle overflow-hidden min-h-45">
+                <CodeViewer
+                  code={code || "# No executable code captured for this step"}
                 />
               </div>
             </SandboxTabContent>

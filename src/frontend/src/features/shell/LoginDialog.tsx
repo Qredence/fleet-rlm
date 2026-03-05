@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { typo } from "@/lib/config/typo";
 import { useAuth } from "@/hooks/useAuth";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Dialog,
   DialogContent,

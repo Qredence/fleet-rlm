@@ -17,7 +17,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 interface Agent {
   id: string;

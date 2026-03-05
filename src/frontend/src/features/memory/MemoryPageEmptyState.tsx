@@ -1,7 +1,7 @@
 import { Brain, Plus } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 export interface MemoryPageEmptyStateProps {
   search: string;

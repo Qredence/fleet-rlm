@@ -24,29 +24,26 @@ test("loads app shell without router crash", async ({ page }) => {
   ).toHaveCount(0);
 });
 
-test("opens settings from user menu without runtime exception", async ({
-  page,
-}) => {
-  await page.goto("/");
+test("opens settings without runtime exception", async ({ page }) => {
+  await page.goto("/settings");
 
-  await page.getByRole("button", { name: "User menu" }).click();
-  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
+  await expect(page.getByText("Appearance", { exact: true })).toBeVisible();
+  await expect(page.getByText("Telemetry", { exact: true })).toBeVisible();
   await expect(
-    page.locator("h2:visible", { hasText: "Settings" }).first(),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Appearance" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Telemetry" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "LiteLLM Integration" }),
+    page.getByText("LiteLLM Integration", { exact: true }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Telemetry" }).click();
-  await expect(
-    page.getByText("Anonymous telemetry", { exact: true }),
-  ).toBeVisible();
+  const telemetryRow = page.getByText("Anonymous telemetry", { exact: true });
+  await telemetryRow.scrollIntoViewIfNeeded();
+  await expect(telemetryRow).toBeVisible();
+
   await expect(
     page.getByRole("heading", { name: "Unexpected Application Error!" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("We hit a rendering issue on this route"),
   ).toHaveCount(0);
 });
 

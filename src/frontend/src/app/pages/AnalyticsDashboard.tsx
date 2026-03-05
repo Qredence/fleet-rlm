@@ -1,7 +1,7 @@
 import { BarChart2 } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 /**
  * AnalyticsDashboard — placeholder until the analytics backend is ready.

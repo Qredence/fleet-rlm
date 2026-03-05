@@ -10,3 +10,11 @@ export interface UserProfile {
   plan: PlanTier;
   org: string;
 }
+
+export interface AuthContextValue {
+  isAuthenticated: boolean;
+  user: UserProfile | null;
+  login: (email: string, password: string) => Promise<boolean>;
+  logout: () => void;
+  setPlan: (plan: PlanTier) => void;
+}

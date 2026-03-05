@@ -16,29 +16,23 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
+import { rlmApiClient } from "@/lib/rlm-api/client";
+import { adaptTasks } from "@/lib/rlm-api/adapters";
 import { mockSkills, generatedSkillMd } from "@/lib/data/mock-skills";
+import type { TaskListParams, DataSource } from "@/lib/rlm-api/capabilities";
 import {
   getCapabilityStatus,
-  type DataSource,
   createFallbackPayload,
-} from "@/lib/rlm-api/dataCapabilities";
+} from "@/lib/rlm-api/capabilities";
+import type { ApiTaskListResponse } from "@/lib/rlm-api/types";
 import type { Skill } from "@/lib/data/types";
-
-type SkillsQueryParams = {
-  domain?: string;
-  category?: string;
-  status?: string;
-  search?: string;
-  sortBy?: string;
-  sortOrder?: "asc" | "desc";
-};
 
 // ── Query Keys ──────────────────────────────────────────────────────
 
 export const skillKeys = {
   all: ["skills"] as const,
   lists: () => [...skillKeys.all, "list"] as const,
-  list: (params?: SkillsQueryParams) =>
+  list: (params?: TaskListParams) =>
     [...skillKeys.lists(), params ?? {}] as const,
   details: () => [...skillKeys.all, "detail"] as const,
   detail: (id: string) => [...skillKeys.details(), id] as const,
@@ -84,7 +78,7 @@ interface UseSkillsReturn {
 export function useSkills(options?: UseSkillsOptions): UseSkillsReturn {
   const mock = rlmApiConfig.mockMode;
 
-  const params: SkillsQueryParams | undefined = options
+  const params: TaskListParams | undefined = options
     ? {
         domain: options.domain,
         category: options.category,
@@ -113,7 +107,45 @@ export function useSkills(options?: UseSkillsOptions): UseSkillsReturn {
       }
 
       const capability = await getCapabilityStatus("skills", signal);
-      return createFallbackPayload("skills", mockSkills, capability, "Skills");
+      if (!capability.available) {
+        return createFallbackPayload(
+          "skills",
+          mockSkills,
+          capability,
+          "Skills",
+        );
+      }
+
+      try {
+        const qs = new URLSearchParams();
+        if (params?.page) qs.set("page", String(params.page));
+        if (params?.pageSize) qs.set("page_size", String(params.pageSize));
+        if (params?.domain) qs.set("domain", params.domain);
+        if (params?.category) qs.set("category", params.category);
+        if (params?.status) qs.set("status", params.status);
+        if (params?.search) qs.set("search", params.search);
+        if (params?.sortBy) qs.set("sort_by", params.sortBy);
+        if (params?.sortOrder) qs.set("sort_order", params.sortOrder);
+
+        const path = qs.toString() ? `/api/v1/tasks?${qs}` : "/api/v1/tasks";
+        const response = await rlmApiClient.get<ApiTaskListResponse>(
+          path,
+          signal,
+        );
+
+        return {
+          skills: adaptTasks(response.items),
+          dataSource: "api" as const,
+          degradedReason: undefined,
+        } satisfies SkillsPayload;
+      } catch {
+        return createFallbackPayload(
+          "skills",
+          mockSkills,
+          { available: false, reason: "tasks endpoint request failed" },
+          "Skills",
+        );
+      }
     },
     enabled: options?.enabled !== false,
     // In mock mode, data never goes stale
@@ -144,11 +176,24 @@ export function useSkill(id: string | null): UseSkillReturn {
 
   const query = useQuery({
     queryKey: skillKeys.detail(id ?? ""),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!id) return null;
       if (mock) return mockSkills.find((s) => s.id === id) ?? null;
 
-      return mockSkills.find((s) => s.id === id) ?? null;
+      const capability = await getCapabilityStatus("skills", signal);
+      if (!capability.available) {
+        return mockSkills.find((s) => s.id === id) ?? null;
+      }
+
+      try {
+        const raw = await rlmApiClient.get<ApiTaskListResponse>(
+          `/api/v1/tasks?page=1&page_size=200`,
+          signal,
+        );
+        return adaptTasks(raw.items).find((s) => s.id === id) ?? null;
+      } catch {
+        return mockSkills.find((s) => s.id === id) ?? null;
+      }
     },
     enabled: !!id,
     staleTime: mock ? Infinity : undefined,
@@ -174,9 +219,14 @@ export function useSkillContent(id: string | null): UseSkillContentReturn {
 
   const query = useQuery({
     queryKey: skillKeys.content(id ?? ""),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!id) return "";
       if (mock) {
+        return generatedSkillMd;
+      }
+
+      const capability = await getCapabilityStatus("skills", signal);
+      if (!capability.available) {
         return generatedSkillMd;
       }
 

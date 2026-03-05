@@ -28,7 +28,7 @@ import {
   BACKEND_CAPABILITY_TOOLTIP,
   isSectionSupported,
 } from "@/lib/rlm-api";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 interface PageItem {
   key: NavItem;

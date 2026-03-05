@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { ChevronDown, Sparkles } from "lucide-react";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
 import { Streamdown } from "@/components/ui/streamdown";

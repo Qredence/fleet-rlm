@@ -8,7 +8,7 @@ import {
 import type { PanInfo } from "motion/react";
 import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 // ── Context ─────────────────────────────────────────────────────────
 interface PanelTabsContextValue {

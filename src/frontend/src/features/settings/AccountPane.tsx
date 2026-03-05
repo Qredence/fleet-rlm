@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { typo } from "@/lib/config/typo";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { SettingsRow } from "@/components/shared/SettingsRow";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";

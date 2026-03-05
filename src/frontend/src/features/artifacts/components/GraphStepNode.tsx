@@ -4,7 +4,7 @@ import type {
   ArtifactActorKind,
   ArtifactStepType,
 } from "@/stores/artifactStore";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import {
   NODE_WIDTH,
   STEP_TYPE_META,

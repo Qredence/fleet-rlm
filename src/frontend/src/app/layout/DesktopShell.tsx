@@ -19,7 +19,7 @@ import { useNavigation } from "@/hooks/useNavigation";
 import { TopHeader } from "@/app/layout/TopHeader";
 import { ChatPanel } from "@/app/layout/ChatPanel";
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 /* ── Transition applied to both panels for smooth open/close ────── */
 const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";

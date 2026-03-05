@@ -10,7 +10,7 @@ import { Drawer } from "vaul";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import { useAuth, type PlanTier } from "@/hooks/useAuth";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 // ── Plan data ───────────────────────────────────────────────────────
 

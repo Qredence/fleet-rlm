@@ -159,6 +159,80 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RuntimeStatusResponse'
+  /api/v1/runtime/volume/tree:
+    get:
+      tags:
+      - runtime
+      summary: Get Volume Tree
+      description: List the file tree of the configured Modal Volume.
+      operationId: get_volume_tree_api_v1_runtime_volume_tree_get
+      parameters:
+      - name: root_path
+        in: query
+        required: false
+        schema:
+          type: string
+          default: /
+          title: Root Path
+      - name: max_depth
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 10
+          minimum: 1
+          default: 3
+          title: Max Depth
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VolumeTreeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/volume/file:
+    get:
+      tags:
+      - runtime
+      summary: Get Volume File Content
+      description: Read a volume file as UTF-8 text for frontend preview.
+      operationId: get_volume_file_content_api_v1_runtime_volume_file_get
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          title: Path
+      - name: max_bytes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000000
+          minimum: 1
+          default: 200000
+          title: Max Bytes
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VolumeFileContentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AuthLoginResponse:
@@ -514,3 +588,102 @@ components:
       - msg
       - type
       title: ValidationError
+    VolumeFileContentResponse:
+      properties:
+        path:
+          type: string
+          title: Path
+        mime:
+          type: string
+          title: Mime
+        size:
+          type: integer
+          title: Size
+        content:
+          type: string
+          title: Content
+        truncated:
+          type: boolean
+          title: Truncated
+          default: false
+      type: object
+      required:
+      - path
+      - mime
+      - size
+      - content
+      title: VolumeFileContentResponse
+      description: Response for runtime volume file-content preview endpoint.
+    VolumeTreeNode:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        path:
+          type: string
+          title: Path
+        type:
+          type: string
+          enum:
+          - volume
+          - directory
+          - file
+          title: Type
+        children:
+          items:
+            $ref: '#/components/schemas/VolumeTreeNode'
+          type: array
+          title: Children
+        size:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Size
+        modified_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Modified At
+      type: object
+      required:
+      - id
+      - name
+      - path
+      - type
+      title: VolumeTreeNode
+      description: A single node in the volume file tree.
+    VolumeTreeResponse:
+      properties:
+        volume_name:
+          type: string
+          title: Volume Name
+        root_path:
+          type: string
+          title: Root Path
+        nodes:
+          items:
+            $ref: '#/components/schemas/VolumeTreeNode'
+          type: array
+          title: Nodes
+        total_files:
+          type: integer
+          title: Total Files
+          default: 0
+        total_dirs:
+          type: integer
+          title: Total Dirs
+          default: 0
+        truncated:
+          type: boolean
+          title: Truncated
+          default: false
+      type: object
+      required:
+      - volume_name
+      - root_path
+      - nodes
+      title: VolumeTreeResponse
+      description: Response for the volume tree listing endpoint.

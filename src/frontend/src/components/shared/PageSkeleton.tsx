@@ -1,5 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 /**
  * Generic full-page loading skeleton.

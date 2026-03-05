@@ -9,7 +9,7 @@ import { Copy, Eye, EyeOff } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 type CopyFormat = "value" | "export";
 

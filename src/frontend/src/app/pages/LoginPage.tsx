@@ -44,7 +44,7 @@ function LoginPage() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4">
       <div
-        className="w-full max-w-[400px] border border-border-subtle p-8"
+        className="w-full max-w-100 border border-border-subtle p-8"
         style={{
           borderRadius: "var(--radius-card)",
           boxShadow: "var(--shadow-200-stronger)",
@@ -53,7 +53,7 @@ function LoginPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="flex flex-col items-center gap-3 pb-2">
-            <BrandMark className="w-8 h-[15px] text-foreground" />
+            <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
               <h1 className="text-foreground" style={typo.h3}>
                 Sign in to Skill Fleet

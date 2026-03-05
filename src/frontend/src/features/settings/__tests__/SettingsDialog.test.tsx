@@ -26,7 +26,7 @@ vi.mock("@/hooks/useNavigation", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/use-mobile", () => ({
+vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 

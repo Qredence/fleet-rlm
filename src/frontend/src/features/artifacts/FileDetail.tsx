@@ -34,8 +34,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/components/ui/utils";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { cn } from "@/lib/utils/cn";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 // ── File icon resolver ──────────────────────────────────────────────
 

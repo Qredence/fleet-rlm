@@ -9,7 +9,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import { useNavigation } from "@/hooks/useNavigation";
-import { useIsMobile } from "@/components/ui/use-mobile";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { IconButton } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 
 import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
 import {

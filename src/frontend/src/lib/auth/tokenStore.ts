@@ -111,4 +111,8 @@ export function clearAccessToken(): void {
   setAccessToken(null);
 }
 
+export function clearTokens(): void {
+  clearAccessToken();
+}
+
 export { ACCESS_TOKEN_KEY };

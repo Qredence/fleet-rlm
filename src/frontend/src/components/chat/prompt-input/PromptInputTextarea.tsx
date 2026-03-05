@@ -33,7 +33,7 @@ function PromptInputTextarea({ placeholder }: PromptInputTextareaProps) {
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={handleKeyDown}
       placeholder={placeholder}
-      className="min-h-11 max-h-[200px] resize-none border-0 bg-transparent! dark:bg-transparent! disabled:bg-transparent! focus-visible:ring-0 focus-visible:ring-offset-0 py-3 px-4 text-foreground placeholder:text-muted-foreground"
+      className="min-h-11 max-h-50 resize-none border-0 bg-transparent! dark:bg-transparent! disabled:bg-transparent! focus-visible:ring-0 focus-visible:ring-offset-0 py-3 px-4 text-foreground placeholder:text-muted-foreground"
       rows={1}
       disabled={isLoading}
       aria-label="Message input"
