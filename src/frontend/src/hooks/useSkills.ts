@@ -144,11 +144,9 @@ export function useSkill(id: string | null): UseSkillReturn {
 
   const query = useQuery({
     queryKey: skillKeys.detail(id ?? ""),
-    queryFn: async ({ signal }) => {
+    queryFn: async () => {
       if (!id) return null;
       if (mock) return mockSkills.find((s) => s.id === id) ?? null;
-
-      await getCapabilityStatus("skills", signal);
 
       return mockSkills.find((s) => s.id === id) ?? null;
     },
@@ -176,13 +174,11 @@ export function useSkillContent(id: string | null): UseSkillContentReturn {
 
   const query = useQuery({
     queryKey: skillKeys.content(id ?? ""),
-    queryFn: async ({ signal }) => {
+    queryFn: async () => {
       if (!id) return "";
       if (mock) {
         return generatedSkillMd;
       }
-
-      await getCapabilityStatus("skills", signal);
 
       return generatedSkillMd;
     },

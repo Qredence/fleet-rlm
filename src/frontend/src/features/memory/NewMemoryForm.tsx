@@ -63,7 +63,7 @@ export function NewMemoryForm({
       transition={reduced ? springs.instant : springs.default}
       className="overflow-hidden"
     >
-      <Card className="border-accent/30 bg-accent/2">
+      <Card className="border-accent/30 bg-accent/[.02]">
         <CardContent className={cn("p-4 space-y-3", isMobile && "p-3")}>
           <div className="flex items-center justify-between">
             <span className="text-foreground" style={typo.label}>

@@ -1,4 +1,5 @@
 import { rlmApiConfig } from "@/lib/rlm-api/config";
+import { getAccessToken } from "@/lib/auth/tokenStore";
 
 export class RlmApiError extends Error {
   readonly status: number;
@@ -71,14 +72,21 @@ async function requestJson<T>(
     : timeoutController.signal;
 
   try {
+    const headers = new Headers({
+      Accept: "application/json",
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
+      ...(options?.headers ?? {}),
+    });
+
+    const accessToken = getAccessToken();
+    if (accessToken && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${accessToken}`);
+    }
+
     const response = await fetch(buildUrl(path), {
       method,
       signal,
-      headers: {
-        Accept: "application/json",
-        ...(options?.body ? { "Content-Type": "application/json" } : {}),
-        ...(options?.headers ?? {}),
-      },
+      headers,
       body: options?.body ? JSON.stringify(options.body) : undefined,
     });
 

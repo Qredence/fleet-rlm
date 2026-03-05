@@ -50,19 +50,29 @@ function writeTokenToStorage(
 }
 
 function loadAccessTokenFromStorage(): string | null {
-  const fromSession = readTokenFromStorage(
-    safeSessionStorage(),
-    ACCESS_TOKEN_KEY,
-  );
+  const session = safeSessionStorage();
+  const local = safeLocalStorage();
+
+  const fromSession = readTokenFromStorage(session, ACCESS_TOKEN_KEY);
   if (fromSession) return fromSession;
 
-  const local = safeLocalStorage();
   const fromCanonicalLocal = readTokenFromStorage(local, ACCESS_TOKEN_KEY);
-  if (fromCanonicalLocal) return fromCanonicalLocal;
+  if (fromCanonicalLocal) {
+    writeTokenToStorage(session, ACCESS_TOKEN_KEY, fromCanonicalLocal);
+    removeTokenFromStorage(local, ACCESS_TOKEN_KEY);
+    for (const legacyKey of LEGACY_LOCAL_STORAGE_KEYS) {
+      removeTokenFromStorage(local, legacyKey);
+    }
+    return fromCanonicalLocal;
+  }
 
   for (const legacyKey of LEGACY_LOCAL_STORAGE_KEYS) {
     const legacyToken = readTokenFromStorage(local, legacyKey);
-    if (legacyToken) return legacyToken;
+    if (legacyToken) {
+      writeTokenToStorage(session, ACCESS_TOKEN_KEY, legacyToken);
+      removeTokenFromStorage(local, legacyKey);
+      return legacyToken;
+    }
   }
 
   return null;
@@ -79,7 +89,7 @@ export function setAccessToken(token: string | null): void {
 
   if (normalized) {
     writeTokenToStorage(session, ACCESS_TOKEN_KEY, normalized);
-    writeTokenToStorage(local, ACCESS_TOKEN_KEY, normalized);
+    removeTokenFromStorage(local, ACCESS_TOKEN_KEY);
   } else {
     removeTokenFromStorage(session, ACCESS_TOKEN_KEY);
     removeTokenFromStorage(local, ACCESS_TOKEN_KEY);

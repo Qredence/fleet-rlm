@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe("tokenStore", () => {
-  it("persists canonical token and removes legacy key", async () => {
+  it("persists canonical token in sessionStorage and removes local keys", async () => {
     localStorage.setItem(LEGACY_KEY, "legacy-token");
 
     const { setAccessToken, getAccessToken } = await loadTokenStore();
@@ -31,16 +31,28 @@ describe("tokenStore", () => {
 
     expect(getAccessToken()).toBe("abc-123");
     expect(sessionStorage.getItem(CANONICAL_KEY)).toBe("abc-123");
-    expect(localStorage.getItem(CANONICAL_KEY)).toBe("abc-123");
+    expect(localStorage.getItem(CANONICAL_KEY)).toBeNull();
     expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
   });
 
-  it("reads from legacy localStorage key when canonical value is absent", async () => {
+  it("migrates canonical localStorage token into sessionStorage", async () => {
+    localStorage.setItem(CANONICAL_KEY, "canonical-local-token");
+
+    const { getAccessToken } = await loadTokenStore();
+
+    expect(getAccessToken()).toBe("canonical-local-token");
+    expect(sessionStorage.getItem(CANONICAL_KEY)).toBe("canonical-local-token");
+    expect(localStorage.getItem(CANONICAL_KEY)).toBeNull();
+  });
+
+  it("reads legacy localStorage token and migrates it to sessionStorage", async () => {
     localStorage.setItem(LEGACY_KEY, "legacy-only-token");
 
     const { getAccessToken } = await loadTokenStore();
 
     expect(getAccessToken()).toBe("legacy-only-token");
+    expect(sessionStorage.getItem(CANONICAL_KEY)).toBe("legacy-only-token");
+    expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
   });
 
   it("clears canonical and legacy tokens", async () => {
