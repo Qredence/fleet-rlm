@@ -86,3 +86,42 @@ def test_apply_env_updates_writes_dotenv_and_process_env(
     assert result["updated"] == ["DSPY_LM_MODEL", "SECRET_NAME"]
     assert os.environ["DSPY_LM_MODEL"] == "openai/gpt-4o-mini"
     assert os.environ["SECRET_NAME"] == "ALT_SECRET"
+
+
+def test_apply_env_updates_ignores_masked_secret_round_trip_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "DSPY_LLM_API_KEY=supersecret66",
+                "MODAL_TOKEN_ID=modaltokenN2",
+                "MODAL_TOKEN_SECRET=modalsecretg4",
+                "DSPY_LM_MODEL=openai/gpt-4o-mini",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DSPY_LLM_API_KEY", "supersecret66")
+    monkeypatch.setenv("MODAL_TOKEN_ID", "modaltokenN2")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "modalsecretg4")
+
+    result = apply_env_updates(
+        updates={
+            "DSPY_LLM_API_KEY": "sup...66",
+            "MODAL_TOKEN_ID": "mod...N2",
+            "MODAL_TOKEN_SECRET": "mod...g4",
+            "DSPY_LM_MODEL": "openai/gpt-4.1-mini",
+        },
+        env_path=env_path,
+    )
+
+    text = env_path.read_text(encoding="utf-8")
+    assert "DSPY_LLM_API_KEY=supersecret66" in text
+    assert "MODAL_TOKEN_ID=modaltokenN2" in text
+    assert "MODAL_TOKEN_SECRET=modalsecretg4" in text
+    assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in text
+    assert result["updated"] == ["DSPY_LM_MODEL"]

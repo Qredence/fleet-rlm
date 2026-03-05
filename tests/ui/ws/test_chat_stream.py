@@ -237,6 +237,33 @@ def test_websocket_error_event(
         assert "Something went wrong" in data["data"]["text"]
 
 
+def test_websocket_reports_agent_startup_modal_auth_error(
+    ws_client, websocket_auth_headers, monkeypatch
+):
+    class _FailingAgent:
+        async def __aenter__(self):
+            raise RuntimeError("modal.exception.AuthError: Token ID is malformed")
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            _ = (exc_type, exc_val, exc_tb)
+            return False
+
+    monkeypatch.setattr(
+        "fleet_rlm.runners.build_react_chat_agent",
+        lambda **kwargs: _FailingAgent(),
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        data = websocket.receive_json()
+
+    assert data["type"] == "error"
+    assert data["code"] == "sandbox_unavailable"
+    assert "Modal authentication failed" in data["message"]
+    assert data["details"]["error_type"] == "RuntimeError"
+
+
 def test_websocket_cancel_message(
     ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):
