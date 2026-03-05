@@ -371,7 +371,7 @@ export function RuntimePane() {
                     }));
                   }
                 }}
-                className="w-65 max-w-[50vw]"
+                className="w-[260px] max-w-[50vw]"
               />
               {field.isSecret && secretKey && (
                 <>

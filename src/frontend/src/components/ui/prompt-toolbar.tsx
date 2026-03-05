@@ -308,7 +308,7 @@ function SkillsChip({ selectedSkills }: { selectedSkills: string[] }) {
         side="top"
         align="start"
         sideOffset={8}
-        className="w-70 p-1.5 rounded-xl"
+        className="w-[280px] p-1.5 rounded-xl"
       >
         <div className="mb-1.5 px-2 flex items-center justify-between">
           <span className="text-muted-foreground" style={typo.helper}>

@@ -277,7 +277,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
 
   return (
     <ScrollArea className={cn("h-full", className)}>
-      <div className={cn("max-w-200 mx-auto", isMobile ? "p-4" : "p-6")}>
+      <div className={cn("max-w-[800px] mx-auto", isMobile ? "p-4" : "p-6")}>
         {/* File header */}
         <div className="flex items-start gap-3 mb-4">
           <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
@@ -437,7 +437,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                 Binary file
               </p>
               <p
-                className="text-muted-foreground max-w-75"
+                className="text-muted-foreground max-w-[300px]"
                 style={typo.caption}
               >
                 This file cannot be previewed in the browser. Download it or

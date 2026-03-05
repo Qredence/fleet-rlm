@@ -169,7 +169,7 @@ export function TaxonomyBrowser() {
           </LargeTitleHeader>
         )}
 
-        <div className="py-2 max-w-200 w-full mx-auto">
+        <div className="py-2 max-w-[800px] w-full mx-auto">
           {isDegraded && (
             <Alert className={cn("mb-3", isMobile ? "mx-4" : "mx-6")}>
               <TriangleAlert className="text-muted-foreground" />

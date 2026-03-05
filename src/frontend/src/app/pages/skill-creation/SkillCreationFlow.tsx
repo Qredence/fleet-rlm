@@ -203,7 +203,7 @@ export function SkillCreationFlow() {
 
       {/* Input composer */}
       <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 pt-6 md:px-6 md:pb-10">
-        <div className="mx-auto w-full max-w-200">
+        <div className="mx-auto w-full max-w-[800px]">
           <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
               <div className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-950">

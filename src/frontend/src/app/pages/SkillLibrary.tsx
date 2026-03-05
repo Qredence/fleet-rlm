@@ -236,7 +236,7 @@ export function SkillLibrary() {
           <div
             className={cn(
               "w-full min-w-0 mx-auto",
-              isMobile ? "px-4 py-4" : "px-6 py-6 max-w-200",
+              isMobile ? "px-4 py-4" : "px-6 py-6 max-w-[800px]",
             )}
           >
             {isDegradedData && (

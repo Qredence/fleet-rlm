@@ -277,7 +277,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setLmModel(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -291,7 +291,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setDelegateLmModel(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -305,7 +305,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setDelegateLmSmallModel(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -319,7 +319,7 @@ export function GroupedSettingsPane({
               placeholder=""
               autoComplete="off"
               onChange={(event) => setApiBase(event.target.value)}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
           </SettingsRow>
 
@@ -336,7 +336,7 @@ export function GroupedSettingsPane({
                 setApiKeyInput(event.target.value);
                 setClearApiKeyOnSave(false);
               }}
-              className="w-65 max-w-[50vw]"
+              className="w-[260px] max-w-[50vw]"
             />
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">

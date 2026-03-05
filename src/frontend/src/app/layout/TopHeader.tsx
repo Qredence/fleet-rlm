@@ -68,7 +68,7 @@ export function TopHeader() {
     >
       {/* ── Logo ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 shrink-0">
-        <BrandMark className="w-4.5 h-4.25 shrink-0 text-foreground" />
+        <BrandMark className="h-[17px] w-[18px] shrink-0 text-foreground" />
       </div>
 
       {/* ── Navigation tabs (desktop only) ─────────────────────── */}
