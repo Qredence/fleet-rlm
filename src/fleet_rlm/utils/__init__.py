@@ -26,7 +26,7 @@ from .scaffold import (
     list_agents,
     list_skills,
 )
-from .tools import regex_extract
+from .regex import regex_extract
 
 __all__ = [
     # Modal helpers

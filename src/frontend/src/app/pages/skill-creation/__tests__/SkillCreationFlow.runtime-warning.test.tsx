@@ -24,12 +24,6 @@ vi.mock("@/hooks/useStickToBottom", () => ({
 
 vi.mock("@/hooks/useNavigation", () => ({
   useNavigation: () => ({
-    activeFeatures: [],
-    toggleFeature: vi.fn(),
-    promptMode: "default",
-    setPromptMode: vi.fn(),
-    selectedPromptSkills: [],
-    togglePromptSkill: vi.fn(),
     sessionId: 1,
   }),
 }));
@@ -80,8 +74,8 @@ vi.mock("@/features/ConversationHistory", () => ({
   ConversationHistory: () => <div>ConversationHistory</div>,
 }));
 
-vi.mock("@/components/ui/prompt-input", () => ({
-  PromptInput: () => <div>PromptInput</div>,
+vi.mock("@/components/chat/ChatInput", () => ({
+  ChatInput: () => <div>ChatInput</div>,
 }));
 
 describe("SkillCreationFlow runtime warning", () => {

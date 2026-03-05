@@ -196,7 +196,6 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
 
 _LAZY_MODULES: dict[str, str] = {
     "scaffold": "fleet_rlm.utils.scaffold",
-    "tools": "fleet_rlm.utils.tools",
 }
 
 

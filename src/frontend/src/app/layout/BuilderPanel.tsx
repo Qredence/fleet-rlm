@@ -12,7 +12,10 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { cn } from "@/components/ui/utils";
-import { CanvasSwitcher, type CanvasMode } from "@/features/artifacts/CanvasSwitcher";
+import {
+  CanvasSwitcher,
+  type CanvasMode,
+} from "@/features/artifacts/CanvasSwitcher";
 import { CodeArtifact } from "@/features/artifacts/CodeArtifact";
 import { FileDetail } from "@/features/artifacts/FileDetail";
 import { ArtifactCanvas } from "@/features/artifacts/components/ArtifactCanvas";
@@ -100,13 +103,8 @@ function getHeaderIcon(mode: CanvasMode) {
 }
 
 export function BuilderPanel() {
-  const {
-    activeNav,
-    creationPhase,
-    closeCanvas,
-    activeFeatures,
-    selectedFileNode,
-  } = useNavigation();
+  const { activeNav, creationPhase, closeCanvas, selectedFileNode } =
+    useNavigation();
   const { navigateTo } = useAppNavigate();
   const isMobile = useIsMobile();
 
@@ -116,10 +114,7 @@ export function BuilderPanel() {
   const showCreation =
     activeNav === "new" && creationPhase !== "idle" && !isUnsupportedNav;
   const showCodeArtifact =
-    activeNav === "new" &&
-    !showCreation &&
-    activeFeatures.has("contextMemory") &&
-    !isUnsupportedNav;
+    activeNav === "new" && !showCreation && !isUnsupportedNav;
   const showFileDetail =
     activeNav === "taxonomy" && !!selectedFileNode && !isUnsupportedNav;
 

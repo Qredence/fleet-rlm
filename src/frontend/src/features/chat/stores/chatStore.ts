@@ -11,6 +11,10 @@ import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEv
 import { telemetryClient } from "@/lib/telemetry/client";
 import { QueryClient } from "@tanstack/react-query";
 
+interface StreamMessageOptions {
+  traceEnabled?: boolean;
+}
+
 interface ChatStore {
   // State
   messages: ChatMessage[];
@@ -33,6 +37,7 @@ interface ChatStore {
     text: string,
     onFrameCallback?: (frame: WsServerMessage) => void,
     queryClient?: QueryClient,
+    options?: StreamMessageOptions,
   ) => Promise<void>;
   stopStreaming: () => void;
 }
@@ -78,6 +83,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     text: string,
     onFrameCallback?: (frame: WsServerMessage) => void,
     queryClient?: QueryClient,
+    options?: StreamMessageOptions,
   ) => {
     const { sessionId, isStreaming } = get();
 
@@ -91,15 +97,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       streamController: controller,
     });
 
+    const traceEnabled = options?.traceEnabled ?? rlmApiConfig.trace;
+
     const payload: WsMessageRequest = {
       type: "message",
       content: text,
-      trace: rlmApiConfig.trace,
+      trace: traceEnabled,
       analytics_enabled: telemetryClient.isAnonymousTelemetryEnabled(),
       workspace_id: rlmApiConfig.workspaceId,
       user_id: rlmApiConfig.userId,
       session_id: sessionId,
-      trace_mode: "compact",
+      trace_mode: traceEnabled ? "compact" : "off",
     };
 
     try {

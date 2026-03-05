@@ -2,6 +2,8 @@
 
 ## Project Structure & Module Organization
 From the repo root, core Python code lives in `src/fleet_rlm/` (notably `core/`, `react/`, `server/`, `terminal/`, `models/`, and `analytics/`). Tests are in `tests/` and split by intent: `unit/`, `ui/`, `integration/`, and `e2e/`. Operational scripts (release checks, DB/bootstrap, perf, env validation) are in `scripts/`. The web client is in `src/frontend/`; release/source packaging runs `scripts/build_ui.py` to sync built assets into `src/fleet_rlm/ui/dist`. API contract source is `openapi.yaml`; schema migrations are in `migrations/`.
+Within `src/fleet_rlm/core/`, keep host-side adapters (`interpreter.py`, `llm_tools.py`, `volume_ops.py`) conceptually separate from sandbox-side protocol/helpers (`driver.py`, `sandbox_tools.py`, `volume_tools.py`).
+For utilities, use `src/fleet_rlm/utils/regex.py` for regex helpers.
 
 ## Build, Test, and Development Commands
 - `uv sync --extra dev --extra server`: install Python deps for local dev + API work.
