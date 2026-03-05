@@ -72,15 +72,14 @@ async function requestJson<T>(
     : timeoutController.signal;
 
   try {
+    const accessToken = getAccessToken();
     const response = await fetch(buildUrl(path), {
       method,
       signal,
       headers: {
         Accept: "application/json",
         ...(options?.body ? { "Content-Type": "application/json" } : {}),
-        ...(getAccessToken()
-          ? { Authorization: `Bearer ${getAccessToken()}` }
-          : {}),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(options?.headers ?? {}),
       },
       body: options?.body ? JSON.stringify(options.body) : undefined,

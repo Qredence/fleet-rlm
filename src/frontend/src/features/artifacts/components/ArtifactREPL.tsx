@@ -199,7 +199,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
             <SandboxTabContent value="output">
               <ToolOutput
                 output={
-                  <pre className="text-xs text-foreground whitespace-pre-wrap wrap-break-word">
+                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
                     {output || "No output captured."}
                   </pre>
                 }
@@ -220,7 +220,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
           <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
             Variables
           </p>
-          <pre className="text-xs text-foreground whitespace-pre-wrap wrap-break-word">
+          <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
             {JSON.stringify(variables, null, 2)}
           </pre>
         </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { motion } from "motion/react";
 import { Check, X } from "lucide-react";
 import { toast } from "sonner";
@@ -35,6 +35,11 @@ export function NewMemoryForm({
   isMobile,
   reduced,
 }: NewMemoryFormProps) {
+  const formId = useId();
+  const typeLabelId = `${formId}-type-label`;
+  const contentId = `${formId}-content`;
+  const tagsId = `${formId}-tags`;
+
   const [type, setType] = useState<MemoryType>("fact");
   const [content, setContent] = useState("");
   const [tagsStr, setTagsStr] = useState("");
@@ -77,6 +82,7 @@ export function NewMemoryForm({
 
           <div>
             <label
+              id={typeLabelId}
               className="text-muted-foreground mb-1.5 block"
               style={typo.helper}
             >
@@ -87,6 +93,7 @@ export function NewMemoryForm({
               onValueChange={(v) => setType(v as MemoryType)}
             >
               <SelectTrigger
+                aria-labelledby={typeLabelId}
                 className={cn("w-full", isMobile && "touch-target")}
                 style={typo.label}
               >
@@ -111,12 +118,14 @@ export function NewMemoryForm({
 
           <div>
             <label
+              htmlFor={contentId}
               className="text-muted-foreground mb-1.5 block"
               style={typo.helper}
             >
               Content
             </label>
             <textarea
+              id={contentId}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="What should the agent remember?"
@@ -132,12 +141,13 @@ export function NewMemoryForm({
                 fontWeight: "var(--font-weight-regular)",
                 lineHeight: "1.5",
               }}
-              autoFocus
+              autoFocus={!isMobile}
             />
           </div>
 
           <div>
             <label
+              htmlFor={tagsId}
               className="text-muted-foreground mb-1.5 block"
               style={typo.helper}
             >
@@ -147,6 +157,7 @@ export function NewMemoryForm({
               </span>
             </label>
             <Input
+              id={tagsId}
               value={tagsStr}
               onChange={(e) => setTagsStr(e.target.value)}
               placeholder="testing, policy, preference"

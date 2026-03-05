@@ -86,68 +86,56 @@ export const useMockStateStore = create<MockState>((set) => ({
   ...createInitialState(),
 
   // Memory actions
-  addMemoryEntry: (entry) =>
-    set((state) =>
-      rlmApiConfig.mockMode
-        ? {
-            memoryEntries: [entry, ...state.memoryEntries],
-          }
-        : state,
-    ),
+  addMemoryEntry: (entry) => {
+    if (!rlmApiConfig.mockMode) return;
+    set((state) => ({
+      memoryEntries: [entry, ...state.memoryEntries],
+    }));
+  },
 
-  updateMemoryEntry: (id, patch) =>
-    set((state) =>
-      rlmApiConfig.mockMode
-        ? {
-            memoryEntries: state.memoryEntries.map((e) =>
-              e.id === id
-                ? { ...e, ...patch, updatedAt: new Date().toISOString() }
-                : e,
-            ),
-          }
-        : state,
-    ),
+  updateMemoryEntry: (id, patch) => {
+    if (!rlmApiConfig.mockMode) return;
+    set((state) => ({
+      memoryEntries: state.memoryEntries.map((e) =>
+        e.id === id
+          ? { ...e, ...patch, updatedAt: new Date().toISOString() }
+          : e,
+      ),
+    }));
+  },
 
-  removeMemoryEntry: (id) =>
-    set((state) =>
-      rlmApiConfig.mockMode
-        ? {
-            memoryEntries: state.memoryEntries.filter((e) => e.id !== id),
-          }
-        : state,
-    ),
+  removeMemoryEntry: (id) => {
+    if (!rlmApiConfig.mockMode) return;
+    set((state) => ({
+      memoryEntries: state.memoryEntries.filter((e) => e.id !== id),
+    }));
+  },
 
-  bulkUpdateMemoryPinned: (ids, pinned) =>
-    set((state) =>
-      rlmApiConfig.mockMode
-        ? {
-            memoryEntries: state.memoryEntries.map((e) =>
-              ids.includes(e.id)
-                ? { ...e, pinned, updatedAt: new Date().toISOString() }
-                : e,
-            ),
-          }
-        : state,
-    ),
+  bulkUpdateMemoryPinned: (ids, pinned) => {
+    if (!rlmApiConfig.mockMode) return;
+    set((state) => ({
+      memoryEntries: state.memoryEntries.map((e) =>
+        ids.includes(e.id)
+          ? { ...e, pinned, updatedAt: new Date().toISOString() }
+          : e,
+      ),
+    }));
+  },
 
-  bulkRemoveMemoryEntries: (ids) =>
-    set((state) =>
-      rlmApiConfig.mockMode
-        ? {
-            memoryEntries: state.memoryEntries.filter((e) => !ids.includes(e.id)),
-          }
-        : state,
-    ),
+  bulkRemoveMemoryEntries: (ids) => {
+    if (!rlmApiConfig.mockMode) return;
+    set((state) => ({
+      memoryEntries: state.memoryEntries.filter((e) => !ids.includes(e.id)),
+    }));
+  },
 
   // Session actions
-  addSession: (session) =>
-    set((state) =>
-      rlmApiConfig.mockMode
-        ? {
-            sessions: [...state.sessions, session],
-          }
-        : state,
-    ),
+  addSession: (session) => {
+    if (!rlmApiConfig.mockMode) return;
+    set((state) => ({
+      sessions: [...state.sessions, session],
+    }));
+  },
 
   // Reset
   reset: () => {
