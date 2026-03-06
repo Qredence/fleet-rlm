@@ -44,6 +44,21 @@ function findAllParts(
   return results;
 }
 
+function traceRows(
+  messages: ChatMessage[],
+  predicate?: (part: ChatRenderPart, message: ChatMessage) => boolean,
+): Array<{ message: ChatMessage; part: ChatRenderPart }> {
+  const rows: Array<{ message: ChatMessage; part: ChatRenderPart }> = [];
+  for (const message of messages) {
+    if (message.type !== "trace") continue;
+    const part = message.renderParts?.[0];
+    if (!part) continue;
+    if (predicate && !predicate(part, message)) continue;
+    rows.push({ message, part });
+  }
+  return rows;
+}
+
 describe("applyWsFrameToMessages", () => {
   it("appends a backend error system message and closes open reasoning", () => {
     const initial: ChatMessage[] = [
@@ -87,20 +102,32 @@ describe("applyWsFrameToMessages", () => {
     expect(assistant?.streaming).toBe(true);
   });
 
-  it("creates reasoning render parts for reasoning_step events", () => {
-    const { messages } = applyWsFrameToMessages(
-      [],
+  it("creates append-only reasoning rows for reasoning_step events", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
       makeEvent("reasoning_step", "Analyzing input"),
+    ).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "Checking constraints"),
+    ).messages;
+
+    const reasoningRows = traceRows(
+      messages,
+      (part, message) =>
+        part.kind === "reasoning" && message.traceSource === "live",
     );
-    const reasoning = messages.find((m) => m.type === "reasoning");
-    expect(reasoning?.reasoningData?.isThinking).toBe(true);
-    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
-    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
-      expect(reasoning.renderParts[0].parts[0]?.text).toBe("Analyzing input");
-    }
+
+    expect(reasoningRows).toHaveLength(2);
+    expect(
+      reasoningRows.map((row) =>
+        row.part.kind === "reasoning" ? row.part.parts[0]?.text : "",
+      ),
+    ).toEqual(["Analyzing input", "Checking constraints"]);
   });
 
-  it("maps trajectory_step thought to reasoning and keeps chain_of_thought structured", () => {
+  it("uses trajectory as fallback primary rows when live events are absent", () => {
     const { messages } = applyWsFrameToMessages(
       [],
       makeEvent("trajectory_step", "trace", {
@@ -114,11 +141,25 @@ describe("applyWsFrameToMessages", () => {
       }),
     );
 
-    const reasoning = messages.find((m) => m.type === "reasoning");
-    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
-    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
-      const parts = reasoning.renderParts[0].parts;
-      expect(parts[parts.length - 1]?.text).toBe("Read file");
+    const fallbackPrimary = traceRows(
+      messages,
+      (_part, message) => message.traceSource === "trajectory",
+    );
+    expect(fallbackPrimary.map((row) => row.part.kind)).toEqual([
+      "reasoning",
+      "tool",
+    ]);
+
+    const fallbackReasoning = fallbackPrimary[0]?.part;
+    if (fallbackReasoning?.kind === "reasoning") {
+      expect(fallbackReasoning.parts[0]?.text).toBe("Read file");
+    }
+
+    const fallbackTool = fallbackPrimary[1]?.part;
+    if (fallbackTool?.kind === "tool") {
+      expect(fallbackTool.toolType).toBe("read_file");
+      expect(fallbackTool.state).toBe("output-available");
+      expect(fallbackTool.output).toBe("Found entrypoint");
     }
 
     const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
@@ -130,28 +171,44 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
-  it("falls back to event text for reasoning when trajectory thought is missing", () => {
-    const { messages } = applyWsFrameToMessages(
-      [],
-      makeEvent("trajectory_step", "Fallback trace text", {
-        step_index: 2,
+  it("suppresses trajectory fallback primary rows when live trace already exists", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "Live reasoning"),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("trajectory_step", "trace", {
+        step_index: 0,
         step_data: {
-          thought: "   ",
+          thought: "Should not duplicate in primary",
           tool_name: "grep_file",
+          observation: "found",
         },
       }),
+    ).messages;
+
+    const trajectoryPrimary = traceRows(
+      messages,
+      (_part, message) => message.traceSource === "trajectory",
     );
+    expect(trajectoryPrimary).toHaveLength(0);
 
-    const reasoning = messages.find((m) => m.type === "reasoning");
-    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
-    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
-      const parts = reasoning.renderParts[0].parts;
-      expect(parts[parts.length - 1]?.text).toBe("Fallback trace text");
-    }
+    const reasoningRows = traceRows(
+      messages,
+      (part) => part.kind === "reasoning",
+    );
+    expect(reasoningRows).toHaveLength(1);
 
-    const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      messages,
+      (part) => part.kind === "chain_of_thought",
+    );
     expect(cot).toBeDefined();
     if (cot?.kind === "chain_of_thought") {
+      expect(cot.steps).toHaveLength(1);
       expect(cot.steps[0]?.label).toBe("Tool: grep_file");
     }
   });
@@ -171,14 +228,16 @@ describe("applyWsFrameToMessages", () => {
       }),
     );
 
-    const reasoning = messages.find((m) => m.type === "reasoning");
-    expect(reasoning?.renderParts?.[0]?.kind).toBe("reasoning");
-    if (reasoning?.renderParts?.[0]?.kind === "reasoning") {
-      expect(reasoning.renderParts[0].parts.map((part) => part.text)).toEqual([
-        "First thought",
-        "Second thought",
-      ]);
-    }
+    const trajectoryReasoning = traceRows(
+      messages,
+      (part, message) =>
+        part.kind === "reasoning" && message.traceSource === "trajectory",
+    );
+    expect(
+      trajectoryReasoning.map((row) =>
+        row.part.kind === "reasoning" ? row.part.parts[0]?.text : "",
+      ),
+    ).toEqual(["First thought", "Second thought"]);
 
     const tools = findAllParts(messages, (part) => part.kind === "tool");
     expect(tools).toHaveLength(2);
@@ -236,82 +295,175 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
-  it("maps plan_update to a queue trace part and closes reasoning", () => {
-    let msgs: ChatMessage[] = [];
-    msgs = applyWsFrameToMessages(
-      msgs,
-      makeEvent("reasoning_step", "Thinking..."),
+  it("keeps exact interleaved order for reasoning and tool events", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "r1"),
     ).messages;
-    msgs = applyWsFrameToMessages(
-      msgs,
-      makeEvent("plan_update", "Moving to step 2"),
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("tool_call", "call", {
+        tool_name: "grep",
+        tool_args: { pattern: "foo" },
+      }),
+    ).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "r2"),
+    ).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("tool_result", "result", {
+        tool_name: "grep",
+        tool_output: "match",
+      }),
+    ).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "r3"),
     ).messages;
 
-    const queue = findFirstPart(msgs, (p) => p.kind === "queue");
+    const primaryRows = traceRows(
+      messages,
+      (part, message) =>
+        message.traceSource === "live" &&
+        (part.kind === "reasoning" ||
+          part.kind === "tool" ||
+          part.kind === "sandbox"),
+    );
+
+    expect(primaryRows.map((row) => row.part.kind)).toEqual([
+      "reasoning",
+      "tool",
+      "reasoning",
+      "tool",
+      "reasoning",
+    ]);
+
+    const toolRows = primaryRows.filter((row) => row.part.kind === "tool");
+    expect(toolRows).toHaveLength(2);
+    if (
+      toolRows[0]?.part.kind === "tool" &&
+      toolRows[1]?.part.kind === "tool"
+    ) {
+      expect(toolRows[0].part.state).toBe("running");
+      expect(toolRows[1].part.state).toBe("output-available");
+    }
+  });
+
+  it("maps plan_update, rlm_executing, memory_update to task rows in order", () => {
+    let messages: ChatMessage[] = [];
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("plan_update", "Moving to step 2"),
+    ).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("rlm_executing", "Delegating", {
+        tool_name: "PythonInterpreter",
+      }),
+    ).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("memory_update", "Saved semantic relationship"),
+    ).messages;
+
+    const taskRows = traceRows(
+      messages,
+      (part, message) => part.kind === "task" && message.traceSource === "live",
+    );
+    expect(taskRows).toHaveLength(3);
+
+    const taskTitles = taskRows.map((row) =>
+      row.part.kind === "task" ? row.part.title : "",
+    );
+    expect(taskTitles).toEqual([
+      "Plan update",
+      "Executing PythonInterpreter",
+      "Saved semantic relationship",
+    ]);
+
+    const taskStatuses = taskRows.map((row) =>
+      row.part.kind === "task" ? row.part.status : "pending",
+    );
+    expect(taskStatuses).toEqual(["in_progress", "in_progress", "completed"]);
+
+    const queue = findFirstPart(messages, (p) => p.kind === "queue");
     expect(queue).toBeDefined();
     if (queue?.kind === "queue") {
       expect(queue.items[queue.items.length - 1]?.label).toBe(
         "Moving to step 2",
       );
     }
-
-    const reasoning = msgs.find((m) => m.type === "reasoning");
-    expect(reasoning?.reasoningData?.isThinking).toBe(false);
   });
 
-  it("maps rlm_executing to a task trace part", () => {
-    const { messages } = applyWsFrameToMessages(
-      [],
-      makeEvent("rlm_executing", "Delegating", {
-        tool_name: "PythonInterpreter",
-      }),
-    );
-
-    const task = findFirstPart(messages, (p) => p.kind === "task");
-    expect(task).toBeDefined();
-    if (task?.kind === "task") {
-      expect(task.title).toContain("PythonInterpreter");
-      expect(task.status).toBe("in_progress");
-    }
-  });
-
-  it("maps tool_call/tool_result to a tool render part and updates it in place", () => {
-    let msgs: ChatMessage[] = [];
-    msgs = applyWsFrameToMessages(
-      msgs,
+  it("maps tool_call/tool_result to distinct chronological tool rows", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
       makeEvent("tool_call", "Running tool", {
         tool_name: "grep",
         tool_args: { pattern: "foo" },
       }),
     ).messages;
 
-    let tool = findFirstPart(msgs, (p) => p.kind === "tool");
-    expect(tool).toBeDefined();
-    if (tool?.kind === "tool") {
-      expect(tool.state).toBe("running");
-      expect(tool.toolType).toBe("grep");
-    }
-
-    msgs = applyWsFrameToMessages(
-      msgs,
+    messages = applyWsFrameToMessages(
+      messages,
       makeEvent("tool_result", "Done", {
         tool_name: "grep",
         tool_output: "match line",
       }),
     ).messages;
 
-    const tools = msgs.flatMap((m) =>
-      (m.renderParts ?? []).filter((p) => p.kind === "tool"),
-    );
-    expect(tools).toHaveLength(1);
-    tool = tools[0];
-    if (tool?.kind === "tool") {
-      expect(tool.state).toBe("output-available");
-      expect(String(tool.output)).toContain("match line");
+    const toolRows = traceRows(messages, (p) => p.kind === "tool");
+    expect(toolRows).toHaveLength(2);
+
+    const first = toolRows[0]?.part;
+    const second = toolRows[1]?.part;
+    if (first?.kind === "tool" && second?.kind === "tool") {
+      expect(first.state).toBe("running");
+      expect(second.state).toBe("output-available");
+      expect(String(second.output)).toContain("match line");
     }
   });
 
-  it("updates trajectory-derived tool cards with explicit tool_result without duplicates", () => {
+  it("preserves tool-session metadata on status_note rows", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("status", "Tool finished", {
+        tool_name: "read_buffer",
+        step_index: 4,
+        runtime: {
+          depth: 1,
+          max_depth: 4,
+          execution_profile: "ROOT_INTERLOCUTOR",
+          sandbox_active: true,
+          effective_max_iters: 12,
+          volume_name: "docs-volume",
+        },
+      }),
+    );
+
+    const statusPart = findFirstPart(messages, (p) => p.kind === "status_note");
+    expect(statusPart).toBeDefined();
+    if (statusPart?.kind === "status_note") {
+      expect(statusPart.text).toBe("Tool finished");
+      expect(statusPart.toolName).toBe("read_buffer");
+      expect(statusPart.stepIndex).toBe(4);
+      expect(statusPart.runtimeContext).toEqual({
+        depth: 1,
+        maxDepth: 4,
+        executionProfile: "ROOT_INTERLOCUTOR",
+        sandboxActive: true,
+        effectiveMaxIters: 12,
+        volumeName: "docs-volume",
+      });
+    }
+  });
+
+  it("keeps trajectory fallback and later live tool result as separate rows", () => {
     let messages = applyWsFrameToMessages(
       [],
       makeEvent("trajectory_step", "trace", {
@@ -333,11 +485,20 @@ describe("applyWsFrameToMessages", () => {
       }),
     ).messages;
 
-    const tools = findAllParts(messages, (part) => part.kind === "tool");
-    expect(tools).toHaveLength(1);
-    if (tools[0]?.kind === "tool") {
-      expect(tools[0].state).toBe("output-available");
-      expect(tools[0].output).toEqual({ matches: 3 });
+    const toolRows = traceRows(messages, (part) => part.kind === "tool");
+    expect(toolRows).toHaveLength(2);
+
+    const first = toolRows[0];
+    const second = toolRows[1];
+    expect(first?.message.traceSource).toBe("trajectory");
+    expect(second?.message.traceSource).toBe("live");
+
+    if (first?.part.kind === "tool") {
+      expect(first.part.state).toBe("running");
+    }
+    if (second?.part.kind === "tool") {
+      expect(second.part.state).toBe("output-available");
+      expect(second.part.output).toEqual({ matches: 3 });
     }
   });
 
@@ -398,30 +559,30 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
-  it("final closes reasoning and finalizes trace parts and attaches citations", () => {
-    let msgs: ChatMessage[] = [];
-    msgs = applyWsFrameToMessages(
-      msgs,
+  it("final finalizes trace summaries and attaches citations/sources/attachments", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
       makeEvent("assistant_token", "Hello"),
     ).messages;
-    msgs = applyWsFrameToMessages(
-      msgs,
+    messages = applyWsFrameToMessages(
+      messages,
       makeEvent("reasoning_step", "Thinking"),
     ).messages;
-    msgs = applyWsFrameToMessages(
-      msgs,
+    messages = applyWsFrameToMessages(
+      messages,
       makeEvent("trajectory_step", "trace", {
         step_index: 0,
-        step_data: { thought: "step one" },
+        step_data: { thought: "step one", tool_name: "read_file" },
       }),
     ).messages;
-    msgs = applyWsFrameToMessages(
-      msgs,
+    messages = applyWsFrameToMessages(
+      messages,
       makeEvent("plan_update", "Do X"),
     ).messages;
 
-    const { messages, terminal } = applyWsFrameToMessages(
-      msgs,
+    const result = applyWsFrameToMessages(
+      messages,
       makeEvent("final", "Done", {
         citations: [
           {
@@ -464,8 +625,9 @@ describe("applyWsFrameToMessages", () => {
       }),
     );
 
-    expect(terminal).toBe(true);
-    const assistant = messages.find((m) => m.type === "assistant");
+    expect(result.terminal).toBe(true);
+
+    const assistant = result.messages.find((m) => m.type === "assistant");
     expect(assistant?.streaming).toBe(false);
     expect(
       assistant?.renderParts?.some((p) => p.kind === "inline_citation_group"),
@@ -476,6 +638,7 @@ describe("applyWsFrameToMessages", () => {
     expect(assistant?.renderParts?.some((p) => p.kind === "attachments")).toBe(
       true,
     );
+
     const citationGroup = assistant?.renderParts?.find(
       (p) => p.kind === "inline_citation_group",
     );
@@ -493,16 +656,24 @@ describe("applyWsFrameToMessages", () => {
       expect(sources.sources[1]?.sourceId).toBe("src-b");
     }
 
-    const reasoning = messages.find((m) => m.type === "reasoning");
-    expect(reasoning?.reasoningData?.isThinking).toBe(false);
-
-    const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      result.messages,
+      (p) => p.kind === "chain_of_thought",
+    );
     if (cot?.kind === "chain_of_thought") {
-      expect(cot.steps[0]?.status).toBe("complete");
+      expect(cot.steps.every((step) => step.status === "complete")).toBe(true);
     }
-    const queue = findFirstPart(messages, (p) => p.kind === "queue");
+
+    const queue = findFirstPart(result.messages, (p) => p.kind === "queue");
     if (queue?.kind === "queue") {
       expect(queue.items.every((item) => item.completed)).toBe(true);
+    }
+
+    const taskRows = findAllParts(result.messages, (p) => p.kind === "task");
+    for (const task of taskRows) {
+      if (task.kind === "task") {
+        expect(task.status).toBe("completed");
+      }
     }
   });
 

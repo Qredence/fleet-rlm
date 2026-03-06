@@ -50,7 +50,7 @@ function PageSkeleton({
 }
 
 /**
- * Compact skeleton for builder-panel content areas (SkillDetail, CreationPreview).
+ * Compact skeleton for builder-panel content areas.
  *
  * Smaller than the full PageSkeleton — just a few lines and a content block.
  */

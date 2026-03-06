@@ -46,7 +46,7 @@ interface QueueProps {
 
 function Queue({ children, className }: QueueProps) {
   return (
-    <div data-slot="queue" className={cn("space-y-3", className)}>
+    <div data-slot="queue" className={cn("space-y-2", className)}>
       {children}
     </div>
   );
@@ -70,7 +70,7 @@ function QueueSection({
       <div
         data-slot="queue-section"
         className={cn(
-          "rounded-lg border border-border-subtle bg-card overflow-hidden",
+          "rounded-xl border border-border-subtle/80 bg-card/70 overflow-hidden",
           className,
         )}
       >
@@ -97,15 +97,15 @@ function QueueSectionTrigger({
         type="button"
         data-slot="queue-section-trigger"
         className={cn(
-          "flex items-center gap-2 w-full px-4 py-3 group",
-          "hover:bg-muted/50 transition-colors",
+          "flex items-center gap-2 w-full px-3 py-2.5 group",
+          "hover:bg-muted/20 transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
           className,
         )}
         aria-label="Toggle section"
       >
         <ChevronRight
-          className="size-4 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-90"
+          className="size-3.5 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-90"
           aria-hidden="true"
         />
         {children}
@@ -159,7 +159,7 @@ function QueueSectionContent({
     <CollapsibleContent>
       <div
         data-slot="queue-section-content"
-        className={cn("border-t border-border-subtle", className)}
+        className={cn("border-t border-border-subtle/80", className)}
       >
         {children}
       </div>
@@ -179,7 +179,7 @@ function QueueList({ children, className }: QueueListProps) {
     <ul
       data-slot="queue-list"
       role="list"
-      className={cn("divide-y divide-border-subtle", className)}
+      className={cn("divide-y divide-border-subtle/80", className)}
     >
       {children}
     </ul>
@@ -197,7 +197,10 @@ function QueueItem({ children, className }: QueueItemProps) {
   return (
     <li
       data-slot="queue-item"
-      className={cn("flex flex-wrap items-start gap-3 px-4 py-3", className)}
+      className={cn(
+        "flex flex-wrap items-start gap-2.5 px-3 py-2.5",
+        className,
+      )}
     >
       {children}
     </li>
@@ -219,14 +222,14 @@ function QueueItemIndicator({
     <div
       data-slot="queue-item-indicator"
       className={cn(
-        "size-5 rounded-full flex items-center justify-center shrink-0 mt-px transition-colors",
-        completed ? "bg-chart-3/15" : "border border-border-strong",
+        "size-4 rounded-full flex items-center justify-center shrink-0 mt-px transition-colors",
+        completed ? "bg-muted/40" : "border border-border-strong/70",
         className,
       )}
     >
       {completed && (
         <Check
-          className="size-3 text-chart-3"
+          className="size-2.5 text-muted-foreground"
           strokeWidth={3}
           aria-hidden="true"
         />
@@ -280,7 +283,7 @@ function QueueItemDescription({
     <span
       data-slot="queue-item-description"
       className={cn(
-        "w-full pl-8",
+        "w-full pl-6",
         completed ? "text-muted-foreground" : "text-muted-foreground/70",
         className,
       )}

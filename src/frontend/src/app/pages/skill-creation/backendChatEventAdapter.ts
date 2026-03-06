@@ -122,14 +122,6 @@ function latestStreamingAssistantIndex(messages: ChatMessage[]): number {
   return -1;
 }
 
-function latestOpenReasoningIndex(messages: ChatMessage[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (msg?.type === "reasoning" && msg.reasoningData?.isThinking) return i;
-  }
-  return -1;
-}
-
 function latestTraceIndex(
   messages: ChatMessage[],
   predicate: (part: ChatRenderPart) => boolean,
@@ -188,105 +180,6 @@ function upsertReasoningRenderPart(
     ...msg,
     renderParts: [nextPart],
   };
-}
-
-type ReasoningAppendMode = "line" | "chunk";
-
-function mergeReasoningParts(
-  existingParts: { type: "text"; text: string }[],
-  text: string,
-  mode: ReasoningAppendMode,
-): { type: "text"; text: string }[] {
-  if (existingParts.length === 0) {
-    return [{ type: "text", text }];
-  }
-
-  if (mode === "line") {
-    return [...existingParts, { type: "text", text }];
-  }
-
-  const nextParts = [...existingParts];
-  const last = nextParts[nextParts.length - 1];
-  if (!last) return [{ type: "text", text }];
-
-  const incoming = text;
-  const lastText = last.text;
-
-  const startsNewStructuredLine =
-    /^(status:|tool call:|tool result:|plan:|warning:|error:)/i.test(incoming);
-  const looksLikeSentenceChunk =
-    incoming.length <= 32 ||
-    /^[a-z0-9(,[\]'"`]/.test(incoming) ||
-    /^[)\].,;:!?]/.test(incoming);
-  const shouldJoin =
-    !startsNewStructuredLine &&
-    (looksLikeSentenceChunk || !/[.!?:]\s*$/.test(lastText));
-
-  if (shouldJoin) {
-    const needsSpace =
-      !/\s$/.test(lastText) &&
-      !/^[)\].,;:!?]/.test(incoming) &&
-      !/^['"`]/.test(incoming);
-    nextParts[nextParts.length - 1] = {
-      type: "text",
-      text: `${lastText}${needsSpace ? " " : ""}${incoming}`,
-    };
-    return nextParts;
-  }
-
-  nextParts.push({ type: "text", text: incoming });
-  return nextParts;
-}
-
-function appendReasoning(
-  messages: ChatMessage[],
-  text: string,
-  mode: ReasoningAppendMode = "line",
-): ChatMessage[] {
-  const trimmed = text.trim();
-  if (!trimmed) return messages;
-
-  const idx = latestOpenReasoningIndex(messages);
-  if (idx >= 0) {
-    const msg = messages[idx];
-    if (!msg?.reasoningData) return messages;
-    const parts = mergeReasoningParts(msg.reasoningData.parts, trimmed, mode);
-
-    const copy = [...messages];
-    copy[idx] = upsertReasoningRenderPart(
-      {
-        ...msg,
-        reasoningData: {
-          ...msg.reasoningData,
-          parts,
-          isThinking: true,
-        },
-      },
-      parts,
-      true,
-      msg.reasoningData.duration,
-    );
-    return copy;
-  }
-
-  const parts = mergeReasoningParts([], trimmed, mode);
-  return [
-    ...messages,
-    upsertReasoningRenderPart(
-      {
-        id: nextId("reasoning"),
-        type: "reasoning",
-        content: "",
-        phase: DEFAULT_PHASE,
-        reasoningData: {
-          parts,
-          isThinking: true,
-        },
-      },
-      parts,
-      true,
-    ),
-  ];
 }
 
 function finishReasoning(messages: ChatMessage[]): ChatMessage[] {
@@ -357,6 +250,7 @@ function appendTracePart(
   messages: ChatMessage[],
   part: ChatRenderPart,
   content = "",
+  traceSource: ChatMessage["traceSource"] = "live",
 ): ChatMessage[] {
   return [
     ...messages,
@@ -364,10 +258,85 @@ function appendTracePart(
       id: nextId("trace"),
       type: "trace",
       content,
+      traceSource,
       phase: DEFAULT_PHASE,
       renderParts: [part],
     },
   ];
+}
+
+function currentTurnStartIndex(messages: ChatMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.type === "user") return i;
+  }
+  return -1;
+}
+
+function currentTurnMessages(messages: ChatMessage[]): ChatMessage[] {
+  const start = currentTurnStartIndex(messages);
+  return start >= 0 ? messages.slice(start + 1) : messages;
+}
+
+function hasLiveTraceInCurrentTurn(messages: ChatMessage[]): boolean {
+  return currentTurnMessages(messages).some((message) => {
+    if (message.traceSource !== "live") return false;
+    return message.type === "trace" || message.type === "reasoning";
+  });
+}
+
+function appendReasoningEvent(
+  messages: ChatMessage[],
+  text: string,
+  traceSource: ChatMessage["traceSource"],
+): ChatMessage[] {
+  const trimmed = text.trim();
+  if (!trimmed) return messages;
+  return appendTracePart(
+    messages,
+    {
+      kind: "reasoning",
+      parts: [{ type: "text", text: trimmed }],
+      isStreaming: false,
+    },
+    trimmed,
+    traceSource,
+  );
+}
+
+function appendTaskTrace(
+  messages: ChatMessage[],
+  task: Extract<ChatRenderPart, { kind: "task" }>,
+  content: string,
+  traceSource: ChatMessage["traceSource"] = "live",
+): ChatMessage[] {
+  return appendTracePart(messages, task, content, traceSource);
+}
+
+function appendStatusTrace(
+  messages: ChatMessage[],
+  text: string,
+  tone: Extract<ChatRenderPart, { kind: "status_note" }>["tone"] = "neutral",
+  payload?: Record<string, unknown>,
+  traceSource: ChatMessage["traceSource"] = "live",
+): ChatMessage[] {
+  const trimmed = text.trim();
+  if (!trimmed) return messages;
+  const toolName = asOptionalText(payload?.tool_name ?? payload?.toolName);
+  const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
+  const runtimeContext = parseRuntimeContext(payload);
+  return appendTracePart(
+    messages,
+    {
+      kind: "status_note",
+      text: trimmed,
+      tone,
+      ...(toolName ? { toolName } : {}),
+      ...(stepIndex != null ? { stepIndex } : {}),
+      ...(runtimeContext ? { runtimeContext } : {}),
+    },
+    trimmed,
+    traceSource,
+  );
 }
 
 function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
@@ -388,6 +357,7 @@ function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
         items: [queueItem],
       },
       text,
+      "summary",
     );
   }
 
@@ -398,7 +368,12 @@ function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
     if (part.kind !== "queue") return part;
     return { ...part, items: [...part.items, queueItem] };
   });
-  copy[idx] = { ...msg, content: label, renderParts: nextParts };
+  copy[idx] = {
+    ...msg,
+    content: label,
+    traceSource: "summary",
+    renderParts: nextParts,
+  };
   return copy;
 }
 
@@ -584,6 +559,7 @@ function upsertChainOfThought(
         steps: [traceStep],
       },
       step.label,
+      "summary",
     );
   }
 
@@ -612,11 +588,16 @@ function upsertChainOfThought(
     }));
     return { ...part, steps: updatedSteps };
   });
-  copy[idx] = { ...msg, content: step.label, renderParts: nextParts };
+  copy[idx] = {
+    ...msg,
+    content: step.label,
+    traceSource: "summary",
+    renderParts: nextParts,
+  };
   return copy;
 }
 
-function upsertTrajectoryToolPart(
+function appendTrajectoryToolPart(
   messages: ChatMessage[],
   step: NormalizedTrajectoryStep,
   parentPayload?: Record<string, unknown>,
@@ -654,19 +635,24 @@ function upsertTrajectoryToolPart(
   const displayText = step.toolName
     ? `Tool: ${step.toolName}`
     : `Step ${step.index + 1}`;
-  return upsertToolLikePart(messages, stateKind, displayText, payload);
+  return appendToolLikePart(messages, stateKind, displayText, payload, {
+    traceSource: "trajectory",
+  });
 }
 
 function applyTrajectoryStep(
   messages: ChatMessage[],
   step: NormalizedTrajectoryStep,
   parentPayload?: Record<string, unknown>,
+  includePrimaryFallback = false,
 ): ChatMessage[] {
   let next = messages;
-  if (step.thought) {
-    next = appendReasoning(next, step.thought, "line");
+  if (includePrimaryFallback && step.thought) {
+    next = appendReasoningEvent(next, step.thought, "trajectory");
   }
-  next = upsertTrajectoryToolPart(next, step, parentPayload);
+  if (includePrimaryFallback) {
+    next = appendTrajectoryToolPart(next, step, parentPayload);
+  }
   next = upsertChainOfThought(next, step);
   return next;
 }
@@ -678,8 +664,11 @@ function applyTrajectoryEvent(
 ): ChatMessage[] {
   const steps = normalizeTrajectorySteps(text, payload);
   if (steps.length === 0) return messages;
+
+  const includePrimaryFallback = !hasLiveTraceInCurrentTurn(messages);
   return steps.reduce<ChatMessage[]>(
-    (acc, step) => applyTrajectoryStep(acc, step, payload),
+    (acc, step) =>
+      applyTrajectoryStep(acc, step, payload, includePrimaryFallback),
     messages,
   );
 }
@@ -845,50 +834,12 @@ function toolFromPayload(
   };
 }
 
-function isOpenToolState(state: ChatRenderToolState): boolean {
-  return state === "running" || state === "input-streaming";
-}
-
-function toolNameMatches(
-  existing: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
-  toolName: string,
-): boolean {
-  if (!toolName) return true;
-  if (existing.kind === "tool") {
-    return existing.toolType === toolName || existing.title === toolName;
-  }
-  return existing.title === toolName;
-}
-
-function stepIndexMatches(
-  existing: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
-  stepIndex: number | undefined,
-): boolean {
-  if (stepIndex == null) return false;
-  return existing.stepIndex === stepIndex;
-}
-
-function findToolLikeTraceIndex(
-  messages: ChatMessage[],
-  part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
-  toolName: string,
-  stepIndex: number | undefined,
-  kind: "tool_call" | "tool_result",
-): number {
-  return latestTraceIndex(messages, (existing) => {
-    if (existing.kind !== part.kind) return false;
-    if (!toolNameMatches(existing, toolName)) return false;
-    if (stepIndexMatches(existing, stepIndex)) return true;
-    if (kind === "tool_call") return isOpenToolState(existing.state);
-    return isOpenToolState(existing.state);
-  });
-}
-
-function upsertToolLikePart(
+function appendToolLikePart(
   messages: ChatMessage[],
   kind: "tool_call" | "tool_result",
   text: string,
   payload?: Record<string, unknown>,
+  options?: { traceSource?: ChatMessage["traceSource"] },
 ): ChatMessage[] {
   const envVars = parseEnvVariablesFromPayload(payload);
   if (envVars && kind === "tool_result") {
@@ -900,73 +851,14 @@ function upsertToolLikePart(
         variables: envVars,
       },
       text,
+      options?.traceSource ?? "live",
     );
   }
 
   const part = isSandboxPayload(payload)
     ? sandboxFromPayload(kind, text, payload)
     : toolFromPayload(kind, text, payload);
-  if (part.kind !== "tool" && part.kind !== "sandbox") {
-    return appendTracePart(messages, part, text);
-  }
-
-  const toolName = String(payload?.tool_name ?? "");
-  const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
-  const idx = findToolLikeTraceIndex(messages, part, toolName, stepIndex, kind);
-
-  if (idx < 0) {
-    return appendTracePart(messages, part, text);
-  }
-
-  const copy = [...messages];
-  const msg = copy[idx];
-  if (!msg?.renderParts) return appendTracePart(messages, part, text);
-
-  copy[idx] = {
-    ...msg,
-    content: text || msg.content,
-    renderParts: msg.renderParts.map((renderPart) => {
-      if (renderPart.kind !== part.kind) return renderPart;
-      if (!toolNameMatches(renderPart, toolName)) return renderPart;
-      if (
-        stepIndex != null &&
-        renderPart.stepIndex != null &&
-        renderPart.stepIndex !== stepIndex
-      ) {
-        return renderPart;
-      }
-
-      if (renderPart.kind === "tool" && part.kind === "tool") {
-        return {
-          ...renderPart,
-          stepIndex: part.stepIndex ?? renderPart.stepIndex,
-          state: part.state,
-          input:
-            kind === "tool_call"
-              ? (part.input ?? renderPart.input)
-              : renderPart.input,
-          output: kind === "tool_result" ? part.output : renderPart.output,
-          errorText:
-            kind === "tool_result" ? part.errorText : renderPart.errorText,
-        };
-      }
-
-      if (renderPart.kind === "sandbox" && part.kind === "sandbox") {
-        return {
-          ...renderPart,
-          stepIndex: part.stepIndex ?? renderPart.stepIndex,
-          state: part.state,
-          code: part.code || renderPart.code,
-          output: kind === "tool_result" ? part.output : renderPart.output,
-          errorText:
-            kind === "tool_result" ? part.errorText : renderPart.errorText,
-        };
-      }
-
-      return renderPart;
-    }),
-  };
-  return copy;
+  return appendTracePart(messages, part, text, options?.traceSource ?? "live");
 }
 
 function parseCitations(
@@ -1353,7 +1245,7 @@ function applyEvent(
     }
     case "reasoning_step": {
       return {
-        messages: appendReasoning(messages, text, "chunk"),
+        messages: appendReasoningEvent(messages, text, "live"),
         terminal: false,
         errored: false,
       };
@@ -1367,37 +1259,47 @@ function applyEvent(
     }
     case "status": {
       return {
-        messages: appendReasoning(messages, `Status: ${text}`, "line"),
+        messages: appendStatusTrace(messages, text, "neutral", payload),
         terminal: false,
         errored: false,
       };
     }
     case "tool_call": {
       return {
-        messages: upsertToolLikePart(messages, "tool_call", text, payload),
+        messages: appendToolLikePart(messages, "tool_call", text, payload),
         terminal: false,
         errored: false,
       };
     }
     case "tool_result": {
       return {
-        messages: upsertToolLikePart(messages, "tool_result", text, payload),
+        messages: appendToolLikePart(messages, "tool_result", text, payload),
         terminal: false,
         errored: false,
       };
     }
     case "plan_update": {
-      let next = finishReasoning(messages);
-      next = upsertQueue(next, text || "Running plan...");
+      const label = text.trim() || "Running plan...";
+      let next = appendTaskTrace(
+        messages,
+        {
+          kind: "task",
+          title: "Plan update",
+          status: "in_progress",
+          items: [{ id: nextId("task-item"), text: label }],
+        },
+        label,
+      );
+      next = upsertQueue(next, label);
       return { messages: next, terminal: false, errored: false };
     }
     case "rlm_executing": {
-      let next = finishReasoning(messages);
+      let next = messages;
       const toolName =
         typeof payload?.tool_name === "string" && payload.tool_name
           ? payload.tool_name
           : "Sub-agent iteration";
-      next = appendTracePart(
+      next = appendTaskTrace(
         next,
         {
           kind: "task",
@@ -1410,9 +1312,8 @@ function applyEvent(
       return { messages: next, terminal: false, errored: false };
     }
     case "memory_update": {
-      let next = finishReasoning(messages);
-      next = appendTracePart(
-        next,
+      const next = appendTaskTrace(
+        messages,
         {
           kind: "task",
           title: text || "Updating memory...",
@@ -1582,8 +1483,11 @@ function applyEvent(
           ? payload.final_reasoning.trim()
           : "";
       if (finalReasoning) {
-        next = appendReasoning(next, `Final reasoning: ${finalReasoning}`);
-        next = finishReasoning(next);
+        next = appendReasoningEvent(
+          next,
+          `Final reasoning: ${finalReasoning}`,
+          "summary",
+        );
       }
 
       next = attachFinalReferences(next, payload);

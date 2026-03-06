@@ -7,19 +7,11 @@ import { BuilderPanel } from "@/app/layout/BuilderPanel";
 
 vi.mock("@/hooks/useNavigation", () => ({
   useNavigation: () => ({
-    activeNav: "taxonomy",
-    creationPhase: "idle",
+    activeNav: "new",
+    creationPhase: "active",
     closeCanvas: vi.fn(),
     activeFeatures: new Set(),
-    selectedFileNode: {
-      id: "file-1",
-      name: "README.md",
-      path: "/workspaces/default/README.md",
-      type: "file",
-      children: [],
-      size: 120,
-      modifiedAt: "2026-03-03T00:00:00Z",
-    },
+    selectedFileNode: null,
   }),
 }));
 
@@ -51,12 +43,22 @@ vi.mock("@/features/artifacts/CanvasSwitcher", () => ({
   CanvasSwitcher: () => <div>CanvasSwitcher</div>,
 }));
 
-vi.mock("@/features/artifacts/CodeArtifact", () => ({
-  CodeArtifact: () => <div>CodeArtifact</div>,
+vi.mock("@/components/domain/artifacts/ArtifactCanvas", () => ({
+  ArtifactCanvas: ({
+    showTabs,
+    activeTab,
+  }: {
+    showTabs?: boolean;
+    activeTab?: string;
+  }) => (
+    <div>
+      ArtifactCanvas showTabs:{String(showTabs)} activeTab:{activeTab}
+    </div>
+  ),
 }));
 
-vi.mock("@/components/domain/artifacts/ArtifactCanvas", () => ({
-  ArtifactCanvas: () => <div>ArtifactCanvas</div>,
+vi.mock("@/features/artifacts/CodeArtifact", () => ({
+  CodeArtifact: () => <div>CodeArtifact</div>,
 }));
 
 vi.mock("@/features/artifacts/FileDetail", () => ({
@@ -71,8 +73,8 @@ vi.mock("@/lib/rlm-api", () => ({
   UNSUPPORTED_SECTION_REASON: "Unsupported",
 }));
 
-describe("BuilderPanel file detail mode", () => {
-  it("renders FileDetail when a taxonomy file is selected", () => {
+describe("BuilderPanel creation header tabs", () => {
+  it("shows artifact tabs in the header and replaces the execution dropdown switcher", () => {
     const queryClient = new QueryClient();
     const html = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
@@ -80,8 +82,14 @@ describe("BuilderPanel file detail mode", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("FileDetail:README.md");
-    expect(html).not.toContain("No active canvas");
-    expect(html).toContain("CanvasSwitcher");
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain("Graph");
+    expect(html).toContain("REPL");
+    expect(html).toContain("Timeline");
+    expect(html).toContain("Preview");
+    expect(html).not.toContain("CanvasSwitcher");
+    expect(html).toContain("ArtifactCanvas showTabs:false");
+    expect(html).toContain("hover:bg-white/8");
+    expect(html).toContain("bg-white/12");
   });
 });

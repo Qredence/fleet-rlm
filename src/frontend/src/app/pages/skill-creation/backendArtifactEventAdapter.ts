@@ -114,6 +114,19 @@ function setActive(id?: string): void {
   useArtifactStore.getState().setActiveStepId(id);
 }
 
+let liveTraceSeenForTurn = false;
+
+function ensureTurnTracking(): void {
+  const { steps } = useArtifactStore.getState();
+  if (steps.length === 0) {
+    liveTraceSeenForTurn = false;
+  }
+}
+
+function markLiveTraceSeen(): void {
+  liveTraceSeenForTurn = true;
+}
+
 function normalizeExecutionStepFromPayload(
   payload: Record<string, unknown> | undefined,
   fallbackTimestamp: string | undefined,
@@ -204,6 +217,41 @@ function appendIntoLlmStep(entry: {
     },
   });
   setActive(current.id);
+}
+
+function addLlmTraceStep(
+  kind: "reasoning_step" | "status",
+  text: string,
+  payload: Record<string, unknown> | undefined,
+  timestamp: number,
+): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+
+  const output =
+    kind === "reasoning_step"
+      ? {
+          text: trimmed,
+          reasoning: [trimmed],
+          streaming: false,
+        }
+      : {
+          text: trimmed,
+          status: [trimmed],
+          streaming: false,
+        };
+
+  add({
+    id: nextId("llm"),
+    type: "llm",
+    label: kind === "reasoning_step" ? "Reasoning" : "Status",
+    input: {
+      source_event: kind,
+      payload,
+    },
+    output,
+    timestamp,
+  });
 }
 
 function addToolStep(
@@ -324,6 +372,8 @@ function addOutputStep(
 }
 
 export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
+  ensureTurnTracking();
+
   if (frame.type === "error") {
     const timestamp = Date.now();
     const parentId = finalizeCurrentLlm(frame.message, undefined, timestamp);
@@ -334,6 +384,7 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
       timestamp,
       parentId,
     );
+    liveTraceSeenForTurn = false;
     return;
   }
 
@@ -352,21 +403,27 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
       appendIntoLlmStep({ bucket: "tokens", text, timestamp: epoch });
       return;
     case "reasoning_step":
-      appendIntoLlmStep({ bucket: "reasoning", text, timestamp: epoch });
+      markLiveTraceSeen();
+      addLlmTraceStep(kind, text, payload, epoch);
       return;
     case "status":
-      appendIntoLlmStep({ bucket: "status", text, timestamp: epoch });
+      markLiveTraceSeen();
+      addLlmTraceStep(kind, text, payload, epoch);
       return;
     case "tool_call":
     case "tool_result":
+      markLiveTraceSeen();
       addToolStep(kind, text, payload, epoch);
       return;
     case "trajectory_step":
-      addTrajectoryStep(text, payload, epoch);
+      if (!liveTraceSeenForTurn) {
+        addTrajectoryStep(text, payload, epoch);
+      }
       return;
     case "final": {
       const parentId = finalizeCurrentLlm(text, payload, epoch);
       addOutputStep("Final output", text, payload, epoch, parentId);
+      liveTraceSeenForTurn = false;
       return;
     }
     case "cancelled": {
@@ -378,6 +435,7 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
         epoch,
         parentId,
       );
+      liveTraceSeenForTurn = false;
       return;
     }
     case "error": {
@@ -389,6 +447,7 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
         epoch,
         parentId,
       );
+      liveTraceSeenForTurn = false;
       return;
     }
     default:

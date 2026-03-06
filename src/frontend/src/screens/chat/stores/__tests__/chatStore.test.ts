@@ -38,7 +38,7 @@ vi.mock("@/lib/telemetry/client", () => ({
 // ── imports ────────────────────────────────────────────────────────────────────
 // Imported after vi.mock so the mocked versions are resolved.
 import { streamChatOverWs } from "@/lib/rlm-api";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import { useChatStore } from "@/screens/chat/stores/chatStore";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 /** Reset Zustand store state between tests */

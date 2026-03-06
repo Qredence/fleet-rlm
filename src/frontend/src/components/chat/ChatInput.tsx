@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { AgentDropdown } from "@/components/chat/input/AgentDropdown";
 import {
@@ -24,6 +25,8 @@ interface ChatInputProps {
   onChange: (value: string) => void;
   onSend: (attachments: AttachedFile[]) => void;
   isLoading?: boolean;
+  isReceiving?: boolean;
+  attachmentsEnabled?: boolean;
   selectedAgent: string;
   onAgentChange: (agentId: string) => void;
   thinkEnabled?: boolean;
@@ -53,6 +56,8 @@ function ChatInput({
   onChange,
   onSend,
   isLoading = false,
+  isReceiving = false,
+  attachmentsEnabled = true,
   selectedAgent,
   onAgentChange,
   thinkEnabled = false,
@@ -96,12 +101,20 @@ function ChatInput({
     onSend(currentAttachments);
   }, [attachments, onSend]);
 
+  const handleUnsupportedAttachmentSelect = useCallback(() => {
+    toast.info("File upload is not available yet", {
+      description:
+        "This backend currently does not accept binary upload payloads.",
+    });
+  }, []);
+
   return (
     <PromptInput
       value={value}
       onChange={onChange}
       onSubmit={handleSubmit}
       isLoading={isLoading}
+      isReceiving={isReceiving}
       className={className}
     >
       {attachments.length > 0 ? (
@@ -122,7 +135,11 @@ function ChatInput({
 
       <PromptInputFooter>
         <PromptInputTools>
-          <AttachmentDropdown onFilesSelected={handleFilesSelected} />
+          <AttachmentDropdown
+            onFilesSelected={handleFilesSelected}
+            uploadsEnabled={attachmentsEnabled}
+            onUnsupportedSelect={handleUnsupportedAttachmentSelect}
+          />
           <SettingsDropdown />
         </PromptInputTools>
 

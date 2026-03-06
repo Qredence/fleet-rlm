@@ -11,9 +11,15 @@ import {
 
 interface AttachmentDropdownProps {
   onFilesSelected?: (files: File[]) => void;
+  uploadsEnabled?: boolean;
+  onUnsupportedSelect?: () => void;
 }
 
-function AttachmentDropdown({ onFilesSelected }: AttachmentDropdownProps) {
+function AttachmentDropdown({
+  onFilesSelected,
+  uploadsEnabled = true,
+  onUnsupportedSelect,
+}: AttachmentDropdownProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -56,10 +62,20 @@ function AttachmentDropdown({ onFilesSelected }: AttachmentDropdownProps) {
         >
           <DropdownMenuItem
             className="gap-2.5 py-2.5 px-3 rounded-lg cursor-pointer"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (!uploadsEnabled) {
+                onUnsupportedSelect?.();
+                return;
+              }
+              fileInputRef.current?.click();
+            }}
           >
             <Paperclip className="h-4 w-4" />
-            <span className="text-sm">Add images, PDFs or CSVs</span>
+            <span className="text-sm">
+              {uploadsEnabled
+                ? "Add images, PDFs or CSVs"
+                : "Add images, PDFs or CSVs (coming soon)"}
+            </span>
           </DropdownMenuItem>
 
           <DropdownMenuItem

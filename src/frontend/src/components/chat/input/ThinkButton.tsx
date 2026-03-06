@@ -21,10 +21,11 @@ function ThinkButton({ enabled, onToggle }: ThinkButtonProps) {
           <button
             type="button"
             onClick={onToggle}
+            aria-pressed={enabled}
             className={cn(
-              "inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-sm transition-colors",
+              "inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
               enabled
-                ? "text-primary bg-primary/10 hover:bg-primary/15"
+                ? "text-accent bg-accent/15 hover:bg-accent/20"
                 : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
             )}
           >

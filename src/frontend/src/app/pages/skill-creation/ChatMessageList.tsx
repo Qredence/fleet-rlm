@@ -4,6 +4,7 @@ import { Clock } from "lucide-react";
 import type {
   ChatMessage,
   ChatRenderPart,
+  ChatRenderToolState,
   RuntimeContext,
 } from "@/lib/data/types";
 import { typo } from "@/lib/config/typo";
@@ -107,7 +108,7 @@ import {
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { ClarificationCard } from "@/features/chat/ClarificationCard";
+import { ClarificationCard } from "@/screens/chat/ClarificationCard";
 import { SuggestionChip } from "@/components/ui/suggestion-chip";
 import {
   SuggestionIconBolt,
@@ -187,17 +188,357 @@ function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {
     pills.push(ctx.executionProfile.toLowerCase().replace(/_/g, " "));
   if (pills.length === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1 px-1 pb-1">
-      {pills.map((pill) => (
-        <span
-          key={pill}
-          className="inline-flex items-center rounded-full border border-border-subtle bg-muted/40 px-1.5 py-0.5 text-[10px] leading-tight text-muted-foreground"
-        >
-          {pill}
-        </span>
-      ))}
+    <div className="text-[10px] leading-relaxed text-muted-foreground">
+      {pills.join(" · ")}
     </div>
   );
+}
+
+function shouldOpenToolRow(
+  state: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>["state"],
+) {
+  return (
+    state === "running" ||
+    state === "input-streaming" ||
+    state === "output-error"
+  );
+}
+
+function shouldOpenTaskRow(
+  status: Extract<ChatRenderPart, { kind: "task" }>["status"],
+) {
+  return status === "in_progress" || status === "error";
+}
+
+type ToolSessionEventKind = "tool_call" | "tool_result" | "status";
+type GroupableTracePart = Extract<
+  ChatRenderPart,
+  {
+    kind: "tool" | "sandbox" | "environment_variables" | "status_note";
+  }
+>;
+type ReasoningTracePart = Extract<ChatRenderPart, { kind: "reasoning" }>;
+
+interface ActiveReasoningGroup {
+  key: string;
+  message: ChatMessage;
+  traceSource: ChatMessage["traceSource"];
+  parts: ReasoningTracePart[];
+}
+
+interface ToolSessionItem {
+  key: string;
+  traceSource: ChatMessage["traceSource"];
+  eventKind: ToolSessionEventKind;
+  part: GroupableTracePart;
+  toolName?: string;
+  stepIndex?: number;
+  runtimeContext?: RuntimeContext;
+}
+
+type TraceDisplayItem =
+  | {
+      kind: "trace_message";
+      key: string;
+      message: ChatMessage;
+      renderParts: ChatRenderPart[];
+    }
+  | {
+      kind: "tool_session";
+      key: string;
+      items: ToolSessionItem[];
+    };
+
+type ChatDisplayItem =
+  | {
+      kind: "message";
+      key: string;
+      message: ChatMessage;
+    }
+  | TraceDisplayItem;
+
+function isToolSessionTracePart(
+  part: ChatRenderPart,
+): part is GroupableTracePart {
+  return (
+    part.kind === "tool" ||
+    part.kind === "sandbox" ||
+    part.kind === "environment_variables" ||
+    part.kind === "status_note"
+  );
+}
+
+function canStartToolSession(part: GroupableTracePart) {
+  return part.kind !== "status_note";
+}
+
+function toolSessionEventKindForPart(
+  part: GroupableTracePart,
+): ToolSessionEventKind {
+  if (part.kind === "status_note") return "status";
+  if (part.kind === "environment_variables") return "tool_result";
+  return part.state === "running" || part.state === "input-streaming"
+    ? "tool_call"
+    : "tool_result";
+}
+
+function toolSessionToolName(part: GroupableTracePart): string | undefined {
+  if (part.kind === "tool") return part.toolType || part.title || undefined;
+  if (part.kind === "sandbox") return part.title || undefined;
+  if (part.kind === "environment_variables") return part.title || undefined;
+  return part.toolName;
+}
+
+function toolSessionStepIndex(part: GroupableTracePart): number | undefined {
+  if (
+    part.kind === "tool" ||
+    part.kind === "sandbox" ||
+    part.kind === "status_note"
+  ) {
+    return part.stepIndex;
+  }
+  return undefined;
+}
+
+function toolSessionRuntimeContext(
+  part: GroupableTracePart,
+): RuntimeContext | undefined {
+  if (
+    part.kind === "tool" ||
+    part.kind === "sandbox" ||
+    part.kind === "status_note"
+  ) {
+    return part.runtimeContext;
+  }
+  return undefined;
+}
+
+function normalizeToolSessionName(name?: string) {
+  return name?.trim().toLowerCase();
+}
+
+function toolSessionItemsCompatible(
+  active: ToolSessionItem,
+  candidate: ToolSessionItem,
+) {
+  if (active.traceSource !== candidate.traceSource) return false;
+  if (active.stepIndex != null && candidate.stepIndex != null) {
+    return active.stepIndex === candidate.stepIndex;
+  }
+  const activeName = normalizeToolSessionName(active.toolName);
+  const candidateName = normalizeToolSessionName(candidate.toolName);
+  if (activeName && candidateName) return activeName === candidateName;
+  return false;
+}
+
+function shouldAppendToActiveSession(
+  activeSession: ToolSessionItem[],
+  candidate: ToolSessionItem,
+) {
+  const first = activeSession[0];
+  if (!first || !toolSessionItemsCompatible(first, candidate)) return false;
+  if (candidate.eventKind === "tool_call") return false;
+  return true;
+}
+
+function buildToolSessionItem(
+  part: GroupableTracePart,
+  key: string,
+  traceSource: ChatMessage["traceSource"],
+): ToolSessionItem {
+  return {
+    key,
+    traceSource,
+    eventKind: toolSessionEventKindForPart(part),
+    part,
+    toolName: toolSessionToolName(part),
+    stepIndex: toolSessionStepIndex(part),
+    runtimeContext: toolSessionRuntimeContext(part),
+  };
+}
+
+function toolSessionStateForItem(item: ToolSessionItem): ChatRenderToolState {
+  if (item.part.kind === "tool" || item.part.kind === "sandbox") {
+    return item.part.state;
+  }
+  if (item.part.kind === "environment_variables") return "output-available";
+  if (
+    item.part.tone === "error" ||
+    /(error|failed|failure|rejected|unable)/i.test(item.part.text)
+  ) {
+    return "output-error";
+  }
+  if (
+    item.part.tone === "success" ||
+    /(done|complete|completed|finished|success)/i.test(item.part.text)
+  ) {
+    return "output-available";
+  }
+  return "running";
+}
+
+function toolSessionHeaderLabel(items: ToolSessionItem[]) {
+  const first = items[0];
+  const toolName = first?.toolName ?? "Tool";
+  return first?.eventKind === "tool_call"
+    ? `Calling tool: ${toolName}`
+    : `Tool: ${toolName}`;
+}
+
+function toolSessionLine(item: ToolSessionItem) {
+  if (item.part.kind === "status_note") {
+    return `Status: ${item.part.text}`;
+  }
+  const toolName = item.toolName ?? "tool";
+  return `${item.eventKind}: ${toolName}`;
+}
+
+function mergeReasoningParts(parts: ReasoningTracePart[]): ReasoningTracePart {
+  const mergedParts = parts.flatMap((part) => part.parts);
+  const latestPart = parts[parts.length - 1];
+  const isStreaming = latestPart?.isStreaming ?? false;
+  const duration = [...parts]
+    .reverse()
+    .find((part) => typeof part.duration === "number")?.duration;
+
+  return {
+    kind: "reasoning",
+    parts: mergedParts,
+    isStreaming,
+    duration,
+  };
+}
+
+function isReasoningTracePart(
+  part: ChatRenderPart,
+): part is ReasoningTracePart {
+  return part.kind === "reasoning";
+}
+
+function buildTraceDisplayItems(messages: ChatMessage[]): TraceDisplayItem[] {
+  const items: TraceDisplayItem[] = [];
+  let activeSession: ToolSessionItem[] | null = null;
+  let activeReasoningGroup: ActiveReasoningGroup | null = null;
+
+  const flushActiveSession = () => {
+    if (!activeSession?.length) return;
+    items.push({
+      kind: "tool_session",
+      key: activeSession[0]?.key ?? `tool-session-${items.length}`,
+      items: activeSession,
+    });
+    activeSession = null;
+  };
+
+  const flushActiveReasoningGroup = () => {
+    if (!activeReasoningGroup) return;
+    items.push({
+      kind: "trace_message",
+      key: activeReasoningGroup.key,
+      message: activeReasoningGroup.message,
+      renderParts: [mergeReasoningParts(activeReasoningGroup.parts)],
+    });
+    activeReasoningGroup = null;
+  };
+
+  for (const message of messages) {
+    if (message.type !== "trace" || !message.renderParts?.length) {
+      flushActiveSession();
+      flushActiveReasoningGroup();
+      continue;
+    }
+
+    for (let idx = 0; idx < message.renderParts.length; idx += 1) {
+      const part = message.renderParts[idx];
+      if (!part) continue;
+      const key = `${message.id}-${part.kind}-${idx}`;
+
+      if (isReasoningTracePart(part)) {
+        flushActiveSession();
+        if (
+          activeReasoningGroup &&
+          activeReasoningGroup.traceSource === message.traceSource
+        ) {
+          activeReasoningGroup.parts.push(part);
+        } else {
+          flushActiveReasoningGroup();
+          activeReasoningGroup = {
+            key,
+            message,
+            traceSource: message.traceSource,
+            parts: [part],
+          };
+        }
+        continue;
+      }
+
+      flushActiveReasoningGroup();
+
+      if (!isToolSessionTracePart(part)) {
+        flushActiveSession();
+        items.push({
+          kind: "trace_message",
+          key,
+          message,
+          renderParts: [part],
+        });
+        continue;
+      }
+
+      const candidate = buildToolSessionItem(part, key, message.traceSource);
+      if (activeSession?.length) {
+        if (shouldAppendToActiveSession(activeSession, candidate)) {
+          activeSession.push(candidate);
+          continue;
+        }
+        flushActiveSession();
+      }
+
+      if (canStartToolSession(part)) {
+        activeSession = [candidate];
+        continue;
+      }
+
+      items.push({
+        kind: "trace_message",
+        key,
+        message,
+        renderParts: [part],
+      });
+    }
+  }
+
+  flushActiveSession();
+  flushActiveReasoningGroup();
+  return items;
+}
+
+function buildChatDisplayItems(messages: ChatMessage[]): ChatDisplayItem[] {
+  const items: ChatDisplayItem[] = [];
+  let pendingTraceMessages: ChatMessage[] = [];
+
+  const flushPendingTraceMessages = () => {
+    if (pendingTraceMessages.length === 0) return;
+    items.push(...buildTraceDisplayItems(pendingTraceMessages));
+    pendingTraceMessages = [];
+  };
+
+  for (const message of messages) {
+    if (message.type === "trace" && message.renderParts?.length) {
+      pendingTraceMessages.push(message);
+      continue;
+    }
+
+    flushPendingTraceMessages();
+    items.push({
+      kind: "message",
+      key: message.id,
+      message,
+    });
+  }
+
+  flushPendingTraceMessages();
+  return items;
 }
 
 function renderInlineCitations(
@@ -291,6 +632,167 @@ function renderAttachments(
   );
 }
 
+function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
+  if (item.part.kind === "tool") {
+    const outputText = stringifyValue(item.part.output).trim();
+    const hasOutput = Boolean(item.part.errorText || outputText);
+
+    return (
+      <div className="space-y-2">
+        <RuntimeContextBadge ctx={item.runtimeContext} />
+        {item.part.input != null ? <ToolInput input={item.part.input} /> : null}
+        {hasOutput ? (
+          <ToolOutput
+            errorText={item.part.errorText}
+            output={
+              item.part.errorText ? undefined : (
+                <div className="w-full">
+                  <Streamdown content={outputText} streaming={false} />
+                </div>
+              )
+            }
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (item.part.kind === "sandbox") {
+    return (
+      <div className="space-y-2">
+        <RuntimeContextBadge ctx={item.runtimeContext} />
+        {item.part.errorText || item.part.output ? (
+          <div className="space-y-1">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Output
+            </div>
+            <div
+              className={cn(
+                "rounded-md border px-2.5 py-2 text-foreground",
+                item.part.errorText
+                  ? "border-destructive/25 bg-destructive/5 text-destructive"
+                  : "border-border-subtle/80 bg-muted/15",
+              )}
+              style={typo.base}
+            >
+              {item.part.errorText ? (
+                item.part.errorText
+              ) : (
+                <Streamdown
+                  content={item.part.output ?? ""}
+                  streaming={false}
+                />
+              )}
+            </div>
+          </div>
+        ) : null}
+        {item.part.code ? (
+          <div className="space-y-1">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Code
+            </div>
+            <pre
+              className="overflow-x-auto rounded-md border border-border-subtle/80 bg-muted/20 px-2.5 py-2 text-foreground"
+              style={{ ...typo.base, fontFamily: "var(--font-family-mono)" }}
+            >
+              <code>{item.part.code}</code>
+            </pre>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (item.part.kind === "environment_variables") {
+    return (
+      <div className="rounded-md border border-border-subtle/80 bg-muted/15">
+        {item.part.variables.map((variable, idx) => (
+          <div
+            key={`${item.key}-env-${variable.name}-${idx}`}
+            className={cn(
+              "flex flex-col gap-1 px-2.5 py-2 text-foreground",
+              idx > 0 && "border-t border-border-subtle/70",
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="text-foreground"
+                style={{
+                  ...typo.base,
+                  fontFamily: "var(--font-family-mono)",
+                  fontWeight: "var(--font-weight-medium)",
+                }}
+              >
+                {variable.name}
+              </span>
+              {variable.required ? (
+                <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  required
+                </span>
+              ) : null}
+            </div>
+            <span
+              className="text-muted-foreground"
+              style={{
+                ...typo.base,
+                fontFamily: "var(--font-family-mono)",
+              }}
+            >
+              {variable.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <RuntimeContextBadge ctx={item.runtimeContext} />;
+}
+
+function renderToolSession(
+  item: Extract<TraceDisplayItem, { kind: "tool_session" }>,
+) {
+  const fallbackState: ChatRenderToolState = "running";
+  const latestItem = item.items[item.items.length - 1];
+  const latestState = latestItem
+    ? toolSessionStateForItem(latestItem)
+    : fallbackState;
+
+  return (
+    <Message from="assistant" className="mb-4" key={item.key}>
+      <MessageContent className="w-full">
+        <Tool
+          density="compact"
+          disclosure="auto"
+          defaultOpen={shouldOpenToolRow(latestState)}
+        >
+          <ToolHeader
+            toolType={toolSessionHeaderLabel(item.items)}
+            state={latestState}
+            density="compact"
+          />
+          <ToolContent className="space-y-3">
+            {item.items.map((sessionItem) => (
+              <div
+                key={sessionItem.key}
+                className="border-l border-border-subtle/70 pl-3"
+                data-slot="tool-session-item"
+              >
+                <div className="space-y-2 py-0.5">
+                  <div className="text-foreground" style={typo.base}>
+                    {toolSessionLine(sessionItem)}
+                  </div>
+                  {renderToolSessionItemDetails(sessionItem)}
+                </div>
+              </div>
+            ))}
+          </ToolContent>
+        </Tool>
+      </MessageContent>
+    </Message>
+  );
+}
+
 function renderTracePart(part: ChatRenderPart, key: string) {
   switch (part.kind) {
     case "reasoning":
@@ -300,13 +802,20 @@ function renderTracePart(part: ChatRenderPart, key: string) {
           parts={part.parts}
           isStreaming={part.isStreaming}
           duration={part.duration}
+          density="compact"
+          displayMode="inline_always"
           className="w-full"
         />
       );
     case "chain_of_thought":
       return (
-        <ChainOfThought key={key} defaultOpen>
-          <ChainOfThoughtHeader>
+        <ChainOfThought
+          key={key}
+          density="compact"
+          disclosure="always_collapsed"
+          defaultOpen={false}
+        >
+          <ChainOfThoughtHeader density="compact">
             {part.title ?? "Execution trace"}
           </ChainOfThoughtHeader>
           <ChainOfThoughtContent>
@@ -355,8 +864,17 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       );
     case "task":
       return (
-        <Task key={key} defaultOpen={part.status === "in_progress"}>
-          <TaskTrigger title={part.title} status={part.status} />
+        <Task
+          key={key}
+          density="compact"
+          disclosure="auto"
+          defaultOpen={shouldOpenTaskRow(part.status)}
+        >
+          <TaskTrigger
+            title={part.title}
+            status={part.status}
+            density="compact"
+          />
           <TaskContent>
             {part.items?.length ? (
               <div className="space-y-1">
@@ -380,13 +898,19 @@ function renderTracePart(part: ChatRenderPart, key: string) {
     case "tool": {
       const outputText = stringifyValue(part.output);
       return (
-        <Tool key={key} defaultOpen={part.state !== "running"}>
+        <Tool
+          key={key}
+          density="compact"
+          disclosure="auto"
+          defaultOpen={shouldOpenToolRow(part.state)}
+        >
           <ToolHeader
             toolType={part.title || part.toolType}
             state={part.state}
+            density="compact"
           />
-          <RuntimeContextBadge ctx={part.runtimeContext} />
           <ToolContent>
+            <RuntimeContextBadge ctx={part.runtimeContext} />
             {part.input != null ? <ToolInput input={part.input} /> : null}
             <ToolOutput
               errorText={part.errorText}
@@ -408,10 +932,21 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       const code = part.code ?? "";
       const output = part.output ?? "";
       return (
-        <Sandbox key={key} defaultOpen={part.state !== "running"}>
-          <SandboxHeader title={part.title} state={part.state} />
-          <RuntimeContextBadge ctx={part.runtimeContext} />
+        <Sandbox
+          key={key}
+          density="compact"
+          disclosure="auto"
+          defaultOpen={shouldOpenToolRow(part.state)}
+        >
+          <SandboxHeader
+            title={part.title}
+            state={part.state}
+            density="compact"
+          />
           <SandboxContent>
+            <div className="px-2.5 py-1.5">
+              <RuntimeContextBadge ctx={part.runtimeContext} />
+            </div>
             <SandboxTabs defaultValue="output">
               <SandboxTabsBar>
                 <SandboxTabsList>
@@ -421,24 +956,33 @@ function renderTracePart(part: ChatRenderPart, key: string) {
               </SandboxTabsBar>
               <SandboxTabContent value="output">
                 {part.errorText ? (
-                  <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                  <div
+                    className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive"
+                    style={typo.base}
+                  >
                     {part.errorText}
                   </div>
                 ) : output ? (
                   <Streamdown content={output} streaming={false} />
                 ) : (
-                  <div className="text-xs text-muted-foreground">
+                  <div className="text-muted-foreground" style={typo.base}>
                     No output yet
                   </div>
                 )}
               </SandboxTabContent>
               <SandboxTabContent value="code">
                 {code ? (
-                  <pre className="overflow-x-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs">
+                  <pre
+                    className="overflow-x-auto rounded-md border border-border-subtle bg-muted/30 p-2"
+                    style={{
+                      ...typo.base,
+                      fontFamily: "var(--font-family-mono)",
+                    }}
+                  >
                     <code>{code}</code>
                   </pre>
                 ) : (
-                  <div className="text-xs text-muted-foreground">
+                  <div className="text-muted-foreground" style={typo.base}>
                     No code captured
                   </div>
                 )}
@@ -495,16 +1039,14 @@ function renderTracePart(part: ChatRenderPart, key: string) {
         <div
           key={key}
           className={cn(
-            "rounded-lg border px-3 py-2 text-xs",
-            part.tone === "error" &&
-              "border-destructive/30 bg-destructive/5 text-destructive",
-            part.tone === "warning" &&
-              "border-amber-300/40 bg-amber-50/50 text-amber-900",
-            part.tone === "success" &&
-              "border-emerald-300/30 bg-emerald-50/30 text-emerald-900",
+            "border-l pl-2 py-0.5",
+            part.tone === "error" && "border-destructive/30 text-destructive",
+            part.tone === "warning" && "border-amber-300/40 text-amber-800",
+            part.tone === "success" && "border-emerald-300/40 text-emerald-800",
             (!part.tone || part.tone === "neutral") &&
-              "border-border-subtle bg-card text-muted-foreground",
+              "border-border-subtle/80 text-muted-foreground",
           )}
+          style={typo.base}
         >
           {part.text}
         </div>
@@ -549,12 +1091,15 @@ function renderLegacyStatusCard(
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-lg border p-3",
+        "flex items-center gap-2 border-l py-0.5 pl-2",
         colorClasses,
       )}
+      style={typo.base}
     >
-      <div className={cn("size-2 rounded-full animate-pulse", pulseClasses)} />
-      <span style={typo.label}>{content}</span>
+      <div
+        className={cn("size-1.5 rounded-full animate-pulse", pulseClasses)}
+      />
+      <span className="text-current">{content}</span>
     </div>
   );
 }
@@ -581,6 +1126,7 @@ export function ChatMessageList({
     (msg) => msg.type === "assistant" && msg.streaming,
   );
   const showTypingShimmer = isTyping && !hasStreamingAssistant;
+  const displayItems = buildChatDisplayItems(messages);
 
   return (
     <Conversation
@@ -594,9 +1140,7 @@ export function ChatMessageList({
         {messages.length === 0 && (
           <motion.div {...preset}>
             <ConversationEmptyState
-              title="Agentic Fleet Session"
-              description="What do you need ?"
-              icon={<span aria-hidden className="hidden" />}
+              icon={null}
               className={cn(
                 "pt-16 pb-8 text-left items-start",
                 isMobile && "pt-10",
@@ -676,136 +1220,162 @@ export function ChatMessageList({
           <AnimatePresence>{historyPanel}</AnimatePresence>
         )}
 
-        {messages.map((msg) => (
-          <motion.div key={msg.id} {...preset}>
-            {msg.type === "system" && (
-              <div className="flex items-center gap-4 py-4">
-                <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
-                <span
-                  className="text-muted-foreground shrink-0 uppercase tracking-[0.2em] opacity-40 whitespace-pre-line"
-                  style={{
-                    ...typo.micro,
-                    fontWeight: "var(--font-weight-semibold)",
-                  }}
-                >
-                  {msg.content}
-                </span>
-                <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
-              </div>
-            )}
+        {displayItems.map((displayItem) => {
+          if (displayItem.kind === "tool_session") {
+            return (
+              <motion.div key={displayItem.key} {...preset}>
+                {renderToolSession(displayItem)}
+              </motion.div>
+            );
+          }
 
-            {msg.type === "user" && (
-              <Message from="user" className="mb-4">
-                <MessageContent className="max-w-[85%] md:max-w-md rounded-xl border border-border-subtle bg-card px-4 py-3 shadow-sm">
-                  <div className="text-sm text-foreground whitespace-pre-wrap">
+          const msg =
+            displayItem.kind === "trace_message"
+              ? {
+                  ...displayItem.message,
+                  renderParts: displayItem.renderParts,
+                }
+              : displayItem.message;
+
+          return (
+            <motion.div key={displayItem.key} {...preset}>
+              {msg.type === "system" && (
+                <div className="flex items-center gap-4 py-4">
+                  <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
+                  <span
+                    className="text-muted-foreground shrink-0 uppercase tracking-[0.2em] opacity-40 whitespace-pre-line"
+                    style={{
+                      ...typo.micro,
+                      fontWeight: "var(--font-weight-semibold)",
+                    }}
+                  >
                     {msg.content}
-                  </div>
-                </MessageContent>
-              </Message>
-            )}
+                  </span>
+                  <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
+                </div>
+              )}
 
-            {(msg.type === "assistant" ||
-              msg.type === "trace" ||
-              msg.type === "reasoning") && (
-              <Message from="assistant" className="mb-4">
-                <MessageContent className="w-full space-y-3">
-                  {msg.renderParts?.map((part, idx) =>
-                    renderTracePart(part, `${msg.id}-${part.kind}-${idx}`),
-                  )}
-                  {msg.type === "assistant" && msg.content ? (
-                    <MessageResponse streaming={msg.streaming}>
+              {msg.type === "user" && (
+                <Message from="user" className="mb-4">
+                  <MessageContent className="max-w-[85%] md:max-w-lg rounded-xl border border-border-subtle/80 bg-card/70 px-3.5 py-2.5">
+                    <div className="text-[13px] leading-relaxed text-foreground whitespace-pre-wrap">
                       {msg.content}
-                    </MessageResponse>
-                  ) : null}
-                  {msg.type === "assistant" && msg.streaming && !msg.content ? (
-                    <div className="max-w-xl">
-                      <Shimmer lines={3} />
                     </div>
-                  ) : null}
-                </MessageContent>
-              </Message>
-            )}
+                  </MessageContent>
+                </Message>
+              )}
 
-            {msg.type === "hitl" && msg.hitlData && (
-              <div className="mb-6">
-                <Confirmation state={hitlConfirmationState(msg)}>
-                  <ConfirmationTitle className="text-sm font-medium">
-                    Checkpoint
-                  </ConfirmationTitle>
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    {msg.hitlData.question}
-                  </div>
-                  <ConfirmationRequest>
-                    <ConfirmationActions>
-                      {msg.hitlData.actions.map((action) => (
-                        <ConfirmationAction
-                          key={action.label}
-                          onClick={() => onResolveHitl(msg.id, action.label)}
-                          className={cn(
-                            action.variant === "primary" &&
-                              "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
-                          )}
-                        >
-                          {action.label}
-                        </ConfirmationAction>
-                      ))}
-                    </ConfirmationActions>
-                  </ConfirmationRequest>
-                  <ConfirmationAccepted>
-                    <div className="mt-3 text-xs text-emerald-600">
-                      Resolved: {msg.hitlData.resolvedLabel ?? "Approved"}
+              {(msg.type === "assistant" ||
+                msg.type === "trace" ||
+                msg.type === "reasoning") && (
+                <Message from="assistant" className="mb-4">
+                  <MessageContent className="w-full space-y-2.5">
+                    {msg.renderParts?.map((part, idx) =>
+                      renderTracePart(part, `${msg.id}-${part.kind}-${idx}`),
+                    )}
+                    {msg.type === "assistant" && msg.content ? (
+                      <div className="max-w-[72ch] rounded-[22px] border border-border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
+                        <MessageResponse streaming={msg.streaming}>
+                          {msg.content}
+                        </MessageResponse>
+                      </div>
+                    ) : null}
+                    {msg.type === "assistant" &&
+                    msg.streaming &&
+                    !msg.content ? (
+                      <div className="max-w-[72ch] rounded-[22px] border border-border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
+                        <Shimmer lines={3} />
+                      </div>
+                    ) : null}
+                  </MessageContent>
+                </Message>
+              )}
+
+              {msg.type === "hitl" && msg.hitlData && (
+                <div className="mb-6">
+                  <Confirmation state={hitlConfirmationState(msg)}>
+                    <ConfirmationTitle className="text-sm font-medium">
+                      Checkpoint
+                    </ConfirmationTitle>
+                    <div className="mt-2 text-sm text-muted-foreground">
+                      {msg.hitlData.question}
                     </div>
-                  </ConfirmationAccepted>
-                  <ConfirmationRejected>
-                    <div className="mt-3 text-xs text-destructive">
-                      Resolved: {msg.hitlData.resolvedLabel ?? "Rejected"}
-                    </div>
-                  </ConfirmationRejected>
-                </Confirmation>
-              </div>
-            )}
+                    <ConfirmationRequest>
+                      <ConfirmationActions>
+                        {msg.hitlData.actions.map((action) => (
+                          <ConfirmationAction
+                            key={action.label}
+                            onClick={() => onResolveHitl(msg.id, action.label)}
+                            className={cn(
+                              action.variant === "primary" &&
+                                "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
+                            )}
+                          >
+                            {action.label}
+                          </ConfirmationAction>
+                        ))}
+                      </ConfirmationActions>
+                    </ConfirmationRequest>
+                    <ConfirmationAccepted>
+                      <div className="mt-3 text-xs text-emerald-600">
+                        Resolved: {msg.hitlData.resolvedLabel ?? "Approved"}
+                      </div>
+                    </ConfirmationAccepted>
+                    <ConfirmationRejected>
+                      <div className="mt-3 text-xs text-destructive">
+                        Resolved: {msg.hitlData.resolvedLabel ?? "Rejected"}
+                      </div>
+                    </ConfirmationRejected>
+                  </Confirmation>
+                </div>
+              )}
 
-            {msg.type === "clarification" && msg.clarificationData && (
-              <div className="mb-8">
-                <ClarificationCard
-                  data={msg.clarificationData}
-                  onResolve={(answer) => onResolveClarification(msg.id, answer)}
-                />
-              </div>
-            )}
-
-            {msg.type === "reasoning" &&
-              msg.reasoningData &&
-              !msg.renderParts?.length && (
-                <div className="mb-4">
-                  <Reasoning
-                    parts={msg.reasoningData.parts}
-                    isStreaming={msg.reasoningData.isThinking}
-                    duration={msg.reasoningData.duration}
+              {msg.type === "clarification" && msg.clarificationData && (
+                <div className="mb-8">
+                  <ClarificationCard
+                    data={msg.clarificationData}
+                    onResolve={(answer) =>
+                      onResolveClarification(msg.id, answer)
+                    }
                   />
                 </div>
               )}
 
-            {msg.type === "plan_update" &&
-              renderLegacyStatusCard(
-                msg.content,
-                "border-accent/20 bg-accent/5 text-accent",
-                "bg-accent",
-              )}
-            {msg.type === "rlm_executing" &&
-              renderLegacyStatusCard(
-                msg.content,
-                "border-primary/20 bg-primary/5 text-primary",
-                "bg-primary",
-              )}
-            {msg.type === "memory_update" &&
-              renderLegacyStatusCard(
-                msg.content,
-                "border-green-500/20 bg-green-500/5 text-green-500",
-                "bg-green-500",
-              )}
-          </motion.div>
-        ))}
+              {msg.type === "reasoning" &&
+                msg.reasoningData &&
+                !msg.renderParts?.length && (
+                  <div className="mb-4">
+                    <Reasoning
+                      parts={msg.reasoningData.parts}
+                      isStreaming={msg.reasoningData.isThinking}
+                      duration={msg.reasoningData.duration}
+                      density="compact"
+                      displayMode="inline_always"
+                    />
+                  </div>
+                )}
+
+              {msg.type === "plan_update" &&
+                renderLegacyStatusCard(
+                  msg.content,
+                  "border-accent/30 text-accent",
+                  "bg-accent",
+                )}
+              {msg.type === "rlm_executing" &&
+                renderLegacyStatusCard(
+                  msg.content,
+                  "border-primary/30 text-primary",
+                  "bg-primary",
+                )}
+              {msg.type === "memory_update" &&
+                renderLegacyStatusCard(
+                  msg.content,
+                  "border-green-500/30 text-green-500",
+                  "bg-green-500",
+                )}
+            </motion.div>
+          );
+        })}
 
         {showTypingShimmer && (
           <Message from="assistant" className="pt-2">
