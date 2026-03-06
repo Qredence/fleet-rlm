@@ -57,27 +57,28 @@ Deprecated/planned surfaces removed from backend:
 - Emits `event`, `command_result`, and `error` envelopes.
 - Auth claims are canonical tenant/user authority.
 
-### Chat Trajectory Render Contract
+### Chat Trace Render Contract
 
-Frontend chat rendering normalizes trajectory payloads from websocket events into
-AI Elements components with deterministic ordering:
+Frontend chat trace rendering uses AI Elements components with a live-first
+chronological policy:
 
-- supported step field aliases:
-  - `tool_args` ↔ `input`
-  - `observation` ↔ `output`
-- supported payload forms:
-  - structured `payload.step_data` with `payload.step_index`
-  - indexed flat fields such as `thought_0`, `tool_name_0`, `tool_args_0`,
-    `observation_0`
-- rendering order:
-  - sorted by step index (`0..N`)
-  - per step sequence: `Reasoning` -> `Tool` -> `ChainOfThought`
+- primary trace order:
+  - websocket arrival order for live events
+  - typical sequence: `Reasoning` -> `Tool`/`Sandbox` -> `Reasoning` -> ...
+- primary row mapping:
+  - `reasoning_step` -> `Reasoning`
+  - `tool_call` / `tool_result` -> `Tool` (or `Sandbox` for REPL-like payloads)
+  - `plan_update` / `rlm_executing` / `memory_update` -> `Task`
+  - `status` -> low-emphasis status note row
+- secondary summaries:
+  - `ChainOfThought` and `Queue` are summary surfaces only (non-primary)
+  - summaries never replace or reorder primary chronological rows
 
-Display policy:
+Trajectory payload handling:
 
-- `Reasoning` shows thought text (auto-opens while streaming).
-- `ToolInput` / `ToolOutput` render full structured payloads.
-- `ChainOfThought` remains concise summary-only metadata (no raw JSON dumps).
+- trajectory data is fallback/summary-oriented
+- trajectory-derived interleaving is only used when live reasoning/tool events
+  are absent for the turn
 
 ### `/api/v1/ws/execution`
 
@@ -101,7 +102,7 @@ Artifact graph rendering maps execution steps into actor swimlanes:
 
 Ordering and edge rules:
 
-- Step order is deterministic by `(timestamp, id)`.
+- Step order is deterministic by `sequence`, with `(timestamp, id)` as fallback.
 - Parent-child edges are causal (primary).
 - Chronological edges are dashed temporal hints (secondary).
 
