@@ -188,7 +188,7 @@ export function BuilderPanel() {
   const handleSelectView = useCallback(
     (mode: CanvasMode) => {
       switch (mode) {
-        case "taxonomy-graph":
+        case "volumes-browser":
           navigateTo("volumes");
           break;
         case "code-artifact":

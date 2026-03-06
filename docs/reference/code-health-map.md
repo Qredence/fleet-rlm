@@ -7,10 +7,9 @@
   - `src/frontend/src/app/pages/RlmWorkspacePage.tsx` → `src/frontend/src/features/rlm-workspace/*`
   - `src/frontend/src/app/pages/VolumesPage.tsx` → `src/frontend/src/features/volumes/*`
   - `src/frontend/src/app/pages/SettingsPage.tsx`
-- Remaining legacy-named frontend directories are transitional only:
-  - `src/frontend/src/app/pages/skill-creation/__tests__/` is test-only history.
-  - `src/frontend/src/lib/skill-creation/simulation/` is currently empty.
-  - `src/frontend/src/features/taxonomy/` is currently empty.
+- Deleted or moved frontend paths may still appear in the historical table below.
+  - treat `skill-creation/*`, `features/taxonomy/*`, and moved panel-widget rows as stale historical entries
+  - do not use those rows as current ownership guidance
 - Treat `src/frontend/AGENTS.md`, `PLANS.md`, and `TASKS.md` as the source of truth for current frontend ownership and supported product surfaces.
 
 Generated from runtime-entrypoint reachability, static imports, lazy export maps, and frontend import graph (including dynamic imports and `@/` aliases).

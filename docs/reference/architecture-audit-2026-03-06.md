@@ -5,7 +5,7 @@
 - This document is the 2026-03-06 baseline snapshot, not the live execution checklist.
 - The active implementation state now lives in `PLANS.md` and `TASKS.md`.
 - The `RLM Workspace` and `Volumes` cleanup has since moved the live frontend ownership path away from several older `app/pages/skill-creation/*` and `features/taxonomy/*` references captured below.
-- Current live ownership is `app/pages/RlmWorkspacePage.tsx` → `features/rlm-workspace/*` and `app/pages/VolumesPage.tsx` → `features/volumes/*`; the remaining `skill-creation` and `taxonomy` directories are transitional test-only or empty shells.
+- Current live ownership is `app/pages/RlmWorkspacePage.tsx` → `features/rlm-workspace/*` and `app/pages/VolumesPage.tsx` → `features/volumes/*`; older `skill-creation` and `taxonomy` path mentions below are historical references, not live ownership roots.
 
 This audit maps the current `fleet-rlm` backend, the `src/frontend` Vite app, and the active test surface. It also records the highest-value cleanup opportunities for making the codebase cleaner, more maintainable, and more honest about which features are truly wired end to end.
 
@@ -34,6 +34,7 @@ The biggest cleanliness problems are not missing libraries. They are architectur
 Implementation note:
 
 - The active cleanup program now uses `RLM Workspace` as the product name for the chat/runtime surface and `Volumes` for the runtime-backed file browser. Internal `skill-creation` and `taxonomy` module names may still exist temporarily while the live tree is being normalized.
+- The active cleanup program now uses `RLM Workspace` as the product name for the chat/runtime surface and `Volumes` for the runtime-backed file browser. Older `skill-creation` and `taxonomy` references in this document should be read as historical context only.
 
 ## Current Code Map
 
@@ -55,11 +56,10 @@ Implementation note:
 - Volumes browser flow: `src/frontend/src/app/pages/VolumesPage.tsx` → `src/frontend/src/features/volumes/*`
 - Artifact execution canvas: `src/frontend/src/features/artifacts/*`
 - Settings/runtime controls: `src/frontend/src/features/settings/*`
-- Transitional leftovers: `src/frontend/src/app/pages/skill-creation/__tests__/` is test-only, while `src/frontend/src/lib/skill-creation/simulation/` and `src/frontend/src/features/taxonomy/` are currently empty cleanup shells
 - Shared shadcn/Radix UI primitives: `src/frontend/src/components/ui/*`
 - Shared app components: `src/frontend/src/components/shared/*`
 - Cross-cutting hooks: `src/frontend/src/hooks/useAuth.ts`, `useFilesystem.ts`, `useNavigation.ts`
-- Local state stores: `src/frontend/src/features/chat/stores/chatStore.ts`, `src/frontend/src/stores/artifactStore.ts`, `src/frontend/src/stores/mockStateStore.ts`
+- Local state stores: `src/frontend/src/screens/chat/stores/chatStore.ts`, `src/frontend/src/stores/artifactStore.ts`, `src/frontend/src/stores/mockStateStore.ts`
 
 #### Styling
 
@@ -107,7 +107,7 @@ Implementation note:
 #### Frontend tests
 
 - API contract/runtime tests: `src/frontend/src/lib/rlm-api/__tests__/*`
-- Store tests: `src/frontend/src/features/chat/stores/__tests__/*`
+- Store tests: `src/frontend/src/screens/chat/stores/__tests__/*`
 - Artifact tests: `src/frontend/src/features/artifacts/components/__tests__/*`
 - UI smoke E2E: `src/frontend/tests/e2e/*`
 

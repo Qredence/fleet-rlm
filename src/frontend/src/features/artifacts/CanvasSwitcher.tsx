@@ -1,13 +1,13 @@
 /**
  * CanvasSwitcher — popover dropdown triggered by the PanelHeaderChip
  * in the BuilderPanel header. Lets users quick-switch between canvas
- * views (Skill Graph, Code Sandbox) and recently viewed skills.
+ * views (Volume Browser, Code Sandbox) and recently viewed skills.
  *
  * All navigation goes through useAppNavigate / useNavigation so the
  * URL remains the single source of truth.
  */
 import { useState, useMemo, type ReactNode } from "react";
-import { GitBranch, Brain, FileText, Check, Layers } from "lucide-react";
+import { HardDrive, Brain, FileText, Check, Layers } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import { PanelHeaderChip } from "@/components/ui/panel-header-chip";
+import { PanelHeaderChip } from "@/features/artifacts/PanelHeaderChip";
 import type { Skill } from "@/lib/data/types";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -26,7 +26,7 @@ import type { Skill } from "@/lib/data/types";
 export type CanvasMode =
   | "creation"
   | "detail"
-  | "taxonomy-graph"
+  | "volumes-browser"
   | "code-artifact"
   | "file-detail"
   | "empty";
@@ -62,10 +62,10 @@ export interface CanvasSwitcherProps {
 
 const CANVAS_VIEWS: CanvasViewItem[] = [
   {
-    id: "taxonomy-graph",
-    label: "Skill Graph",
+    id: "volumes-browser",
+    label: "Volume Browser",
     icon: (
-      <GitBranch className="size-4 text-muted-foreground" aria-hidden="true" />
+      <HardDrive className="size-4 text-muted-foreground" aria-hidden="true" />
     ),
   },
   {
@@ -75,7 +75,7 @@ const CANVAS_VIEWS: CanvasViewItem[] = [
   },
   {
     id: "creation",
-    label: "Creation Preview",
+    label: "Execution",
     icon: <FileText className="size-4 text-chart-3" aria-hidden="true" />,
   },
 ];
