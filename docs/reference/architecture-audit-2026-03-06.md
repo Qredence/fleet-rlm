@@ -6,6 +6,7 @@
 - The active implementation state now lives in `PLANS.md` and `TASKS.md`.
 - The `RLM Workspace` and `Volumes` cleanup has since moved the live frontend ownership path away from several older `app/pages/skill-creation/*` and `features/taxonomy/*` references captured below.
 - Current live ownership is `app/pages/RlmWorkspacePage.tsx` → `features/rlm-workspace/*` and `app/pages/VolumesPage.tsx` → `features/volumes/*`; older `skill-creation` and `taxonomy` path mentions below are historical references, not live ownership roots.
+- Subsequent cleanup work has also removed the previously empty/test-only legacy frontend directories from the active tree.
 
 This audit maps the current `fleet-rlm` backend, the `src/frontend` Vite app, and the active test surface. It also records the highest-value cleanup opportunities for making the codebase cleaner, more maintainable, and more honest about which features are truly wired end to end.
 
@@ -33,7 +34,6 @@ The biggest cleanliness problems are not missing libraries. They are architectur
 
 Implementation note:
 
-- The active cleanup program now uses `RLM Workspace` as the product name for the chat/runtime surface and `Volumes` for the runtime-backed file browser. Internal `skill-creation` and `taxonomy` module names may still exist temporarily while the live tree is being normalized.
 - The active cleanup program now uses `RLM Workspace` as the product name for the chat/runtime surface and `Volumes` for the runtime-backed file browser. Older `skill-creation` and `taxonomy` references in this document should be read as historical context only.
 
 ## Current Code Map
@@ -122,7 +122,7 @@ Evidence:
 - `src/frontend/src/app/routes.ts` only exposes `workspace`, `volumes`, and `settings` as first-class `/app/*` children.
 - `src/frontend/src/lib/perf/routePreload.tsx` preloads `RlmWorkspacePage`, `VolumesPage`, and `SettingsPage`.
 - `src/frontend/AGENTS.md` now documents `workspace`, `volumes`, and `settings` as the only supported product surfaces.
-- The remaining `skill-creation` and `taxonomy` directories in the tree are test-only or empty transitional shells, not live route ownership roots.
+- The old `skill-creation` and `taxonomy` ownership paths are no longer present in the active tree and should not be treated as live route ownership roots.
 
 Why this still matters:
 
@@ -148,7 +148,7 @@ Evidence:
 
 - Real runtime chat state lives in `src/frontend/src/features/chat/stores/chatStore.ts`.
 - The canonical runtime flow is `src/frontend/src/features/rlm-workspace/useBackendChatRuntime.ts`.
-- The old `skill-creation` runtime ownership path is no longer active; only test-only `app/pages/skill-creation/__tests__/` remains, and `src/frontend/src/lib/skill-creation/simulation/` is currently empty.
+- The old `skill-creation` runtime ownership path is no longer active and has been removed from the active tree.
 
 Why this matters:
 
@@ -157,7 +157,7 @@ Why this matters:
 Recommendation:
 
 1. Keep the backend-driven `RLM Workspace` flow as the only live runtime path.
-2. Remove empty simulation/taxonomy shells in a dedicated cleanup pass once the branch is checkpointed.
+2. Keep the tree aligned with the ownership model by deleting or avoiding reintroduction of legacy simulation/taxonomy shells.
 3. Keep Zustand limited to ephemeral client state:
    - streaming session state
    - artifact canvas/UI state
@@ -182,7 +182,7 @@ Recommendation:
    - `lib/rlm-api/` for transport and shared backend contract utilities
    - `components/ui/` only for reusable primitives
 2. Keep route files thin and domain composition-heavy.
-3. Delete or archive the remaining empty/test-only legacy directories so the filesystem matches the current architecture story.
+3. Keep the filesystem aligned with the current architecture story and avoid reintroducing deleted legacy directories.
 
 ### 4. shadcn and Tailwind are already present; the real opportunity is consistency
 
