@@ -269,14 +269,6 @@ export function ArtifactGraph({
       const source = nodeIdByStepId.get(previous.id);
       const target = nodeIdByStepId.get(current.id);
       if (!source || !target || source === target) continue;
-      const previousLane = deriveLane(previous).key;
-      const currentLane = deriveLane(current).key;
-      const shouldShowChronoEdge =
-        previousLane === currentLane ||
-        previous.id === activeStepId ||
-        current.id === activeStepId;
-      if (!shouldShowChronoEdge) continue;
-
       const elapsedLabel = formatElapsedLabel(
         current.timestamp - previous.timestamp,
       );

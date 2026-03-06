@@ -133,8 +133,12 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
   await expect(page.getByText("2.0s", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-  await expect(page.getByText(TAIL_FRAGMENT, { exact: false })).toBeVisible();
+  await expect(
+    page.getByRole("tabpanel").getByText(TAIL_FRAGMENT, { exact: false }).first(),
+  ).toBeVisible();
 
   await page.getByRole("tab", { name: "Preview", exact: true }).click();
-  await expect(page.getByText(TAIL_FRAGMENT, { exact: false })).toBeVisible();
+  await expect(
+    page.getByRole("tabpanel").getByText(TAIL_FRAGMENT, { exact: false }).first(),
+  ).toBeVisible();
 });
