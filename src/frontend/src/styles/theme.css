@@ -4,6 +4,8 @@
  * - Define design tokens as CSS variables.
  * - Expose them to Tailwind through `@theme inline`.
  * - Keep component slot typography/theme rules colocated here for reuse.
+ * - Core light/dark semantic color values are aligned with OpenAI Apps SDK UI
+ *   foundations tokens: https://openai.github.io/apps-sdk-ui/?path=/docs/foundations-design-tokens--docs
  */
 /* @custom-variant dark is declared in tailwind.css */
 
@@ -29,56 +31,57 @@
 
   /* Font Family */
   --font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter,
-    system-ui, sans-serif;
+    "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Noto Sans", "Helvetica", "Arial",
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
   --font-family-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
+    ui-monospace, "SFMono-Regular", "SF Mono", "Menlo", "Monaco", "Consolas",
+    "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
 
   /* The default background color for the application. */
-  --background: rgba(255, 255, 255, 1);
+  --background: rgba(255, 255, 255, 1); /* gray-0 */
   /* The default color for elements or text that appears on top of the background. */
-  --foreground: rgba(13, 13, 13, 1);
+  --foreground: rgba(13, 13, 13, 1); /* gray-1000 */
   /* The background color for cards, modals, and other containers. */
-  --card: rgba(255, 255, 255, 1);
+  --card: rgba(255, 255, 255, 1); /* surface-elevated (light) */
   /* The default color for text or elements that appear on top of cards, modals and other background containers. */
-  --card-foreground: rgba(13, 13, 13, 1);
+  --card-foreground: rgba(13, 13, 13, 1); /* color-text */
   /* The background color for dropdowns and tooltips. */
-  --popover: rgba(255, 255, 255, 1);
+  --popover: rgba(255, 255, 255, 1); /* surface-elevated (light) */
   /* The default color for text or elements that appear on top of dropdowns and tooltips. */
-  --popover-foreground: rgba(13, 13, 13, 1);
+  --popover-foreground: rgba(13, 13, 13, 1); /* color-text */
   /* The primary color used for buttons, links, and other interactive elements. */
-  --primary: rgba(13, 13, 13, 1);
+  --primary: rgba(24, 24, 24, 1); /* primary solid (gray-900) */
   /* The default color for text or elements that appear on top of primary colored elements. */
-  --primary-foreground: rgba(255, 255, 255, 1);
+  --primary-foreground: rgba(255, 255, 255, 1); /* text-inverse */
   /* The secondary color used for secondary(but NOT-DESTRUCTIVE) buttons and interactive elements. */
-  --secondary: rgba(243, 243, 243, 1);
+  --secondary: rgba(237, 237, 237, 1); /* secondary soft (gray-100) */
   /* The default color for text or elements that appear on top of secondary colored elements. */
-  --secondary-foreground: rgba(13, 13, 13, 1);
+  --secondary-foreground: rgba(13, 13, 13, 1); /* color-text */
   /* The muted color used for less prominent elements, such as disabled buttons or disabled text. */
-  --muted: rgba(243, 243, 243, 1);
+  --muted: rgba(237, 237, 237, 1); /* secondary soft (gray-100) */
   /* The default color for text or elements that appear on top of muted colored elements. */
-  --muted-foreground: rgba(143, 143, 143, 1);
+  --muted-foreground: rgba(93, 93, 93, 1); /* text-secondary (gray-500) */
   /* The accent color used for highlights, links, and other interactive elements. */
-  --accent: rgba(2, 133, 255, 1);
+  --accent: rgba(2, 133, 255, 1); /* blue-400 */
   /* The default color for text or elements that appear on top of accent colored elements. */
   --accent-foreground: rgba(255, 255, 255, 1);
   /* The color used for background in destructive actions, such as delete buttons or error messages. */
-  --destructive: rgba(224, 46, 42, 1);
+  --destructive: rgba(224, 46, 42, 1); /* red-500 */
   /* The default color for text or elements that appear on top of destructive colored elements. */
   --destructive-foreground: rgba(255, 255, 255, 1);
   /* The default border color for elements such as inputs, buttons, and other containers. */
-  --border: rgba(13, 13, 13, 0.1);
+  --border: rgba(13, 13, 13, 0.1); /* alpha-10 */
   /* A subtler border color for dividers, nested containers, and low-emphasis edges. */
-  --border-subtle: rgba(13, 13, 13, 0.05);
+  --border-subtle: rgba(13, 13, 13, 0.05); /* alpha-05 */
   /* A stronger border color for prominent separators, active inputs, and high-emphasis edges. */
-  --border-strong: rgba(13, 13, 13, 0.15);
+  --border-strong: rgba(13, 13, 13, 0.15); /* alpha-15 */
   /* The default background color for input fields once the text has been filled. Should be either transparent or match the input-background. */
   --input: rgba(255, 255, 255, 1);
   /* The default background color for input fields, text areas, and other input elements. */
   --input-background: rgba(255, 255, 255, 1);
   /* The color for focus rings, outlines, and other focus indicators. */
-  --ring: rgba(13, 13, 13, 1);
+  --ring: rgba(1, 105, 204, 1); /* ring (blue-500) */
   /* Shadow for small elevations, such as cards or modals. */
   --elevation-sm: 0px 4px 16px 0px rgba(0, 0, 0, 0.05);
   /* Shadow for medium elevations, such as hovered cards. */
@@ -88,44 +91,53 @@
     0px 8px 28px 0px rgba(0, 0, 0, 0.12), 0px 2px 8px 0px rgba(0, 0, 0, 0.06);
 
   /* Elevated surface backgrounds */
-  --bg-elevated-primary: rgba(248, 248, 248, 1);
+  --bg-elevated-primary: rgba(255, 255, 255, 1); /* surface-elevated (light) */
 
   /* The color for chart elements, such as a bar or line in a chart. */
-  --chart-1: rgba(2, 133, 255, 1);
+  --chart-1: rgba(2, 133, 255, 1); /* blue-400 */
   /* The color for another chart element, such as a bar or line in a chart. */
-  --chart-2: rgba(224, 76, 145, 1);
+  --chart-2: rgba(146, 79, 247, 1); /* purple-400 */
   /* The color for another chart element, such as a bar or line in a chart. */
-  --chart-3: rgba(0, 162, 64, 1);
+  --chart-3: rgba(4, 184, 76, 1); /* green-400 */
   /* The color for another chart element, such as a bar or line in a chart. */
-  --chart-4: rgba(226, 85, 7, 1);
+  --chart-4: rgba(251, 106, 34, 1); /* orange-400 */
   /* The color for another chart element, such as a bar or line in a chart. */
-  --chart-5: rgba(224, 172, 0, 1);
+  --chart-5: rgba(255, 195, 0, 1); /* yellow-400 */
   /* The default border radius for elements such as buttons, cards, and other containers. */
-  --radius: 8px;
+  --radius: 10px;
   /* The border radius for button elements. */
   --radius-button: 999px;
   /* The border radius for card elements. */
-  --radius-card: 24px;
+  --radius-card: 14px;
   /* The border radius for large card elements (suggestion cards, etc.). */
-  --radius-card-lg: 28px;
+  --radius-card-lg: 16px;
   /* The border radius for hero/prominent surfaces (hero images, composers). */
-  --radius-hero: 32px;
+  --radius-hero: 18px;
+
+  /* Execution trace palette */
+  --trace-llm: rgba(93, 93, 93, 1); /* gray-500 */
+  --trace-repl: rgba(251, 106, 34, 1); /* orange-400 */
+  --trace-tool: rgba(146, 79, 247, 1); /* purple-400 */
+  --trace-memory: rgba(4, 184, 76, 1); /* green-400 */
+  --trace-output: rgba(2, 133, 255, 1); /* blue-400 */
+  --trace-edge: rgba(2, 133, 255, 0.56);
+  --trace-edge-secondary: rgba(93, 93, 93, 0.48);
   /* The background color for sidebars, navigation menus, and other persistent elements. */
-  --sidebar: rgba(249, 249, 249, 1);
+  --sidebar: rgba(249, 249, 249, 1); /* surface-secondary (gray-50) */
   /* The default color for text or elements that appear on top of sidebars, navigation menus, and other persistent elements. */
-  --sidebar-foreground: rgba(13, 13, 13, 1);
+  --sidebar-foreground: rgba(13, 13, 13, 1); /* color-text */
   /* The primary color used for buttons, links, and other interactive elements in sidebars and navigation menus. */
-  --sidebar-primary: rgba(13, 13, 13, 1);
+  --sidebar-primary: rgba(24, 24, 24, 1); /* primary solid */
   /* The default color for text or elements that appear on top of primary colored elements in sidebars and navigation menus. */
   --sidebar-primary-foreground: rgba(255, 255, 255, 1);
   /* The accent color used for highlights, links, and other interactive elements in sidebars and navigation menus. */
-  --sidebar-accent: rgba(2, 133, 255, 1);
+  --sidebar-accent: rgba(2, 133, 255, 1); /* blue-400 */
   /* The default color for text or elements that appear on top of accent colored elements in sidebars and navigation menus. */
   --sidebar-accent-foreground: rgba(255, 255, 255, 1);
   /* The default border color for elements in sidebars and navigation menus. */
-  --sidebar-border: rgba(13, 13, 13, 0.1);
+  --sidebar-border: rgba(13, 13, 13, 0.1); /* alpha-10 */
   /* The default color for focus rings, outlines, and other focus indicators in sidebars and navigation menus. */
-  --sidebar-ring: rgba(13, 13, 13, 1);
+  --sidebar-ring: rgba(1, 105, 204, 1); /* blue-500 */
 
   /* Toggle (iOS 26 Liquid Glass) */
   --toggle-active: rgba(48, 209, 88, 1);
@@ -170,50 +182,50 @@
 }
 
 .dark {
-  --background: rgba(13, 13, 13, 1);
-  --foreground: rgba(255, 255, 255, 1);
-  --card: rgba(20, 20, 20, 1);
+  --background: rgba(33, 33, 33, 1); /* surface (gray-200 dark) */
+  --foreground: rgba(255, 255, 255, 1); /* color-text dark */
+  --card: rgba(48, 48, 48, 1); /* surface-elevated (gray-300 dark) */
   --card-foreground: rgba(255, 255, 255, 1);
-  --popover: rgba(20, 20, 20, 1);
+  --popover: rgba(48, 48, 48, 1); /* surface-elevated (gray-300 dark) */
   --popover-foreground: rgba(255, 255, 255, 1);
-  --primary: rgba(255, 255, 255, 1);
-  --primary-foreground: rgba(13, 13, 13, 1);
-  --secondary: rgba(40, 40, 40, 1);
+  --primary: rgba(19, 19, 19, 1); /* primary solid (gray-950 dark) */
+  --primary-foreground: rgba(13, 13, 13, 1); /* text-inverse dark */
+  --secondary: rgba(48, 48, 48, 1); /* secondary soft (gray-300 dark) */
   --secondary-foreground: rgba(255, 255, 255, 1);
-  --muted: rgba(40, 40, 40, 1);
-  --muted-foreground: rgba(143, 143, 143, 1);
-  --accent: rgba(2, 133, 255, 1);
+  --muted: rgba(48, 48, 48, 1); /* secondary soft (gray-300 dark) */
+  --muted-foreground: rgba(175, 175, 175, 1); /* text-secondary dark */
+  --accent: rgba(2, 133, 255, 1); /* blue-400 */
   --accent-foreground: rgba(255, 255, 255, 1);
-  --destructive: rgba(224, 46, 42, 1);
+  --destructive: rgba(224, 46, 42, 1); /* red-500 */
   --destructive-foreground: rgba(255, 255, 255, 1);
-  --border: rgba(255, 255, 255, 0.1);
+  --border: rgba(255, 255, 255, 0.12); /* alpha-12 */
   /* A subtler border color for dividers, nested containers, and low-emphasis edges — dark mode. */
-  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-subtle: rgba(255, 255, 255, 0.06);
   /* A stronger border color for prominent separators, active inputs, and high-emphasis edges — dark mode. */
-  --border-strong: rgba(255, 255, 255, 0.15);
-  --input: rgba(20, 20, 20, 1);
-  --input-background: rgba(20, 20, 20, 1);
-  --ring: rgba(255, 255, 255, 1);
+  --border-strong: rgba(255, 255, 255, 0.2); /* alpha-20 */
+  --input: rgba(255, 255, 255, 0.12); /* primary soft alpha (dark) */
+  --input-background: rgba(255, 255, 255, 0.12);
+  --ring: rgba(2, 133, 255, 1); /* ring (blue-400 dark) */
 
   /* Elevated surface backgrounds */
-  --bg-elevated-primary: rgba(28, 28, 30, 1);
+  --bg-elevated-primary: rgba(48, 48, 48, 1); /* surface-elevated dark */
   /* Shadow for prominent interactive surfaces — dark mode */
   --shadow-200-stronger:
     0px 8px 28px 0px rgba(0, 0, 0, 0.36), 0px 2px 8px 0px rgba(0, 0, 0, 0.24);
 
-  --chart-1: rgba(2, 133, 255, 1);
-  --chart-2: rgba(224, 76, 145, 1);
-  --chart-3: rgba(0, 162, 64, 1);
-  --chart-4: rgba(226, 85, 7, 1);
-  --chart-5: rgba(224, 172, 0, 1);
-  --sidebar: rgba(10, 10, 10, 1);
+  --chart-1: rgba(2, 133, 255, 1); /* blue-400 */
+  --chart-2: rgba(146, 79, 247, 1); /* purple-400 */
+  --chart-3: rgba(4, 184, 76, 1); /* green-400 */
+  --chart-4: rgba(251, 106, 34, 1); /* orange-400 */
+  --chart-5: rgba(255, 195, 0, 1); /* yellow-400 */
+  --sidebar: rgba(24, 24, 24, 1); /* surface-secondary dark */
   --sidebar-foreground: rgba(255, 255, 255, 1);
-  --sidebar-primary: rgba(255, 255, 255, 1);
+  --sidebar-primary: rgba(19, 19, 19, 1);
   --sidebar-primary-foreground: rgba(13, 13, 13, 1);
   --sidebar-accent: rgba(2, 133, 255, 1);
   --sidebar-accent-foreground: rgba(255, 255, 255, 1);
-  --sidebar-border: rgba(255, 255, 255, 0.1);
-  --sidebar-ring: rgba(255, 255, 255, 1);
+  --sidebar-border: rgba(255, 255, 255, 0.12);
+  --sidebar-ring: rgba(2, 133, 255, 1);
 
   /* Toggle (iOS 26 Liquid Glass) */
   --toggle-active: rgba(48, 209, 88, 1);
@@ -226,17 +238,26 @@
   --toggle-glass-depth: rgba(0, 0, 0, 0.1);
 
   /* iOS 26 Liquid Glass — dark mode */
-  --glass-tab-bg: rgba(30, 30, 30, 0.72);
+  --glass-tab-bg: rgba(24, 24, 26, 0.72);
   --glass-tab-border: rgba(255, 255, 255, 0.08);
   --glass-tab-shadow:
     0 2px 20px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
   --glass-tab-highlight: rgba(255, 255, 255, 0.06);
-  --glass-nav-bg: rgba(13, 13, 13, 0.78);
+  --glass-nav-bg: rgba(8, 8, 9, 0.8);
   --glass-nav-border: rgba(255, 255, 255, 0.06);
-  --glass-sheet-bg: rgba(28, 28, 30, 0.88);
-  --glass-sheet-border: rgba(255, 255, 255, 0.08);
+  --glass-sheet-bg: rgba(16, 16, 18, 0.88);
+  --glass-sheet-border: rgba(255, 255, 255, 0.1);
   --glass-sheet-handle: rgba(255, 255, 255, 0.24);
-  --glass-overlay: rgba(0, 0, 0, 0.45);
+  --glass-overlay: rgba(0, 0, 0, 0.52);
+
+  /* Execution trace palette */
+  --trace-llm: rgba(175, 175, 175, 1);
+  --trace-repl: rgba(251, 106, 34, 1);
+  --trace-tool: rgba(146, 79, 247, 1);
+  --trace-memory: rgba(4, 184, 76, 1);
+  --trace-output: rgba(2, 133, 255, 1);
+  --trace-edge: rgba(2, 133, 255, 0.62);
+  --trace-edge-secondary: rgba(175, 175, 175, 0.5);
 }
 
 @theme inline {
@@ -300,6 +321,7 @@ body {
   font-family: var(--font-family);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
 }
 
 /* ── Global Touch & Interaction ──────────────────────────────── */
@@ -757,6 +779,31 @@ li {
   font-size: var(--text-caption);
   font-weight: var(--font-weight-regular);
   line-height: 1.4;
+}
+
+/* ── React Flow Minimal Skin ─────────────────────────────────────── */
+.artifact-graph-flow .react-flow__controls {
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.artifact-graph-flow .react-flow__controls-button {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--muted-foreground);
+}
+
+.artifact-graph-flow .react-flow__controls-button:hover {
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
+  color: var(--foreground);
+}
+
+.artifact-graph-flow .react-flow__minimap {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--card) 90%, transparent);
 }
 
 /* ── Radio Option Card ─────────────────────────────────────────── */

@@ -55,7 +55,7 @@ vi.mock("@/features/artifacts/CodeArtifact", () => ({
   CodeArtifact: () => <div>CodeArtifact</div>,
 }));
 
-vi.mock("@/features/artifacts/components/ArtifactCanvas", () => ({
+vi.mock("@/components/domain/artifacts/ArtifactCanvas", () => ({
   ArtifactCanvas: () => <div>ArtifactCanvas</div>,
 }));
 

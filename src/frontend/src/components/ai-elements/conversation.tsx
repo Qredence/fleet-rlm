@@ -62,14 +62,16 @@ function ConversationContent({
   ...props
 }: ConversationContentProps) {
   return (
-    <div {...props} className={cn("px-4 py-6 md:px-6 md:py-8", className)}>
-      <div className="mx-auto w-full max-w-[800px] space-y-6">{children}</div>
+    <div {...props} className={cn("px-3 py-4 md:px-5 md:py-6", className)}>
+      <div className="mx-auto w-full max-w-[800px] space-y-5 md:space-y-6">
+        {children}
+      </div>
     </div>
   );
 }
 
 interface ConversationEmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
-  title: string;
+  title?: string;
   description?: string;
   icon?: ReactNode;
   children?: ReactNode;
@@ -83,6 +85,13 @@ function ConversationEmptyState({
   className,
   ...props
 }: ConversationEmptyStateProps) {
+  const resolvedIcon =
+    icon === undefined ? (
+      <MessageSquare className="size-10" aria-hidden />
+    ) : (
+      icon
+    );
+
   return (
     <div
       {...props}
@@ -92,10 +101,12 @@ function ConversationEmptyState({
       )}
       data-slot="conversation-empty-state"
     >
-      <div className="mb-4 text-muted-foreground">
-        {icon ?? <MessageSquare className="size-10" aria-hidden />}
-      </div>
-      <h3 className="text-xl font-semibold text-foreground">{title}</h3>
+      {resolvedIcon ? (
+        <div className="mb-4 text-muted-foreground">{resolvedIcon}</div>
+      ) : null}
+      {title ? (
+        <h3 className="text-xl font-semibold text-foreground">{title}</h3>
+      ) : null}
       {description ? (
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
           {description}
@@ -120,7 +131,7 @@ function ConversationScrollButton({
       size="icon"
       variant="secondary"
       className={cn(
-        "absolute bottom-3 right-3 z-20 rounded-full shadow-md",
+        "absolute bottom-3 right-3 z-20 rounded-full border border-border-subtle shadow-none",
         className,
       )}
       onClick={ctx?.scrollToBottom}

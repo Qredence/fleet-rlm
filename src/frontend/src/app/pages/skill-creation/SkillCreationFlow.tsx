@@ -7,7 +7,7 @@ import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
-import { ConversationHistory } from "@/features/chat/ConversationHistory";
+import { ConversationHistory } from "@/screens/chat/ConversationHistory";
 import { ChatMessageList } from "@/app/pages/skill-creation/ChatMessageList";
 import { useBackendChatRuntime } from "@/app/pages/skill-creation/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
@@ -95,7 +95,7 @@ export function SkillCreationFlow() {
 
   // ── Auto-save on session change ──────────────────────────────────
   // When sessionId increments (newSession() called), save the current
-  // conversation before it gets wiped by useChatSimulation's reset.
+  // conversation before the backend runtime resets local chat state.
   const prevSessionIdRef = useRef(sessionId);
   const messagesRef = useRef(messages);
   const phaseRef = useRef(phase);
@@ -170,6 +170,8 @@ export function SkillCreationFlow() {
     runtimeStatus.data != null &&
     runtimeStatus.data.ready === false &&
     runtimeGuidance.length > 0;
+  const composerDisabled = isTyping || !backendEnabled;
+  const isReceivingResponse = backendEnabled && isTyping;
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
@@ -202,11 +204,11 @@ export function SkillCreationFlow() {
       />
 
       {/* Input composer */}
-      <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 pt-6 md:px-6 md:pb-10">
-        <div className="mx-auto w-full max-w-[800px]">
+      <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 pt-6 md:px-6">
+        <div className="mx-auto w-full max-w-200">
           <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
-              <div className="rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-foreground">
                 <div>
                   <span className="font-medium">Runtime warning:</span>{" "}
                   {runtimeGuidance[0]}
@@ -214,7 +216,7 @@ export function SkillCreationFlow() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="mt-3 rounded-lg border-amber-400/70 bg-amber-100 text-amber-950 hover:bg-amber-200"
+                  className="mt-3 rounded-lg border-amber-500/35 bg-background/70 text-foreground hover:bg-amber-500/15"
                   onClick={handleOpenRuntimeSettings}
                 >
                   Open Runtime Settings
@@ -225,6 +227,7 @@ export function SkillCreationFlow() {
               value={inputValue}
               onChange={setInputValue}
               onSend={handleSubmit}
+              attachmentsEnabled={false}
               placeholder={
                 !backendEnabled
                   ? "Configure FastAPI backend to start chatting\u2026"
@@ -232,7 +235,8 @@ export function SkillCreationFlow() {
                     ? "Ask anything\u2026"
                     : "Ask a follow-up\u2026"
               }
-              isLoading={isTyping || !backendEnabled}
+              isLoading={composerDisabled}
+              isReceiving={isReceivingResponse}
               selectedAgent={selectedAgent}
               onAgentChange={setSelectedAgent}
               thinkEnabled={thinkEnabled}

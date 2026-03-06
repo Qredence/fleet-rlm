@@ -1,5 +1,13 @@
-import { X, Brain, PanelRight } from "lucide-react";
-import { useCallback } from "react";
+import {
+  X,
+  Brain,
+  PanelRight,
+  GitBranch,
+  TerminalSquare,
+  ListTree,
+  FileCode2,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { typo } from "@/lib/config/typo";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
@@ -13,12 +21,19 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 import {
+  AnimatedTabs,
+  type AnimatedTabItem,
+} from "@/components/ui/animated-tabs";
+import {
   CanvasSwitcher,
   type CanvasMode,
 } from "@/features/artifacts/CanvasSwitcher";
-import { CodeArtifact } from "@/features/artifacts/CodeArtifact";
 import { FileDetail } from "@/features/artifacts/FileDetail";
-import { ArtifactCanvas } from "@/features/artifacts/components/ArtifactCanvas";
+import {
+  ArtifactCanvas,
+  type ArtifactTab,
+} from "@/components/domain/artifacts/ArtifactCanvas";
+import { useArtifactStore } from "@/stores/artifactStore";
 import {
   isRlmCoreEnabled,
   isSectionSupported,
@@ -103,28 +118,78 @@ function getHeaderIcon(mode: CanvasMode) {
 }
 
 export function BuilderPanel() {
-  const { activeNav, creationPhase, closeCanvas, selectedFileNode } =
-    useNavigation();
+  const { activeNav, closeCanvas, selectedFileNode } = useNavigation();
   const { navigateTo } = useAppNavigate();
   const isMobile = useIsMobile();
+  const steps = useArtifactStore((state) => state.steps);
+
+  const [activeArtifactTab, setActiveArtifactTab] =
+    useState<ArtifactTab>("graph");
+  const [hasUserSelectedArtifactTab, setHasUserSelectedArtifactTab] =
+    useState(false);
+
+  const artifactSummary = useMemo(() => {
+    const counts = steps.reduce(
+      (acc, step) => {
+        acc[step.type] += 1;
+        return acc;
+      },
+      { llm: 0, repl: 0, tool: 0, memory: 0, output: 0 },
+    );
+
+    return {
+      stepCount: steps.length,
+      hasTimeline: steps.length > 0,
+      hasRepl: counts.repl > 0 || counts.tool > 0,
+      hasPreview: counts.output > 0,
+    };
+  }, [steps]);
+
+  const artifactTabs = useMemo<AnimatedTabItem<ArtifactTab>[]>(
+    () => [
+      {
+        id: "graph",
+        label: "Graph",
+        icon: <GitBranch className="size-3.5" />,
+      },
+      {
+        id: "repl",
+        label: "REPL",
+        icon: <TerminalSquare className="size-3.5" />,
+        disabled: !artifactSummary.hasRepl,
+      },
+      {
+        id: "timeline",
+        label: "Timeline",
+        icon: <ListTree className="size-3.5" />,
+        disabled: !artifactSummary.hasTimeline,
+      },
+      {
+        id: "preview",
+        label: "Preview",
+        icon: <FileCode2 className="size-3.5" />,
+        disabled: !artifactSummary.hasPreview,
+      },
+    ],
+    [
+      artifactSummary.hasPreview,
+      artifactSummary.hasRepl,
+      artifactSummary.hasTimeline,
+    ],
+  );
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
 
-  const showCreation =
-    activeNav === "new" && creationPhase !== "idle" && !isUnsupportedNav;
-  const showCodeArtifact =
-    activeNav === "new" && !showCreation && !isUnsupportedNav;
+  const showCreation = activeNav === "new" && !isUnsupportedNav;
   const showFileDetail =
     activeNav === "taxonomy" && !!selectedFileNode && !isUnsupportedNav;
 
   const canvasMode: CanvasMode = showCreation
     ? "creation"
-    : showCodeArtifact
-      ? "code-artifact"
-      : showFileDetail
-        ? "file-detail"
-        : "empty";
+    : showFileDetail
+      ? "file-detail"
+      : "empty";
 
   const handleSelectView = useCallback(
     (mode: CanvasMode) => {
@@ -148,6 +213,44 @@ export function BuilderPanel() {
     [navigateTo],
   );
 
+  useEffect(() => {
+    if (!showCreation) {
+      setActiveArtifactTab("graph");
+      setHasUserSelectedArtifactTab(false);
+      return;
+    }
+
+    if (!hasUserSelectedArtifactTab) {
+      setActiveArtifactTab(
+        artifactSummary.stepCount > 0 ? "timeline" : "graph",
+      );
+    }
+  }, [artifactSummary.stepCount, hasUserSelectedArtifactTab, showCreation]);
+
+  useEffect(() => {
+    if (!showCreation) return;
+
+    if (activeArtifactTab === "timeline" && !artifactSummary.hasTimeline) {
+      setActiveArtifactTab("graph");
+      return;
+    }
+
+    if (activeArtifactTab === "repl" && !artifactSummary.hasRepl) {
+      setActiveArtifactTab(artifactSummary.hasTimeline ? "timeline" : "graph");
+      return;
+    }
+
+    if (activeArtifactTab === "preview" && !artifactSummary.hasPreview) {
+      setActiveArtifactTab(artifactSummary.hasTimeline ? "timeline" : "graph");
+    }
+  }, [
+    activeArtifactTab,
+    artifactSummary.hasPreview,
+    artifactSummary.hasRepl,
+    artifactSummary.hasTimeline,
+    showCreation,
+  ]);
+
   return (
     <div className="flex flex-col h-full bg-card">
       <div
@@ -158,15 +261,27 @@ export function BuilderPanel() {
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <CanvasSwitcher
-              canvasMode={canvasMode}
-              headerIcon={getHeaderIcon(canvasMode)}
-              headerLabel={getHeaderLabel(canvasMode)}
-              skills={[]}
-              selectedSkill={null}
-              onSelectView={handleSelectView}
-              onSelectSkill={() => {}}
-            />
+            {showCreation ? (
+              <AnimatedTabs
+                value={activeArtifactTab}
+                tabs={artifactTabs}
+                onValueChange={(value: ArtifactTab) => {
+                  setHasUserSelectedArtifactTab(true);
+                  setActiveArtifactTab(value);
+                }}
+                className="min-w-0"
+              />
+            ) : (
+              <CanvasSwitcher
+                canvasMode={canvasMode}
+                headerIcon={getHeaderIcon(canvasMode)}
+                headerLabel={getHeaderLabel(canvasMode)}
+                skills={[]}
+                selectedSkill={null}
+                onSelectView={handleSelectView}
+                onSelectSkill={() => {}}
+              />
+            )}
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -202,11 +317,11 @@ export function BuilderPanel() {
           </ErrorBoundary>
         ) : showCreation ? (
           <ErrorBoundary name="Artifact Canvas">
-            <ArtifactCanvas />
-          </ErrorBoundary>
-        ) : showCodeArtifact ? (
-          <ErrorBoundary name="Code Artifact">
-            <CodeArtifact />
+            <ArtifactCanvas
+              activeTab={activeArtifactTab}
+              onTabChange={setActiveArtifactTab}
+              showTabs={false}
+            />
           </ErrorBoundary>
         ) : showFileDetail && selectedFileNode ? (
           <ErrorBoundary name="File Detail">

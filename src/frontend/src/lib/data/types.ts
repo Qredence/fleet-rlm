@@ -68,6 +68,11 @@ export interface ChatMessage {
     | "rlm_executing"
     | "memory_update";
   content: string;
+  /**
+   * Optional trace provenance tag used to differentiate primary live rows from
+   * fallback trajectory rows and secondary summaries.
+   */
+  traceSource?: "live" | "trajectory" | "summary";
   phase?: 1 | 2 | 3;
   /** Structured UI render parts for richer event rendering (AI Elements-style). */
   renderParts?: ChatRenderPart[];
@@ -261,6 +266,9 @@ export type ChatRenderPart =
       kind: "status_note";
       text: string;
       tone?: "neutral" | "success" | "warning" | "error";
+      toolName?: string;
+      stepIndex?: number;
+      runtimeContext?: RuntimeContext;
     };
 
 // ── Plan Steps (Queue component in Plan tab) ────────────────────────

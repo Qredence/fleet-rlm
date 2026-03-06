@@ -6,7 +6,11 @@
  * sections can be split without exposing blank screens on transient
  * chunk-load failures.
  */
-import { createBrowserRouter, redirect, type LoaderFunctionArgs } from "react-router";
+import {
+  createBrowserRouter,
+  redirect,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { RootLayout, RootHydrateFallback } from "@/app/layout/RootLayout";
 import { RouteErrorPage } from "@/app/pages/RouteErrorPage";
 import { LazyRouteComponents } from "@/lib/perf/routePreload";

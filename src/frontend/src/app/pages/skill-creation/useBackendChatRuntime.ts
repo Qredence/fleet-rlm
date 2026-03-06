@@ -2,16 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useNavigation } from "@/hooks/useNavigation";
-import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import type { Conversation } from "@/hooks/useChatHistory";
+import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/app/pages/skill-creation/backendArtifactEventAdapter";
 import type {
-  ChatSimulation,
+  ChatRuntime,
   ChatSubmitOptions,
-} from "@/app/pages/skill-creation/useChatSimulation";
+} from "@/app/pages/skill-creation/runtime-types";
 import { useArtifactStore } from "@/stores/artifactStore";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import { useChatStore } from "@/screens/chat/stores/chatStore";
 import {
   sendCommandOverWs,
   rlmApiConfig,
@@ -90,7 +90,7 @@ function revertOptimisticHitlResolution(
   });
 }
 
-export function useBackendChatRuntime(): ChatSimulation {
+export function useBackendChatRuntime(): ChatRuntime {
   const {
     setCreationPhase,
     sessionId: navSessionId,

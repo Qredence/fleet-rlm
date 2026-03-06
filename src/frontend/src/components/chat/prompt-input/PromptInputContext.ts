@@ -5,6 +5,7 @@ export interface PromptInputContextValue {
   onChange: (value: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
+  isReceiving: boolean;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
 }
 

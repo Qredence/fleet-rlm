@@ -32,6 +32,15 @@ Generated file policy:
 - Sole backend layer: `src/lib/rlm-api/*`
 - Legacy layer `src/lib/api/*` is removed and must not be reintroduced.
 
+## Canonical Source Layout
+- Route entrypoints and shells live in `src/app/*`.
+- Reusable domain UI belongs in `src/features/*`.
+- Shared presentational primitives live in `src/components/*`.
+- Backend/data adapters live in `src/lib/*`.
+- Cross-cutting React hooks live in `src/hooks/*`; Zustand stores live in `src/stores/*`.
+- `src/screens/*` is not a general-purpose home for new work. The remaining chat files there are transitional and should only be touched when continuing that refactor.
+- Remove empty folders and dead placeholder modules instead of leaving parallel directory schemes behind.
+
 ### API Layer Ownership
 - Use `src/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/api/v1/sessions/state`, `/api/v1/runtime/*`, `/api/v1/ws/chat`, `/api/v1/ws/execution`).
 - New frontend data work must map to existing FastAPI endpoints or be gated as unsupported in UI.

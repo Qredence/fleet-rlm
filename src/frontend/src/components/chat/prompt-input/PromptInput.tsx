@@ -8,6 +8,7 @@ interface PromptInputProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   isLoading?: boolean;
+  isReceiving?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -17,6 +18,7 @@ export function PromptInput({
   onChange,
   onSubmit,
   isLoading = false,
+  isReceiving = false,
   className,
   children,
 }: PromptInputProps) {
@@ -24,7 +26,14 @@ export function PromptInput({
 
   return (
     <PromptInputContext.Provider
-      value={{ value, onChange, onSubmit, isLoading, textareaRef }}
+      value={{
+        value,
+        onChange,
+        onSubmit,
+        isLoading,
+        isReceiving,
+        textareaRef,
+      }}
     >
       <div className={cn("flex flex-col", className)}>{children}</div>
     </PromptInputContext.Provider>

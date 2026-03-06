@@ -56,8 +56,7 @@ export function adaptTask(task: ApiTask | CamelCase<ApiTask>): Skill {
     tags: input.tags || [],
     dependencies: input.dependencies || [],
     taxonomyPath:
-      input.taxonomyPath ||
-      `/${input.domain}/${input.category}/${input.name}`,
+      input.taxonomyPath || `/${input.domain}/${input.category}/${input.name}`,
     usageCount: input.usageCount ?? 0,
     lastUsed: input.lastUsed || input.createdAt || new Date().toISOString(),
     qualityScore: input.qualityScore ?? 0,
@@ -66,11 +65,15 @@ export function adaptTask(task: ApiTask | CamelCase<ApiTask>): Skill {
   };
 }
 
-export function adaptTasks(tasks: Array<ApiTask | CamelCase<ApiTask>>): Skill[] {
+export function adaptTasks(
+  tasks: Array<ApiTask | CamelCase<ApiTask>>,
+): Skill[] {
   return tasks.map(adaptTask);
 }
 
-export function adaptTaxonomyNode(node: ApiTaxonomyNode | CamelCase<ApiTaxonomyNode>): TaxonomyNode {
+export function adaptTaxonomyNode(
+  node: ApiTaxonomyNode | CamelCase<ApiTaxonomyNode>,
+): TaxonomyNode {
   const input = keysToCamel<CamelCase<ApiTaxonomyNode>>(node);
   return {
     id: input.id,

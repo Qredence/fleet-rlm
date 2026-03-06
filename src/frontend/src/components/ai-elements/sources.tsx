@@ -37,7 +37,7 @@ function Sources({
       data-slot="sources"
       defaultOpen={defaultOpen}
       className={cn(
-        "rounded-lg border border-border-subtle bg-card",
+        "rounded-xl border border-border-subtle/80 bg-card/70",
         className,
       )}
       {...props}
@@ -54,12 +54,12 @@ function SourcesTrigger({
     <CollapsibleTrigger
       data-slot="sources-trigger"
       className={cn(
-        "group flex w-full items-center justify-between px-3 py-2 text-left",
+        "group flex w-full items-center justify-between px-2.5 py-2 text-left transition-colors hover:bg-muted/20",
         className,
       )}
       {...props}
     >
-      <span className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+      <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
         <Link2 className="size-3.5" aria-hidden="true" />
         Sources
         <span className="rounded-full border border-border-subtle px-1.5 py-0 text-[10px]">
@@ -81,7 +81,7 @@ function SourcesContent({
   return (
     <CollapsibleContent
       data-slot="sources-content"
-      className={cn("border-t border-border-subtle p-2", className)}
+      className={cn("border-t border-border-subtle/80 p-2", className)}
       {...props}
     />
   );
@@ -125,7 +125,7 @@ function Source({
       <div
         data-slot="source"
         className={cn(
-          "block rounded-md border border-border-subtle p-2",
+          "block rounded-md border border-border-subtle/80 p-2",
           className,
         )}
       >
@@ -141,7 +141,7 @@ function Source({
       target="_blank"
       rel="noopener noreferrer nofollow"
       className={cn(
-        "block rounded-md border border-border-subtle p-2 transition-colors hover:bg-muted/40",
+        "block rounded-md border border-border-subtle/80 p-2 transition-colors hover:bg-muted/30",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}

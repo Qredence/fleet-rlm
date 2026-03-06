@@ -69,7 +69,7 @@ function MessageActions({
   return (
     <div
       data-slot="message-actions"
-      className={cn("mt-2 flex items-center gap-2", className)}
+      className={cn("mt-1.5 flex items-center gap-2", className)}
       {...props}
     />
   );
@@ -93,7 +93,7 @@ function MessageAction({
       aria-label={label}
       title={props.title ?? label}
       className={cn(
-        "inline-flex items-center justify-center rounded-md border border-border-subtle bg-card p-1.5 text-muted-foreground hover:text-foreground hover:border-border-strong",
+        "inline-flex items-center justify-center rounded-md border border-border-subtle/80 bg-card/70 p-1.5 text-muted-foreground hover:text-foreground hover:border-border-strong",
         className,
       )}
       {...props}
