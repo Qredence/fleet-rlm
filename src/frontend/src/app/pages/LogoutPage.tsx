@@ -5,8 +5,7 @@
  * screen with a redirect back to login. This page lives outside the app
  * shell -- it doesn't depend on AuthProvider or NavigationProvider.
  *
- * In a real app this would clear tokens / session cookies; here it just
- * simulates the transition for demo purposes.
+ * Signs out of the browser session and clears local access tokens.
  */
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
@@ -17,6 +16,7 @@ import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { BrandMark } from "@/components/shared/BrandMark";
+import { logoutWithEntra } from "@/lib/auth/entra";
 
 type LogoutPhase = "signing-out" | "done";
 
@@ -30,10 +30,21 @@ function LogoutPage() {
     telemetry.capture("user_logged_out");
     telemetry.reset();
 
-    const timer = setTimeout(() => {
-      setPhase("done");
-    }, 1200);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    void logoutWithEntra()
+      .catch(() => undefined)
+      .then(() => {
+        if (cancelled) return;
+        timer = setTimeout(() => {
+          setPhase("done");
+        }, 500);
+      });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [telemetry]);
 
   return (
@@ -109,11 +120,11 @@ function LogoutPage() {
                   <ArrowRight className="size-4" />
                 </Button>
                 <Link
-                  to="/signup"
+                  to="/login"
                   className="inline-flex items-center justify-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
                   style={typo.caption}
                 >
-                  Don&rsquo;t have an account? Sign up
+                  Return to Microsoft sign-in
                 </Link>
               </div>
             </motion.div>

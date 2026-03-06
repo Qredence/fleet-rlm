@@ -80,18 +80,12 @@ function EmptyCanvas() {
 
 function navLabel(nav: string): string {
   switch (nav) {
-    case "skills":
-      return "Skills";
-    case "taxonomy":
+    case "volumes":
       return "Volumes";
-    case "memory":
-      return "Memory";
-    case "analytics":
-      return "Analytics";
     case "settings":
       return "Settings";
     default:
-      return "Chat";
+      return "RLM Workspace";
   }
 }
 
@@ -181,9 +175,9 @@ export function BuilderPanel() {
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
 
-  const showCreation = activeNav === "new" && !isUnsupportedNav;
+  const showCreation = activeNav === "workspace" && !isUnsupportedNav;
   const showFileDetail =
-    activeNav === "taxonomy" && !!selectedFileNode && !isUnsupportedNav;
+    activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
 
   const canvasMode: CanvasMode = showCreation
     ? "creation"
@@ -195,16 +189,16 @@ export function BuilderPanel() {
     (mode: CanvasMode) => {
       switch (mode) {
         case "taxonomy-graph":
-          navigateTo("taxonomy");
+          navigateTo("volumes");
           break;
         case "code-artifact":
-          navigateTo("new");
+          navigateTo("workspace");
           break;
         case "creation":
-          navigateTo("new");
+          navigateTo("workspace");
           break;
         case "file-detail":
-          navigateTo("taxonomy");
+          navigateTo("volumes");
           break;
         default:
           break;
@@ -311,8 +305,8 @@ export function BuilderPanel() {
         ) : !coreReady ? (
           <ErrorBoundary name="Mock Mode Active">
             <UnsupportedState
-              sectionLabel="Chat"
-              reason="FastAPI chat runtime is not available in mock mode. Disable VITE_MOCK_MODE to connect to the backend."
+              sectionLabel="RLM Workspace"
+              reason="The RLM Workspace requires a live FastAPI runtime. Disable VITE_MOCK_MODE to connect to the backend."
             />
           </ErrorBoundary>
         ) : showCreation ? (

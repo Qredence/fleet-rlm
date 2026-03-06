@@ -41,6 +41,7 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
   );
 
   await page.goto("/");
+  await page.waitForURL(/\/app\/workspace$/);
 
   await page.getByRole("button", { name: "View recent conversations" }).click();
   await page
@@ -49,6 +50,9 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
     })
     .click();
   await page.waitForLoadState("domcontentloaded");
+  await expect(
+    page.getByRole("button", { name: /side panel/i }).first(),
+  ).toBeVisible();
 
   const closeSidePanelButton = page.getByRole("button", {
     name: "Close side panel",

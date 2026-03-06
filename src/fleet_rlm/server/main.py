@@ -108,7 +108,7 @@ def _build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
         allow_debug_auth=cfg.allow_debug_auth,
         allow_query_auth_tokens=cfg.allow_query_auth_tokens,
         entra_jwks_url=cfg.entra_jwks_url,
-        entra_issuer=cfg.entra_issuer,
+        entra_issuer_template=cfg.entra_issuer_template,
         entra_audience=cfg.entra_audience,
     )
     state.db_manager = None

@@ -19,6 +19,7 @@ Authoritative contracts, interfaces, and implementation-facing facts.
 ## Internal Maps
 
 - [Codebase Map](codebase-map.md)
+- [Architecture Audit (2026-03-06)](architecture-audit-2026-03-06.md)
 
 ## Code Health
 

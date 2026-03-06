@@ -1,19 +1,16 @@
-"""Reusable DSPy module wrappers for ReAct long-context runtime tasks.
-
-This module provides canonical wrappers around ``dspy.RLM`` so tool handlers
-do not recreate RLM instances on every call.
-"""
+"""Registry-driven DSPy runtime modules for long-context operations."""
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 
 import dspy
 
 from .signatures import (
     AnalyzeLongDocument,
-    CodeChangePlan,
     ClarificationQuestionSignature,
+    CodeChangePlan,
     CoreMemoryUpdateProposal,
     ExtractFromLogs,
     GroundedAnswerWithCitations,
@@ -26,8 +23,38 @@ from .signatures import (
 )
 
 
-class AnalyzeLongDocumentModule(dspy.Module):
-    """Runtime wrapper for ``AnalyzeLongDocument`` RLM execution."""
+def create_runtime_rlm(
+    *,
+    signature: type[dspy.Signature],
+    interpreter: Any,
+    max_iterations: int,
+    max_llm_calls: int,
+    verbose: bool,
+) -> dspy.Module:
+    """Create a canonical RLM instance for a runtime signature."""
+
+    return dspy.RLM(
+        signature=signature,
+        interpreter=interpreter,
+        max_iterations=max_iterations,
+        max_llm_calls=max_llm_calls,
+        verbose=verbose,
+    )
+
+
+@dataclass(frozen=True)
+class RuntimeModuleDefinition:
+    """Registry entry for a runtime module."""
+
+    signature: type[dspy.Signature]
+    class_name: str
+    doc: str
+
+
+class _RuntimeSignatureModule(dspy.Module):
+    """Generic runtime wrapper that forwards keyword arguments into one RLM."""
+
+    signature_cls: type[dspy.Signature]
 
     def __init__(
         self,
@@ -38,313 +65,123 @@ class AnalyzeLongDocumentModule(dspy.Module):
         verbose: bool,
     ) -> None:
         super().__init__()
-        self._rlm = dspy.RLM(
-            signature=AnalyzeLongDocument,
+        self._rlm = create_runtime_rlm(
+            signature=self.signature_cls,
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
             verbose=verbose,
         )
 
-    def forward(self, *, document: str, query: str) -> dspy.Prediction:
-        return self._rlm(document=document, query=query)
+    def forward(self, **kwargs: Any) -> dspy.Prediction:
+        return self._rlm(**kwargs)
 
 
-class SummarizeLongDocumentModule(dspy.Module):
-    """Runtime wrapper for ``SummarizeLongDocument`` RLM execution."""
+RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
+    "analyze_long_document": RuntimeModuleDefinition(
+        signature=AnalyzeLongDocument,
+        class_name="AnalyzeLongDocumentModule",
+        doc="Runtime wrapper for ``AnalyzeLongDocument`` RLM execution.",
+    ),
+    "summarize_long_document": RuntimeModuleDefinition(
+        signature=SummarizeLongDocument,
+        class_name="SummarizeLongDocumentModule",
+        doc="Runtime wrapper for ``SummarizeLongDocument`` RLM execution.",
+    ),
+    "extract_from_logs": RuntimeModuleDefinition(
+        signature=ExtractFromLogs,
+        class_name="ExtractFromLogsModule",
+        doc="Runtime wrapper for ``ExtractFromLogs`` RLM execution.",
+    ),
+    "grounded_answer": RuntimeModuleDefinition(
+        signature=GroundedAnswerWithCitations,
+        class_name="GroundedAnswerWithCitationsModule",
+        doc="Runtime wrapper for ``GroundedAnswerWithCitations`` RLM execution.",
+    ),
+    "triage_incident_logs": RuntimeModuleDefinition(
+        signature=IncidentTriageFromLogs,
+        class_name="IncidentTriageFromLogsModule",
+        doc="Runtime wrapper for ``IncidentTriageFromLogs`` RLM execution.",
+    ),
+    "plan_code_change": RuntimeModuleDefinition(
+        signature=CodeChangePlan,
+        class_name="CodeChangePlanModule",
+        doc="Runtime wrapper for ``CodeChangePlan`` RLM execution.",
+    ),
+    "propose_core_memory_update": RuntimeModuleDefinition(
+        signature=CoreMemoryUpdateProposal,
+        class_name="CoreMemoryUpdateProposalModule",
+        doc="Runtime wrapper for ``CoreMemoryUpdateProposal`` RLM execution.",
+    ),
+    "memory_tree": RuntimeModuleDefinition(
+        signature=VolumeFileTreeSignature,
+        class_name="VolumeFileTreeModule",
+        doc="Runtime wrapper for ``VolumeFileTreeSignature`` RLM execution.",
+    ),
+    "memory_action_intent": RuntimeModuleDefinition(
+        signature=MemoryActionIntentSignature,
+        class_name="MemoryActionIntentModule",
+        doc="Runtime wrapper for ``MemoryActionIntentSignature`` RLM execution.",
+    ),
+    "memory_structure_audit": RuntimeModuleDefinition(
+        signature=MemoryStructureAuditSignature,
+        class_name="MemoryStructureAuditModule",
+        doc="Runtime wrapper for ``MemoryStructureAuditSignature`` RLM execution.",
+    ),
+    "memory_structure_migration_plan": RuntimeModuleDefinition(
+        signature=MemoryStructureMigrationPlanSignature,
+        class_name="MemoryStructureMigrationPlanModule",
+        doc="Runtime wrapper for ``MemoryStructureMigrationPlanSignature`` RLM execution.",
+    ),
+    "clarification_questions": RuntimeModuleDefinition(
+        signature=ClarificationQuestionSignature,
+        class_name="ClarificationQuestionModule",
+        doc="Runtime wrapper for ``ClarificationQuestionSignature`` RLM execution.",
+    ),
+}
 
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=SummarizeLongDocument,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
+
+def _register_runtime_module_classes() -> dict[str, type[_RuntimeSignatureModule]]:
+    classes: dict[str, type[_RuntimeSignatureModule]] = {}
+    for definition in RUNTIME_MODULE_REGISTRY.values():
+        module_class = cast(
+            type[_RuntimeSignatureModule],
+            type(
+                definition.class_name,
+                (_RuntimeSignatureModule,),
+                {
+                    "signature_cls": definition.signature,
+                    "__doc__": definition.doc,
+                },
+            ),
         )
-
-    def forward(self, *, document: str, focus: str) -> dspy.Prediction:
-        return self._rlm(document=document, focus=focus)
-
-
-class ExtractFromLogsModule(dspy.Module):
-    """Runtime wrapper for ``ExtractFromLogs`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=ExtractFromLogs,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(self, *, logs: str, query: str) -> dspy.Prediction:
-        return self._rlm(logs=logs, query=query)
+        globals()[definition.class_name] = module_class
+        classes[definition.class_name] = module_class
+    return classes
 
 
-class GroundedAnswerWithCitationsModule(dspy.Module):
-    """Runtime wrapper for ``GroundedAnswerWithCitations`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=GroundedAnswerWithCitations,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(
-        self, *, query: str, evidence_chunks: list[str], response_style: str
-    ) -> dspy.Prediction:
-        return self._rlm(
-            query=query,
-            evidence_chunks=evidence_chunks,
-            response_style=response_style,
-        )
+RUNTIME_MODULE_CLASSES = _register_runtime_module_classes()
+RUNTIME_MODULE_NAMES: frozenset[str] = frozenset(RUNTIME_MODULE_REGISTRY)
 
 
-class IncidentTriageFromLogsModule(dspy.Module):
-    """Runtime wrapper for ``IncidentTriageFromLogs`` RLM execution."""
+def build_runtime_module(
+    name: str,
+    *,
+    interpreter: Any,
+    max_iterations: int,
+    max_llm_calls: int,
+    verbose: bool,
+) -> dspy.Module:
+    """Build a runtime module from the canonical registry."""
 
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=IncidentTriageFromLogs,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
+    definition = RUNTIME_MODULE_REGISTRY.get(name)
+    if definition is None:
+        raise ValueError(f"Unknown runtime module: {name}")
 
-    def forward(
-        self, *, logs: str, service_context: str, query: str
-    ) -> dspy.Prediction:
-        return self._rlm(logs=logs, service_context=service_context, query=query)
-
-
-class CodeChangePlanModule(dspy.Module):
-    """Runtime wrapper for ``CodeChangePlan`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=CodeChangePlan,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(
-        self, *, task: str, repo_context: str, constraints: str
-    ) -> dspy.Prediction:
-        return self._rlm(task=task, repo_context=repo_context, constraints=constraints)
-
-
-class CoreMemoryUpdateProposalModule(dspy.Module):
-    """Runtime wrapper for ``CoreMemoryUpdateProposal`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=CoreMemoryUpdateProposal,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(self, *, turn_history: str, current_memory: str) -> dspy.Prediction:
-        return self._rlm(turn_history=turn_history, current_memory=current_memory)
-
-
-class VolumeFileTreeModule(dspy.Module):
-    """Runtime wrapper for ``VolumeFileTreeSignature`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=VolumeFileTreeSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(
-        self, *, root_path: str, max_depth: int, include_hidden: bool
-    ) -> dspy.Prediction:
-        return self._rlm(
-            root_path=root_path, max_depth=max_depth, include_hidden=include_hidden
-        )
-
-
-class MemoryActionIntentModule(dspy.Module):
-    """Runtime wrapper for ``MemoryActionIntentSignature`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=MemoryActionIntentSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(
-        self,
-        *,
-        user_request: str,
-        current_tree: list[dict[str, str]],
-        policy_constraints: str,
-    ) -> dspy.Prediction:
-        return self._rlm(
-            user_request=user_request,
-            current_tree=current_tree,
-            policy_constraints=policy_constraints,
-        )
-
-
-class MemoryStructureAuditModule(dspy.Module):
-    """Runtime wrapper for ``MemoryStructureAuditSignature`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=MemoryStructureAuditSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(
-        self, *, tree_snapshot: list[dict[str, str]], usage_goals: str
-    ) -> dspy.Prediction:
-        return self._rlm(tree_snapshot=tree_snapshot, usage_goals=usage_goals)
-
-
-class MemoryStructureMigrationPlanModule(dspy.Module):
-    """Runtime wrapper for ``MemoryStructureMigrationPlanSignature`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=MemoryStructureMigrationPlanSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(
-        self, *, audit_findings: list[str], approved_constraints: str
-    ) -> dspy.Prediction:
-        return self._rlm(
-            audit_findings=audit_findings, approved_constraints=approved_constraints
-        )
-
-
-class ClarificationQuestionModule(dspy.Module):
-    """Runtime wrapper for ``ClarificationQuestionSignature`` RLM execution."""
-
-    def __init__(
-        self,
-        *,
-        interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ) -> None:
-        super().__init__()
-        self._rlm = dspy.RLM(
-            signature=ClarificationQuestionSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
-
-    def forward(
-        self, *, ambiguous_request: str, available_context: str, operation_risk: str
-    ) -> dspy.Prediction:
-        return self._rlm(
-            ambiguous_request=ambiguous_request,
-            available_context=available_context,
-            operation_risk=operation_risk,
-        )
+    wrapper_class = RUNTIME_MODULE_CLASSES[definition.class_name]
+    return wrapper_class(
+        interpreter=interpreter,
+        max_iterations=max_iterations,
+        max_llm_calls=max_llm_calls,
+        verbose=verbose,
+    )

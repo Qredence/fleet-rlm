@@ -16,11 +16,8 @@ import type { NavItem } from "@/lib/data/types";
 // ── Nav ↔ Path mapping ─────────────────────────────────────────────
 
 const NAV_TO_PATH: Record<NavItem, string> = {
-  new: "/app",
-  skills: "/app/skills",
-  taxonomy: "/app/taxonomy",
-  memory: "/app/memory",
-  analytics: "/app/analytics",
+  workspace: "/app/workspace",
+  volumes: "/app/volumes",
   settings: "/app/settings",
 };
 
@@ -34,11 +31,13 @@ export function pathToNav(pathname: string): NavItem | null {
   const section = parts[1] ?? "";
 
   const PATH_TO_NAV: Record<string, NavItem> = {
-    "": "new",
-    skills: "skills",
-    taxonomy: "taxonomy",
-    memory: "memory",
-    analytics: "analytics",
+    "": "workspace",
+    workspace: "workspace",
+    volumes: "volumes",
+    taxonomy: "volumes",
+    skills: "workspace",
+    memory: "workspace",
+    analytics: "workspace",
     settings: "settings",
   };
   return PATH_TO_NAV[section] ?? null;
@@ -57,21 +56,5 @@ export function useAppNavigate() {
     [navigate],
   );
 
-  /** Navigate to a specific skill within a section (opens BuilderPanel) */
-  const navigateToSkill = useCallback(
-    (section: "skills" | "taxonomy", skillId: string) => {
-      navigate(`/${section}/${skillId}`);
-    },
-    [navigate],
-  );
-
-  /** Navigate to section root (e.g. deselect skill) */
-  const navigateToSection = useCallback(
-    (section: "skills" | "taxonomy") => {
-      navigate(`/${section}`);
-    },
-    [navigate],
-  );
-
-  return { navigate, navigateTo, navigateToSkill, navigateToSection };
+  return { navigate, navigateTo };
 }

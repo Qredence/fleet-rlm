@@ -12,18 +12,15 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
-import { NavTab } from "@/components/ui/nav-tab";
+import { NavTab } from "@/features/shell/NavTab";
 import { cn } from "@/lib/utils/cn";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
-import { BACKEND_CAPABILITY_TOOLTIP, isSectionSupported } from "@/lib/rlm-api";
+import { isSectionSupported } from "@/lib/rlm-api";
 
 // ── Tab definitions ─────────────────────────────────────────────────
 const navItems: { key: NavItem; label: string }[] = [
-  { key: "new", label: "Chat" },
-  { key: "skills", label: "Skills" },
-  { key: "taxonomy", label: "Volumes" },
-  { key: "memory", label: "Memory" },
-  { key: "analytics", label: "Analytics" },
+  { key: "workspace", label: "RLM Workspace" },
+  { key: "volumes", label: "Volumes" },
 ];
 
 // ── Component ───────────────────────────────────────────────────────
@@ -78,7 +75,7 @@ export function TopHeader() {
             {navItems.map((item) => {
               const isActive = activeNav === item.key;
               const isSupported = isSectionSupported(item.key);
-              const tab = (
+              return (
                 <NavTab
                   key={item.key}
                   onClick={() => navigateTo(item.key)}
@@ -96,17 +93,6 @@ export function TopHeader() {
                   label={item.label}
                   disabled={!isSupported}
                 />
-              );
-              if (isSupported) return tab;
-              return (
-                <Tooltip key={item.key}>
-                  <TooltipTrigger asChild>
-                    <span className="inline-flex">{tab}</span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {BACKEND_CAPABILITY_TOOLTIP}
-                  </TooltipContent>
-                </Tooltip>
               );
             })}
           </nav>
@@ -127,7 +113,7 @@ export function TopHeader() {
               <IconButton
                 onClick={() => {
                   newSession();
-                  navigate("/");
+                  navigate("/app/workspace");
                 }}
                 aria-label="New Session"
                 className={isMobile ? "touch-target" : undefined}

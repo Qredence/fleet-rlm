@@ -7,7 +7,7 @@ import { BuilderPanel } from "@/app/layout/BuilderPanel";
 
 vi.mock("@/hooks/useNavigation", () => ({
   useNavigation: () => ({
-    activeNav: "new",
+    activeNav: "workspace",
     creationPhase: "active",
     closeCanvas: vi.fn(),
     activeFeatures: new Set(),
@@ -73,7 +73,7 @@ vi.mock("@/lib/rlm-api", () => ({
   UNSUPPORTED_SECTION_REASON: "Unsupported",
 }));
 
-describe("BuilderPanel creation header tabs", () => {
+describe("BuilderPanel workspace header tabs", () => {
   it("shows artifact tabs in the header and replaces the execution dropdown switcher", () => {
     const queryClient = new QueryClient();
     const html = renderToStaticMarkup(

@@ -21,7 +21,7 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 // Mock the event adapter so it is a pure pass-through in these tests
-vi.mock("@/app/pages/skill-creation/backendChatEventAdapter", () => ({
+vi.mock("@/features/rlm-workspace/backendChatEventAdapter", () => ({
   applyWsFrameToMessages: vi.fn((messages, _frame) => ({
     messages,
     terminal: false,

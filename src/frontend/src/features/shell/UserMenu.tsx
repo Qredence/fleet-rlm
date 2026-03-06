@@ -6,7 +6,7 @@
  *
  * When logged out: shows a "Sign In" button.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Settings,
   CreditCard,
@@ -18,7 +18,6 @@ import {
 import { typo } from "@/lib/config/typo";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useAuth } from "@/hooks/useAuth";
-import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -45,7 +44,6 @@ interface OpenSettingsEventDetail {
 
 export function UserMenu() {
   const { isAuthenticated, user, logout } = useAuth();
-  const { navigate } = useAppNavigate();
   const telemetry = useTelemetry();
   const isMobile = useIsMobile();
 
@@ -56,6 +54,7 @@ export function UserMenu() {
   const [pricingOpen, setPricingOpen] = useState(false);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const loginTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Listen for Command Palette "open-settings" custom event
   useEffect(() => {
@@ -75,6 +74,7 @@ export function UserMenu() {
     return (
       <>
         <Button
+          ref={loginTriggerRef}
           variant="secondary"
           className="gap-1.5"
           onClick={() => setLoginOpen(true)}
@@ -83,7 +83,11 @@ export function UserMenu() {
           <span style={typo.label}>Sign In</span>
         </Button>
 
-        <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+        <LoginDialog
+          open={loginOpen}
+          onOpenChange={setLoginOpen}
+          returnFocusRef={loginTriggerRef}
+        />
 
         <SettingsDialog
           open={settingsOpen}
@@ -127,7 +131,7 @@ export function UserMenu() {
           </button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="end" className="w-[220px]">
+        <DropdownMenuContent align="end" className="w-55">
           {/* User info header */}
           <DropdownMenuLabel className="p-3">
             <div className="flex items-center gap-2.5">
@@ -201,7 +205,6 @@ export function UserMenu() {
           <DropdownMenuItem
             onClick={() => {
               logout();
-              navigate("/logout");
             }}
             variant="destructive"
             style={typo.label}

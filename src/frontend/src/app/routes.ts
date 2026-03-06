@@ -18,7 +18,7 @@ import { LazyRouteComponents } from "@/lib/perf/routePreload";
 export const router = createBrowserRouter([
   {
     path: "/",
-    loader: () => redirect("/app"),
+    loader: () => redirect("/app/workspace"),
   },
   {
     path: "/settings",
@@ -55,31 +55,39 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        Component: LazyRouteComponents.SkillCreationFlow,
+        loader: () => redirect("/app/workspace"),
       },
       {
-        path: "skills",
-        Component: LazyRouteComponents.SkillLibrary,
+        path: "workspace",
+        Component: LazyRouteComponents.RlmWorkspacePage,
       },
       {
-        path: "skills/:skillId",
-        Component: LazyRouteComponents.SkillLibrary,
+        path: "volumes",
+        Component: LazyRouteComponents.VolumesPage,
       },
       {
         path: "taxonomy",
-        Component: LazyRouteComponents.TaxonomyBrowser,
+        loader: () => redirect("/app/volumes"),
       },
       {
         path: "taxonomy/:skillId",
-        Component: LazyRouteComponents.TaxonomyBrowser,
+        loader: () => redirect("/app/volumes"),
+      },
+      {
+        path: "skills",
+        loader: () => redirect("/app/workspace"),
+      },
+      {
+        path: "skills/:skillId",
+        loader: () => redirect("/app/workspace"),
       },
       {
         path: "memory",
-        Component: LazyRouteComponents.MemoryPage,
+        loader: () => redirect("/app/workspace"),
       },
       {
         path: "analytics",
-        Component: LazyRouteComponents.AnalyticsDashboard,
+        loader: () => redirect("/app/workspace"),
       },
       {
         path: "settings",

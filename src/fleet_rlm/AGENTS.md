@@ -21,6 +21,22 @@ Use Python 3.10+ with 4-space indentation, explicit type hints, and clear docstr
 
 Naming conventions: modules/functions/tests use `snake_case`; classes use `PascalCase`; constants use `UPPER_SNAKE_CASE`. Prefer small, focused modules over large mixed-responsibility files.
 
+## FastAPI and DSPy Conventions
+- Keep FastAPI router `prefix`, `tags`, and shared dependencies on the router declaration rather than at `include_router()` call sites.
+- Prefer `Annotated[...]` dependency aliases from `src/fleet_rlm/server/deps.py` for request-bound server state, config, and identity.
+- When async handlers need blocking provider or filesystem work, wrap it with `asyncio.to_thread(...)` instead of running it inline inside `async def`.
+- Keep `src/fleet_rlm/server/routers/ws/api.py` router-oriented. Chat runtime/bootstrap helpers belong in `server/routers/ws/chat_runtime.py`; the websocket message loop belongs in `server/routers/ws/chat_connection.py`.
+- Keep `src/fleet_rlm/server/execution/step_builder.py` focused on sequencing/orchestration. Pure actor/lane extraction and stream-event mapping helpers belong in `step_builder_extractors.py` and `step_builder_mapping.py`.
+- Keep DSPy signatures centralized in `src/fleet_rlm/react/signatures.py`, and prefer reusable runtime modules/factories over ad hoc `dspy.RLM(...)` creation scattered across callers.
+- Keep the canonical runtime module registry in `src/fleet_rlm/react/rlm_runtime_modules.py`; `runtime_factory.py` should be a thin cache/assembly layer rather than a second source of truth.
+- Avoid new compatibility shims for internal imports; prefer moving call sites to canonical modules and deleting the shim once in-repo usage reaches zero.
+
+## Auth Contract
+- Public auth HTTP surface is `/api/v1/auth/me`; do not reintroduce dummy `/api/v1/auth/login` or `/api/v1/auth/logout` endpoints.
+- `AUTH_MODE=entra` is multitenant by default and must validate real Entra bearer tokens with `ENTRA_JWKS_URL`, `ENTRA_AUDIENCE`, and an issuer template (default `https://login.microsoftonline.com/{tenantid}/v2.0`).
+- Entra-authenticated tenants must already exist in the Neon `tenants` table with `status=active`; login/runtime bootstrap must not auto-create tenants.
+- WebSocket auth may reuse the same bearer token through the existing `access_token` query-string bootstrap when `ALLOW_QUERY_AUTH_TOKENS=true`.
+
 ## Testing Guidelines
 Use `pytest` with strict markers (`unit`, `ui`, `integration`, `e2e`, `live_llm`, `benchmark`). Default local run:
 - `uv run pytest -q -m "not live_llm and not benchmark"`

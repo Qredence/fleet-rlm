@@ -7,7 +7,7 @@ import {
   rlmApiConfig,
 } from "@/lib/rlm-api";
 import type { ChatMessage } from "@/lib/data/types";
-import { applyWsFrameToMessages } from "@/app/pages/skill-creation/backendChatEventAdapter";
+import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { telemetryClient } from "@/lib/telemetry/client";
 import { QueryClient } from "@tanstack/react-query";
 

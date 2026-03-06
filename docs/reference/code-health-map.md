@@ -1,5 +1,18 @@
 # Code Health Map (Used Code and Files)
 
+## Status Note
+
+- This file is a historical reachability snapshot and has not been fully regenerated after the 2026-03-06 frontend cleanup.
+- The live frontend ownership model is now:
+  - `src/frontend/src/app/pages/RlmWorkspacePage.tsx` → `src/frontend/src/features/rlm-workspace/*`
+  - `src/frontend/src/app/pages/VolumesPage.tsx` → `src/frontend/src/features/volumes/*`
+  - `src/frontend/src/app/pages/SettingsPage.tsx`
+- Remaining legacy-named frontend directories are transitional only:
+  - `src/frontend/src/app/pages/skill-creation/__tests__/` is test-only history.
+  - `src/frontend/src/lib/skill-creation/simulation/` is currently empty.
+  - `src/frontend/src/features/taxonomy/` is currently empty.
+- Treat `src/frontend/AGENTS.md`, `PLANS.md`, and `TASKS.md` as the source of truth for current frontend ownership and supported product surfaces.
+
 Generated from runtime-entrypoint reachability, static imports, lazy export maps, and frontend import graph (including dynamic imports and `@/` aliases).
 
 ## Scope
@@ -24,440 +37,440 @@ Generated from runtime-entrypoint reachability, static imports, lazy export maps
 
 ## File Map
 
-| path | layer | entrypoint_reachable | import_reachable | dynamic_reachable | owner | usage_class | notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `src/fleet_rlm/__init__.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/_scaffold/__init__.py` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/agents/modal-interpreter-agent.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/agents/rlm-orchestrator.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/agents/rlm-specialist.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/agents/rlm-subcall.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/hooks/README.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-document-process.local.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-large-file.local.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-llm-query-error.local.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-modal-error.local.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/dspy-signature/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/dspy-signature/references/signature-examples.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/modal-sandbox/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-batch/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-debug/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-debug/scripts/diagnose.py` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-execute/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/references/advanced-techniques.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/references/codebase-processing.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/cache_manager.py` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/codebase_concat.py` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/orchestrate.py` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/rank_chunks.py` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/semantic_chunk.py` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-memory/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-run/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm-test-suite/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm/SKILL.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/skills/rlm/references/api-reference.md` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/teams/fleet-rlm/config.json` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/modal-interpreter-agent.json` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/rlm-orchestrator.json` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/rlm-specialist.json` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/rlm-subcall.json` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/team-lead.json` | other | no | no | no | platform | USED_PACKAGE_EXPORT | packaged scaffold asset |
-| `src/fleet_rlm/analytics/__init__.py` | analytics | yes | yes | no | analytics | USED_RUNTIME | - |
-| `src/fleet_rlm/analytics/client.py` | analytics | yes | yes | no | analytics | USED_RUNTIME | - |
-| `src/fleet_rlm/analytics/config.py` | analytics | yes | yes | no | analytics | USED_RUNTIME | - |
-| `src/fleet_rlm/analytics/posthog_callback.py` | analytics | no | no | no | analytics | USED_TEST_ONLY | imported by tests/scripts only |
-| `src/fleet_rlm/analytics/sanitization.py` | analytics | no | yes | no | analytics | USED_RUNTIME | - |
-| `src/fleet_rlm/analytics/trace_context.py` | analytics | no | yes | no | analytics | USED_RUNTIME | - |
-| `src/fleet_rlm/chunking/__init__.py` | other | no | no | no | platform | USED_TEST_ONLY | imported by tests/scripts only |
-| `src/fleet_rlm/chunking/headers.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/chunking/json_keys.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/chunking/size.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/chunking/timestamps.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/cli.py` | other | yes | yes | no | platform | USED_RUNTIME | entrypoint module |
-| `src/fleet_rlm/cli_commands/__init__.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/cli_commands/init_cmd.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/cli_commands/serve_cmds.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/conf/__init__.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/conf/config.yaml` | other | no | no | yes | platform | USED_PACKAGE_EXPORT | Hydra/runtime config asset |
-| `src/fleet_rlm/config.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/core/__init__.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/config.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/driver.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/driver_factories.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/interpreter.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/llm_tools.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/memory_tools.py` | core | no | no | no | core-runtime | USED_TEST_ONLY | imported by tests/scripts only |
-| `src/fleet_rlm/core/output_utils.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/sandbox_tools.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/session_history.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/volume_ops.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/core/volume_tools.py` | core | yes | yes | no | core-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/db/__init__.py` | db | yes | yes | no | backend-db | USED_RUNTIME | - |
-| `src/fleet_rlm/db/engine.py` | db | no | yes | no | backend-db | USED_RUNTIME | - |
-| `src/fleet_rlm/db/models.py` | db | no | yes | no | backend-db | USED_RUNTIME | - |
-| `src/fleet_rlm/db/repository.py` | db | no | no | no | backend-db | UNCONFIRMED | - |
-| `src/fleet_rlm/db/types.py` | db | no | yes | no | backend-db | USED_RUNTIME | - |
-| `src/fleet_rlm/fleet_cli.py` | other | yes | no | no | platform | USED_RUNTIME | entrypoint module; imported by tests/scripts only |
-| `src/fleet_rlm/logging.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/mcp/__init__.py` | mcp | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/mcp/server.py` | mcp | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/models/__init__.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/models/streaming.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/py.typed` | other | no | no | yes | platform | USED_PACKAGE_EXPORT | PEP 561 typing marker |
-| `src/fleet_rlm/react/__init__.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/agent.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/commands.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/core_memory.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/delegate_sub_agent.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/document_cache.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/document_sources.py` | react | no | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/rlm_runtime_modules.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/runtime_factory.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/signatures.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/streaming.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/streaming_citations.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/tool_delegation.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/tools/__init__.py` | react-tools | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/tools/chunking.py` | react-tools | no | no | no | react-runtime | UNCONFIRMED | - |
-| `src/fleet_rlm/react/tools/delegate.py` | react-tools | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/tools/document.py` | react-tools | no | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/tools/filesystem.py` | react-tools | no | no | no | react-runtime | UNCONFIRMED | - |
-| `src/fleet_rlm/react/tools/memory_intelligence.py` | react-tools | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/tools/sandbox.py` | react-tools | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/tools/sandbox_helpers.py` | react-tools | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/react/validation.py` | react | yes | yes | no | react-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/runners.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/__init__.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/auth/__init__.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/auth/base.py` | server | no | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/auth/dev.py` | server | no | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/auth/entra.py` | server | no | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/auth/factory.py` | server | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/server/auth/types.py` | server | no | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/config.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/deps.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/execution/__init__.py` | server-execution | yes | yes | no | backend-observability | USED_RUNTIME | - |
-| `src/fleet_rlm/server/execution/events.py` | server-execution | no | yes | no | backend-observability | USED_RUNTIME | - |
-| `src/fleet_rlm/server/execution/sanitizer.py` | server-execution | no | yes | no | backend-observability | USED_RUNTIME | - |
-| `src/fleet_rlm/server/execution/step_builder.py` | server-execution | no | yes | no | backend-observability | USED_RUNTIME | - |
-| `src/fleet_rlm/server/legacy_compat.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/legacy_models.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/main.py` | server | yes | yes | no | platform | USED_RUNTIME | entrypoint module |
-| `src/fleet_rlm/server/middleware.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/__init__.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/auth.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/chat.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/health.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/planned.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/runtime.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/sessions.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/tasks.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/__init__.py` | server-ws | yes | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/api.py` | server-ws | no | no | no | backend-ws | UNCONFIRMED | - |
-| `src/fleet_rlm/server/routers/ws/commands.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/helpers.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/lifecycle.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/message_loop.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/repl_hook.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/session.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/session_store.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/streaming.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/routers/ws/turn.py` | server-ws | no | yes | no | backend-ws | USED_RUNTIME | - |
-| `src/fleet_rlm/server/runtime_settings.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/schemas/__init__.py` | server | no | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/schemas/base.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/schemas/core.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/schemas/session.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/schemas/task.py` | server | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/server/utils.py` | server | no | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/terminal/__init__.py` | terminal | yes | yes | no | terminal-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/terminal/chat.py` | terminal | yes | yes | no | terminal-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/terminal/commands.py` | terminal | no | yes | no | terminal-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/terminal/settings.py` | terminal | no | no | no | terminal-runtime | UNCONFIRMED | - |
-| `src/fleet_rlm/terminal/ui.py` | terminal | no | yes | no | terminal-runtime | USED_RUNTIME | - |
-| `src/fleet_rlm/ui/__init__.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/utils/__init__.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/fleet_rlm/utils/modal.py` | other | yes | yes | no | platform | USED_RUNTIME | - |
-| `src/fleet_rlm/utils/scaffold.py` | other | no | no | no | platform | UNCONFIRMED | - |
-| `src/frontend/src/app/App.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/layout/BuilderPanel.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/layout/ChatPanel.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/layout/DesktopShell.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/layout/MobileShell.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/layout/RootLayout.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/layout/RouteSync.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/layout/TopHeader.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/AnalyticsDashboard.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/LoginPage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/LogoutPage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/MemoryPage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/NotFoundPage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/RouteErrorPage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/SettingsPage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/SignupPage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/SkillCreationFlow.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/SkillLibrary.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/TaxonomyBrowser.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/AssistantMessage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/ChatMessageList.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/HitlCard.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/SkillCreationFlow.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/UserMessage.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/__tests__/ChatMessageList.ai-elements.test.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/__tests__/SkillCreationFlow.runtime-warning.test.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/__tests__/backendChatEventAdapter.test.ts` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/animation-presets.ts` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/backendArtifactEventAdapter.ts` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/backendChatEventAdapter.ts` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/useBackendChatRuntime.ts` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/pages/skill-creation/useChatSimulation.ts` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/providers/AppProviders.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/providers/QueryProvider.tsx` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/app/routes.ts` | frontend-app | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/attachments.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/chain-of-thought.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/confirmation.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/conversation.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/environment-variables.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/inline-citation.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/message.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/queue.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/reasoning.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/sandbox.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/shimmer.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/sources.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/task.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ai-elements/tool.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/AnalyticsSkeleton.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/BrandMark.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/ErrorBoundary.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/ImageWithFallback.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/LargeTitleHeader.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/ListRow.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/PageSkeleton.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/ResolvedChip.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/SectionHeader.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/SettingsNavItem.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/SettingsRow.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/SkillCardSkeleton.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/SkillLibrarySkeleton.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/SkillMarkdown.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/SuggestionIcons.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/ToggleSwitch.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/shared/TypingDots.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/accordion.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/alert-dialog.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/alert.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/animated-indicator.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/aspect-ratio.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/avatar.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/badge-variants.ts` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/badge.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/breadcrumb.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/button-variants.ts` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/button.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/calendar.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/card.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/carousel.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/chart.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/checkbox.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/collapsible.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/command.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/context-menu.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/dialog.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/drawer.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/dropdown-menu.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/form.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/hover-card.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/icon-button.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/input-otp.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/input.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/label.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/menubar.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/mobile-tab-bar.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/nav-tab.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/navigation-menu.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/pagination.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/panel-header-chip.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/panel-tabs.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/popover.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/progress.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/prompt-input.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/prompt-plus-menu.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/prompt-toolbar.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/queue.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/radio-group.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/radio-option-card.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/reasoning.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/resizable.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/scroll-area.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/select.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/selectable-card.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/separator.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/sheet.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/sidebar.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/skeleton.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/slider.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/sonner.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/streamdown.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/suggestion-chip.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/switch.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/table.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/tabs.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/textarea.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/toggle-group.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/toggle-variants.ts` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/toggle.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/tooltip.tsx` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/use-mobile.ts` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/components/ui/utils.ts` | frontend-components | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/CanvasSwitcher.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/ClarificationCard.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/CodeArtifact.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/CommandPalette.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/ConversationHistory.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/CreationPreview.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/FileDetail.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/IntegrationsDialog.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/LoginDialog.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/NotificationCenter.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/PhaseIndicator.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/PricingDialog.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/SettingsDialog.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/SkillBadge.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/SkillCard.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/SkillDetail.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/TaxonomyGraph.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/UserMenu.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/ArtifactCanvas.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/ArtifactGraph.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/ArtifactPreview.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/ArtifactREPL.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/ArtifactTimeline.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/GraphStepNode.constants.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/GraphStepNode.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/__tests__/artifactGraphEdgeLabels.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/__tests__/artifactPreviewTypedOutput.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/__tests__/artifactTimelineSummaries.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/__tests__/graphNodeDetails.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/__tests__/graphToolBadge.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/graphNodeDetailParsers.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/components/graphToolBadge.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/parsers/artifactPayloadSchemas.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/artifacts/parsers/artifactPayloadSummaries.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/chat/stores/__tests__/chatStore.test.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/chat/stores/chatStore.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/memory/BulkActionToolbar.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/memory/MemoryEntryCard.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/memory/MemoryPageEmptyState.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/memory/MemoryPageHeaderControls.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/memory/MemoryPageSections.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/memory/NewMemoryForm.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/memory/index.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/AboutPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/AccountPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/BillingPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/DataPrivacyPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/GeneralPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/GroupedSettingsPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/NotificationsPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/PersonalizationPane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/RuntimePane.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/SettingsDialog.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/SettingsPaneContent.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/SettingsSelectField.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/SettingsToggleRow.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/__tests__/RuntimePane.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/__tests__/SettingsDialog.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/__tests__/SettingsPaneContent.test.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/__tests__/useRuntimeSettings.test.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/types.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/settings/useRuntimeSettings.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/skill-library/PullToRefreshIndicator.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/skill-library/SkillLibraryHeaderControls.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/taxonomy/TaxonomyBrowserSections.tsx` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/features/taxonomy/useTaxonomyGraphCanvas.ts` | frontend-features | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/AuthProvider.tsx` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/NavigationProvider.tsx` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/auth-context.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/auth-mock-user.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/auth-types.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/navigation-context.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/navigation-types.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useAnalytics.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useAppNavigate.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useAuth.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useChatHistory.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useCodeMirror.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useFilesystem.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useMemory.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useNavigation.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useSkillMutations.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useSkills.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useStickToBottom.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useTaxonomy.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/hooks/useTheme.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/__tests__/capabilities.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/__tests__/config.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/__tests__/legacy-surface.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/adapters.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/capabilities.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/client.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/config.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/endpoints.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/index.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/api/types.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/config/motion-config.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/config/typo.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/codemirror-modules.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/codemirror-theme.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/graph-layouts.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/mock-skills.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/mock/analytics.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/mock/filesystem.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/mock/index.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/mock/memory.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/mock/skills.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/mock/taxonomy.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/data/types.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/id.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/memory/metadata.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/perf/lazyWithRetry.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/perf/routePreload.tsx` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/__tests__/auth.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/__tests__/backend-contract.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/__tests__/config.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/__tests__/runtime.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/__tests__/wsClient.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/__tests__/wsFrameParser.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/auth.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/capabilities.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/client.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/config.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/endpoints.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/generated/openapi.ts` | frontend-lib | no | no | no | frontend-runtime | USED_PACKAGE_EXPORT | generated client artifact |
-| `src/frontend/src/lib/rlm-api/index.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/messages.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/runtime.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/types.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/wsClient.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/wsFrameParser.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/wsReconnecting.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/rlm-api/wsTypes.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/skill-creation/simulation/messages.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/skill-creation/simulation/phase1.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/skill-creation/simulation/phase2.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/skill-creation/simulation/phase3.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/skill-creation/simulation/types.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/skills/library.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/taxonomy/browser.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/taxonomy/graph.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/telemetry/__tests__/client.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/telemetry/__tests__/posthog.test.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/telemetry/client.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/telemetry/posthog.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/lib/telemetry/useTelemetry.ts` | frontend-lib | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/main.tsx` | other | yes | no | no | frontend-runtime | USED_RUNTIME | - |
-| `src/frontend/src/stores/artifactStore.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
-| `src/frontend/src/stores/mockStateStore.ts` | other | no | no | no | frontend-runtime | UNCONFIRMED | - |
+| path                                                                                             | layer               | entrypoint_reachable | import_reachable | dynamic_reachable | owner                 | usage_class         | notes                                             |
+| ------------------------------------------------------------------------------------------------ | ------------------- | -------------------- | ---------------- | ----------------- | --------------------- | ------------------- | ------------------------------------------------- |
+| `src/fleet_rlm/__init__.py`                                                                      | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/_scaffold/__init__.py`                                                            | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/agents/modal-interpreter-agent.md`                                      | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/agents/rlm-orchestrator.md`                                             | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/agents/rlm-specialist.md`                                               | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/agents/rlm-subcall.md`                                                  | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/hooks/README.md`                                                        | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-document-process.local.md`                      | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-large-file.local.md`                            | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-llm-query-error.local.md`                       | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/hooks/hookify.fleet-rlm-modal-error.local.md`                           | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/dspy-signature/SKILL.md`                                         | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/dspy-signature/references/signature-examples.md`                 | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/modal-sandbox/SKILL.md`                                          | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-batch/SKILL.md`                                              | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-debug/SKILL.md`                                              | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-debug/scripts/diagnose.py`                                   | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-execute/SKILL.md`                                            | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/SKILL.md`                                       | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/references/advanced-techniques.md`              | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/references/codebase-processing.md`              | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/cache_manager.py`                       | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/codebase_concat.py`                     | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/orchestrate.py`                         | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/rank_chunks.py`                         | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-long-context/scripts/semantic_chunk.py`                      | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-memory/SKILL.md`                                             | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-run/SKILL.md`                                                | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm-test-suite/SKILL.md`                                         | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm/SKILL.md`                                                    | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/skills/rlm/references/api-reference.md`                                 | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/teams/fleet-rlm/config.json`                                            | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/modal-interpreter-agent.json`                   | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/rlm-orchestrator.json`                          | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/rlm-specialist.json`                            | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/rlm-subcall.json`                               | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/_scaffold/teams/fleet-rlm/inboxes/team-lead.json`                                 | other               | no                   | no               | no                | platform              | USED_PACKAGE_EXPORT | packaged scaffold asset                           |
+| `src/fleet_rlm/analytics/__init__.py`                                                            | analytics           | yes                  | yes              | no                | analytics             | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/analytics/client.py`                                                              | analytics           | yes                  | yes              | no                | analytics             | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/analytics/config.py`                                                              | analytics           | yes                  | yes              | no                | analytics             | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/analytics/posthog_callback.py`                                                    | analytics           | no                   | no               | no                | analytics             | USED_TEST_ONLY      | imported by tests/scripts only                    |
+| `src/fleet_rlm/analytics/sanitization.py`                                                        | analytics           | no                   | yes              | no                | analytics             | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/analytics/trace_context.py`                                                       | analytics           | no                   | yes              | no                | analytics             | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/chunking/__init__.py`                                                             | other               | no                   | no               | no                | platform              | USED_TEST_ONLY      | imported by tests/scripts only                    |
+| `src/fleet_rlm/chunking/headers.py`                                                              | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/chunking/json_keys.py`                                                            | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/chunking/size.py`                                                                 | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/chunking/timestamps.py`                                                           | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/cli.py`                                                                           | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | entrypoint module                                 |
+| `src/fleet_rlm/cli_commands/__init__.py`                                                         | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/cli_commands/init_cmd.py`                                                         | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/cli_commands/serve_cmds.py`                                                       | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/conf/__init__.py`                                                                 | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/conf/config.yaml`                                                                 | other               | no                   | no               | yes               | platform              | USED_PACKAGE_EXPORT | Hydra/runtime config asset                        |
+| `src/fleet_rlm/config.py`                                                                        | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/__init__.py`                                                                 | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/config.py`                                                                   | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/driver.py`                                                                   | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/driver_factories.py`                                                         | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/interpreter.py`                                                              | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/llm_tools.py`                                                                | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/memory_tools.py`                                                             | core                | no                   | no               | no                | core-runtime          | USED_TEST_ONLY      | imported by tests/scripts only                    |
+| `src/fleet_rlm/core/output_utils.py`                                                             | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/sandbox_tools.py`                                                            | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/session_history.py`                                                          | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/volume_ops.py`                                                               | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/core/volume_tools.py`                                                             | core                | yes                  | yes              | no                | core-runtime          | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/db/__init__.py`                                                                   | db                  | yes                  | yes              | no                | backend-db            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/db/engine.py`                                                                     | db                  | no                   | yes              | no                | backend-db            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/db/models.py`                                                                     | db                  | no                   | yes              | no                | backend-db            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/db/repository.py`                                                                 | db                  | no                   | no               | no                | backend-db            | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/db/types.py`                                                                      | db                  | no                   | yes              | no                | backend-db            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/fleet_cli.py`                                                                     | other               | yes                  | no               | no                | platform              | USED_RUNTIME        | entrypoint module; imported by tests/scripts only |
+| `src/fleet_rlm/logging.py`                                                                       | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/mcp/__init__.py`                                                                  | mcp                 | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/mcp/server.py`                                                                    | mcp                 | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/models/__init__.py`                                                               | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/models/streaming.py`                                                              | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/py.typed`                                                                         | other               | no                   | no               | yes               | platform              | USED_PACKAGE_EXPORT | PEP 561 typing marker                             |
+| `src/fleet_rlm/react/__init__.py`                                                                | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/agent.py`                                                                   | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/commands.py`                                                                | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/core_memory.py`                                                             | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/delegate_sub_agent.py`                                                      | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/document_cache.py`                                                          | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/document_sources.py`                                                        | react               | no                   | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/rlm_runtime_modules.py`                                                     | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/runtime_factory.py`                                                         | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/signatures.py`                                                              | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/streaming.py`                                                               | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/streaming_citations.py`                                                     | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/tool_delegation.py`                                                         | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/tools/__init__.py`                                                          | react-tools         | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/tools/chunking.py`                                                          | react-tools         | no                   | no               | no                | react-runtime         | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/react/tools/delegate.py`                                                          | react-tools         | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/tools/document.py`                                                          | react-tools         | no                   | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/tools/filesystem.py`                                                        | react-tools         | no                   | no               | no                | react-runtime         | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/react/tools/memory_intelligence.py`                                               | react-tools         | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/tools/sandbox.py`                                                           | react-tools         | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/tools/sandbox_helpers.py`                                                   | react-tools         | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/react/validation.py`                                                              | react               | yes                  | yes              | no                | react-runtime         | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/runners.py`                                                                       | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/__init__.py`                                                               | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/auth/__init__.py`                                                          | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/auth/base.py`                                                              | server              | no                   | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/auth/dev.py`                                                               | server              | no                   | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/auth/entra.py`                                                             | server              | no                   | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/auth/factory.py`                                                           | server              | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/server/auth/types.py`                                                             | server              | no                   | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/config.py`                                                                 | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/deps.py`                                                                   | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/execution/__init__.py`                                                     | server-execution    | yes                  | yes              | no                | backend-observability | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/execution/events.py`                                                       | server-execution    | no                   | yes              | no                | backend-observability | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/execution/sanitizer.py`                                                    | server-execution    | no                   | yes              | no                | backend-observability | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/execution/step_builder.py`                                                 | server-execution    | no                   | yes              | no                | backend-observability | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/legacy_compat.py`                                                          | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/legacy_models.py`                                                          | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/main.py`                                                                   | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | entrypoint module                                 |
+| `src/fleet_rlm/server/middleware.py`                                                             | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/__init__.py`                                                       | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/auth.py`                                                           | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/chat.py`                                                           | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/health.py`                                                         | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/planned.py`                                                        | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/runtime.py`                                                        | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/sessions.py`                                                       | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/tasks.py`                                                          | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/__init__.py`                                                    | server-ws           | yes                  | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/api.py`                                                         | server-ws           | no                   | no               | no                | backend-ws            | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/server/routers/ws/commands.py`                                                    | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/helpers.py`                                                     | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/lifecycle.py`                                                   | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/message_loop.py`                                                | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/repl_hook.py`                                                   | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/session.py`                                                     | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/session_store.py`                                               | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/streaming.py`                                                   | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/routers/ws/turn.py`                                                        | server-ws           | no                   | yes              | no                | backend-ws            | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/runtime_settings.py`                                                       | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/schemas/__init__.py`                                                       | server              | no                   | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/schemas/base.py`                                                           | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/schemas/core.py`                                                           | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/schemas/session.py`                                                        | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/schemas/task.py`                                                           | server              | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/server/utils.py`                                                                  | server              | no                   | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/terminal/__init__.py`                                                             | terminal            | yes                  | yes              | no                | terminal-runtime      | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/terminal/chat.py`                                                                 | terminal            | yes                  | yes              | no                | terminal-runtime      | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/terminal/commands.py`                                                             | terminal            | no                   | yes              | no                | terminal-runtime      | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/terminal/settings.py`                                                             | terminal            | no                   | no               | no                | terminal-runtime      | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/terminal/ui.py`                                                                   | terminal            | no                   | yes              | no                | terminal-runtime      | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/ui/__init__.py`                                                                   | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/utils/__init__.py`                                                                | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/fleet_rlm/utils/modal.py`                                                                   | other               | yes                  | yes              | no                | platform              | USED_RUNTIME        | -                                                 |
+| `src/fleet_rlm/utils/scaffold.py`                                                                | other               | no                   | no               | no                | platform              | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/App.tsx`                                                                   | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/layout/BuilderPanel.tsx`                                                   | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/layout/ChatPanel.tsx`                                                      | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/layout/DesktopShell.tsx`                                                   | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/layout/MobileShell.tsx`                                                    | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/layout/RootLayout.tsx`                                                     | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/layout/RouteSync.tsx`                                                      | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/layout/TopHeader.tsx`                                                      | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/AnalyticsDashboard.tsx`                                              | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/LoginPage.tsx`                                                       | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/LogoutPage.tsx`                                                      | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/MemoryPage.tsx`                                                      | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/NotFoundPage.tsx`                                                    | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/RouteErrorPage.tsx`                                                  | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/SettingsPage.tsx`                                                    | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/SignupPage.tsx`                                                      | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/SkillCreationFlow.tsx`                                               | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/SkillLibrary.tsx`                                                    | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/TaxonomyBrowser.tsx`                                                 | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/AssistantMessage.tsx`                                 | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/ChatMessageList.tsx`                                  | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/HitlCard.tsx`                                         | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/SkillCreationFlow.tsx`                                | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/UserMessage.tsx`                                      | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/__tests__/ChatMessageList.ai-elements.test.tsx`       | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/__tests__/SkillCreationFlow.runtime-warning.test.tsx` | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/__tests__/backendChatEventAdapter.test.ts`            | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/animation-presets.ts`                                 | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/backendArtifactEventAdapter.ts`                       | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/backendChatEventAdapter.ts`                           | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/useBackendChatRuntime.ts`                             | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/pages/skill-creation/useChatSimulation.ts`                                 | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/providers/AppProviders.tsx`                                                | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/providers/QueryProvider.tsx`                                               | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/app/routes.ts`                                                                 | frontend-app        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/attachments.tsx`                                        | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/chain-of-thought.tsx`                                   | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/confirmation.tsx`                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/conversation.tsx`                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/environment-variables.tsx`                              | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/inline-citation.tsx`                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/message.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/queue.tsx`                                              | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/reasoning.tsx`                                          | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/sandbox.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/shimmer.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/sources.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/task.tsx`                                               | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ai-elements/tool.tsx`                                               | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/AnalyticsSkeleton.tsx`                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/BrandMark.tsx`                                               | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/ErrorBoundary.tsx`                                           | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/ImageWithFallback.tsx`                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/LargeTitleHeader.tsx`                                        | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/ListRow.tsx`                                                 | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/PageSkeleton.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/ResolvedChip.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/SectionHeader.tsx`                                           | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/SettingsNavItem.tsx`                                         | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/SettingsRow.tsx`                                             | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/SkillCardSkeleton.tsx`                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/SkillLibrarySkeleton.tsx`                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/SkillMarkdown.tsx`                                           | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/SuggestionIcons.tsx`                                         | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/ToggleSwitch.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/shared/TypingDots.tsx`                                              | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/accordion.tsx`                                                   | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/alert-dialog.tsx`                                                | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/alert.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/animated-indicator.tsx`                                          | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/aspect-ratio.tsx`                                                | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/avatar.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/badge-variants.ts`                                               | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/badge.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/breadcrumb.tsx`                                                  | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/button-variants.ts`                                              | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/button.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/calendar.tsx`                                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/card.tsx`                                                        | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/carousel.tsx`                                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/chart.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/checkbox.tsx`                                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/collapsible.tsx`                                                 | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/command.tsx`                                                     | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/context-menu.tsx`                                                | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/dialog.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/drawer.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/dropdown-menu.tsx`                                               | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/form.tsx`                                                        | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/hover-card.tsx`                                                  | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/icon-button.tsx`                                                 | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/input-otp.tsx`                                                   | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/input.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/label.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/menubar.tsx`                                                     | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/mobile-tab-bar.tsx`                                              | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/nav-tab.tsx`                                                     | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/navigation-menu.tsx`                                             | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/pagination.tsx`                                                  | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/panel-header-chip.tsx`                                           | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/panel-tabs.tsx`                                                  | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/popover.tsx`                                                     | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/progress.tsx`                                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/prompt-input.tsx`                                                | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/prompt-plus-menu.tsx`                                            | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/prompt-toolbar.tsx`                                              | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/queue.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/radio-group.tsx`                                                 | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/radio-option-card.tsx`                                           | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/reasoning.tsx`                                                   | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/resizable.tsx`                                                   | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/scroll-area.tsx`                                                 | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/select.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/selectable-card.tsx`                                             | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/separator.tsx`                                                   | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/sheet.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/sidebar.tsx`                                                     | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/skeleton.tsx`                                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/slider.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/sonner.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/streamdown.tsx`                                                  | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/suggestion-chip.tsx`                                             | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/switch.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/table.tsx`                                                       | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/tabs.tsx`                                                        | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/textarea.tsx`                                                    | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/toggle-group.tsx`                                                | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/toggle-variants.ts`                                              | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/toggle.tsx`                                                      | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/tooltip.tsx`                                                     | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/use-mobile.ts`                                                   | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/components/ui/utils.ts`                                                        | frontend-components | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/CanvasSwitcher.tsx`                                                   | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/ClarificationCard.tsx`                                                | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/CodeArtifact.tsx`                                                     | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/CommandPalette.tsx`                                                   | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/ConversationHistory.tsx`                                              | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/CreationPreview.tsx`                                                  | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/FileDetail.tsx`                                                       | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/IntegrationsDialog.tsx`                                               | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/LoginDialog.tsx`                                                      | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/NotificationCenter.tsx`                                               | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/PhaseIndicator.tsx`                                                   | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/PricingDialog.tsx`                                                    | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/SettingsDialog.tsx`                                                   | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/SkillBadge.tsx`                                                       | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/SkillCard.tsx`                                                        | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/SkillDetail.tsx`                                                      | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/TaxonomyGraph.tsx`                                                    | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/UserMenu.tsx`                                                         | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/ArtifactCanvas.tsx`                              | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/ArtifactGraph.tsx`                               | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/ArtifactPreview.tsx`                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/ArtifactREPL.tsx`                                | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/ArtifactTimeline.tsx`                            | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/GraphStepNode.constants.ts`                      | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/GraphStepNode.tsx`                               | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/__tests__/artifactGraphEdgeLabels.test.tsx`      | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/__tests__/artifactPreviewTypedOutput.test.tsx`   | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/__tests__/artifactTimelineSummaries.test.tsx`    | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/__tests__/graphNodeDetails.test.tsx`             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/__tests__/graphToolBadge.test.tsx`               | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/graphNodeDetailParsers.ts`                       | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/components/graphToolBadge.ts`                               | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/parsers/artifactPayloadSchemas.ts`                          | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/artifacts/parsers/artifactPayloadSummaries.ts`                        | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/chat/stores/__tests__/chatStore.test.ts`                              | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/chat/stores/chatStore.ts`                                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/memory/BulkActionToolbar.tsx`                                         | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/memory/MemoryEntryCard.tsx`                                           | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/memory/MemoryPageEmptyState.tsx`                                      | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/memory/MemoryPageHeaderControls.tsx`                                  | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/memory/MemoryPageSections.tsx`                                        | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/memory/NewMemoryForm.tsx`                                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/memory/index.ts`                                                      | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/AboutPane.tsx`                                               | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/AccountPane.tsx`                                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/BillingPane.tsx`                                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/DataPrivacyPane.tsx`                                         | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/GeneralPane.tsx`                                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/GroupedSettingsPane.tsx`                                     | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/NotificationsPane.tsx`                                       | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/PersonalizationPane.tsx`                                     | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/RuntimePane.tsx`                                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/SettingsDialog.tsx`                                          | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/SettingsPaneContent.tsx`                                     | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/SettingsSelectField.tsx`                                     | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/SettingsToggleRow.tsx`                                       | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/__tests__/RuntimePane.test.tsx`                              | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/__tests__/SettingsDialog.test.tsx`                           | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/__tests__/SettingsPaneContent.test.tsx`                      | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/__tests__/useRuntimeSettings.test.ts`                        | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/types.ts`                                                    | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/settings/useRuntimeSettings.ts`                                       | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/skill-library/PullToRefreshIndicator.tsx`                             | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/skill-library/SkillLibraryHeaderControls.tsx`                         | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/taxonomy/TaxonomyBrowserSections.tsx`                                 | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/features/taxonomy/useTaxonomyGraphCanvas.ts`                                   | frontend-features   | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/AuthProvider.tsx`                                                        | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/NavigationProvider.tsx`                                                  | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/auth-context.ts`                                                         | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/auth-mock-user.ts`                                                       | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/auth-types.ts`                                                           | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/navigation-context.ts`                                                   | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/navigation-types.ts`                                                     | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useAnalytics.ts`                                                         | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useAppNavigate.ts`                                                       | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useAuth.ts`                                                              | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useChatHistory.ts`                                                       | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useCodeMirror.ts`                                                        | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useFilesystem.ts`                                                        | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useMemory.ts`                                                            | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useNavigation.ts`                                                        | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useSkillMutations.ts`                                                    | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useSkills.ts`                                                            | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useStickToBottom.ts`                                                     | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useTaxonomy.ts`                                                          | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/hooks/useTheme.ts`                                                             | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/__tests__/capabilities.test.ts`                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/__tests__/config.test.ts`                                              | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/__tests__/legacy-surface.test.ts`                                      | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/adapters.ts`                                                           | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/capabilities.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/client.ts`                                                             | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/config.ts`                                                             | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/endpoints.ts`                                                          | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/index.ts`                                                              | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/api/types.ts`                                                              | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/config/motion-config.ts`                                                   | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/config/typo.ts`                                                            | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/codemirror-modules.ts`                                                | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/codemirror-theme.ts`                                                  | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/graph-layouts.ts`                                                     | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/mock-skills.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/mock/analytics.ts`                                                    | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/mock/filesystem.ts`                                                   | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/mock/index.ts`                                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/mock/memory.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/mock/skills.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/mock/taxonomy.ts`                                                     | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/data/types.ts`                                                             | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/id.ts`                                                                     | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/memory/metadata.ts`                                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/perf/lazyWithRetry.ts`                                                     | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/perf/routePreload.tsx`                                                     | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/__tests__/auth.test.ts`                                            | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/__tests__/backend-contract.test.ts`                                | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/__tests__/config.test.ts`                                          | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/__tests__/runtime.test.ts`                                         | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/__tests__/wsClient.test.ts`                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/__tests__/wsFrameParser.test.ts`                                   | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/auth.ts`                                                           | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/capabilities.ts`                                                   | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/client.ts`                                                         | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/config.ts`                                                         | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/endpoints.ts`                                                      | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/generated/openapi.ts`                                              | frontend-lib        | no                   | no               | no                | frontend-runtime      | USED_PACKAGE_EXPORT | generated client artifact                         |
+| `src/frontend/src/lib/rlm-api/index.ts`                                                          | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/messages.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/runtime.ts`                                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/types.ts`                                                          | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/wsClient.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/wsFrameParser.ts`                                                  | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/wsReconnecting.ts`                                                 | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/rlm-api/wsTypes.ts`                                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/skill-creation/simulation/messages.ts`                                     | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/skill-creation/simulation/phase1.ts`                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/skill-creation/simulation/phase2.ts`                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/skill-creation/simulation/phase3.ts`                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/skill-creation/simulation/types.ts`                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/skills/library.ts`                                                         | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/taxonomy/browser.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/taxonomy/graph.ts`                                                         | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/telemetry/__tests__/client.test.ts`                                        | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/telemetry/__tests__/posthog.test.ts`                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/telemetry/client.ts`                                                       | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/telemetry/posthog.ts`                                                      | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/lib/telemetry/useTelemetry.ts`                                                 | frontend-lib        | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/main.tsx`                                                                      | other               | yes                  | no               | no                | frontend-runtime      | USED_RUNTIME        | -                                                 |
+| `src/frontend/src/stores/artifactStore.ts`                                                       | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |
+| `src/frontend/src/stores/mockStateStore.ts`                                                      | other               | no                   | no               | no                | frontend-runtime      | UNCONFIRMED         | -                                                 |

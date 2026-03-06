@@ -88,7 +88,7 @@ export function PanelHeaderChip({
           "cursor-pointer",
           "hover:border-border hover:shadow-sm hover:bg-secondary/80",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-          "active:scale-[var(--haptic-scale)]",
+          "active:scale-(--haptic-scale)",
         ],
         /* ── Open state (popover active) ───────────────────────── */
         open && "border-border shadow-sm bg-secondary/80",

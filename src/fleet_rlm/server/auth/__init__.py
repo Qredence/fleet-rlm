@@ -1,5 +1,6 @@
 """Server auth abstraction with dev and Entra providers."""
 
+from .admission import resolve_admitted_identity
 from .base import AuthError, AuthProvider
 from .dev import DevAuthProvider
 from .entra import EntraAuthProvider
@@ -13,4 +14,5 @@ __all__ = [
     "EntraAuthProvider",
     "NormalizedIdentity",
     "build_auth_provider",
+    "resolve_admitted_identity",
 ]

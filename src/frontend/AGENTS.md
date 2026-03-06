@@ -44,13 +44,27 @@ Generated file policy:
 ### API Layer Ownership
 - Use `src/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/api/v1/sessions/state`, `/api/v1/runtime/*`, `/api/v1/ws/chat`, `/api/v1/ws/execution`).
 - New frontend data work must map to existing FastAPI endpoints or be gated as unsupported in UI.
-- Unsupported sections (`skills`, `taxonomy`, `memory`, `analytics`) stay visible but disabled with a capability notice.
+- Supported product surfaces are `workspace`, `volumes`, and `settings`.
+- Legacy `taxonomy`, `skills`, `memory`, and `analytics` URLs should redirect to canonical supported routes instead of remaining in primary navigation.
+
+### State Ownership
+- Use TanStack Query for backend-backed server state.
+- Use Zustand only for ephemeral client state (streaming/chat/session UI state, artifact canvas state, or explicitly demo/mock-only state).
+- Do not add new feature state to generic app-wide providers when it can live inside a domain module.
+
+### Mock Data
+- Canonical mock data lives under `src/lib/data/mock/*`.
+- Import mock data directly from those modules; do not reintroduce compatibility barrels like `src/lib/data/mock-skills.ts`.
+- If a screen is mock-only, label it clearly in code and UI instead of silently degrading from a removed backend route.
 
 ### Runtime Conventions
 - Route modules are lazy-loaded through `src/lib/perf/lazyWithRetry.ts` and `src/lib/perf/routePreload.tsx`.
 - Navigation preloads likely next routes on intent (`TopHeader`, `mobile-tab-bar`) to reduce first-click latency.
 - Router errors must render `RouteErrorPage` (never rely on React Router’s default crash screen).
-- Skill creation chat flow should use backend runtime only (no legacy API fallback path).
+- The RLM Workspace chat flow should use backend runtime only (no legacy API fallback path).
+- Canonical domain ownership now lives in `src/features/rlm-workspace/*` for chat/runtime UX and `src/features/volumes/*` for the Modal Volume browser; route pages under `src/app/pages/*` should stay thin.
+- Product-facing labels should use `RLM Workspace` and `Volumes`; do not introduce new `skill-creation` or `taxonomy` product terminology.
+- Keep `src/components/ui/*` limited to primitives and thin wrappers. Shell navigation or workspace composition widgets belong under `src/features/*` or another shared domain folder.
 
 ## Environment Variables
 - `VITE_FLEET_API_URL`
@@ -58,6 +72,11 @@ Generated file policy:
 - `VITE_FLEET_WORKSPACE_ID`
 - `VITE_FLEET_USER_ID`
 - `VITE_FLEET_TRACE`
+- `VITE_ENTRA_CLIENT_ID`
+- `VITE_ENTRA_AUTHORITY`
+- `VITE_ENTRA_SCOPES`
+- `VITE_ENTRA_REDIRECT_PATH`
+- Default Entra authority is `https://login.microsoftonline.com/organizations`; use `VITE_ENTRA_AUTHORITY` only when you intentionally need an override.
 
 ## Validation Expectations
 Before finishing backend-integration changes, run:

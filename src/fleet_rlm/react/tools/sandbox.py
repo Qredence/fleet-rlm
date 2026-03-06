@@ -11,13 +11,13 @@ the modularization effort (Linear: QRE-273).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-import logging
 
 from . import execute_submit
-from .memory_intelligence import build_memory_intelligence_tools
 from .delegate import build_rlm_delegate_tools
+from .memory_intelligence import build_memory_intelligence_tools
 from .sandbox_helpers import _resolve_volume_path
 
 if TYPE_CHECKING:

@@ -18,7 +18,7 @@ Configuration controls:
 - `ALLOW_QUERY_AUTH_TOKENS`
 
 `dev` supports debug headers and local HS256 tokens.
-`entra` is scaffolded and currently fail-closed until JWKS verification is implemented.
+`entra` is the real multitenant path: JWKS-backed bearer-token verification plus Neon-backed tenant allowlisting.
 
 See [Auth Modes](auth.md).
 
@@ -29,17 +29,13 @@ See [Auth Modes](auth.md).
 - `GET /health`
 - `GET /ready`
 
-### Auth (stub responses)
+### Auth
 
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
 Response contracts:
 
-- `POST /api/v1/auth/login` → `{"token": "<string>"}`
-- `POST /api/v1/auth/logout` → `{"status": "ok"}`
-- `GET /api/v1/auth/me` → identity envelope with `tenant_claim`, `user_claim`, optional `email`, `name`, `tenant_id`, `user_id`
+- `GET /api/v1/auth/me` → identity envelope with Entra claim ids (`tenant_claim`, `user_claim`), optional `email`/`name`, and resolved internal ids (`tenant_id`, `user_id`) when tenant admission succeeds
 
 ### Chat
 
@@ -88,6 +84,8 @@ Notes:
 The following deprecated or planned-only routes were removed:
 
 - `/api/v1/chat`
+- `/api/v1/auth/login`
+- `/api/v1/auth/logout`
 - `/api/v1/tasks*`
 - `/api/v1/sessions*` CRUD (state summary endpoint remains)
 - `/api/v1/taxonomy*`
@@ -137,6 +135,8 @@ Server envelopes include:
 - `{"type":"event","data":...}`
 - `{"type":"command_result","command":"...","result":{...}}`
 - `{"type":"error","message":"..."}`
+
+In `AUTH_MODE=entra`, valid tokens from non-allowlisted or inactive tenants are rejected before runtime state is created.
 
 ### `WS /api/v1/ws/execution`
 

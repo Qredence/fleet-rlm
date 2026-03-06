@@ -20,8 +20,6 @@ interface NavigationContextValue {
   closeCanvas: () => void;
   toggleCanvas: () => void;
   registerCanvasHandlers: (handlers: CanvasHandlers) => void;
-  selectedSkillId: string | null;
-  selectSkill: (id: string | null) => void;
   selectedFileNode: FsNode | null;
   selectFile: (node: FsNode | null) => void;
   creationPhase: CreationPhase;

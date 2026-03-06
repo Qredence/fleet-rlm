@@ -4,13 +4,13 @@ import { rlmApiConfig } from "@/lib/rlm-api/config";
 // ── Nav section support ─────────────────────────────────────────────
 
 export const SUPPORTED_SECTIONS = new Set<NavItem>([
-  "new",
+  "workspace",
   "settings",
-  "taxonomy",
+  "volumes",
 ]);
 
 export const UNSUPPORTED_SECTION_REASON =
-  "This section requires backend endpoints that are not currently exposed by FastAPI.";
+  "This surface is not part of the current RLM Workspace product contract.";
 
 export function isSectionSupported(nav: NavItem): boolean {
   return SUPPORTED_SECTIONS.has(nav);

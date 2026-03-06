@@ -4,8 +4,8 @@
  * Uses React Router's `<Outlet />` for content determined by the URL.
  * Wraps the outlet in AnimatePresence for smooth page transitions.
  *
- * The transition key is derived from the URL "section" (first path segment)
- * so that navigating within a section (e.g. `/skills` → `/skills/:skillId`)
+ * The transition key is derived from the active `/app/*` child route
+ * so that navigating within a surface (e.g. `/app/workspace` → `/app/volumes`)
  * does NOT re-trigger the page transition animation.
  */
 import { Suspense } from "react";
@@ -23,7 +23,8 @@ export function ChatPanel() {
 
   // Derive the "section" for AnimatePresence key —
   // only animate when changing top-level sections, not sub-routes
-  const section = location.pathname.split("/").filter(Boolean)[0] || "chat";
+  const section =
+    location.pathname.split("/").filter(Boolean)[1] || "workspace";
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">

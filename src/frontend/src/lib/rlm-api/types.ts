@@ -4,8 +4,6 @@ export type OpenApiPaths = paths;
 
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type ReadyResponse = components["schemas"]["ReadyResponse"];
-export type AuthLoginResponse = components["schemas"]["AuthLoginResponse"];
-export type AuthLogoutResponse = components["schemas"]["AuthLogoutResponse"];
 export type AuthMeResponse = components["schemas"]["AuthMeResponse"];
 export type SessionStateResponse =
   components["schemas"]["SessionStateResponse"];

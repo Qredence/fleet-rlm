@@ -1,10 +1,7 @@
 // ── Navigation & Phases ─────────────────────────────────────────────
 export type NavItem =
-  | "new"
-  | "skills"
-  | "taxonomy"
-  | "memory"
-  | "analytics"
+  | "workspace"
+  | "volumes"
   | "settings";
 
 export type CreationPhase =
@@ -19,11 +16,11 @@ export type CreationPhase =
 export type PromptFeature =
   | "library"
   | "contextMemory"
-  | "skills"
+  | "capabilities"
   | "webSearch";
 
 /** Prompt execution mode selected via toolbar chip */
-export type PromptMode = "auto" | "skillCreation" | "webSearch" | "cowork";
+export type PromptMode = "auto" | "workspace" | "webSearch" | "cowork";
 
 // ── Domain Types ────────────────────────────────────────────────────
 export interface Skill {

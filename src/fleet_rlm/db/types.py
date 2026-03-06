@@ -11,12 +11,14 @@ from .models import (
     ArtifactKind,
     JobStatus,
     JobType,
+    MembershipRole,
     MemoryKind,
     MemoryScope,
     MemorySource,
     RunStatus,
     RunStepType,
     SandboxProvider,
+    TenantStatus,
 )
 
 
@@ -24,6 +26,16 @@ from .models import (
 class IdentityUpsertResult:
     tenant_id: uuid.UUID
     user_id: uuid.UUID
+    tenant_status: TenantStatus | None = None
+    membership_role: MembershipRole | None = None
+
+
+@dataclass(frozen=True)
+class ControlPlaneIdentityResolution:
+    tenant_id: uuid.UUID
+    tenant_status: TenantStatus
+    user_id: uuid.UUID | None = None
+    membership_role: MembershipRole | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +84,7 @@ class MemoryItemCreateRequest:
     scope_id: str
     kind: MemoryKind
     source: MemorySource
+    uri: str | None = None
     content_text: str | None = None
     content_json: dict[str, Any] | None = None
     importance: int = 0
