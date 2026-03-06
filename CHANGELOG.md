@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Highlights (User Impact)
+
+- Reworked the skill-creation trace UI so reasoning, task, tool, sandbox, and final-output events render as a cleaner unified execution timeline.
+- Upgraded the builder panel to a tabbed artifact canvas that adapts to available execution data, making it easier to move between graph, timeline, REPL, and preview views.
+- Removed a large set of unused frontend modules and placeholder surfaces, reducing maintenance overhead and clarifying the active web app structure.
+
+### Added
+
+- **Change:** Added animated artifact tabs in the builder panel plus focused tests for tab visibility, builder-panel routing, prompt actions, attachment controls, and artifact-store behavior.
+  **Outcome:** The execution canvas is easier to navigate and frontend regressions around panel state are covered more thoroughly.
+- **Change:** Added dedicated runtime type definitions for the backend-driven skill-creation flow.
+  **Outcome:** Chat runtime contracts are easier to maintain without depending on the removed mock simulation hook.
+
+### Changed
+
+- **Change:** Redesigned `ChatMessageList` and related AI Elements primitives to coalesce contiguous reasoning, tool, sandbox, and task events into richer grouped trace rows.
+  **Outcome:** Long-running chat traces are easier to scan and no longer fragment important execution context across many small rows.
+- **Change:** Updated the builder panel to use the canonical domain artifact canvas instead of the older split code-artifact path.
+  **Outcome:** Artifact navigation now behaves more consistently across live runs and file-preview workflows.
+- **Change:** Moved the remaining live chat history/clarification/store modules into the `src/screens/chat/*` transition area and documented the canonical frontend layout in `src/frontend/AGENTS.md`.
+  **Outcome:** The current migration seam is explicit, making the frontend codebase easier to understand while refactoring continues.
+
+### Removed
+
+- **Change:** Removed the legacy mock skill-creation simulation stack, unused taxonomy graph modules, placeholder settings panes, and stale feature-chat/artifact components that were no longer wired into the live app.
+  **Outcome:** Smaller frontend surface area with less dead code and fewer parallel architectures to maintain.
+
 ## [0.4.95] - 2026-03-05
 
 ### Highlights (User Impact)
