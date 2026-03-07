@@ -1,5 +1,6 @@
 import { Lightbulb } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -7,6 +8,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
+import {
+  PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
+  PROMPT_INPUT_ACTION_BUTTON_SIZE,
+} from "./composerActionStyles";
 
 interface ThinkButtonProps {
   enabled: boolean;
@@ -18,20 +23,22 @@ function ThinkButton({ enabled, onToggle }: ThinkButtonProps) {
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
+          <Button
             type="button"
             onClick={onToggle}
             aria-pressed={enabled}
+            size={PROMPT_INPUT_ACTION_BUTTON_SIZE}
+            variant="ghost"
             className={cn(
-              "inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+              PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
               enabled
-                ? "text-accent bg-accent/15 hover:bg-accent/20"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                ? "bg-accent/15 text-accent hover:bg-accent/20"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Lightbulb className="h-3.5 w-3.5" />
             <span className="text-xs font-medium">Think</span>
-          </button>
+          </Button>
         </TooltipTrigger>
         <TooltipContent side="top">
           <p className="text-xs">

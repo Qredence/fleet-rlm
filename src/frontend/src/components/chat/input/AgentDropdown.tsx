@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils/cn";
+import {
+  PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
+  PROMPT_INPUT_ACTION_BUTTON_SIZE,
+} from "./composerActionStyles";
 
 interface Agent {
   id: string;
@@ -120,13 +125,18 @@ function AgentDropdown({ selectedAgent, onAgentChange }: AgentDropdownProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <Button
           type="button"
-          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-muted-foreground text-sm hover:text-foreground hover:bg-accent/50 transition-colors"
+          size={PROMPT_INPUT_ACTION_BUTTON_SIZE}
+          variant="ghost"
+          className={cn(
+            PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
+            "gap-1 text-muted-foreground hover:text-foreground",
+          )}
         >
           <span>{currentAgent.name}</span>
           <ChevronDown className="h-3 w-3 opacity-60" />
-        </button>
+        </Button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent

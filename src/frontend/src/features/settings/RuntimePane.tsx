@@ -385,9 +385,7 @@ export function RuntimePane() {
                   <Button
                     type="button"
                     size="sm"
-                    variant={
-                      clearSecretFlags[secretKey] ? "secondary" : "outline"
-                    }
+                    variant={clearSecretFlags[secretKey] ? "soft" : "outline"}
                     className="rounded-lg"
                     onClick={() => {
                       const nextClear = !(clearSecretFlags[secretKey] ?? false);
@@ -416,7 +414,7 @@ export function RuntimePane() {
         description="Writes to .env (local only), updates process env, and refreshes in-memory runtime."
       >
         <Button
-          variant="secondary"
+          variant="fill"
           className="rounded-lg"
           onClick={handleSave}
           disabled={saveDisabled}
@@ -446,9 +444,9 @@ export function RuntimePane() {
           <div className="min-w-0 rounded-xl border border-border-subtle/70 bg-muted/15 p-4">
             <div className="grid gap-2.5 sm:grid-cols-2">
               <Button
-                variant="outline"
+                variant="soft"
                 size="lg"
-                className="w-full justify-center rounded-lg border-border-subtle/70 bg-background/40"
+                className="w-full justify-center rounded-lg"
                 onClick={handleTestModal}
                 disabled={testModalConnection.isPending}
               >
@@ -459,7 +457,7 @@ export function RuntimePane() {
               <Button
                 variant="outline"
                 size="lg"
-                className="w-full justify-center rounded-lg border-border-subtle/70 bg-background/40"
+                className="w-full justify-center rounded-lg"
                 onClick={handleTestLm}
                 disabled={testLmConnection.isPending}
               >
@@ -468,7 +466,7 @@ export function RuntimePane() {
                   : "Test LM Connection"}
               </Button>
               <Button
-                variant="secondary"
+                variant="fill"
                 size="lg"
                 className="w-full justify-center rounded-lg sm:col-span-2"
                 onClick={handleTestAll}

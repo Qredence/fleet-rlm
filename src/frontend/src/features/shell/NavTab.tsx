@@ -1,4 +1,5 @@
 import { AnimatedIndicator } from "@/components/ui/animated-indicator";
+import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 
 interface NavTabProps {
@@ -40,10 +41,8 @@ export function NavTab({
       <span
         className="relative z-10"
         style={{
-          fontFamily: "var(--font-family)",
-          fontWeight: "var(--font-weight-regular)",
-          fontSize: "var(--text-label)",
-          lineHeight: "20px",
+          ...typo.labelRegular,
+          lineHeight: "var(--space-5)",
           letterSpacing: "-0.33px",
         }}
       >

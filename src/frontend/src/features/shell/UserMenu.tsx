@@ -31,7 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SettingsDialog } from "@/features/SettingsDialog";
+import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { PricingDialog } from "./PricingDialog";
 import { IntegrationsDialog } from "./IntegrationsDialog";
 import { LoginDialog } from "./LoginDialog";

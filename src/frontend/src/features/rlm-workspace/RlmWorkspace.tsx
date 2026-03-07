@@ -241,7 +241,7 @@ export function RlmWorkspace() {
               onAgentChange={setSelectedAgent}
               thinkEnabled={thinkEnabled}
               onThinkToggle={() => setThinkEnabled((prev) => !prev)}
-              className="w-full rounded-3xl border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
+              className="mx-auto w-full max-w-175 rounded-3xl border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
             />
           </div>
         </div>

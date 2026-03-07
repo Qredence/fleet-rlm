@@ -28,7 +28,6 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { cn } from "@/lib/utils/cn";
 import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
 import {
   settingsSections,
@@ -78,7 +77,12 @@ function SectionContent({
 
   return (
     <div
-      className={cn("flex flex-col min-h-0", isMobile ? "h-[85dvh]" : "h-full")}
+      className="flex flex-col min-h-0"
+      style={{
+        height: isMobile
+          ? "var(--settings-dialog-section-height-mobile)"
+          : "100%",
+      }}
     >
       <div className="shrink-0 border-b border-border-subtle/70">
         <div className={isMobile ? "px-4 pt-3 pb-3" : "px-6 pt-5 pb-3"}>
@@ -185,7 +189,7 @@ export function SettingsDialog({
           <Drawer.Content
             className="fixed inset-x-0 bottom-0 z-50 flex flex-col outline-none"
             style={{
-              height: "95dvh",
+              height: "var(--settings-dialog-height-mobile)",
               borderTopLeftRadius: "var(--radius-card)",
               borderTopRightRadius: "var(--radius-card)",
               backgroundColor: "var(--glass-sheet-bg)",
@@ -288,7 +292,10 @@ export function SettingsDialog({
             </SidebarContent>
           </Sidebar>
 
-          <main className="flex h-125 min-h-0 flex-1 flex-col overflow-hidden">
+          <main
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            style={{ height: "var(--settings-dialog-height-desktop)" }}
+          >
             <SectionContent
               isDark={isDark}
               onToggleTheme={toggleTheme}

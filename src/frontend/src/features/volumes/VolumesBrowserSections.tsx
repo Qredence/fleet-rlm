@@ -71,7 +71,9 @@ export function FsItem({
           isMobile ? "py-3 touch-target" : "py-2",
           isVolume && "bg-muted/50",
         )}
-        style={{ paddingLeft: `${12 + depth * 20}px` }}
+        style={{
+          paddingLeft: `calc(var(--tree-indent-base) + (${depth} * var(--tree-indent-step)))`,
+        }}
         onClick={() => {
           if (isFile) {
             onSelectFile(node);

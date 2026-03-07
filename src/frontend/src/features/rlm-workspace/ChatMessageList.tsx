@@ -33,7 +33,7 @@ import {
   QueueSectionContent,
   QueueSectionLabel,
   QueueSectionTrigger,
-} from "@/components/ai-elements/queue";
+} from "@/components/ui/queue";
 import {
   ChainOfThought,
   ChainOfThoughtContent,

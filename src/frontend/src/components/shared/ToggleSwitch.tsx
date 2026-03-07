@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -15,13 +16,27 @@ import {
 import { springs } from "@/lib/config/motion-config";
 import { cn } from "@/lib/utils/cn";
 
-/* ── iOS 26 Authentic Dimensions ──────────────────────────────── */
-const TRACK_W = 51;
-const TRACK_H = 31;
-const KNOB_SIZE = 27;
-const MARGIN = 2;
-const TRAVEL = TRACK_W - KNOB_SIZE - MARGIN * 2; // 20px
-const EXPAND_SCALE = 1.22; // Knob widens to ~33px on press/drag
+const DEFAULT_TOGGLE_DIMENSIONS = {
+  trackWidth: 51,
+  trackHeight: 31,
+  knobSize: 27,
+  knobMargin: 2,
+  expandScale: 1.22,
+} as const;
+
+function readRootNumber(token: string, fallback: number) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  const value = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue(token)
+    .trim();
+  const parsed = Number.parseFloat(value);
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 /* ── Spring Configurations (from centralised motion-config) ───── */
 const SNAP_SPRING = springs.toggleSnap;
@@ -55,6 +70,33 @@ export function ToggleSwitch({
   className = "",
 }: ToggleSwitchProps) {
   const prefersReduced = useReducedMotion();
+  const { trackWidth, trackHeight, knobSize, knobMargin, expandScale } =
+    useMemo(
+      () => ({
+        trackWidth: readRootNumber(
+          "--toggle-track-width",
+          DEFAULT_TOGGLE_DIMENSIONS.trackWidth,
+        ),
+        trackHeight: readRootNumber(
+          "--toggle-track-height",
+          DEFAULT_TOGGLE_DIMENSIONS.trackHeight,
+        ),
+        knobSize: readRootNumber(
+          "--toggle-knob-size",
+          DEFAULT_TOGGLE_DIMENSIONS.knobSize,
+        ),
+        knobMargin: readRootNumber(
+          "--toggle-knob-margin",
+          DEFAULT_TOGGLE_DIMENSIONS.knobMargin,
+        ),
+        expandScale: readRootNumber(
+          "--toggle-knob-expand-scale",
+          DEFAULT_TOGGLE_DIMENSIONS.expandScale,
+        ),
+      }),
+      [],
+    );
+  const travel = trackWidth - knobSize - knobMargin * 2;
 
   /* ── State ──────────────────────────────────────────────── */
   const [isOn, setIsOn] = useState(checked);
@@ -72,18 +114,18 @@ export function ToggleSwitch({
   const isExpanded = isPressed || isDragging;
 
   /* ── Motion value for knob x position ───────────────────── */
-  const x = useMotionValue(isOn ? TRAVEL : 0);
+  const x = useMotionValue(isOn ? travel : 0);
 
   /* ── Animate position on state change ───────────────────── */
   useEffect(() => {
     if (isDragging) return;
-    const target = isOn ? TRAVEL : 0;
+    const target = isOn ? travel : 0;
     if (prefersReduced) {
       x.set(target);
     } else {
       animate(x, target, SNAP_SPRING);
     }
-  }, [isOn, isDragging, prefersReduced, x]);
+  }, [isOn, isDragging, prefersReduced, travel, x]);
 
   /* ── Flash timer ────────────────────────────────────────── */
   useEffect(() => {
@@ -118,7 +160,7 @@ export function ToggleSwitch({
   const handleDragEnd = useCallback(() => {
     if (disabled) return;
     const current = x.get();
-    const shouldBeOn = current > TRAVEL / 2;
+    const shouldBeOn = current > travel / 2;
 
     if (shouldBeOn !== isOn) {
       setIsOn(shouldBeOn);
@@ -134,7 +176,7 @@ export function ToggleSwitch({
     setTimeout(() => {
       justDraggedRef.current = false;
     }, 200);
-  }, [disabled, isOn, onChange, x]);
+  }, [disabled, isOn, onChange, travel, x]);
 
   const handleKnobPointerDown = useCallback(() => {
     if (disabled) return;
@@ -176,8 +218,8 @@ export function ToggleSwitch({
         className,
       )}
       style={{
-        width: TRACK_W,
-        height: TRACK_H,
+        width: trackWidth,
+        height: trackHeight,
         WebkitTapHighlightColor: "transparent",
         outline: "none",
         fontFamily: "var(--font-family)",
@@ -243,7 +285,7 @@ export function ToggleSwitch({
       <motion.div
         className="absolute z-10 touch-none"
         drag={disabled ? false : "x"}
-        dragConstraints={{ left: 0, right: TRAVEL }}
+        dragConstraints={{ left: 0, right: travel }}
         dragElastic={0.08}
         dragMomentum={false}
         onDragStart={handleDragStart}
@@ -253,14 +295,14 @@ export function ToggleSwitch({
         onPointerCancel={() => setIsPressed(false)}
         style={{
           x,
-          top: MARGIN,
-          left: MARGIN,
-          width: KNOB_SIZE,
-          height: KNOB_SIZE,
+          top: knobMargin,
+          left: knobMargin,
+          width: knobSize,
+          height: knobSize,
           transformOrigin: isOn ? "right center" : "left center",
         }}
         animate={{
-          scaleX: isExpanded ? EXPAND_SCALE : 1,
+          scaleX: isExpanded ? expandScale : 1,
         }}
         transition={{
           scaleX: springConfig,

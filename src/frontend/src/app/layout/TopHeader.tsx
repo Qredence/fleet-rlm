@@ -50,22 +50,25 @@ export function TopHeader() {
       style={
         isMobile
           ? {
-              padding: "10px 16px",
-              paddingLeft: "max(16px, env(safe-area-inset-left, 16px))",
-              paddingRight: "max(16px, env(safe-area-inset-right, 16px))",
+              paddingBlock: "var(--header-padding-block-mobile)",
+              paddingLeft:
+                "max(var(--header-padding-inline-mobile), var(--safe-area-inset-left))",
+              paddingRight:
+                "max(var(--header-padding-inline-mobile), var(--safe-area-inset-right))",
               backgroundColor: "var(--glass-nav-bg)",
               backdropFilter: "blur(var(--glass-nav-blur))",
               WebkitBackdropFilter: "blur(var(--glass-nav-blur))",
               borderBottom: "0.5px solid var(--glass-nav-border)",
             }
           : {
-              padding: "16px 32px",
+              paddingBlock: "var(--header-padding-block-desktop)",
+              paddingInline: "var(--header-padding-inline-desktop)",
             }
       }
     >
       {/* ── Logo ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 shrink-0">
-        <BrandMark className="h-[17px] w-[18px] shrink-0 text-foreground" />
+        <BrandMark className="h-4.25 w-4.5 shrink-0 text-foreground" />
       </div>
 
       {/* ── Navigation tabs (desktop only) ─────────────────────── */}
@@ -118,7 +121,7 @@ export function TopHeader() {
                 aria-label="New Session"
                 className={isMobile ? "touch-target" : undefined}
               >
-                <SquarePen className="size-5 text-foreground" />
+                <SquarePen className="size-5" />
               </IconButton>
             </span>
           </TooltipTrigger>
