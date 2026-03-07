@@ -112,5 +112,13 @@ describe("RuntimePane", () => {
     expect(html).toContain("LM Smoke");
     expect(html).toContain("Pass");
     expect(html).toContain("Test Credentials + Connection");
+    expect(html).toContain(
+      "rounded-xl border border-border-subtle/70 bg-muted/15 p-4",
+    );
+    expect(html).toContain("sm:col-span-2");
+    expect(html).toContain(
+      "w-full justify-center rounded-lg border-border-subtle/70 bg-background/40",
+    );
+    expect(html).toContain("w-full justify-center rounded-lg sm:col-span-2");
   });
 });

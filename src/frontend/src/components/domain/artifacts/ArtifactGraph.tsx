@@ -25,6 +25,7 @@ interface ArtifactGraphProps {
   steps: ExecutionStep[];
   activeStepId?: string;
   onSelectStep: (id: string) => void;
+  isVisible?: boolean;
 }
 
 const nodeTypes: NodeTypes = { step: GraphStepNode };
@@ -191,11 +192,14 @@ export function ArtifactGraph({
   steps,
   activeStepId,
   onSelectStep,
+  isVisible = true,
 }: ArtifactGraphProps) {
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerReady, setContainerReady] = useState(
-    () => typeof ResizeObserver === "undefined" || isJsDomEnvironment(),
+    () =>
+      isVisible &&
+      (typeof ResizeObserver === "undefined" || isJsDomEnvironment()),
   );
 
   const { nodes, edges } = useMemo(() => {
@@ -312,6 +316,11 @@ export function ArtifactGraph({
   );
 
   useEffect(() => {
+    if (!isVisible) {
+      setContainerReady(false);
+      return;
+    }
+
     const element = containerRef.current;
     if (!element) return;
 
@@ -349,7 +358,7 @@ export function ArtifactGraph({
       window.cancelAnimationFrame(frameId);
       observer.disconnect();
     };
-  }, [steps.length]);
+  }, [isVisible, steps.length]);
 
   if (steps.length === 0) {
     return (
@@ -362,7 +371,7 @@ export function ArtifactGraph({
   return (
     <div className="h-full w-full rounded-xl border border-border-subtle/80 overflow-hidden bg-card/30">
       <div ref={containerRef} className="h-full min-h-0">
-        {containerReady ? (
+        {isVisible && containerReady ? (
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -379,11 +388,11 @@ export function ArtifactGraph({
           >
             <Background gap={20} color="var(--border-subtle)" />
           </ReactFlow>
-        ) : (
+        ) : isVisible ? (
           <div className="flex h-full min-h-0 items-center justify-center text-sm text-muted-foreground">
             Preparing graph…
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

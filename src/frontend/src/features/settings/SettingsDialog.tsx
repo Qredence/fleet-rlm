@@ -80,7 +80,7 @@ function SectionContent({
     <div
       className={cn("flex flex-col min-h-0", isMobile ? "h-[85dvh]" : "h-full")}
     >
-      <div className="shrink-0 border-b border-border-subtle">
+      <div className="shrink-0 border-b border-border-subtle/70">
         <div className={isMobile ? "px-4 pt-3 pb-3" : "px-6 pt-5 pb-3"}>
           {isMobile ? (
             <span className="text-foreground" style={typo.h4}>
@@ -106,7 +106,7 @@ function SectionContent({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className={isMobile ? "px-4" : "px-6"}>
+        <div className={isMobile ? "px-4 pb-4" : "px-6 pb-6"}>
           <SettingsPaneContent
             isDark={isDark}
             onToggleTheme={onToggleTheme}
@@ -126,7 +126,7 @@ function MobileSectionNav({
   onSelectSection: (section: SettingsSection) => void;
 }) {
   return (
-    <div className="shrink-0 overflow-x-auto border-b border-border-subtle px-4 py-2">
+    <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-4 py-2">
       <div className="flex w-max items-center gap-2">
         {settingsSections.map((section) => {
           const Icon = section.icon;
@@ -244,13 +244,16 @@ export function SettingsDialog({
   /* ── Desktop: standard dialog ──────────────────────────────────── */
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 md:max-h-130 md:max-w-195 lg:max-w-215">
+      <DialogContent className="overflow-hidden border-border-subtle/70 bg-card/95 p-0 md:max-h-130 md:max-w-195 lg:max-w-215">
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">
           Configure Skill Fleet preferences and appearance
         </DialogDescription>
         <SidebarProvider className="items-start">
-          <Sidebar collapsible="none" className="hidden border-r md:flex">
+          <Sidebar
+            collapsible="none"
+            className="hidden border-r border-border-subtle/70 bg-card/40 md:flex"
+          >
             <SidebarContent>
               <SidebarGroup>
                 <SidebarGroupContent>

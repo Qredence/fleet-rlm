@@ -166,6 +166,7 @@ export function ArtifactCanvas({
               steps={steps}
               activeStepId={activeStepId}
               onSelectStep={setActiveStepId}
+              isVisible={activeTab === "graph"}
             />
           </TabsContent>
         ) : null}

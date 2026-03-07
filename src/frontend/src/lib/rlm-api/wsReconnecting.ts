@@ -53,6 +53,8 @@ export async function createReconnectingWs(
   options: StreamWsOptions & {
     url: string;
     terminalEventKinds?: WsEventKind[];
+    abortMode?: "cancel" | "close";
+    abortTimeoutMs?: number;
   },
 ): Promise<void> {
   const {
@@ -63,6 +65,8 @@ export async function createReconnectingWs(
     initialBackoff = DEFAULT_INITIAL_BACKOFF,
     maxBackoff = DEFAULT_MAX_BACKOFF,
     terminalEventKinds = ["final", "cancelled"],
+    abortMode = "close",
+    abortTimeoutMs = 1500,
   } = options;
 
   const retryState: RetryState = {
@@ -86,6 +90,7 @@ export async function createReconnectingWs(
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       let completed = false;
+      let abortTimer: ReturnType<typeof setTimeout> | null = null;
 
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
@@ -99,6 +104,10 @@ export async function createReconnectingWs(
       const finish = (fn: () => void) => {
         if (settled) return;
         settled = true;
+        if (abortTimer) {
+          clearTimeout(abortTimer);
+          abortTimer = null;
+        }
         fn();
       };
 
@@ -115,9 +124,15 @@ export async function createReconnectingWs(
         retryState.aborted = true;
         cleanup();
 
-        if (socket.readyState === WebSocket.OPEN) {
+        if (abortMode === "cancel" && socket.readyState === WebSocket.OPEN) {
           const cancel: WsCancelRequest = { type: "cancel" };
           socket.send(JSON.stringify(cancel));
+          abortTimer = setTimeout(() => {
+            safeClose();
+            updateStatus("disconnected");
+            finish(resolve);
+          }, abortTimeoutMs);
+          return;
         }
 
         safeClose();
