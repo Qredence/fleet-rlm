@@ -51,7 +51,8 @@ function IconButton({
       variant={resolvedVariant}
       className={cn(
         "rounded-lg focus-visible:ring-2",
-        resolvedVariant === "ghost" && "border border-transparent bg-transparent",
+        resolvedVariant === "ghost" &&
+          "border border-transparent bg-transparent",
         isActive ? "text-accent" : "text-foreground",
         className,
       )}
