@@ -296,6 +296,46 @@ def test_websocket_cancel_message(
         assert total == 6
 
 
+def test_websocket_cancel_message_mid_stream(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="assistant_token", text=f"Token {i}", timestamp=ts(float(i))
+            )
+            for i in range(10)
+        ]
+        + [StreamEvent(kind="final", text="Done", timestamp=ts(99.0))]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json({"type": "message", "content": "cancel me"})
+
+        first = websocket.receive_json()
+        assert first["type"] == "event"
+        assert first["data"]["kind"] == "assistant_token"
+
+        websocket.send_json({"type": "cancel"})
+
+        kinds = [first["data"]["kind"]]
+        cancelled = None
+        while True:
+            data = websocket.receive_json()
+            if data["type"] != "event":
+                continue
+            kinds.append(data["data"]["kind"])
+            if data["data"]["kind"] == "cancelled":
+                cancelled = data
+                break
+
+        assert cancelled is not None
+        assert cancelled["data"]["text"] == "[cancelled]"
+        assert "final" not in kinds
+
+
 def test_websocket_resolve_hitl_command_flow(
     ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):

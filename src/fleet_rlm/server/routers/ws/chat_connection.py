@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
+from contextlib import suppress
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -28,6 +32,20 @@ from .streaming import run_streaming_turn
 from .turn import handle_command_with_persist, initialize_turn_lifecycle
 
 logger = logging.getLogger(__name__)
+
+
+def _cancelled_event_payload(message: str = "Request cancelled.") -> dict[str, Any]:
+    return {
+        "type": "event",
+        "data": {
+            "kind": "cancelled",
+            "text": message,
+            "payload": None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "version": 2,
+            "event_id": str(uuid.uuid4()),
+        },
+    }
 
 
 async def _process_chat_message(
@@ -104,15 +122,79 @@ async def _chat_message_loop(
     local_persist: Any,
 ) -> None:
     execution_emitter = _get_execution_emitter(state)
+    stream_task: asyncio.Task[str | None] | None = None
+    pending_receive_task: asyncio.Task[Any] | None = None
 
     try:
         while True:
-            raw_payload = await websocket.receive_json()
+            if stream_task is not None:
+                if pending_receive_task is None:
+                    pending_receive_task = asyncio.create_task(websocket.receive_json())
+
+                done, _pending = await asyncio.wait(
+                    {stream_task, pending_receive_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if stream_task in done:
+                    session.last_loaded_docs_path = await stream_task
+                    stream_task = None
+                    continue
+
+                assert pending_receive_task in done
+                raw_payload = await pending_receive_task
+                pending_receive_task = None
+                msg = await parse_ws_message_or_send_error(
+                    websocket=websocket,
+                    raw_payload=raw_payload,
+                )
+                if msg is None:
+                    continue
+
+                if msg.type == "cancel":
+                    session.cancel_flag["cancelled"] = True
+                    continue
+
+                if msg.type == "command":
+                    await handle_command_with_persist(
+                        websocket=websocket,
+                        agent=agent,
+                        payload=msg.model_dump(),
+                        session_record=session.session_record,
+                        repository=runtime.repository,
+                        identity_rows=runtime.identity_rows,
+                        persistence_required=runtime.persistence_required,
+                        local_persist=local_persist,
+                    )
+                    continue
+
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": (
+                            "A run is already in progress. Cancel it or wait for "
+                            "completion before sending another message."
+                        ),
+                    }
+                )
+                continue
+
+            if pending_receive_task is not None:
+                raw_payload = await pending_receive_task
+                pending_receive_task = None
+            else:
+                raw_payload = await websocket.receive_json()
+
             msg = await parse_ws_message_or_send_error(
                 websocket=websocket,
                 raw_payload=raw_payload,
             )
             if msg is None:
+                continue
+
+            if msg.type == "cancel":
+                session.cancel_flag["cancelled"] = True
+                await websocket.send_json(_cancelled_event_payload())
                 continue
 
             workspace_id, user_id, sess_id = resolve_session_identity(
@@ -138,10 +220,6 @@ async def _chat_message_loop(
                 local_persist=local_persist,
             )
 
-            if msg.type == "cancel":
-                session.cancel_flag["cancelled"] = True
-                continue
-
             if msg.type == "command":
                 await handle_command_with_persist(
                     websocket=websocket,
@@ -161,21 +239,31 @@ async def _chat_message_loop(
                 )
                 continue
 
-            session.last_loaded_docs_path = await _process_chat_message(
-                websocket=websocket,
-                msg=msg,
-                agent=agent,
-                interpreter=interpreter,
-                session=session,
-                local_persist=local_persist,
-                runtime=runtime,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                sess_id=sess_id,
-                execution_emitter=execution_emitter,
+            stream_task = asyncio.create_task(
+                _process_chat_message(
+                    websocket=websocket,
+                    msg=msg,
+                    agent=agent,
+                    interpreter=interpreter,
+                    session=session,
+                    local_persist=local_persist,
+                    runtime=runtime,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sess_id=sess_id,
+                    execution_emitter=execution_emitter,
+                )
             )
     except WebSocketDisconnect:
         session.cancel_flag["cancelled"] = True
+        if pending_receive_task is not None and not pending_receive_task.done():
+            pending_receive_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending_receive_task
+        if stream_task is not None and not stream_task.done():
+            stream_task.cancel()
+            with suppress(asyncio.CancelledError, WebSocketDisconnect):
+                await stream_task
         try:
             await local_persist(include_volume_save=True)
         except PersistenceRequiredError as exc:
@@ -196,6 +284,14 @@ async def _chat_message_loop(
         if session.lifecycle is not None:
             await session.lifecycle.complete_run(RunStatus.CANCELLED)
     except Exception as exc:
+        if pending_receive_task is not None and not pending_receive_task.done():
+            pending_receive_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending_receive_task
+        if stream_task is not None and not stream_task.done():
+            stream_task.cancel()
+            with suppress(asyncio.CancelledError, WebSocketDisconnect):
+                await stream_task
         error_code = _classify_stream_failure(exc)
         await websocket.send_json(
             _error_envelope(

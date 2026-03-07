@@ -90,6 +90,9 @@ class FakeChatAgent:
     ):
         _ = (message, trace, cancel_check)
         for event in self._events:
+            if cancel_check is not None and cancel_check():
+                yield StreamEvent(kind="cancelled", text="[cancelled]", timestamp=ts())
+                return
             await asyncio.sleep(0.01)
             yield event
 
