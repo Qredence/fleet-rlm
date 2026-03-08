@@ -26,7 +26,7 @@
   * [Code Health Complexity Heatmap](reference/code-health-complexity-heatmap.md)
   * [Code Health Map (Used Code and Files)](reference/code-health-map.md)
   * [Code Health Unused and Unnecessary Review](reference/code-health-unused-review.md)
-  * [fleet-rlm Codebase Map (Wave 7.2)](reference/codebase-map.md)
+  * [fleet-rlm Codebase Map and Simplification Audit](reference/codebase-map.md)
   * [Database Architecture](reference/database.md)
   * [Frontend ↔ Backend Integration](reference/frontend-backend-integration.md)
   * [HTTP and WebSocket API Reference](reference/http-api.md)

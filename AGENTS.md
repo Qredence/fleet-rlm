@@ -1,8 +1,14 @@
 # Repository Guidelines
 
+## Usage
+Always use uv to run commands, not raw Python or pytest. This ensures the correct environment and dependencies are used.
+Always use bun in src/frontend for frontend commands to run build and dev scripts
+
 ## Project Structure & Module Organization
 Core Python code lives in `src/fleet_rlm/` (`core/`, `react/`, `server/`, `mcp/`, `analytics/`, `db/`).
 Inside `src/fleet_rlm/core/`, keep host-side adapters (`interpreter.py`, `llm_tools.py`, `volume_ops.py`) conceptually separate from sandbox-side protocol/helpers (`driver.py`, `sandbox_tools.py`, `volume_tools.py`).
+The websocket chat runtime now uses `RLMReActChatAgent` as the only top-level chat runtime. Deep symbolic work should happen through `rlm_query -> delegate_sub_agent.py -> child dspy.RLM`, while `docs_path` is preload-only and does not select a separate top-level execution mode.
+Treat live conversation trace rendering as a backend/frontend contract spanning `src/fleet_rlm/server/routers/ws/*`, `src/fleet_rlm/react/streaming_context.py`, `src/frontend/src/features/rlm-workspace/backendChatEventAdapter.ts`, and `src/frontend/src/features/rlm-workspace/ChatMessageList.tsx`.
 Use `src/fleet_rlm/utils/regex.py` for regex helpers.
 Frontend code lives in `src/frontend/` (Vite + React + TypeScript).
 Tests are organized by scope in `tests/unit/`, `tests/ui/`, `tests/integration/`, and `tests/e2e/`.
@@ -32,6 +38,10 @@ Use `pytest` with strict markers (`unit`, `ui`, `integration`, `e2e`, `live_llm`
 Default local run: `uv run pytest -q -m "not live_llm and not benchmark"`.
 Name tests `test_<behavior>.py` and add regression tests for bug fixes.
 Frontend tests use Vitest (`bun run test:unit`) and Playwright (`bun run test:e2e`).
+For chat-runtime or trace changes, prefer this focused validation set before broader gates:
+- `uv run pytest -q tests/ui/server/test_server_config.py tests/ui/ws/test_chat_stream.py tests/unit/test_tools_sandbox.py`
+- `cd src/frontend && bun run type-check`
+- `cd src/frontend && bun run test:unit src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx`
 
 ## Commit & Pull Request Guidelines
 Follow Conventional Commits seen in history: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` (scopes encouraged, e.g., `fix(frontend): ...`).
