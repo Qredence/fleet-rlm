@@ -44,7 +44,7 @@ function SuggestionChip({
       data-slot="suggestion-chip"
       className={cn(
         "flex items-center gap-2 px-4 py-2.5 rounded-button",
-        "bg-secondary border border-border-subtle",
+        "bg-secondary border-subtle",
         "hover:border-border-strong hover:bg-secondary/80",
         "transition-colors",
         "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",

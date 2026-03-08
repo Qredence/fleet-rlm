@@ -48,7 +48,7 @@ function EnvironmentVariables({
     <EnvCtx.Provider value={value}>
       <div
         className={cn(
-          "rounded-lg border border-border-subtle bg-card",
+          "rounded-lg border-subtle bg-card",
           className,
         )}
         {...props}

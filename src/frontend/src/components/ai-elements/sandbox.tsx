@@ -33,8 +33,8 @@ function Sandbox({
       {...props}
       className={cn(
         density === "compact"
-          ? "rounded-xl border border-border-subtle/80 bg-card/70"
-          : "rounded-xl border border-border-subtle bg-card",
+          ? "rounded-xl border-subtle/80 bg-card/70"
+          : "rounded-xl border-subtle bg-card",
         className,
       )}
     />
@@ -71,7 +71,7 @@ function SandboxHeader({
       >
         {title ?? "Sandbox"}
       </span>
-      <span className="rounded-full border border-border-subtle px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+      <span className="rounded-full border-subtle px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {state.replace(/_/g, " ")}
       </span>
       <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />

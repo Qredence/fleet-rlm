@@ -40,7 +40,7 @@ function InlineCitationCardTrigger({
       <button
         type="button"
         className={cn(
-          "ml-1 inline-flex items-center rounded-full border border-border-subtle px-1.5 py-0 text-[10px] text-muted-foreground hover:text-foreground",
+          "ml-1 inline-flex items-center rounded-full border-subtle px-1.5 py-0 text-[10px] text-muted-foreground hover:text-foreground",
           className,
         )}
         aria-label={`Citation (${sources.length})`}
@@ -116,7 +116,7 @@ function InlineCitationSource({
 }
 function InlineCitationQuote({ children }: { children: ReactNode }) {
   return (
-    <blockquote className="rounded-md border border-border-subtle bg-muted/30 p-2 text-xs text-muted-foreground">
+    <blockquote className="rounded-md border-subtle bg-muted/30 p-2 text-xs text-muted-foreground">
       {children}
     </blockquote>
   );

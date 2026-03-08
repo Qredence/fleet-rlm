@@ -47,7 +47,7 @@ export function RouteErrorPage() {
       className="flex min-h-dvh w-full items-center justify-center bg-background px-6"
       style={{ fontFamily: "var(--font-family)" }}
     >
-      <div className="mx-auto flex w-full max-w-xl flex-col items-center rounded-card border border-border-subtle bg-card px-6 py-10 text-center shadow-sm">
+      <div className="mx-auto flex w-full max-w-xl flex-col items-center rounded-card border-subtle bg-card px-6 py-10 text-center shadow-sm">
         <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-destructive/10">
           <AlertTriangle
             className="size-6 text-destructive"

@@ -276,7 +276,7 @@ function renderInlineCitations(
               {part.citations.map((citation, idx) => (
                 <div
                   key={`${citation.url}-${idx}`}
-                  className="space-y-2 rounded-md border border-border-subtle p-2"
+                  className="space-y-2 rounded-md border-subtle p-2"
                 >
                   <InlineCitationSource
                     title={citation.title}
@@ -409,7 +409,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
               Code
             </div>
             <pre
-              className="overflow-x-auto rounded-md border border-border-subtle/80 bg-muted/20 px-2.5 py-2 text-foreground"
+              className="overflow-x-auto rounded-md border-subtle/80 bg-muted/20 px-2.5 py-2 text-foreground"
               style={{ ...typo.base, fontFamily: "var(--font-family-mono)" }}
             >
               <code>{item.part.code}</code>
@@ -422,7 +422,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
 
   if (item.part.kind === "environment_variables") {
     return (
-      <div className="rounded-md border border-border-subtle/80 bg-muted/15">
+      <div className="rounded-md border-subtle/80 bg-muted/15">
         {item.part.variables.map((variable, idx) => (
           <div
             key={`${item.key}-env-${variable.name}-${idx}`}
@@ -650,7 +650,7 @@ function renderAssistantTurn(item: AssistantTurnDisplayItem) {
     <Message from="assistant" className="mb-4" key={item.key}>
       <MessageContent className="w-full space-y-2.5">
         {shouldRenderBubble ? (
-          <div className="max-w-[72ch] rounded-[22px] border border-border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
+          <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
             <div className="flex flex-col gap-3">
               {reasoningParts.map(({ key, part }) =>
                 renderReasoningPart(part, key, true),
@@ -850,7 +850,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
               <SandboxTabContent value="code">
                 {code ? (
                   <pre
-                    className="overflow-x-auto rounded-md border border-border-subtle bg-muted/30 p-2"
+                    className="overflow-x-auto rounded-md border-subtle bg-muted/30 p-2"
                     style={{
                       ...typo.base,
                       fontFamily: "var(--font-family-mono)",
@@ -1064,7 +1064,7 @@ export function ChatMessageList({
                 >
                   <button
                     type="button"
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-button border border-border-subtle hover:border-border-strong hover:bg-secondary/60 transition-colors"
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-button border-subtle hover:border-border-strong hover:bg-secondary/60 transition-colors"
                     onClick={onToggleHistory}
                   >
                     <Clock
@@ -1130,7 +1130,7 @@ export function ChatMessageList({
 
               {msg.type === "user" && (
                 <Message from="user" className="mb-4">
-                  <MessageContent className="max-w-[85%] md:max-w-lg rounded-xl border border-border-subtle/80 bg-card/70 px-3.5 py-2.5">
+                  <MessageContent className="max-w-[85%] md:max-w-lg rounded-xl border-subtle/80 bg-card/70 px-3.5 py-2.5">
                     <div className="text-[13px] leading-relaxed text-foreground whitespace-pre-wrap">
                       {msg.content}
                     </div>
@@ -1147,7 +1147,7 @@ export function ChatMessageList({
                       renderTracePart(part, `${msg.id}-${part.kind}-${idx}`),
                     )}
                     {msg.type === "assistant" && msg.content ? (
-                      <div className="max-w-[72ch] rounded-[22px] border border-border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
+                      <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
                         <MessageResponse streaming={msg.streaming}>
                           {msg.content}
                         </MessageResponse>
@@ -1156,7 +1156,7 @@ export function ChatMessageList({
                     {msg.type === "assistant" &&
                     msg.streaming &&
                     !msg.content ? (
-                      <div className="max-w-[72ch] rounded-[22px] border border-border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
+                      <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
                         <Shimmer
                           as="span"
                           className="text-sm text-muted-foreground"

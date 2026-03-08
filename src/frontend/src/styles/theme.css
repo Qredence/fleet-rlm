@@ -155,6 +155,10 @@
   /* Label widths */
   --label-min-width: 72px;
 
+  /* Content widths */
+  --content-max-width: 72ch;
+  --container-max-width: 800px;
+
   /* Additional line heights for specific use cases */
   --line-height-display: 40px;
 
@@ -367,6 +371,10 @@
   --color-toggle-knob: var(--toggle-knob);
 
   --color-elevated-primary: var(--bg-elevated-primary);
+
+  /* Content widths - exposed for max-w-* utilities */
+  --width-content: var(--content-max-width);
+  --width-container: var(--container-max-width);
 }
 
 /* ── Base Styles ──────────────────────────────────────────────── */

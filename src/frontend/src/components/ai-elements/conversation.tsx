@@ -131,7 +131,7 @@ function ConversationScrollButton({
       size="icon"
       variant="secondary"
       className={cn(
-        "absolute bottom-3 right-3 z-20 rounded-full border border-border-subtle shadow-none",
+        "absolute bottom-3 right-3 z-20 rounded-full border-subtle shadow-none",
         className,
       )}
       onClick={ctx?.scrollToBottom}

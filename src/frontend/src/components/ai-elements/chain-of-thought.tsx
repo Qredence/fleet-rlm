@@ -52,8 +52,8 @@ function ChainOfThought({
       defaultOpen={resolvedDefaultOpen}
       className={cn(
         density === "compact"
-          ? "rounded-xl border border-border-subtle/80 bg-card/70"
-          : "rounded-xl border border-border-subtle bg-card",
+          ? "rounded-xl border-subtle/80 bg-card/70"
+          : "rounded-xl border-subtle bg-card",
         className,
       )}
       {...props}
@@ -163,7 +163,7 @@ function ChainOfThoughtSearchResult({
   return (
     <span
       className={cn(
-        "rounded-full border border-border-subtle bg-muted/40 px-2 py-0.5 text-[11px]",
+        "rounded-full border-subtle bg-muted/40 px-2 py-0.5 text-[11px]",
         className,
       )}
       {...props}

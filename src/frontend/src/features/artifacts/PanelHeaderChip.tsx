@@ -38,7 +38,7 @@ export function PanelHeaderChip({
       disabled={onClick ? disabled : undefined}
       className={cn(
         "inline-flex items-center gap-2 px-3 py-1.5 min-w-0",
-        "bg-secondary rounded-button border border-border-subtle",
+        "bg-secondary rounded-button border-subtle",
         "transition-[background-color,border-color,box-shadow,transform]",
         "duration-150 ease-out",
         isInteractive && [

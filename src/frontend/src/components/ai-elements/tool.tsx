@@ -44,8 +44,8 @@ function Tool({
       {...props}
       className={cn(
         density === "compact"
-          ? "rounded-xl border border-border-subtle/80 bg-card/70"
-          : "rounded-xl border border-border-subtle bg-card",
+          ? "rounded-xl border-subtle/80 bg-card/70"
+          : "rounded-xl border-subtle bg-card",
         className,
       )}
     />
@@ -135,7 +135,7 @@ function ToolInput({
         Input
       </div>
       <pre
-        className="overflow-x-auto rounded-md border border-border-subtle/80 bg-muted/20 p-2 text-foreground"
+        className="overflow-x-auto rounded-md border-subtle/80 bg-muted/20 p-2 text-foreground"
         style={{ ...typo.base, fontFamily: "var(--font-family-mono)" }}
       >
         <code>
@@ -169,7 +169,7 @@ function ToolOutput({
         </div>
       ) : (
         <div
-          className="rounded-md border border-border-subtle/80 bg-muted/15 p-2 text-foreground"
+          className="rounded-md border-subtle/80 bg-muted/15 p-2 text-foreground"
           style={typo.base}
         >
           {output}

@@ -67,8 +67,8 @@ function Task({
       {...props}
       className={cn(
         density === "compact"
-          ? "rounded-xl border border-border-subtle/80 bg-card/70"
-          : "rounded-xl border border-border-subtle bg-card",
+          ? "rounded-xl border-subtle/80 bg-card/70"
+          : "rounded-xl border-subtle bg-card",
         props.className,
       )}
     />
@@ -147,7 +147,7 @@ function TaskItemFile({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded border border-border-subtle bg-muted/40 px-1.5 py-0.5 text-xs",
+        "inline-flex items-center gap-1 rounded border-subtle bg-muted/40 px-1.5 py-0.5 text-xs",
         "text-muted-foreground",
         className,
       )}

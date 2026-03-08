@@ -20,3 +20,19 @@
   min-height: 44px;
   min-width: 44px;
 }
+
+/* Utility: max width for prose content (72ch) */
+@utility max-w-content {
+  max-width: var(--content-max-width);
+}
+
+/* Utility: max width for container layouts (800px) */
+@utility max-w-container {
+  max-width: var(--container-max-width);
+}
+
+/* Utility: subtle border with 1px width */
+@utility border-subtle {
+  border-width: 1px;
+  border-color: var(--border-subtle);
+}

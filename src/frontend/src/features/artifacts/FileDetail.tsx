@@ -303,7 +303,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
         </div>
 
         {/* Path + actions */}
-        <div className="flex items-center gap-2 mb-4 p-2.5 rounded-lg bg-muted/50 border border-border-subtle">
+        <div className="flex items-center gap-2 mb-4 p-2.5 rounded-lg bg-muted/50 border-subtle">
           <HardDrive className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <code
             className="text-foreground flex-1 min-w-0 truncate"
@@ -365,7 +365,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
               )}
             </div>
             <div
-              className="rounded-lg border border-border-subtle overflow-hidden"
+              className="rounded-lg border-subtle overflow-hidden"
               style={{
                 backgroundColor: "var(--input-background, var(--muted))",
               }}

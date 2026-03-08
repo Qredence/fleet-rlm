@@ -181,7 +181,7 @@ export function CanvasSwitcher({
         align="start"
         sideOffset={8}
         className={cn(
-          "w-72 p-0 rounded-card border border-border-subtle",
+          "w-72 p-0 rounded-card border-subtle",
           "shadow-md overflow-hidden",
         )}
       >

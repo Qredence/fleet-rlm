@@ -153,7 +153,7 @@ function Attachment({
       <div
         data-slot="attachment"
         className={cn(
-          "group relative rounded-lg border border-border-subtle bg-card p-2",
+          "group relative rounded-lg border-subtle bg-card p-2",
           className,
         )}
         {...props}
@@ -185,7 +185,7 @@ function AttachmentPreview({
     <div
       data-slot="attachment-preview"
       className={cn(
-        "mb-2 flex min-h-10 items-center justify-center rounded-md border border-border-subtle bg-muted/30",
+        "mb-2 flex min-h-10 items-center justify-center rounded-md border-subtle bg-muted/30",
         className,
       )}
       {...props}

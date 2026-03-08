@@ -104,7 +104,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         aria-label="Command palette"
       >
         <div
-          className="w-full max-w-140 overflow-hidden border border-border-subtle"
+          className="w-full max-w-140 overflow-hidden border-subtle"
           style={{
             borderRadius: "var(--radius-card)",
             backgroundColor: "var(--popover)",
@@ -133,7 +133,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 autoFocus
               />
               <kbd
-                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                 style={typo.micro}
               >
                 ESC
@@ -278,13 +278,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </span>
               <div className="flex items-center gap-1">
                 <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                   style={typo.micro}
                 >
                   &uarr;
                 </kbd>
                 <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                   style={typo.micro}
                 >
                   &darr;
@@ -294,7 +294,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 to select
               </span>
               <kbd
-                className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                 style={typo.micro}
               >
                 &crarr;

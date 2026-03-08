@@ -34,7 +34,7 @@ function Confirmation({
         data-slot="confirmation"
         data-state={state}
         className={cn(
-          "rounded-xl border border-border-subtle bg-card p-4 shadow-sm",
+          "rounded-xl border-subtle bg-card p-4 shadow-sm",
           className,
         )}
         {...props}
