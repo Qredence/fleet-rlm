@@ -1,14 +1,14 @@
 """FastAPI application factory with lifespan and Scalar docs."""
 
-from contextlib import asynccontextmanager
 import logging
 import os
-
-from fastapi import FastAPI, APIRouter
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from contextlib import asynccontextmanager
 from pathlib import Path
+
 from dotenv import load_dotenv
+from fastapi import APIRouter, FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from fleet_rlm import __version__
 from fleet_rlm.analytics.client import get_posthog_client, shutdown_posthog_client

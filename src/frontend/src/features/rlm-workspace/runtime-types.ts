@@ -1,5 +1,6 @@
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import type { Conversation } from "@/hooks/useChatHistory";
+import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 
 export interface ChatSubmitAttachment {
   id: string;
@@ -10,6 +11,7 @@ export interface ChatSubmitAttachment {
 
 export interface ChatSubmitOptions {
   traceEnabled?: boolean;
+  executionMode?: WsExecutionMode;
   attachments?: ChatSubmitAttachment[];
 }
 

@@ -14,6 +14,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fleet_rlm.analytics.trace_context import (
     runtime_distinct_id_context,
 )
+
 from ...deps import get_server_state_from_websocket
 from ...execution import (
     ExecutionSubscription,
@@ -28,13 +29,14 @@ from .chat_runtime import (
 )
 from .helpers import (
     _authenticate_websocket,
+    _close_websocket_safely,
     _error_envelope,
     _get_execution_emitter,
     _sanitize_for_log,
     _sanitize_id,
+    _try_send_json,
 )
 from .session import persist_session_state
-
 
 router = APIRouter(tags=["websocket"])
 
@@ -61,13 +63,14 @@ async def execution_stream(
     )
     if not subscription.session_id:
         await websocket.accept()
-        await websocket.send_json(
+        if await _try_send_json(
+            websocket,
             _error_envelope(
                 code="missing_session_id",
                 message="Missing required query param: session_id",
-            )
-        )
-        await websocket.close(code=1008)
+            ),
+        ):
+            await _close_websocket_safely(websocket, code=1008)
         return
     emitter = _get_execution_emitter(state)
     await emitter.connect(websocket, subscription)
@@ -140,5 +143,5 @@ async def chat_streaming(websocket: WebSocket) -> None:
                 )
     except Exception as exc:
         logger.exception("WebSocket chat startup failed: %s", _sanitize_for_log(exc))
-        await websocket.send_json(_chat_startup_error_payload(exc))
-        await websocket.close(code=1011)
+        if await _try_send_json(websocket, _chat_startup_error_payload(exc)):
+            await _close_websocket_safely(websocket, code=1011)

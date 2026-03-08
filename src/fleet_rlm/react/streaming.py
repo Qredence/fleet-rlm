@@ -197,6 +197,14 @@ def _build_cancelled_event(
     )
 
 
+def _drain_live_events(
+    pending_events: list[StreamEvent],
+) -> Iterable[StreamEvent]:
+    """Yield and clear queued nested events emitted by child runtimes."""
+    while pending_events:
+        yield pending_events.pop(0)
+
+
 def _process_stream_value(
     *,
     value: Any,
@@ -360,6 +368,17 @@ def iter_chat_turn_stream(
     assistant_chunks: list[str] = []
     final_prediction: dspy.Prediction | None = None
     last_tool_name_ref: list[str | None] = [None]
+    pending_live_events: list[StreamEvent] = []
+    previous_live_callback = getattr(agent, "_live_event_callback", None)
+
+    def _queue_live_event(event: StreamEvent) -> None:
+        if not isinstance(event, StreamEvent):
+            return
+        if event.kind in {"final", "cancelled", "error"}:
+            return
+        pending_live_events.append(event)
+
+    agent._live_event_callback = _queue_live_event
 
     try:
         with dspy.context(allow_tool_async_sync_conversion=True):
@@ -377,6 +396,8 @@ def iter_chat_turn_stream(
                         assistant_chunks=assistant_chunks,
                     )
                     return
+
+                yield from _drain_live_events(pending_live_events)
 
                 if isinstance(value, dspy.Prediction):
                     final_prediction = value
@@ -405,6 +426,10 @@ def iter_chat_turn_stream(
             init_phase=False,
         )
         return
+    finally:
+        agent._live_event_callback = previous_live_callback
+
+    yield from _drain_live_events(pending_live_events)
 
     assistant_response, trajectory, final_reasoning = _extract_final_response(
         final_prediction=final_prediction,
@@ -502,6 +527,17 @@ async def aiter_chat_turn_stream(
     assistant_chunks: list[str] = []
     final_prediction: dspy.Prediction | None = None
     last_tool_name_ref: list[str | None] = [None]
+    pending_live_events: list[StreamEvent] = []
+    previous_live_callback = getattr(agent, "_live_event_callback", None)
+
+    def _queue_live_event(event: StreamEvent) -> None:
+        if not isinstance(event, StreamEvent):
+            return
+        if event.kind in {"final", "cancelled", "error"}:
+            return
+        pending_live_events.append(event)
+
+    agent._live_event_callback = _queue_live_event
 
     try:
         output_stream = stream_program(
@@ -518,6 +554,9 @@ async def aiter_chat_turn_stream(
                     assistant_chunks=assistant_chunks,
                 )
                 return
+
+            for event in _drain_live_events(pending_live_events):
+                yield event
 
             if isinstance(value, dspy.Prediction):
                 final_prediction = value
@@ -549,6 +588,11 @@ async def aiter_chat_turn_stream(
         ):
             yield event
         return
+    finally:
+        agent._live_event_callback = previous_live_callback
+
+    for event in _drain_live_events(pending_live_events):
+        yield event
 
     assistant_response, trajectory, final_reasoning = _extract_final_response(
         final_prediction=final_prediction,

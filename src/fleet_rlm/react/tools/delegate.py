@@ -503,16 +503,27 @@ SUBMIT(
         }
 
     async def rlm_query(query: str, context: str = "") -> dict[str, Any]:
-        """Delegate a complex sub-task to a recursive sub-agent."""
-        prompt = f"Context:\n{context}\n\nTask: {query}" if context else query
-        result = await spawn_delegate_sub_agent_async(ctx.agent, prompt=prompt)
+        """Use bounded child-RLM recursion for deep symbolic work.
+
+        Reach for this tool when the task needs multi-step reasoning in a
+        Python REPL, deeper code or repo exploration, program synthesis, or
+        other symbolic analysis that is heavier than normal conversational
+        tool use.
+        """
+        result = await spawn_delegate_sub_agent_async(
+            ctx.agent,
+            prompt=query,
+            context=context,
+            stream_event_callback=getattr(ctx.agent, "_live_event_callback", None),
+        )
         if result.get("status") == "error":
             return result
         return {
             "status": "ok",
-            "answer": result.get("assistant_response", ""),
+            "answer": result.get("answer") or result.get("assistant_response", ""),
             "sub_agent_history": result.get("sub_agent_history", 0),
             "depth": result.get("depth", getattr(ctx.agent, "_current_depth", 0) + 1),
+            **build_trajectory_payload(result, include_trajectory=True),
         }
 
     from dspy import Tool

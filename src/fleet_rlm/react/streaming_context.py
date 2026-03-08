@@ -33,6 +33,10 @@ class StreamingContext:
         Whether a Modal Sandbox session is currently alive.
     effective_max_iters : int
         Iteration budget computed for this turn.
+    execution_mode : str
+        High-level execution mode label (for example ``"auto"`` or ``"rlm"``).
+    sandbox_id : str | None
+        Stable sandbox identifier when the provider exposes one.
     """
 
     depth: int = 0
@@ -41,6 +45,8 @@ class StreamingContext:
     volume_name: str | None = None
     sandbox_active: bool = False
     effective_max_iters: int = 10
+    execution_mode: str = "auto"
+    sandbox_id: str | None = None
 
     # ------------------------------------------------------------------
     # Factory
@@ -72,6 +78,8 @@ class StreamingContext:
                 if effective_max_iters is not None
                 else agent._current_effective_max_iters
             ),
+            execution_mode=str(getattr(agent, "execution_mode", "auto") or "auto"),
+            sandbox_id=None,
         )
 
     # ------------------------------------------------------------------
@@ -86,11 +94,23 @@ class StreamingContext:
             "execution_profile": self.execution_profile,
             "sandbox_active": self.sandbox_active,
             "effective_max_iters": self.effective_max_iters,
+            "execution_mode": self.execution_mode,
         }
         if self.volume_name:
             ctx["volume_name"] = self.volume_name
+        if self.sandbox_id:
+            ctx["sandbox_id"] = self.sandbox_id
         return ctx
 
     def enrich(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return *payload* merged with runtime context under ``"runtime"``."""
-        return {**payload, "runtime": self.as_payload()}
+        runtime_payload = self.as_payload()
+        existing_runtime = payload.get("runtime")
+        if isinstance(existing_runtime, dict):
+            runtime_payload = {**runtime_payload, **existing_runtime}
+
+        enriched = dict(payload)
+        for key, value in runtime_payload.items():
+            enriched.setdefault(key, value)
+        enriched["runtime"] = runtime_payload
+        return enriched

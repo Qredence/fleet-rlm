@@ -237,10 +237,26 @@ describe("useChatStore — streamMessage", () => {
       content: "test",
       trace: true,
       trace_mode: "compact",
+      execution_mode: "auto",
       analytics_enabled: true,
       session_id: "sess-abc",
       workspace_id: "test-workspace",
       user_id: "test-user",
+    });
+  });
+
+  it("passes execution mode overrides to the websocket payload", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+
+    await useChatStore
+      .getState()
+      .streamMessage("test", undefined, undefined, {
+        executionMode: "tools_only",
+      });
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      execution_mode: "tools_only",
     });
   });
 

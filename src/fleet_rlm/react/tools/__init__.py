@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal
 
 from dspy.primitives.code_interpreter import FinalOutput
 
@@ -26,11 +26,44 @@ from ...chunking import (
     chunk_by_timestamps,
 )
 from ...core.interpreter import ExecutionProfile
+from ..streaming_citations import _normalize_trajectory
 
 if TYPE_CHECKING:
     from ..agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
+
+ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
+
+_RLM_DELEGATION_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "parallel_semantic_map",
+        "rlm_query",
+        "analyze_long_document",
+        "summarize_long_document",
+        "extract_from_logs",
+        "grounded_answer",
+        "triage_incident_logs",
+        "plan_code_change",
+        "propose_core_memory_update",
+    }
+)
+
+_MEMORY_INTELLIGENCE_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "memory_tree",
+        "memory_action_intent",
+        "memory_structure_audit",
+        "memory_structure_migration_plan",
+        "clarification_questions",
+    }
+)
+
+_RLM_HEAVY_TOOL_NAMES: frozenset[str] = (
+    _RLM_DELEGATION_TOOL_NAMES | _MEMORY_INTELLIGENCE_TOOL_NAMES
+)
+
+_RLM_ONLY_TOOL_NAMES: frozenset[str] = frozenset({"rlm_query"})
 
 
 # ---------------------------------------------------------------------------
@@ -154,17 +187,22 @@ def build_trajectory_payload(
     if not include_trajectory:
         return {}
 
+    def _coerce_trajectory(raw: Any) -> list[Any]:
+        if isinstance(raw, dict):
+            return list(_normalize_trajectory(raw))
+        if isinstance(raw, list):
+            return list(raw)
+        return []
+
     # Accept both Prediction objects (getattr) and plain dicts
     if isinstance(source, dict):
         raw = source.get("trajectory", [])
-        trajectory: list[Any] = (
-            list(raw.values()) if isinstance(raw, dict) else list(raw or [])
-        )
+        trajectory = _coerce_trajectory(raw)
         final_reasoning = source.get("final_reasoning")
         depth = source.get("depth")
         parent_step_id = source.get("parent_step_id")
     else:
-        trajectory = list(getattr(source, "trajectory", []) or [])
+        trajectory = _coerce_trajectory(getattr(source, "trajectory", []))
         final_reasoning = getattr(source, "final_reasoning", None)
         depth = getattr(source, "depth", None)
         parent_step_id = getattr(source, "parent_step_id", None)
@@ -234,7 +272,28 @@ def build_tool_list(
                 tools.append(et)
             else:
                 tools.append(Tool(et))
+
+    return _filter_tools_for_execution_mode(
+        tools,
+        getattr(agent, "execution_mode", "auto"),
+    )
+
+
+def _filter_tools_for_execution_mode(
+    tools: list[Any], execution_mode: ExecutionMode | str
+) -> list[Any]:
+    """Return the subset of *tools* allowed for the selected execution mode."""
+    if execution_mode == "tools_only":
+        return [tool for tool in tools if _tool_name(tool) not in _RLM_HEAVY_TOOL_NAMES]
+
+    if execution_mode == "rlm_only":
+        return [tool for tool in tools if _tool_name(tool) in _RLM_ONLY_TOOL_NAMES]
+
     return tools
+
+
+def _tool_name(tool: Any) -> str:
+    return str(getattr(tool, "name", None) or getattr(tool, "__name__", ""))
 
 
 # ---------------------------------------------------------------------------

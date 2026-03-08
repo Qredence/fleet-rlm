@@ -1,5 +1,7 @@
 export type WsTraceMode = "compact" | "verbose" | "off";
 
+export type WsExecutionMode = "auto" | "rlm_only" | "tools_only";
+
 export type WsConnectionStatus =
   | "connecting"
   | "connected"
@@ -18,6 +20,7 @@ export interface WsMessageRequest {
   docs_path?: string | null;
   trace?: boolean;
   trace_mode?: WsTraceMode;
+  execution_mode?: WsExecutionMode;
   analytics_enabled?: boolean;
   workspace_id?: string;
   user_id?: string;
@@ -77,6 +80,8 @@ export interface WsRuntimeContext {
   sandbox_active: boolean;
   effective_max_iters: number;
   volume_name?: string;
+  execution_mode?: string;
+  sandbox_id?: string;
 }
 
 export interface WsServerEvent {

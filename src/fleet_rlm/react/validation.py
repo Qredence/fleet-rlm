@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from .trajectory_errors import trajectory_has_tool_errors
+
 
 @dataclass
 class ValidationConfig:
@@ -27,50 +29,6 @@ class ValidationConfig:
     guardrail_mode: Literal["off", "warn", "strict"] = "off"
     max_output_chars: int = 10000
     min_substantive_chars: int = 20
-
-
-def trajectory_has_tool_errors(trajectory: dict[str, Any] | None) -> bool:
-    """Best-effort detector for tool error traces in trajectory payloads.
-
-    Checks output fields in the trajectory for common error indicators.
-
-    Args:
-        trajectory: The trajectory dict from a ReAct prediction, or None
-
-    Returns:
-        True if any output field contains error-like text, False otherwise
-    """
-    if not trajectory or not isinstance(trajectory, dict):
-        return False
-
-    # Legacy DSPy ReAct flat keys: output_0, output_1, ...
-    for key, value in trajectory.items():
-        if not key.startswith("output_"):
-            continue
-        text = str(value).lower()
-        if any(token in text for token in ("error", "exception", "traceback")):
-            return True
-
-    # Structured trajectory variants: {"steps": [...]} or {"trajectory": [...]}
-    structured_steps: list[Any] = []
-    maybe_steps = trajectory.get("steps")
-    if isinstance(maybe_steps, list):
-        structured_steps.extend(maybe_steps)
-    maybe_trajectory = trajectory.get("trajectory")
-    if isinstance(maybe_trajectory, list):
-        structured_steps.extend(maybe_trajectory)
-
-    for step in structured_steps:
-        if not isinstance(step, dict):
-            continue
-        for field_name in ("output", "observation", "error"):
-            field_value = step.get(field_name)
-            if field_value is None:
-                continue
-            text = str(field_value).lower()
-            if any(token in text for token in ("error", "exception", "traceback")):
-                return True
-    return False
 
 
 def validate_assistant_response(

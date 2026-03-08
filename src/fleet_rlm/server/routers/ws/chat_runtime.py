@@ -12,7 +12,12 @@ from fleet_rlm import runners
 from fleet_rlm.core.interpreter import ExecutionProfile
 
 from ...auth import AuthError, resolve_admitted_identity
-from .helpers import _error_envelope, _sanitize_id
+from .helpers import (
+    _close_websocket_safely,
+    _error_envelope,
+    _sanitize_id,
+    _try_send_json,
+)
 from .lifecycle import _classify_stream_failure
 
 
@@ -75,37 +80,40 @@ async def _prepare_chat_runtime(
                     full_name=identity.name,
                 )
         except AuthError as exc:
-            await websocket.send_json(
+            if await _try_send_json(
+                websocket,
                 _error_envelope(
                     code="tenant_forbidden"
                     if exc.status_code == 403
                     else "auth_failed",
                     message=exc.message,
-                )
-            )
-            await websocket.close(code=1008)
+                ),
+            ):
+                await _close_websocket_safely(websocket, code=1008)
             return None
     elif persistence_required:
-        await websocket.send_json(
+        if await _try_send_json(
+            websocket,
             _error_envelope(
                 code="durable_state_unavailable",
                 message="Database repository is required but unavailable",
-            )
-        )
-        await websocket.close(code=1011)
+            ),
+        ):
+            await _close_websocket_safely(websocket, code=1011)
         return None
 
     if planner_lm is None:
-        await websocket.send_json(
+        if await _try_send_json(
+            websocket,
             _error_envelope(
                 code="planner_missing",
                 message=(
                     "Planner LM not configured. "
                     "Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars."
                 ),
-            )
-        )
-        await websocket.close()
+            ),
+        ):
+            await _close_websocket_safely(websocket)
         return None
 
     return _PreparedChatRuntime(

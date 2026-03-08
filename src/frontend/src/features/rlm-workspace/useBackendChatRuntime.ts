@@ -197,7 +197,10 @@ export function useBackendChatRuntime(): ChatRuntime {
             onFrame(frame);
           },
           queryClient,
-          { traceEnabled: options?.traceEnabled },
+          {
+            traceEnabled: true,
+            executionMode: options?.executionMode,
+          },
         );
       } catch (error) {
         const message =

@@ -13,10 +13,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from fleet_rlm.analytics.trace_context import runtime_telemetry_enabled_context
 from fleet_rlm.db.models import RunStatus
-from fleet_rlm.react.agent import RLMReActChatAgent
-
 from ...execution import ExecutionStepBuilder
-from .helpers import _error_envelope, _sanitize_for_log
+from .helpers import _error_envelope, _sanitize_for_log, _try_send_json
 from .lifecycle import ExecutionLifecycleManager, _classify_stream_failure
 from .repl_hook import ReplHookBridge
 
@@ -26,7 +24,7 @@ logger = logging.getLogger(__name__)
 async def run_streaming_turn(
     *,
     websocket: WebSocket,
-    agent: RLMReActChatAgent,
+    agent: Any,
     message: str,
     docs_path: str | None,
     trace: bool,
@@ -60,6 +58,7 @@ async def run_streaming_turn(
             websocket=websocket,
             agent=agent,
             message=message,
+            docs_path=docs_path,
             trace=trace,
             cancel_check=cancel_check,
             lifecycle=lifecycle,
@@ -85,8 +84,9 @@ async def run_streaming_turn(
 async def _stream_agent_events(
     *,
     websocket: WebSocket,
-    agent: RLMReActChatAgent,
+    agent: Any,
     message: str,
+    docs_path: str | None,
     trace: bool,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
@@ -99,6 +99,7 @@ async def _stream_agent_events(
             message=message,
             trace=trace,
             cancel_check=cancel_check,
+            docs_path=docs_path,
         ):
             await _emit_stream_event(
                 websocket=websocket,
@@ -132,7 +133,8 @@ async def _emit_stream_event(
     }
     is_terminal_event = event.kind in {"final", "cancelled", "error"}
     if not is_terminal_event:
-        await websocket.send_json({"type": "event", "data": event_dict})
+        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+            raise WebSocketDisconnect(code=1001)
 
     step = step_builder.from_stream_event(
         kind=event.kind,
@@ -148,7 +150,8 @@ async def _emit_stream_event(
     if event.kind == "final":
         await persist_session_state(include_volume_save=True)
         await lifecycle.complete_run(RunStatus.COMPLETED, step=step)
-        await websocket.send_json({"type": "event", "data": event_dict})
+        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+            raise WebSocketDisconnect(code=1001)
         return
 
     if event.kind in {"cancelled", "error"}:
@@ -157,7 +160,8 @@ async def _emit_stream_event(
             {"error": event.text, "kind": event.kind} if event.kind == "error" else None
         )
         await lifecycle.complete_run(status, step=step, error_json=error_json)
-        await websocket.send_json({"type": "event", "data": event_dict})
+        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+            raise WebSocketDisconnect(code=1001)
 
 
 async def _handle_stream_error(
@@ -177,12 +181,13 @@ async def _handle_stream_error(
             "error_code": error_code,
         },
     )
-    await websocket.send_json(
+    await _try_send_json(
+        websocket,
         _error_envelope(
             code=error_code,
             message=f"Streaming error: {exc}",
             details={"error_type": type(exc).__name__},
-        )
+        ),
     )
     if lifecycle.run_completed:
         return

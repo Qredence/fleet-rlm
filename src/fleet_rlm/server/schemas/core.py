@@ -8,11 +8,14 @@ from pydantic import BaseModel, Field
 
 from fleet_rlm import __version__
 
+ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
+
 
 class ChatRequest(BaseModel):
     message: str
     docs_path: str | None = None
     trace: bool = False
+    execution_mode: ExecutionMode = "auto"
 
 
 class ChatResponse(BaseModel):
@@ -82,6 +85,7 @@ class WSMessage(BaseModel):
     docs_path: str | None = None
     trace: bool = True
     trace_mode: Literal["compact", "verbose", "off"] | None = None
+    execution_mode: ExecutionMode = "auto"
     workspace_id: str = "default"
     user_id: str = "anonymous"
     session_id: str | None = None

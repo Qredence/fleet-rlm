@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from ...deps import ServerState, session_key
 from ...schemas import WSMessage
+from .helpers import _try_send_json
 from .session import _manifest_path, _volume_load_manifest
 
 
@@ -26,15 +27,17 @@ async def parse_ws_message_or_send_error(
     except ValidationError as exc:
         raw_type = str(payload.get("type", "")).strip()
         if raw_type:
-            await websocket.send_json(
+            await _try_send_json(
+                websocket,
                 {
                     "type": "error",
                     "message": f"Unknown message type: {raw_type}",
-                }
+                },
             )
             return None
-        await websocket.send_json(
-            {"type": "error", "message": f"Invalid payload: {exc}"}
+        await _try_send_json(
+            websocket,
+            {"type": "error", "message": f"Invalid payload: {exc}"},
         )
         return None
 

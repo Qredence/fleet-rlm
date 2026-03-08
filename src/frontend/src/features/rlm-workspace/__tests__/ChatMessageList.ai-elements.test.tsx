@@ -305,6 +305,81 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html.match(/data-slot="reasoning-inline"/g)?.length).toBe(1);
   });
 
+  it("renders runtime context badges for reasoning and status rows", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "trace-runtime-reasoning",
+        type: "trace",
+        content: "reasoning",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "reasoning",
+            parts: [{ type: "text", text: "Inspecting recursive RLM output." }],
+            isStreaming: false,
+            runtimeContext: {
+              depth: 1,
+              maxDepth: 3,
+              executionProfile: "RLM_ROOT",
+              sandboxActive: true,
+              effectiveMaxIters: 30,
+              executionMode: "rlm",
+              sandboxId: "sb-1234567890",
+              volumeName: "shared-volume",
+            },
+          },
+        ],
+      },
+      {
+        id: "trace-runtime-status",
+        type: "trace",
+        content: "status",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "status_note",
+            text: "Child sandbox attached",
+            tone: "success",
+            runtimeContext: {
+              depth: 1,
+              maxDepth: 3,
+              executionProfile: "RLM_ROOT",
+              sandboxActive: true,
+              effectiveMaxIters: 30,
+              executionMode: "rlm",
+              sandboxId: "sb-1234567890",
+              volumeName: "shared-volume",
+            },
+          },
+        ],
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessageList
+        messages={messages}
+        isTyping={false}
+        isMobile={false}
+        scrollRef={createRef<HTMLDivElement>()}
+        contentRef={createRef<HTMLDivElement>()}
+        isAtBottom={true}
+        scrollToBottom={() => {}}
+        onSuggestionClick={() => {}}
+        onResolveHitl={() => {}}
+        onResolveClarification={() => {}}
+        showHistory={false}
+        hasHistory={false}
+        historyPanel={null}
+      />,
+    );
+
+    expect(html).toContain("depth 1/3");
+    expect(html).toContain("mode rlm");
+    expect(html).toContain("sandbox sb-123456");
+    expect(html).toContain("shared-volume");
+    expect(html).toContain("rlm root");
+  });
+
   it("groups contiguous tool call, status, and result rows into one dropdown", () => {
     const messages: ChatMessage[] = [
       {

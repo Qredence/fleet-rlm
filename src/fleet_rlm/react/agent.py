@@ -11,6 +11,8 @@ in :mod:`fleet_rlm.streaming`, and command dispatch in
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from collections.abc import AsyncIterator
 from typing import Any, Callable, Iterable, Literal
 
@@ -20,12 +22,15 @@ from ..core.interpreter import ModalInterpreter
 from ..models import StreamEvent
 from .commands import execute_command as _execute_command
 from .core_memory import CoreMemoryMixin
+from .delegate_sub_agent import spawn_delegate_sub_agent_async
 from .document_cache import DocumentCacheMixin
 from .runtime_factory import get_runtime_module
 from .streaming import aiter_chat_turn_stream as _aiter_stream
 from .streaming import iter_chat_turn_stream as _iter_stream
+from .streaming_context import StreamingContext
 from .tool_delegation import TOOL_DELEGATE_NAMES, get_tool_by_name
-from .tools import build_tool_list
+from .tools import ExecutionMode, build_tool_list
+from .trajectory_errors import count_tool_errors
 from .validation import ValidationConfig, validate_assistant_response
 
 
@@ -83,6 +88,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         delegate_lm: Any | None = None,
         delegate_max_calls_per_turn: int = 8,
         delegate_result_truncation_chars: int = 8000,
+        execution_mode: ExecutionMode = "auto",
     ) -> None:
         super().__init__()
         self.react_max_iters = react_max_iters
@@ -99,11 +105,13 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self.delegate_result_truncation_chars = max(
             256, int(delegate_result_truncation_chars)
         )
+        self.execution_mode: ExecutionMode = execution_mode
         self._last_tool_error_count = 0
         self._current_effective_max_iters = react_max_iters
         self._delegate_calls_turn = 0
         self._delegate_fallback_count_turn = 0
         self._delegate_result_truncated_count_turn = 0
+        self._live_event_callback: Callable[[StreamEvent], Any] | None = None
 
         # Validation configuration
         self._validation_config = ValidationConfig(
@@ -260,6 +268,15 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         module graph is visible to optimizers and ``save()``/``load()``.
         """
         self.start()
+        if self.execution_mode == "rlm_only":
+            self.start()
+            self.prepare_routed_turn()
+            forced_result = get_tool_by_name(self, "rlm_query")(
+                query=user_request,
+                context=self._forced_delegate_context(),
+            )
+            return self._prediction_from_forced_rlm_result(forced_result)
+
         effective_max_iters = self._prepare_turn(user_request)
         with dspy.context(allow_tool_async_sync_conversion=True):
             prediction = self.react(
@@ -349,11 +366,65 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         message: str,
         trace: bool,
         cancel_check: Callable[[], bool] | None = None,
+        *,
+        docs_path: str | None = None,
     ) -> Iterable[StreamEvent]:
         """Yield typed streaming events for one chat turn (sync).
 
         Delegates to :func:`fleet_rlm.streaming.iter_chat_turn_stream`.
         """
+        _ = docs_path
+        if self.execution_mode == "rlm_only":
+            if not message or not message.strip():
+                raise ValueError("message cannot be empty")
+
+            self.start()
+            effective_max_iters = self.prepare_routed_turn()
+            ctx = StreamingContext.from_agent(
+                self, effective_max_iters=effective_max_iters
+            )
+            yield StreamEvent(
+                kind="status",
+                text="Execution mode: RLM only",
+                payload=ctx.enrich({"forced": True}),
+            )
+            yield StreamEvent(
+                kind="rlm_executing",
+                text="tool call: rlm_query",
+                payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
+            )
+
+            forced_result = get_tool_by_name(self, "rlm_query")(
+                query=message,
+                context=self._forced_delegate_context(),
+            )
+            prediction = self._prediction_from_forced_rlm_result(forced_result)
+            assistant_response, trajectory = self._prediction_response_and_trajectory(
+                prediction
+            )
+            guardrail_warnings = self._prediction_guardrail_warnings(prediction)
+            self._append_history(message, assistant_response)
+
+            yield StreamEvent(
+                kind="tool_result",
+                text="tool result: rlm_query completed",
+                payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
+            )
+            yield StreamEvent(
+                kind="final",
+                flush_tokens=True,
+                text=assistant_response,
+                payload=self._forced_stream_final_payload(
+                    trajectory=trajectory,
+                    guardrail_warnings=guardrail_warnings,
+                    final_reasoning=str(
+                        getattr(prediction, "final_reasoning", "") or ""
+                    ),
+                    ctx=ctx,
+                ),
+            )
+            return
+
         return _iter_stream(self, message, trace, cancel_check)
 
     def chat_turn_stream(self, *, message: str, trace: bool = False) -> dict[str, Any]:
@@ -401,10 +472,36 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     # Public chat API - async (native DSPy async)
     # -----------------------------------------------------------------
 
-    async def achat_turn(self, message: str) -> dict[str, Any]:
+    async def achat_turn(
+        self, message: str, *, docs_path: str | None = None
+    ) -> dict[str, Any]:
         """Async version of chat_turn using ``dspy.ReAct.acall``."""
+        _ = docs_path
         if not message or not message.strip():
             raise ValueError("message cannot be empty")
+
+        if self.execution_mode == "rlm_only":
+            await self.astart()
+            self.prepare_routed_turn()
+            forced_result = await spawn_delegate_sub_agent_async(
+                self,
+                prompt=message,
+                context=self._forced_delegate_context(),
+                stream_event_callback=None,
+            )
+            prediction = self._prediction_from_forced_rlm_result(forced_result)
+            assistant_response, trajectory = self._prediction_response_and_trajectory(
+                prediction
+            )
+            warnings = self._prediction_guardrail_warnings(prediction)
+            self._append_history(message, assistant_response)
+            return self._build_turn_result(
+                assistant_response=assistant_response,
+                trajectory=trajectory,
+                guardrail_warnings=warnings,
+                include_core_memory_snapshot=False,
+                turn_metrics=self._turn_metrics(),
+            )
 
         self.start()
         effective_max_iters = self._prepare_turn(message)
@@ -436,11 +533,22 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         message: str,
         trace: bool,
         cancel_check: Callable[[], bool] | None = None,
+        *,
+        docs_path: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Yield typed streaming events for one chat turn (async).
 
         Delegates to :func:`fleet_rlm.streaming.aiter_chat_turn_stream`.
         """
+        _ = docs_path
+        if self.execution_mode == "rlm_only":
+            async for event in self._aiter_forced_rlm_turn_stream(
+                message=message,
+                cancel_check=cancel_check,
+            ):
+                yield event
+            return
+
         async for event in _aiter_stream(self, message, trace, cancel_check):
             yield event
 
@@ -466,6 +574,18 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self._extra_tools.append(tool)
         self.react = self._build_agent()
         return {"status": "ok", "tool_name": getattr(tool, "__name__", str(tool))}
+
+    def set_execution_mode(self, execution_mode: ExecutionMode) -> None:
+        """Apply a per-turn execution mode and rebuild the tool list if needed."""
+        normalized: ExecutionMode = (
+            execution_mode
+            if execution_mode in {"auto", "rlm_only", "tools_only"}
+            else "auto"
+        )
+        if self.execution_mode == normalized:
+            return
+        self.execution_mode = normalized
+        self.react = self._build_agent()
 
     # -----------------------------------------------------------------
     # Dynamic tool delegation
@@ -513,6 +633,186 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             signature=RLMReActChatSignature,
             tools=list(self.react_tools),
             max_iters=self.react_max_iters,
+        )
+
+    def _forced_delegate_context(self) -> str:
+        parts: list[str] = []
+
+        core_memory = str(self.fmt_core_memory() or "").strip()
+        if core_memory:
+            parts.append(f"Core memory:\n{core_memory}")
+
+        history_lines: list[str] = []
+        for item in self.history_messages()[-6:]:
+            if not isinstance(item, dict):
+                continue
+            user_request = str(item.get("user_request", "") or "").strip()
+            assistant_response = str(item.get("assistant_response", "") or "").strip()
+            if user_request:
+                history_lines.append(f"User: {user_request}")
+            if assistant_response:
+                history_lines.append(f"Assistant: {assistant_response}")
+
+        if history_lines:
+            parts.append("Recent conversation:\n" + "\n".join(history_lines))
+
+        return "\n\n".join(parts)
+
+    def _prediction_from_forced_rlm_result(
+        self, result: dict[str, Any]
+    ) -> dspy.Prediction:
+        trajectory = result.get("trajectory", {})
+        if not isinstance(trajectory, dict):
+            trajectory = {}
+
+        assistant_response = str(
+            result.get("assistant_response") or result.get("answer") or ""
+        ).strip()
+        self._finalize_turn(trajectory)
+        assistant_response, warnings = self._validate_assistant_response(
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+        )
+
+        prediction = dspy.Prediction(
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+        )
+        final_reasoning = str(result.get("final_reasoning") or "").strip()
+        if final_reasoning:
+            setattr(prediction, "final_reasoning", final_reasoning)
+        if warnings:
+            setattr(prediction, "guardrail_warnings", warnings)
+        setattr(prediction, "effective_max_iters", self._current_effective_max_iters)
+        setattr(prediction, "delegate_calls_turn", self._delegate_calls_turn)
+        setattr(
+            prediction,
+            "delegate_fallback_count_turn",
+            self._delegate_fallback_count_turn,
+        )
+        setattr(
+            prediction,
+            "delegate_result_truncated_count_turn",
+            self._delegate_result_truncated_count_turn,
+        )
+        return prediction
+
+    def _forced_stream_final_payload(
+        self,
+        *,
+        trajectory: dict[str, Any],
+        guardrail_warnings: list[str],
+        final_reasoning: str,
+        ctx: StreamingContext,
+    ) -> dict[str, Any]:
+        return ctx.enrich(
+            {
+                "trajectory": trajectory,
+                "history_turns": self.history_turns(),
+                "guardrail_warnings": guardrail_warnings,
+                "final_reasoning": final_reasoning,
+                **self._turn_metrics(),
+            }
+        )
+
+    async def _aiter_forced_rlm_turn_stream(
+        self,
+        *,
+        message: str,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        if not message or not message.strip():
+            raise ValueError("message cannot be empty")
+
+        await self.astart()
+        effective_max_iters = self.prepare_routed_turn()
+        ctx = StreamingContext.from_agent(self, effective_max_iters=effective_max_iters)
+
+        yield StreamEvent(
+            kind="status",
+            text="Execution mode: RLM only",
+            payload=ctx.enrich({"forced": True}),
+        )
+        yield StreamEvent(
+            kind="rlm_executing",
+            text="tool call: rlm_query",
+            payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
+        )
+
+        pending_events: asyncio.Queue[StreamEvent] = asyncio.Queue()
+
+        async def _queue_event(event: Any) -> None:
+            if isinstance(event, StreamEvent):
+                await pending_events.put(event)
+
+        task = asyncio.create_task(
+            spawn_delegate_sub_agent_async(
+                self,
+                prompt=message,
+                context=self._forced_delegate_context(),
+                stream_event_callback=_queue_event,
+            )
+        )
+
+        try:
+            while True:
+                if cancel_check is not None and cancel_check():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+                    cancelled_text = "[cancelled]"
+                    self._append_history(message, cancelled_text)
+                    yield StreamEvent(
+                        kind="cancelled",
+                        text=cancelled_text,
+                        payload={
+                            "history_turns": self.history_turns(),
+                            **self._turn_metrics(),
+                        },
+                    )
+                    return
+
+                try:
+                    event = await asyncio.wait_for(pending_events.get(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    if task.done():
+                        break
+                    continue
+
+                yield event
+
+            forced_result = await task
+        finally:
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+        while not pending_events.empty():
+            yield pending_events.get_nowait()
+
+        prediction = self._prediction_from_forced_rlm_result(forced_result)
+        assistant_response, trajectory = self._prediction_response_and_trajectory(
+            prediction
+        )
+        guardrail_warnings = self._prediction_guardrail_warnings(prediction)
+        self._append_history(message, assistant_response)
+
+        yield StreamEvent(
+            kind="tool_result",
+            text="tool result: rlm_query completed",
+            payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
+        )
+        yield StreamEvent(
+            kind="final",
+            flush_tokens=True,
+            text=assistant_response,
+            payload=self._forced_stream_final_payload(
+                trajectory=trajectory,
+                guardrail_warnings=guardrail_warnings,
+                final_reasoning=str(getattr(prediction, "final_reasoning", "") or ""),
+                ctx=ctx,
+            ),
         )
 
     def get_runtime_module(self, name: str) -> dspy.Module:
@@ -620,6 +920,21 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         )
         return self._current_effective_max_iters
 
+    def prepare_routed_turn(self, *, effective_max_iters: int | None = None) -> int:
+        """Reset per-turn counters for an externally-routed RLM turn."""
+        self._delegate_calls_turn = 0
+        self._delegate_fallback_count_turn = 0
+        self._delegate_result_truncated_count_turn = 0
+        self._current_effective_max_iters = max(
+            1,
+            int(
+                effective_max_iters
+                if effective_max_iters is not None
+                else self.rlm_max_iterations
+            ),
+        )
+        return self._current_effective_max_iters
+
     def _compute_effective_max_iters(self, user_request: str) -> int:
         baseline = max(1, int(self.react_max_iters))
         if not self.enable_adaptive_iters:
@@ -652,28 +967,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self._last_tool_error_count = self._count_tool_errors(trajectory)
 
     def _count_tool_errors(self, trajectory: Any) -> int:
-        if not isinstance(trajectory, dict):
-            return 0
-
-        total = 0
-        for key, value in trajectory.items():
-            if not str(key).startswith("observation_"):
-                continue
-            text = str(value).lower()
-            if "execution error in" in text or "traceback" in text:
-                total += 1
-
-        steps = trajectory.get("steps")
-        if isinstance(steps, list):
-            for step in steps:
-                if not isinstance(step, dict):
-                    continue
-                text = str(
-                    step.get("output", step.get("observation", step.get("error", "")))
-                ).lower()
-                if "error" in text and "no error" not in text:
-                    total += 1
-        return total
+        return count_tool_errors(trajectory)
 
     def _claim_delegate_slot(self) -> tuple[bool, int]:
         limit = max(1, int(self.delegate_max_calls_per_turn))

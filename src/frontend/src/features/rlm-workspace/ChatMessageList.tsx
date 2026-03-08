@@ -190,7 +190,11 @@ function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {
   if (!ctx) return null;
   const pills: string[] = [];
   if (ctx.depth > 0) pills.push(`depth ${ctx.depth}/${ctx.maxDepth}`);
+  if (ctx.executionMode && ctx.executionMode !== "react") {
+    pills.push(`mode ${ctx.executionMode}`);
+  }
   if (ctx.sandboxActive) pills.push("sandbox");
+  if (ctx.sandboxId) pills.push(`sandbox ${ctx.sandboxId.slice(0, 10)}`);
   if (ctx.volumeName) pills.push(ctx.volumeName);
   if (ctx.executionProfile !== "ROOT_INTERLOCUTOR")
     pills.push(ctx.executionProfile.toLowerCase().replace(/_/g, " "));
@@ -525,6 +529,7 @@ function renderReasoningPart(
             "rounded-none border-0 bg-transparent px-0 py-0 shadow-none",
         )}
       />
+      <RuntimeContextBadge ctx={part.runtimeContext} />
     </div>
   );
 }
@@ -557,6 +562,7 @@ function renderCompactStatusAlert(
     | "primary"
     | "success"
     | undefined,
+  runtimeContext?: RuntimeContext,
 ) {
   return (
     <Alert
@@ -564,7 +570,10 @@ function renderCompactStatusAlert(
       className={compactStatusClasses(tone)}
     >
       <AlertDescription>
-        <div style={typo.base}>{content}</div>
+        <div className="space-y-1">
+          <div style={typo.base}>{content}</div>
+          <RuntimeContextBadge ctx={runtimeContext} />
+        </div>
       </AlertDescription>
     </Alert>
   );
@@ -595,6 +604,9 @@ function mergeReasoningParts(
     .map((part) => part.text)
     .join("");
   const lastPart = reasoningParts[reasoningParts.length - 1]?.part;
+  const runtimeContext = [...reasoningParts]
+    .reverse()
+    .find(({ part }) => part.runtimeContext)?.part.runtimeContext;
   const duration = [...reasoningParts]
     .reverse()
     .find(({ part }) => part.duration != null)?.part.duration;
@@ -609,6 +621,7 @@ function mergeReasoningParts(
         parts: [{ type: "text" as const, text: mergedText }],
         isStreaming: lastPart.isStreaming,
         ...(duration != null ? { duration } : {}),
+        ...(runtimeContext ? { runtimeContext } : {}),
       },
     },
   ];
@@ -901,7 +914,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
     case "status_note":
       return (
         <div key={key}>
-          {renderCompactStatusAlert(part.text, part.tone)}
+          {renderCompactStatusAlert(part.text, part.tone, part.runtimeContext)}
         </div>
       );
     case "confirmation":

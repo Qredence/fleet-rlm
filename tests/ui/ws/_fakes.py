@@ -63,6 +63,7 @@ class FakeChatAgent:
         self._loaded_docs: list[str] = []
         self._session_state: dict[str, Any] = {}
         self.interpreter = FakeInterpreter()
+        self._live_event_callback = None
 
     def __enter__(self):
         return self
@@ -79,16 +80,16 @@ class FakeChatAgent:
         return False
 
     def iter_chat_turn_stream(
-        self, message: str, trace: bool = True, cancel_check=None
+        self, message: str, trace: bool = True, cancel_check=None, *, docs_path=None
     ):
-        _ = (message, trace, cancel_check)
+        _ = (message, trace, cancel_check, docs_path)
         for event in self._events:
             yield event
 
     async def aiter_chat_turn_stream(
-        self, message: str, trace: bool = True, cancel_check=None
+        self, message: str, trace: bool = True, cancel_check=None, *, docs_path=None
     ):
-        _ = (message, trace, cancel_check)
+        _ = (message, trace, cancel_check, docs_path)
         for event in self._events:
             if cancel_check is not None and cancel_check():
                 yield StreamEvent(kind="cancelled", text="[cancelled]", timestamp=ts())

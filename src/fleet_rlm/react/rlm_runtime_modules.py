@@ -18,6 +18,7 @@ from .signatures import (
     MemoryActionIntentSignature,
     MemoryStructureAuditSignature,
     MemoryStructureMigrationPlanSignature,
+    RecursiveSubQuerySignature,
     SummarizeLongDocument,
     VolumeFileTreeSignature,
 )
@@ -30,11 +31,31 @@ def create_runtime_rlm(
     max_iterations: int,
     max_llm_calls: int,
     verbose: bool,
+    tools: list[Any] | None = None,
 ) -> dspy.Module:
     """Create a canonical RLM instance for a runtime signature."""
 
     return dspy.RLM(
         signature=signature,
+        interpreter=interpreter,
+        max_iterations=max_iterations,
+        max_llm_calls=max_llm_calls,
+        verbose=verbose,
+        tools=tools,
+    )
+
+
+def build_recursive_subquery_rlm(
+    *,
+    interpreter: Any,
+    max_iterations: int,
+    max_llm_calls: int,
+    verbose: bool,
+) -> dspy.Module:
+    """Build the canonical recursive child-query RLM."""
+
+    return create_runtime_rlm(
+        signature=RecursiveSubQuerySignature,
         interpreter=interpreter,
         max_iterations=max_iterations,
         max_llm_calls=max_llm_calls,
@@ -178,7 +199,9 @@ def build_runtime_module(
     if definition is None:
         raise ValueError(f"Unknown runtime module: {name}")
 
-    wrapper_class = RUNTIME_MODULE_CLASSES[definition.class_name]
+    wrapper_class = cast(
+        type[_RuntimeSignatureModule], globals()[definition.class_name]
+    )
     return wrapper_class(
         interpreter=interpreter,
         max_iterations=max_iterations,

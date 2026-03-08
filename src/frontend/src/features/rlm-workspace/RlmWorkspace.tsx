@@ -13,6 +13,7 @@ import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
 import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
+import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /**
@@ -50,8 +51,7 @@ export function RlmWorkspace() {
     loadConversation,
   } = chatRuntime;
 
-  const [selectedAgent, setSelectedAgent] = useState("auto");
-  const [thinkEnabled, setThinkEnabled] = useState(false);
+  const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
@@ -62,7 +62,7 @@ export function RlmWorkspace() {
         });
       }
       originalHandleSubmit({
-        traceEnabled: thinkEnabled,
+        executionMode,
         attachments: attachments.map((attachment) => ({
           id: attachment.id,
           name: attachment.file.name,
@@ -77,7 +77,7 @@ export function RlmWorkspace() {
       inputValue,
       telemetry,
       originalHandleSubmit,
-      thinkEnabled,
+      executionMode,
     ],
   );
 
@@ -242,10 +242,8 @@ export function RlmWorkspace() {
               }
               isLoading={composerDisabled}
               isReceiving={isReceivingResponse}
-              selectedAgent={selectedAgent}
-              onAgentChange={setSelectedAgent}
-              thinkEnabled={thinkEnabled}
-              onThinkToggle={() => setThinkEnabled((prev) => !prev)}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               className="mx-auto w-full max-w-175 rounded-3xl border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
             />
           </div>

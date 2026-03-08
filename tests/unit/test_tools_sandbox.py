@@ -19,6 +19,8 @@ class _FakeInterpreter:
         self.last_code = ""
         self.last_vars = {}
         self._volume = None
+        self.tools: dict[str, Any] = {}
+        self.async_execute = False
 
     def execute(
         self, code: str, variables: dict[str, Any], execution_profile: Any = None
@@ -80,6 +82,7 @@ def mock_agent():
     agent = MagicMock(spec=RLMReActChatAgent)
     agent.interpreter = _FakeInterpreter()
     agent.start = MagicMock()
+    agent.execution_mode = "auto"
     agent.delegate_lm = None
     agent.active_alias = "active"
     agent._get_document = MagicMock(return_value="line1\nline2")
@@ -166,48 +169,53 @@ def test_process_document_with_non_empty_volume_payload(mock_agent):
     assert result["lines"] == 3
 
 
-def test_rlm_query_spawns_sub_agent(mock_agent):
-    """Test that rlm_query spawns a sub-agent."""
-    # We need to mock the RLMReActChatAgent class effectively since rlm_query instantiates it.
-    # rlm_query uses `agent.__class__`.
-
-    # Mock the __class__ of our mock_agent to return a Mock class
-    MockAgentClass = MagicMock()
-    mock_instance = MockAgentClass.return_value
-    # DSPy 3.1.3 uses 'assistant_response' key
-    mock_instance.chat_turn.return_value = {"assistant_response": "42"}
-    mock_instance.achat_turn = AsyncMock(return_value={"assistant_response": "42"})
-    mock_instance.history.messages = ["a", "b"]
-
-    mock_agent.__class__ = MockAgentClass
+def test_rlm_query_spawns_child_rlm(mock_agent, monkeypatch: pytest.MonkeyPatch):
+    """rlm_query should delegate through the child-RLM launcher."""
+    spawn_mock = AsyncMock(
+        return_value={
+            "status": "ok",
+            "answer": "42",
+            "assistant_response": "42",
+            "depth": 1,
+            "sub_agent_history": 3,
+        }
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async",
+        spawn_mock,
+    )
 
     tools = build_tool_list(mock_agent)
     query_tool = next(t for t in tools if t.name == "rlm_query")
 
-    # Run the tool
     result = query_tool(query="Calculate life", context="Deep thought")
 
-    # Verify sub-agent instantiation
-    MockAgentClass.assert_called_once()
-    # Verify chat_turn call
-    # The prompt should combine context and query
-    expected_prompt = "Context:\nDeep thought\n\nTask: Calculate life"
-    mock_instance.achat_turn.assert_called_with(expected_prompt)
-
-    # Verify result
+    spawn_mock.assert_awaited_once_with(
+        mock_agent,
+        prompt="Calculate life",
+        context="Deep thought",
+        stream_event_callback=None,
+    )
     assert result["status"] == "ok"
     assert result["answer"] == "42"
+    assert result["depth"] == 1
 
 
-def test_rlm_query_enforces_max_depth(mock_agent):
-    """Test that rlm_query respects max_depth and prevents infinite recursion."""
-    MockAgentClass = MagicMock()
-    mock_instance = MockAgentClass.return_value
-    mock_instance.chat_turn.return_value = {"assistant_response": "test"}
-    mock_instance.achat_turn = AsyncMock(return_value={"assistant_response": "test"})
-    mock_instance.history.messages = []
-
-    mock_agent.__class__ = MockAgentClass
+def test_rlm_query_enforces_max_depth(mock_agent, monkeypatch: pytest.MonkeyPatch):
+    """rlm_query should propagate recursion metadata from the child launcher."""
+    spawn_mock = AsyncMock(
+        return_value={
+            "status": "ok",
+            "answer": "test",
+            "assistant_response": "test",
+            "depth": 2,
+            "sub_agent_history": 1,
+        }
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async",
+        spawn_mock,
+    )
     mock_agent._max_depth = 2
     mock_agent._current_depth = 1  # One level down already
 
@@ -216,10 +224,9 @@ def test_rlm_query_enforces_max_depth(mock_agent):
 
     result = query_tool(query="Test query")
 
-    # Should have spawned with incremented depth
-    call_args = MockAgentClass.call_args
-    assert call_args.kwargs.get("current_depth") == 2  # Verify result is ok
+    spawn_mock.assert_awaited_once()
     assert result["status"] == "ok"
+    assert result["depth"] == 2
 
 
 def test_rlm_query_blocks_at_max_depth(mock_agent):
@@ -237,18 +244,22 @@ def test_rlm_query_blocks_at_max_depth(mock_agent):
     assert "max recursion depth" in result["error"].lower()
 
 
-def test_rlm_query_extracts_answer_correctly(mock_agent):
-    """Test that rlm_query extracts answer from the correct key."""
-    MockAgentClass = MagicMock()
-    mock_instance = MockAgentClass.return_value
-    # DSPy 3.1.3 uses 'assistant_response' key
-    mock_instance.chat_turn.return_value = {"assistant_response": "The answer is 42"}
-    mock_instance.achat_turn = AsyncMock(
-        return_value={"assistant_response": "The answer is 42"}
+def test_rlm_query_extracts_answer_correctly(
+    mock_agent, monkeypatch: pytest.MonkeyPatch
+):
+    """rlm_query should accept child results keyed by assistant_response."""
+    spawn_mock = AsyncMock(
+        return_value={
+            "status": "ok",
+            "assistant_response": "The answer is 42",
+            "depth": 1,
+            "sub_agent_history": 0,
+        }
     )
-    mock_instance.history.messages = []
-
-    mock_agent.__class__ = MockAgentClass
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async",
+        spawn_mock,
+    )
     mock_agent._max_depth = 2
     mock_agent._current_depth = 0
 
@@ -257,9 +268,72 @@ def test_rlm_query_extracts_answer_correctly(mock_agent):
 
     result = query_tool(query="What is the answer?")
 
-    # Should extract from 'assistant_response', not 'answer'
     assert result["status"] == "ok"
     assert result["answer"] == "The answer is 42"
+
+
+def test_rlm_query_normalizes_nested_child_trajectory(
+    mock_agent, monkeypatch: pytest.MonkeyPatch
+):
+    """rlm_query should preserve structured child trajectory steps."""
+    spawn_mock = AsyncMock(
+        return_value={
+            "status": "ok",
+            "answer": "done",
+            "depth": 1,
+            "sub_agent_history": 0,
+            "trajectory": {
+                "trajectory": [
+                    {"thought": "step one", "output": "ok"},
+                    {"thought": "step two", "output": "done"},
+                ]
+            },
+        }
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.react.tools.delegate.spawn_delegate_sub_agent_async",
+        spawn_mock,
+    )
+
+    tools = build_tool_list(mock_agent)
+    query_tool = next(t for t in tools if t.name == "rlm_query")
+
+    result = query_tool(query="trace child work")
+
+    assert result["status"] == "ok"
+    assert result["trajectory_steps"] == 2
+    assert [step["thought"] for step in result["trajectory"]] == [
+        "step one",
+        "step two",
+    ]
+
+
+def test_tools_only_mode_excludes_rlm_and_memory_intelligence_tools(mock_agent):
+    mock_agent.execution_mode = "tools_only"
+
+    tools = build_tool_list(mock_agent)
+    names = {
+        getattr(tool, "name", None) or getattr(tool, "__name__", "") for tool in tools
+    }
+
+    assert "edit_file" in names
+    assert "load_document" in names
+    assert "list_files" in names
+    assert "write_to_file" in names
+    assert "rlm_query" not in names
+    assert "grounded_answer" not in names
+    assert "memory_tree" not in names
+
+
+def test_rlm_only_mode_keeps_only_forced_delegate_tool(mock_agent):
+    mock_agent.execution_mode = "rlm_only"
+
+    tools = build_tool_list(mock_agent)
+    names = {
+        getattr(tool, "name", None) or getattr(tool, "__name__", "") for tool in tools
+    }
+
+    assert names == {"rlm_query"}
 
 
 def _configure_runtime_modules(

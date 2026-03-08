@@ -44,6 +44,7 @@ TOOL_DELEGATE_NAMES: frozenset[str] = frozenset(
         "chunk_sandbox",
         # RLM delegation tools
         "parallel_semantic_map",
+        "rlm_query",
         "analyze_long_document",
         "summarize_long_document",
         "extract_from_logs",
