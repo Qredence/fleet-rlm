@@ -275,6 +275,39 @@ async def test_entra_auth_rejects_missing_tid_before_issuer_resolution(
     assert "tid" in exc.value.message
 
 
+@pytest.mark.asyncio
+async def test_entra_auth_logs_unexpected_validation_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    provider = EntraAuthProvider(
+        jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+        issuer_template="https://login.microsoftonline.com/{tenantid}/v2.0",
+        audience="api://fleet-rlm",
+    )
+
+    monkeypatch.setattr(jwt, "decode", lambda *args, **kwargs: {"tid": "tenant-123"})
+
+    def _raise_jwks_unavailable(_: str):
+        raise RuntimeError("jwks offline")
+
+    monkeypatch.setattr(
+        provider._jwk_client,
+        "get_signing_key_from_jwt",
+        _raise_jwks_unavailable,
+    )
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(AuthError) as exc:
+            await provider.authenticate_http(
+                _FakeRequest({"authorization": "Bearer entra-token"})
+            )
+
+    assert exc.value.status_code == 503
+    assert "Failed to validate Entra token" in exc.value.message
+    assert "Unexpected error during Entra token validation" in caplog.text
+
+
 class _AdmissionRepository:
     def __init__(self, tenant_status: TenantStatus | None) -> None:
         self.tenant_status = tenant_status

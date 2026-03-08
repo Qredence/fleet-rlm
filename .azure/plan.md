@@ -74,7 +74,7 @@ Generated: 2026-03-06
   - `https://staging.qredence.ai/login`
   - `https://app.qredence.ai/login`
 - Post-logout redirect URIs: same as the SPA redirect URIs above
-- Delegated API scope: `api://<api-app-client-id>/access_as_user`
+- Delegated API scope: `api://YOUR_API_APP_CLIENT_ID_HERE/access_as_user`
 - Frontend default authority: `https://login.microsoftonline.com/organizations`
 - Backend issuer template default: `https://login.microsoftonline.com/{tenantid}/v2.0`
 - Tenant admission: allowlisted tenants only via the Neon `tenants` table

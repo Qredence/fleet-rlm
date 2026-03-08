@@ -70,7 +70,7 @@ Deprecated/planned surfaces removed from backend:
 - The SPA requests `api://<api-app-client-id>/access_as_user`.
 - The same acquired access token is reused for:
   - `Authorization: Bearer ...` on HTTP requests
-  - `access_token` bootstrap on `WS /api/v1/ws/chat`
+  - `access_token` bootstrap on `WS /api/v1/ws/chat` only when `ALLOW_QUERY_AUTH_TOKENS=true`; treat this as a compatibility bootstrap and disable it outside trusted environments when you can
 - `GET /api/v1/auth/me` is the frontend’s canonical identity bootstrap endpoint.
 - In Entra mode, backend tenant admission is enforced against the Neon `tenants` table before runtime persistence starts.
 

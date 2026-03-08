@@ -131,7 +131,7 @@ export function UserMenu() {
           </button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="end" className="w-55">
+        <DropdownMenuContent align="end" className="w-56">
           {/* User info header */}
           <DropdownMenuLabel className="p-3">
             <div className="flex items-center gap-2.5">
