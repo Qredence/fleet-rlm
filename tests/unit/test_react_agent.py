@@ -562,27 +562,38 @@ def test_get_tool_raises_on_unknown_name(monkeypatch):
 def test_get_runtime_module_caches_instances(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-    from fleet_rlm.react import rlm_runtime_modules as runtime_mod
+    from fleet_rlm.react import runtime_factory
 
-    created: list[tuple[object, int, int, bool]] = []
+    created: list[tuple[str, object, int, int, bool]] = []
+    fake_module = object()
 
-    class _FakeGroundedModule:
-        def __init__(
-            self, *, interpreter, max_iterations: int, max_llm_calls: int, verbose: bool
-        ) -> None:
-            created.append((interpreter, max_iterations, max_llm_calls, verbose))
+    def _fake_build_runtime_module(
+        name: str,
+        *,
+        interpreter: object,
+        max_iterations: int,
+        max_llm_calls: int,
+        verbose: bool,
+    ) -> object:
+        created.append((name, interpreter, max_iterations, max_llm_calls, verbose))
+        return fake_module
 
     monkeypatch.setattr(
-        runtime_mod, "GroundedAnswerWithCitationsModule", _FakeGroundedModule
+        runtime_factory, "build_runtime_module", _fake_build_runtime_module
     )
 
     agent = RLMReActChatAgent(interpreter=_FakeInterpreter(), verbose=True)
     first = agent.get_runtime_module("grounded_answer")
     second = agent.get_runtime_module("grounded_answer")
 
-    assert first is second
+    assert first is second is fake_module
     assert len(created) == 1
-    assert created[0][1:] == (agent.rlm_max_iterations, agent.rlm_max_llm_calls, True)
+    assert created[0][0] == "grounded_answer"
+    assert created[0][2:] == (
+        agent.rlm_max_iterations,
+        agent.rlm_max_llm_calls,
+        True,
+    )
 
 
 def test_get_runtime_module_raises_on_unknown_name(monkeypatch):

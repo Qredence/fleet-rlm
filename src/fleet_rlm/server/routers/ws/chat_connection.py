@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
@@ -46,6 +45,23 @@ def _cancelled_event_payload(message: str = "Request cancelled.") -> dict[str, A
             "event_id": str(uuid.uuid4()),
         },
     }
+
+
+async def _cancel_task(task: asyncio.Task[Any] | None) -> None:
+    """Cancel an in-flight task and swallow expected shutdown exceptions."""
+    if task is None or task.done():
+        return
+
+    task.cancel()
+    outcomes = await asyncio.gather(task, return_exceptions=True)
+    if not outcomes:
+        return
+
+    outcome = outcomes[0]
+    if isinstance(outcome, (asyncio.CancelledError, WebSocketDisconnect)):
+        return
+    if isinstance(outcome, BaseException):
+        raise outcome
 
 
 async def _process_chat_message(
@@ -256,14 +272,8 @@ async def _chat_message_loop(
             )
     except WebSocketDisconnect:
         session.cancel_flag["cancelled"] = True
-        if pending_receive_task is not None and not pending_receive_task.done():
-            pending_receive_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await pending_receive_task
-        if stream_task is not None and not stream_task.done():
-            stream_task.cancel()
-            with suppress(asyncio.CancelledError, WebSocketDisconnect):
-                await stream_task
+        await _cancel_task(pending_receive_task)
+        await _cancel_task(stream_task)
         try:
             await local_persist(include_volume_save=True)
         except PersistenceRequiredError as exc:
@@ -284,14 +294,8 @@ async def _chat_message_loop(
         if session.lifecycle is not None:
             await session.lifecycle.complete_run(RunStatus.CANCELLED)
     except Exception as exc:
-        if pending_receive_task is not None and not pending_receive_task.done():
-            pending_receive_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await pending_receive_task
-        if stream_task is not None and not stream_task.done():
-            stream_task.cancel()
-            with suppress(asyncio.CancelledError, WebSocketDisconnect):
-                await stream_task
+        await _cancel_task(pending_receive_task)
+        await _cancel_task(stream_task)
         error_code = _classify_stream_failure(exc)
         await websocket.send_json(
             _error_envelope(
