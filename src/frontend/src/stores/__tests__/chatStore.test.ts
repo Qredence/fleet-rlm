@@ -38,7 +38,7 @@ vi.mock("@/lib/telemetry/client", () => ({
 // ── imports ────────────────────────────────────────────────────────────────────
 // Imported after vi.mock so the mocked versions are resolved.
 import { streamChatOverWs } from "@/lib/rlm-api";
-import { useChatStore } from "@/screens/chat/stores/chatStore";
+import { useChatStore } from "@/stores/chatStore";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 /** Reset Zustand store state between tests */
@@ -235,6 +235,8 @@ describe("useChatStore — streamMessage", () => {
     expect(payload).toMatchObject({
       type: "message",
       content: "test",
+      trace: true,
+      trace_mode: "compact",
       analytics_enabled: true,
       session_id: "sess-abc",
       workspace_id: "test-workspace",

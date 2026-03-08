@@ -238,7 +238,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(taskIndex).toBeGreaterThan(toolIndex);
   });
 
-  it("coalesces contiguous reasoning trace fragments into one reasoning component", () => {
+  it("merges contiguous reasoning trace fragments into one inline markdown stream", () => {
     const messages: ChatMessage[] = [
       {
         id: "trace-reasoning-1",
@@ -248,7 +248,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "First reasoning fragment." }],
+            parts: [{ type: "text", text: "Prefix `co" }],
             isStreaming: true,
           },
         ],
@@ -261,7 +261,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "Second reasoning fragment." }],
+            parts: [{ type: "text", text: "de` suffix" }],
             isStreaming: true,
           },
         ],
@@ -274,7 +274,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "Final reasoning fragment." }],
+            parts: [{ type: "text", text: " and final sentence." }],
             isStreaming: false,
           },
         ],
@@ -299,11 +299,10 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       />,
     );
 
-    expect(html).toContain("First reasoning fragment.");
-    expect(html).toContain("Second reasoning fragment.");
-    expect(html).toContain("Final reasoning fragment.");
+    expect(html).toContain("Prefix ");
+    expect(html).toContain("suffix and final sentence.");
+    expect(html).toContain('data-streamdown="inline-code"');
     expect(html.match(/data-slot="reasoning-inline"/g)?.length).toBe(1);
-    expect(html.match(/Reasoning trace/g)?.length).toBe(1);
   });
 
   it("groups contiguous tool call, status, and result rows into one dropdown", () => {
@@ -746,7 +745,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     ).toContain('data-state="closed"');
   });
 
-  it("shows shimmer while typing with no streaming assistant message", () => {
+  it("shows trailing Loading text shimmer while typing with no streaming assistant message", () => {
     const html = renderToStaticMarkup(
       <ChatMessageList
         messages={[]}
@@ -765,7 +764,48 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       />,
     );
 
-    expect(html).toContain('data-slot="shimmer"');
+    expect(html).toContain("Loading");
     expect(html).toContain("Agentic Fleet Session");
+  });
+
+  it("keeps the typing shimmer visible on a follow-up turn before assistant output arrives", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "user-1",
+        type: "user",
+        content: "First prompt",
+      },
+      {
+        id: "assistant-1",
+        type: "assistant",
+        content: "First answer",
+        streaming: false,
+      },
+      {
+        id: "user-2",
+        type: "user",
+        content: "Second prompt",
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessageList
+        messages={messages}
+        isTyping={true}
+        isMobile={false}
+        scrollRef={createRef<HTMLDivElement>()}
+        contentRef={createRef<HTMLDivElement>()}
+        isAtBottom={true}
+        scrollToBottom={() => {}}
+        onSuggestionClick={() => {}}
+        onResolveHitl={() => {}}
+        onResolveClarification={() => {}}
+        showHistory={false}
+        hasHistory={false}
+        historyPanel={null}
+      />,
+    );
+
+    expect(html).toContain("Loading");
   });
 });

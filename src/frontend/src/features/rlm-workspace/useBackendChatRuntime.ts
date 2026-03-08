@@ -11,7 +11,7 @@ import type {
   ChatSubmitOptions,
 } from "@/features/rlm-workspace/runtime-types";
 import { useArtifactStore } from "@/stores/artifactStore";
-import { useChatStore } from "@/screens/chat/stores/chatStore";
+import { useChatStore } from "@/stores/chatStore";
 import {
   sendCommandOverWs,
   rlmApiConfig,

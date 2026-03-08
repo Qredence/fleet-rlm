@@ -10,6 +10,8 @@ import type {
 import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import { Streamdown } from "@/components/ui/streamdown";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import {
   Conversation,
   ConversationContent,
@@ -108,7 +110,7 @@ import {
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { ClarificationCard } from "@/screens/chat/ClarificationCard";
+import { ClarificationCard } from "@/features/rlm-workspace/ClarificationCard";
 import { SuggestionChip } from "@/components/ui/suggestion-chip";
 import {
   SuggestionIconBolt,
@@ -119,6 +121,12 @@ import {
   fadeUp,
   fadeUpReduced,
 } from "@/features/rlm-workspace/animation-presets";
+import {
+  buildChatDisplayItems,
+  type AssistantTurnDisplayItem,
+  type ToolSessionItem,
+  type TraceDisplayItem,
+} from "@/features/rlm-workspace/chatDisplayItems";
 
 const suggestions = [
   {
@@ -210,153 +218,6 @@ function shouldOpenTaskRow(
   return status === "in_progress" || status === "error";
 }
 
-type ToolSessionEventKind = "tool_call" | "tool_result" | "status";
-type GroupableTracePart = Extract<
-  ChatRenderPart,
-  {
-    kind: "tool" | "sandbox" | "environment_variables" | "status_note";
-  }
->;
-type ReasoningTracePart = Extract<ChatRenderPart, { kind: "reasoning" }>;
-
-interface ActiveReasoningGroup {
-  key: string;
-  message: ChatMessage;
-  traceSource: ChatMessage["traceSource"];
-  parts: ReasoningTracePart[];
-}
-
-interface ToolSessionItem {
-  key: string;
-  traceSource: ChatMessage["traceSource"];
-  eventKind: ToolSessionEventKind;
-  part: GroupableTracePart;
-  toolName?: string;
-  stepIndex?: number;
-  runtimeContext?: RuntimeContext;
-}
-
-type TraceDisplayItem =
-  | {
-      kind: "trace_message";
-      key: string;
-      message: ChatMessage;
-      renderParts: ChatRenderPart[];
-    }
-  | {
-      kind: "tool_session";
-      key: string;
-      items: ToolSessionItem[];
-    };
-
-type ChatDisplayItem =
-  | {
-      kind: "message";
-      key: string;
-      message: ChatMessage;
-    }
-  | TraceDisplayItem;
-
-function isToolSessionTracePart(
-  part: ChatRenderPart,
-): part is GroupableTracePart {
-  return (
-    part.kind === "tool" ||
-    part.kind === "sandbox" ||
-    part.kind === "environment_variables" ||
-    part.kind === "status_note"
-  );
-}
-
-function canStartToolSession(part: GroupableTracePart) {
-  return part.kind !== "status_note";
-}
-
-function toolSessionEventKindForPart(
-  part: GroupableTracePart,
-): ToolSessionEventKind {
-  if (part.kind === "status_note") return "status";
-  if (part.kind === "environment_variables") return "tool_result";
-  return part.state === "running" || part.state === "input-streaming"
-    ? "tool_call"
-    : "tool_result";
-}
-
-function toolSessionToolName(part: GroupableTracePart): string | undefined {
-  if (part.kind === "tool") return part.toolType || part.title || undefined;
-  if (part.kind === "sandbox") return part.title || undefined;
-  if (part.kind === "environment_variables") return part.title || undefined;
-  return part.toolName;
-}
-
-function toolSessionStepIndex(part: GroupableTracePart): number | undefined {
-  if (
-    part.kind === "tool" ||
-    part.kind === "sandbox" ||
-    part.kind === "status_note"
-  ) {
-    return part.stepIndex;
-  }
-  return undefined;
-}
-
-function toolSessionRuntimeContext(
-  part: GroupableTracePart,
-): RuntimeContext | undefined {
-  if (
-    part.kind === "tool" ||
-    part.kind === "sandbox" ||
-    part.kind === "status_note"
-  ) {
-    return part.runtimeContext;
-  }
-  return undefined;
-}
-
-function normalizeToolSessionName(name?: string) {
-  return name?.trim().toLowerCase();
-}
-
-function toolSessionItemsCompatible(
-  active: ToolSessionItem,
-  candidate: ToolSessionItem,
-) {
-  if (active.traceSource !== candidate.traceSource) return false;
-  if (active.stepIndex != null && candidate.stepIndex != null) {
-    return active.stepIndex === candidate.stepIndex;
-  }
-  const activeName = normalizeToolSessionName(active.toolName);
-  const candidateName = normalizeToolSessionName(candidate.toolName);
-  if (activeName && candidateName) return activeName === candidateName;
-  return false;
-}
-
-function shouldAppendToActiveSession(
-  activeSession: ToolSessionItem[],
-  candidate: ToolSessionItem,
-) {
-  const first = activeSession[0];
-  if (!first || !toolSessionItemsCompatible(first, candidate)) return false;
-  if (candidate.eventKind === "tool_call") return false;
-  return true;
-}
-
-function buildToolSessionItem(
-  part: GroupableTracePart,
-  key: string,
-  traceSource: ChatMessage["traceSource"],
-): ToolSessionItem {
-  return {
-    key,
-    traceSource,
-    eventKind: toolSessionEventKindForPart(part),
-    part,
-    toolName: toolSessionToolName(part),
-    stepIndex: toolSessionStepIndex(part),
-    runtimeContext: toolSessionRuntimeContext(part),
-  };
-}
-
 function toolSessionStateForItem(item: ToolSessionItem): ChatRenderToolState {
   if (item.part.kind === "tool" || item.part.kind === "sandbox") {
     return item.part.state;
@@ -391,154 +252,6 @@ function toolSessionLine(item: ToolSessionItem) {
   }
   const toolName = item.toolName ?? "tool";
   return `${item.eventKind}: ${toolName}`;
-}
-
-function mergeReasoningParts(parts: ReasoningTracePart[]): ReasoningTracePart {
-  const mergedParts = parts.flatMap((part) => part.parts);
-  const latestPart = parts[parts.length - 1];
-  const isStreaming = latestPart?.isStreaming ?? false;
-  const duration = [...parts]
-    .reverse()
-    .find((part) => typeof part.duration === "number")?.duration;
-
-  return {
-    kind: "reasoning",
-    parts: mergedParts,
-    isStreaming,
-    duration,
-  };
-}
-
-function isReasoningTracePart(
-  part: ChatRenderPart,
-): part is ReasoningTracePart {
-  return part.kind === "reasoning";
-}
-
-function buildTraceDisplayItems(messages: ChatMessage[]): TraceDisplayItem[] {
-  const items: TraceDisplayItem[] = [];
-  let activeSession: ToolSessionItem[] | null = null;
-  let activeReasoningGroup: ActiveReasoningGroup | null = null;
-
-  const flushActiveSession = () => {
-    if (!activeSession?.length) return;
-    items.push({
-      kind: "tool_session",
-      key: activeSession[0]?.key ?? `tool-session-${items.length}`,
-      items: activeSession,
-    });
-    activeSession = null;
-  };
-
-  const flushActiveReasoningGroup = () => {
-    if (!activeReasoningGroup) return;
-    items.push({
-      kind: "trace_message",
-      key: activeReasoningGroup.key,
-      message: activeReasoningGroup.message,
-      renderParts: [mergeReasoningParts(activeReasoningGroup.parts)],
-    });
-    activeReasoningGroup = null;
-  };
-
-  for (const message of messages) {
-    if (message.type !== "trace" || !message.renderParts?.length) {
-      flushActiveSession();
-      flushActiveReasoningGroup();
-      continue;
-    }
-
-    for (let idx = 0; idx < message.renderParts.length; idx += 1) {
-      const part = message.renderParts[idx];
-      if (!part) continue;
-      const key = `${message.id}-${part.kind}-${idx}`;
-
-      if (isReasoningTracePart(part)) {
-        flushActiveSession();
-        if (
-          activeReasoningGroup &&
-          activeReasoningGroup.traceSource === message.traceSource
-        ) {
-          activeReasoningGroup.parts.push(part);
-        } else {
-          flushActiveReasoningGroup();
-          activeReasoningGroup = {
-            key,
-            message,
-            traceSource: message.traceSource,
-            parts: [part],
-          };
-        }
-        continue;
-      }
-
-      flushActiveReasoningGroup();
-
-      if (!isToolSessionTracePart(part)) {
-        flushActiveSession();
-        items.push({
-          kind: "trace_message",
-          key,
-          message,
-          renderParts: [part],
-        });
-        continue;
-      }
-
-      const candidate = buildToolSessionItem(part, key, message.traceSource);
-      if (activeSession?.length) {
-        if (shouldAppendToActiveSession(activeSession, candidate)) {
-          activeSession.push(candidate);
-          continue;
-        }
-        flushActiveSession();
-      }
-
-      if (canStartToolSession(part)) {
-        activeSession = [candidate];
-        continue;
-      }
-
-      items.push({
-        kind: "trace_message",
-        key,
-        message,
-        renderParts: [part],
-      });
-    }
-  }
-
-  flushActiveSession();
-  flushActiveReasoningGroup();
-  return items;
-}
-
-function buildChatDisplayItems(messages: ChatMessage[]): ChatDisplayItem[] {
-  const items: ChatDisplayItem[] = [];
-  let pendingTraceMessages: ChatMessage[] = [];
-
-  const flushPendingTraceMessages = () => {
-    if (pendingTraceMessages.length === 0) return;
-    items.push(...buildTraceDisplayItems(pendingTraceMessages));
-    pendingTraceMessages = [];
-  };
-
-  for (const message of messages) {
-    if (message.type === "trace" && message.renderParts?.length) {
-      pendingTraceMessages.push(message);
-      continue;
-    }
-
-    flushPendingTraceMessages();
-    items.push({
-      kind: "message",
-      key: message.id,
-      message,
-    });
-  }
-
-  flushPendingTraceMessages();
-  return items;
 }
 
 function renderInlineCitations(
@@ -793,20 +506,171 @@ function renderToolSession(
   );
 }
 
+function renderReasoningPart(
+  part: Extract<ChatRenderPart, { kind: "reasoning" }>,
+  key: string,
+  embedded = false,
+) {
+  return (
+    <div key={key} className="space-y-1">
+      <Reasoning
+        parts={part.parts}
+        isStreaming={part.isStreaming}
+        duration={part.duration}
+        density="compact"
+        displayMode="inline_always"
+        className={cn(
+          "w-full",
+          embedded &&
+            "rounded-none border-0 bg-transparent px-0 py-0 shadow-none",
+        )}
+      />
+    </div>
+  );
+}
+
+function compactStatusClasses(
+  tone:
+    | Extract<ChatRenderPart, { kind: "status_note" }>["tone"]
+    | "accent"
+    | "primary"
+    | "success"
+    | undefined,
+) {
+  if (tone === "error") return undefined;
+  return cn(
+    "px-3 py-2.5",
+    tone === "warning" && "border-accent/25 bg-accent/5 text-foreground",
+    tone === "accent" && "border-accent/25 bg-accent/5 text-foreground",
+    tone === "primary" && "border-primary/25 bg-primary/5 text-foreground",
+    tone === "success" && "border-primary/25 bg-primary/5 text-foreground",
+    (!tone || tone === "neutral") &&
+      "border-border-subtle/80 bg-muted/20 text-muted-foreground",
+  );
+}
+
+function renderCompactStatusAlert(
+  content: string,
+  tone:
+    | Extract<ChatRenderPart, { kind: "status_note" }>["tone"]
+    | "accent"
+    | "primary"
+    | "success"
+    | undefined,
+) {
+  return (
+    <Alert
+      variant={tone === "error" ? "destructive" : "default"}
+      className={compactStatusClasses(tone)}
+    >
+      <AlertDescription>
+        <div style={typo.base}>{content}</div>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function buildAssistantTurnReasoningParts(item: AssistantTurnDisplayItem) {
+  const fromTrace = item.reasoningItems.map((reasoningItem) => ({
+    key: reasoningItem.key,
+    part: reasoningItem.part,
+  }));
+  const message = item.message;
+  const fromMessage =
+    message?.renderParts?.flatMap((part, idx) =>
+      part.kind === "reasoning"
+        ? [{ key: `${message.id}-${part.kind}-${idx}`, part }]
+        : [],
+    ) ?? [];
+  return [...fromTrace, ...fromMessage];
+}
+
+function mergeReasoningParts(
+  reasoningParts: ReturnType<typeof buildAssistantTurnReasoningParts>,
+) {
+  if (reasoningParts.length === 0) return [];
+
+  const mergedText = reasoningParts
+    .flatMap(({ part }) => part.parts)
+    .map((part) => part.text)
+    .join("");
+  const lastPart = reasoningParts[reasoningParts.length - 1]?.part;
+  const duration = [...reasoningParts]
+    .reverse()
+    .find(({ part }) => part.duration != null)?.part.duration;
+
+  if (!lastPart) return [];
+
+  return [
+    {
+      key: reasoningParts[0]?.key ?? "reasoning",
+      part: {
+        kind: "reasoning" as const,
+        parts: [{ type: "text" as const, text: mergedText }],
+        isStreaming: lastPart.isStreaming,
+        ...(duration != null ? { duration } : {}),
+      },
+    },
+  ];
+}
+
+function buildAssistantTurnSupplementalParts(item: AssistantTurnDisplayItem) {
+  return (
+    item.message?.renderParts?.filter((part) => part.kind !== "reasoning") ?? []
+  );
+}
+
+function renderAssistantTurn(item: AssistantTurnDisplayItem) {
+  const reasoningParts = mergeReasoningParts(
+    buildAssistantTurnReasoningParts(item),
+  );
+  const supplementalParts = buildAssistantTurnSupplementalParts(item);
+  const assistantContent = item.message?.content ?? "";
+  const hasReasoning = reasoningParts.length > 0;
+  const hasAssistantContent = assistantContent.length > 0;
+  const showStreamingShell =
+    Boolean(item.message?.streaming) && !hasAssistantContent && !hasReasoning;
+  const shouldRenderBubble =
+    hasReasoning || hasAssistantContent || showStreamingShell;
+
+  return (
+    <Message from="assistant" className="mb-4" key={item.key}>
+      <MessageContent className="w-full space-y-2.5">
+        {shouldRenderBubble ? (
+          <div className="max-w-[72ch] rounded-[22px] border border-border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
+            <div className="flex flex-col gap-3">
+              {reasoningParts.map(({ key, part }) =>
+                renderReasoningPart(part, key, true),
+              )}
+              {hasReasoning && hasAssistantContent ? (
+                <Separator className="bg-border-subtle/70" />
+              ) : null}
+              {hasAssistantContent ? (
+                <MessageResponse streaming={item.message?.streaming}>
+                  {assistantContent}
+                </MessageResponse>
+              ) : null}
+              {showStreamingShell ? (
+                <Shimmer as="span" className="text-sm text-muted-foreground">
+                  Loading
+                </Shimmer>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {supplementalParts.map((part, idx) =>
+          renderTracePart(part, `${item.key}-${part.kind}-${idx}`),
+        )}
+      </MessageContent>
+    </Message>
+  );
+}
+
 function renderTracePart(part: ChatRenderPart, key: string) {
   switch (part.kind) {
     case "reasoning":
-      return (
-        <Reasoning
-          key={key}
-          parts={part.parts}
-          isStreaming={part.isStreaming}
-          duration={part.duration}
-          density="compact"
-          displayMode="inline_always"
-          className="w-full"
-        />
-      );
+      return renderReasoningPart(part, key);
     case "chain_of_thought":
       return (
         <ChainOfThought
@@ -1036,19 +900,8 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       return <div key={key}>{renderAttachments(part)}</div>;
     case "status_note":
       return (
-        <div
-          key={key}
-          className={cn(
-            "border-l pl-2 py-0.5",
-            part.tone === "error" && "border-destructive/30 text-destructive",
-            part.tone === "warning" && "border-amber-300/40 text-amber-800",
-            part.tone === "success" && "border-emerald-300/40 text-emerald-800",
-            (!part.tone || part.tone === "neutral") &&
-              "border-border-subtle/80 text-muted-foreground",
-          )}
-          style={typo.base}
-        >
-          {part.text}
+        <div key={key}>
+          {renderCompactStatusAlert(part.text, part.tone)}
         </div>
       );
     case "confirmation":
@@ -1085,23 +938,9 @@ function renderTracePart(part: ChatRenderPart, key: string) {
 
 function renderLegacyStatusCard(
   content: string,
-  colorClasses: string,
-  pulseClasses: string,
+  tone: "accent" | "primary" | "success",
 ) {
-  return (
-    <div
-      className={cn(
-        "flex items-center gap-2 border-l py-0.5 pl-2",
-        colorClasses,
-      )}
-      style={typo.base}
-    >
-      <div
-        className={cn("size-1.5 rounded-full animate-pulse", pulseClasses)}
-      />
-      <span className="text-current">{content}</span>
-    </div>
-  );
+  return renderCompactStatusAlert(content, tone);
 }
 
 export function ChatMessageList({
@@ -1125,8 +964,21 @@ export function ChatMessageList({
   const hasStreamingAssistant = messages.some(
     (msg) => msg.type === "assistant" && msg.streaming,
   );
-  const showTypingShimmer = isTyping && !hasStreamingAssistant;
+  let activeTurnStartIndex = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.type === "user") {
+      activeTurnStartIndex = index + 1;
+      break;
+    }
+  }
   const displayItems = buildChatDisplayItems(messages);
+  const hasVisibleAssistantTurn = buildChatDisplayItems(
+    messages.slice(activeTurnStartIndex),
+  ).some(
+    (item) => item.kind === "assistant_turn",
+  );
+  const showTypingShimmer =
+    isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
 
   return (
     <Conversation
@@ -1229,6 +1081,14 @@ export function ChatMessageList({
             );
           }
 
+          if (displayItem.kind === "assistant_turn") {
+            return (
+              <motion.div key={displayItem.key} {...preset}>
+                {renderAssistantTurn(displayItem)}
+              </motion.div>
+            );
+          }
+
           const msg =
             displayItem.kind === "trace_message"
               ? {
@@ -1284,7 +1144,12 @@ export function ChatMessageList({
                     msg.streaming &&
                     !msg.content ? (
                       <div className="max-w-[72ch] rounded-[22px] border border-border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
-                        <Shimmer lines={3} />
+                        <Shimmer
+                          as="span"
+                          className="text-sm text-muted-foreground"
+                        >
+                          Loading
+                        </Shimmer>
                       </div>
                     ) : null}
                   </MessageContent>
@@ -1317,7 +1182,7 @@ export function ChatMessageList({
                       </ConfirmationActions>
                     </ConfirmationRequest>
                     <ConfirmationAccepted>
-                      <div className="mt-3 text-xs text-emerald-600">
+                      <div className="mt-3 text-xs text-primary">
                         Resolved: {msg.hitlData.resolvedLabel ?? "Approved"}
                       </div>
                     </ConfirmationAccepted>
@@ -1356,23 +1221,11 @@ export function ChatMessageList({
                 )}
 
               {msg.type === "plan_update" &&
-                renderLegacyStatusCard(
-                  msg.content,
-                  "border-accent/30 text-accent",
-                  "bg-accent",
-                )}
+                renderLegacyStatusCard(msg.content, "accent")}
               {msg.type === "rlm_executing" &&
-                renderLegacyStatusCard(
-                  msg.content,
-                  "border-primary/30 text-primary",
-                  "bg-primary",
-                )}
+                renderLegacyStatusCard(msg.content, "primary")}
               {msg.type === "memory_update" &&
-                renderLegacyStatusCard(
-                  msg.content,
-                  "border-green-500/30 text-green-500",
-                  "bg-green-500",
-                )}
+                renderLegacyStatusCard(msg.content, "success")}
             </motion.div>
           );
         })}
@@ -1380,7 +1233,9 @@ export function ChatMessageList({
         {showTypingShimmer && (
           <Message from="assistant" className="pt-2">
             <MessageContent className="max-w-xl">
-              <Shimmer lines={3} />
+              <Shimmer as="span" className="text-sm text-muted-foreground">
+                Loading
+              </Shimmer>
             </MessageContent>
           </Message>
         )}

@@ -7,11 +7,9 @@ import { Streamdown } from "@/components/ui/streamdown";
 import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import { Sparkles } from "lucide-react";
-
 export type ReasoningPart = { type: "text"; text: string };
 export type ReasoningDensity = "default" | "compact";
 export type ReasoningDisplayMode = "collapsible" | "inline_always";
-
 interface ReasoningProps {
   parts: ReasoningPart[];
   isStreaming?: boolean;
@@ -21,7 +19,6 @@ interface ReasoningProps {
   displayMode?: ReasoningDisplayMode;
   className?: string;
 }
-
 function Reasoning({
   parts,
   isStreaming = false,
@@ -31,6 +28,8 @@ function Reasoning({
   displayMode = "collapsible",
   className,
 }: ReasoningProps) {
+  const mergedContent = parts.map((part) => part.text).join("");
+
   if (displayMode === "inline_always") {
     return (
       <div
@@ -47,25 +46,12 @@ function Reasoning({
             {isStreaming ? "Reasoning in progress" : "Reasoning trace"}
           </span>
         </div>
-        {parts.map((part, idx) => (
-          <div
-            key={`reasoning-inline-${idx}`}
-            className={cn(
-              "text-muted-foreground",
-              idx > 0 && "border-t border-border-subtle/70 pt-2",
-            )}
-            style={typo.base}
-          >
-            <Streamdown
-              content={part.text}
-              streaming={isStreaming && idx === parts.length - 1}
-            />
-          </div>
-        ))}
+        <div className="text-muted-foreground" style={typo.base}>
+          <Streamdown content={mergedContent} streaming={isStreaming} />
+        </div>
       </div>
     );
   }
-
   return (
     <BaseReasoning
       parts={parts}
