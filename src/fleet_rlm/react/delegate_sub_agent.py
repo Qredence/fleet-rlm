@@ -337,8 +337,8 @@ async def spawn_delegate_sub_agent_async(
                     await _emit_stream_event_callback(stream_event_callback, event)
 
             if final_prediction is None:
-                final_prediction = await child_module.acall(
-                    prompt=prompt, context=context
+                raise RuntimeError(
+                    "Delegate streaming completed without producing a Prediction"
                 )
             return _prediction_payload(final_prediction)
 

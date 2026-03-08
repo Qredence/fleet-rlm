@@ -202,7 +202,11 @@ def _drain_live_events(
 ) -> Iterable[StreamEvent]:
     """Yield and clear queued nested events emitted by child runtimes."""
     while pending_events:
-        yield pending_events.pop(0)
+        # pop from end (O(1)) after reversing once, to avoid O(N) list.pop(0)
+        pending_events.reverse()
+        while pending_events:
+            yield pending_events.pop()
+        break
 
 
 def _process_stream_value(
