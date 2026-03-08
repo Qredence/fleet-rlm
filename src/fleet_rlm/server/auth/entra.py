@@ -139,6 +139,7 @@ class EntraAuthProvider:
         except InvalidTokenError as exc:
             raise AuthError(f"Invalid Entra token: {exc}", status_code=401) from exc
         except Exception as exc:  # pragma: no cover - network/JWKS edge cases
+            logging.warning("Unexpected error during Entra token validation", exc_info=True)
             raise AuthError(
                 f"Failed to validate Entra token: {exc}",
                 status_code=503,
