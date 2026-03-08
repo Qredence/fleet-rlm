@@ -13,7 +13,9 @@ import {
   SandboxTabContent,
 } from "@/components/ai-elements/sandbox";
 import { ToolOutput } from "@/components/ai-elements/tool";
-import type { ToolState } from "@/components/ai-elements/tool";
+
+// Local tool state type for internal use
+type LocalToolState = "input-streaming" | "running" | "output-available" | "output-error";
 
 // ── Read-only CodeMirror code viewer ───────────────────────────────
 
@@ -137,7 +139,7 @@ function resolveOutput(step: ExecutionStep | undefined): string {
   }
 }
 
-function inferToolState(step: ExecutionStep | undefined): ToolState {
+function inferToolState(step: ExecutionStep | undefined): LocalToolState {
   if (!step) return "running";
   const label = step.label?.toLowerCase() ?? "";
   if (label.includes("error")) return "output-error";
