@@ -10,7 +10,9 @@ describe("ThinkButton", () => {
     );
 
     expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain("text-accent bg-accent/15 hover:bg-accent/20");
+    expect(html).toContain("bg-accent/15");
+    expect(html).toContain("text-accent");
+    expect(html).toContain("hover:bg-accent/20");
   });
 
   it("uses muted styles when disabled", () => {

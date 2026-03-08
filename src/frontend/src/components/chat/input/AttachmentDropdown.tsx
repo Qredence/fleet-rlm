@@ -8,6 +8,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  PROMPT_INPUT_ICON_BUTTON_CLASSNAME,
+  PROMPT_INPUT_ICON_BUTTON_VARIANT,
+} from "./composerActionStyles";
 
 interface AttachmentDropdownProps {
   onFilesSelected?: (files: File[]) => void;
@@ -44,17 +53,25 @@ function AttachmentDropdown({
       />
 
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <span className="inline-flex">
-            <IconButton
-              type="button"
-              aria-label="Prompt features"
-              className="touch-target rounded-full"
-            >
-              <Plus className="size-5 text-foreground" />
-            </IconButton>
-          </span>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <span className="inline-flex">
+                <IconButton
+                  type="button"
+                  aria-label="Prompt features"
+                  variant={PROMPT_INPUT_ICON_BUTTON_VARIANT}
+                  className={PROMPT_INPUT_ICON_BUTTON_CLASSNAME}
+                >
+                  <Plus className="size-5" />
+                </IconButton>
+              </span>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>
+            Prompt features
+          </TooltipContent>
+        </Tooltip>
 
         <DropdownMenuContent
           align="start"

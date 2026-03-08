@@ -7,7 +7,7 @@ import { BuilderPanel } from "@/app/layout/BuilderPanel";
 
 vi.mock("@/hooks/useNavigation", () => ({
   useNavigation: () => ({
-    activeNav: "taxonomy",
+    activeNav: "volumes",
     creationPhase: "idle",
     closeCanvas: vi.fn(),
     activeFeatures: new Set(),
@@ -72,7 +72,7 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 describe("BuilderPanel file detail mode", () => {
-  it("renders FileDetail when a taxonomy file is selected", () => {
+  it("renders FileDetail when a volumes file is selected", () => {
     const queryClient = new QueryClient();
     const html = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>

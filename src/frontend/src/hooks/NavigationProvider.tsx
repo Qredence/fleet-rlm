@@ -26,9 +26,8 @@ interface ProviderProps {
 
 function NavigationProvider({ children }: ProviderProps) {
   const { isDark, toggle: toggleTheme } = useTheme();
-  const [activeNav, setActiveNav] = useState<NavItem>("new");
+  const [activeNav, setActiveNav] = useState<NavItem>("workspace");
   const [isCanvasOpen, setIsCanvasOpen] = useState(false);
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [creationPhase, setCreationPhase] = useState<CreationPhase>("idle");
 
   const canvasHandlersRef = useRef<CanvasHandlers>({
@@ -61,10 +60,6 @@ function NavigationProvider({ children }: ProviderProps) {
     canvasHandlersRef.current = handlers;
   }, []);
 
-  const selectSkill = useCallback((id: string | null) => {
-    setSelectedSkillId(id);
-  }, []);
-
   const [selectedFileNode, setSelectedFileNode] = useState<FsNode | null>(null);
   const selectFile = useCallback((node: FsNode | null) => {
     setSelectedFileNode(node);
@@ -75,13 +70,12 @@ function NavigationProvider({ children }: ProviderProps) {
     const prev = prevActiveNavRef.current;
     prevActiveNavRef.current = activeNav;
 
-    if (activeNav === "taxonomy" && prev !== "taxonomy") {
-      setSelectedSkillId(null);
+    if (activeNav === "volumes" && prev !== "volumes") {
       setSelectedFileNode(null);
       canvasHandlersRef.current.open();
     }
 
-    if (activeNav !== "taxonomy" && prev === "taxonomy") {
+    if (activeNav !== "volumes" && prev === "volumes") {
       setSelectedFileNode(null);
     }
   }, [activeNav]);
@@ -155,7 +149,7 @@ function NavigationProvider({ children }: ProviderProps) {
   const [sessionId, setSessionId] = useState(0);
 
   const newSession = useCallback(() => {
-    setActiveNav("new");
+    setActiveNav("workspace");
     setCreationPhase("idle");
     setActiveFeatures(new Set());
     setPromptMode("auto");
@@ -172,8 +166,6 @@ function NavigationProvider({ children }: ProviderProps) {
     closeCanvas,
     toggleCanvas,
     registerCanvasHandlers,
-    selectedSkillId,
-    selectSkill,
     creationPhase,
     setCreationPhase,
     newSession,

@@ -1,14 +1,15 @@
 /**
- * Mock login dialog.
+ * Microsoft Entra sign-in dialog.
  *
- * Simple email + password form that calls `useAuth().login()`.
+ * Uses the shared auth provider to start the Microsoft sign-in flow.
  * Desktop: centered Dialog. Mobile: iOS 26 Liquid Glass bottom sheet.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { typo } from "@/lib/config/typo";
+import { isEntraAuthConfigured } from "@/lib/auth/entra";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -18,8 +19,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { IconButton } from "@/components/ui/icon-button";
 import { BrandMark } from "@/components/shared/BrandMark";
 
@@ -27,19 +26,28 @@ import { BrandMark } from "@/components/shared/BrandMark";
 
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const { login } = useAuth();
-  const [email, setEmail] = useState("alex@qredence.ai");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const authConfigured = isEntraAuthConfigured();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!authConfigured) {
+      toast.error(
+        "Microsoft Entra sign-in is not configured. Set VITE_ENTRA_CLIENT_ID and VITE_ENTRA_SCOPES first.",
+      );
+      return;
+    }
     setLoading(true);
-    const ok = await login(email, password);
+    const ok = await login();
     setLoading(false);
     if (ok) {
       toast.success("Signed in successfully");
       onSuccess();
+      return;
     }
+    toast.error(
+      "Microsoft sign-in failed. Check your Entra redirect URI, authority, and requested scopes.",
+    );
   }
 
   return (
@@ -49,73 +57,34 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         <BrandMark className="w-8 h-[15px] text-foreground" />
         <div className="text-center">
           <h2 className="text-foreground" style={typo.h3}>
-            Sign in to Skill Fleet
+            Sign in to Fleet RLM
           </h2>
           <p className="text-muted-foreground mt-1" style={typo.caption}>
-            Enter your credentials to continue
+            Continue with your Microsoft Entra account
           </p>
         </div>
       </div>
 
-      {/* Email */}
-      <div className="space-y-1.5">
-        <Label htmlFor="login-email" style={typo.label}>
-          Email
-        </Label>
-        <Input
-          id="login-email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@company.com"
-          required
-          autoComplete="email"
-        />
-      </div>
-
-      {/* Password */}
-      <div className="space-y-1.5">
-        <Label htmlFor="login-password" style={typo.label}>
-          Password
-        </Label>
-        <Input
-          id="login-password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Enter password"
-          required
-          autoComplete="current-password"
-        />
-      </div>
-
-      {/* Forgot password */}
-      <div className="flex justify-end">
-        <button
-          type="button"
-          className="text-accent bg-transparent border-0 p-0 cursor-pointer"
-          style={typo.caption}
-          onClick={() => toast("Password reset link sent (mock)")}
-        >
-          Forgot password?
-        </button>
-      </div>
-
       {/* Submit */}
-      <Button type="submit" className="w-full" disabled={loading || !email}>
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={loading || !authConfigured}
+      >
         {loading ? (
           <>
             <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-            <span style={typo.label}>Signing in...</span>
+            <span style={typo.label}>Opening Microsoft sign-in...</span>
           </>
         ) : (
-          <span style={typo.label}>Sign In</span>
+          <span style={typo.label}>Continue with Microsoft</span>
         )}
       </Button>
 
-      {/* Demo hint */}
       <p className="text-center text-muted-foreground" style={typo.helper}>
-        Demo mode — any credentials will work
+        {authConfigured
+          ? "Your Entra access token is reused for both API and WebSocket runtime calls."
+          : "This workspace needs Entra SPA settings before Microsoft sign-in can be used."}
       </p>
     </form>
   );
@@ -126,10 +95,23 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 interface LoginDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
+export function LoginDialog({
+  open,
+  onOpenChange,
+  returnFocusRef,
+}: LoginDialogProps) {
   const isMobile = useIsMobile();
+  const wasOpenRef = useRef(open);
+
+  useEffect(() => {
+    if (wasOpenRef.current && !open) {
+      returnFocusRef?.current?.focus();
+    }
+    wasOpenRef.current = open;
+  }, [open, returnFocusRef]);
 
   if (isMobile) {
     return (
@@ -175,7 +157,7 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
               </IconButton>
             </div>
             <Drawer.Description className="sr-only">
-              Sign in to your Skill Fleet account
+              Sign in to your Fleet RLM account
             </Drawer.Description>
 
             <div className="px-4 pb-6 pt-2">
@@ -192,7 +174,7 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
       <DialogContent className="sm:max-w-[400px] p-6 rounded-card">
         <DialogTitle className="sr-only">Sign In</DialogTitle>
         <DialogDescription className="sr-only">
-          Sign in to your Skill Fleet account
+          Sign in to your Fleet RLM account
         </DialogDescription>
         <LoginForm onSuccess={() => onOpenChange(false)} />
       </DialogContent>

@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-const HISTORY_KEY = "hax-fleet:chat-history";
 const TAIL_FRAGMENT = "TAIL_FRAGMENT_EXECUTION_CANVAS_NO_TRUNCATION";
 const LONG_OUTPUT_TEXT =
   "Execution canvas deterministic payload for no-truncation verification. " +
@@ -11,44 +10,11 @@ const LONG_OUTPUT_TEXT =
 test("execution canvas keeps lanes readable and payloads untruncated", async ({
   page,
 }) => {
-  const nowIso = new Date().toISOString();
-
-  await page.addInitScript(
-    ({ storageKey, createdAt, updatedAt }) => {
-      const conversation = {
-        id: "conv-execution-canvas-smoke",
-        title: "Execution canvas deterministic run",
-        phase: "complete",
-        createdAt,
-        updatedAt,
-        messages: [
-          {
-            id: "msg-user-1",
-            type: "user",
-            content: "Run deterministic execution canvas smoke",
-          },
-          {
-            id: "msg-assistant-1",
-            type: "assistant",
-            content: "Loaded deterministic execution trace for smoke testing.",
-          },
-        ],
-      };
-
-      localStorage.setItem(storageKey, JSON.stringify([conversation]));
-    },
-    { storageKey: HISTORY_KEY, createdAt: nowIso, updatedAt: nowIso },
-  );
-
   await page.goto("/");
-
-  await page.getByRole("button", { name: "View recent conversations" }).click();
-  await page
-    .getByRole("button", {
-      name: /^Open conversation:\s*Execution canvas deterministic run\b/,
-    })
-    .click();
-  await page.waitForLoadState("domcontentloaded");
+  await page.waitForURL(/\/app\/workspace$/);
+  await expect(
+    page.getByRole("button", { name: /side panel/i }).first(),
+  ).toBeVisible();
 
   const closeSidePanelButton = page.getByRole("button", {
     name: "Close side panel",
@@ -57,72 +23,87 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
     await page.getByRole("button", { name: "Open side panel" }).click();
   }
 
-  await page.evaluate(
-    async ({ longOutputText }) => {
-      const baseTimestamp = Date.parse("2026-03-03T10:00:00.000Z");
-      const steps = [
-        {
-          id: "root-1",
-          type: "llm",
-          label: "Root planning step",
-          timestamp: baseTimestamp,
-          depth: 0,
-          actor_kind: "root_rlm",
-          lane_key: "root_rlm",
-          output: { text: "Root planner initialized." },
-        },
-        {
-          id: "sub-1",
-          parent_id: "root-1",
-          type: "tool",
-          label: "Sub-agent analysis",
-          timestamp: baseTimestamp + 2_000,
-          depth: 1,
-          actor_kind: "sub_agent",
-          actor_id: "research-sub-agent",
-          lane_key: "sub_agent:research-sub-agent",
-          output: {
-            tool_name: "analyze_long_document",
-            tool_output: "Sub-agent extracted requirements.",
-          },
-        },
-        {
-          id: "delegate-1",
-          parent_id: "sub-1",
-          type: "repl",
-          label: "Delegate execution",
-          timestamp: baseTimestamp + 5_000,
-          depth: 2,
-          actor_kind: "delegate",
-          actor_id: "delegate-worker",
-          lane_key: "delegate:delegate-worker",
-          input: { code: "print('delegate run')" },
-          output: { text: "Delegate execution completed." },
-        },
-        {
-          id: "output-1",
-          parent_id: "delegate-1",
-          type: "output",
-          label: "Final artifact output",
-          timestamp: baseTimestamp + 8_000,
-          depth: 2,
-          actor_kind: "delegate",
-          actor_id: "delegate-worker",
-          lane_key: "delegate:delegate-worker",
-          output: {
-            text: longOutputText,
-            payload: { summary: longOutputText },
-          },
-        },
-      ];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.evaluate(
+        async ({ longOutputText }) => {
+          const baseTimestamp = Date.parse("2026-03-03T10:00:00.000Z");
+          const steps = [
+            {
+              id: "root-1",
+              type: "llm",
+              label: "Root planning step",
+              timestamp: baseTimestamp,
+              depth: 0,
+              actor_kind: "root_rlm",
+              lane_key: "root_rlm",
+              output: { text: "Root planner initialized." },
+            },
+            {
+              id: "sub-1",
+              parent_id: "root-1",
+              type: "tool",
+              label: "Sub-agent analysis",
+              timestamp: baseTimestamp + 2_000,
+              depth: 1,
+              actor_kind: "sub_agent",
+              actor_id: "research-sub-agent",
+              lane_key: "sub_agent:research-sub-agent",
+              output: {
+                tool_name: "analyze_long_document",
+                tool_output: "Sub-agent extracted requirements.",
+              },
+            },
+            {
+              id: "delegate-1",
+              parent_id: "sub-1",
+              type: "repl",
+              label: "Delegate execution",
+              timestamp: baseTimestamp + 5_000,
+              depth: 2,
+              actor_kind: "delegate",
+              actor_id: "delegate-worker",
+              lane_key: "delegate:delegate-worker",
+              input: { code: "print('delegate run')" },
+              output: { text: "Delegate execution completed." },
+            },
+            {
+              id: "output-1",
+              parent_id: "delegate-1",
+              type: "output",
+              label: "Final artifact output",
+              timestamp: baseTimestamp + 8_000,
+              depth: 2,
+              actor_kind: "delegate",
+              actor_id: "delegate-worker",
+              lane_key: "delegate:delegate-worker",
+              output: {
+                text: longOutputText,
+                payload: { summary: longOutputText },
+              },
+            },
+          ];
 
-      const storeModule = await import("/src/stores/artifactStore.ts");
-      const state = storeModule.useArtifactStore.getState();
-      state.setSteps(steps);
-      state.setActiveStepId("output-1");
-    },
-    { longOutputText: LONG_OUTPUT_TEXT },
-  );
+          const storeModule = await import("/src/stores/artifactStore.ts");
+          const state = storeModule.useArtifactStore.getState();
+          state.setSteps(steps);
+          state.setActiveStepId("output-1");
+        },
+        { longOutputText: LONG_OUTPUT_TEXT },
+      );
+      break;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? "");
+      const isRetryable = message.includes("Execution context was destroyed");
+      const isLastAttempt = attempt === 2;
+      if (!isRetryable || isLastAttempt) {
+        throw error;
+      }
+      await page.waitForURL(/\/app\/workspace$/);
+      await page.waitForLoadState("domcontentloaded");
+    }
+  }
 
   await page.getByRole("tab", { name: "Graph", exact: true }).click();
   await expect(page.getByText("Root RLM", { exact: false }).first()).toBeVisible();

@@ -22,40 +22,6 @@ afterEach(() => {
 });
 
 describe("authEndpoints", () => {
-  it("calls /api/v1/auth/login", async () => {
-    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockJsonResponse({ token: "dummy_token" }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { authEndpoints } = await loadAuthModule();
-    await authEndpoints.login();
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/auth/login",
-    );
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
-  });
-
-  it("calls /api/v1/auth/logout", async () => {
-    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockJsonResponse({ status: "ok" }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { authEndpoints } = await loadAuthModule();
-    await authEndpoints.logout();
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/auth/logout",
-    );
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
-  });
-
   it("calls /api/v1/auth/me", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
     const fetchMock = vi.fn().mockResolvedValue(
@@ -74,5 +40,18 @@ describe("authEndpoints", () => {
       "http://localhost:8000/api/v1/auth/me",
     );
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("GET");
+  });
+
+  it("clears local auth without calling the backend", async () => {
+    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    sessionStorage.setItem("fleet-rlm:access-token", "abc-123");
+
+    const { authEndpoints } = await loadAuthModule();
+    authEndpoints.clearLocalAuth();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("fleet-rlm:access-token")).toBeNull();
   });
 });

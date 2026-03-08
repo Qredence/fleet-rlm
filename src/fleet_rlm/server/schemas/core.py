@@ -50,14 +50,6 @@ class AuthMeResponse(BaseModel):
     user_id: str | None = None
 
 
-class AuthLoginResponse(BaseModel):
-    token: str
-
-
-class AuthLogoutResponse(BaseModel):
-    status: Literal["ok"] = "ok"
-
-
 class TaskRequest(BaseModel):
     task_type: Literal[
         "basic",

@@ -96,6 +96,9 @@ def get_repository(request: Request) -> FleetRepository | None:
     return get_server_state(request).repository
 
 
+RepositoryDep = Annotated[FleetRepository | None, Depends(get_repository)]
+
+
 def get_auth_provider(request: Request) -> AuthProvider | None:
     return get_server_state(request).auth_provider
 

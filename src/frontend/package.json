@@ -36,6 +36,7 @@
     "@lezer/highlight": "^1.2.3",
     "@lezer/python": "^1.1.18",
     "@marijn/find-cluster-break": "^1.0.2",
+    "@azure/msal-browser": "^5.4.0",
     "@posthog/react": "^1.8.0",
     "@radix-ui/react-accordion": "1.2.3",
     "@radix-ui/react-alert-dialog": "1.1.6",

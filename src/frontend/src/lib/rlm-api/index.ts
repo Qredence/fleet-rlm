@@ -54,8 +54,6 @@ export type {
   OpenApiPaths,
   HealthResponse,
   ReadyResponse,
-  AuthLoginResponse,
-  AuthLogoutResponse,
   AuthMeResponse,
   SessionStateResponse,
   SessionStateSummary,

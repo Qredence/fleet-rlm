@@ -8,11 +8,8 @@ type RouteKey =
   | "signup"
   | "logout"
   | "notFound"
-  | "skillCreation"
-  | "skills"
-  | "taxonomy"
-  | "memory"
-  | "analytics"
+  | "workspace"
+  | "volumes"
   | "settings";
 
 type RouteLoader = () => Promise<{ default: ComponentType<unknown> }>;
@@ -34,25 +31,13 @@ const routeLoaders: Record<RouteKey, RouteLoader> = {
     const module = await import("@/app/pages/NotFoundPage");
     return { default: module.NotFoundPage };
   },
-  skillCreation: async () => {
-    const module = await import("@/app/pages/SkillCreationFlow");
-    return { default: module.SkillCreationFlow };
+  workspace: async () => {
+    const module = await import("@/app/pages/RlmWorkspacePage");
+    return { default: module.RlmWorkspacePage };
   },
-  skills: async () => {
-    const module = await import("@/app/pages/SkillLibrary");
-    return { default: module.SkillLibrary };
-  },
-  taxonomy: async () => {
-    const module = await import("@/app/pages/TaxonomyBrowser");
-    return { default: module.TaxonomyBrowser };
-  },
-  memory: async () => {
-    const module = await import("@/app/pages/MemoryPage");
-    return { default: module.MemoryPage };
-  },
-  analytics: async () => {
-    const module = await import("@/app/pages/AnalyticsDashboard");
-    return { default: module.AnalyticsDashboard };
+  volumes: async () => {
+    const module = await import("@/app/pages/VolumesPage");
+    return { default: module.VolumesPage };
   },
   settings: async () => {
     const module = await import("@/app/pages/SettingsPage");
@@ -61,11 +46,8 @@ const routeLoaders: Record<RouteKey, RouteLoader> = {
 };
 
 const navPreloadMap: Partial<Record<NavItem, RouteKey>> = {
-  new: "skillCreation",
-  skills: "skills",
-  taxonomy: "taxonomy",
-  memory: "memory",
-  analytics: "analytics",
+  workspace: "workspace",
+  volumes: "volumes",
   settings: "settings",
 };
 
@@ -107,11 +89,8 @@ export const LazyRouteComponents = {
   SignupPage: lazyRoute("signup"),
   LogoutPage: lazyRoute("logout"),
   NotFoundPage: lazyRoute("notFound"),
-  SkillCreationFlow: lazyRoute("skillCreation"),
-  SkillLibrary: lazyRoute("skills"),
-  TaxonomyBrowser: lazyRoute("taxonomy"),
-  MemoryPage: lazyRoute("memory"),
-  AnalyticsDashboard: lazyRoute("analytics"),
+  RlmWorkspacePage: lazyRoute("workspace"),
+  VolumesPage: lazyRoute("volumes"),
   SettingsPage: lazyRoute("settings"),
 } as const;
 

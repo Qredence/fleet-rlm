@@ -67,7 +67,11 @@ export async function streamChatOverWs(
     throw createWsError("WebSocket URL is not configured (VITE_FLEET_WS_URL)");
   }
 
-  await createReconnectingWs(message, { ...options, url: rlmApiConfig.wsUrl });
+  await createReconnectingWs(message, {
+    ...options,
+    url: rlmApiConfig.wsUrl,
+    abortMode: "cancel",
+  });
 }
 
 export async function sendCommandOverWs(
@@ -108,6 +112,7 @@ export function subscribeToExecutionStream(
     url: urlObj.toString(),
     signal: controller.signal,
     terminalEventKinds: [],
+    abortMode: "close",
   }).catch((err: unknown) => {
     console.error("Execution stream error:", sanitizeLogValue(err));
   });

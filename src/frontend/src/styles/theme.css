@@ -38,6 +38,32 @@
     ui-monospace, "SFMono-Regular", "SF Mono", "Menlo", "Monaco", "Consolas",
     "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
 
+  /* Spacing & layout tokens */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --header-padding-block-mobile: var(--space-3);
+  --header-padding-inline-mobile: var(--space-4);
+  --header-padding-block-desktop: var(--space-4);
+  --header-padding-inline-desktop: var(--space-8);
+  --tree-indent-base: var(--space-3);
+  --tree-indent-step: var(--space-5);
+  --settings-dialog-height-mobile: 95dvh;
+  --settings-dialog-section-height-mobile: 85dvh;
+  --settings-dialog-height-desktop: 31.25rem;
+  --icon-button-hover-bg: rgba(13, 13, 13, 0.065);
+  --icon-button-hover-border: rgba(13, 13, 13, 0.11);
+  --icon-button-hover-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --icon-button-active-bg: rgba(2, 133, 255, 0.14);
+  --icon-button-active-border: rgba(2, 133, 255, 0.24);
+  --icon-button-active-shadow: 0 1px 2px rgba(2, 133, 255, 0.12);
+
   /* The default background color for the application. */
   --background: rgba(255, 255, 255, 1); /* gray-0 */
   /* The default color for elements or text that appears on top of the background. */
@@ -156,6 +182,11 @@
   --toggle-glass-specular-stop: rgba(255, 255, 255, 0.15);
   --toggle-glass-caustic-bright: rgba(255, 255, 255, 0.12);
   --toggle-glass-caustic-dim: rgba(255, 255, 255, 0.04);
+  --toggle-track-width: 51px;
+  --toggle-track-height: 31px;
+  --toggle-knob-size: 27px;
+  --toggle-knob-margin: 2px;
+  --toggle-knob-expand-scale: 1.22;
 
   /* ── iOS 26 Liquid Glass Material System ──────────────────────── */
   --glass-tab-bg: rgba(255, 255, 255, 0.72);
@@ -249,6 +280,12 @@
   --glass-sheet-border: rgba(255, 255, 255, 0.1);
   --glass-sheet-handle: rgba(255, 255, 255, 0.24);
   --glass-overlay: rgba(0, 0, 0, 0.52);
+  --icon-button-hover-bg: rgba(255, 255, 255, 0.1);
+  --icon-button-hover-border: rgba(255, 255, 255, 0.14);
+  --icon-button-hover-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --icon-button-active-bg: rgba(2, 133, 255, 0.2);
+  --icon-button-active-border: rgba(2, 133, 255, 0.34);
+  --icon-button-active-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
 
   /* Execution trace palette */
   --trace-llm: rgba(175, 175, 175, 1);
@@ -414,6 +451,33 @@ li {
 [data-slot="button"] {
   font-size: var(--text-label);
   font-weight: var(--font-weight-medium);
+}
+
+[data-slot="icon-button"][data-variant="ghost"] {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+[data-slot="icon-button"][data-variant="ghost"][data-active="false"]:hover,
+[data-slot="icon-button"][data-variant="ghost"][data-active="false"]:focus-visible {
+  background-color: var(--icon-button-hover-bg);
+  border-color: var(--icon-button-hover-border);
+  box-shadow: var(--icon-button-hover-shadow);
+}
+
+[data-slot="icon-button"][data-variant="ghost"][data-active="true"] {
+  background-color: var(--icon-button-active-bg);
+  border-color: var(--icon-button-active-border);
+  box-shadow: var(--icon-button-active-shadow);
+}
+
+[data-slot="icon-button"][data-variant="ghost"][data-active="true"]:hover,
+[data-slot="icon-button"][data-variant="ghost"][data-active="true"]:focus-visible {
+  background-color: color-mix(
+    in srgb,
+    var(--icon-button-active-bg) 70%,
+    var(--accent) 30%
+  );
 }
 
 /* ── Accordion ──────────────────────────────────────────────────── */

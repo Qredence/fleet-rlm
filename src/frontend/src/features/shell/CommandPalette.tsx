@@ -1,33 +1,24 @@
 /**
  * Command Palette — global keyboard-driven quick actions.
  *
- * In FastAPI-only mode, unsupported sections remain visible but disabled.
+ * Mirrors the current product shell: RLM Workspace, Volumes, and Settings.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Search,
   Zap,
-  BarChart3,
   HardDrive,
-  Brain,
   Plus,
   Moon,
   Sun,
   Settings,
-  Layers,
 } from "lucide-react";
 import { Command } from "cmdk";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { toast } from "sonner";
 import { typo } from "@/lib/config/typo";
 import type { NavItem } from "@/lib/data/types";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
-import {
-  BACKEND_CAPABILITY_TOAST,
-  BACKEND_CAPABILITY_TOOLTIP,
-  isSectionSupported,
-} from "@/lib/rlm-api";
 import { cn } from "@/lib/utils/cn";
 
 interface PageItem {
@@ -37,11 +28,9 @@ interface PageItem {
 }
 
 const pages: PageItem[] = [
-  { key: "new", label: "Chat", icon: Zap },
-  { key: "skills", label: "Skill Library", icon: Layers },
-  { key: "taxonomy", label: "Volume Browser", icon: HardDrive },
-  { key: "memory", label: "Memory", icon: Brain },
-  { key: "analytics", label: "Analytics Dashboard", icon: BarChart3 },
+  { key: "workspace", label: "RLM Workspace", icon: Zap },
+  { key: "volumes", label: "Volumes", icon: HardDrive },
+  { key: "settings", label: "Settings", icon: Settings },
 ];
 
 interface CommandPaletteProps {
@@ -87,10 +76,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   const navigateToPage = useCallback(
     (nav: NavItem) => {
-      if (!isSectionSupported(nav)) {
-        toast.info(BACKEND_CAPABILITY_TOAST);
-        return;
-      }
       telemetry.capture("command_palette_action_selected", {
         action_type: "page",
         action_value: nav,
@@ -178,17 +163,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               >
                 {pages.map((page) => {
                   const Icon = page.icon;
-                  const supported = isSectionSupported(page.key);
                   return (
                     <Command.Item
                       key={page.key}
                       value={`page ${page.label}`}
-                      title={supported ? undefined : BACKEND_CAPABILITY_TOOLTIP}
                       onSelect={() => navigateToPage(page.key)}
                       className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-10",
                         "text-foreground data-[selected=true]:bg-muted",
-                        !supported && "opacity-50",
                       )}
                     >
                       <Icon
@@ -219,7 +201,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       action_value: "new_session",
                     });
                     newSession();
-                    navigate("/");
+                    navigate("/app/workspace");
                     close();
                   }}
                   className={cn(

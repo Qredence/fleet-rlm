@@ -16,17 +16,17 @@ from typing import Any, Callable, Iterable, Literal
 
 import dspy
 
-from .commands import execute_command as _execute_command
-from ..models import StreamEvent
 from ..core.interpreter import ModalInterpreter
-from .tools import build_tool_list
-from .streaming import aiter_chat_turn_stream as _aiter_stream
-from .streaming import iter_chat_turn_stream as _iter_stream
-from .validation import ValidationConfig, validate_assistant_response
+from ..models import StreamEvent
+from .commands import execute_command as _execute_command
 from .core_memory import CoreMemoryMixin
 from .document_cache import DocumentCacheMixin
-from .tool_delegation import TOOL_DELEGATE_NAMES, get_tool_by_name
 from .runtime_factory import get_runtime_module
+from .streaming import aiter_chat_turn_stream as _aiter_stream
+from .streaming import iter_chat_turn_stream as _iter_stream
+from .tool_delegation import TOOL_DELEGATE_NAMES, get_tool_by_name
+from .tools import build_tool_list
+from .validation import ValidationConfig, validate_assistant_response
 
 
 class RLMReActChatSignature(dspy.Signature):

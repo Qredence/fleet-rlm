@@ -43,6 +43,8 @@ async def test_migrations_apply_and_core_tables_exist():
                           and table_name in (
                             'tenants',
                             'users',
+                            'memberships',
+                            'sandbox_sessions',
                             'modal_volumes',
                             'runs',
                             'run_steps',
@@ -50,13 +52,50 @@ async def test_migrations_apply_and_core_tables_exist():
                             'rlm_programs',
                             'rlm_traces',
                             'memory_items',
-                            'jobs'
+                            'jobs',
+                            'tenant_subscriptions'
                           )
                         order by table_name
                         """
                     )
                 )
                 names = [row[0] for row in result.fetchall()]
+
+                column_result = await session.execute(
+                    text(
+                        """
+                        select table_name, column_name
+                        from information_schema.columns
+                        where table_schema = 'public'
+                          and (
+                            (table_name = 'tenants' and column_name = 'slug')
+                            or (table_name = 'sandbox_sessions' and column_name = 'created_by_user_id')
+                            or (table_name = 'memory_items' and column_name = 'uri')
+                            or (table_name = 'tenant_subscriptions' and column_name = 'purchaser_tenant_id')
+                          )
+                        order by table_name, column_name
+                        """
+                    )
+                )
+                control_plane_columns = {
+                    (row[0], row[1]) for row in column_result.fetchall()
+                }
+
+                index_result = await session.execute(
+                    text(
+                        """
+                        select indexname
+                        from pg_indexes
+                        where schemaname = 'public'
+                          and indexname in (
+                            'ix_tenants_status',
+                            'ix_tenant_subscriptions_status'
+                          )
+                        order by indexname
+                        """
+                    )
+                )
+                control_plane_indexes = {row[0] for row in index_result.fetchall()}
 
                 all_tables_result = await session.execute(
                     text(
@@ -86,15 +125,28 @@ async def test_migrations_apply_and_core_tables_exist():
         assert names == [
             "artifacts",
             "jobs",
+            "memberships",
             "memory_items",
             "modal_volumes",
             "rlm_programs",
             "rlm_traces",
             "run_steps",
             "runs",
+            "sandbox_sessions",
+            "tenant_subscriptions",
             "tenants",
             "users",
         ]
+        assert control_plane_columns == {
+            ("memory_items", "uri"),
+            ("sandbox_sessions", "created_by_user_id"),
+            ("tenant_subscriptions", "purchaser_tenant_id"),
+            ("tenants", "slug"),
+        }
+        assert control_plane_indexes == {
+            "ix_tenant_subscriptions_status",
+            "ix_tenants_status",
+        }
         for deprecated_table in {
             "skill_taxonomies",
             "taxonomy_terms",

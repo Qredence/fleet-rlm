@@ -5,6 +5,18 @@ This document captures the current integration contract between:
 - Frontend SPA: `src/frontend`
 - Backend API: `src/fleet_rlm/server`
 
+## Supported Frontend Product Surfaces
+
+The live frontend shell supports only:
+
+- `/app/workspace`
+- `/app/volumes`
+- `/app/settings`
+
+Legacy `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics`
+routes remain redirect-only compatibility entrypoints and are not active
+product surfaces.
+
 ## API Base and Routing
 
 Backend serves:
@@ -22,6 +34,7 @@ Primary interactive/chat surfaces:
 
 Runtime setup surfaces:
 
+- `GET /api/v1/auth/me`
 - `GET /api/v1/runtime/settings`
 - `PATCH /api/v1/runtime/settings` (local-only writes)
 - `POST /api/v1/runtime/tests/modal`
@@ -48,6 +61,18 @@ Deprecated/planned surfaces removed from backend:
 - `/api/v1/search`
 - `/api/v1/memory*`
 - `/api/v1/sandbox*`
+
+## Auth Contract
+
+- Frontend SPA auth uses Microsoft Entra via MSAL Browser.
+- Default frontend authority is `https://login.microsoftonline.com/organizations`.
+- Frontend login/logout callback path is `/login`.
+- The SPA requests `api://<api-app-client-id>/access_as_user`.
+- The same acquired access token is reused for:
+  - `Authorization: Bearer ...` on HTTP requests
+  - `access_token` bootstrap on `WS /api/v1/ws/chat` only when `ALLOW_QUERY_AUTH_TOKENS=true`; treat this as a compatibility bootstrap and disable it outside trusted environments when you can
+- `GET /api/v1/auth/me` is the frontend’s canonical identity bootstrap endpoint.
+- In Entra mode, backend tenant admission is enforced against the Neon `tenants` table before runtime persistence starts.
 
 ## WebSocket Behavior
 
@@ -154,3 +179,7 @@ If backend routes or payload shapes change, update this file in the same PR as t
 
 - Canonical backend contracts for runtime/chat/auth should use `src/frontend/src/lib/rlm-api/*`.
 - Legacy `src/frontend/src/lib/api` auth/chat endpoint helpers have been removed. Do not reintroduce auth/chat contracts in that layer.
+- Canonical frontend feature ownership now lives in:
+  - `src/frontend/src/features/rlm-workspace/*` for the live chat/runtime surface
+  - `src/frontend/src/features/volumes/*` for the Modal Volume browser
+  - `src/frontend/src/features/shell/*` for composed shell navigation widgets

@@ -3,6 +3,7 @@
  * Do not make direct changes to the file.
  */
 
+
 export interface paths {
   "/health": {
     /** Health */
@@ -11,14 +12,6 @@ export interface paths {
   "/ready": {
     /** Ready */
     get: operations["ready_ready_get"];
-  };
-  "/api/v1/auth/login": {
-    /** Login */
-    post: operations["login_api_v1_auth_login_post"];
-  };
-  "/api/v1/auth/logout": {
-    /** Logout */
-    post: operations["logout_api_v1_auth_logout_post"];
   };
   "/api/v1/auth/me": {
     /** Get Me */
@@ -49,26 +42,26 @@ export interface paths {
     /** Get Runtime Status */
     get: operations["get_runtime_status_api_v1_runtime_status_get"];
   };
+  "/api/v1/runtime/volume/tree": {
+    /**
+     * Get Volume Tree
+     * @description List the file tree of the configured Modal Volume.
+     */
+    get: operations["get_volume_tree_api_v1_runtime_volume_tree_get"];
+  };
+  "/api/v1/runtime/volume/file": {
+    /**
+     * Get Volume File Content
+     * @description Read a volume file as UTF-8 text for frontend preview.
+     */
+    get: operations["get_volume_file_content_api_v1_runtime_volume_file_get"];
+  };
 }
 
 export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
-    /** AuthLoginResponse */
-    AuthLoginResponse: {
-      /** Token */
-      token: string;
-    };
-    /** AuthLogoutResponse */
-    AuthLogoutResponse: {
-      /**
-       * Status
-       * @default ok
-       * @constant
-       */
-      status?: "ok";
-    };
     /** AuthMeResponse */
     AuthMeResponse: {
       /** Tenant Claim */
@@ -98,7 +91,7 @@ export interface components {
       ok?: boolean;
       /**
        * Version
-       * @default 0.4.94
+       * @default 0.4.95
        */
       version?: string;
     };
@@ -283,6 +276,75 @@ export interface components {
       /** Context */
       ctx?: Record<string, never>;
     };
+    /**
+     * VolumeFileContentResponse
+     * @description Response for runtime volume file-content preview endpoint.
+     */
+    VolumeFileContentResponse: {
+      /** Path */
+      path: string;
+      /** Mime */
+      mime: string;
+      /** Size */
+      size: number;
+      /** Content */
+      content: string;
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
+    };
+    /**
+     * VolumeTreeNode
+     * @description A single node in the volume file tree.
+     */
+    VolumeTreeNode: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Path */
+      path: string;
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: "volume" | "directory" | "file";
+      /** Children */
+      children?: components["schemas"]["VolumeTreeNode"][];
+      /** Size */
+      size?: number | null;
+      /** Modified At */
+      modified_at?: string | null;
+    };
+    /**
+     * VolumeTreeResponse
+     * @description Response for the volume tree listing endpoint.
+     */
+    VolumeTreeResponse: {
+      /** Volume Name */
+      volume_name: string;
+      /** Root Path */
+      root_path: string;
+      /** Nodes */
+      nodes: components["schemas"]["VolumeTreeNode"][];
+      /**
+       * Total Files
+       * @default 0
+       */
+      total_files?: number;
+      /**
+       * Total Dirs
+       * @default 0
+       */
+      total_dirs?: number;
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
+    };
   };
   responses: never;
   parameters: never;
@@ -296,6 +358,7 @@ export type $defs = Record<string, never>;
 export type external = Record<string, never>;
 
 export interface operations {
+
   /** Health */
   health_health_get: {
     responses: {
@@ -314,28 +377,6 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ReadyResponse"];
-        };
-      };
-    };
-  };
-  /** Login */
-  login_api_v1_auth_login_post: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AuthLoginResponse"];
-        };
-      };
-    };
-  };
-  /** Logout */
-  logout_api_v1_auth_logout_post: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AuthLogoutResponse"];
         };
       };
     };
@@ -427,6 +468,58 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["RuntimeStatusResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Volume Tree
+   * @description List the file tree of the configured Modal Volume.
+   */
+  get_volume_tree_api_v1_runtime_volume_tree_get: {
+    parameters: {
+      query?: {
+        root_path?: string;
+        max_depth?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["VolumeTreeResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Volume File Content
+   * @description Read a volume file as UTF-8 text for frontend preview.
+   */
+  get_volume_file_content_api_v1_runtime_volume_file_get: {
+    parameters: {
+      query: {
+        path: string;
+        max_bytes?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["VolumeFileContentResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

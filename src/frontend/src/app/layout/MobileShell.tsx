@@ -10,7 +10,7 @@ import { useNavigation } from "@/hooks/useNavigation";
 import { TopHeader } from "@/app/layout/TopHeader";
 import { ChatPanel } from "@/app/layout/ChatPanel";
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
-import { MobileTabBar } from "@/components/ui/mobile-tab-bar";
+import { MobileTabBar } from "@/features/shell/MobileTabBar";
 
 function MobileShell() {
   const { isCanvasOpen, setIsCanvasOpen } = useNavigation();
@@ -51,7 +51,7 @@ function MobileShell() {
           >
             <Drawer.Title className="sr-only">Builder Panel</Drawer.Title>
             <Drawer.Description className="sr-only">
-              Skill builder and detail view
+              Workspace detail and artifact view
             </Drawer.Description>
             {/* iOS 26 grab handle */}
             <div className="flex items-center justify-center py-2.5 shrink-0">

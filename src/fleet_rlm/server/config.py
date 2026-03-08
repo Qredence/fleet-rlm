@@ -92,7 +92,10 @@ class ServerRuntimeConfig(BaseModel):
     allow_query_auth_tokens: bool = Field(
         default_factory=lambda: _env_bool(
             os.getenv("ALLOW_QUERY_AUTH_TOKENS"),
-            default=_env_app_env() == "local",
+            default=(
+                _env_app_env() == "local"
+                or (os.getenv("AUTH_MODE") or "dev").strip().lower() == "entra"
+            ),
         )
     )
     cors_allowed_origins: list[str] = Field(
@@ -126,8 +129,12 @@ class ServerRuntimeConfig(BaseModel):
     entra_jwks_url: str | None = Field(
         default_factory=lambda: os.getenv("ENTRA_JWKS_URL") or None
     )
-    entra_issuer: str | None = Field(
-        default_factory=lambda: os.getenv("ENTRA_ISSUER") or None
+    entra_issuer_template: str = Field(
+        default_factory=lambda: (
+            os.getenv("ENTRA_ISSUER_TEMPLATE")
+            or os.getenv("ENTRA_ISSUER")
+            or "https://login.microsoftonline.com/{tenantid}/v2.0"
+        )
     )
     entra_audience: str | None = Field(
         default_factory=lambda: os.getenv("ENTRA_AUDIENCE") or None
@@ -150,7 +157,7 @@ class ServerRuntimeConfig(BaseModel):
                 raise ValueError(
                     "ALLOW_DEBUG_AUTH must be false when APP_ENV is staging/production"
                 )
-            if self.allow_query_auth_tokens:
+            if self.allow_query_auth_tokens and self.auth_mode != "entra":
                 raise ValueError(
                     "ALLOW_QUERY_AUTH_TOKENS must be false when APP_ENV is staging/production"
                 )
@@ -161,4 +168,18 @@ class ServerRuntimeConfig(BaseModel):
             if self.auth_mode == "dev" and self.dev_jwt_secret == "change-me":
                 raise ValueError(
                     "DEV_JWT_SECRET must be customized for staging/production in AUTH_MODE=dev"
+                )
+
+        if self.auth_mode == "entra":
+            if not self.auth_required:
+                raise ValueError("AUTH_REQUIRED must be true when AUTH_MODE=entra")
+            if not self.database_required:
+                raise ValueError("DATABASE_REQUIRED must be true when AUTH_MODE=entra")
+            if not self.entra_jwks_url:
+                raise ValueError("ENTRA_JWKS_URL is required when AUTH_MODE=entra")
+            if not self.entra_audience:
+                raise ValueError("ENTRA_AUDIENCE is required when AUTH_MODE=entra")
+            if "{tenantid}" not in self.entra_issuer_template:
+                raise ValueError(
+                    "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder when AUTH_MODE=entra"
                 )

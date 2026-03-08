@@ -25,6 +25,10 @@ def ws_test_app(monkeypatch: pytest.MonkeyPatch, fake_agent: FakeChatAgent):
 
     monkeypatch.setattr("fleet_rlm.runners.build_react_chat_agent", _fake_build_agent)
     config = ServerRuntimeConfig(
+        app_env="local",
+        database_required=False,
+        database_url=None,
+        db_validate_on_startup=False,
         secret_name="TEST_SECRET",
         volume_name="test-volume",
         timeout=60,

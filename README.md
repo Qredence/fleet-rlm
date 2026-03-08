@@ -39,8 +39,11 @@ Open `http://localhost:8000` in your browser.
 ## What You Get
 
 - Browser-first RLM chat (`fleet web`)
+- A focused Web UI with `RLM Workspace`, `Volumes`, and `Settings`
 - Secure Modal-backed long-context execution for code/doc workflows
 - WS-first runtime streaming for chat and execution events
+- `GET /api/v1/auth/me` as the canonical frontend identity/bootstrap surface
+- Multitenant Entra auth with Neon-backed tenant admission when `AUTH_MODE=entra`
 - Runtime configuration and diagnostics from the Web UI settings
 - Optional MCP server surface (`fleet-rlm serve-mcp`)
 
@@ -62,9 +65,13 @@ fleet-rlm init --list
 
 ## Runtime Notes
 
+- The current Web UI shell supports `RLM Workspace`, `Volumes`, and `Settings`.
+- Legacy `taxonomy`, `skills`, `memory`, and `analytics` browser routes redirect to the supported surfaces.
 - Product chat transport is WS-first (`/api/v1/ws/chat`).
+- Frontend identity/bootstrap is `GET /api/v1/auth/me`.
 - Runtime model updates from Settings are hot-applied in-process (`/api/v1/runtime/settings`) and reflected on `/api/v1/runtime/status`.
 - Secret inputs in Runtime Settings are write-only.
+- In `AUTH_MODE=entra`, bearer tokens are validated against Entra JWKS and admitted only for active Neon tenants.
 
 ## Running From Source (Contributors)
 
@@ -161,6 +168,7 @@ graph TB
 - [Runtime settings (LM/Modal diagnostics)](docs/how-to-guides/runtime-settings.md)
 - [Deploying the server](docs/how-to-guides/deploying-server.md)
 - [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
+- [Frontend ↔ Backend integration](docs/reference/frontend-backend-integration.md)
 - [CLI reference](docs/reference/cli.md)
 - [HTTP API reference](docs/reference/http-api.md)
 - [Auth modes](docs/reference/auth.md)

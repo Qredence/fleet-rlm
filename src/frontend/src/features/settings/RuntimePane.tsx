@@ -341,7 +341,7 @@ export function RuntimePane() {
         </SettingsRow>
       )}
 
-      <div className="py-3 border-b border-border-subtle">
+      <div className="border-b border-border-subtle/70 py-3">
         <span className="text-sm text-muted-foreground font-medium">
           Runtime Configuration
         </span>
@@ -385,9 +385,7 @@ export function RuntimePane() {
                   <Button
                     type="button"
                     size="sm"
-                    variant={
-                      clearSecretFlags[secretKey] ? "secondary" : "outline"
-                    }
+                    variant={clearSecretFlags[secretKey] ? "soft" : "outline"}
                     className="rounded-lg"
                     onClick={() => {
                       const nextClear = !(clearSecretFlags[secretKey] ?? false);
@@ -416,7 +414,7 @@ export function RuntimePane() {
         description="Writes to .env (local only), updates process env, and refreshes in-memory runtime."
       >
         <Button
-          variant="secondary"
+          variant="fill"
           className="rounded-lg"
           onClick={handleSave}
           disabled={saveDisabled}
@@ -425,47 +423,70 @@ export function RuntimePane() {
         </Button>
       </SettingsRow>
 
-      <SettingsRow
-        label="Test Credentials + Connection"
-        description="Runs preflight credential checks plus live Modal + LM connectivity smoke tests."
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            className="rounded-lg"
-            onClick={handleTestModal}
-            disabled={testModalConnection.isPending}
-          >
-            {testModalConnection.isPending
-              ? "Testing Modal…"
-              : "Test Modal Connection"}
-          </Button>
-          <Button
-            variant="outline"
-            className="rounded-lg"
-            onClick={handleTestLm}
-            disabled={testLmConnection.isPending}
-          >
-            {testLmConnection.isPending ? "Testing LM…" : "Test LM Connection"}
-          </Button>
-          <Button
-            variant="secondary"
-            className="rounded-lg"
-            onClick={handleTestAll}
-            disabled={
-              testModalConnection.isPending || testLmConnection.isPending
-            }
-          >
-            Test Credentials + Connection
-          </Button>
+      <div className="border-b border-border-subtle/70 py-4">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)] lg:items-start lg:gap-6">
+          <div className="min-w-0">
+            <span
+              data-slot="settings-row-label"
+              className="text-sm font-medium leading-5 text-foreground"
+            >
+              Test Credentials + Connection
+            </span>
+            <p
+              data-slot="settings-row-description"
+              className="mt-0.5 max-w-xl text-xs leading-4 text-muted-foreground"
+            >
+              Runs preflight credential checks plus live Modal + LM connectivity
+              smoke tests.
+            </p>
+          </div>
+
+          <div className="min-w-0 rounded-xl border border-border-subtle/70 bg-muted/15 p-4">
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <Button
+                variant="soft"
+                size="lg"
+                className="w-full justify-center rounded-lg"
+                onClick={handleTestModal}
+                disabled={testModalConnection.isPending}
+              >
+                {testModalConnection.isPending
+                  ? "Testing Modal…"
+                  : "Test Modal Connection"}
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="w-full justify-center rounded-lg"
+                onClick={handleTestLm}
+                disabled={testLmConnection.isPending}
+              >
+                {testLmConnection.isPending
+                  ? "Testing LM…"
+                  : "Test LM Connection"}
+              </Button>
+              <Button
+                variant="fill"
+                size="lg"
+                className="w-full justify-center rounded-lg sm:col-span-2"
+                onClick={handleTestAll}
+                disabled={
+                  testModalConnection.isPending || testLmConnection.isPending
+                }
+              >
+                Test Credentials + Connection
+              </Button>
+            </div>
+
+            {hasUnsavedRuntimeChanges ? (
+              <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                Save runtime settings first so tests run against your latest
+                credentials and provider configuration.
+              </p>
+            ) : null}
+          </div>
         </div>
-        {hasUnsavedRuntimeChanges && (
-          <p className="text-xs text-muted-foreground mt-2">
-            Save runtime settings first so tests run against your latest
-            credentials and provider configuration.
-          </p>
-        )}
-      </SettingsRow>
+      </div>
 
       <SettingsRow
         label="Modal Smoke"
@@ -491,11 +512,11 @@ export function RuntimePane() {
         </Badge>
       </SettingsRow>
 
-      <div className="py-4 border-b border-border-subtle">
-        <p className="text-sm text-foreground font-medium mb-2">
-          Preflight Checks
-        </p>
-        <div className="flex flex-wrap gap-2">
+      <SettingsRow
+        label="Preflight Checks"
+        description="Credential and provider availability."
+      >
+        <div className="flex flex-wrap justify-end gap-1.5">
           {llmChecks.map(([key, ok]) => (
             <Badge
               key={`llm-${key}`}
@@ -513,16 +534,19 @@ export function RuntimePane() {
             </Badge>
           ))}
         </div>
-      </div>
+      </SettingsRow>
 
-      <div className="py-4">
-        <p className="text-sm text-foreground font-medium mb-2">Guidance</p>
-        <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground">
+      <SettingsRow
+        label="Guidance"
+        description="Actionable runtime recommendations."
+        noBorder
+      >
+        <ul className="list-disc pl-5 space-y-1 text-xs text-muted-foreground text-right">
           {(status?.guidance ?? ["No guidance available."]).map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>
-      </div>
+      </SettingsRow>
     </div>
   );
 }

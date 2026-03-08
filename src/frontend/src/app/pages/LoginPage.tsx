@@ -1,21 +1,17 @@
 /**
  * Standalone login page at `/login`.
  *
- * Full-screen centered login form with the app logo. On successful login
- * the user is redirected to `/`. This page lives outside the app shell
+ * Full-screen centered Entra sign-in entrypoint. On successful login
+ * the user is redirected to the authenticated workspace. This page lives outside the app shell
  * (no header, no tabs, no AuthProvider) — it's entirely self-contained.
- *
- * Since the app uses mock auth (user starts logged-in), this page is
- * mainly for demonstrating the login flow / direct URL access.
  */
 import { useNavigate, Link } from "react-router";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
+import { isEntraAuthConfigured, loginWithEntra } from "@/lib/auth/entra";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { BrandMark } from "@/components/shared/BrandMark";
 
 export { LoginPage };
@@ -23,22 +19,33 @@ export { LoginPage };
 function LoginPage() {
   const navigate = useNavigate();
   const telemetry = useTelemetry();
-  const [email, setEmail] = useState("alex@qredence.ai");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const authConfigured = isEntraAuthConfigured();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!authConfigured) {
+      setError(
+        "Microsoft Entra sign-in is not configured. Set VITE_ENTRA_CLIENT_ID and VITE_ENTRA_SCOPES before using this page.",
+      );
+      return;
+    }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setLoading(false);
-
-    // Anonymous-only telemetry: capture login event without PII.
-    telemetry.capture("user_logged_in", {
-      source: "login_page",
-    });
-
-    navigate("/", { replace: true });
+    setError(null);
+    try {
+      await loginWithEntra();
+      telemetry.capture("user_logged_in", {
+        source: "login_page",
+      });
+      navigate("/app/workspace", { replace: true });
+    } catch {
+      setError(
+        "Microsoft sign-in did not complete. Try again, then verify your Entra tenant, redirect URI, and requested scopes.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -56,69 +63,45 @@ function LoginPage() {
             <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
               <h1 className="text-foreground" style={typo.h3}>
-                Sign in to Skill Fleet
+                Sign in to Fleet RLM
               </h1>
               <p className="text-muted-foreground mt-1" style={typo.caption}>
-                Enter your credentials to continue
+                Continue with Microsoft Entra to open your RLM workspace
               </p>
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="login-email" style={typo.label}>
-              Email
-            </Label>
-            <Input
-              id="login-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
-              required
-              autoComplete="email"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="login-password" style={typo.label}>
-              Password
-            </Label>
-            <Input
-              id="login-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
-              required
-              autoComplete="current-password"
-            />
-          </div>
-          <Button type="submit" className="w-full" disabled={loading || !email}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={loading || !authConfigured}
+          >
             {loading ? (
               <>
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                <span style={typo.label}>Signing in...</span>
+                <span style={typo.label}>Opening Microsoft sign-in...</span>
               </>
             ) : (
-              <span style={typo.label}>Sign In</span>
+              <span style={typo.label}>Continue with Microsoft</span>
             )}
           </Button>
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-border-subtle" />
-            <span className="text-muted-foreground" style={typo.helper}>
-              or
-            </span>
-            <div className="flex-1 h-px bg-border-subtle" />
-          </div>
+          {error ? (
+            <p className="text-center text-destructive" style={typo.helper}>
+              {error}
+            </p>
+          ) : null}
           <div className="text-center">
             <Link
               to="/signup"
               className="text-muted-foreground transition-colors hover:text-foreground"
               style={typo.caption}
             >
-              Don&rsquo;t have an account? Sign up
+              Need access? Contact your workspace administrator
             </Link>
           </div>
           <p className="text-center text-muted-foreground" style={typo.helper}>
-            Demo mode — any credentials will work
+            {authConfigured
+              ? "The same access token is reused for API and WebSocket runtime sessions."
+              : "Set the Entra client id, requested scopes, and optional authority override to enable Microsoft sign-in."}
           </p>
         </form>
       </div>

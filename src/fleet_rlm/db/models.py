@@ -157,6 +157,10 @@ class SubscriptionStatus(str, enum.Enum):
 
 class Tenant(Base):
     __tablename__ = "tenants"
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_tenants_slug"),
+        Index("ix_tenants_status", "status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -164,6 +168,7 @@ class Tenant(Base):
     entra_tenant_id: Mapped[str] = mapped_column(
         String(128), nullable=False, unique=True
     )
+    slug: Mapped[str | None] = mapped_column(String(128), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     plan: Mapped[TenantPlan] = mapped_column(
@@ -262,6 +267,12 @@ class Membership(Base):
 class SandboxSession(Base):
     __tablename__ = "sandbox_sessions"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "created_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            ondelete="RESTRICT",
+            name="fk_sandbox_sessions_tenant_user__users_tenant_id_id",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_sandbox_sessions_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
@@ -277,6 +288,9 @@ class SandboxSession(Base):
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
     )
     provider: Mapped[SandboxProvider] = mapped_column(
         _pg_enum(SandboxProvider, name="sandbox_provider"), nullable=False
@@ -699,6 +713,7 @@ class MemoryItem(Base):
     kind: Mapped[MemoryKind] = mapped_column(
         _pg_enum(MemoryKind, name="memory_kind"), nullable=False
     )
+    uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     source: Mapped[MemorySource] = mapped_column(
@@ -785,6 +800,7 @@ class TenantSubscription(Base):
             name="uq_tenant_subscriptions_source_subscription",
         ),
         Index("ix_tenant_subscriptions_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_tenant_subscriptions_status", "status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -798,6 +814,7 @@ class TenantSubscription(Base):
         nullable=False,
         server_default=BillingSource.MANUAL.value,
     )
+    purchaser_tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     subscription_id: Mapped[str] = mapped_column(String(255), nullable=False)
     offer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     plan_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

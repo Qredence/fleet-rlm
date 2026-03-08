@@ -7,8 +7,6 @@ from starlette.routing import WebSocketRoute
 
 
 _REQUIRED_HTTP_PATHS = {
-    "/api/v1/auth/login",
-    "/api/v1/auth/logout",
     "/api/v1/auth/me",
     "/api/v1/runtime/settings",
     "/api/v1/runtime/tests/modal",
@@ -138,6 +136,8 @@ def test_removed_deprecated_and_planned_routes_absent(
     }
     removed_paths = {
         "/api/v1/chat",
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
         "/api/v1/tasks",
         "/api/v1/tasks/{task_id}",
         "/api/v1/sessions",

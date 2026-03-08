@@ -16,7 +16,7 @@
  * ```
  */
 import { create } from "zustand";
-import { mockMemoryEntries } from "@/lib/data/mock-skills";
+import { mockMemoryEntries } from "@/lib/data/mock/memory";
 import type { MemoryEntry } from "@/lib/data/types";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 

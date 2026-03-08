@@ -29,32 +29,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadyResponse'
-  /api/v1/auth/login:
-    post:
-      tags:
-      - auth
-      summary: Login
-      operationId: login_api_v1_auth_login_post
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthLoginResponse'
-  /api/v1/auth/logout:
-    post:
-      tags:
-      - auth
-      summary: Logout
-      operationId: logout_api_v1_auth_logout_post
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthLogoutResponse'
   /api/v1/auth/me:
     get:
       tags:
@@ -235,24 +209,6 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
-    AuthLoginResponse:
-      properties:
-        token:
-          type: string
-          title: Token
-      type: object
-      required:
-      - token
-      title: AuthLoginResponse
-    AuthLogoutResponse:
-      properties:
-        status:
-          type: string
-          const: ok
-          title: Status
-          default: ok
-      type: object
-      title: AuthLogoutResponse
     AuthMeResponse:
       properties:
         tenant_claim:

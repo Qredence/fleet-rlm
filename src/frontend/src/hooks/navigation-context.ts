@@ -5,7 +5,7 @@ import type { NavigationContextValue } from "@/hooks/navigation-types";
 const noop = () => {};
 
 const defaultCtx: NavigationContextValue = {
-  activeNav: "new",
+  activeNav: "workspace",
   setActiveNav: noop,
   isCanvasOpen: false,
   setIsCanvasOpen: noop,
@@ -13,8 +13,6 @@ const defaultCtx: NavigationContextValue = {
   closeCanvas: noop,
   toggleCanvas: noop,
   registerCanvasHandlers: noop,
-  selectedSkillId: null,
-  selectSkill: noop,
   creationPhase: "idle",
   setCreationPhase: noop,
   newSession: noop,

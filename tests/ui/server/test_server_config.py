@@ -7,8 +7,7 @@ from types import SimpleNamespace
 from fleet_rlm.server.config import ServerRuntimeConfig
 from fleet_rlm.server.deps import ServerState, get_server_state, session_key
 from fleet_rlm.server.schemas import (
-    AuthLoginResponse,
-    AuthLogoutResponse,
+    AuthMeResponse,
     ChatRequest,
     ChatResponse,
     HealthResponse,
@@ -50,6 +49,9 @@ def test_default_config(monkeypatch: pytest.MonkeyPatch):
     assert cfg.cors_allowed_origins == ["*"]
     assert cfg.ws_execution_max_queue == 256
     assert cfg.ws_execution_drop_policy == "drop_oldest"
+    assert (
+        cfg.entra_issuer_template == "https://login.microsoftonline.com/{tenantid}/v2.0"
+    )
 
 
 def test_default_config_uses_volume_name_env(monkeypatch: pytest.MonkeyPatch):
@@ -75,7 +77,7 @@ def test_custom_config():
         auth_mode="entra",
         auth_required=True,
         allow_debug_auth=False,
-        allow_query_auth_tokens=False,
+        allow_query_auth_tokens=True,
         cors_allowed_origins=["https://app.example.com"],
         dev_jwt_secret="secret",
         database_url="postgresql://localhost:5432/test",
@@ -83,6 +85,9 @@ def test_custom_config():
         ws_execution_max_queue=512,
         ws_execution_drop_policy="drop_newest",
         db_validate_on_startup=True,
+        entra_jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+        entra_issuer_template="https://login.microsoftonline.com/{tenantid}/v2.0",
+        entra_audience="api://fleet-rlm",
     )
     assert cfg.app_env == "production"
     assert cfg.secret_name == "CUSTOM"
@@ -97,7 +102,7 @@ def test_custom_config():
     assert cfg.database_url == "postgresql://localhost:5432/test"
     assert cfg.database_required is True
     assert cfg.allow_debug_auth is False
-    assert cfg.allow_query_auth_tokens is False
+    assert cfg.allow_query_auth_tokens is True
     assert cfg.cors_allowed_origins == ["https://app.example.com"]
     assert cfg.ws_execution_max_queue == 512
     assert cfg.ws_execution_drop_policy == "drop_newest"
@@ -115,6 +120,37 @@ def test_validate_startup_rejects_insecure_production():
         cors_allowed_origins=["https://app.example.com"],
     )
     with pytest.raises(ValueError, match="AUTH_REQUIRED"):
+        cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_requires_entra_settings() -> None:
+    cfg = ServerRuntimeConfig(
+        auth_mode="entra",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+    )
+    with pytest.raises(ValueError, match="ENTRA_JWKS_URL"):
+        cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_requires_database_for_entra() -> None:
+    cfg = ServerRuntimeConfig(auth_mode="entra", auth_required=True)
+    with pytest.raises(ValueError, match="DATABASE_REQUIRED"):
+        cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_rejects_fixed_entra_issuer_template() -> None:
+    cfg = ServerRuntimeConfig(
+        auth_mode="entra",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        entra_jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        entra_audience="api://fleet-rlm",
+        entra_issuer_template="https://login.microsoftonline.com/static/v2.0",
+    )
+    with pytest.raises(ValueError, match="tenantid"):
         cfg.validate_startup_or_raise()
 
 
@@ -171,11 +207,15 @@ def test_task_request_defaults() -> None:
     assert req.timeout == 600
 
 
-def test_auth_response_defaults() -> None:
-    login = AuthLoginResponse(token="dummy")
-    logout = AuthLogoutResponse()
-    assert login.token == "dummy"
-    assert logout.status == "ok"
+def test_auth_me_response_shape() -> None:
+    me = AuthMeResponse(
+        tenant_claim="tenant-1",
+        user_claim="user-1",
+        email="alice@example.com",
+        name="Alice",
+    )
+    assert me.tenant_claim == "tenant-1"
+    assert me.user_claim == "user-1"
 
 
 def test_runtime_status_shape() -> None:

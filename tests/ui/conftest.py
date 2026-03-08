@@ -60,11 +60,6 @@ def local_client() -> TestClient:
 
 
 @pytest.fixture
-def legacy_disabled_client(local_client: TestClient) -> TestClient:
-    yield local_client
-
-
-@pytest.fixture
 def staging_client() -> TestClient:
     app = create_app(
         config=ServerRuntimeConfig(

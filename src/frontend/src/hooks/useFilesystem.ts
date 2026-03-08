@@ -14,7 +14,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
-import { mockFilesystem } from "@/lib/data/mock-skills";
+import { mockFilesystem } from "@/lib/data/mock/filesystem";
 import type { DataSource } from "@/lib/rlm-api/capabilities";
 import type { FsNode } from "@/lib/data/types";
 

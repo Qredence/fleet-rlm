@@ -4,34 +4,38 @@ multi_agent = true
 [agents]
 max_threads = 6
 
-[agents.lead]
-description = "Lead conductor for milestone phases. Use when coordinating a phase, consolidating specialist outputs, and driving commit/PR/Linear/docs sequence. Do not use when you only need repo exploration (use explorer) or a narrow code change (use backend_impl/frontend_impl)."
-config_file = ".codex/agents/lead.toml"
+  [agents.lead]
+  description = "Lead conductor for milestone phases. Use when coordinating a phase, consolidating specialist outputs, and driving commit/PR/Linear/docs sequence. Do not use when you only need repo exploration (use explorer) or a narrow code change (use backend_impl/frontend_impl)."
+  config_file = "agents/lead.toml"
 
-[agents.explorer]
-description = "Read-only repo exploration specialist. Use when mapping files, symbols, imports, tests, and docs impact. Do not use when editing code or running mutating commands."
-config_file = ".codex/agents/explorer.toml"
+  [agents.explorer]
+  description = "Read-only repo exploration specialist. Use when mapping files, symbols, imports, tests, and docs impact. Do not use when editing code or running mutating commands."
+  config_file = "agents/explorer.toml"
 
-[agents.backend_impl]
-description = "Python/backend implementation specialist. Use when editing src/fleet_rlm, migrations, server, db, and running backend validation gates. Do not use for frontend-only UI changes, Linear updates, or Playwright execution."
-config_file = ".codex/agents/backend_impl.toml"
+  [agents.backend_impl]
+  description = "Python/backend implementation specialist. Use when editing src/fleet_rlm, migrations, server, db, and running backend validation gates. Do not use for frontend-only UI changes, Linear updates, or Playwright execution."
+  config_file = "agents/backend_impl.toml"
 
-[agents.frontend_impl]
-description = "React/TS frontend implementation specialist. Use when editing src/frontend or UI behavior and running frontend checks. Do not use for backend changes, Linear updates, or browser validation-only tasks (use qa_playwright)."
-config_file = ".codex/agents/frontend_impl.toml"
+  [agents.frontend_impl]
+  description = "React/TS frontend implementation specialist. Use when editing src/frontend or UI behavior and running frontend checks. Do not use for backend changes, Linear updates, or browser validation-only tasks (use qa_playwright)."
+  config_file = "agents/frontend_impl.toml"
 
-[agents.qa_playwright]
-description = "Browser QA specialist using Playwright CLI wrapper. Use when running end-user smoke/regression flows and capturing screenshots. Do not use for UI code implementation or static lint/test-only checks."
-config_file = ".codex/agents/qa_playwright.toml"
+  [agents.qa_playwright]
+  description = "Browser QA specialist using Playwright CLI wrapper. Use when running end-user smoke/regression flows and capturing screenshots. Do not use for UI code implementation or static lint/test-only checks."
+  config_file = "agents/qa_playwright.toml"
 
-[agents.reviewer]
-description = "Findings-first code review specialist. Use before PR open to identify bugs, regressions, security/correctness risks, and missing tests. Do not use for generic exploration or implementation unless explicitly requested."
-config_file = ".codex/agents/reviewer.toml"
+  [agents.reviewer]
+  description = "Findings-first code review specialist. Use before PR open to identify bugs, regressions, security/correctness risks, and missing tests. Do not use for generic exploration or implementation unless explicitly requested."
+  config_file = "agents/reviewer.toml"
 
-[agents.docs_keeper]
-description = "Documentation and hygiene specialist. Use when syncing docs, AGENTS.md, @plan phase logs, imports, and stale references after implementation changes. Do not use while implementation is still unstable."
-config_file = ".codex/agents/docs_keeper.toml"
+  [agents.docs_keeper]
+  description = "Documentation and hygiene specialist. Use when syncing docs, AGENTS.md, @plan phase logs, imports, and stale references after implementation changes. Do not use while implementation is still unstable."
+  config_file = "agents/docs_keeper.toml"
 
-[agents.linear_ops]
-description = "Linear workflow specialist. Use for issue/label/cycle updates, comments, and project status updates via Linear MCP. Do not use for repo implementation or browser validation."
-config_file = ".codex/agents/linear_ops.toml"
+  [agents.linear_ops]
+  description = "Linear workflow specialist. Use for issue/label/cycle updates, comments, and project status updates via Linear MCP. Do not use for repo implementation or browser validation."
+  config_file = "agents/linear_ops.toml"
+
+[mcp_servers.neon]
+type = "http"
+url = "https://mcp.neon.tech/mcp"

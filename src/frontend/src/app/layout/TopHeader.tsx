@@ -12,18 +12,15 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
-import { NavTab } from "@/components/ui/nav-tab";
+import { NavTab } from "@/features/shell/NavTab";
 import { cn } from "@/lib/utils/cn";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
-import { BACKEND_CAPABILITY_TOOLTIP, isSectionSupported } from "@/lib/rlm-api";
+import { isSectionSupported } from "@/lib/rlm-api";
 
 // ── Tab definitions ─────────────────────────────────────────────────
 const navItems: { key: NavItem; label: string }[] = [
-  { key: "new", label: "Chat" },
-  { key: "skills", label: "Skills" },
-  { key: "taxonomy", label: "Volumes" },
-  { key: "memory", label: "Memory" },
-  { key: "analytics", label: "Analytics" },
+  { key: "workspace", label: "RLM Workspace" },
+  { key: "volumes", label: "Volumes" },
 ];
 
 // ── Component ───────────────────────────────────────────────────────
@@ -53,22 +50,25 @@ export function TopHeader() {
       style={
         isMobile
           ? {
-              padding: "10px 16px",
-              paddingLeft: "max(16px, env(safe-area-inset-left, 16px))",
-              paddingRight: "max(16px, env(safe-area-inset-right, 16px))",
+              paddingBlock: "var(--header-padding-block-mobile)",
+              paddingLeft:
+                "max(var(--header-padding-inline-mobile), var(--safe-area-inset-left))",
+              paddingRight:
+                "max(var(--header-padding-inline-mobile), var(--safe-area-inset-right))",
               backgroundColor: "var(--glass-nav-bg)",
               backdropFilter: "blur(var(--glass-nav-blur))",
               WebkitBackdropFilter: "blur(var(--glass-nav-blur))",
               borderBottom: "0.5px solid var(--glass-nav-border)",
             }
           : {
-              padding: "16px 32px",
+              paddingBlock: "var(--header-padding-block-desktop)",
+              paddingInline: "var(--header-padding-inline-desktop)",
             }
       }
     >
       {/* ── Logo ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 shrink-0">
-        <BrandMark className="h-[17px] w-[18px] shrink-0 text-foreground" />
+        <BrandMark className="h-4.25 w-4.5 shrink-0 text-foreground" />
       </div>
 
       {/* ── Navigation tabs (desktop only) ─────────────────────── */}
@@ -78,7 +78,7 @@ export function TopHeader() {
             {navItems.map((item) => {
               const isActive = activeNav === item.key;
               const isSupported = isSectionSupported(item.key);
-              const tab = (
+              return (
                 <NavTab
                   key={item.key}
                   onClick={() => navigateTo(item.key)}
@@ -96,17 +96,6 @@ export function TopHeader() {
                   label={item.label}
                   disabled={!isSupported}
                 />
-              );
-              if (isSupported) return tab;
-              return (
-                <Tooltip key={item.key}>
-                  <TooltipTrigger asChild>
-                    <span className="inline-flex">{tab}</span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {BACKEND_CAPABILITY_TOOLTIP}
-                  </TooltipContent>
-                </Tooltip>
               );
             })}
           </nav>
@@ -127,12 +116,12 @@ export function TopHeader() {
               <IconButton
                 onClick={() => {
                   newSession();
-                  navigate("/");
+                  navigate("/app/workspace");
                 }}
                 aria-label="New Session"
                 className={isMobile ? "touch-target" : undefined}
               >
-                <SquarePen className="size-5 text-foreground" />
+                <SquarePen className="size-5" />
               </IconButton>
             </span>
           </TooltipTrigger>
