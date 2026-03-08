@@ -25,7 +25,7 @@ export function createEditorTheme(CM: CMBarrel) {
         fontSize: "var(--text-caption)",
         fontFamily: "var(--font-family-mono)",
         fontWeight: "var(--font-weight-regular)",
-        lineHeight: "1.6",
+        lineHeight: "var(--line-height-loose)",
         color: "var(--foreground)",
         backgroundColor: "var(--card)",
         height: "100%",

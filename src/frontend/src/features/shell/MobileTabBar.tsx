@@ -28,7 +28,7 @@ export function MobileTabBar() {
           "max(var(--glass-tab-bar-inset), env(safe-area-inset-bottom, 8px))",
         paddingLeft: "var(--glass-tab-bar-inset)",
         paddingRight: "var(--glass-tab-bar-inset)",
-        paddingTop: "6px",
+        paddingTop: "var(--space-1)",
       }}
     >
       <nav
@@ -101,7 +101,7 @@ export function MobileTabBar() {
                     fontWeight: isActive
                       ? "var(--font-weight-medium)"
                       : "var(--font-weight-regular)",
-                    lineHeight: "1.2",
+                    lineHeight: "var(--line-height-tight)",
                   }}
                 >
                   {tab.label}

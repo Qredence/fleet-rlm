@@ -224,7 +224,7 @@ function MetadataRow({
       <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <span
         className="text-muted-foreground shrink-0"
-        style={{ ...typo.helper, minWidth: 72 }}
+        style={{ ...typo.helper, minWidth: "var(--label-min-width)" }}
       >
         {label}
       </span>
@@ -406,7 +406,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                       fontFamily: "var(--font-family-mono)",
                       fontSize: "var(--text-helper)",
                       fontWeight: "var(--font-weight-regular)",
-                      lineHeight: "1.6",
+                      lineHeight: "var(--line-height-loose)",
                     }}
                   >
                     {resolvedContent}

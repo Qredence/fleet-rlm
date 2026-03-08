@@ -119,7 +119,7 @@ export function ArtifactCanvas({
         {showTabs ? (
           <TabsList
             className="h-8 max-w-full shrink-0 self-start overflow-x-auto rounded-md border border-border-subtle/70 bg-muted/45 p-0.5"
-            style={{ height: "2rem", minHeight: "2rem" }}
+            style={{ height: "var(--touch-target-min-height)", minHeight: "var(--touch-target-min-height)" }}
           >
             <TabsTrigger
               value="graph"

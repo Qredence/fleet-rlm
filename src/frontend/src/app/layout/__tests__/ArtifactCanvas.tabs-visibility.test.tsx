@@ -13,6 +13,8 @@ describe("ArtifactCanvas tab visibility", () => {
     const html = renderToStaticMarkup(<ArtifactCanvas />);
 
     expect(html).toContain('data-slot="tabs-list"');
-    expect(html).toMatch(/style="[^"]*height:2rem;[^"]*min-height:2rem[^"]*"/);
+    expect(html).toMatch(
+      /style="[^"]*height:var\(--touch-target-min-height\)[^"]*min-height:var\(--touch-target-min-height\)[^"]*"/,
+    );
   });
 });

@@ -14,6 +14,14 @@ import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { typo } from "@/lib/config/typo";
 import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { BrandMark } from "@/components/shared/BrandMark";
 import { logoutWithEntra } from "@/lib/auth/entra";
@@ -49,14 +57,7 @@ function LogoutPage() {
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4">
-      <div
-        className="w-full max-w-[400px] border border-border-subtle p-8"
-        style={{
-          borderRadius: "var(--radius-card)",
-          boxShadow: "var(--shadow-200-stronger)",
-          backgroundColor: "var(--card)",
-        }}
-      >
+      <Card className="w-full max-w-100 shadow-(--shadow-200-stronger)">
         <AnimatePresence mode="wait">
           {phase === "signing-out" ? (
             <motion.div
@@ -65,10 +66,21 @@ function LogoutPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={prefersReduced ? fades.instant : fades.fast}
-              className="flex flex-col items-center gap-5 py-4"
+              className="flex flex-col gap-5"
             >
-              <BrandMark className="w-8 h-[15px] text-foreground" />
-              <div className="flex flex-col items-center gap-3">
+              <CardHeader className="items-center text-center">
+                <BrandMark className="h-3.75 w-8 text-foreground" />
+                <div className="space-y-1">
+                  <CardTitle className="text-foreground" style={typo.h3}>
+                    Signing you out
+                  </CardTitle>
+                  <CardDescription style={typo.caption}>
+                    Clearing your local session and closing the current
+                    workspace.
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center gap-3 pb-8">
                 <motion.div
                   animate={prefersReduced ? undefined : { rotate: 360 }}
                   transition={
@@ -80,13 +92,13 @@ function LogoutPage() {
                           ease: "linear",
                         }
                   }
-                  className="w-6 h-6 border-2 border-muted-foreground border-t-foreground"
-                  style={{ borderRadius: "50%" }}
+                  className="h-6 w-6 border-2 border-muted-foreground border-t-foreground"
+                  style={{ borderRadius: "var(--radius-full)" }}
                 />
                 <p className="text-muted-foreground" style={typo.caption}>
                   Signing you out&hellip;
                 </p>
-              </div>
+              </CardContent>
             </motion.div>
           ) : (
             <motion.div
@@ -94,24 +106,26 @@ function LogoutPage() {
               initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={prefersReduced ? springs.instant : springs.default}
-              className="flex flex-col items-center gap-5 py-4"
+              className="flex flex-col gap-5"
             >
-              <BrandMark className="w-8 h-[15px] text-foreground" />
-              <div
-                className="w-12 h-12 flex items-center justify-center bg-muted"
-                style={{ borderRadius: "var(--radius)" }}
-              >
-                <LogOut className="w-5 h-5 text-muted-foreground" />
-              </div>
-              <div className="text-center">
-                <h1 className="text-foreground mb-1" style={typo.h3}>
-                  You&rsquo;ve been signed out
-                </h1>
-                <p className="text-muted-foreground" style={typo.caption}>
-                  Your session has ended. Sign in again to continue.
-                </p>
-              </div>
-              <div className="flex flex-col gap-3 w-full">
+              <CardHeader className="items-center text-center">
+                <BrandMark className="h-3.75 w-8 text-foreground" />
+                <div
+                  className="flex h-12 w-12 items-center justify-center bg-muted"
+                  style={{ borderRadius: "var(--radius)" }}
+                >
+                  <LogOut className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-foreground" style={typo.h3}>
+                    You&rsquo;ve been signed out
+                  </CardTitle>
+                  <CardDescription style={typo.caption}>
+                    Your session has ended. Sign in again to continue.
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardFooter className="flex flex-col items-stretch gap-3">
                 <Button
                   className="w-full"
                   onClick={() => navigate("/login", { replace: true })}
@@ -126,11 +140,11 @@ function LogoutPage() {
                 >
                   Return to Microsoft sign-in
                 </Link>
-              </div>
+              </CardFooter>
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </Card>
     </div>
   );
 }

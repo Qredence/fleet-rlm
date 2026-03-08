@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { typo } from "@/lib/config/typo";
+import { Separator } from "@/components/ui/separator";
 
 interface Props {
   content: string;
@@ -304,11 +305,11 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <ul
           key={index}
-          className="mb-3 ml-5 list-disc space-y-1.5 text-muted-foreground"
+          className="mb-3 ml-5 flex list-disc flex-col gap-1.5 text-muted-foreground"
           style={typo.labelRegular}
         >
           {block.items?.map((item, j) => (
-            <li key={j} style={{ lineHeight: "1.6" }}>
+            <li key={j} style={{ lineHeight: "var(--line-height-relaxed)" }}>
               {parseInline(item)}
             </li>
           ))}
@@ -319,11 +320,11 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <ol
           key={index}
-          className="mb-3 ml-5 list-decimal space-y-1.5 text-muted-foreground"
+          className="mb-3 ml-5 flex list-decimal flex-col gap-1.5 text-muted-foreground"
           style={typo.labelRegular}
         >
           {block.items?.map((item, j) => (
-            <li key={j} style={{ lineHeight: "1.6" }}>
+            <li key={j} style={{ lineHeight: "var(--line-height-relaxed)" }}>
               {parseInline(item)}
             </li>
           ))}
@@ -331,7 +332,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       );
 
     case "hr":
-      return <hr key={index} className="my-4 border-border-subtle" />;
+      return <Separator key={index} className="my-4" />;
 
     default:
       return null;

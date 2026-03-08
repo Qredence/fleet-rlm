@@ -1017,7 +1017,7 @@ export function ChatMessageList({
                   style={{
                     ...typo.display,
                     fontWeight: "var(--font-weight-medium)",
-                    lineHeight: "40px",
+                    lineHeight: "var(--line-height-display)",
                     letterSpacing: "-0.53px",
                     textWrap: "balance",
                   }}
