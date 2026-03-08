@@ -1,0 +1,24 @@
+commands:
+  install: bun install
+  typecheck: bun run type-check
+  build: bun run build
+  test: bun run test:unit
+  lint: bun run lint
+  e2e: bun run test:e2e
+  check: bun run check
+  dev: bun run dev
+
+services:
+  frontend:
+    start: bun run dev
+    stop: lsof -ti :5173 | xargs kill 2>/dev/null || true
+    healthcheck: curl -sf http://localhost:5173
+    port: 5173
+    depends_on: []
+
+  backend:
+    start: cd /Volumes/StorageBackup/_RLM/fleet-rlm-dspy && uv run fleet web
+    stop: lsof -ti :8000 | xargs kill 2>/dev/null || true
+    healthcheck: curl -sf http://localhost:8000/health
+    port: 8000
+    depends_on: []
