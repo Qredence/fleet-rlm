@@ -18,6 +18,7 @@
 * [How-to Guides](how-to-guides/index.md)
   * [Installation Guide](how-to-guides/installation.md)
   * [Developer Setup](how-to-guides/developer-setup.md)
+  * [Frontend Development](how-to-guides/frontend-development.md)
   * [Testing Strategy](how-to-guides/testing-strategy.md)
   * [Configuring Modal](how-to-guides/configuring-modal.md)
   * [Runtime Setup from Frontend Settings](how-to-guides/runtime-settings.md)
