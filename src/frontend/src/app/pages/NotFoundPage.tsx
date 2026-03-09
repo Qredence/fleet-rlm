@@ -28,10 +28,7 @@ export function NotFoundPage() {
         className="flex flex-col items-center text-center gap-6 max-w-[380px]"
       >
         <BrandMark className="w-8 h-[15px] text-foreground" />
-        <div
-          className="w-16 h-16 flex items-center justify-center bg-muted"
-          style={{ borderRadius: "var(--radius-card)" }}
-        >
+        <div className="rounded-card-token flex h-16 w-16 items-center justify-center bg-muted">
           <FileQuestion className="w-7 h-7 text-muted-foreground" />
         </div>
         <div>

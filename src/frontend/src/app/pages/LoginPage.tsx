@@ -50,15 +50,8 @@ function LoginPage() {
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4">
-      <div
-        className="w-full max-w-100 border border-border-subtle p-8"
-        style={{
-          borderRadius: "var(--radius-card)",
-          boxShadow: "var(--shadow-200-stronger)",
-          backgroundColor: "var(--card)",
-        }}
-      >
-        <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="surface-raised-card w-full max-w-100 border border-border-subtle p-8">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">

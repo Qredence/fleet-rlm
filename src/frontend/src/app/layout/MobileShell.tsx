@@ -26,10 +26,7 @@ function MobileShell() {
 
   return (
     <div
-      className="flex flex-col h-dvh bg-background overflow-hidden"
-      style={{
-        paddingTop: "env(safe-area-inset-top, 0px)",
-      }}
+      className="flex h-dvh flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)]"
     >
       {/* iOS 26 glass header: logo + action icons only */}
       <TopHeader />
@@ -42,21 +39,9 @@ function MobileShell() {
       {/* iOS 26 Liquid Glass sheet / drawer */}
       <Drawer.Root open={isCanvasOpen} onOpenChange={setIsCanvasOpen}>
         <Drawer.Portal>
-          <Drawer.Overlay
-            className="fixed inset-0 z-40"
-            style={{ backgroundColor: "var(--glass-overlay)" }}
-          />
+          <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-40" />
           <Drawer.Content
-            className="fixed bottom-0 left-0 right-0 z-50 flex flex-col"
-            style={{
-              borderTopLeftRadius: "var(--radius-card)",
-              borderTopRightRadius: "var(--radius-card)",
-              maxHeight: "92dvh",
-              backgroundColor: "var(--glass-sheet-bg)",
-              backdropFilter: "blur(var(--glass-sheet-blur))",
-              WebkitBackdropFilter: "blur(var(--glass-sheet-blur))",
-              borderTop: "0.5px solid var(--glass-sheet-border)",
-            }}
+            className="surface-glass-sheet fixed bottom-0 left-0 right-0 z-50 flex max-h-[92dvh] flex-col"
           >
             <Drawer.Title className="sr-only">Builder Panel</Drawer.Title>
             <Drawer.Description className="sr-only">
@@ -65,8 +50,7 @@ function MobileShell() {
             {/* iOS 26 grab handle */}
             <div className="flex items-center justify-center py-2.5 shrink-0">
               <div
-                className="w-9 h-[5px] rounded-full"
-                style={{ backgroundColor: "var(--glass-sheet-handle)" }}
+                className="surface-glass-handle h-[5px] w-9 rounded-full"
                 aria-hidden="true"
               />
             </div>

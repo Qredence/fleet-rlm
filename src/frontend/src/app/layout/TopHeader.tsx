@@ -40,6 +40,8 @@ export function TopHeader() {
   const { activeNav, isCanvasOpen, toggleCanvas, newSession } = useNavigationStore();
   const { navigateTo, navigate } = useAppNavigate();
   const isMobile = useIsMobile();
+  const panelLabel =
+    activeNav === "workspace" ? "message inspector" : "side panel";
 
   return (
     <header
@@ -136,7 +138,9 @@ export function TopHeader() {
                 onClick={toggleCanvas}
                 isActive={isCanvasOpen}
                 aria-label={
-                  isCanvasOpen ? "Close side panel" : "Open side panel"
+                  isCanvasOpen
+                    ? `Close ${panelLabel}`
+                    : `Open ${panelLabel}`
                 }
                 className={isMobile ? "touch-target" : undefined}
               >
@@ -145,7 +149,7 @@ export function TopHeader() {
             </span>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            {isCanvasOpen ? "Close side panel" : "Open side panel"}
+            {isCanvasOpen ? `Close ${panelLabel}` : `Open ${panelLabel}`}
           </TooltipContent>
         </Tooltip>
 

@@ -51,24 +51,21 @@ vi.mock("@/features/artifacts/CanvasSwitcher", () => ({
   CanvasSwitcher: () => <div>CanvasSwitcher</div>,
 }));
 
-vi.mock("@/features/artifacts/CodeArtifact", () => ({
-  CodeArtifact: () => <div>CodeArtifact</div>,
-}));
-
-vi.mock("@/components/domain/artifacts/ArtifactCanvas", () => ({
-  ArtifactCanvas: () => <div>ArtifactCanvas</div>,
-}));
-
 vi.mock("@/features/artifacts/FileDetail", () => ({
   FileDetail: ({ file }: { file: { name: string } }) => (
     <div>FileDetail:{file.name}</div>
   ),
 }));
 
+vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () => ({
+  MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
+}));
+
 vi.mock("@/lib/rlm-api", () => ({
   isRlmCoreEnabled: () => true,
   isSectionSupported: () => true,
   UNSUPPORTED_SECTION_REASON: "Unsupported",
+  createBackendSessionId: () => "session-test",
 }));
 
 describe("BuilderPanel file detail mode", () => {
@@ -83,5 +80,6 @@ describe("BuilderPanel file detail mode", () => {
     expect(html).toContain("FileDetail:README.md");
     expect(html).not.toContain("No active canvas");
     expect(html).toContain("CanvasSwitcher");
+    expect(html).not.toContain("MessageInspectorPanel");
   });
 });

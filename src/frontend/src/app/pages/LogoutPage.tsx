@@ -92,8 +92,7 @@ function LogoutPage() {
                           ease: "linear",
                         }
                   }
-                  className="h-6 w-6 border-2 border-muted-foreground border-t-foreground"
-                  style={{ borderRadius: "var(--radius-full)" }}
+                  className="rounded-full-token h-6 w-6 border-2 border-muted-foreground border-t-foreground"
                 />
                 <p className="text-muted-foreground" style={typo.caption}>
                   Signing you out&hellip;
@@ -110,10 +109,7 @@ function LogoutPage() {
             >
               <CardHeader className="items-center text-center">
                 <BrandMark className="h-3.75 w-8 text-foreground" />
-                <div
-                  className="flex h-12 w-12 items-center justify-center bg-muted"
-                  style={{ borderRadius: "var(--radius)" }}
-                >
+                <div className="rounded-token flex h-12 w-12 items-center justify-center bg-muted">
                   <LogOut className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div className="space-y-1">
