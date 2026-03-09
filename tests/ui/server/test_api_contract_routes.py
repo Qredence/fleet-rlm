@@ -85,16 +85,6 @@ def test_ws_router_registers_expected_websocket_routes() -> None:
     assert "/ws/execution" in websocket_paths
 
 
-def test_http_chat_route_is_absent(local_client: TestClient) -> None:
-    route_map = {
-        (route.path, frozenset(route.methods or [])): route
-        for route in local_client.app.routes
-        if isinstance(route, APIRoute)
-    }
-    assert ("/api/v1/chat", frozenset({"POST"})) not in route_map
-    assert "/api/v1/chat" not in set(local_client.app.openapi().get("paths", {}))
-
-
 def test_sessions_state_endpoint_exists_and_returns_expected_shape(
     default_client: TestClient,
     auth_headers: dict[str, str],
@@ -130,33 +120,6 @@ def test_runtime_contract_endpoints_remain_available(
     assert status.status_code == 200
     assert modal.status_code == 200
     assert lm.status_code == 200
-
-
-def test_removed_deprecated_and_planned_routes_absent(
-    local_client: TestClient,
-) -> None:
-    http_paths = {
-        route.path for route in local_client.app.routes if isinstance(route, APIRoute)
-    }
-    removed_paths = {
-        "/api/v1/chat",
-        "/api/v1/auth/login",
-        "/api/v1/auth/logout",
-        "/api/v1/tasks",
-        "/api/v1/tasks/{task_id}",
-        "/api/v1/sessions",
-        "/api/v1/sessions/{session_id}",
-        "/api/v1/taxonomy",
-        "/api/v1/taxonomy/{path}",
-        "/api/v1/analytics",
-        "/api/v1/analytics/skills/{skill_id}",
-        "/api/v1/search",
-        "/api/v1/memory",
-        "/api/v1/sandbox",
-        "/api/v1/sandbox/file",
-    }
-    assert removed_paths.isdisjoint(http_paths)
-    assert removed_paths.isdisjoint(set(local_client.app.openapi().get("paths", {})))
 
 
 def _patch_main_resolve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

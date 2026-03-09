@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -128,6 +129,44 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
         assert mlflow_integration.trace_result_metadata() == {
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",
+        }
+
+
+def test_trace_result_metadata_recovers_trace_id_captured_on_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def _last_active_trace_id(*, thread_local=True):
+        _ = thread_local
+        threading = __import__("threading")
+        if threading.current_thread() is not threading.main_thread():
+            return "trace-worker"
+        return None
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: None,
+        get_active_trace_id=lambda: None,
+        get_last_active_trace_id=_last_active_trace_id,
+    )
+
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    monkeypatch.setattr(
+        mlflow_integration, "initialize_mlflow", lambda config=None: True
+    )
+
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-threaded")
+    ):
+        assert (
+            asyncio.run(
+                asyncio.to_thread(mlflow_integration.capture_last_active_trace_id)
+            )
+            == "trace-worker"
+        )
+
+        assert mlflow_integration.trace_result_metadata() == {
+            "mlflow_trace_id": "trace-worker",
+            "mlflow_client_request_id": "req-threaded",
         }
 
 
