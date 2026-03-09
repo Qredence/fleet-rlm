@@ -4,7 +4,7 @@
 
 set -e
 
-cd /Volumes/StorageBackup/_RLM/fleet-rlm-dspy/src/frontend
+cd "$(dirname "$0")/../../src/frontend"
 
 # Install dependencies if needed
 if [ ! -d "node_modules" ]; then
