@@ -9,6 +9,10 @@ Task-oriented guides for operating `fleet-rlm` in day-to-day usage.
 - [Runtime Settings](runtime-settings.md)
 - [MLflow Tracing, Feedback, Eval, and Optimization](mlflow-workflows.md)
 
+## DSPy Integration
+
+- [DSPy Integration Guide](dspy-integration.md) - Signatures, modules, and RLM runtime configuration
+
 ## Running and Integration
 
 - [Deploying the API Server](deploying-server.md)
