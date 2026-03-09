@@ -9,7 +9,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import dspy
 from dspy.utils.callback import BaseCallback
@@ -146,14 +146,17 @@ def flush_mlflow_traces(*, terminate: bool = False) -> None:
     mlflow = _import_mlflow()
     if mlflow is None:
         return
+    trace_exporter_getter: Callable[[], Any] | None = None
     try:
         from mlflow.tracing.provider import _get_trace_exporter
     except Exception:
-        _get_trace_exporter = None
+        pass
+    else:
+        trace_exporter_getter = _get_trace_exporter
 
-    if _get_trace_exporter is not None:
+    if trace_exporter_getter is not None:
         try:
-            exporter = _get_trace_exporter()
+            exporter = trace_exporter_getter()
         except Exception:
             exporter = None
         if exporter is None or not hasattr(exporter, "_async_queue"):

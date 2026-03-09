@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import import_module
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import dspy
 
@@ -110,7 +110,7 @@ def optimize_program_with_mipro(
     input_keys: list[str] | None = None,
     output_key: str = "answer",
     train_ratio: float = 0.8,
-    auto: str = "light",
+    auto: Literal["light", "medium", "heavy"] | None = "light",
     run_name: str | None = None,
     config: MlflowConfig | None = None,
 ) -> dict[str, Any]:
