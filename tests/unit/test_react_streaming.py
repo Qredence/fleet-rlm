@@ -541,7 +541,7 @@ def test_build_final_payload_filters_unsafe_external_urls():
     assert file_attachment["url"] is None
 
 
-def test_build_final_payload_defers_mlflow_metadata_to_ws_boundary(monkeypatch):
+def test_build_final_payload_merges_mlflow_metadata(monkeypatch):
     monkeypatch.setattr(
         "fleet_rlm.analytics.mlflow_integration.trace_result_metadata",
         lambda response_preview=None: {
@@ -559,8 +559,8 @@ def test_build_final_payload_defers_mlflow_metadata_to_ws_boundary(monkeypatch):
         fallback=False,
     )
 
-    assert "mlflow_trace_id" not in payload
-    assert "mlflow_client_request_id" not in payload
+    assert payload["mlflow_trace_id"] == "trace-123"
+    assert payload["mlflow_client_request_id"] == "req-123"
 
 
 # ---------------------------------------------------------------------------
