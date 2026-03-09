@@ -8,6 +8,7 @@ Authoritative contracts, interfaces, and implementation-facing facts.
 - [HTTP and WebSocket API](http-api.md)
 - [Python API](python-api.md)
 - [Source Layout](source-layout.md)
+- [Frontend Architecture](frontend-architecture.md)
 - [Frontend ↔ Backend Integration](frontend-backend-integration.md)
 
 ## Platform and Runtime
