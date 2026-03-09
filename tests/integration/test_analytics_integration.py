@@ -104,8 +104,8 @@ def test_mlflow_integration_captures_real_trace(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr("fleet_rlm.analytics.mlflow_integration._INIT_IDENTITY", None)
-    monkeypatch.setattr(mlflow_integration, "_INITIALIZED", False)
-    monkeypatch.setattr(mlflow_integration, "_ACTIVE_CONFIG", None)
+    monkeypatch.setattr("fleet_rlm.analytics.mlflow_integration._INITIALIZED", False)
+    monkeypatch.setattr("fleet_rlm.analytics.mlflow_integration._ACTIVE_CONFIG", None)
 
     experiment_name = f"fleet-rlm-test-{uuid4().hex}"
     config = MlflowConfig(

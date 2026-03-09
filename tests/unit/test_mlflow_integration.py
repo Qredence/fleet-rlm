@@ -96,8 +96,8 @@ def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
 
     config = MlflowConfig(enabled=True, tracking_uri="http://127.0.0.1:6001")
 
-    assert initialize_mlflow(config) is True
-    assert initialize_mlflow(config) is True
+    assert mlflow_integration.initialize_mlflow(config) is True
+    assert mlflow_integration.initialize_mlflow(config) is True
     assert calls["tracking_uri"] == 1
     assert calls["autolog"] == 1
 
@@ -124,8 +124,10 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
         lambda response_preview=None: "trace-123",
     )
 
-    with mlflow_request_context(MlflowTraceRequestContext(client_request_id="req-123")):
-        assert trace_result_metadata() == {
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-123")
+    ):
+        assert mlflow_integration.trace_result_metadata() == {
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",
         }
@@ -187,8 +189,13 @@ def test_update_current_mlflow_trace_skips_when_no_active_trace(
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
 
-    with mlflow_request_context(MlflowTraceRequestContext(client_request_id="req-123")):
-        assert update_current_mlflow_trace(response_preview="done") is None
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-123")
+    ):
+        assert (
+            mlflow_integration.update_current_mlflow_trace(response_preview="done")
+            is None
+        )
 
     assert calls == []
 
@@ -212,7 +219,7 @@ def test_flush_mlflow_traces_skips_exporters_without_async_queue(
 
     monkeypatch.setattr(provider, "_get_trace_exporter", lambda: _Exporter())
 
-    flush_mlflow_traces()
+    mlflow_integration.flush_mlflow_traces()
 
 
 def test_trace_to_dataset_row_extracts_expectations_and_feedback():
@@ -248,7 +255,7 @@ def test_trace_to_dataset_row_extracts_expectations_and_feedback():
         ],
     )
 
-    row = trace_to_dataset_row(trace)
+    row = mlflow_integration.trace_to_dataset_row(trace)
 
     assert row["trace_id"] == "trace-1"
     assert row["client_request_id"] == "req-1"
