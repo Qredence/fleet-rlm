@@ -14,7 +14,9 @@ Frontend code lives in `src/frontend/` (Vite + React + TypeScript).
 Tests are organized by scope in `tests/unit/`, `tests/ui/`, `tests/integration/`, and `tests/e2e/`.
 Operational scripts are in `scripts/`; DB migrations are in `migrations/`; API contract source is `openapi.yaml`; longer design/runbook docs are in `docs/`.
 MLflow integration lives under `src/fleet_rlm/analytics/` and is additive to PostHog: use it for GenAI trace correlation, feedback, offline evaluation, and DSPy optimization workflows, not for general product telemetry.
-The experimental Daytona-backed strict-RLM pilot lives in `src/fleet_rlm/daytona_rlm/`; treat it as an isolated reference runtime driven by the `fleet-rlm daytona-smoke` and `fleet-rlm daytona-rlm` CLI commands, not as a replacement for the current Modal/WebSocket chat stack. Its current contract is repo-clone-only, analysis-first, and built around a persistent sandbox-side Python driver with host-brokered recursive subcalls. Daytona setup in this repo is strict: use `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`; `DAYTONA_API_BASE_URL` is considered a misconfiguration.
+The experimental Daytona-backed strict-RLM pilot lives in `src/fleet_rlm/daytona_rlm/`; treat it as an isolated reference runtime driven by the `fleet-rlm daytona-smoke` and `fleet-rlm daytona-rlm` CLI commands, not as a replacement for the current Modal/WebSocket chat stack. Its current contract is repo-clone-only, analysis-first, and split into a guide-native interpreter core plus a thin product adapter. The interpreter core owns persistent sandbox-side Python execution, brokered host tools, canonical `llm_query` / `llm_query_batched`, typed `SUBMIT`, and sandbox-resident prompt objects for large task/observation payloads; the runner adapter owns provenance capture, root synthesis validation, persisted traces, and UI event shaping. Daytona setup in this repo is strict: use `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`; `DAYTONA_API_BASE_URL` is considered a misconfiguration.
+Within that Daytona pilot, repo inspection should stay environment-native: `read_file_slice`, `grep_repo`, `chunk_text`, and `chunk_file` belong in the persistent sandbox driver, prompt externalization belongs there too via `store_prompt`, `list_prompts`, and `read_prompt_slice`, `find_files` remains glob/path discovery, `llm_query` / `llm_query_batched` are the canonical recursive builtins, and only recursive LM delegation should cross back to the host. `rlm_query`, `rlm_query_batched`, `FINAL`, and `FINAL_VAR` are compatibility aliases only.
+The Web UI now exposes this Daytona runtime through an explicit experimental runtime toggle in `RLM Workspace`. Keep `Modal chat` as the default product path, treat `execution_mode` as Modal-only, and only send `repo_url`, `repo_ref`, `max_depth`, and `batch_concurrency` when `runtime_mode="daytona_pilot"`.
 
 ## Build, Test, and Development Commands
 - `uv sync --all-extras --dev`: install Python dependencies for full local development.
@@ -57,6 +59,11 @@ For chat-runtime or trace changes, prefer this focused validation set before bro
 - `uv run pytest -q tests/unit/test_mlflow_integration.py tests/ui/server/test_api_contract_routes.py`
 - `cd src/frontend && bun run type-check`
 - `cd src/frontend && bun run test:unit src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx`
+For Daytona Web UI runtime-toggle changes, prefer this focused validation set before broader gates:
+- `uv run pytest -q tests/unit/test_daytona_rlm_driver.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_ws_chat_helpers.py tests/ui/ws/test_chat_stream.py`
+- `uv run ruff check src/fleet_rlm/daytona_rlm src/fleet_rlm/server/routers/ws src/fleet_rlm/server/schemas tests/unit/test_ws_chat_helpers.py tests/ui/ws/test_chat_stream.py`
+- `cd src/frontend && bun run test:unit src/stores/__tests__/chatStore.test.ts src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/ExecutionModeDropdown.test.tsx src/components/chat/input/__tests__/RuntimeModeDropdown.test.tsx`
+- `cd src/frontend && bun run type-check`
 
 ## Commit & Pull Request Guidelines
 Follow Conventional Commits seen in history: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` (scopes encouraged, e.g., `fix(frontend): ...`).
