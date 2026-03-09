@@ -759,7 +759,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
                 if cancel_check is not None and cancel_check():
                     task.cancel()
                     with suppress(asyncio.CancelledError):
-                        await task
+                        _ = await task
                     cancelled_text = "[cancelled]"
                     self._append_history(message, cancelled_text)
                     yield StreamEvent(
@@ -786,7 +786,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             if not task.done():
                 task.cancel()
                 with suppress(asyncio.CancelledError):
-                    await task
+                    _ = await task
 
         while not pending_events.empty():
             yield pending_events.get_nowait()

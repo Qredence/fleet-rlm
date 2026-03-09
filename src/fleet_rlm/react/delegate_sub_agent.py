@@ -198,7 +198,7 @@ async def _emit_stream_event_callback(
 
     result = callback(event)
     if inspect.isawaitable(result):
-        await result
+        _ = await result
 
 
 def _delegate_trajectory_events(

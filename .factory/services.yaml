@@ -17,7 +17,7 @@ services:
     depends_on: []
 
   backend:
-    start: cd /Volumes/StorageBackup/_RLM/fleet-rlm-dspy && uv run fleet web
+    start: cd "$(git rev-parse --show-toplevel)" && uv run fleet web
     stop: lsof -ti :8000 | xargs kill 2>/dev/null || true
     healthcheck: curl -sf http://localhost:8000/health
     port: 8000
