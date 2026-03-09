@@ -5,15 +5,6 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.analytics.config import MlflowConfig
-from fleet_rlm.analytics.mlflow_integration import (
-    MlflowTraceRequestContext,
-    flush_mlflow_traces,
-    initialize_mlflow,
-    mlflow_request_context,
-    trace_result_metadata,
-    trace_to_dataset_row,
-    update_current_mlflow_trace,
-)
 import fleet_rlm.analytics.mlflow_integration as mlflow_integration
 
 
@@ -61,7 +52,7 @@ def test_initialize_mlflow_wires_tracking_experiment_autolog_and_callback(
         dspy_log_evals=True,
     )
 
-    assert initialize_mlflow(config) is True
+    assert mlflow_integration.initialize_mlflow(config) is True
     assert calls["tracking_uri"] == "http://127.0.0.1:6001"
     assert calls["experiment"] == {"experiment_name": "fleet-rlm-tests"}
     assert calls["autolog"] == {
@@ -113,10 +104,10 @@ def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
 
 def test_trace_result_metadata_returns_empty_when_mlflow_disabled():
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=False)
-    with mlflow_request_context(
-        MlflowTraceRequestContext(client_request_id="req-disabled")
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-disabled")
     ):
-        assert trace_result_metadata() == {}
+        assert mlflow_integration.trace_result_metadata() == {}
 
 
 def test_trace_result_metadata_includes_trace_and_client_request_id(
