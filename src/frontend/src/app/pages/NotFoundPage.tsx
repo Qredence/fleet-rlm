@@ -25,10 +25,10 @@ export function NotFoundPage() {
         initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={shouldReduceMotion ? springs.instant : springs.default}
-        className="flex flex-col items-center text-center gap-6 max-w-[380px]"
+        className="flex flex-col items-center text-center gap-6 max-w-95"
       >
-        <BrandMark className="w-8 h-[15px] text-foreground" />
-        <div className="rounded-card-token flex h-16 w-16 items-center justify-center bg-muted">
+        <BrandMark className="w-8 h-3.75 text-foreground" />
+        <div className="rounded-card-token flex h-3.75 w-3.75 items-center justify-center bg-muted">
           <FileQuestion className="w-7 h-7 text-muted-foreground" />
         </div>
         <div>

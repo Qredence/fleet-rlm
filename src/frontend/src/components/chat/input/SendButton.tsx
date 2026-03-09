@@ -20,14 +20,14 @@ function SendButton({
       aria-label={isLoading ? "Sending message" : "Submit"}
       aria-busy={isReceiving}
       className={cn(
-        "prompt-composer-submit-button aspect-square size-[26px] min-h-[26px] min-w-[26px] rounded-full first:rounded-full last:rounded-full",
+        "prompt-composer-submit-button aspect-square size-6.5 min-h-6.5 min-w-6.5 rounded-full first:rounded-full last:rounded-full",
         "transition-[background-color,color,box-shadow,opacity]",
       )}
       disabled={disabled}
       size="icon"
       variant="ghost"
     >
-      {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-[18px]" />}
+      {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-4.5" />}
     </PromptInputSubmit>
   );
 }

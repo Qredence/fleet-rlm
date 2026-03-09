@@ -147,7 +147,6 @@ function executionSectionState(
   if (section.kind === "status_note") {
     if (section.part.tone === "error") return "failed";
     if (section.part.tone === "warning") return "running";
-    return "completed";
   }
 
   if ("errorText" in section.part && section.part.errorText) {
@@ -894,7 +893,7 @@ function GraphInspectorTab({ steps }: { steps: ExecutionStep[] }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              <div className="h-[420px] overflow-hidden rounded-2xl border border-border-subtle/80 bg-muted/15">
+              <div className="h-105 overflow-hidden rounded-2xl border border-border-subtle/80 bg-muted/15">
                 <ArtifactGraph
                   steps={steps}
                   activeStepId={activeStepId}

@@ -50,7 +50,7 @@ function MobileShell() {
             {/* iOS 26 grab handle */}
             <div className="flex items-center justify-center py-2.5 shrink-0">
               <div
-                className="surface-glass-handle h-[5px] w-9 rounded-full"
+                className="surface-glass-handle h-1.25 w-9 rounded-full"
                 aria-hidden="true"
               />
             </div>
