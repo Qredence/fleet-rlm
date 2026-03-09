@@ -138,6 +138,40 @@ def test_sanitize_log_field_escapes_newlines_and_carriage_returns() -> None:
     )
 
 
+def test_resolve_trace_by_client_request_id_uses_server_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    matching_trace = SimpleNamespace(
+        info=SimpleNamespace(client_request_id="req-123", timestamp_ms=20)
+    )
+    older_trace = SimpleNamespace(
+        info=SimpleNamespace(client_request_id="req-123", timestamp_ms=10)
+    )
+    fake_mlflow = SimpleNamespace(
+        search_traces=lambda **kwargs: calls.append(kwargs)
+        or [older_trace, matching_trace],
+    )
+
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    monkeypatch.setattr(
+        mlflow_integration, "_trace_experiment_ids", lambda config=None: ["exp-1"]
+    )
+
+    resolved = mlflow_integration.resolve_trace_by_client_request_id("req-123")
+
+    assert resolved is matching_trace
+    assert calls == [
+        {
+            "experiment_ids": ["exp-1"],
+            "filter_string": "trace.client_request_id = 'req-123'",
+            "max_results": 5000,
+            "return_type": "list",
+            "include_spans": False,
+        }
+    ]
+
+
 def test_update_current_mlflow_trace_skips_when_no_active_trace(
     monkeypatch: pytest.MonkeyPatch,
 ):

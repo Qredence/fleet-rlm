@@ -76,6 +76,12 @@ def _sanitize_log_field(value: str) -> str:
     return value.replace("\r", "\\r").replace("\n", "\\n")
 
 
+def _mlflow_string_literal(value: str) -> str:
+    """Escape single quotes for MLflow's SQL-like trace search DSL."""
+
+    return value.replace("'", "''")
+
+
 def _existing_trace_callback() -> "FleetMlflowTraceCallback | None":
     callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
     for callback in callbacks:
@@ -414,6 +420,10 @@ def resolve_trace_by_client_request_id(
     try:
         traces = mlflow.search_traces(
             experiment_ids=experiment_ids,
+            filter_string=(
+                "trace.client_request_id = "
+                f"'{_mlflow_string_literal(client_request_id)}'"
+            ),
             max_results=max_results,
             return_type="list",
             include_spans=False,
