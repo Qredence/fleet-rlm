@@ -86,7 +86,7 @@ def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
     monkeypatch.setattr(
-        mlflow_integration, "_existing_trace_callback", lambda: object()
+        mlflow_integration, "_existing_trace_callback", object
     )
     monkeypatch.setattr(
         mlflow_integration.dspy,
