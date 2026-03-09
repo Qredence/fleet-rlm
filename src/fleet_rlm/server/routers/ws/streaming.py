@@ -11,6 +11,11 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from fleet_rlm.analytics import (
+    MlflowTraceRequestContext,
+    merge_trace_result_metadata,
+    mlflow_request_context,
+)
 from fleet_rlm.analytics.trace_context import runtime_telemetry_enabled_context
 from fleet_rlm.db.models import RunStatus
 from ...execution import ExecutionStepBuilder
@@ -35,6 +40,7 @@ async def run_streaming_turn(
     last_loaded_docs_path: str | None,
     analytics_enabled: bool | None,
     persist_session_state: Callable[..., Awaitable[None]],
+    mlflow_trace_context: MlflowTraceRequestContext | None = None,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
 
@@ -54,18 +60,33 @@ async def run_streaming_turn(
         last_loaded_docs_path = str(docs_path).strip()
 
     try:
-        await _stream_agent_events(
-            websocket=websocket,
-            agent=agent,
-            message=message,
-            docs_path=docs_path,
-            trace=trace,
-            cancel_check=cancel_check,
-            lifecycle=lifecycle,
-            step_builder=step_builder,
-            analytics_enabled=analytics_enabled,
-            persist_session_state=persist_session_state,
-        )
+        if mlflow_trace_context is None:
+            await _stream_agent_events(
+                websocket=websocket,
+                agent=agent,
+                message=message,
+                docs_path=docs_path,
+                trace=trace,
+                cancel_check=cancel_check,
+                lifecycle=lifecycle,
+                step_builder=step_builder,
+                analytics_enabled=analytics_enabled,
+                persist_session_state=persist_session_state,
+            )
+        else:
+            with mlflow_request_context(mlflow_trace_context):
+                await _stream_agent_events(
+                    websocket=websocket,
+                    agent=agent,
+                    message=message,
+                    docs_path=docs_path,
+                    trace=trace,
+                    cancel_check=cancel_check,
+                    lifecycle=lifecycle,
+                    step_builder=step_builder,
+                    analytics_enabled=analytics_enabled,
+                    persist_session_state=persist_session_state,
+                )
     except WebSocketDisconnect:
         raise
     except Exception as exc:
@@ -123,10 +144,16 @@ async def _emit_stream_event(
     persist_session_state: Callable[..., Awaitable[None]],
 ) -> None:
     lifecycle.raise_if_persistence_error()
+    payload = event.payload
+    if event.kind == "final":
+        payload = merge_trace_result_metadata(
+            payload if isinstance(payload, dict) else None,
+            response_preview=event.text,
+        )
     event_dict = {
         "kind": event.kind,
         "text": event.text,
-        "payload": event.payload,
+        "payload": payload,
         "timestamp": event.timestamp.isoformat(),
         "version": 2,
         "event_id": str(uuid.uuid4()),
@@ -139,7 +166,7 @@ async def _emit_stream_event(
     step = step_builder.from_stream_event(
         kind=event.kind,
         text=event.text,
-        payload=event.payload,
+        payload=payload,
         timestamp=event.timestamp.timestamp(),
     )
     if step is not None:

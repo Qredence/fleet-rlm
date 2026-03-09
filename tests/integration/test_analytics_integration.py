@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import dspy
+import pytest
 
-from fleet_rlm.analytics.config import PostHogConfig
+from fleet_rlm.analytics.config import MlflowConfig, PostHogConfig
+from fleet_rlm.analytics.mlflow_integration import (
+    MlflowTraceRequestContext,
+    flush_mlflow_traces,
+    initialize_mlflow,
+    mlflow_request_context,
+    trace_result_metadata,
+)
 from fleet_rlm.analytics.posthog_callback import PostHogLLMCallback
 
 
@@ -82,5 +92,71 @@ def test_threaded_calls_do_not_leak_trace_state(monkeypatch) -> None:
         assert callback._pending_traces == {}
         assert callback._pending_inputs == {}
         assert callback._context_tokens == {}
+    finally:
+        dspy.configure(callbacks=old_callbacks)
+
+
+@pytest.mark.filterwarnings(
+    "ignore:Parameter 'experiment_ids' is deprecated. Please use 'locations' instead.:FutureWarning"
+)
+def test_mlflow_integration_captures_real_trace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("fleet_rlm.analytics.mlflow_integration._INIT_IDENTITY", None)
+    monkeypatch.setattr("fleet_rlm.analytics.mlflow_integration._INITIALIZED", False)
+    monkeypatch.setattr("fleet_rlm.analytics.mlflow_integration._ACTIVE_CONFIG", None)
+
+    experiment_name = f"fleet-rlm-test-{uuid4().hex}"
+    config = MlflowConfig(
+        enabled=True,
+        tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}",
+        experiment=experiment_name,
+    )
+
+    old_callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
+    try:
+        assert initialize_mlflow(config) is True
+
+        lm = _FakeResponseLM()
+        with dspy.context(lm=lm):
+            with mlflow_request_context(
+                MlflowTraceRequestContext(
+                    client_request_id="integration-trace-request",
+                    session_id="integration-session",
+                    user_id="integration-user",
+                    app_env="test",
+                    request_preview="hello trace",
+                )
+            ):
+                result = lm("hello trace")
+                metadata = trace_result_metadata(response_preview=str(result))
+
+        flush_mlflow_traces()
+
+        import mlflow
+
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        assert experiment is not None
+
+        traces = mlflow.search_traces(
+            experiment_ids=[experiment.experiment_id],
+            max_results=20,
+            return_type="list",
+        )
+
+        assert metadata["mlflow_client_request_id"] == "integration-trace-request"
+        assert metadata["mlflow_trace_id"]
+        assert len(traces) == 1
+
+        info = traces[0].to_dict()["info"]
+        trace_metadata = info.get("trace_metadata", {})
+        assert info["trace_id"] == metadata["mlflow_trace_id"]
+        assert info["client_request_id"] == "integration-trace-request"
+        assert info["request_preview"] == "hello trace"
+        assert "echo:hello trace" in info["response_preview"]
+        assert trace_metadata["mlflow.trace.session"] == "integration-session"
+        assert trace_metadata["mlflow.trace.user"] == "integration-user"
+        assert trace_metadata["app_env"] == "test"
     finally:
         dspy.configure(callbacks=old_callbacks)

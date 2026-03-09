@@ -12,8 +12,8 @@ in :mod:`fleet_rlm.streaming`, and command dispatch in
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from typing import Any, Callable, Iterable, Literal
 
 import dspy

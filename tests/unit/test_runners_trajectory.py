@@ -18,6 +18,21 @@ class _FakeInterpreter:
         return False
 
 
+class _FakeChatAgent:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def chat_turn(self, message: str) -> dict[str, object]:
+        return {
+            "assistant_response": f"echo:{message}",
+            "trajectory": {"tool_name_0": "finish"},
+            "history_turns": 1,
+        }
+
+
 def _fake_rlm_factory():
     class _FakeRLM:
         def __init__(self, *, signature, interpreter, **kwargs):
@@ -98,3 +113,24 @@ def test_runners_can_suppress_trajectory(fn_name, kwargs):
     assert "trajectory_steps" not in result
     assert "trajectory" not in result
     assert "final_reasoning" not in result
+
+
+def test_run_react_chat_once_merges_mlflow_metadata(monkeypatch):
+    monkeypatch.setattr(
+        runners,
+        "_build_react_agent_from_options",
+        lambda **kwargs: _FakeChatAgent(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.analytics.mlflow_integration.trace_result_metadata",
+        lambda response_preview=None: {
+            "mlflow_trace_id": "trace-123",
+            "mlflow_client_request_id": "req-123",
+        },
+    )
+
+    result = runners.run_react_chat_once(message="hello")
+
+    assert result["assistant_response"] == "echo:hello"
+    assert result["mlflow_trace_id"] == "trace-123"
+    assert result["mlflow_client_request_id"] == "req-123"

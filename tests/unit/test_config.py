@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -250,34 +249,21 @@ def test_get_planner_lm_from_env_production_keeps_process_env(
     assert lm.api_base == "https://process.example"
 
 
-def test_prepare_env_initializes_mlflow_autolog_once(
+def test_prepare_env_initializes_mlflow_service(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    calls: dict[str, int] = {"set_tracking_uri": 0, "autolog": 0}
-    recorded_uri: list[str] = []
+    calls: list[object] = []
 
-    def _set_tracking_uri(uri: str) -> None:
-        calls["set_tracking_uri"] += 1
-        recorded_uri.append(uri)
-
-    fake_mlflow = SimpleNamespace(
-        set_tracking_uri=_set_tracking_uri,
-        dspy=SimpleNamespace(
-            autolog=lambda: calls.__setitem__("autolog", calls["autolog"] + 1)
-        ),
-    )
-
-    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
-    monkeypatch.setattr(config, "_MLFLOW_AUTOLOG_ENABLED", False)
     monkeypatch.setattr(config, "configure_posthog_analytics_from_env", lambda: None)
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:6001")
+    monkeypatch.setattr(
+        config,
+        "MlflowConfig",
+        SimpleNamespace(from_env=lambda: "mlflow-config"),
+    )
+    monkeypatch.setattr(config, "initialize_mlflow", lambda cfg: calls.append(cfg))
     monkeypatch.setenv("APP_ENV", "local")
 
     env_file = tmp_path / ".env"
     config._prepare_env(env_file=env_file)
-    config._prepare_env(env_file=env_file)
 
-    assert calls["set_tracking_uri"] == 1
-    assert calls["autolog"] == 1
-    assert recorded_uri == ["http://127.0.0.1:6001"]
-    assert config._MLFLOW_AUTOLOG_ENABLED is True
+    assert calls == ["mlflow-config"]

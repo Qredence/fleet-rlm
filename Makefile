@@ -1,7 +1,7 @@
 PYTHON_SOURCES = src tests
 PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
-.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean
+.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean mlflow-server
 
 help:
 	@echo "Targets:"
@@ -23,6 +23,7 @@ help:
 	@echo "  make frontend-check    - Run frontend checks when src/frontend exists"
 	@echo "  make quality-gate      - Run lint + format-check + typecheck + test + metadata-check + frontend-check"
 	@echo "  make check             - Alias for quality-gate"
+	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5000"
 	@echo "  make clean             - Remove caches and local generated artifacts"
 	@echo "  make sync-scaffold     - Sync .claude/ to src/fleet_rlm/_scaffold/"
 	@echo "  make release-check     - Run clean + quality-gate + security-check + build + twine checks"
@@ -87,6 +88,9 @@ frontend-check:
 quality-gate: lint format-check typecheck test-fast metadata-check docs-check frontend-check
 
 check: quality-gate
+
+mlflow-server:
+	uv run mlflow server --backend-store-uri sqlite:///mlruns.db --port 5000
 
 sync-scaffold:
 	@echo "Syncing .claude/ to src/fleet_rlm/_scaffold/..."

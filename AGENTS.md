@@ -13,6 +13,7 @@ Use `src/fleet_rlm/utils/regex.py` for regex helpers.
 Frontend code lives in `src/frontend/` (Vite + React + TypeScript).
 Tests are organized by scope in `tests/unit/`, `tests/ui/`, `tests/integration/`, and `tests/e2e/`.
 Operational scripts are in `scripts/`; DB migrations are in `migrations/`; API contract source is `openapi.yaml`; longer design/runbook docs are in `docs/`.
+MLflow integration lives under `src/fleet_rlm/analytics/` and is additive to PostHog: use it for GenAI trace correlation, feedback, offline evaluation, and DSPy optimization workflows, not for general product telemetry.
 
 ## Build, Test, and Development Commands
 - `uv sync --all-extras --dev`: install Python dependencies for full local development.
@@ -20,9 +21,14 @@ Operational scripts are in `scripts/`; DB migrations are in `migrations/`; API c
 - `make test-fast`: run default pytest suite (`not live_llm and not benchmark`).
 - `make quality-gate`: run lint, format check, type check, tests, docs/metadata checks, and frontend checks.
 - `make release-check`: full pre-release validation (quality + security + build + wheel checks).
+- `make mlflow-server`: start the local OSS MLflow tracking server (`sqlite:///mlruns.db` on port `5000`).
 - Frontend-only loop:
   - `cd src/frontend && bun install --frozen-lockfile`
   - `bun run dev` (local UI), `bun run check` (type/lint/tests/build/e2e)
+- MLflow contributor workflows:
+  - `uv run python scripts/export_mlflow_traces.py`
+  - `uv run python scripts/evaluate_mlflow_traces.py`
+  - `uv run python scripts/optimize_dspy_with_mlflow.py --dataset <json> --program <module:attr>`
 
 ## Coding Style & Naming Conventions
 Use Python 3.10+, 4-space indentation, type hints on public functions, and clear docstrings for non-trivial logic.
@@ -40,6 +46,7 @@ Name tests `test_<behavior>.py` and add regression tests for bug fixes.
 Frontend tests use Vitest (`bun run test:unit`) and Playwright (`bun run test:e2e`).
 For chat-runtime or trace changes, prefer this focused validation set before broader gates:
 - `uv run pytest -q tests/ui/server/test_server_config.py tests/ui/ws/test_chat_stream.py tests/unit/test_tools_sandbox.py`
+- `uv run pytest -q tests/unit/test_mlflow_integration.py tests/ui/server/test_api_contract_routes.py`
 - `cd src/frontend && bun run type-check`
 - `cd src/frontend && bun run test:unit src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx`
 

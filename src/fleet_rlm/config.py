@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .analytics.config import PostHogConfig
+from .analytics.config import MlflowConfig, PostHogConfig
 
 
 class MemoryConfig(BaseModel):
@@ -151,6 +151,7 @@ class AnalyticsConfig(BaseModel):
     """Configuration for runtime analytics integrations."""
 
     posthog: PostHogConfig = Field(default_factory=PostHogConfig)
+    mlflow: MlflowConfig = Field(default_factory=MlflowConfig)
 
 
 class AppConfig(BaseModel):

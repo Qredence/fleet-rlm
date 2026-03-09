@@ -14,6 +14,7 @@ import dspy
 from dotenv import load_dotenv
 
 from fleet_rlm._env_utils import env_bool as _env_bool
+from fleet_rlm.analytics import MlflowConfig, initialize_mlflow
 
 load_dotenv()  # Load .env from current working directory by default
 logger = logging.getLogger(__name__)
@@ -134,9 +135,6 @@ def configure_posthog_analytics_from_env() -> object | None:
         return None
 
 
-_MLFLOW_AUTOLOG_ENABLED = False
-
-
 def _prepare_env(*, env_file: Path | None = None) -> None:
     """Load env defaults and shared runtime guards for LM configuration helpers."""
     dotenv_path = env_file
@@ -148,27 +146,7 @@ def _prepare_env(*, env_file: Path | None = None) -> None:
     _load_dotenv(dotenv_path, override=app_env == "local")
     _guard_modal_shadowing()
     configure_posthog_analytics_from_env()
-
-    global _MLFLOW_AUTOLOG_ENABLED
-    if not _MLFLOW_AUTOLOG_ENABLED:
-        try:
-            import mlflow
-
-            # Point MLflow to the correct tracking URI (assumes local server by default)
-            tracking_uri = os.environ.get(
-                "MLFLOW_TRACKING_URI", "http://127.0.0.1:5000"
-            )
-            mlflow.set_tracking_uri(tracking_uri)
-            # Enable MLflow autologging for DSPy LLM calls
-            mlflow.dspy.autolog()
-            _MLFLOW_AUTOLOG_ENABLED = True
-        except ImportError:
-            logger.debug("MLflow not installed, skipping DSPy autologging.")
-            _MLFLOW_AUTOLOG_ENABLED = True
-        except Exception as e:
-            logger.warning(f"Failed to initialize MLflow autologging: {e}")
-            # Don't try again if it fails
-            _MLFLOW_AUTOLOG_ENABLED = True
+    initialize_mlflow(MlflowConfig.from_env())
 
 
 def _guard_modal_shadowing() -> None:

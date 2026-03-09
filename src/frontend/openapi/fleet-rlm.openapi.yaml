@@ -207,6 +207,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/traces/feedback:
+    post:
+      tags:
+      - traces
+      summary: Create Trace Feedback
+      description: Record human feedback and optional ground truth for an MLflow trace.
+      operationId: create_trace_feedback_api_v1_traces_feedback_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TraceFeedbackRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceFeedbackResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AuthMeResponse:
@@ -518,6 +544,61 @@ components:
       - workspace_id
       - user_id
       title: SessionStateSummary
+    TraceFeedbackRequest:
+      properties:
+        trace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Id
+        client_request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Request Id
+        is_correct:
+          type: boolean
+          title: Is Correct
+        comment:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Comment
+        expected_response:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expected Response
+      type: object
+      required:
+      - is_correct
+      title: TraceFeedbackRequest
+    TraceFeedbackResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        trace_id:
+          type: string
+          title: Trace Id
+        client_request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Request Id
+        feedback_logged:
+          type: boolean
+          title: Feedback Logged
+          default: true
+        expectation_logged:
+          type: boolean
+          title: Expectation Logged
+          default: false
+      type: object
+      required:
+      - trace_id
+      title: TraceFeedbackResponse
     ValidationError:
       properties:
         loc:
