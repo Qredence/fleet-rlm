@@ -18,21 +18,6 @@ type ToolUIPartApproval =
       approved: boolean;
       reason?: string;
     }
-  | {
-      id: string;
-      approved: true;
-      reason?: string;
-    }
-  | {
-      id: string;
-      approved: true;
-      reason?: string;
-    }
-  | {
-      id: string;
-      approved: false;
-      reason?: string;
-    }
   | undefined;
 
 interface ConfirmationContextValue {
