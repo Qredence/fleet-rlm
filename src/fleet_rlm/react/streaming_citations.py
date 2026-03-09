@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import dspy
 
+from ..analytics import merge_trace_result_metadata
+
 STREAM_EVENT_SCHEMA_VERSION = 2
 _ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https"})
 
@@ -372,4 +374,5 @@ def _build_final_payload(
         payload["error_type"] = fallback_error_type
     if effective_max_iters is not None:
         payload["effective_max_iters"] = effective_max_iters
-    return payload
+    final_text = str(getattr(final_prediction, "assistant_response", "") or "")
+    return merge_trace_result_metadata(payload, response_preview=final_text)

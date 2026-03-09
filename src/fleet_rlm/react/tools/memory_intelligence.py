@@ -181,10 +181,12 @@ def _runtime_metadata(
     }
 
 
-def _reload_volume_best_effort(ctx: _MemoryIntelligenceContext, *, reason: str) -> None:
+async def _reload_volume_best_effort(
+    ctx: _MemoryIntelligenceContext, *, reason: str
+) -> None:
     if ctx.agent.interpreter._volume:
         try:
-            ctx.agent.interpreter.reload()
+            await ctx.agent.interpreter.areload()
         except Exception as exc:
             logger.warning(
                 "Failed to reload interpreter volume for %s: %s", reason, exc
@@ -239,7 +241,7 @@ def build_memory_intelligence_tools(agent: "RLMReActChatAgent") -> list[Any]:
         if error is not None:
             return error
 
-        _reload_volume_best_effort(ctx, reason="memory_tree")
+        await _reload_volume_best_effort(ctx, reason="memory_tree")
 
         prediction, runtime_error, fallback_used = _run_runtime_module(
             ctx,

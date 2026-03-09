@@ -61,7 +61,7 @@ def _reload_volume_best_effort(ctx: _SandboxToolContext) -> None:
         try:
             ctx.agent.interpreter.reload()
         except Exception as exc:
-            logging.exception("Best-effort volume reload failed: %s", exc)
+            logging.warning("Best-effort volume reload failed: %s", exc)
 
 
 def _commit_volume_best_effort(ctx: _SandboxToolContext) -> None:
