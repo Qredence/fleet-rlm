@@ -17,8 +17,11 @@
 
 * [How-to Guides](how-to-guides/index.md)
   * [Installation Guide](how-to-guides/installation.md)
+  * [Developer Setup](how-to-guides/developer-setup.md)
+  * [Testing Strategy](how-to-guides/testing-strategy.md)
   * [Configuring Modal](how-to-guides/configuring-modal.md)
   * [Runtime Setup from Frontend Settings](how-to-guides/runtime-settings.md)
+  * [DSPy Integration Guide](how-to-guides/dspy-integration.md)
   * [Deploying the API Server](how-to-guides/deploying-server.md)
   * [Using the MCP Server](how-to-guides/using-mcp-server.md)
   * [Using with Claude Code](how-to-guides/using-claude-code-agents.md)
