@@ -6,6 +6,7 @@ const LONG_OUTPUT_TEXT =
   "This text intentionally includes a unique tail marker to verify that " +
   "Timeline and Preview panels render full content end-to-end. " +
   TAIL_FRAGMENT;
+const PANEL_LABEL_PATTERN = /(?:message inspector|side panel)/i;
 
 test("execution canvas keeps lanes readable and payloads untruncated", async ({
   page,
@@ -13,14 +14,18 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
   await page.goto("/");
   await page.waitForURL(/\/app\/workspace$/);
   await expect(
-    page.getByRole("button", { name: /side panel/i }).first(),
+    page.getByRole("button", { name: PANEL_LABEL_PATTERN }).first(),
   ).toBeVisible();
 
   const closeSidePanelButton = page.getByRole("button", {
-    name: "Close side panel",
+    name: new RegExp(`^Close ${PANEL_LABEL_PATTERN.source}$`, "i"),
   });
   if ((await closeSidePanelButton.count()) === 0) {
-    await page.getByRole("button", { name: "Open side panel" }).click();
+    await page
+      .getByRole("button", {
+        name: new RegExp(`^Open ${PANEL_LABEL_PATTERN.source}$`, "i"),
+      })
+      .click();
   }
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -84,10 +89,81 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
             },
           ];
 
-          const storeModule = await import("/src/stores/artifactStore.ts");
-          const state = storeModule.useArtifactStore.getState();
-          state.setSteps(steps);
-          state.setActiveStepId("output-1");
+          const chatStoreModule = await import("/src/stores/chatStore.ts");
+          const navigationStoreModule = await import(
+            "/src/stores/navigationStore.ts"
+          );
+
+          chatStoreModule.useChatStore.setState({
+            messages: [
+              {
+                id: "trace-reasoning",
+                type: "trace",
+                content: "reasoning",
+                traceSource: "live",
+                renderParts: [
+                  {
+                    kind: "reasoning",
+                    parts: [
+                      {
+                        type: "text",
+                        text: "Execution canvas reasoning stays fully readable without truncation.",
+                      },
+                    ],
+                    isStreaming: false,
+                  },
+                ],
+              },
+              {
+                id: "trace-tool",
+                type: "trace",
+                content: "tool call",
+                traceSource: "live",
+                renderParts: [
+                  {
+                    kind: "tool",
+                    title: "analyze_long_document",
+                    toolType: "analyze_long_document",
+                    state: "output-available",
+                    input: { path: "docs/spec.md" },
+                    output: longOutputText,
+                  },
+                ],
+              },
+              {
+                id: "assistant-1",
+                type: "assistant",
+                content: "Execution canvas smoke turn",
+                streaming: false,
+                renderParts: [
+                  {
+                    kind: "sources",
+                    title: "Sources",
+                    sources: [
+                      {
+                        sourceId: "src-1",
+                        kind: "file",
+                        title: "docs/spec.md",
+                        description: "Execution canvas smoke source.",
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            turnArtifactsByMessageId: {
+              "assistant-1": steps,
+            },
+            isStreaming: false,
+            error: null,
+          });
+
+          navigationStoreModule.useNavigationStore.setState({
+            activeNav: "workspace",
+            isCanvasOpen: true,
+            selectedAssistantTurnId: "assistant-1",
+            activeInspectorTab: "graph",
+          });
         },
         { longOutputText: LONG_OUTPUT_TEXT },
       );
@@ -112,14 +188,22 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
   ).toBeVisible();
   await expect(page.getByText("Delegate", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("2.0s", { exact: true }).first()).toBeVisible();
-
-  await page.getByRole("tab", { name: "Timeline", exact: true }).click();
   await expect(
     page.getByRole("tabpanel").getByText(TAIL_FRAGMENT, { exact: false }).first(),
   ).toBeVisible();
 
-  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  await page.getByRole("tab", { name: "Execution", exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: /tool:\s*analyze_long_document/i,
+    })
+    .click();
   await expect(
     page.getByRole("tabpanel").getByText(TAIL_FRAGMENT, { exact: false }).first(),
+  ).toBeVisible();
+
+  await page.getByRole("tab", { name: "Evidence", exact: true }).click();
+  await expect(
+    page.getByRole("tabpanel").getByText("docs/spec.md", { exact: false }).first(),
   ).toBeVisible();
 });
