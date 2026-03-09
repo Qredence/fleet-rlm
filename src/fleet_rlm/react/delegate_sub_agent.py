@@ -60,7 +60,11 @@ def _share_llm_budget(
     *, parent: ModalInterpreter, child: ModalInterpreter
 ) -> ModalInterpreter:
     """Route child sandbox sub-LLM accounting through the parent interpreter."""
-    child._check_and_increment_llm_calls = parent._check_and_increment_llm_calls
+    setattr(
+        child,
+        "_check_and_increment_llm_calls",
+        parent._check_and_increment_llm_calls,
+    )
     return child
 
 
@@ -186,7 +190,7 @@ def _delegate_execution_profile_context(interpreter: Any) -> Any:
 
 
 async def _emit_stream_event_callback(
-    callback: Callable[[Any], None] | None,
+    callback: Callable[[Any], Any] | None,
     event: StreamEvent,
 ) -> None:
     if callback is None:
@@ -235,7 +239,7 @@ async def spawn_delegate_sub_agent_async(
     *,
     prompt: str,
     context: str = "",
-    stream_event_callback: Callable[[Any], None] | None = None,
+    stream_event_callback: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     """Run a bounded child RLM query in a fresh child Modal sandbox."""
 
