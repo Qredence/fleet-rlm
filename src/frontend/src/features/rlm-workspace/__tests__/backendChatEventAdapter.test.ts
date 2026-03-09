@@ -106,11 +106,11 @@ describe("applyWsFrameToMessages", () => {
     let messages: ChatMessage[] = [];
     messages = applyWsFrameToMessages(
       messages,
-      makeEvent("reasoning_step", "Analyzing input"),
+      makeEvent("reasoning_step", "Analyzing input "),
     ).messages;
     messages = applyWsFrameToMessages(
       messages,
-      makeEvent("reasoning_step", "Checking constraints"),
+      makeEvent("reasoning_step", "and checking constraints"),
     ).messages;
 
     const reasoningRows = traceRows(
@@ -124,7 +124,43 @@ describe("applyWsFrameToMessages", () => {
       reasoningRows.map((row) =>
         row.part.kind === "reasoning" ? row.part.parts[0]?.text : "",
       ),
-    ).toEqual(["Analyzing input", "Checking constraints"]);
+    ).toEqual(["Analyzing input ", "and checking constraints"]);
+  });
+
+  it("attaches runtime context to live reasoning rows", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("reasoning_step", "Inspecting sandbox output", {
+        runtime: {
+          depth: 1,
+          max_depth: 3,
+          execution_profile: "RLM_ROOT",
+          sandbox_active: true,
+          effective_max_iters: 30,
+          volume_name: "shared-volume",
+          execution_mode: "rlm",
+          sandbox_id: "sb-1234567890",
+        },
+      }),
+    );
+
+    const reasoning = findFirstPart(
+      messages,
+      (part) => part.kind === "reasoning",
+    );
+    expect(reasoning).toBeDefined();
+    if (reasoning?.kind === "reasoning") {
+      expect(reasoning.runtimeContext).toEqual({
+        depth: 1,
+        maxDepth: 3,
+        executionProfile: "RLM_ROOT",
+        sandboxActive: true,
+        effectiveMaxIters: 30,
+        volumeName: "shared-volume",
+        executionMode: "rlm",
+        sandboxId: "sb-1234567890",
+      });
+    }
   });
 
   it("uses trajectory as fallback primary rows when live events are absent", () => {
@@ -442,6 +478,8 @@ describe("applyWsFrameToMessages", () => {
           sandbox_active: true,
           effective_max_iters: 12,
           volume_name: "docs-volume",
+          execution_mode: "rlm",
+          sandbox_id: "sb-status-1",
         },
       }),
     );
@@ -459,7 +497,47 @@ describe("applyWsFrameToMessages", () => {
         sandboxActive: true,
         effectiveMaxIters: 12,
         volumeName: "docs-volume",
+        executionMode: "rlm",
+        sandboxId: "sb-status-1",
       });
+    }
+  });
+
+  it("treats payload-level tool failures as errors even when text says finished", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("tool_result", "Tool finished", {
+        tool_name: "find_files",
+        tool_output: {
+          status: "error",
+          error: "rg not found",
+        },
+      }),
+    );
+
+    const tool = findFirstPart(messages, (part) => part.kind === "tool");
+    expect(tool).toBeDefined();
+    if (tool?.kind === "tool") {
+      expect(tool.state).toBe("output-error");
+      expect(tool.errorText).toContain("rg not found");
+    }
+  });
+
+  it("does not treat successful tool output mentioning errors as a failure", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("tool_result", "Tool finished", {
+        tool_name: "grep",
+        tool_output: "0 errors found while scanning logs",
+      }),
+    );
+
+    const tool = findFirstPart(messages, (part) => part.kind === "tool");
+    expect(tool).toBeDefined();
+    if (tool?.kind === "tool") {
+      expect(tool.state).toBe("output-available");
+      expect(tool.errorText).toBeUndefined();
+      expect(tool.output).toBe("0 errors found while scanning logs");
     }
   });
 

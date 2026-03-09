@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { typo } from "@/lib/config/typo";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -112,7 +112,7 @@ function getHeaderIcon(mode: CanvasMode) {
 }
 
 export function BuilderPanel() {
-  const { activeNav, closeCanvas, selectedFileNode } = useNavigation();
+  const { activeNav, closeCanvas, selectedFileNode } = useNavigationStore();
   const { navigateTo } = useAppNavigate();
   const isMobile = useIsMobile();
   const steps = useArtifactStore((state) => state.steps);

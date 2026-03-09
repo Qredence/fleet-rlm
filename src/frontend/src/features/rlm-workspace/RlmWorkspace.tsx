@@ -1,26 +1,29 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { TriangleAlert } from "lucide-react";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
-import { useChatHistory } from "@/hooks/useChatHistory";
+import { useChatHistoryStore } from "@/stores/chatHistoryStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
-import { ConversationHistory } from "@/screens/chat/ConversationHistory";
+import { ConversationHistory } from "@/features/rlm-workspace/ConversationHistory";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
 import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
+import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /**
  * RlmWorkspace — chat-first DSPy.RLM runtime surface.
  *
  * Chat logic (messages, phases, backend events) lives in `useBackendChatRuntime`.
- * Shared session state still flows through `NavigationContext` so it persists
+ * Shared session state still flows through `NavigationStore` so it persists
  * across shell navigation.
  *
- * Conversation history is managed by `useChatHistory` (localStorage-backed).
+ * Conversation history is managed by `useChatHistoryStore` (localStorage-backed).
  * Auto-saves the current conversation when `sessionId` changes (new session),
  * and allows loading past conversations from the welcome state.
  */
@@ -48,8 +51,7 @@ export function RlmWorkspace() {
     loadConversation,
   } = chatRuntime;
 
-  const [selectedAgent, setSelectedAgent] = useState("auto");
-  const [thinkEnabled, setThinkEnabled] = useState(false);
+  const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
@@ -60,7 +62,7 @@ export function RlmWorkspace() {
         });
       }
       originalHandleSubmit({
-        traceEnabled: thinkEnabled,
+        executionMode,
         attachments: attachments.map((attachment) => ({
           id: attachment.id,
           name: attachment.file.name,
@@ -75,11 +77,11 @@ export function RlmWorkspace() {
       inputValue,
       telemetry,
       originalHandleSubmit,
-      thinkEnabled,
+      executionMode,
     ],
   );
 
-  const { sessionId } = useNavigation();
+  const { sessionId } = useNavigationStore();
 
   // Chat history
   const {
@@ -88,7 +90,7 @@ export function RlmWorkspace() {
     loadConversation: loadConv,
     deleteConversation,
     clearHistory,
-  } = useChatHistory();
+  } = useChatHistoryStore();
 
   // ── History panel toggle ─────────────────────────────────────────
   const [showHistory, setShowHistory] = useState(false);
@@ -208,20 +210,23 @@ export function RlmWorkspace() {
         <div className="mx-auto w-full max-w-200">
           <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
-              <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-foreground">
-                <div>
-                  <span className="font-medium">Runtime warning:</span>{" "}
-                  {runtimeGuidance[0]}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-3 rounded-lg border-amber-500/35 bg-background/70 text-foreground hover:bg-amber-500/15"
-                  onClick={handleOpenRuntimeSettings}
-                >
-                  Open Runtime Settings
-                </Button>
-              </div>
+              <Alert className="border-accent/25 bg-accent/5 text-foreground">
+                <TriangleAlert className="size-4" />
+                <AlertTitle>Runtime warning</AlertTitle>
+                <AlertDescription>
+                  <div className="space-y-3">
+                    <p>{runtimeGuidance[0]}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={handleOpenRuntimeSettings}
+                    >
+                      Open Runtime Settings
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
             ) : null}
             <ChatInput
               value={inputValue}
@@ -237,10 +242,8 @@ export function RlmWorkspace() {
               }
               isLoading={composerDisabled}
               isReceiving={isReceivingResponse}
-              selectedAgent={selectedAgent}
-              onAgentChange={setSelectedAgent}
-              thinkEnabled={thinkEnabled}
-              onThinkToggle={() => setThinkEnabled((prev) => !prev)}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               className="mx-auto w-full max-w-175 rounded-3xl border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
             />
           </div>

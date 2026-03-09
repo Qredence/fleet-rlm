@@ -38,7 +38,7 @@ vi.mock("@/lib/telemetry/client", () => ({
 // ── imports ────────────────────────────────────────────────────────────────────
 // Imported after vi.mock so the mocked versions are resolved.
 import { streamChatOverWs } from "@/lib/rlm-api";
-import { useChatStore } from "@/screens/chat/stores/chatStore";
+import { useChatStore } from "@/stores/chatStore";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 /** Reset Zustand store state between tests */
@@ -235,10 +235,28 @@ describe("useChatStore — streamMessage", () => {
     expect(payload).toMatchObject({
       type: "message",
       content: "test",
+      trace: true,
+      trace_mode: "compact",
+      execution_mode: "auto",
       analytics_enabled: true,
       session_id: "sess-abc",
       workspace_id: "test-workspace",
       user_id: "test-user",
+    });
+  });
+
+  it("passes execution mode overrides to the websocket payload", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+
+    await useChatStore
+      .getState()
+      .streamMessage("test", undefined, undefined, {
+        executionMode: "tools_only",
+      });
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      execution_mode: "tools_only",
     });
   });
 

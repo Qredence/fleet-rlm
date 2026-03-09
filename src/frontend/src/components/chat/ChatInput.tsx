@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { AgentDropdown } from "@/components/chat/input/AgentDropdown";
 import {
   AttachmentChip,
   type AttachedFile,
 } from "@/components/chat/input/AttachmentChip";
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
+import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
 import { SendButton } from "@/components/chat/input/SendButton";
 import { SettingsDropdown } from "@/components/chat/input/SettingsDropdown";
-import { ThinkButton } from "@/components/chat/input/ThinkButton";
 import {
   PromptInput,
   PromptInputActions,
@@ -19,6 +18,7 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/chat/prompt-input";
+import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 
 interface ChatInputProps {
   value: string;
@@ -27,10 +27,8 @@ interface ChatInputProps {
   isLoading?: boolean;
   isReceiving?: boolean;
   attachmentsEnabled?: boolean;
-  selectedAgent: string;
-  onAgentChange: (agentId: string) => void;
-  thinkEnabled?: boolean;
-  onThinkToggle?: () => void;
+  executionMode: WsExecutionMode;
+  onExecutionModeChange: (mode: WsExecutionMode) => void;
   placeholder?: string;
   className?: string;
 }
@@ -58,10 +56,8 @@ function ChatInput({
   isLoading = false,
   isReceiving = false,
   attachmentsEnabled = true,
-  selectedAgent,
-  onAgentChange,
-  thinkEnabled = false,
-  onThinkToggle,
+  executionMode,
+  onExecutionModeChange,
   placeholder = "Ask anything…",
   className,
 }: ChatInputProps) {
@@ -144,13 +140,9 @@ function ChatInput({
         </PromptInputTools>
 
         <PromptInputActions>
-          {onThinkToggle ? (
-            <ThinkButton enabled={thinkEnabled} onToggle={onThinkToggle} />
-          ) : null}
-
-          <AgentDropdown
-            selectedAgent={selectedAgent}
-            onAgentChange={onAgentChange}
+          <ExecutionModeDropdown
+            value={executionMode}
+            onChange={onExecutionModeChange}
           />
 
           <SendButton />

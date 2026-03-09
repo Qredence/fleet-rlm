@@ -18,7 +18,7 @@ Protocol:
             "variables": {"var_name": value},  // Optional
             "tool_names": ["tool1", "tool2"],  // Optional
             "output_names": ["result1", "result2"],  // Optional
-            "execution_profile": "ROOT_INTERLOCUTOR|RLM_DELEGATE|MAINTENANCE"  // Optional
+            "execution_profile": "ROOT_INTERLOCUTOR|RLM_ROOT|RLM_DELEGATE|MAINTENANCE"  // Optional
         }
 
     Output (JSON, one per line):
@@ -232,6 +232,7 @@ def sandbox_driver() -> None:
         ).strip()
         if execution_profile not in {
             "ROOT_INTERLOCUTOR",
+            "RLM_ROOT",
             "RLM_DELEGATE",
             "MAINTENANCE",
         }:

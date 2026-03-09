@@ -70,7 +70,7 @@ function QueueSection({
       <div
         data-slot="queue-section"
         className={cn(
-          "rounded-xl border border-border-subtle/80 bg-card/70 overflow-hidden",
+          "rounded-xl border-subtle/80 bg-card/70 overflow-hidden",
           className,
         )}
       >

@@ -9,10 +9,12 @@ import {
 import type { ChatMessage } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { telemetryClient } from "@/lib/telemetry/client";
+import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 import { QueryClient } from "@tanstack/react-query";
 
 interface StreamMessageOptions {
   traceEnabled?: boolean;
+  executionMode?: WsExecutionMode;
 }
 
 interface ChatStore {
@@ -97,12 +99,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       streamController: controller,
     });
 
-    const traceEnabled = options?.traceEnabled ?? rlmApiConfig.trace;
+    const traceEnabled = options?.traceEnabled ?? true;
 
     const payload: WsMessageRequest = {
       type: "message",
       content: text,
       trace: traceEnabled,
+      execution_mode: options?.executionMode ?? "auto",
       analytics_enabled: telemetryClient.isAnonymousTelemetryEnabled(),
       workspace_id: rlmApiConfig.workspaceId,
       user_id: rlmApiConfig.userId,

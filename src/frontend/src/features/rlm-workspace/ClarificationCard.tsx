@@ -128,7 +128,7 @@ export function ClarificationCard({ data, onResolve }: Props) {
                             onChange={(e) => setCustomText(e.target.value)}
                             placeholder="Describe your specific requirement&#x2026;"
                             rows={2}
-                            className="w-full px-3 py-2 rounded-lg border border-border-subtle bg-background text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:border-ring resize-none"
+                            className="w-full px-3 py-2 rounded-lg border-subtle bg-background text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:border-ring resize-none"
                             style={typo.labelRegular}
                           />
                         </div>

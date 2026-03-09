@@ -1,60 +1,127 @@
 from contextlib import contextmanager
+import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import dspy
 import pytest
+from dspy.streaming.messages import StatusMessage
 
+from fleet_rlm.core.interpreter import ExecutionProfile, ModalInterpreter
 from fleet_rlm.react.agent import RLMReActChatAgent
-from fleet_rlm.react.delegate_sub_agent import spawn_delegate_sub_agent_async
+from fleet_rlm.react.delegate_sub_agent import (
+    _build_child_interpreter,
+    spawn_delegate_sub_agent_async,
+)
+from fleet_rlm.models import StreamEvent
+
+
+def _patch_child_module(monkeypatch, *, answer: str = "ok"):
+    created: list[dict[str, object]] = []
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str):
+            return SimpleNamespace(
+                answer=answer,
+                trajectory=[{"reasoning": f"handled:{prompt}", "output": context}],
+                final_reasoning="done",
+            )
+
+    def _fake_builder(
+        *,
+        interpreter,
+        max_iterations: int,
+        max_llm_calls: int,
+        verbose: bool,
+    ):
+        created.append(
+            {
+                "interpreter": interpreter,
+                "max_iterations": max_iterations,
+                "max_llm_calls": max_llm_calls,
+                "verbose": verbose,
+            }
+        )
+        return _FakeChildModule()
+
+    monkeypatch.setattr(
+        "fleet_rlm.react.delegate_sub_agent.build_recursive_subquery_rlm",
+        _fake_builder,
+    )
+    return created
+
+
+def _make_modal_interpreter(
+    *, max_llm_calls: int, used_calls: int, sandbox_active: bool = False
+) -> ModalInterpreter:
+    interpreter = object.__new__(ModalInterpreter)
+    interpreter.image = object()
+    interpreter._app_obj = None
+    interpreter.secrets = []
+    interpreter.timeout = 60
+    interpreter.idle_timeout = None
+    interpreter.execute_timeout = 60
+    interpreter._app_name = "test-app"
+    interpreter.volume_name = None
+    interpreter.volume_mount_path = "/data"
+    interpreter.summarize_stdout = True
+    interpreter.stdout_summary_threshold = 10_000
+    interpreter.stdout_summary_prefix_len = 200
+    interpreter.sub_lm = None
+    interpreter.max_llm_calls = max_llm_calls
+    interpreter._llm_call_count = used_calls
+    interpreter._llm_call_lock = threading.Lock()
+    interpreter._sub_lm_executor = None
+    interpreter._sub_lm_executor_lock = threading.Lock()
+    interpreter.llm_call_timeout = 60
+    interpreter.default_execution_profile = ExecutionProfile.RLM_DELEGATE
+    interpreter.async_execute = True
+    interpreter._sandbox = object() if sandbox_active else None
+    return interpreter
 
 
 @pytest.mark.asyncio
-async def test_sub_agent_interpreter_sharing():
-    """Verify that spawned sub-agents share the exact same ModalInterpreter instance."""
-    # Create a parent agent with a mock interpreter
+async def test_sub_agent_interpreter_sharing(monkeypatch):
     mock_interpreter = MagicMock()
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter)
     parent_agent._current_depth = 0
 
-    # We don't actually want to run a full LLM turn, so we'll mock achat_turn
-    # on the SubAgentClass (which is RLMReActChatAgent) before spawning
-    original_achat_turn = RLMReActChatAgent.achat_turn
+    created = _patch_child_module(monkeypatch)
 
-    try:
-        # Override chat_turn to return a fake result and trap the instance
-        trapped_sub_agent = None
+    result = await spawn_delegate_sub_agent_async(parent_agent, prompt="Test delegate")
 
-        async def fake_achat_turn(self, prompt, **kwargs):
-            nonlocal trapped_sub_agent
-            trapped_sub_agent = self
-            return {"assistant_response": "Sub-agent mock response"}
+    assert created
+    assert created[0]["interpreter"] is parent_agent.interpreter
+    assert result["depth"] == 1
+    assert result["status"] == "ok"
 
-        RLMReActChatAgent.achat_turn = fake_achat_turn
 
-        # Spawn the sub-agent
-        result = await spawn_delegate_sub_agent_async(
-            parent_agent, prompt="Test delegate"
-        )
+def test_child_modal_interpreter_shares_parent_llm_budget_counter():
+    parent_interpreter = _make_modal_interpreter(max_llm_calls=4, used_calls=1)
+    parent_agent = RLMReActChatAgent(interpreter=parent_interpreter)
 
-        # Verify
-        assert trapped_sub_agent is not None, "Sub-agent was not spawned"
+    child_interpreter = _build_child_interpreter(parent_agent, remaining_llm_budget=3)
 
-        # The critical test: the interpreter MUST be the exact same object reference
-        # This proves Modal session_id preservation is working
-        assert id(trapped_sub_agent.interpreter) == id(parent_agent.interpreter), (
-            "Sub-agent did not inherit parent's interpreter instance"
-        )
+    assert child_interpreter is not parent_interpreter
+    child_interpreter._check_and_increment_llm_calls(2)
+    assert parent_interpreter._llm_call_count == 3
 
-        # Also verify depth recursion incremented correctly
-        assert trapped_sub_agent._current_depth == 1
-        assert result["depth"] == 1
 
-    finally:
-        # Restore the original method
-        RLMReActChatAgent.achat_turn = original_achat_turn
+def test_live_modal_interpreter_reuses_parent_sandbox_for_delegate_turns():
+    parent_interpreter = _make_modal_interpreter(
+        max_llm_calls=4,
+        used_calls=1,
+        sandbox_active=True,
+    )
+    parent_agent = RLMReActChatAgent(interpreter=parent_interpreter)
+
+    child_interpreter = _build_child_interpreter(parent_agent, remaining_llm_budget=3)
+
+    assert child_interpreter is parent_interpreter
 
 
 @pytest.mark.asyncio
-async def test_delegate_budget_cap_returns_bounded_error():
+async def test_delegate_budget_cap_returns_bounded_error(monkeypatch):
     mock_interpreter = MagicMock()
     parent_agent = RLMReActChatAgent(
         interpreter=mock_interpreter,
@@ -62,28 +129,18 @@ async def test_delegate_budget_cap_returns_bounded_error():
     )
     parent_agent._current_depth = 0
 
-    original_achat_turn = RLMReActChatAgent.achat_turn
-    try:
+    _patch_child_module(monkeypatch)
 
-        async def _fake_achat_turn(self, prompt, **kwargs):
-            return {"assistant_response": "ok"}
+    first = await spawn_delegate_sub_agent_async(parent_agent, prompt="delegate once")
+    second = await spawn_delegate_sub_agent_async(parent_agent, prompt="delegate twice")
 
-        RLMReActChatAgent.achat_turn = _fake_achat_turn
-        first = await spawn_delegate_sub_agent_async(
-            parent_agent, prompt="delegate once"
-        )
-        second = await spawn_delegate_sub_agent_async(
-            parent_agent, prompt="delegate twice"
-        )
-        assert first["status"] == "ok"
-        assert second["status"] == "error"
-        assert "Delegate call budget reached" in second["error"]
-    finally:
-        RLMReActChatAgent.achat_turn = original_achat_turn
+    assert first["status"] == "ok"
+    assert second["status"] == "error"
+    assert "Delegate call budget reached" in second["error"]
 
 
 @pytest.mark.asyncio
-async def test_delegate_result_truncation_updates_metadata():
+async def test_delegate_result_truncation_updates_metadata(monkeypatch):
     mock_interpreter = MagicMock()
     parent_agent = RLMReActChatAgent(
         interpreter=mock_interpreter,
@@ -91,22 +148,14 @@ async def test_delegate_result_truncation_updates_metadata():
     )
     parent_agent._current_depth = 0
 
-    original_achat_turn = RLMReActChatAgent.achat_turn
-    try:
+    _patch_child_module(monkeypatch, answer="x" * 1024)
 
-        async def _fake_achat_turn(self, prompt, **kwargs):
-            return {"assistant_response": "x" * 1024}
+    result = await spawn_delegate_sub_agent_async(parent_agent, prompt="truncate")
 
-        RLMReActChatAgent.achat_turn = _fake_achat_turn
-        result = await spawn_delegate_sub_agent_async(
-            parent_agent, prompt="truncate output"
-        )
-        assert result["status"] == "ok"
-        assert result["delegate_output_truncated"] is True
-        assert result["assistant_response"].endswith("[truncated delegate output]")
-        assert parent_agent._delegate_result_truncated_count_turn == 1
-    finally:
-        RLMReActChatAgent.achat_turn = original_achat_turn
+    assert result["status"] == "ok"
+    assert result["delegate_output_truncated"] is True
+    assert result["assistant_response"].endswith("[truncated delegate output]")
+    assert parent_agent._delegate_result_truncated_count_turn == 1
 
 
 @pytest.mark.asyncio
@@ -128,100 +177,141 @@ async def test_delegate_uses_delegate_lm_context_when_available(monkeypatch):
     monkeypatch.setattr(
         "fleet_rlm.react.delegate_sub_agent.dspy.context", _fake_context
     )
+    _patch_child_module(monkeypatch)
 
-    original_achat_turn = RLMReActChatAgent.achat_turn
-    try:
+    result = await spawn_delegate_sub_agent_async(
+        parent_agent, prompt="delegate with lm"
+    )
 
-        async def _fake_achat_turn(self, prompt, **kwargs):
-            return {"assistant_response": "ok"}
-
-        RLMReActChatAgent.achat_turn = _fake_achat_turn
-        result = await spawn_delegate_sub_agent_async(
-            parent_agent, prompt="delegate with lm"
-        )
-        assert result["status"] == "ok"
-        assert result["delegate_lm_fallback"] is False
-        assert seen_lms and seen_lms[0] is delegate_lm
-    finally:
-        RLMReActChatAgent.achat_turn = original_achat_turn
+    assert result["status"] == "ok"
+    assert result["delegate_lm_fallback"] is False
+    assert seen_lms and seen_lms[0] is delegate_lm
 
 
 @pytest.mark.asyncio
-async def test_delegate_fallback_count_increments_when_delegate_lm_missing():
+async def test_delegate_fallback_count_increments_when_delegate_lm_missing(monkeypatch):
     mock_interpreter = MagicMock()
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter, delegate_lm=None)
     parent_agent._current_depth = 0
 
-    original_achat_turn = RLMReActChatAgent.achat_turn
-    try:
+    _patch_child_module(monkeypatch)
 
-        async def _fake_achat_turn(self, prompt, **kwargs):
-            return {"assistant_response": "ok"}
+    result = await spawn_delegate_sub_agent_async(parent_agent, prompt="no delegate lm")
 
-        RLMReActChatAgent.achat_turn = _fake_achat_turn
-        result = await spawn_delegate_sub_agent_async(
-            parent_agent, prompt="no delegate lm configured"
-        )
-        assert result["status"] == "ok"
-        assert result["delegate_lm_fallback"] is True
-        assert parent_agent._delegate_fallback_count_turn == 1
-    finally:
-        RLMReActChatAgent.achat_turn = original_achat_turn
+    assert result["status"] == "ok"
+    assert result["delegate_lm_fallback"] is True
+    assert parent_agent._delegate_fallback_count_turn == 1
 
 
 @pytest.mark.asyncio
-async def test_async_sub_agent_interpreter_sharing():
-    """Async delegate spawning should reuse interpreter and increment depth."""
+async def test_delegate_rejects_when_parent_llm_budget_is_exhausted(monkeypatch):
+    parent_interpreter = _make_modal_interpreter(max_llm_calls=2, used_calls=2)
+    parent_agent = RLMReActChatAgent(interpreter=parent_interpreter)
+    parent_agent._current_depth = 0
+
+    build_child = MagicMock()
+    monkeypatch.setattr(
+        "fleet_rlm.react.delegate_sub_agent.build_recursive_subquery_rlm",
+        build_child,
+    )
+
+    result = await spawn_delegate_sub_agent_async(parent_agent, prompt="no budget left")
+
+    assert result["status"] == "error"
+    assert "LLM call limit already exhausted" in result["error"]
+    build_child.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_sub_agent_interpreter_sharing(monkeypatch):
     mock_interpreter = MagicMock()
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter)
     parent_agent._current_depth = 0
 
-    original_achat_turn = RLMReActChatAgent.achat_turn
+    created = _patch_child_module(monkeypatch, answer="async sub-agent mock response")
 
-    try:
-        trapped_sub_agent = None
+    result = await spawn_delegate_sub_agent_async(
+        parent_agent, prompt="Test async delegate"
+    )
 
-        async def fake_achat_turn(self, prompt, **kwargs):
-            nonlocal trapped_sub_agent
-            trapped_sub_agent = self
-            return {"assistant_response": "async sub-agent mock response"}
-
-        RLMReActChatAgent.achat_turn = fake_achat_turn
-
-        result = await spawn_delegate_sub_agent_async(
-            parent_agent, prompt="Test async delegate"
-        )
-
-        assert trapped_sub_agent is not None, "Sub-agent was not spawned"
-        assert id(trapped_sub_agent.interpreter) == id(parent_agent.interpreter), (
-            "Sub-agent did not inherit parent's interpreter instance"
-        )
-        assert trapped_sub_agent._current_depth == 1
-        assert result["depth"] == 1
-        assert result["status"] == "ok"
-    finally:
-        RLMReActChatAgent.achat_turn = original_achat_turn
+    assert created
+    assert created[0]["interpreter"] is parent_agent.interpreter
+    assert result["depth"] == 1
+    assert result["status"] == "ok"
 
 
 @pytest.mark.asyncio
-async def test_async_delegate_fallback_count_increments_when_delegate_lm_missing():
+async def test_async_delegate_fallback_count_increments_when_delegate_lm_missing(
+    monkeypatch,
+):
     mock_interpreter = MagicMock()
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter, delegate_lm=None)
     parent_agent._current_depth = 0
 
-    original_achat_turn = RLMReActChatAgent.achat_turn
-    try:
+    _patch_child_module(monkeypatch)
 
-        async def _fake_achat_turn(self, prompt, **kwargs):
-            return {"assistant_response": "ok"}
+    result = await spawn_delegate_sub_agent_async(
+        parent_agent,
+        prompt="no delegate lm configured (async)",
+    )
 
-        RLMReActChatAgent.achat_turn = _fake_achat_turn
-        result = await spawn_delegate_sub_agent_async(
-            parent_agent,
-            prompt="no delegate lm configured (async)",
-        )
-        assert result["status"] == "ok"
-        assert result["delegate_lm_fallback"] is True
-        assert parent_agent._delegate_fallback_count_turn == 1
-    finally:
-        RLMReActChatAgent.achat_turn = original_achat_turn
+    assert result["status"] == "ok"
+    assert result["delegate_lm_fallback"] is True
+    assert parent_agent._delegate_fallback_count_turn == 1
+
+
+@pytest.mark.asyncio
+async def test_delegate_stream_event_callback_forwards_coarse_child_events(
+    monkeypatch,
+):
+    mock_interpreter = MagicMock()
+    parent_agent = RLMReActChatAgent(interpreter=mock_interpreter)
+    parent_agent._current_depth = 0
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str):
+            _ = (prompt, context)
+            return dspy.Prediction(
+                answer="done",
+                trajectory=[{"reasoning": "inspect file", "output": "ok"}],
+                final_reasoning="done",
+            )
+
+    monkeypatch.setattr(
+        "fleet_rlm.react.delegate_sub_agent.build_recursive_subquery_rlm",
+        lambda **kwargs: _FakeChildModule(),
+    )
+
+    def _fake_streamify(*args, **kwargs):
+        _ = (args, kwargs)
+
+        async def _stream_with_prediction(**stream_kwargs):
+            _ = stream_kwargs
+            yield StatusMessage(message="Calling tool: read_file_slice(path='a.py')")
+            yield StatusMessage(message="Tool finished.")
+            yield dspy.Prediction(
+                answer="done",
+                trajectory=[{"reasoning": "inspect file", "output": "ok"}],
+                final_reasoning="done",
+            )
+
+        return _stream_with_prediction
+
+    monkeypatch.setattr(
+        "fleet_rlm.react.delegate_sub_agent.dspy.streamify", _fake_streamify
+    )
+
+    events: list[StreamEvent] = []
+    result = await spawn_delegate_sub_agent_async(
+        parent_agent,
+        prompt="inspect file",
+        context="ctx",
+        stream_event_callback=events.append,
+    )
+
+    assert result["status"] == "ok"
+    kinds = [event.kind for event in events]
+    assert "status" in kinds
+    assert "tool_call" in kinds
+    assert "tool_result" in kinds
+    assert "trajectory_step" in kinds

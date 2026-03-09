@@ -18,7 +18,8 @@ Authoritative contracts, interfaces, and implementation-facing facts.
 
 ## Internal Maps
 
-- [Codebase Map](codebase-map.md)
+- [Codebase Map and Simplification Audit](codebase-map.md)
+  Current full-package architecture map for `src/fleet_rlm`, including runtime surfaces, support packages, and refactor hotspots.
 - [Architecture Audit (2026-03-06)](architecture-audit-2026-03-06.md)
   Historical baseline snapshot; check `PLANS.md`, `TASKS.md`, and AGENTS files for the live implementation state.
 

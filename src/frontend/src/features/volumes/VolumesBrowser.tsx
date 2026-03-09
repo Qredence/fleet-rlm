@@ -4,7 +4,7 @@
  * Displays the real file tree of the configured Modal Volume
  * fetched from GET /api/v1/runtime/volume/tree.
  *
- * All shared state consumed from NavigationContext — zero props.
+ * All shared state consumed from NavigationStore — zero props.
  */
 import { useState, useCallback, useMemo } from "react";
 import { useReducedMotion } from "motion/react";
@@ -12,7 +12,7 @@ import { Search, HardDrive, TriangleAlert, RefreshCw } from "lucide-react";
 import { typo } from "@/lib/config/typo";
 import type { FsNode } from "@/lib/data/types";
 import { useFilesystem } from "@/hooks/useFilesystem";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import {
 } from "@/lib/volumes/browser";
 
 export function VolumesBrowser() {
-  const { openCanvas, selectFile } = useNavigation();
+  const { openCanvas, selectFile } = useNavigationStore();
   const isMobile = useIsMobile();
   const {
     volumes: filesystem,

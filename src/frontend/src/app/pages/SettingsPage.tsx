@@ -8,7 +8,7 @@
 import { useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { typo } from "@/lib/config/typo";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useThemeStore } from "@/stores/themeStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { IconButton } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,7 +27,7 @@ import {
 
 // ── Component ───────────────────────────────────────────────────────
 export function SettingsPage() {
-  const { isDark, toggleTheme } = useNavigation();
+  const { isDark, toggle: toggleTheme } = useThemeStore();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

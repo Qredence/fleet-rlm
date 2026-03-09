@@ -325,7 +325,7 @@ export function ToggleSwitch({
               left: "14%",
               right: "14%",
               height: "44%",
-              borderRadius: "50%",
+              borderRadius: "var(--radius-full)",
               background:
                 "linear-gradient(180deg, var(--toggle-glass-highlight) 0%, var(--toggle-glass-specular-stop) 75%, transparent 100%)",
             }}

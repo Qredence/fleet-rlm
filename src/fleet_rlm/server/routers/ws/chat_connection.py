@@ -17,6 +17,7 @@ from .helpers import (
     _error_envelope,
     _get_execution_emitter,
     _sanitize_for_log,
+    _try_send_json,
 )
 from .lifecycle import (
     PersistenceRequiredError,
@@ -81,10 +82,14 @@ async def _process_chat_message(
     """Process one ``message`` payload and return the loaded docs path."""
     message = str(msg.content or "").strip()
     if not message:
-        await websocket.send_json(
-            {"type": "error", "message": "Message content cannot be empty"}
+        await _try_send_json(
+            websocket, {"type": "error", "message": "Message content cannot be empty"}
         )
         return session.last_loaded_docs_path
+
+    execution_mode = getattr(msg, "execution_mode", "auto")
+    if callable(getattr(agent, "set_execution_mode", None)):
+        agent.set_execution_mode(execution_mode)
 
     await local_persist(include_volume_save=True, latest_user_message=message)
     session.cancel_flag["cancelled"] = False
@@ -184,14 +189,15 @@ async def _chat_message_loop(
                     )
                     continue
 
-                await websocket.send_json(
+                await _try_send_json(
+                    websocket,
                     {
                         "type": "error",
                         "message": (
                             "A run is already in progress. Cancel it or wait for "
                             "completion before sending another message."
                         ),
-                    }
+                    },
                 )
                 continue
 
@@ -210,7 +216,7 @@ async def _chat_message_loop(
 
             if msg.type == "cancel":
                 session.cancel_flag["cancelled"] = True
-                await websocket.send_json(_cancelled_event_payload())
+                await _try_send_json(websocket, _cancelled_event_payload())
                 continue
 
             workspace_id, user_id, sess_id = resolve_session_identity(
@@ -250,8 +256,9 @@ async def _chat_message_loop(
                 continue
 
             if msg.type != "message":
-                await websocket.send_json(
-                    {"type": "error", "message": f"Unknown message type: {msg.type}"}
+                await _try_send_json(
+                    websocket,
+                    {"type": "error", "message": f"Unknown message type: {msg.type}"},
                 )
                 continue
 
@@ -297,12 +304,13 @@ async def _chat_message_loop(
         await _cancel_task(pending_receive_task)
         await _cancel_task(stream_task)
         error_code = _classify_stream_failure(exc)
-        await websocket.send_json(
+        await _try_send_json(
+            websocket,
             _error_envelope(
                 code=error_code,
                 message=f"Server error: {str(exc)}",
                 details={"error_type": type(exc).__name__},
-            )
+            ),
         )
         try:
             await local_persist(include_volume_save=True)

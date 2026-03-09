@@ -22,7 +22,7 @@ function Toaster(props: ToasterProps) {
           fontFamily: "var(--font-family)",
           fontSize: "var(--text-label)",
           fontWeight: "var(--font-weight-medium)",
-          lineHeight: "1.4",
+          lineHeight: "var(--line-height-normal)",
           borderRadius: "var(--radius)",
           boxShadow: "var(--elevation-md)",
         },

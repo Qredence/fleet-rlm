@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
 
-vi.mock("@/hooks/useNavigation", () => ({
-  useNavigation: () => ({
+vi.mock("@/stores/navigationStore", () => ({
+  useNavigationStore: () => ({
     activeNav: "volumes",
     creationPhase: "idle",
     closeCanvas: vi.fn(),

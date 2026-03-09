@@ -34,7 +34,7 @@ export function AnimatedTabs<T extends string = string>({
         "text-muted-foreground w-fit items-center justify-center flex h-8 max-w-full self-start overflow-x-auto rounded-md border border-border-subtle/70 bg-muted/45 p-0.5",
         className,
       )}
-      style={{ height: "2rem", minHeight: "2rem" }}
+      style={{ height: "var(--touch-target-min-height)", minHeight: "var(--touch-target-min-height)" }}
       tabIndex={0}
     >
       {tabs.map((tab) => {

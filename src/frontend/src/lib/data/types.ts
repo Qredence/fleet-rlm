@@ -1,8 +1,5 @@
 // ── Navigation & Phases ─────────────────────────────────────────────
-export type NavItem =
-  | "workspace"
-  | "volumes"
-  | "settings";
+export type NavItem = "workspace" | "volumes" | "settings";
 
 export type CreationPhase =
   | "idle"
@@ -186,6 +183,8 @@ export interface RuntimeContext {
   sandboxActive: boolean;
   effectiveMaxIters: number;
   volumeName?: string;
+  executionMode?: string;
+  sandboxId?: string;
 }
 
 export type ChatRenderPart =
@@ -194,6 +193,7 @@ export type ChatRenderPart =
       parts: { type: "text"; text: string }[];
       isStreaming: boolean;
       duration?: number;
+      runtimeContext?: RuntimeContext;
     }
   | {
       kind: "chain_of_thought";

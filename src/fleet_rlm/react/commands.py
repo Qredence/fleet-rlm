@@ -40,6 +40,7 @@ COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
         ["query"],
         ["chunk_strategy", "max_chunks", "buffer_name"],
     ),
+    "rlm_query": ("rlm_query", ["query"], ["context"]),
     "analyze_document": (
         "analyze_long_document",
         ["query"],
@@ -126,6 +127,7 @@ _BLOCKING_COMMANDS = frozenset(
         "clarification_questions",
         "propose_memory_update",
         "parallel_semantic_map",
+        "rlm_query",
         "chunk_sandbox",
         "load_document",
         "fetch_web_document",

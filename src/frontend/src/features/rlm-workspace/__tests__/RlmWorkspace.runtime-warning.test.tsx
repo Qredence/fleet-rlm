@@ -22,8 +22,8 @@ vi.mock("@/hooks/useStickToBottom", () => ({
   useStickToBottom: () => ({ scrollRef: null, contentRef: null }),
 }));
 
-vi.mock("@/hooks/useNavigation", () => ({
-  useNavigation: () => ({
+vi.mock("@/stores/navigationStore", () => ({
+  useNavigationStore: () => ({
     sessionId: 1,
   }),
 }));
@@ -34,8 +34,8 @@ vi.mock("@/hooks/useAppNavigate", () => ({
   }),
 }));
 
-vi.mock("@/hooks/useChatHistory", () => ({
-  useChatHistory: () => ({
+vi.mock("@/stores/chatHistoryStore", () => ({
+  useChatHistoryStore: () => ({
     conversations: [],
     saveConversation: vi.fn(),
     loadConversation: vi.fn(),
@@ -70,7 +70,7 @@ vi.mock("@/features/rlm-workspace/ChatMessageList", () => ({
   ChatMessageList: () => <div>ChatMessageList</div>,
 }));
 
-vi.mock("@/screens/chat/ConversationHistory", () => ({
+vi.mock("@/features/rlm-workspace/ConversationHistory", () => ({
   ConversationHistory: () => <div>ConversationHistory</div>,
 }));
 
@@ -90,7 +90,8 @@ describe("RlmWorkspace runtime warning", () => {
 
   it("renders warning banner when runtime status is unhealthy", () => {
     const html = renderToStaticMarkup(<RlmWorkspace />);
-    expect(html).toContain("Runtime warning:");
+    expect(html).toContain('data-slot="alert"');
+    expect(html).toContain("Runtime warning");
     expect(html).toContain("Run Runtime tests from Settings -&gt; Runtime.");
     expect(html).toContain("Open Runtime Settings");
   });

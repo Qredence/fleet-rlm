@@ -136,6 +136,7 @@ def test_websocket_with_docs_path(
         assert data["type"] == "event"
         assert data["data"]["kind"] == "final"
         assert data["data"]["text"] == "Processed doc"
+        assert fake_agent._loaded_docs == ["/path/to/doc.txt"]
 
 
 def test_websocket_with_trace_flag(

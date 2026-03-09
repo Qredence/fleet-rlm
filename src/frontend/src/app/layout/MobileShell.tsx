@@ -3,17 +3,26 @@
  *
  * Owns the vaul Drawer for the builder panel, glass tab bar placement,
  * and safe-area inset handling. All shared app state comes from
- * NavigationContext — no props drilled to children.
+ * NavigationStore — no props drilled to children.
  */
 import { Drawer } from "vaul";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useEffect } from "react";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { TopHeader } from "@/app/layout/TopHeader";
 import { ChatPanel } from "@/app/layout/ChatPanel";
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
 import { MobileTabBar } from "@/features/shell/MobileTabBar";
 
 function MobileShell() {
-  const { isCanvasOpen, setIsCanvasOpen } = useNavigation();
+  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
+    useNavigationStore();
+
+  useEffect(() => {
+    registerCanvasHandlers({
+      open: () => setIsCanvasOpen(true),
+      close: () => setIsCanvasOpen(false),
+    });
+  }, [registerCanvasHandlers, setIsCanvasOpen]);
 
   return (
     <div

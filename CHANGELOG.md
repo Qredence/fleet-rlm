@@ -9,6 +9,9 @@ All notable changes to this project are documented in this file.
 - Reworked the skill-creation trace UI so reasoning, task, tool, sandbox, and final-output events render as a cleaner unified execution timeline.
 - Upgraded the builder panel to a tabbed artifact canvas that adapts to available execution data, making it easier to move between graph, timeline, REPL, and preview views.
 - Removed a large set of unused frontend modules and placeholder surfaces, reducing maintenance overhead and clarifying the active web app structure.
+- Added per-turn execution mode controls (`Auto`, `RLM only`, `Tools only`) and streamed child-RLM delegation back through the live chat timeline, giving operators tighter control over when deep recursive execution is used.
+- Migrated navigation, theme, and persisted chat-history state to dedicated Zustand stores while completing more of the workspace ownership cleanup.
+- Standardized more of the AI Elements workspace UI around shared CSS variables/utilities and fixed follow-up citation/rendering issues, making the refreshed interface more consistent in daily use.
 
 ### Added
 
@@ -16,6 +19,10 @@ All notable changes to this project are documented in this file.
   **Outcome:** The execution canvas is easier to navigate and frontend regressions around panel state are covered more thoroughly.
 - **Change:** Added dedicated runtime type definitions for the backend-driven skill-creation flow.
   **Outcome:** Chat runtime contracts are easier to maintain without depending on the removed mock simulation hook.
+- **Change:** Added an execution-mode dropdown to the chat composer and extended chat request / WebSocket schemas to carry `auto`, `rlm_only`, and `tools_only` turn overrides.
+  **Outcome:** Operators can choose whether a turn should use normal tools, force recursive RLM delegation, or let the runtime decide automatically without changing global settings.
+- **Change:** Added dedicated frontend trace-normalization helpers for backend event references/tool parts plus store coverage for navigation, theme, and persisted chat history.
+  **Outcome:** The workspace has clearer UI data-shaping seams and better regression coverage around the new global client-state primitives.
 
 ### Changed
 
@@ -23,8 +30,23 @@ All notable changes to this project are documented in this file.
   **Outcome:** Long-running chat traces are easier to scan and no longer fragment important execution context across many small rows.
 - **Change:** Updated the builder panel to use the canonical domain artifact canvas instead of the older split code-artifact path.
   **Outcome:** Artifact navigation now behaves more consistently across live runs and file-preview workflows.
-- **Change:** Moved the remaining live chat history/clarification/store modules into the `src/screens/chat/*` transition area and documented the canonical frontend layout in `src/frontend/AGENTS.md`.
-  **Outcome:** The current migration seam is explicit, making the frontend codebase easier to understand while refactoring continues.
+- **Change:** Completed more of the frontend ownership cleanup by moving live chat modules into canonical `features/rlm-workspace/*` and `src/stores/*` homes, with matching layout guidance in `src/frontend/AGENTS.md`.
+  **Outcome:** The active workspace architecture is clearer and less dependent on temporary transition seams while refactoring continues.
+- **Change:** Updated the ReAct chat runtime and delegate-sub-agent flow to apply execution mode per turn, filter tool availability accordingly, and stream child-RLM work through the existing websocket trajectory pipeline.
+  **Outcome:** Deep symbolic turns are easier to reason about live, and recursive delegation can now be forced or disabled without changing the top-level chat runtime.
+- **Change:** Split workspace trace rendering into dedicated display-item/reference/tool-part helpers and continued simplifying `RlmWorkspace` ownership boundaries.
+  **Outcome:** The live chat timeline is easier to maintain and renders grouped trace/citation content more consistently.
+- **Change:** Migrated navigation, theme, and chat-history persistence away from ad-hoc hooks/providers into dedicated Zustand stores reused across the app shell.
+  **Outcome:** Shell state is more predictable across route changes and easier to evolve without threading extra providers through the component tree.
+- **Change:** Replaced more inline style literals with shared CSS variables/Tailwind utilities and expanded AI Elements/shared component exports to support the cleaned-up workspace architecture.
+  **Outcome:** The frontend has more consistent typography, spacing, and border treatment with fewer one-off styling paths to maintain.
+
+### Fixed
+
+- **Change:** Improved pending-event draining in streaming internals and raised explicit errors when delegate streaming completes without a prediction.
+  **Outcome:** Child-RLM failures surface earlier and long-running trace streams are less likely to stall or replay pending events inefficiently.
+- **Change:** Fixed inline citation URL handling plus follow-up null-safety/export issues across AI Elements and artifact helpers.
+  **Outcome:** Citations resolve to the correct targets more reliably and richer workspace components are less brittle when payloads are partial.
 
 ### Removed
 

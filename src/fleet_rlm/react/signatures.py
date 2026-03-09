@@ -256,17 +256,26 @@ class ClarificationQuestionSignature(dspy.Signature):
     )
 
 
+class RecursiveSubQuerySignature(dspy.Signature):
+    """Answer a bounded recursive sub-problem by exploring context in Python."""
+
+    prompt: str = dspy.InputField(desc="The delegated sub-task to solve")
+    context: str = dspy.InputField(desc="Optional context for the sub-task")
+    answer: str = dspy.OutputField(desc="Answer for the parent caller")
+
+
 __all__ = [
     "AnalyzeLongDocument",
-    "SummarizeLongDocument",
+    "ClarificationQuestionSignature",
+    "CodeChangePlan",
+    "CoreMemoryUpdateProposal",
     "ExtractFromLogs",
     "GroundedAnswerWithCitations",
     "IncidentTriageFromLogs",
-    "CodeChangePlan",
-    "CoreMemoryUpdateProposal",
-    "VolumeFileTreeSignature",
     "MemoryActionIntentSignature",
     "MemoryStructureAuditSignature",
     "MemoryStructureMigrationPlanSignature",
-    "ClarificationQuestionSignature",
+    "RecursiveSubQuerySignature",
+    "SummarizeLongDocument",
+    "VolumeFileTreeSignature",
 ]

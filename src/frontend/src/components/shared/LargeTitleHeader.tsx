@@ -109,7 +109,7 @@ export function LargeTitleHeader({
             fontFamily: "var(--font-family)",
             fontSize: "var(--text-h2)",
             fontWeight: "var(--font-weight-semibold)",
-            lineHeight: "1.2",
+            lineHeight: "var(--line-height-tight)",
             textWrap: "balance",
           }}
         >

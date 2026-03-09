@@ -1,216 +1,166 @@
-import {
-  createContext,
-  useContext,
-  type ReactNode,
-  type RefObject,
-} from "react";
-import { ChevronDown, Download, MessageSquare } from "lucide-react";
+
+import type { ComponentProps } from "react";
+
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/components/ui/utils";
+import { ArrowDownIcon, DownloadIcon } from "lucide-react";
+import { useCallback } from "react";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
-interface ConversationContextValue {
-  isAtBottom?: boolean;
-  scrollToBottom?: () => void;
-}
+export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
-const ConversationContext = createContext<ConversationContextValue | null>(
-  null,
+export const Conversation = ({ className, ...props }: ConversationProps) => (
+  <StickToBottom
+    className={cn("relative flex-1 overflow-y-hidden", className)}
+    initial="smooth"
+    resize="smooth"
+    role="log"
+    {...props}
+  />
 );
 
-interface ConversationProps extends React.HTMLAttributes<HTMLDivElement> {
-  children: ReactNode;
-  scrollRef?: RefObject<HTMLDivElement | null>;
-  contentRef?: RefObject<HTMLDivElement | null>;
-  isAtBottom?: boolean;
-  scrollToBottom?: () => void;
-}
+export type ConversationContentProps = ComponentProps<
+  typeof StickToBottom.Content
+>;
 
-function Conversation({
-  children,
-  className,
-  scrollRef,
-  contentRef,
-  isAtBottom,
-  scrollToBottom,
-  ...props
-}: ConversationProps) {
-  return (
-    <ConversationContext.Provider value={{ isAtBottom, scrollToBottom }}>
-      <div {...props} className={cn("relative flex-1 min-h-0", className)}>
-        <div
-          ref={scrollRef}
-          className="h-full overflow-y-auto"
-          style={{ overscrollBehavior: "contain" }}
-          data-slot="conversation-viewport"
-        >
-          <div ref={contentRef} data-slot="conversation-content-root">
-            {children}
-          </div>
-        </div>
-      </div>
-    </ConversationContext.Provider>
-  );
-}
-
-interface ConversationContentProps extends React.HTMLAttributes<HTMLDivElement> {
-  children: ReactNode;
-}
-
-function ConversationContent({
-  children,
+export const ConversationContent = ({
   className,
   ...props
-}: ConversationContentProps) {
-  return (
-    <div {...props} className={cn("px-3 py-4 md:px-5 md:py-6", className)}>
-      <div className="mx-auto w-full max-w-[800px] space-y-5 md:space-y-6">
-        {children}
-      </div>
-    </div>
-  );
-}
+}: ConversationContentProps) => (
+  <StickToBottom.Content
+    className={cn("flex flex-col gap-8 p-4", className)}
+    {...props}
+  />
+);
 
-interface ConversationEmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
+export type ConversationEmptyStateProps = ComponentProps<"div"> & {
   title?: string;
   description?: string;
-  icon?: ReactNode;
-  children?: ReactNode;
-}
-
-function ConversationEmptyState({
-  title,
-  description,
-  icon,
-  children,
-  className,
-  ...props
-}: ConversationEmptyStateProps) {
-  const resolvedIcon =
-    icon === undefined ? (
-      <MessageSquare className="size-10" aria-hidden />
-    ) : (
-      icon
-    );
-
-  return (
-    <div
-      {...props}
-      className={cn(
-        "flex flex-col items-center justify-center py-12 text-center",
-        className,
-      )}
-      data-slot="conversation-empty-state"
-    >
-      {resolvedIcon ? (
-        <div className="mb-4 text-muted-foreground">{resolvedIcon}</div>
-      ) : null}
-      {title ? (
-        <h3 className="text-xl font-semibold text-foreground">{title}</h3>
-      ) : null}
-      {description ? (
-        <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          {description}
-        </p>
-      ) : null}
-      {children ? <div className="mt-6 w-full">{children}</div> : null}
-    </div>
-  );
-}
-
-function ConversationScrollButton({
-  className,
-  ...props
-}: React.ComponentProps<typeof Button>) {
-  const ctx = useContext(ConversationContext);
-  const visible = ctx?.isAtBottom === false;
-  if (!visible) return null;
-
-  return (
-    <Button
-      type="button"
-      size="icon"
-      variant="secondary"
-      className={cn(
-        "absolute bottom-3 right-3 z-20 rounded-full border border-border-subtle shadow-none",
-        className,
-      )}
-      onClick={ctx?.scrollToBottom}
-      aria-label="Scroll to latest message"
-      {...props}
-    >
-      <ChevronDown className="size-4" />
-    </Button>
-  );
-}
-
-type ConversationMessageForDownload = {
-  role: string;
-  content: string;
+  icon?: React.ReactNode;
 };
 
-function messagesToMarkdown(
-  messages: ConversationMessageForDownload[],
-  formatMessage?: (
-    message: ConversationMessageForDownload,
-    index: number,
-  ) => string,
-): string {
-  return messages
-    .map((m, i) =>
-      formatMessage ? formatMessage(m, i) : `## ${m.role}\n\n${m.content}`,
-    )
-    .join("\n\n");
-}
+export const ConversationEmptyState = ({
+  className,
+  title = "No messages yet",
+  description = "Start a conversation to see messages here",
+  icon,
+  children,
+  ...props
+}: ConversationEmptyStateProps) => (
+  <div
+    className={cn(
+      "flex size-full flex-col items-center justify-center gap-3 p-8 text-center",
+      className
+    )}
+    {...props}
+  >
+    {children ?? (
+      <>
+        {icon && <div className="text-muted-foreground">{icon}</div>}
+        <div className="space-y-1">
+          <h3 className="font-medium text-sm">{title}</h3>
+          {description && (
+            <p className="text-muted-foreground text-sm">{description}</p>
+          )}
+        </div>
+      </>
+    )}
+  </div>
+);
 
-interface ConversationDownloadProps extends Omit<
-  React.ComponentProps<typeof Button>,
-  "onClick"
-> {
-  messages: ConversationMessageForDownload[];
-  filename?: string;
-  formatMessage?: (
-    message: ConversationMessageForDownload,
-    index: number,
-  ) => string;
-}
+export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
 
-function ConversationDownload({
-  messages,
-  filename = "conversation.md",
-  formatMessage,
+export const ConversationScrollButton = ({
   className,
   ...props
-}: ConversationDownloadProps) {
-  const handleDownload = () => {
+}: ConversationScrollButtonProps) => {
+  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+
+  const handleScrollToBottom = useCallback(() => {
+    scrollToBottom();
+  }, [scrollToBottom]);
+
+  return (
+    !isAtBottom && (
+      <Button
+        className={cn(
+          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
+          className
+        )}
+        onClick={handleScrollToBottom}
+        size="icon"
+        type="button"
+        variant="outline"
+        {...props}
+      >
+        <ArrowDownIcon className="size-4" />
+      </Button>
+    )
+  );
+};
+
+export interface ConversationMessage {
+  role: "user" | "assistant" | "system" | "data" | "tool";
+  content: string;
+}
+
+export type ConversationDownloadProps = Omit<
+  ComponentProps<typeof Button>,
+  "onClick"
+> & {
+  messages: ConversationMessage[];
+  filename?: string;
+  formatMessage?: (message: ConversationMessage, index: number) => string;
+};
+
+const defaultFormatMessage = (message: ConversationMessage): string => {
+  const roleLabel =
+    message.role.charAt(0).toUpperCase() + message.role.slice(1);
+  return `**${roleLabel}:** ${message.content}`;
+};
+
+export const messagesToMarkdown = (
+  messages: ConversationMessage[],
+  formatMessage: (
+    message: ConversationMessage,
+    index: number
+  ) => string = defaultFormatMessage
+): string => messages.map((msg, i) => formatMessage(msg, i)).join("\n\n");
+
+export const ConversationDownload = ({
+  messages,
+  filename = "conversation.md",
+  formatMessage = defaultFormatMessage,
+  className,
+  children,
+  ...props
+}: ConversationDownloadProps) => {
+  const handleDownload = useCallback(() => {
     const markdown = messagesToMarkdown(messages, formatMessage);
-    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([markdown], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
     URL.revokeObjectURL(url);
-  };
+  }, [messages, filename, formatMessage]);
 
   return (
     <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className={cn("absolute top-3 right-3 z-10", className)}
+      className={cn(
+        "absolute top-4 right-4 rounded-full dark:bg-background dark:hover:bg-muted",
+        className
+      )}
       onClick={handleDownload}
+      size="icon"
+      type="button"
+      variant="outline"
       {...props}
     >
-      <Download className="mr-2 size-4" />
-      Download
+      {children ?? <DownloadIcon className="size-4" />}
     </Button>
   );
-}
-
-export {
-  Conversation,
-  ConversationContent,
-  ConversationDownload,
-  ConversationEmptyState,
-  ConversationScrollButton,
 };

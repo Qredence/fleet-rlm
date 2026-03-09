@@ -101,6 +101,7 @@ src/frontend/node_modules/
 src/frontend/dist/
 src/frontend/playwright-report/
 src/frontend/.vite/
+.vite/
 
 src/frontend/test-results/
 archive/

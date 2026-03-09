@@ -17,7 +17,8 @@ import { Command } from "cmdk";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import type { NavItem } from "@/lib/data/types";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
+import { useThemeStore } from "@/stores/themeStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { cn } from "@/lib/utils/cn";
 
@@ -39,7 +40,8 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
-  const { newSession, isDark, toggleTheme } = useNavigation();
+  const { newSession } = useNavigationStore();
+  const { isDark, toggle: toggleTheme } = useThemeStore();
   const { navigateTo, navigate } = useAppNavigate();
   const telemetry = useTelemetry();
 
@@ -104,7 +106,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         aria-label="Command palette"
       >
         <div
-          className="w-full max-w-140 overflow-hidden border border-border-subtle"
+          className="w-full max-w-140 overflow-hidden border-subtle"
           style={{
             borderRadius: "var(--radius-card)",
             backgroundColor: "var(--popover)",
@@ -133,7 +135,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 autoFocus
               />
               <kbd
-                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                 style={typo.micro}
               >
                 ESC
@@ -278,13 +280,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </span>
               <div className="flex items-center gap-1">
                 <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                   style={typo.micro}
                 >
                   &uarr;
                 </kbd>
                 <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                   style={typo.micro}
                 >
                   &darr;
@@ -294,7 +296,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 to select
               </span>
               <kbd
-                className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border border-border-subtle text-muted-foreground"
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
                 style={typo.micro}
               >
                 &crarr;

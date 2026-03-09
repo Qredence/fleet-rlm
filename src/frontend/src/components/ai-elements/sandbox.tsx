@@ -1,133 +1,132 @@
-import { ChevronDown, TerminalSquare } from "lucide-react";
+
+import type { ToolUIPart } from "ai";
+import type { ComponentProps } from "react";
+
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils/cn";
-import type { ToolState } from "@/components/ai-elements/tool";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { cn } from "@/components/ui/utils";
+import { ChevronDownIcon, Code } from "lucide-react";
 
-export type SandboxDensity = "default" | "compact";
-export type SandboxDisclosure = "auto" | "always_open" | "always_collapsed";
+import { getStatusBadge } from "./tool";
 
-function Sandbox({
-  density = "default",
-  disclosure = "auto",
-  defaultOpen,
-  className,
-  ...props
-}: React.ComponentProps<typeof Collapsible> & {
-  density?: SandboxDensity;
-  disclosure?: SandboxDisclosure;
-}) {
-  const resolvedDefaultOpen =
-    disclosure === "always_open"
-      ? true
-      : disclosure === "always_collapsed"
-        ? false
-        : defaultOpen;
-  return (
-    <Collapsible
-      defaultOpen={resolvedDefaultOpen}
-      {...props}
-      className={cn(
-        density === "compact"
-          ? "rounded-xl border border-border-subtle/80 bg-card/70"
-          : "rounded-xl border border-border-subtle bg-card",
-        className,
-      )}
-    />
-  );
+export type SandboxRootProps = ComponentProps<typeof Collapsible>;
+
+export const Sandbox = ({ className, ...props }: SandboxRootProps) => (
+  <Collapsible
+    className={cn(
+      "not-prose group mb-4 w-full overflow-hidden rounded-md border",
+      className
+    )}
+    defaultOpen
+    {...props}
+  />
+);
+
+export interface SandboxHeaderProps {
+  title?: string;
+  state: ToolUIPart["state"];
+  className?: string;
 }
 
-function SandboxHeader({
+export const SandboxHeader = ({
+  className,
   title,
   state,
-  density = "default",
+  ...props
+}: SandboxHeaderProps) => (
+  <CollapsibleTrigger
+    className={cn(
+      "flex w-full items-center justify-between gap-4 p-3",
+      className
+    )}
+    {...props}
+  >
+    <div className="flex items-center gap-2">
+      <Code className="size-4 text-muted-foreground" />
+      <span className="font-medium text-sm">{title}</span>
+      {getStatusBadge(state)}
+    </div>
+    <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+  </CollapsibleTrigger>
+);
+
+export type SandboxContentProps = ComponentProps<typeof CollapsibleContent>;
+
+export const SandboxContent = ({
   className,
   ...props
-}: React.ComponentProps<typeof CollapsibleTrigger> & {
-  title?: string;
-  state: ToolState;
-  density?: SandboxDensity;
-}) {
-  return (
-    <CollapsibleTrigger
-      className={cn(
-        density === "compact"
-          ? "group flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-muted/20"
-          : "group flex w-full items-center gap-2 px-3 py-2 text-left",
-        className,
-      )}
-      {...props}
-    >
-      <TerminalSquare className="size-3.5 text-muted-foreground" />
-      <span
-        className={cn(
-          "min-w-0 flex-1 font-medium text-foreground",
-          density === "compact" ? "text-[13px]" : "text-sm",
-        )}
-      >
-        {title ?? "Sandbox"}
-      </span>
-      <span className="rounded-full border border-border-subtle px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-        {state.replace(/_/g, " ")}
-      </span>
-      <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-    </CollapsibleTrigger>
-  );
-}
+}: SandboxContentProps) => (
+  <CollapsibleContent
+    className={cn(
+      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      className
+    )}
+    {...props}
+  />
+);
 
-function SandboxContent(
-  props: React.ComponentProps<typeof CollapsibleContent>,
-) {
-  return (
-    <CollapsibleContent
-      {...props}
-      className={cn("border-t border-border-subtle/80", props.className)}
-    />
-  );
-}
+export type SandboxTabsProps = ComponentProps<typeof Tabs>;
 
-function SandboxTabs(props: React.ComponentProps<typeof Tabs>) {
-  return <Tabs {...props} className={cn("w-full", props.className)} />;
-}
-function SandboxTabsBar(props: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn(
-        "border-b border-border-subtle/80 px-2.5 py-1.5",
-        props.className,
-      )}
-      {...props}
-    />
-  );
-}
-function SandboxTabsList(props: React.ComponentProps<typeof TabsList>) {
-  return (
-    <TabsList
-      {...props}
-      className={cn("grid w-fit grid-cols-2", props.className)}
-    />
-  );
-}
-function SandboxTabsTrigger(props: React.ComponentProps<typeof TabsTrigger>) {
-  return <TabsTrigger {...props} />;
-}
-function SandboxTabContent(props: React.ComponentProps<typeof TabsContent>) {
-  return (
-    <TabsContent {...props} className={cn("m-0 px-3 py-2", props.className)} />
-  );
-}
+export const SandboxTabs = ({ className, ...props }: SandboxTabsProps) => (
+  <Tabs className={cn("w-full gap-0", className)} {...props} />
+);
 
-export {
-  Sandbox,
-  SandboxHeader,
-  SandboxContent,
-  SandboxTabs,
-  SandboxTabsBar,
-  SandboxTabsList,
-  SandboxTabsTrigger,
-  SandboxTabContent,
-};
+export type SandboxTabsBarProps = ComponentProps<"div">;
+
+export const SandboxTabsBar = ({
+  className,
+  ...props
+}: SandboxTabsBarProps) => (
+  <div
+    className={cn(
+      "flex w-full items-center border-border border-t border-b",
+      className
+    )}
+    {...props}
+  />
+);
+
+export type SandboxTabsListProps = ComponentProps<typeof TabsList>;
+
+export const SandboxTabsList = ({
+  className,
+  ...props
+}: SandboxTabsListProps) => (
+  <TabsList
+    className={cn("h-auto rounded-none border-0 bg-transparent p-0", className)}
+    {...props}
+  />
+);
+
+export type SandboxTabsTriggerProps = ComponentProps<typeof TabsTrigger>;
+
+export const SandboxTabsTrigger = ({
+  className,
+  ...props
+}: SandboxTabsTriggerProps) => (
+  <TabsTrigger
+    className={cn(
+      "rounded-none border-0 border-transparent border-b-2 px-4 py-2 font-medium text-muted-foreground text-sm transition-colors data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none",
+      className
+    )}
+    {...props}
+  />
+);
+
+export type SandboxTabContentProps = ComponentProps<typeof TabsContent>;
+
+export const SandboxTabContent = ({
+  className,
+  ...props
+}: SandboxTabContentProps) => (
+  <TabsContent className={cn("mt-0 text-sm", className)} {...props} />
+);

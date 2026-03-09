@@ -1,155 +1,77 @@
-import { ChevronDown, ExternalLink, Link2 } from "lucide-react";
+
+import type { ComponentProps } from "react";
+
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/components/ui/utils";
+import { BookIcon, ChevronDownIcon } from "lucide-react";
 
-function safeHref(href: string | undefined): string | undefined {
-  if (!href) return undefined;
-  try {
-    const parsed = new URL(href);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return href;
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
+export type SourcesProps = ComponentProps<typeof Collapsible>;
 
-function domainForLabel(href: string): string {
-  try {
-    return new URL(href).hostname.replace(/^www\./, "");
-  } catch {
-    return href;
-  }
-}
+export const Sources = ({ className, ...props }: SourcesProps) => (
+  <Collapsible
+    className={cn("not-prose mb-4 text-primary text-xs", className)}
+    {...props}
+  />
+);
 
-function Sources({
-  defaultOpen = false,
+export type SourcesTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
+  count: number;
+};
+
+export const SourcesTrigger = ({
   className,
-  ...props
-}: React.ComponentProps<typeof Collapsible>) {
-  return (
-    <Collapsible
-      data-slot="sources"
-      defaultOpen={defaultOpen}
-      className={cn(
-        "rounded-xl border border-border-subtle/80 bg-card/70",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-function SourcesTrigger({
   count,
-  className,
-  ...props
-}: React.ComponentProps<typeof CollapsibleTrigger> & { count: number }) {
-  return (
-    <CollapsibleTrigger
-      data-slot="sources-trigger"
-      className={cn(
-        "group flex w-full items-center justify-between px-2.5 py-2 text-left transition-colors hover:bg-muted/20",
-        className,
-      )}
-      {...props}
-    >
-      <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
-        <Link2 className="size-3.5" aria-hidden="true" />
-        Sources
-        <span className="rounded-full border border-border-subtle px-1.5 py-0 text-[10px]">
-          {count}
-        </span>
-      </span>
-      <ChevronDown
-        className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
-        aria-hidden="true"
-      />
-    </CollapsibleTrigger>
-  );
-}
-
-function SourcesContent({
-  className,
-  ...props
-}: React.ComponentProps<typeof CollapsibleContent>) {
-  return (
-    <CollapsibleContent
-      data-slot="sources-content"
-      className={cn("border-t border-border-subtle/80 p-2", className)}
-      {...props}
-    />
-  );
-}
-
-function Source({
-  href,
-  title,
-  className,
   children,
   ...props
-}: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
-  const hrefSafe = safeHref(href);
-  const sourceTitle = title || (hrefSafe ? domainForLabel(hrefSafe) : "Source");
-  const content = (
-    <>
-      <div className="flex items-center gap-2">
-        <span className="truncate text-xs font-medium text-foreground">
-          {sourceTitle}
-        </span>
-        {hrefSafe ? (
-          <ExternalLink
-            className="ml-auto size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-        ) : null}
-      </div>
-      {hrefSafe ? (
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">
-          {domainForLabel(hrefSafe)}
-        </div>
-      ) : null}
-      {children ? (
-        <div className="mt-1 text-xs text-muted-foreground">{children}</div>
-      ) : null}
-    </>
-  );
+}: SourcesTriggerProps) => (
+  <CollapsibleTrigger
+    className={cn("flex items-center gap-2", className)}
+    {...props}
+  >
+    {children ?? (
+      <>
+        <p className="font-medium">Used {count} sources</p>
+        <ChevronDownIcon className="h-4 w-4" />
+      </>
+    )}
+  </CollapsibleTrigger>
+);
 
-  if (!hrefSafe) {
-    return (
-      <div
-        data-slot="source"
-        className={cn(
-          "block rounded-md border border-border-subtle/80 p-2",
-          className,
-        )}
-      >
-        {content}
-      </div>
-    );
-  }
+export type SourcesContentProps = ComponentProps<typeof CollapsibleContent>;
 
-  return (
-    <a
-      data-slot="source"
-      href={hrefSafe}
-      target="_blank"
-      rel="noopener noreferrer nofollow"
-      className={cn(
-        "block rounded-md border border-border-subtle/80 p-2 transition-colors hover:bg-muted/30",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        className,
-      )}
-      {...props}
-    >
-      {content}
-    </a>
-  );
-}
+export const SourcesContent = ({
+  className,
+  ...props
+}: SourcesContentProps) => (
+  <CollapsibleContent
+    className={cn(
+      "mt-3 flex w-fit flex-col gap-2",
+      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      className
+    )}
+    {...props}
+  />
+);
 
-export { Sources, SourcesTrigger, SourcesContent, Source };
+export type SourceProps = ComponentProps<"a">;
+
+export const Source = ({ href, title, children, ...props }: SourceProps) => (
+  <a
+    className="flex items-center gap-2"
+    href={href}
+    rel="noreferrer"
+    target="_blank"
+    {...props}
+  >
+    {children ?? (
+      <>
+        <BookIcon className="h-4 w-4" />
+        <span className="block font-medium">{title}</span>
+      </>
+    )}
+  </a>
+);

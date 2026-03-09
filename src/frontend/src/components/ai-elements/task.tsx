@@ -1,159 +1,87 @@
-import {
-  CheckCircle2,
-  CircleDot,
-  LoaderCircle,
-  AlertCircle,
-  ChevronDown,
-} from "lucide-react";
+
+import type { ComponentProps } from "react";
+
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/components/ui/utils";
+import { ChevronDownIcon, SearchIcon } from "lucide-react";
 
-type TaskStatus = "pending" | "in_progress" | "completed" | "error";
-export type TaskDensity = "default" | "compact";
-export type TaskDisclosure = "auto" | "always_open" | "always_collapsed";
+export type TaskItemFileProps = ComponentProps<"div">;
 
-function iconForStatus(status: TaskStatus) {
-  switch (status) {
-    case "completed":
-      return (
-        <CheckCircle2
-          className="size-3.5 text-muted-foreground"
-          aria-hidden="true"
-        />
-      );
-    case "in_progress":
-      return (
-        <LoaderCircle
-          className="size-3.5 animate-spin text-accent"
-          aria-hidden="true"
-        />
-      );
-    case "error":
-      return (
-        <AlertCircle className="size-3.5 text-destructive" aria-hidden="true" />
-      );
-    default:
-      return (
-        <CircleDot
-          className="size-3.5 text-muted-foreground"
-          aria-hidden="true"
-        />
-      );
-  }
-}
-
-function Task({
-  density = "default",
-  disclosure = "auto",
-  defaultOpen,
-  ...props
-}: React.ComponentProps<typeof Collapsible> & {
-  density?: TaskDensity;
-  disclosure?: TaskDisclosure;
-}) {
-  const resolvedDefaultOpen =
-    disclosure === "always_open"
-      ? true
-      : disclosure === "always_collapsed"
-        ? false
-        : defaultOpen;
-  return (
-    <Collapsible
-      defaultOpen={resolvedDefaultOpen}
-      {...props}
-      className={cn(
-        density === "compact"
-          ? "rounded-xl border border-border-subtle/80 bg-card/70"
-          : "rounded-xl border border-border-subtle bg-card",
-        props.className,
-      )}
-    />
-  );
-}
-
-function TaskTrigger({
-  title,
-  status = "pending",
-  density = "default",
+export const TaskItemFile = ({
+  children,
   className,
   ...props
-}: React.ComponentProps<typeof CollapsibleTrigger> & {
+}: TaskItemFileProps) => (
+  <div
+    className={cn(
+      "inline-flex items-center gap-1 rounded-md border bg-secondary px-1.5 py-0.5 text-foreground text-xs",
+      className
+    )}
+    {...props}
+  >
+    {children}
+  </div>
+);
+
+export type TaskItemProps = ComponentProps<"div">;
+
+export const TaskItem = ({ children, className, ...props }: TaskItemProps) => (
+  <div className={cn("text-muted-foreground text-sm", className)} {...props}>
+    {children}
+  </div>
+);
+
+export type TaskProps = ComponentProps<typeof Collapsible>;
+
+export const Task = ({
+  defaultOpen = true,
+  className,
+  ...props
+}: TaskProps) => (
+  <Collapsible className={cn(className)} defaultOpen={defaultOpen} {...props} />
+);
+
+export type TaskTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
   title: string;
-  status?: TaskStatus;
-  density?: TaskDensity;
-}) {
-  const normalizedStatus = status.replace(/_/g, " ");
+};
 
-  return (
-    <CollapsibleTrigger
-      aria-label={`${title} (${normalizedStatus})`}
-      className={cn(
-        density === "compact"
-          ? "group flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-muted/20"
-          : "group flex w-full items-center gap-2 px-3 py-2 text-left",
-        className,
-      )}
-      {...props}
-    >
-      {iconForStatus(status)}
-      <span
-        className={cn(
-          "min-w-0 flex-1 font-medium text-foreground",
-          density === "compact" ? "text-[13px]" : "text-sm",
-        )}
-      >
-        {title}
-      </span>
-      <ChevronDown
-        className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
-        aria-hidden="true"
-      />
-    </CollapsibleTrigger>
-  );
-}
+export const TaskTrigger = ({
+  children,
+  className,
+  title,
+  ...props
+}: TaskTriggerProps) => (
+  <CollapsibleTrigger asChild className={cn("group", className)} {...props}>
+    {children ?? (
+      <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+        <SearchIcon className="size-4" />
+        <p className="text-sm">{title}</p>
+        <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+      </div>
+    )}
+  </CollapsibleTrigger>
+);
 
-function TaskContent(props: React.ComponentProps<typeof CollapsibleContent>) {
-  return (
-    <CollapsibleContent
-      {...props}
-      className={cn(
-        "border-t border-border-subtle/80 px-2.5 py-2",
-        props.className,
-      )}
-    />
-  );
-}
+export type TaskContentProps = ComponentProps<typeof CollapsibleContent>;
 
-function TaskItem({
+export const TaskContent = ({
+  children,
   className,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn("text-sm text-muted-foreground py-1", className)}
-      {...props}
-    />
-  );
-}
-
-function TaskItemFile({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLSpanElement>) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded border border-border-subtle bg-muted/40 px-1.5 py-0.5 text-xs",
-        "text-muted-foreground",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export { Task, TaskTrigger, TaskContent, TaskItem, TaskItemFile };
+}: TaskContentProps) => (
+  <CollapsibleContent
+    className={cn(
+      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      className
+    )}
+    {...props}
+  >
+    <div className="mt-4 space-y-2 border-muted border-l-2 pl-4">
+      {children}
+    </div>
+  </CollapsibleContent>
+);

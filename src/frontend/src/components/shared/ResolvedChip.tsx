@@ -34,7 +34,7 @@ function ResolvedChip({ icon, children, className }: ResolvedChipProps) {
     <div
       data-slot="resolved-chip"
       className={cn(
-        "inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted border border-border-subtle text-foreground w-fit",
+        "inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted border-subtle text-foreground w-fit",
         className,
       )}
     >
