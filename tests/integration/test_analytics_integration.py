@@ -19,7 +19,6 @@ from fleet_rlm.analytics.mlflow_integration import (
     trace_result_metadata,
 )
 from fleet_rlm.analytics.posthog_callback import PostHogLLMCallback
-import fleet_rlm.analytics.mlflow_integration as mlflow_integration
 
 
 class _FakeClient:
@@ -104,7 +103,7 @@ def test_mlflow_integration_captures_real_trace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(mlflow_integration, "_INIT_IDENTITY", None)
+    monkeypatch.setattr("fleet_rlm.analytics.mlflow_integration._INIT_IDENTITY", None)
     monkeypatch.setattr(mlflow_integration, "_INITIALIZED", False)
     monkeypatch.setattr(mlflow_integration, "_ACTIVE_CONFIG", None)
 
