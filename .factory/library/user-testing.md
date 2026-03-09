@@ -22,7 +22,7 @@ Testing surface: tools, URLs, setup steps, known quirks for the Frontend Archite
 
 ## Setup Steps
 
-1. Start backend: `cd /Volumes/StorageBackup/_RLM/fleet-rlm-dspy && uv run fleet web`
+1. Start backend: `cd <PROJECT_ROOT> && uv run fleet web`
 2. Start frontend: `cd src/frontend && bun run dev`
 3. Navigate to http://localhost:5173
 
