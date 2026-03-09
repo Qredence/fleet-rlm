@@ -416,10 +416,7 @@ async def arun_react_chat_once(
                     result = await agent.achat_turn(message)
                     if not include_trajectory:
                         result.pop("trajectory", None)
-                    return merge_trace_result_metadata(
-                        result,
-                        response_preview=result.get("assistant_response"),
-                    )
+                    return result
     except Exception:
         agent.shutdown()
         raise
