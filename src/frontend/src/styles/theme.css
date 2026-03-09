@@ -36,6 +36,11 @@
   --line-height-relaxed: 1.5;
   --line-height-loose: 1.6;
 
+  /* Letter Spacing */
+  --letter-spacing-label: -0.33px;
+  --letter-spacing-display-title: -0.53px;
+  --letter-spacing-display-subtitle: -1.6px;
+
   /* Font Family */
   --font-family:
     "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont,

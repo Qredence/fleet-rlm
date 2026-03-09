@@ -9,6 +9,7 @@ import type {
 } from "@/lib/data/types";
 import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
+import { mapToolState, mapConfirmationState, mapTaskStatus } from "@/lib/utils/ai-elements-state";
 import { Streamdown } from "@/components/ui/streamdown";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
@@ -23,7 +24,7 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import { Reasoning } from "@/components/ai-elements/reasoning";
+import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai-elements/reasoning";
 import {
   Queue,
   QueueItem,
@@ -308,8 +309,8 @@ function renderSources(
           {part.sources.map((source) => (
             <Source
               key={`${source.sourceId}-${source.url ?? source.canonicalUrl ?? source.title}`}
-              href={source.url ?? source.canonicalUrl}
-              title={source.title}
+              href={source.url ?? source.canonicalUrl ?? "#"}
+              title={source.title ?? "Source"}
             >
               {source.description || source.quote || source.displayUrl}
             </Source>
@@ -331,14 +332,10 @@ function renderAttachments(
           key={attachment.attachmentId}
           data={{
             id: attachment.attachmentId,
-            name: attachment.name,
-            url: attachment.url,
-            previewUrl: attachment.previewUrl,
-            mimeType: attachment.mimeType,
-            mediaType: attachment.mediaType,
-            description: attachment.description,
-            sizeBytes: attachment.sizeBytes,
-            kind: attachment.kind,
+            type: "file",
+            filename: attachment.name ?? "unknown",
+            url: attachment.url ?? "",
+            mediaType: attachment.mimeType ?? attachment.mediaType ?? "application/octet-stream",
           }}
         >
           <AttachmentPreview />
@@ -478,15 +475,11 @@ function renderToolSession(
   return (
     <Message from="assistant" className="mb-4" key={item.key}>
       <MessageContent className="w-full">
-        <Tool
-          density="compact"
-          disclosure="auto"
-          defaultOpen={shouldOpenToolRow(latestState)}
-        >
+        <Tool defaultOpen={shouldOpenToolRow(latestState)}>
           <ToolHeader
-            toolType={toolSessionHeaderLabel(item.items)}
-            state={latestState}
-            density="compact"
+            type="tool-default"
+            state={mapToolState(latestState)}
+            title={toolSessionHeaderLabel(item.items)}
           />
           <ToolContent className="space-y-3">
             {item.items.map((sessionItem) => (
@@ -515,20 +508,23 @@ function renderReasoningPart(
   key: string,
   embedded = false,
 ) {
+  // Combine parts into a single text string for ReasoningContent
+  const reasoningText = part.parts.map(p => p.text).join("\n");
+
   return (
     <div key={key} className="space-y-1">
       <Reasoning
-        parts={part.parts}
         isStreaming={part.isStreaming}
         duration={part.duration}
-        density="compact"
-        displayMode="inline_always"
         className={cn(
           "w-full",
           embedded &&
             "rounded-none border-0 bg-transparent px-0 py-0 shadow-none",
         )}
-      />
+      >
+        <ReasoningTrigger />
+        <ReasoningContent>{reasoningText}</ReasoningContent>
+      </Reasoning>
       <RuntimeContextBadge ctx={part.runtimeContext} />
     </div>
   );
@@ -659,7 +655,7 @@ function renderAssistantTurn(item: AssistantTurnDisplayItem) {
                 <Separator className="bg-border-subtle/70" />
               ) : null}
               {hasAssistantContent ? (
-                <MessageResponse streaming={item.message?.streaming}>
+                <MessageResponse>
                   {assistantContent}
                 </MessageResponse>
               ) : null}
@@ -686,13 +682,8 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       return renderReasoningPart(part, key);
     case "chain_of_thought":
       return (
-        <ChainOfThought
-          key={key}
-          density="compact"
-          disclosure="always_collapsed"
-          defaultOpen={false}
-        >
-          <ChainOfThoughtHeader density="compact">
+        <ChainOfThought key={key} defaultOpen={false}>
+          <ChainOfThoughtHeader>
             {part.title ?? "Execution trace"}
           </ChainOfThoughtHeader>
           <ChainOfThoughtContent>
@@ -701,7 +692,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                 <ChainOfThoughtStep
                   key={step.id}
                   label={step.label}
-                  status={step.status}
+                  status={mapTaskStatus(step.status as "pending" | "in_progress" | "completed" | "error")}
                 >
                   {step.details?.map((detail, idx) => (
                     <div key={`${step.id}-detail-${idx}`}>{detail}</div>
@@ -743,15 +734,9 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       return (
         <Task
           key={key}
-          density="compact"
-          disclosure="auto"
           defaultOpen={shouldOpenTaskRow(part.status)}
         >
-          <TaskTrigger
-            title={part.title}
-            status={part.status}
-            density="compact"
-          />
+          <TaskTrigger title={part.title} />
           <TaskContent>
             {part.items?.length ? (
               <div className="space-y-1">
@@ -777,14 +762,12 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       return (
         <Tool
           key={key}
-          density="compact"
-          disclosure="auto"
           defaultOpen={shouldOpenToolRow(part.state)}
         >
           <ToolHeader
-            toolType={part.title || part.toolType}
-            state={part.state}
-            density="compact"
+            type={`tool-${part.toolType}`}
+            state={mapToolState(part.state)}
+            title={part.title || part.toolType}
           />
           <ToolContent>
             <RuntimeContextBadge ctx={part.runtimeContext} />
@@ -811,14 +794,11 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       return (
         <Sandbox
           key={key}
-          density="compact"
-          disclosure="auto"
           defaultOpen={shouldOpenToolRow(part.state)}
         >
           <SandboxHeader
             title={part.title}
-            state={part.state}
-            density="compact"
+            state={mapToolState(part.state)}
           />
           <SandboxContent>
             <div className="px-2.5 py-1.5">
@@ -884,7 +864,6 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                 key={`${variable.name}-${idx}`}
                 name={variable.name}
                 value={variable.value}
-                required={variable.required}
               >
                 <EnvironmentVariableGroup>
                   <div className="space-y-1">
@@ -919,7 +898,14 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       );
     case "confirmation":
       return (
-        <Confirmation key={key} state={part.state}>
+        <Confirmation
+          key={key}
+          state={mapConfirmationState(part.state)}
+          approval={{
+            id: key,
+            approved: part.state === "approved" ? true : part.state === "rejected" ? false : undefined,
+          }}
+        >
           <ConfirmationTitle>{part.question}</ConfirmationTitle>
           <ConfirmationRequest>
             <ConfirmationActions>
@@ -960,10 +946,10 @@ export function ChatMessageList({
   messages,
   isTyping,
   isMobile,
-  scrollRef,
-  contentRef,
-  isAtBottom,
-  scrollToBottom,
+  scrollRef: _scrollRef,
+  contentRef: _contentRef,
+  isAtBottom: _isAtBottom,
+  scrollToBottom: _scrollToBottom,
   onSuggestionClick,
   onResolveHitl,
   onResolveClarification,
@@ -994,13 +980,7 @@ export function ChatMessageList({
     isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
 
   return (
-    <Conversation
-      scrollRef={scrollRef}
-      contentRef={contentRef}
-      isAtBottom={isAtBottom}
-      scrollToBottom={scrollToBottom}
-      className="bg-background"
-    >
+    <Conversation className="bg-background">
       <ConversationContent>
         {messages.length === 0 && (
           <motion.div {...preset}>
@@ -1018,7 +998,7 @@ export function ChatMessageList({
                     ...typo.display,
                     fontWeight: "var(--font-weight-medium)",
                     lineHeight: "var(--line-height-display)",
-                    letterSpacing: "-0.53px",
+                    letterSpacing: "var(--letter-spacing-display-title)",
                     textWrap: "balance",
                   }}
                 >
@@ -1029,7 +1009,7 @@ export function ChatMessageList({
                   style={{
                     ...typo.display,
                     fontWeight: "var(--font-weight-regular)",
-                    letterSpacing: "-1.6px",
+                    letterSpacing: "var(--letter-spacing-display-subtitle)",
                     textWrap: "balance",
                   }}
                 >
@@ -1148,7 +1128,7 @@ export function ChatMessageList({
                     )}
                     {msg.type === "assistant" && msg.content ? (
                       <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
-                        <MessageResponse streaming={msg.streaming}>
+                        <MessageResponse>
                           {msg.content}
                         </MessageResponse>
                       </div>
@@ -1171,7 +1151,13 @@ export function ChatMessageList({
 
               {msg.type === "hitl" && msg.hitlData && (
                 <div className="mb-6">
-                  <Confirmation state={hitlConfirmationState(msg)}>
+                  <Confirmation
+                    state={mapConfirmationState(hitlConfirmationState(msg))}
+                    approval={{
+                      id: msg.id,
+                      approved: hitlConfirmationState(msg) === "approved" ? true : hitlConfirmationState(msg) === "rejected" ? false : undefined,
+                    }}
+                  >
                     <ConfirmationTitle className="text-sm font-medium">
                       Checkpoint
                     </ConfirmationTitle>
@@ -1224,12 +1210,14 @@ export function ChatMessageList({
                 !msg.renderParts?.length && (
                   <div className="mb-4">
                     <Reasoning
-                      parts={msg.reasoningData.parts}
                       isStreaming={msg.reasoningData.isThinking}
                       duration={msg.reasoningData.duration}
-                      density="compact"
-                      displayMode="inline_always"
-                    />
+                    >
+                      <ReasoningTrigger />
+                      <ReasoningContent>
+                        {msg.reasoningData.parts.map(p => p.text).join("\n")}
+                      </ReasoningContent>
+                    </Reasoning>
                   </div>
                 )}
 

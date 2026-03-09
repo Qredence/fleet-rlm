@@ -48,6 +48,7 @@ dependencies = [
     "pgvector>=0.4.2",
     "PyJWT>=2.8,<3",
     "mlflow[mcp]>=3.10.0",
+    "ripgrep>=15.0.0",
 ]
 
 [project.urls]

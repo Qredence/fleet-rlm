@@ -43,7 +43,7 @@ export function NavTab({
         style={{
           ...typo.labelRegular,
           lineHeight: "var(--space-5)",
-          letterSpacing: "-0.33px",
+          letterSpacing: "var(--letter-spacing-label)",
         }}
       >
         {label}
