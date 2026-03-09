@@ -425,7 +425,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             )
             return
 
-        return _iter_stream(self, message, trace, cancel_check)
+        yield from _iter_stream(self, message, trace, cancel_check)
 
     def chat_turn_stream(self, *, message: str, trace: bool = False) -> dict[str, Any]:
         """Compatibility stream collector for existing CLI/tests."""

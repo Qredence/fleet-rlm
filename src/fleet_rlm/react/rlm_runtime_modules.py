@@ -35,13 +35,18 @@ def create_runtime_rlm(
 ) -> dspy.Module:
     """Create a canonical RLM instance for a runtime signature."""
 
+    kwargs: dict[str, Any] = {
+        "signature": signature,
+        "interpreter": interpreter,
+        "max_iterations": max_iterations,
+        "max_llm_calls": max_llm_calls,
+        "verbose": verbose,
+    }
+    if tools is not None:
+        kwargs["tools"] = tools
+
     return dspy.RLM(
-        signature=signature,
-        interpreter=interpreter,
-        max_iterations=max_iterations,
-        max_llm_calls=max_llm_calls,
-        verbose=verbose,
-        tools=tools,
+        **kwargs,
     )
 
 
