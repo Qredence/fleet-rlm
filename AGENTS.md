@@ -14,10 +14,13 @@ Frontend code lives in `src/frontend/` (Vite + React + TypeScript).
 Tests are organized by scope in `tests/unit/`, `tests/ui/`, `tests/integration/`, and `tests/e2e/`.
 Operational scripts are in `scripts/`; DB migrations are in `migrations/`; API contract source is `openapi.yaml`; longer design/runbook docs are in `docs/`.
 MLflow integration lives under `src/fleet_rlm/analytics/` and is additive to PostHog: use it for GenAI trace correlation, feedback, offline evaluation, and DSPy optimization workflows, not for general product telemetry.
+The experimental Daytona-backed strict-RLM pilot lives in `src/fleet_rlm/daytona_rlm/`; treat it as an isolated reference runtime driven by the `fleet-rlm daytona-smoke` and `fleet-rlm daytona-rlm` CLI commands, not as a replacement for the current Modal/WebSocket chat stack. Its current contract is repo-clone-only, analysis-first, and built around a persistent sandbox-side Python driver with host-brokered recursive subcalls. Daytona setup in this repo is strict: use `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`; `DAYTONA_API_BASE_URL` is considered a misconfiguration.
 
 ## Build, Test, and Development Commands
 - `uv sync --all-extras --dev`: install Python dependencies for full local development.
 - `uv run fleet web`: run the primary local Web UI experience.
+- `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]`: verify native Daytona setup, sandbox creation, repo clone, persistent driver state, and phase-aware diagnostics before using the pilot.
+- `uv run fleet-rlm daytona-rlm --repo <url> --task <text> [--max-depth N] [--batch-concurrency N]`: run the experimental Daytona-backed strict-RLM pilot against a cloned repository.
 - `make test-fast`: run default pytest suite (`not live_llm and not benchmark`).
 - `make quality-gate`: run lint, format check, type check, tests, docs/metadata checks, and frontend checks.
 - `make release-check`: full pre-release validation (quality + security + build + wheel checks).
@@ -40,10 +43,15 @@ Enforce style with:
 Naming: `snake_case` for modules/functions/tests, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants. Keep modules focused and avoid mixing unrelated concerns.
 
 ## Testing Guidelines
-Use `pytest` with strict markers (`unit`, `ui`, `integration`, `e2e`, `live_llm`, `benchmark`).
-Default local run: `uv run pytest -q -m "not live_llm and not benchmark"`.
+Use `pytest` with strict markers (`unit`, `ui`, `integration`, `e2e`, `live_llm`, `live_daytona`, `benchmark`).
+Default local run: `uv run pytest -q -m "not live_llm and not live_daytona and not benchmark"`.
 Name tests `test_<behavior>.py` and add regression tests for bug fixes.
 Frontend tests use Vitest (`bun run test:unit`) and Playwright (`bun run test:e2e`).
+For the Daytona pilot, prefer this focused validation set before broader gates:
+- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`
+- `uv run ruff check src/fleet_rlm/daytona_rlm src/fleet_rlm/cli.py tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`
+- `DAYTONA_LIVE_TESTS=1 uv run pytest -q tests/integration/test_daytona_smoke_live.py` for the opt-in real Daytona validation lane
+Use the Daytona flow in this order: configure `DAYTONA_API_KEY` + `DAYTONA_API_URL`, run `daytona-smoke`, then run `daytona-rlm` only if the smoke diagnostics are clean.
 For chat-runtime or trace changes, prefer this focused validation set before broader gates:
 - `uv run pytest -q tests/ui/server/test_server_config.py tests/ui/ws/test_chat_stream.py tests/unit/test_tools_sandbox.py`
 - `uv run pytest -q tests/unit/test_mlflow_integration.py tests/ui/server/test_api_contract_routes.py`
