@@ -1,6 +1,22 @@
 from __future__ import annotations
 
+import asyncio
+
 from fleet_rlm.core.interpreter import ModalInterpreter
+
+
+class _FakeReloadVolumes:
+    """Mock Sandbox.reload_volumes callable with async support."""
+
+    def __init__(self) -> None:
+        self.sync_calls = 0
+        self.async_calls = 0
+
+    def __call__(self):
+        self.sync_calls += 1
+
+    async def aio(self):
+        self.async_calls += 1
 
 
 class _FakeSandbox:
@@ -8,6 +24,7 @@ class _FakeSandbox:
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.reload_volumes = _FakeReloadVolumes()
 
     def terminate(self):
         pass
@@ -123,6 +140,59 @@ def test_volume_commit_reload_methods(monkeypatch):
     # Should not raise when volume not mounted yet
     interpreter.commit()
     interpreter.reload()
+    asyncio.run(interpreter.areload())
+
+
+def test_volume_reload_uses_sandbox_refresh(monkeypatch):
+    """reload() should refresh mounted volumes via the running sandbox."""
+    monkeypatch.setattr("fleet_rlm.core.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr("fleet_rlm.core.interpreter.modal.Image", _FakeImage)
+
+    interpreter = ModalInterpreter(
+        image=_FakeImage(python_version="3.12"),
+        app=_FakeApp("test-app"),
+        volume_name="test-volume",
+    )
+    interpreter._volume = _FakeVolume("test-volume")
+    interpreter._sandbox = _FakeSandbox()
+
+    interpreter.reload()
+
+    assert interpreter._sandbox.reload_volumes.sync_calls == 1
+
+
+def test_volume_areload_uses_async_sandbox_refresh(monkeypatch):
+    """areload() should use Sandbox.reload_volumes.aio when available."""
+    monkeypatch.setattr("fleet_rlm.core.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr("fleet_rlm.core.interpreter.modal.Image", _FakeImage)
+
+    interpreter = ModalInterpreter(
+        image=_FakeImage(python_version="3.12"),
+        app=_FakeApp("test-app"),
+        volume_name="test-volume",
+    )
+    interpreter._volume = _FakeVolume("test-volume")
+    interpreter._sandbox = _FakeSandbox()
+
+    asyncio.run(interpreter.areload())
+
+    assert interpreter._sandbox.reload_volumes.async_calls == 1
+
+
+def test_volume_reload_noops_without_running_sandbox(monkeypatch):
+    """reload helpers should be safe no-ops before the sandbox starts."""
+    monkeypatch.setattr("fleet_rlm.core.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr("fleet_rlm.core.interpreter.modal.Image", _FakeImage)
+
+    interpreter = ModalInterpreter(
+        image=_FakeImage(python_version="3.12"),
+        app=_FakeApp("test-app"),
+        volume_name="test-volume",
+    )
+    interpreter._volume = _FakeVolume("test-volume")
+
+    interpreter.reload()
+    asyncio.run(interpreter.areload())
 
 
 def test_resolve_app_with_explicit_app(monkeypatch):

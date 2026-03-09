@@ -26,6 +26,7 @@ uv run pytest -q -m "not live_llm and not benchmark"
 - UI/server fixture boundaries live in `tests/ui/conftest.py`.
 - WebSocket test fakes + app/client fixtures live in `tests/ui/ws/`.
 - Integration runtime gates + DB fixtures live in `tests/integration/conftest.py`.
+- Prefer consolidating related websocket behavior into `tests/ui/ws/test_chat_stream.py` and HTTP contract checks into `tests/ui/server/test_api_contract_routes.py` instead of creating many tiny route-specific files.
 
 ## Commands
 
