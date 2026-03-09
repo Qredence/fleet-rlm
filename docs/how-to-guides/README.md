@@ -1,2 +1,0 @@
-# how-to-guides
-
