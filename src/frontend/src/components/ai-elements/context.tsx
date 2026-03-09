@@ -72,7 +72,7 @@ const ContextIcon = () => {
       aria-label="Model context usage"
       height="20"
       role="img"
-      style={{ color: "currentcolor" }}
+      className="text-current -rotate-90 origin-center"
       viewBox={`0 0 ${ICON_VIEWBOX} ${ICON_VIEWBOX}`}
       width="20"
     >
@@ -96,7 +96,6 @@ const ContextIcon = () => {
         strokeDashoffset={dashOffset}
         strokeLinecap="round"
         strokeWidth={ICON_STROKE_WIDTH}
-        style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
       />
     </svg>
   );
