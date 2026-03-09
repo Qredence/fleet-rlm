@@ -31,7 +31,7 @@ memory:
   archival_path: "/data/memory"
 
 rlm_settings:
-  max_depth: 2
+  max_depth: 3
   max_iters: 60
   deep_max_iters: 60
   enable_adaptive_iters: true
@@ -55,3 +55,12 @@ analytics:
     input_truncation_chars: ${oc.env:POSTHOG_INPUT_TRUNCATION,10000}
     output_truncation_chars: ${oc.env:POSTHOG_OUTPUT_TRUNCATION,5000}
     redact_sensitive: ${oc.env:POSTHOG_REDACT_SENSITIVE,true}
+  mlflow:
+    enabled: ${oc.env:MLFLOW_ENABLED,true}
+    tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,http://127.0.0.1:5000}
+    experiment: ${oc.env:MLFLOW_EXPERIMENT,fleet-rlm}
+    active_model_id: ${oc.env:MLFLOW_ACTIVE_MODEL_ID,null}
+    dspy_log_traces_from_compile: ${oc.env:MLFLOW_DSPY_LOG_TRACES_FROM_COMPILE,false}
+    dspy_log_traces_from_eval: ${oc.env:MLFLOW_DSPY_LOG_TRACES_FROM_EVAL,true}
+    dspy_log_compiles: ${oc.env:MLFLOW_DSPY_LOG_COMPILES,false}
+    dspy_log_evals: ${oc.env:MLFLOW_DSPY_LOG_EVALS,false}

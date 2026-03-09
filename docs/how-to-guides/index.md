@@ -7,6 +7,7 @@ Task-oriented guides for operating `fleet-rlm` in day-to-day usage.
 - [Installation](installation.md)
 - [Configuring Modal](configuring-modal.md)
 - [Runtime Settings](runtime-settings.md)
+- [MLflow Tracing, Feedback, Eval, and Optimization](mlflow-workflows.md)
 
 ## Running and Integration
 

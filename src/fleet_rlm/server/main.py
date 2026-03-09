@@ -11,8 +11,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from fleet_rlm import __version__
+from fleet_rlm.analytics import initialize_mlflow, shutdown_mlflow
 from fleet_rlm.analytics.client import get_posthog_client, shutdown_posthog_client
-from fleet_rlm.analytics.config import PostHogConfig
+from fleet_rlm.analytics.config import MlflowConfig, PostHogConfig
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.db import DatabaseManager, FleetRepository
 from fleet_rlm.server.runtime_settings import resolve_env_path
@@ -27,6 +28,7 @@ from .routers import (
     health,
     runtime,
     sessions,
+    traces,
     ws,
 )
 
@@ -140,6 +142,7 @@ async def _initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) 
 
 def _initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
     """Load planner/delegate LMs into process state."""
+    initialize_mlflow(MlflowConfig.from_env())
     model_name = cfg.agent_model
     if model_name is None:
         state.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
@@ -164,6 +167,7 @@ def _register_api_routes(app: FastAPI) -> None:
     api_router.include_router(ws.router)
     api_router.include_router(sessions.router)
     api_router.include_router(runtime.router)
+    api_router.include_router(traces.router)
     app.include_router(api_router)
 
 
@@ -219,6 +223,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         yield
         state.planner_lm = None
         state.delegate_lm = None
+        shutdown_mlflow()
         shutdown_posthog_client()
         if state.db_manager is not None:
             await state.db_manager.dispose()

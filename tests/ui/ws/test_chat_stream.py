@@ -45,10 +45,19 @@ def test_websocket_basic_message_flow(
         assert len(received_events) == 3
         assert received_events[0]["data"]["kind"] == "assistant_token"
         assert received_events[0]["data"]["text"] == "Hello"
+        assert set(received_events[0]["data"].keys()) >= {
+            "kind",
+            "text",
+            "payload",
+            "timestamp",
+            "version",
+            "event_id",
+        }
         assert received_events[0]["data"]["version"] == 2
         assert isinstance(received_events[0]["data"]["event_id"], str)
         assert received_events[1]["data"]["kind"] == "assistant_token"
         assert received_events[1]["data"]["text"] == " world"
+        assert received_events[2]["type"] == "event"
         assert received_events[2]["data"]["kind"] == "final"
         assert received_events[2]["data"]["text"] == "Hello world"
         assert received_events[2]["data"]["payload"]["history_turns"] == 1
@@ -76,6 +85,81 @@ def test_websocket_accepts_query_auth_in_dev_mode(ws_client, fake_agent: FakeCha
         assert data["type"] == "event"
         assert data["data"]["kind"] == "final"
         assert data["data"]["text"] == "ok"
+
+
+def test_execution_websocket_requires_session_id_query_param(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/execution", headers=websocket_auth_headers
+    ) as websocket:
+        error = websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "missing_session_id"
+    assert "session_id" in error["message"]
+
+
+def test_execution_websocket_streams_execution_events_for_matching_session(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(kind="reasoning_step", text="Thinking...", timestamp=ts(1.0)),
+            StreamEvent(
+                kind="final",
+                text="Done",
+                payload={"trajectory": {}, "history_turns": 1},
+                timestamp=ts(2.0),
+            ),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/execution?workspace_id=default&user_id=alice&session_id=session-123",
+        headers=websocket_auth_headers,
+    ) as execution_ws:
+        with ws_client.websocket_connect(
+            "/api/v1/ws/chat", headers=websocket_auth_headers
+        ) as chat_ws:
+            chat_ws.send_json(
+                {
+                    "type": "message",
+                    "content": "test execution events",
+                    "workspace_id": "default",
+                    "user_id": "alice",
+                    "session_id": "session-123",
+                }
+            )
+
+            while True:
+                chat_data = chat_ws.receive_json()
+                if (
+                    chat_data["type"] == "event"
+                    and chat_data["data"]["kind"] == "final"
+                ):
+                    break
+
+            execution_events = []
+            while True:
+                event = execution_ws.receive_json()
+                execution_events.append(event)
+                if event["type"] == "execution_completed":
+                    break
+
+    assert execution_events[0]["type"] == "execution_started"
+    assert execution_events[0]["run_id"].endswith(":1")
+    assert execution_events[0]["workspace_id"] == "default"
+    assert execution_events[0]["user_id"] == "alice"
+    assert execution_events[0]["session_id"] == "session-123"
+
+    step_events = [
+        event for event in execution_events if event["type"] == "execution_step"
+    ]
+    assert step_events
+    assert any(step["step"]["type"] == "llm" for step in step_events)
+    assert any(step["step"]["type"] == "output" for step in step_events)
+    assert execution_events[-1]["type"] == "execution_completed"
 
 
 def test_websocket_final_event_waits_for_run_completion(
@@ -108,6 +192,108 @@ def test_websocket_final_event_waits_for_run_completion(
         assert elapsed >= delayed_repo.completion_delay_seconds * 0.8
 
 
+def test_websocket_final_event_can_include_mlflow_metadata(
+    ws_client,
+    fake_agent: FakeChatAgent,
+    websocket_auth_headers,
+    monkeypatch,
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="done",
+                payload={"history_turns": 1},
+                timestamp=ts(1.0),
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.ws.streaming.merge_trace_result_metadata",
+        lambda payload, response_preview=None: {
+            **(payload or {}),
+            "mlflow_trace_id": "trace-123",
+            "mlflow_client_request_id": "req-123",
+        },
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json({"type": "message", "content": "hello"})
+        data = websocket.receive_json()
+
+    assert data["type"] == "event"
+    assert data["data"]["kind"] == "final"
+    assert data["data"]["payload"]["history_turns"] == 1
+    assert data["data"]["payload"]["mlflow_trace_id"] == "trace-123"
+    assert data["data"]["payload"]["mlflow_client_request_id"] == "req-123"
+
+
+def test_websocket_multiple_messages_sequential(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(kind="final", text="Response 1", timestamp=ts(1.0)),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json({"type": "message", "content": "message 1"})
+        data1 = websocket.receive_json()
+        assert data1["data"]["text"] == "Response 1"
+
+        fake_agent.set_events(
+            [
+                StreamEvent(kind="final", text="Response 2", timestamp=ts(2.0)),
+            ]
+        )
+        websocket.send_json({"type": "message", "content": "message 2"})
+        data2 = websocket.receive_json()
+        assert data2["data"]["text"] == "Response 2"
+
+
+def test_websocket_session_state_isolated_by_session_id(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(kind="final", text="Response A", timestamp=ts(1.0)),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {"type": "message", "content": "message A", "session_id": "session-a"}
+        )
+        first = websocket.receive_json()
+        assert first["data"]["text"] == "Response A"
+
+        fake_agent.set_events(
+            [
+                StreamEvent(kind="final", text="Response B", timestamp=ts(2.0)),
+            ]
+        )
+        websocket.send_json(
+            {"type": "message", "content": "message B", "session_id": "session-b"}
+        )
+        second = websocket.receive_json()
+        assert second["data"]["text"] == "Response B"
+
+    keys = [
+        key
+        for key in ws_client.app.state.server_state.sessions.keys()
+        if key.startswith("default:alice:")
+    ]
+    assert "default:alice:session-a" in keys
+    assert "default:alice:session-b" in keys
+
+
 def test_websocket_with_docs_path(
     ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):
@@ -137,6 +323,25 @@ def test_websocket_with_docs_path(
         assert data["data"]["kind"] == "final"
         assert data["data"]["text"] == "Processed doc"
         assert fake_agent._loaded_docs == ["/path/to/doc.txt"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_substring"),
+    [
+        ({"type": "invalid_type", "content": "test"}, "Unknown message type"),
+        ({"type": "message", "content": ""}, "empty"),
+    ],
+)
+def test_websocket_validation_errors(
+    ws_client, websocket_auth_headers, payload: dict[str, str], expected_substring: str
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(payload)
+        data = websocket.receive_json()
+        assert data["type"] == "error"
+        assert expected_substring.lower() in data["message"].lower()
 
 
 def test_websocket_with_trace_flag(

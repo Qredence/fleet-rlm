@@ -5,6 +5,7 @@ from . import (
     health,
     runtime,
     sessions,
+    traces,
     ws,
 )
 
@@ -14,4 +15,5 @@ __all__ = [
     "ws",
     "sessions",
     "runtime",
+    "traces",
 ]

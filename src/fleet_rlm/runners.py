@@ -20,12 +20,19 @@ All runners automatically:
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import dspy
 
+from .analytics import (
+    MlflowTraceRequestContext,
+    merge_trace_result_metadata,
+    mlflow_request_context,
+    new_client_request_id,
+)
 from .core.config import configure_planner_from_env
 from .core.interpreter import ModalInterpreter
 from .react.agent import RLMReActChatAgent
@@ -55,6 +62,30 @@ class _ReActAgentOptions:
     delegate_lm: Any | None = None
     delegate_max_calls_per_turn: int = 8
     delegate_result_truncation_chars: int = 8000
+
+
+def _local_runner_user_id() -> str:
+    candidate = (os.getenv("USER") or os.getenv("USERNAME") or "").strip()
+    return candidate or "local-user"
+
+
+def _runner_trace_context(
+    *,
+    entrypoint: str,
+    request_preview: str,
+    metadata: dict[str, str] | None = None,
+) -> MlflowTraceRequestContext:
+    return MlflowTraceRequestContext(
+        client_request_id=new_client_request_id(prefix=entrypoint),
+        session_id=f"runner:{entrypoint}",
+        user_id=_local_runner_user_id(),
+        app_env=(os.getenv("APP_ENV") or "local").strip().lower(),
+        request_preview=request_preview,
+        metadata={
+            "fleet_rlm.entrypoint": entrypoint,
+            **(metadata or {}),
+        },
+    )
 
 
 def _rlm_trajectory_payload(result: Any, *, include_trajectory: bool) -> dict[str, Any]:
@@ -307,10 +338,19 @@ def run_react_chat_once(
         env_file=env_file,
         planner_lm=None,
     ) as agent:
-        result = agent.chat_turn(message)
-        if not include_trajectory:
-            result.pop("trajectory", None)
-        return result
+        with mlflow_request_context(
+            _runner_trace_context(
+                entrypoint="run-react-chat-once",
+                request_preview=message,
+            )
+        ):
+            result = agent.chat_turn(message)
+            if not include_trajectory:
+                result.pop("trajectory", None)
+            return merge_trace_result_metadata(
+                result,
+                response_preview=result.get("assistant_response"),
+            )
 
 
 async def arun_react_chat_once(
@@ -367,10 +407,19 @@ async def arun_react_chat_once(
     try:
         with dspy.context(lm=planner_lm) if planner_lm else _nullcontext():
             with agent:
-                result = await agent.achat_turn(message)
-                if not include_trajectory:
-                    result.pop("trajectory", None)
-                return result
+                with mlflow_request_context(
+                    _runner_trace_context(
+                        entrypoint="arun-react-chat-once",
+                        request_preview=message,
+                    )
+                ):
+                    result = await agent.achat_turn(message)
+                    if not include_trajectory:
+                        result.pop("trajectory", None)
+                    return merge_trace_result_metadata(
+                        result,
+                        response_preview=result.get("assistant_response"),
+                    )
     except Exception:
         agent.shutdown()
         raise
@@ -437,35 +486,50 @@ def run_long_context(
     with _interpreter(
         timeout=timeout, secret_name=secret_name, volume_name=volume_name
     ) as interpreter:
-        rlm = dspy.RLM(
-            signature=sig,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
-        )
+        with mlflow_request_context(
+            _runner_trace_context(
+                entrypoint="run-long-context",
+                request_preview=query,
+                metadata={
+                    "fleet_rlm.mode": mode,
+                    "fleet_rlm.docs_path": str(docs_path),
+                },
+            )
+        ):
+            rlm = dspy.RLM(
+                signature=sig,
+                interpreter=interpreter,
+                max_iterations=max_iterations,
+                max_llm_calls=max_llm_calls,
+                verbose=verbose,
+            )
 
-        if mode == "analyze":
-            result = rlm(document=docs, query=query)
-            response: dict[str, Any] = {
-                "findings": result.findings,
-                "answer": result.answer,
-                "sections_examined": result.sections_examined,
-                "doc_chars": len(docs),
-            }
-        else:
-            result = rlm(document=docs, focus=query)
-            response = {
-                "summary": result.summary,
-                "key_points": result.key_points,
-                "coverage_pct": result.coverage_pct,
-                "doc_chars": len(docs),
-            }
+            if mode == "analyze":
+                result = rlm(document=docs, query=query)
+                response: dict[str, Any] = {
+                    "findings": result.findings,
+                    "answer": result.answer,
+                    "sections_examined": result.sections_examined,
+                    "doc_chars": len(docs),
+                }
+                response_preview = str(getattr(result, "answer", "") or "")
+            else:
+                result = rlm(document=docs, focus=query)
+                response = {
+                    "summary": result.summary,
+                    "key_points": result.key_points,
+                    "coverage_pct": result.coverage_pct,
+                    "doc_chars": len(docs),
+                }
+                response_preview = str(getattr(result, "summary", "") or "")
 
-        response.update(
-            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
-        )
-        return response
+            response.update(
+                _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
+            )
+            return merge_trace_result_metadata(
+                response,
+                response_preview=response_preview,
+            )
 
 
 def check_secret_presence(*, secret_name: str = "LITELLM") -> dict[str, bool]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from fleet_rlm import __version__
 
@@ -212,3 +212,25 @@ class VolumeFileContentResponse(BaseModel):
     size: int
     content: str
     truncated: bool = False
+
+
+class TraceFeedbackRequest(BaseModel):
+    trace_id: str | None = None
+    client_request_id: str | None = None
+    is_correct: bool
+    comment: str | None = None
+    expected_response: str | None = None
+
+    @model_validator(mode="after")
+    def validate_trace_lookup_target(self) -> "TraceFeedbackRequest":
+        if (self.trace_id or "").strip() or (self.client_request_id or "").strip():
+            return self
+        raise ValueError("trace_id or client_request_id is required")
+
+
+class TraceFeedbackResponse(BaseModel):
+    ok: bool = True
+    trace_id: str
+    client_request_id: str | None = None
+    feedback_logged: bool = True
+    expectation_logged: bool = False

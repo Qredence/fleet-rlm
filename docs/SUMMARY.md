@@ -14,6 +14,7 @@
   * [Deploying the API Server](how-to-guides/deploying-server.md)
   * [How-to Guides](how-to-guides/index.md)
   * [Installation Guide](how-to-guides/installation.md)
+  * [MLflow Tracing, Feedback, Eval, and Optimization](how-to-guides/mlflow-workflows.md)
   * [Performance Regression Guardrail](how-to-guides/performance-regression-guardrail.md)
   * [Runtime Setup from Frontend Settings](how-to-guides/runtime-settings.md)
   * [Troubleshooting](how-to-guides/troubleshooting.md)

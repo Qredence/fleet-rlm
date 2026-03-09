@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from fleet_rlm.analytics import MlflowTraceRequestContext, new_client_request_id
 from fleet_rlm.db.models import RunStatus
 
 from .chat_runtime import _ChatSessionState, _PreparedChatRuntime
@@ -112,6 +113,18 @@ async def _process_chat_message(
         turn_index=turn_index,
         session_record=session.session_record,
     )
+    trace_context = MlflowTraceRequestContext(
+        client_request_id=new_client_request_id(prefix="chat"),
+        session_id=f"{workspace_id}:{user_id}:{sess_id}",
+        user_id=user_id,
+        app_env=runtime.cfg.app_env,
+        request_preview=message,
+        metadata={
+            "fleet_rlm.workspace_id": workspace_id,
+            "fleet_rlm.turn_index": str(turn_index),
+            "fleet_rlm.execution_mode": execution_mode,
+        },
+    )
 
     def cancel_check() -> bool:
         return session.cancel_flag["cancelled"]
@@ -129,6 +142,7 @@ async def _process_chat_message(
         last_loaded_docs_path=session.last_loaded_docs_path,
         analytics_enabled=getattr(msg, "analytics_enabled", None),
         persist_session_state=local_persist,
+        mlflow_trace_context=trace_context,
     )
 
 

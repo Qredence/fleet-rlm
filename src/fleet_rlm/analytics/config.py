@@ -1,4 +1,4 @@
-"""Configuration models for PostHog LLM analytics."""
+"""Configuration models for runtime analytics integrations."""
 
 from __future__ import annotations
 
@@ -50,5 +50,50 @@ class PostHogConfig(BaseModel):
             ),
             redact_sensitive=_env_bool(
                 os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True
+            ),
+        )
+
+
+class MlflowConfig(BaseModel):
+    """MLflow tracing/evaluation configuration."""
+
+    enabled: bool = Field(default=True)
+    tracking_uri: str = Field(default="http://127.0.0.1:5000")
+    experiment: str = Field(default="fleet-rlm")
+    active_model_id: str | None = Field(default=None)
+    dspy_log_traces_from_compile: bool = Field(default=False)
+    dspy_log_traces_from_eval: bool = Field(default=True)
+    dspy_log_compiles: bool = Field(default=False)
+    dspy_log_evals: bool = Field(default=False)
+
+    @classmethod
+    def from_env(cls) -> "MlflowConfig":
+        """Load MLflow configuration from environment variables."""
+        tracking_uri = (
+            os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5000"
+        ).strip()
+        experiment = (os.getenv("MLFLOW_EXPERIMENT") or "fleet-rlm").strip()
+        active_model_id = (os.getenv("MLFLOW_ACTIVE_MODEL_ID") or "").strip() or None
+        enabled_raw = os.getenv("MLFLOW_ENABLED")
+        return cls(
+            enabled=_env_bool(enabled_raw, default=True),
+            tracking_uri=tracking_uri,
+            experiment=experiment or "fleet-rlm",
+            active_model_id=active_model_id,
+            dspy_log_traces_from_compile=_env_bool(
+                os.getenv("MLFLOW_DSPY_LOG_TRACES_FROM_COMPILE"),
+                default=False,
+            ),
+            dspy_log_traces_from_eval=_env_bool(
+                os.getenv("MLFLOW_DSPY_LOG_TRACES_FROM_EVAL"),
+                default=True,
+            ),
+            dspy_log_compiles=_env_bool(
+                os.getenv("MLFLOW_DSPY_LOG_COMPILES"),
+                default=False,
+            ),
+            dspy_log_evals=_env_bool(
+                os.getenv("MLFLOW_DSPY_LOG_EVALS"),
+                default=False,
             ),
         )

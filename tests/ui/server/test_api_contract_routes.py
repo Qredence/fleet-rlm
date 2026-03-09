@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -13,6 +16,7 @@ _REQUIRED_HTTP_PATHS = {
     "/api/v1/runtime/tests/lm",
     "/api/v1/runtime/status",
     "/api/v1/sessions/state",
+    "/api/v1/traces/feedback",
 }
 
 _REQUIRED_WS_PATHS = {
@@ -153,3 +157,244 @@ def test_removed_deprecated_and_planned_routes_absent(
     }
     assert removed_paths.isdisjoint(http_paths)
     assert removed_paths.isdisjoint(set(local_client.app.openapi().get("paths", {})))
+
+
+def _patch_main_resolve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from fleet_rlm.server import main as server_main
+
+    def fake_resolve(self, *args, **kwargs):  # noqa: ARG001
+        return Path(tmp_path / "repo" / "src" / "fleet_rlm" / "server" / "main.py")
+
+    monkeypatch.setattr(server_main.Path, "resolve", fake_resolve)
+
+
+def test_resolve_ui_dist_dir_prefers_frontend_when_both_exist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.server import main as server_main
+
+    _patch_main_resolve(monkeypatch, tmp_path)
+
+    original_exists = server_main.Path.exists
+
+    def fake_exists(self: Path) -> bool:
+        path_str = str(self)
+        if path_str.endswith("/ui/dist"):
+            return True
+        if path_str.endswith("/src/frontend/dist"):
+            return True
+        return original_exists(self)
+
+    monkeypatch.setattr(server_main.Path, "exists", fake_exists)
+
+    resolved = server_main._resolve_ui_dist_dir()
+
+    assert resolved is not None
+    assert str(resolved).endswith("/src/frontend/dist")
+
+
+def test_resolve_ui_dist_dir_falls_back_to_packaged_dist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.server import main as server_main
+
+    _patch_main_resolve(monkeypatch, tmp_path)
+
+    original_exists = server_main.Path.exists
+
+    def fake_exists(self: Path) -> bool:
+        path_str = str(self)
+        if path_str.endswith("/src/frontend/dist"):
+            return False
+        if path_str.endswith("/ui/dist"):
+            return True
+        return original_exists(self)
+
+    monkeypatch.setattr(server_main.Path, "exists", fake_exists)
+
+    resolved = server_main._resolve_ui_dist_dir()
+
+    assert resolved is not None
+    assert str(resolved).endswith("/ui/dist")
+
+
+def test_create_app_serves_spa_index_from_frontend_dist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.server import main as server_main
+    from fleet_rlm.server.config import ServerRuntimeConfig
+    from fleet_rlm.server.main import create_app
+
+    ui_dist = tmp_path / "src" / "frontend" / "dist"
+    assets_dir = ui_dist / "assets"
+    branding_dir = ui_dist / "branding"
+    assets_dir.mkdir(parents=True)
+    branding_dir.mkdir(parents=True)
+    (ui_dist / "index.html").write_text("<html><body>Fleet UI</body></html>")
+    (branding_dir / "logo-mark.svg").write_text("<svg>logo</svg>")
+
+    monkeypatch.setattr(server_main, "_resolve_ui_dist_dir", lambda: ui_dist)
+
+    app = create_app(
+        config=ServerRuntimeConfig(
+            app_env="local",
+            database_required=False,
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Fleet UI" in response.text
+
+    logo = client.get("/branding/logo-mark.svg")
+    assert logo.status_code == 200
+    assert logo.text == "<svg>logo</svg>"
+
+
+def test_trace_feedback_logs_feedback_by_trace_id(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    fake_trace = SimpleNamespace(
+        info=SimpleNamespace(trace_id="trace-1", client_request_id="req-1")
+    )
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.resolve_trace",
+        lambda **kwargs: fake_trace,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.log_trace_feedback",
+        lambda **kwargs: (
+            calls.append(kwargs)
+            or {"feedback_logged": True, "expectation_logged": True}
+        ),
+    )
+
+    response = default_client.post(
+        "/api/v1/traces/feedback",
+        headers=auth_headers,
+        json={
+            "trace_id": "trace-1",
+            "is_correct": True,
+            "comment": "Looks good",
+            "expected_response": "Expected answer",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trace_id"] == "trace-1"
+    assert payload["client_request_id"] == "req-1"
+    assert payload["feedback_logged"] is True
+    assert payload["expectation_logged"] is True
+    assert calls[0]["source_id"] == "user-a"
+    assert calls[0]["metadata"]["tenant_claim"] == "tenant-a"
+
+
+def test_trace_feedback_resolves_by_client_request_id(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[dict[str, object]] = []
+    fake_trace = SimpleNamespace(
+        info=SimpleNamespace(trace_id="trace-2", client_request_id="req-2")
+    )
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.resolve_trace",
+        lambda **kwargs: captured.append(kwargs) or fake_trace,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.log_trace_feedback",
+        lambda **kwargs: {"feedback_logged": True, "expectation_logged": False},
+    )
+
+    response = default_client.post(
+        "/api/v1/traces/feedback",
+        headers=auth_headers,
+        json={
+            "client_request_id": "req-2",
+            "is_correct": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured[0]["client_request_id"] == "req-2"
+    assert response.json()["trace_id"] == "trace-2"
+
+
+def test_trace_feedback_returns_503_when_mlflow_disabled(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+
+    response = default_client.post(
+        "/api/v1/traces/feedback",
+        headers=auth_headers,
+        json={
+            "trace_id": "trace-disabled",
+            "is_correct": True,
+        },
+    )
+
+    assert response.status_code == 503
+    assert "MLFLOW_ENABLED=false" in response.json()["detail"]
+
+
+def test_trace_feedback_returns_404_when_trace_missing(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.resolve_trace",
+        lambda **kwargs: None,
+    )
+
+    response = default_client.post(
+        "/api/v1/traces/feedback",
+        headers=auth_headers,
+        json={
+            "client_request_id": "missing",
+            "is_correct": True,
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_trace_feedback_returns_503_when_lookup_raises(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.resolve_trace",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("mlflow down")),
+    )
+
+    response = default_client.post(
+        "/api/v1/traces/feedback",
+        headers=auth_headers,
+        json={
+            "trace_id": "trace-err",
+            "is_correct": True,
+        },
+    )
+
+    assert response.status_code == 503
+    assert "Failed to resolve MLflow trace" in response.json()["detail"]

@@ -45,6 +45,7 @@ Open `http://localhost:8000` in your browser.
 - `GET /api/v1/auth/me` as the canonical frontend identity/bootstrap surface
 - Multitenant Entra auth with Neon-backed tenant admission when `AUTH_MODE=entra`
 - Runtime configuration and diagnostics from the Web UI settings
+- MLflow-backed trace correlation, feedback capture, offline evaluation, and DSPy optimization workflows
 - Optional MCP server surface (`fleet-rlm serve-mcp`)
 
 ## Common Commands
@@ -85,6 +86,25 @@ uv run fastapi dev
 For release/packaging workflows, `uv build` now runs frontend build sync automatically (requires `bun` in repo checkouts that include `src/frontend`).
 
 Use full contributor setup and quality gates in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## MLflow Workflows
+
+`fleet-rlm` now supports MLflow as the GenAI tracing and evaluation plane on top of the existing PostHog runtime telemetry.
+
+```bash
+# from repo root
+make mlflow-server
+
+# in another shell
+export MLFLOW_ENABLED=true
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+export MLFLOW_EXPERIMENT=fleet-rlm
+uv run fleet web
+```
+
+- Live chat turns and offline runner entry points emit MLflow-correlated traces with `mlflow_trace_id` / `mlflow_client_request_id` on final payloads when MLflow is enabled.
+- Human feedback can be recorded through `POST /api/v1/traces/feedback`.
+- Contributors can export annotated traces, run MLflow GenAI evaluation, and optimize DSPy programs with the scripts documented in [`docs/how-to-guides/mlflow-workflows.md`](docs/how-to-guides/mlflow-workflows.md).
 
 ## Architecture Overview
 
@@ -166,6 +186,7 @@ graph TB
 - [Quick install + setup](docs/how-to-guides/installation.md)
 - [Configure Modal](docs/how-to-guides/configuring-modal.md)
 - [Runtime settings (LM/Modal diagnostics)](docs/how-to-guides/runtime-settings.md)
+- [MLflow tracing, feedback, eval, and optimization](docs/how-to-guides/mlflow-workflows.md)
 - [Deploying the server](docs/how-to-guides/deploying-server.md)
 - [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
 - [Frontend ↔ Backend integration](docs/reference/frontend-backend-integration.md)

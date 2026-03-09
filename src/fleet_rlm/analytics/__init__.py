@@ -1,20 +1,59 @@
-"""PostHog analytics integration for DSPy LM calls."""
+"""Analytics integration helpers for PostHog and MLflow."""
 
 from __future__ import annotations
 
 import dspy
 
 from .client import flush_posthog_client, shutdown_posthog_client
-from .config import PostHogConfig
+from .config import MlflowConfig, PostHogConfig
+from .mlflow_integration import (
+    FleetMlflowTraceCallback,
+    MlflowTraceRequestContext,
+    capture_last_active_trace_id,
+    current_request_context,
+    flush_mlflow_traces,
+    get_mlflow_config,
+    initialize_mlflow,
+    log_trace_feedback,
+    merge_trace_result_metadata,
+    mlflow_request_context,
+    new_client_request_id,
+    resolve_trace,
+    resolve_trace_by_client_request_id,
+    search_annotated_trace_rows,
+    shutdown_mlflow,
+    trace_result_metadata,
+    trace_to_dataset_row,
+    update_current_mlflow_trace,
+)
 from .posthog_callback import PostHogLLMCallback
 
 
 __all__ = [
+    "MlflowConfig",
+    "MlflowTraceRequestContext",
+    "FleetMlflowTraceCallback",
     "PostHogConfig",
     "PostHogLLMCallback",
+    "capture_last_active_trace_id",
     "configure_analytics",
+    "current_request_context",
+    "flush_mlflow_traces",
+    "get_mlflow_config",
+    "initialize_mlflow",
+    "log_trace_feedback",
+    "merge_trace_result_metadata",
+    "mlflow_request_context",
+    "new_client_request_id",
+    "resolve_trace",
+    "resolve_trace_by_client_request_id",
+    "search_annotated_trace_rows",
+    "shutdown_mlflow",
     "flush_posthog_client",
     "shutdown_posthog_client",
+    "trace_result_metadata",
+    "trace_to_dataset_row",
+    "update_current_mlflow_trace",
 ]
 
 
