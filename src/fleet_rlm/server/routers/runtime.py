@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
@@ -22,7 +22,7 @@ from fleet_rlm.server.runtime_settings import (
 )
 from fleet_rlm.utils.modal import load_modal_config
 
-from ..deps import ServerStateDep
+from ..deps import ServerStateDep, require_http_identity
 from ..schemas.core import (
     RuntimeActiveModels,
     RuntimeConnectivityTestResponse,
@@ -35,7 +35,11 @@ from ..schemas.core import (
     VolumeTreeResponse,
 )
 
-router = APIRouter(prefix="/runtime", tags=["runtime"])
+router = APIRouter(
+    prefix="/runtime",
+    tags=["runtime"],
+    dependencies=[Depends(require_http_identity)],
+)
 
 _RUNTIME_TEST_TIMEOUT_SECONDS = 20
 

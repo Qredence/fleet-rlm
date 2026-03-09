@@ -22,9 +22,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _CLIENT_LOCK = Lock()
+_TRACE_ID_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
 _INITIALIZED = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
+_TRACE_IDS_BY_CLIENT_REQUEST_ID: dict[str, str] = {}
 
 
 @dataclass(slots=True)
@@ -37,6 +39,7 @@ class MlflowTraceRequestContext:
     app_env: str | None = None
     request_preview: str | None = None
     model_id: str | None = None
+    resolved_trace_id: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -197,6 +200,8 @@ def mlflow_request_context(context: MlflowTraceRequestContext):
         yield context
     finally:
         capture_last_active_trace_id()
+        with _TRACE_ID_LOCK:
+            _TRACE_IDS_BY_CLIENT_REQUEST_ID.pop(context.client_request_id, None)
         _CURRENT_TRACE_ID.reset(trace_token)
         _CURRENT_REQUEST_CONTEXT.reset(context_token)
 
@@ -293,13 +298,44 @@ def update_current_mlflow_trace(
 
 def capture_last_active_trace_id() -> str | None:
     """Cache and return the last active MLflow trace id for this execution."""
-    mlflow = _import_mlflow()
-    if mlflow is None:
-        return _CURRENT_TRACE_ID.get()
+    context = current_request_context()
 
     trace_id = _CURRENT_TRACE_ID.get()
     if trace_id:
+        if context is not None:
+            context.resolved_trace_id = trace_id
+            with _TRACE_ID_LOCK:
+                _TRACE_IDS_BY_CLIENT_REQUEST_ID[context.client_request_id] = trace_id
         return trace_id
+
+    if context is not None:
+        if context.resolved_trace_id:
+            _CURRENT_TRACE_ID.set(context.resolved_trace_id)
+            return context.resolved_trace_id
+        with _TRACE_ID_LOCK:
+            request_trace_id = _TRACE_IDS_BY_CLIENT_REQUEST_ID.get(
+                context.client_request_id
+            )
+        if request_trace_id:
+            context.resolved_trace_id = request_trace_id
+            _CURRENT_TRACE_ID.set(request_trace_id)
+            return request_trace_id
+
+    mlflow = _import_mlflow()
+    if mlflow is None:
+        return None
+
+    get_active_trace_id = getattr(mlflow, "get_active_trace_id", None)
+    if callable(get_active_trace_id):
+        try:
+            trace_id = get_active_trace_id()
+        except Exception:
+            trace_id = None
+        if trace_id:
+            _CURRENT_TRACE_ID.set(trace_id)
+            if context is not None:
+                context.resolved_trace_id = trace_id
+            return trace_id
 
     try:
         trace_id = mlflow.get_last_active_trace_id(thread_local=True)
@@ -308,6 +344,10 @@ def capture_last_active_trace_id() -> str | None:
 
     if trace_id:
         _CURRENT_TRACE_ID.set(trace_id)
+        if context is not None:
+            context.resolved_trace_id = trace_id
+            with _TRACE_ID_LOCK:
+                _TRACE_IDS_BY_CLIENT_REQUEST_ID[context.client_request_id] = trace_id
     return trace_id
 
 
