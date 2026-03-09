@@ -85,9 +85,7 @@ def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
     )
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
-    monkeypatch.setattr(
-        mlflow_integration, "_existing_trace_callback", object
-    )
+    monkeypatch.setattr(mlflow_integration, "_existing_trace_callback", object)
     monkeypatch.setattr(
         mlflow_integration.dspy,
         "settings",
@@ -114,7 +112,7 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
     monkeypatch: pytest.MonkeyPatch,
 ):
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
-    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: object())
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", object)
     monkeypatch.setattr(
         mlflow_integration, "initialize_mlflow", lambda config=None: True
     )
