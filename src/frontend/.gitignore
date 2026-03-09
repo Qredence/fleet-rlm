@@ -27,3 +27,4 @@ dist/
 
 test-results/
 .tmp-bun
+.factory/

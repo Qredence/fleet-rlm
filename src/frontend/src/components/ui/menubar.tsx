@@ -138,22 +138,28 @@ function MenubarCheckboxItem({
 function MenubarRadioItem({
   className,
   children,
+  showIndicator = true,
   ...props
-}: React.ComponentProps<typeof MenubarPrimitive.RadioItem>) {
+}: React.ComponentProps<typeof MenubarPrimitive.RadioItem> & {
+  showIndicator?: boolean;
+}) {
   return (
     <MenubarPrimitive.RadioItem
       data-slot="menubar-radio-item"
       className={cn(
-        "focus:bg-muted relative flex cursor-default items-center gap-2 rounded-xs py-1.5 pr-2 pl-8 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "focus:bg-muted relative flex cursor-default items-center gap-2 rounded-xs py-1.5 pr-2 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        showIndicator ? "pl-8" : "pl-2",
         className,
       )}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
-        <MenubarPrimitive.ItemIndicator>
-          <CircleIcon className="size-2 fill-current" />
-        </MenubarPrimitive.ItemIndicator>
-      </span>
+      {showIndicator ? (
+        <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
+          <MenubarPrimitive.ItemIndicator>
+            <CircleIcon className="size-2 fill-current" />
+          </MenubarPrimitive.ItemIndicator>
+        </span>
+      ) : null}
       {children}
     </MenubarPrimitive.RadioItem>
   );

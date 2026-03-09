@@ -30,7 +30,7 @@ venv/
 # OS/editor
 .DS_Store
 .vscode/
-
+.factory/
 # Temporary local scratch artifacts
 *.tmp
 .tmp*

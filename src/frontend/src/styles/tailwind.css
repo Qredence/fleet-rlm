@@ -277,11 +277,7 @@
   }
   &:disabled {
     color: var(--color-text-disabled);
-    background-color: color-mix(
-      in srgb,
-      var(--color-text) 5%,
-      var(--color-surface-elevated)
-    );
+    background-color: var(--alpha-05);
   }
 }
 
@@ -329,7 +325,7 @@
 }
 
 @utility prompt-composer-menu-icon {
-  color: var(--color-text-secondary);
+  color: currentColor;
 }
 
 @utility prompt-composer-attachment-chip {

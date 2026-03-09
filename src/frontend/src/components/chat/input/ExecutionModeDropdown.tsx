@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentType } from "react";
 import { Brain, Sparkles, Wrench } from "lucide-react";
 
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import {
   Menubar,
   MenubarContent,
-  MenubarLabel,
   MenubarMenu,
   MenubarRadioGroup,
   MenubarRadioItem,
@@ -23,28 +22,24 @@ import {
 interface ExecutionModeOption {
   id: WsExecutionMode;
   name: string;
-  description: string;
-  icon: ReactNode;
+  icon: ComponentType<{ className?: string }>;
 }
 
 const EXECUTION_MODE_OPTIONS: ExecutionModeOption[] = [
   {
     id: "auto",
     name: "Auto",
-    description: "Let the agent decide when to delegate with RLM.",
-    icon: <Sparkles className="h-4 w-4" />,
+    icon: Sparkles,
   },
   {
     id: "rlm_only",
     name: "RLM only",
-    description: "Force the turn through recursive long-context delegation.",
-    icon: <Brain className="h-4 w-4" />,
+    icon: Brain,
   },
   {
     id: "tools_only",
     name: "Tools only",
-    description: "Use normal tools only and skip RLM delegation helpers.",
-    icon: <Wrench className="h-4 w-4" />,
+    icon: Wrench,
   },
 ];
 
@@ -60,6 +55,7 @@ function ExecutionModeDropdown({
   const currentMode =
     EXECUTION_MODE_OPTIONS.find((option) => option.id === value) ??
     EXECUTION_MODE_OPTIONS[0]!;
+  const CurrentModeIcon = currentMode.icon;
 
   return (
     <Menubar className={PROMPT_INPUT_MENUBAR_CLASSNAME}>
@@ -71,10 +67,11 @@ function ExecutionModeDropdown({
             variant="ghost"
             className={cn(
               PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
-              "justify-center text-muted-foreground hover:text-foreground",
+              "justify-center gap-2 text-muted-foreground hover:text-foreground",
             )}
             aria-label={`Execution mode: ${currentMode.name}`}
           >
+            <CurrentModeIcon className="size-4 shrink-0" />
             <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
               {currentMode.name}
             </span>
@@ -83,34 +80,22 @@ function ExecutionModeDropdown({
 
         <MenubarContent
           align="end"
-          className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-72")}
+          className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-44")}
         >
-          <MenubarLabel className="prompt-composer-menu-label px-3 py-2 uppercase tracking-[0.12em]">
-            Execution mode
-          </MenubarLabel>
-
           <MenubarRadioGroup value={value}>
             {EXECUTION_MODE_OPTIONS.map((option) => (
               <MenubarRadioItem
                 key={option.id}
                 value={option.id}
+                showIndicator={false}
                 onSelect={() => onChange(option.id)}
                 className={cn(
-                  "prompt-composer-menu-item flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 pl-8 text-xs",
+                  "prompt-composer-menu-item cursor-pointer gap-3 rounded-xl px-3 py-2.5",
                   value === option.id && "prompt-composer-menu-item-active",
                 )}
               >
-                <span className="prompt-composer-menu-icon mt-0.5">
-                  {option.icon}
-                </span>
-                <div className="min-w-0">
-                  <div className="font-medium text-(--color-text)">
-                    {option.name}
-                  </div>
-                  <div className="mt-0.5 text-[11px] leading-4 text-(--color-text-secondary)">
-                    {option.description}
-                  </div>
-                </div>
+                <option.icon className="prompt-composer-menu-icon h-4 w-4" />
+                <span className="text-sm">{option.name}</span>
               </MenubarRadioItem>
             ))}
           </MenubarRadioGroup>

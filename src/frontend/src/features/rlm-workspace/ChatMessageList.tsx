@@ -117,9 +117,9 @@ import {
   ConfirmationRequest,
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
+import { Suggestion } from "@/components/ai-elements/suggestion";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { ClarificationCard } from "@/features/rlm-workspace/ClarificationCard";
-import { SuggestionChip } from "@/components/ui/suggestion-chip";
 import {
   SuggestionIconBolt,
   SuggestionIconTune,
@@ -771,7 +771,10 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                 ) : output ? (
                   <Streamdown content={output} streaming={false} />
                 ) : (
-                  <div className="text-muted-foreground" style={typo.labelRegular}>
+                  <div
+                    className="text-muted-foreground"
+                    style={typo.labelRegular}
+                  >
                     No output yet
                   </div>
                 )}
@@ -785,7 +788,10 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                     <code>{code}</code>
                   </pre>
                 ) : (
-                  <div className="text-muted-foreground" style={typo.labelRegular}>
+                  <div
+                    className="text-muted-foreground"
+                    style={typo.labelRegular}
+                  >
                     No code captured
                   </div>
                 )}
@@ -916,13 +922,16 @@ export function ChatMessageList({
   const hasStreamingAssistant = messages.some(
     (msg) => msg.type === "assistant" && msg.streaming,
   );
-  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
-  const lastUserMessageId = lastUserIndex >= 0 ? messages[lastUserIndex]?.id ?? null : null;
+  const lastUserIndex = messages.findLastIndex(
+    (message) => message.type === "user",
+  );
+  const lastUserMessageId =
+    lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
   const activeTurnAssistantMessageId =
     lastUserIndex >= 0
-      ? [...messages.slice(lastUserIndex + 1)]
+      ? ([...messages.slice(lastUserIndex + 1)]
           .reverse()
-          .find((message) => message.type === "assistant")?.id ?? null
+          .find((message) => message.type === "assistant")?.id ?? null)
       : null;
   const displayItems = buildChatDisplayItems(messages, {
     showPendingAssistantShell: isTyping,
@@ -936,13 +945,20 @@ export function ChatMessageList({
   useEffect(() => {
     if (!selectedAssistantTurnId || !lastUserMessageId) return;
     const pendingTurnId = buildPendingAssistantTurnId(lastUserMessageId);
-    if (selectedAssistantTurnId !== pendingTurnId || !activeTurnAssistantMessageId) {
+    if (
+      selectedAssistantTurnId !== pendingTurnId ||
+      !activeTurnAssistantMessageId
+    ) {
       return;
     }
     useNavigationStore.setState({
       selectedAssistantTurnId: activeTurnAssistantMessageId,
     });
-  }, [activeTurnAssistantMessageId, lastUserMessageId, selectedAssistantTurnId]);
+  }, [
+    activeTurnAssistantMessageId,
+    lastUserMessageId,
+    selectedAssistantTurnId,
+  ]);
 
   return (
     <Conversation
@@ -984,13 +1000,31 @@ export function ChatMessageList({
                 aria-label="Suggestion actions"
               >
                 {suggestions.map((s, i) => (
-                  <SuggestionChip
+                  <motion.div
                     key={s.text}
-                    icon={s.Icon}
-                    label={s.text}
-                    index={i}
-                    onClick={onSuggestionClick}
-                  />
+                    initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={
+                      prefersReduced
+                        ? { duration: 0.01 }
+                        : { delay: 0.15 + i * 0.08 }
+                    }
+                  >
+                    <Suggestion
+                      suggestion={s.text}
+                      onClick={onSuggestionClick}
+                      variant="secondary"
+                      className="h-auto border border-border-subtle px-4 py-2.5 hover:border-border-strong"
+                    >
+                      <s.Icon />
+                      <span
+                        data-slot="suggestion-chip-label"
+                        className="text-foreground"
+                      >
+                        {s.text}
+                      </span>
+                    </Suggestion>
+                  </motion.div>
                 ))}
               </div>
 
@@ -1042,7 +1076,8 @@ export function ChatMessageList({
                 return (
                   <motion.div key={displayItem.key} {...preset}>
                     {renderAssistantTurn(displayItem, {
-                      selected: isCanvasOpen && selectedAssistantTurnId === turnId,
+                      selected:
+                        isCanvasOpen && selectedAssistantTurnId === turnId,
                       onOpenTab: (tab) => selectInspectorTurn(turnId, tab),
                     })}
                   </motion.div>

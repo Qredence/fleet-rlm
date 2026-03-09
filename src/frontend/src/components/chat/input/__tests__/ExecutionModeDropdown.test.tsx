@@ -31,6 +31,7 @@ vi.mock("@/components/ui/menubar", () => ({
   }: {
     children: ReactNode;
     onSelect?: () => void;
+    showIndicator?: boolean;
   }) => <button onClick={onSelect}>{children}</button>,
 }));
 
@@ -51,6 +52,10 @@ describe("ExecutionModeDropdown", () => {
     });
 
     expect(container.textContent).toContain("Tools only");
+    expect(container.textContent).not.toContain("Execution mode");
+    expect(container.textContent).not.toContain(
+      "Use normal tools only and skip RLM delegation helpers.",
+    );
 
     act(() => {
       root.unmount();
