@@ -496,7 +496,9 @@ def log_trace_feedback(
     if mlflow is None:
         raise RuntimeError("MLflow is not installed.")
 
-    source = mlflow.entities.AssessmentSource(source_type="HUMAN", source_id=source_id or "anonymous")
+    source = mlflow.entities.AssessmentSource(
+        source_type="HUMAN", source_id=source_id or "anonymous"
+    )
     mlflow.log_feedback(
         trace_id=trace_id,
         name="response_is_correct",

@@ -149,8 +149,9 @@ def test_resolve_trace_by_client_request_id_uses_server_filter(
         info=SimpleNamespace(client_request_id="req-123", timestamp_ms=10)
     )
     fake_mlflow = SimpleNamespace(
-        search_traces=lambda **kwargs: calls.append(kwargs)
-        or [older_trace, matching_trace],
+        search_traces=lambda **kwargs: (
+            calls.append(kwargs) or [older_trace, matching_trace]
+        ),
     )
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
