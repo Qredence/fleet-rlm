@@ -347,7 +347,10 @@ def run_react_chat_once(
             result = agent.chat_turn(message)
             if not include_trajectory:
                 result.pop("trajectory", None)
-            return result
+            return merge_trace_result_metadata(
+                result,
+                response_preview=result.get("assistant_response"),
+            )
 
 
 async def arun_react_chat_once(
@@ -413,7 +416,10 @@ async def arun_react_chat_once(
                     result = await agent.achat_turn(message)
                     if not include_trajectory:
                         result.pop("trajectory", None)
-                    return result
+                    return merge_trace_result_metadata(
+                        result,
+                        response_preview=result.get("assistant_response"),
+                    )
     except Exception:
         agent.shutdown()
         raise
