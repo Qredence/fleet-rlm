@@ -43,8 +43,14 @@
   * [Source Layout (src/fleet_rlm)](reference/source-layout.md)
   * [Python Backend Module Map](reference/module-map.md)
   * [fleet-rlm Codebase Map](reference/codebase-map.md)
+  * [Frontend Architecture](reference/frontend-architecture.md)
   * [Frontend ↔ Backend Integration](reference/frontend-backend-integration.md)
   * [fleet-rlm v0.4.94 Release Notes](reference/release-notes-0.4.94.md)
+  * [Architecture Decision Records](reference/adr/README.md)
+    * [ADR-001: RLM Runtime Architecture](reference/adr/001-rlm-runtime-architecture.md)
+    * [ADR-002: Modal Sandbox Execution](reference/adr/002-modal-sandbox-execution.md)
+    * [ADR-003: Neon/Postgres with RLS](reference/adr/003-neon-postgres-rls-persistence.md)
+    * [ADR-004: Dual Auth Modes](reference/adr/004-dual-auth-modes.md)
 
 ## Explanation
 
