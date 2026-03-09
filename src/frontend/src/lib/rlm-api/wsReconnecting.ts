@@ -128,6 +128,7 @@ export async function createReconnectingWs(
           const cancel: WsCancelRequest = { type: "cancel" };
           socket.send(JSON.stringify(cancel));
           abortTimer = setTimeout(() => {
+            console.warn("WebSocket: Abort timeout reached. Forcibly closing connection.");
             safeClose();
             updateStatus("disconnected");
             finish(resolve);

@@ -238,6 +238,36 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     expect(sockets[0]?.close).toHaveBeenCalled();
   });
 
+  it("warns before forcing a close when cancel does not receive a terminal frame", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { streamChatOverWs } = await loadWsClientModule();
+    const { sockets } = installSocketFactory();
+
+    const controller = new AbortController();
+    const streamPromise = streamChatOverWs(dummyMessage, {
+      onFrame: vi.fn(),
+      signal: controller.signal,
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    await Promise.resolve();
+
+    sockets[0]?.trigger("open");
+    controller.abort();
+
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1500);
+
+    await expect(streamPromise).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "WebSocket: Abort timeout reached. Forcibly closing connection.",
+    );
+    expect(sockets[0]?.close).toHaveBeenCalled();
+  });
+
   it("closes execution subscriptions without sending cancel", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
     const { subscribeToExecutionStream } = await loadWsClientModule();
