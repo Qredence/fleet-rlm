@@ -286,6 +286,11 @@ def _filter_tools_for_execution_mode(
     if execution_mode == "tools_only":
         return [tool for tool in tools if _tool_name(tool) not in _RLM_HEAVY_TOOL_NAMES]
 
+    # In ``rlm_only`` mode we intentionally restrict the agent to a very small
+    # allowlist of RLM-centric tools (currently just ``rlm_query`` via
+    # ``_RLM_ONLY_TOOL_NAMES``). This is a single-tool mode used for tightly
+    # controlled or diagnostic runs where the planner is expected to rely
+    # solely on ``rlm_query`` without other helper tools.
     if execution_mode == "rlm_only":
         return [tool for tool in tools if _tool_name(tool) in _RLM_ONLY_TOOL_NAMES]
 
