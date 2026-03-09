@@ -56,6 +56,13 @@ export interface paths {
      */
     get: operations["get_volume_file_content_api_v1_runtime_volume_file_get"];
   };
+  "/api/v1/traces/feedback": {
+    /**
+     * Create Trace Feedback
+     * @description Record human feedback and optional ground truth for an MLflow trace.
+     */
+    post: operations["create_trace_feedback_api_v1_traces_feedback_post"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -262,6 +269,41 @@ export interface components {
       artifact_count?: number;
       /** Updated At */
       updated_at?: string | null;
+    };
+    /** TraceFeedbackRequest */
+    TraceFeedbackRequest: {
+      /** Trace Id */
+      trace_id?: string | null;
+      /** Client Request Id */
+      client_request_id?: string | null;
+      /** Is Correct */
+      is_correct: boolean;
+      /** Comment */
+      comment?: string | null;
+      /** Expected Response */
+      expected_response?: string | null;
+    };
+    /** TraceFeedbackResponse */
+    TraceFeedbackResponse: {
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Trace Id */
+      trace_id: string;
+      /** Client Request Id */
+      client_request_id?: string | null;
+      /**
+       * Feedback Logged
+       * @default true
+       */
+      feedback_logged?: boolean;
+      /**
+       * Expectation Logged
+       * @default false
+       */
+      expectation_logged?: boolean;
     };
     /** ValidationError */
     ValidationError: {
@@ -514,6 +556,31 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["VolumeFileContentResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Trace Feedback
+   * @description Record human feedback and optional ground truth for an MLflow trace.
+   */
+  create_trace_feedback_api_v1_traces_feedback_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TraceFeedbackRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TraceFeedbackResponse"];
         };
       };
       /** @description Validation Error */

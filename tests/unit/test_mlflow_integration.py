@@ -140,6 +140,13 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
         }
 
 
+def test_sanitize_log_field_escapes_newlines_and_carriage_returns() -> None:
+    assert (
+        mlflow_integration._sanitize_log_field("trace-1\r\nforged-entry")
+        == "trace-1\\r\\nforged-entry"
+    )
+
+
 def test_update_current_mlflow_trace_skips_when_no_active_trace(
     monkeypatch: pytest.MonkeyPatch,
 ):

@@ -70,6 +70,12 @@ def _import_mlflow() -> Any | None:
     return mlflow
 
 
+def _sanitize_log_field(value: str) -> str:
+    """Escape control characters before including user-provided ids in logs."""
+
+    return value.replace("\r", "\\r").replace("\n", "\\n")
+
+
 def _existing_trace_callback() -> "FleetMlflowTraceCallback | None":
     callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
     for callback in callbacks:
@@ -412,7 +418,7 @@ def resolve_trace_by_client_request_id(
     except Exception:
         logger.warning(
             "Failed to search MLflow traces for client request id '%s'.",
-            client_request_id,
+            _sanitize_log_field(client_request_id),
             exc_info=True,
         )
         return None
@@ -448,7 +454,11 @@ def resolve_trace(
         try:
             return mlflow.get_trace(trace_id)
         except Exception:
-            logger.warning("Failed to load MLflow trace '%s'.", trace_id, exc_info=True)
+            logger.warning(
+                "Failed to load MLflow trace '%s'.",
+                _sanitize_log_field(trace_id),
+                exc_info=True,
+            )
             return None
 
     if client_request_id:
