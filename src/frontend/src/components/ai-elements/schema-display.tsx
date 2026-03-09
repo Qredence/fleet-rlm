@@ -7,7 +7,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { ChevronRightIcon } from "lucide-react";
 import { createContext, useContext, useMemo } from "react";
 
@@ -43,6 +43,36 @@ const SchemaDisplayContext = createContext<SchemaDisplayContextType>({
   method: "GET",
   path: "",
 });
+const SCHEMA_PROPERTY_PADDING_CLASSES = [
+  "pl-10",
+  "pl-14",
+  "pl-[72px]",
+  "pl-[88px]",
+  "pl-[104px]",
+  "pl-[120px]",
+  "pl-[136px]",
+  "pl-[152px]",
+] as const;
+const SCHEMA_PROPERTY_DESCRIPTION_PADDING_CLASSES = [
+  "pl-16",
+  "pl-20",
+  "pl-24",
+  "pl-28",
+  "pl-32",
+  "pl-36",
+  "pl-40",
+  "pl-44",
+] as const;
+
+const resolveSchemaPropertyPaddingClass = (depth: number) =>
+  SCHEMA_PROPERTY_PADDING_CLASSES[
+    Math.min(depth, SCHEMA_PROPERTY_PADDING_CLASSES.length - 1)
+  ];
+
+const resolveSchemaDescriptionPaddingClass = (depth: number) =>
+  SCHEMA_PROPERTY_DESCRIPTION_PADDING_CLASSES[
+    Math.min(depth, SCHEMA_PROPERTY_DESCRIPTION_PADDING_CLASSES.length - 1)
+  ];
 
 export type SchemaDisplayProps = HTMLAttributes<HTMLDivElement> & {
   method: HttpMethod;
@@ -368,7 +398,6 @@ export const SchemaDisplayProperty = ({
   ...props
 }: SchemaDisplayPropertyProps) => {
   const hasChildren = properties || items;
-  const paddingLeft = 40 + depth * 16;
 
   if (hasChildren) {
     return (
@@ -376,9 +405,9 @@ export const SchemaDisplayProperty = ({
         <CollapsibleTrigger
           className={cn(
             "group flex w-full items-center gap-2 py-3 text-left transition-colors hover:bg-muted/50",
+            resolveSchemaPropertyPaddingClass(depth),
             className
           )}
-          style={{ paddingLeft }}
         >
           <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
           <span className="font-mono text-sm">{name}</span>
@@ -396,8 +425,10 @@ export const SchemaDisplayProperty = ({
         </CollapsibleTrigger>
         {description && (
           <p
-            className="pb-2 text-muted-foreground text-sm"
-            style={{ paddingLeft: paddingLeft + 24 }}
+            className={cn(
+              "pb-2 text-muted-foreground text-sm",
+              resolveSchemaDescriptionPaddingClass(depth)
+            )}
           >
             {description}
           </p>
@@ -426,8 +457,11 @@ export const SchemaDisplayProperty = ({
 
   return (
     <div
-      className={cn("py-3 pr-4", className)}
-      style={{ paddingLeft }}
+      className={cn(
+        "py-3 pr-4",
+        resolveSchemaPropertyPaddingClass(depth),
+        className
+      )}
       {...props}
     >
       <div className="flex items-center gap-2">

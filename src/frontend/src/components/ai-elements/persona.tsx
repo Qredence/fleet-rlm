@@ -1,8 +1,7 @@
-
 import type { RiveParameters } from "@rive-app/react-webgl2";
 import type { FC, ReactNode } from "react";
 
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import {
   useRive,
   useStateMachineInput,
@@ -75,7 +74,7 @@ const sources = {
 
 const getCurrentTheme = (): "light" | "dark" => {
   if (typeof window !== "undefined") {
-    if (document.documentElement.classList.contains("dark")) {
+    if (document.documentElement.dataset.theme === "dark") {
       return "dark";
     }
     if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
@@ -94,13 +93,13 @@ const useTheme = (enabled: boolean) => {
       return;
     }
 
-    // Watch for classList changes
+    // Watch for explicit theme attribute changes
     const observer = new MutationObserver(() => {
       setTheme(getCurrentTheme());
     });
 
     observer.observe(document.documentElement, {
-      attributeFilter: ["class"],
+      attributeFilter: ["data-theme"],
       attributes: true,
     });
 
@@ -142,7 +141,7 @@ const PersonaWithModel = memo(
     });
     const viewModelInstanceColor = useViewModelInstanceColor(
       "color",
-      viewModelInstance
+      viewModelInstance,
     );
 
     useEffect(() => {
@@ -155,7 +154,7 @@ const PersonaWithModel = memo(
     }, [viewModelInstanceColor, theme, source.dynamicColor]);
 
     return children;
-  }
+  },
 );
 
 PersonaWithModel.displayName = "PersonaWithModel";
@@ -165,7 +164,7 @@ interface PersonaWithoutModelProps {
 }
 
 const PersonaWithoutModel = memo(
-  ({ children }: PersonaWithoutModelProps) => children
+  ({ children }: PersonaWithoutModelProps) => children,
 );
 
 PersonaWithoutModel.displayName = "PersonaWithoutModel";
@@ -213,11 +212,11 @@ export const Persona: FC<PersonaProps> = memo(
       () => ({
         onLoad: ((loadedRive) =>
           callbacksRef.current.onLoad?.(
-            loadedRive
+            loadedRive,
           )) as RiveParameters["onLoad"],
         onLoadError: ((err) =>
           callbacksRef.current.onLoadError?.(
-            err
+            err,
           )) as RiveParameters["onLoadError"],
         onPause: ((event) =>
           callbacksRef.current.onPause?.(event)) as RiveParameters["onPause"],
@@ -227,7 +226,7 @@ export const Persona: FC<PersonaProps> = memo(
         onStop: ((event) =>
           callbacksRef.current.onStop?.(event)) as RiveParameters["onStop"],
       }),
-      []
+      [],
     );
 
     const { rive, RiveComponent } = useRive({
@@ -245,7 +244,7 @@ export const Persona: FC<PersonaProps> = memo(
     const listeningInput = useStateMachineInput(
       rive,
       stateMachine,
-      "listening"
+      "listening",
     );
     const thinkingInput = useStateMachineInput(rive, stateMachine, "thinking");
     const speakingInput = useStateMachineInput(rive, stateMachine, "speaking");
@@ -279,7 +278,7 @@ export const Persona: FC<PersonaProps> = memo(
         <RiveComponent className={cn("size-16 shrink-0", className)} />
       </PersonaWithoutModel>
     );
-  }
+  },
 );
 
 Persona.displayName = "Persona";

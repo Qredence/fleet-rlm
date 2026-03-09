@@ -30,6 +30,7 @@ describe("useThemeStore", () => {
       value: storage,
       configurable: true,
     });
+    delete document.documentElement.dataset.theme;
     document.documentElement.classList.remove("dark");
     document.documentElement.style.colorScheme = "";
   });
@@ -42,6 +43,7 @@ describe("useThemeStore", () => {
     await useThemeStore.persist.rehydrate();
 
     expect(useThemeStore.getState().isDark).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.style.colorScheme).toBe("dark");
   });

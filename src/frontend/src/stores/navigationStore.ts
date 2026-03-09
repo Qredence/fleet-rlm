@@ -10,6 +10,7 @@ import { create } from "zustand";
 import type {
   CreationPhase,
   FsNode,
+  InspectorTab,
   NavItem,
   PromptFeature,
   PromptMode,
@@ -34,6 +35,14 @@ interface NavigationState {
   closeCanvas: () => void;
   toggleCanvas: () => void;
   registerCanvasHandlers: (handlers: CanvasHandlers) => void;
+
+  // Workspace inspector
+  selectedAssistantTurnId: string | null;
+  activeInspectorTab: InspectorTab;
+  openInspector: (turnId?: string | null, tab?: InspectorTab) => void;
+  selectInspectorTurn: (turnId: string, tab?: InspectorTab) => void;
+  setInspectorTab: (tab: InspectorTab) => void;
+  clearInspectorSelection: () => void;
 
   // File selection
   selectedFileNode: FsNode | null;
@@ -109,6 +118,31 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     }
   },
 
+  // Workspace inspector
+  selectedAssistantTurnId: null,
+  activeInspectorTab: "trajectory",
+  openInspector: (turnId, tab) => {
+    set((state) => ({
+      selectedAssistantTurnId:
+        turnId === undefined ? state.selectedAssistantTurnId : turnId,
+      activeInspectorTab: tab ?? state.activeInspectorTab,
+    }));
+    canvasHandlers.open();
+  },
+  selectInspectorTurn: (turnId, tab) => {
+    set((state) => ({
+      selectedAssistantTurnId: turnId,
+      activeInspectorTab: tab ?? state.activeInspectorTab,
+    }));
+    canvasHandlers.open();
+  },
+  setInspectorTab: (tab) => set({ activeInspectorTab: tab }),
+  clearInspectorSelection: () =>
+    set({
+      selectedAssistantTurnId: null,
+      activeInspectorTab: "trajectory",
+    }),
+
   // File selection
   selectedFileNode: null,
   selectFile: (node) => set({ selectedFileNode: node }),
@@ -126,6 +160,8 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
       activeFeatures: new Set(),
       promptMode: "auto",
       selectedPromptSkills: [],
+      selectedAssistantTurnId: null,
+      activeInspectorTab: "trajectory",
       sessionId: get().sessionId + 1,
     });
   },
@@ -142,14 +178,6 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
       }
       return { activeFeatures: next };
     });
-
-    // Auto-open canvas when library or contextMemory feature is activated
-    const features = get().activeFeatures;
-    const hasLibrary = features.has("library");
-    const hasContextMemory = features.has("contextMemory");
-    if (hasLibrary || hasContextMemory) {
-      canvasHandlers.open();
-    }
   },
 
   // Prompt mode
@@ -181,3 +209,7 @@ export const useSelectedPromptSkills = () =>
   useNavigationStore((s) => s.selectedPromptSkills);
 export const useSelectedFileNode = () =>
   useNavigationStore((s) => s.selectedFileNode);
+export const useSelectedAssistantTurnId = () =>
+  useNavigationStore((s) => s.selectedAssistantTurnId);
+export const useActiveInspectorTab = () =>
+  useNavigationStore((s) => s.activeInspectorTab);

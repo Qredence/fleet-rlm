@@ -8,7 +8,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import {
   AlertTriangleIcon,
   CheckIcon,
@@ -31,6 +31,13 @@ const STACK_FRAME_WITH_PARENS_REGEX = /^at\s+(.+?)\s+\((.+):(\d+):(\d+)\)$/;
 const STACK_FRAME_WITHOUT_FN_REGEX = /^at\s+(.+):(\d+):(\d+)$/;
 const ERROR_TYPE_REGEX = /^(\w+Error|Error):\s*(.*)$/;
 const AT_PREFIX_REGEX = /^at\s+/;
+const STACK_TRACE_MAX_HEIGHT_CLASSES: Record<number, string> = {
+  200: "max-h-[200px]",
+  300: "max-h-[300px]",
+  400: "max-h-[400px]",
+  500: "max-h-[500px]",
+  600: "max-h-[600px]",
+};
 
 interface StackFrame {
   raw: string;
@@ -153,6 +160,10 @@ const parseStackTrace = (trace: string): ParsedStackTrace => {
     raw: trace,
   };
 };
+
+const resolveStackTraceMaxHeightClass = (maxHeight: number) =>
+  STACK_TRACE_MAX_HEIGHT_CLASSES[maxHeight] ??
+  STACK_TRACE_MAX_HEIGHT_CLASSES[400];
 
 export type StackTraceProps = ComponentProps<"div"> & {
   trace: string;
@@ -408,9 +419,9 @@ export const StackTraceContent = memo(
           className={cn(
             "overflow-auto border-t bg-muted/30",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=open]:animate-in",
+            resolveStackTraceMaxHeightClass(maxHeight),
             className
           )}
-          style={{ maxHeight }}
           {...props}
         >
           {children}

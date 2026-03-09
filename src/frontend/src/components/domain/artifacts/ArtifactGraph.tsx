@@ -363,7 +363,7 @@ export function ArtifactGraph({
   if (steps.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-        Run a backend prompt to populate the execution graph.
+        Graph appears once the run starts.
       </div>
     );
   }

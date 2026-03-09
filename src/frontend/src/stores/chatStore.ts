@@ -11,6 +11,7 @@ import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEven
 import { telemetryClient } from "@/lib/telemetry/client";
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 import { QueryClient } from "@tanstack/react-query";
+import type { ExecutionStep } from "@/stores/artifactStore";
 
 interface StreamMessageOptions {
   traceEnabled?: boolean;
@@ -20,6 +21,7 @@ interface StreamMessageOptions {
 interface ChatStore {
   // State
   messages: ChatMessage[];
+  turnArtifactsByMessageId: Record<string, ExecutionStep[]>;
   isStreaming: boolean;
   sessionId: string;
   error: string | null;
@@ -30,6 +32,15 @@ interface ChatStore {
   setMessages: (
     messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
   ) => void;
+  setTurnArtifactsByMessageId: (
+    turnArtifactsByMessageId:
+      | Record<string, ExecutionStep[]>
+      | ((
+          prev: Record<string, ExecutionStep[]>,
+        ) => Record<string, ExecutionStep[]>),
+  ) => void;
+  snapshotTurnArtifacts: (messageId: string, steps: ExecutionStep[]) => void;
+  clearTurnArtifacts: () => void;
   clearMessages: () => void;
   addMessage: (message: ChatMessage) => void;
 
@@ -46,6 +57,7 @@ interface ChatStore {
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
+  turnArtifactsByMessageId: {},
   isStreaming: false,
   sessionId: createBackendSessionId(),
   error: null,
@@ -56,6 +68,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({
       sessionId: createBackendSessionId(),
       messages: [],
+      turnArtifactsByMessageId: {},
       isStreaming: false,
       error: null,
     }),
@@ -66,7 +79,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         typeof updater === "function" ? updater(state.messages) : updater,
     })),
 
-  clearMessages: () => set({ messages: [] }),
+  setTurnArtifactsByMessageId: (updater) =>
+    set((state) => ({
+      turnArtifactsByMessageId:
+        typeof updater === "function"
+          ? updater(state.turnArtifactsByMessageId)
+          : updater,
+    })),
+
+  snapshotTurnArtifacts: (messageId, steps) =>
+    set((state) => ({
+      turnArtifactsByMessageId: {
+        ...state.turnArtifactsByMessageId,
+        [messageId]: steps.map((step) => ({ ...step })),
+      },
+    })),
+
+  clearTurnArtifacts: () => set({ turnArtifactsByMessageId: {} }),
+
+  clearMessages: () => set({ messages: [], turnArtifactsByMessageId: {} }),
 
   addMessage: (message) =>
     set((state) => ({

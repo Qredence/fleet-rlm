@@ -6,6 +6,7 @@ import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useChatHistoryStore } from "@/stores/chatHistoryStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { cn } from "@/lib/utils/cn";
 import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
 import { ConversationHistory } from "@/features/rlm-workspace/ConversationHistory";
@@ -41,6 +42,7 @@ export function RlmWorkspace() {
 
   const {
     messages,
+    turnArtifactsByMessageId,
     inputValue,
     setInputValue,
     phase,
@@ -100,12 +102,14 @@ export function RlmWorkspace() {
   // conversation before the backend runtime resets local chat state.
   const prevSessionIdRef = useRef(sessionId);
   const messagesRef = useRef(messages);
+  const turnArtifactsRef = useRef(turnArtifactsByMessageId);
   const phaseRef = useRef(phase);
 
   useEffect(() => {
     messagesRef.current = messages;
+    turnArtifactsRef.current = turnArtifactsByMessageId;
     phaseRef.current = phase;
-  }, [messages, phase]);
+  }, [messages, phase, turnArtifactsByMessageId]);
 
   useEffect(() => {
     let historyResetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -113,7 +117,12 @@ export function RlmWorkspace() {
     if (prevSessionIdRef.current !== sessionId) {
       // Save the old conversation (if it had messages)
       if (messagesRef.current.length > 0) {
-        saveConversation(messagesRef.current, phaseRef.current);
+        saveConversation(
+          messagesRef.current,
+          phaseRef.current,
+          undefined,
+          turnArtifactsRef.current,
+        );
         // PostHog: Track conversation saved
         telemetry.capture("conversation_saved", {
           message_count: messagesRef.current.length,
@@ -134,12 +143,19 @@ export function RlmWorkspace() {
       if (!conv) return;
       // Save current conversation first if it has messages
       if (messages.length > 0) {
-        saveConversation(messages, phase);
+        saveConversation(messages, phase, undefined, turnArtifactsByMessageId);
       }
       loadConversation(conv);
       setShowHistory(false);
     },
-    [loadConv, loadConversation, messages, phase, saveConversation],
+    [
+      loadConv,
+      loadConversation,
+      messages,
+      phase,
+      saveConversation,
+      turnArtifactsByMessageId,
+    ],
   );
 
   const handleToggleHistory = useCallback(() => {
@@ -172,41 +188,49 @@ export function RlmWorkspace() {
     runtimeStatus.data != null &&
     runtimeStatus.data.ready === false &&
     runtimeGuidance.length > 0;
+  const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
       {/* Messages */}
-      <ChatMessageList
-        messages={messages}
-        isTyping={isTyping}
-        isMobile={isMobile}
-        scrollRef={scrollRef}
-        contentRef={contentRef}
-        isAtBottom={isAtBottom}
-        scrollToBottom={scrollToBottom}
-        onSuggestionClick={setInputValue}
-        onResolveHitl={resolveHitl}
-        onResolveClarification={resolveClarification}
-        showHistory={showHistory}
-        onToggleHistory={handleToggleHistory}
-        hasHistory={conversations.length > 0}
-        historyPanel={
-          showHistory ? (
-            <ConversationHistory
-              conversations={conversations}
-              onSelect={handleSelectConversation}
-              onDelete={deleteConversation}
-              onClearAll={clearHistory}
-              onClose={handleCloseHistory}
-            />
-          ) : null
-        }
-      />
+      <div className="flex-1 min-h-0">
+        <ChatMessageList
+          messages={messages}
+          isTyping={isTyping}
+          isMobile={isMobile}
+          scrollRef={scrollRef}
+          contentRef={contentRef}
+          isAtBottom={isAtBottom}
+          scrollToBottom={scrollToBottom}
+          onSuggestionClick={setInputValue}
+          onResolveHitl={resolveHitl}
+          onResolveClarification={resolveClarification}
+          showHistory={showHistory}
+          onToggleHistory={handleToggleHistory}
+          hasHistory={conversations.length > 0}
+          historyPanel={
+            showHistory ? (
+              <ConversationHistory
+                conversations={conversations}
+                onSelect={handleSelectConversation}
+                onDelete={deleteConversation}
+                onClearAll={clearHistory}
+                onClose={handleCloseHistory}
+              />
+            ) : null
+          }
+        />
+      </div>
 
       {/* Input composer */}
-      <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 pt-6 md:px-6">
+      <div
+        className={cn(
+          "sticky bottom-0 z-10 shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 md:px-6",
+          hasMessages || showRuntimeWarning ? "pt-5" : "pt-2",
+        )}
+      >
         <div className="mx-auto w-full max-w-200">
           <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
@@ -244,7 +268,7 @@ export function RlmWorkspace() {
               isReceiving={isReceivingResponse}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
-              className="mx-auto w-full max-w-175 rounded-3xl border border-border-strong overflow-hidden bg-elevated-primary px-2 py-1 [box-shadow:var(--shadow-200-stronger)]"
+              className="mx-auto w-full max-w-175"
             />
           </div>
         </div>

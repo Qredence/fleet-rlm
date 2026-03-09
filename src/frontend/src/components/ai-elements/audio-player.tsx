@@ -7,7 +7,7 @@ import {
   ButtonGroup,
   ButtonGroupText,
 } from "@/components/ui/button-group";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import {
   MediaControlBar,
   MediaController,

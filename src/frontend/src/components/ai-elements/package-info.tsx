@@ -2,7 +2,7 @@
 import type { HTMLAttributes } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { ArrowRightIcon, MinusIcon, PackageIcon, PlusIcon } from "lucide-react";
 import { createContext, useContext } from "react";
 

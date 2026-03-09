@@ -163,13 +163,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-6">
         <p className="text-sm text-muted-foreground">
-          REPL data streams in when the agent calls a code-execution tool (e.g.{" "}
-          <code className="font-mono bg-muted rounded px-1">python_repl</code>,{" "}
-          <code className="font-mono bg-muted rounded px-1">bash</code>).
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Send a prompt that requires running code to see the code, variables,
-          and output here.
+          Code and output appear here when the run executes a tool.
         </p>
       </div>
     );

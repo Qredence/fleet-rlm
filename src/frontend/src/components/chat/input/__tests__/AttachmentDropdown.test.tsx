@@ -4,23 +4,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
 
-vi.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => (
+vi.mock("@/components/ui/menubar", () => ({
+  Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarTrigger: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => (
+  MenubarContent: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuItem: ({
+  MenubarItem: ({
     children,
-    onClick,
+    onSelect,
   }: {
     children: ReactNode;
-    onClick?: () => void;
-  }) => <button onClick={onClick}>{children}</button>,
+    onSelect?: () => void;
+  }) => <button onClick={onSelect}>{children}</button>,
 }));
 
 describe("AttachmentDropdown", () => {

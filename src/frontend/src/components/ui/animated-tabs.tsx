@@ -31,10 +31,9 @@ export function AnimatedTabs<T extends string = string>({
       aria-orientation="horizontal"
       data-slot="tabs-list"
       className={cn(
-        "text-muted-foreground w-fit items-center justify-center flex h-8 max-w-full self-start overflow-x-auto rounded-md border border-border-subtle/70 bg-muted/45 p-0.5",
+        "text-muted-foreground flex h-[var(--touch-target-min-height)] min-h-[var(--touch-target-min-height)] w-fit max-w-full items-center justify-center self-start overflow-x-auto rounded-md border border-border-subtle/70 bg-muted/45 p-0.5",
         className,
       )}
-      style={{ height: "var(--touch-target-min-height)", minHeight: "var(--touch-target-min-height)" }}
       tabIndex={0}
     >
       {tabs.map((tab) => {

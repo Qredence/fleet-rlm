@@ -15,15 +15,15 @@ function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
   const isImage = attachment.file.type.startsWith("image/");
 
   return (
-    <div className="relative group flex items-center gap-1.5 rounded-lg bg-accent/60 px-2 py-1 text-xs text-foreground shrink-0 max-w-[180px]">
+    <div className="prompt-composer-attachment-chip group relative flex max-w-55 shrink-0 items-center gap-2 rounded-full px-2.5 py-1.5 text-xs">
       {isImage && attachment.previewUrl ? (
         <img
           src={attachment.previewUrl}
           alt={attachment.file.name}
-          className="h-5 w-5 rounded object-cover shrink-0"
+          className="h-5 w-5 shrink-0 rounded-full object-cover"
         />
       ) : (
-        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <FileText className="prompt-composer-attachment-chip-icon h-4 w-4 shrink-0" />
       )}
 
       <span className="truncate">{attachment.file.name}</span>
@@ -31,7 +31,7 @@ function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
       <button
         type="button"
         onClick={() => onRemove(attachment.id)}
-        className="ml-auto flex items-center justify-center h-4 w-4 rounded-full bg-muted hover:bg-destructive hover:text-destructive-foreground transition-colors shrink-0"
+        className="prompt-composer-attachment-chip-remove ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
         aria-label={`Remove ${attachment.file.name}`}
       >
         <X className="h-3 w-3" />

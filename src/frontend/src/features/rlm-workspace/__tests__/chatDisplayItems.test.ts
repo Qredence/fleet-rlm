@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildChatDisplayItems } from "@/features/rlm-workspace/chatDisplayItems";
+import {
+  buildChatDisplayItems,
+  buildPendingAssistantTurnId,
+} from "@/features/rlm-workspace/chatDisplayItems";
 import type { ChatMessage } from "@/lib/data/types";
 
 describe("buildChatDisplayItems", () => {
@@ -39,7 +42,7 @@ describe("buildChatDisplayItems", () => {
     }
   });
 
-  it("keeps reasoning in place when later tool activity interrupts the turn", () => {
+  it("attaches trailing tool activity and adjacent reasoning to the following assistant turn", () => {
     const messages: ChatMessage[] = [
       {
         id: "trace-reasoning",
@@ -79,26 +82,15 @@ describe("buildChatDisplayItems", () => {
 
     const items = buildChatDisplayItems(messages);
 
-    expect(items.map((item) => item.kind)).toEqual([
-      "assistant_turn",
-      "tool_session",
-      "assistant_turn",
-    ]);
-
-    const [reasoningTurn, toolSession, assistantTurn] = items;
-
-    expect(reasoningTurn?.kind).toBe("assistant_turn");
-    if (reasoningTurn?.kind === "assistant_turn") {
-      expect(reasoningTurn.reasoningItems).toHaveLength(1);
-      expect(reasoningTurn.message).toBeUndefined();
-    }
-
-    expect(toolSession?.kind).toBe("tool_session");
-
-    expect(assistantTurn?.kind).toBe("assistant_turn");
-    if (assistantTurn?.kind === "assistant_turn") {
-      expect(assistantTurn.message?.content).toBe("Done.");
-      expect(assistantTurn.reasoningItems).toHaveLength(0);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe("assistant_turn");
+    if (items[0]?.kind === "assistant_turn") {
+      expect(items[0].message?.content).toBe("Done.");
+      expect(items[0].reasoningItems).toHaveLength(1);
+      expect(items[0].attachedToolSessions).toHaveLength(1);
+      expect(items[0].attachedToolSessions[0]?.items[0]?.toolName).toBe(
+        "search_files",
+      );
     }
   });
 
@@ -135,6 +127,114 @@ describe("buildChatDisplayItems", () => {
       expect(items[0].reasoningItems[0]?.part.parts[0]?.text).toBe(
         "Final reasoning: kept together.",
       );
+    }
+  });
+
+  it("keeps trace-only tool sessions standalone when there is no assistant response", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "trace-tool",
+        type: "trace",
+        content: "tool",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "search_files",
+            toolType: "search_files",
+            state: "running",
+            input: { pattern: "workspace" },
+          },
+        ],
+      },
+    ];
+
+    const items = buildChatDisplayItems(messages);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe("tool_session");
+  });
+
+  it("creates a pending assistant shell for the active turn and folds in live trace data", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "user-1",
+        type: "user",
+        content: "Inspect the workspace",
+      },
+      {
+        id: "trace-reasoning",
+        type: "trace",
+        content: "reasoning",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "reasoning",
+            parts: [{ type: "text", text: "Scanning the workspace layout." }],
+            isStreaming: true,
+          },
+          {
+            kind: "task",
+            title: "Inspecting files",
+            status: "in_progress",
+            items: [{ id: "task-1", text: "Opening workspace files" }],
+          },
+        ],
+      },
+    ];
+
+    const items = buildChatDisplayItems(messages, {
+      showPendingAssistantShell: true,
+    });
+
+    expect(items).toHaveLength(2);
+    expect(items[1]?.kind).toBe("assistant_turn");
+    if (items[1]?.kind === "assistant_turn") {
+      expect(items[1].isPendingShell).toBe(true);
+      expect(items[1].turnId).toBe(buildPendingAssistantTurnId("user-1"));
+      expect(items[1].reasoningItems).toHaveLength(1);
+      expect(items[1].attachedTraceParts).toHaveLength(1);
+      expect(items[1].attachedTraceParts[0]?.part.kind).toBe("task");
+    }
+  });
+
+  it("attaches live execution traces to an existing assistant turn instead of leaving standalone rows", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "user-1",
+        type: "user",
+        content: "Continue",
+      },
+      {
+        id: "assistant-live",
+        type: "assistant",
+        content: "",
+        streaming: true,
+      },
+      {
+        id: "trace-task",
+        type: "trace",
+        content: "task",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "task",
+            title: "Inspecting file tree",
+            status: "in_progress",
+            items: [{ id: "task-1", text: "Reading files" }],
+          },
+        ],
+      },
+    ];
+
+    const items = buildChatDisplayItems(messages);
+
+    expect(items).toHaveLength(2);
+    expect(items[1]?.kind).toBe("assistant_turn");
+    if (items[1]?.kind === "assistant_turn") {
+      expect(items[1].message?.id).toBe("assistant-live");
+      expect(items[1].attachedTraceParts).toHaveLength(1);
+      expect(items[1].attachedTraceParts[0]?.part.kind).toBe("task");
     }
   });
 });

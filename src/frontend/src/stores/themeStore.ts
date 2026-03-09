@@ -24,6 +24,7 @@ type ThemePersistedState = Pick<ThemeState, "isDark">;
 
 function applyThemeToDocument(isDark: boolean) {
   const root = document.documentElement;
+  root.dataset.theme = isDark ? "dark" : "light";
   root.classList.toggle("dark", isDark);
   root.style.colorScheme = isDark ? "dark" : "light";
 }

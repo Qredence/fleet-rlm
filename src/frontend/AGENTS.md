@@ -15,6 +15,19 @@ This repository hosts the frontend app for the fleet-rlm ecosystem.
 - E2E smoke tests: `bun run test:e2e`
 - Full quality gate: `bun run check`
 
+## shadcn & AI Elements
+- `components.json` is the source of truth for shadcn and AI Elements registry wiring.
+- Keep `components.json.aliases.utils` pointed at `@/lib/utils/cn`; do not reintroduce `src/components/ui/utils.ts`.
+- The `@/* -> ./src/*` alias must live in `src/frontend/tsconfig.json` so `bunx --bun shadcn@latest info --json` resolves real frontend paths.
+- Before refreshing registry-backed components, run `bunx --bun shadcn@latest info --json` and confirm `importAlias` is `@` and `resolvedPaths.utils` points to `src/lib/utils/cn`.
+- Official AI Elements primitives live under `src/components/ai-elements/*`. Refresh them through shadcn/registry workflow instead of forking custom lookalikes.
+- `src/components/chat/ChatInput.tsx` is a thin product wrapper around the official AI Elements `prompt-input` primitives. Keep execution-mode/settings affordances local, but do not recreate `src/components/chat/prompt-input/*`.
+
+## Hook & Lib Ownership
+- Keep `src/hooks/*` for active cross-cutting React hooks only. Delete zero-reference compatibility shims instead of parking deprecated hooks there.
+- Deprecated navigation/history shims (`NavigationProvider`, `navigation-context`, `navigation-types`, `useNavigation`, `useChatHistory`, `useTheme`) are removed. Prefer `src/stores/navigationStore.ts` plus focused hooks like `useAppNavigate`.
+- Keep `src/lib/*` for active adapters and shared utilities only. Removed mock/legacy modules (`lib/data/mock/skills.ts`, `lib/memory/metadata.ts`, `lib/skills/library.ts`) should stay deleted unless a real caller returns.
+
 ## Backend Integration
 Core backend integration targets `fleet-rlm` at:
 `<path-to-your-fleet-rlm-repo>`
@@ -63,6 +76,13 @@ Generated file policy:
 - Router errors must render `RouteErrorPage` (never rely on React Router’s default crash screen).
 - The RLM Workspace chat flow should use backend runtime only (no legacy API fallback path).
 - Canonical domain ownership now lives in `src/features/rlm-workspace/*` for chat/runtime UX and `src/features/volumes/*` for the Modal Volume browser; route pages under `src/app/pages/*` should stay thin.
+- Assistant-turn composition belongs in `src/features/rlm-workspace/assistant-content/*`; keep `ChatMessageList.tsx` as the conversation shell / standalone trace renderer and `chatDisplayItems.ts` as the grouping + attachment boundary.
+- Keep the chat column as the primary live reasoning surface: current-turn reasoning, trajectory, and attachable execution traces should fold into the active assistant turn in real time instead of waiting for the inspector or rendering as detached standalone rows.
+- The workspace right rail is a message-scoped `Message Inspector`, not a second chat surface. Keep it closed by default, scoped to the selected assistant turn, and driven from the same normalized assistant-content model used in chat.
+- Inline assistant content is summary-first: chat shows the answer, summary pills, and compact trajectory/execution/evidence previews; full-detail inspection belongs in `src/features/rlm-workspace/message-inspector/*`.
+- Do not silently clamp or ellipsize primary reasoning copy in chat or the inspector. Let trajectory cards grow vertically, and keep scrolling at the conversation/panel level instead of clipping the reasoning body inside the card.
+- Inspector tab order is fixed: `Trajectory`, `Execution`, `Evidence`, then `Graph`. Only surface `Graph` when execution artifacts show meaningful branching, delegation, or lineage worth visualizing.
+- Turn-scoped execution graph state persists via `turnArtifactsByMessageId` in chat/history stores. Preserve backward-compatible history hydration when evolving this shape.
 - Product-facing labels should use `RLM Workspace` and `Volumes`; do not introduce new `skill-creation` or `taxonomy` product terminology.
 - Keep `src/components/ui/*` limited to primitives and thin wrappers. Shell navigation or workspace composition widgets belong under `src/features/*` or another shared domain folder.
 
@@ -89,3 +109,13 @@ Before finishing backend-integration changes, run:
 6. `bun run build`
 7. `bun run test:e2e`
 8. `bun run check`
+
+Focused validation for chat/composer and cleanup work:
+1. `bun run type-check`
+2. `bun run build`
+3. `bun run test:unit -- src/app/layout/__tests__/BuilderPanel.creation-tabs.test.tsx src/app/layout/__tests__/BuilderPanel.file-detail.test.tsx src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/AttachmentDropdown.test.tsx src/components/chat/input/__tests__/ExecutionModeDropdown.test.tsx src/components/chat/input/__tests__/SettingsDropdown.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.runtime-warning.test.tsx src/features/rlm-workspace/__tests__/chatDisplayItems.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/message-inspector/__tests__/MessageInspectorPanel.test.tsx src/hooks/__tests__/useAppNavigate.test.ts src/stores/__tests__/chatHistoryStore.test.ts src/stores/__tests__/navigationStore.test.ts`
+4. `bunx --bun shadcn@latest info --json`
+
+## Dependency Policy
+- Curated dependency refreshes can move low-risk packages forward in bulk (Vitest, Radix UI, Tailwind/PostCSS, CodeMirror patches, PostHog patches, `shiki`, `globals`, `typescript-eslint`, `tw-animate-css`).
+- Defer high-risk majors that expand scope into separate follow-ups. Current deferred majors are `eslint`/`@eslint/js` v10, `eslint-plugin-react-hooks` v7, `eslint-plugin-react-refresh` v0.5, `jsdom` v28, `openapi-typescript` v7, and `react-resizable-panels` v4.

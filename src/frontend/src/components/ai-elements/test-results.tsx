@@ -7,7 +7,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import {
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -176,16 +176,19 @@ export const TestResultsProgress = ({
     <div className={cn("space-y-2", className)} {...props}>
       {children ?? (
         <>
-          <div className="flex h-2 overflow-hidden rounded-full bg-muted">
-            <div
-              className="bg-green-500 transition-all"
-              style={{ width: `${passedPercent}%` }}
+          <svg
+            className="h-2 w-full overflow-hidden rounded-full bg-muted"
+            preserveAspectRatio="none"
+            viewBox="0 0 100 8"
+          >
+            <rect className="fill-green-500" height="8" width={passedPercent} />
+            <rect
+              className="fill-red-500"
+              height="8"
+              width={failedPercent}
+              x={passedPercent}
             />
-            <div
-              className="bg-red-500 transition-all"
-              style={{ width: `${failedPercent}%` }}
-            />
-          </div>
+          </svg>
           <div className="flex justify-between text-muted-foreground text-xs">
             <span>
               {summary.passed}/{summary.total} tests passed

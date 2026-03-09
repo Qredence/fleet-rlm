@@ -1,5 +1,4 @@
 import { AnimatedIndicator } from "@/components/ui/animated-indicator";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 
 interface NavTabProps {
@@ -38,14 +37,7 @@ export function NavTab({
             : "text-muted-foreground hover:text-foreground hover:bg-muted",
       )}
     >
-      <span
-        className="relative z-10"
-        style={{
-          ...typo.labelRegular,
-          lineHeight: "var(--space-5)",
-          letterSpacing: "var(--letter-spacing-label)",
-        }}
-      >
+      <span className="relative z-10 font-app text-[length:var(--font-text-sm-size)] font-normal leading-[var(--font-text-sm-line-height)] tracking-[var(--font-text-sm-tracking)]">
         {label}
       </span>
       {isActive && <AnimatedIndicator layoutId={layoutId} />}

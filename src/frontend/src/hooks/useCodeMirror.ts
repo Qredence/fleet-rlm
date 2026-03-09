@@ -82,11 +82,13 @@ export function useCodeMirror({
           CM.bracketMatching(),
           CM.indentOnInput(),
           CM.history(),
-          CM.keymap.of([
-            ...CM.defaultKeymap,
-            ...CM.historyKeymap,
-            CM.indentWithTab,
-          ]),
+          CM.keymap.of(
+            [
+              ...CM.defaultKeymap,
+              ...CM.historyKeymap,
+              CM.indentWithTab,
+            ] as unknown as Parameters<typeof CM.keymap.of>[0],
+          ),
           CM.EditorView.lineWrapping,
           CM.EditorView.updateListener.of(
             (update: {

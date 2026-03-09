@@ -1,19 +1,23 @@
 import type { ReactNode } from "react";
-import { Bot, Brain, Check, ChevronDown, Sparkles, Wrench } from "lucide-react";
+import { Brain, Sparkles, Wrench } from "lucide-react";
 
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Menubar,
+  MenubarContent,
+  MenubarLabel,
+  MenubarMenu,
+  MenubarRadioGroup,
+  MenubarRadioItem,
+  MenubarTrigger,
+} from "@/components/ui/menubar";
 import { cn } from "@/lib/utils/cn";
 import {
   PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
   PROMPT_INPUT_ACTION_BUTTON_SIZE,
+  PROMPT_INPUT_MENUBAR_CLASSNAME,
+  PROMPT_INPUT_MENU_CONTENT_CLASSNAME,
 } from "./composerActionStyles";
 
 interface ExecutionModeOption {
@@ -58,62 +62,61 @@ function ExecutionModeDropdown({
     EXECUTION_MODE_OPTIONS[0]!;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          size={PROMPT_INPUT_ACTION_BUTTON_SIZE}
-          variant="ghost"
-          className={cn(
-            PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
-            "h-8 gap-1.5 text-muted-foreground hover:text-foreground",
-          )}
-          aria-label={`Execution mode: ${currentMode.name}`}
-        >
-          <Bot className="h-3.5 w-3.5" />
-          <span style={{ fontSize: "var(--text-label)" }}>
-            {currentMode.name}
-          </span>
-          <ChevronDown className="h-3 w-3 opacity-60" />
-        </Button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent
-        align="end"
-        className="w-72 border-border bg-popover"
-      >
-        <DropdownMenuLabel className="px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground">
-          Execution mode
-        </DropdownMenuLabel>
-
-        {EXECUTION_MODE_OPTIONS.map((option) => (
-          <DropdownMenuItem
-            key={option.id}
-            onClick={() => onChange(option.id)}
+    <Menubar className={PROMPT_INPUT_MENUBAR_CLASSNAME}>
+      <MenubarMenu>
+        <MenubarTrigger asChild>
+          <Button
+            type="button"
+            size={PROMPT_INPUT_ACTION_BUTTON_SIZE}
+            variant="ghost"
             className={cn(
-              "flex items-start justify-between gap-3 rounded-md px-2.5 py-2 text-xs cursor-pointer",
-              value === option.id && "bg-accent",
+              PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
+              "justify-center text-muted-foreground hover:text-foreground",
             )}
+            aria-label={`Execution mode: ${currentMode.name}`}
           >
-            <div className="flex min-w-0 items-start gap-2">
-              <span className="mt-0.5 text-muted-foreground">
-                {option.icon}
-              </span>
-              <div className="min-w-0">
-                <div className="font-medium text-foreground">{option.name}</div>
-                <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-                  {option.description}
-                </div>
-              </div>
-            </div>
+            <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
+              {currentMode.name}
+            </span>
+          </Button>
+        </MenubarTrigger>
 
-            {value === option.id ? (
-              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-            ) : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <MenubarContent
+          align="end"
+          className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-72")}
+        >
+          <MenubarLabel className="prompt-composer-menu-label px-3 py-2 uppercase tracking-[0.12em]">
+            Execution mode
+          </MenubarLabel>
+
+          <MenubarRadioGroup value={value}>
+            {EXECUTION_MODE_OPTIONS.map((option) => (
+              <MenubarRadioItem
+                key={option.id}
+                value={option.id}
+                onSelect={() => onChange(option.id)}
+                className={cn(
+                  "prompt-composer-menu-item flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 pl-8 text-xs",
+                  value === option.id && "prompt-composer-menu-item-active",
+                )}
+              >
+                <span className="prompt-composer-menu-icon mt-0.5">
+                  {option.icon}
+                </span>
+                <div className="min-w-0">
+                  <div className="font-medium text-(--color-text)">
+                    {option.name}
+                  </div>
+                  <div className="mt-0.5 text-[11px] leading-4 text-(--color-text-secondary)">
+                    {option.description}
+                  </div>
+                </div>
+              </MenubarRadioItem>
+            ))}
+          </MenubarRadioGroup>
+        </MenubarContent>
+      </MenubarMenu>
+    </Menubar>
   );
 }
 

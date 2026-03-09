@@ -1,6 +1,7 @@
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import type { Conversation } from "@/stores/chatHistoryStore";
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
+import type { ExecutionStep } from "@/stores/artifactStore";
 
 export interface ChatSubmitAttachment {
   id: string;
@@ -17,6 +18,7 @@ export interface ChatSubmitOptions {
 
 export interface ChatRuntime {
   messages: ChatMessage[];
+  turnArtifactsByMessageId: Record<string, ExecutionStep[]>;
   inputValue: string;
   setInputValue: (value: string) => void;
   phase: CreationPhase;

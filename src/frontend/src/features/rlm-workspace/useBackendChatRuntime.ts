@@ -6,6 +6,7 @@ import type { Conversation } from "@/stores/chatHistoryStore";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/features/rlm-workspace/backendArtifactEventAdapter";
+import { buildChatDisplayItems } from "@/features/rlm-workspace/chatDisplayItems";
 import type {
   ChatRuntime,
   ChatSubmitOptions,
@@ -51,6 +52,16 @@ function toUserMessage(content: string): ChatMessage {
   };
 }
 
+function latestAssistantTurnId(messages: ChatMessage[]): string | null {
+  const displayItems = buildChatDisplayItems(messages);
+  for (let index = displayItems.length - 1; index >= 0; index -= 1) {
+    const item = displayItems[index];
+    if (item?.kind !== "assistant_turn" || !item.message) continue;
+    return item.turnId;
+  }
+  return null;
+}
+
 function applyOptimisticHitlResolution(
   messages: ChatMessage[],
   msgId: string,
@@ -94,19 +105,21 @@ export function useBackendChatRuntime(): ChatRuntime {
   const {
     setCreationPhase,
     sessionId: navSessionId,
-    isCanvasOpen,
-    openCanvas,
   } = useNavigationStore();
   const clearArtifactSteps = useArtifactStore((state) => state.clear);
 
   const {
     messages,
+    turnArtifactsByMessageId,
     isStreaming,
     sessionId,
     streamMessage,
     stopStreaming,
     resetSession,
     setMessages,
+    setTurnArtifactsByMessageId,
+    snapshotTurnArtifacts,
+    clearTurnArtifacts,
     addMessage,
   } = useChatStore();
 
@@ -126,7 +139,14 @@ export function useBackendChatRuntime(): ChatRuntime {
     setCreationPhase("idle");
     setIsTyping(false);
     clearArtifactSteps();
-  }, [clearArtifactSteps, setCreationPhase, stopStreaming, resetSession]);
+    clearTurnArtifacts();
+  }, [
+    clearArtifactSteps,
+    clearTurnArtifacts,
+    resetSession,
+    setCreationPhase,
+    stopStreaming,
+  ]);
 
   useEffect(() => {
     if (isFirstMount.current) {
@@ -155,6 +175,10 @@ export function useBackendChatRuntime(): ChatRuntime {
       applyWsFrameToArtifacts(frame);
 
       if (isTerminalFrame(frame)) {
+        const turnId = latestAssistantTurnId(useChatStore.getState().messages);
+        if (turnId) {
+          snapshotTurnArtifacts(turnId, useArtifactStore.getState().steps);
+        }
         if (isErrorFrame(frame)) {
           setPhase("idle");
           setCreationPhase("idle");
@@ -164,7 +188,7 @@ export function useBackendChatRuntime(): ChatRuntime {
         }
       }
     },
-    [setCreationPhase],
+    [setCreationPhase, snapshotTurnArtifacts],
   );
 
   const handleSubmit = useCallback(
@@ -185,7 +209,6 @@ export function useBackendChatRuntime(): ChatRuntime {
       setCreationPhase("understanding");
       setIsTyping(true);
       clearArtifactSteps();
-      if (!isCanvasOpen) openCanvas();
 
       let terminalSeen = false;
 
@@ -231,11 +254,9 @@ export function useBackendChatRuntime(): ChatRuntime {
     [
       clearArtifactSteps,
       inputValue,
-      isCanvasOpen,
       isTyping,
       isStreaming,
       onFrame,
-      openCanvas,
       queryClient,
       streamMessage,
       setCreationPhase,
@@ -295,17 +316,25 @@ export function useBackendChatRuntime(): ChatRuntime {
     (conversation: Conversation) => {
       stopStreaming();
       clearArtifactSteps();
+      setTurnArtifactsByMessageId(conversation.turnArtifactsByMessageId ?? {});
       setMessages(conversation.messages);
       setInputValue("");
       setPhase(conversation.phase);
       setCreationPhase(conversation.phase);
       setIsTyping(false);
     },
-    [clearArtifactSteps, setCreationPhase, stopStreaming, setMessages],
+    [
+      clearArtifactSteps,
+      setCreationPhase,
+      setMessages,
+      setTurnArtifactsByMessageId,
+      stopStreaming,
+    ],
   );
 
   return {
     messages,
+    turnArtifactsByMessageId,
     inputValue,
     setInputValue,
     phase,

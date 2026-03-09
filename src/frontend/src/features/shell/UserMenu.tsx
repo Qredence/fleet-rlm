@@ -114,14 +114,7 @@ export function UserMenu() {
             aria-label="User menu"
           >
             <Avatar className="size-7">
-              <AvatarFallback
-                className="bg-accent/10 text-accent"
-                style={{
-                  fontSize: "var(--text-helper)",
-                  fontWeight: "var(--font-weight-medium)",
-                  fontFamily: "var(--font-family)",
-                }}
-              >
+              <AvatarFallback className="font-app bg-accent/10 text-[length:var(--font-text-2xs-size)] font-medium leading-[var(--font-text-2xs-line-height)] tracking-[var(--font-text-2xs-tracking)] text-accent">
                 {user.initials}
               </AvatarFallback>
             </Avatar>
@@ -136,14 +129,7 @@ export function UserMenu() {
           <DropdownMenuLabel className="p-3">
             <div className="flex items-center gap-2.5">
               <Avatar className="size-9">
-                <AvatarFallback
-                  className="bg-accent/10 text-accent"
-                  style={{
-                    fontSize: "var(--text-helper)",
-                    fontWeight: "var(--font-weight-medium)",
-                    fontFamily: "var(--font-family)",
-                  }}
-                >
+                <AvatarFallback className="font-app bg-accent/10 text-[length:var(--font-text-2xs-size)] font-medium leading-[var(--font-text-2xs-line-height)] tracking-[var(--font-text-2xs-tracking)] text-accent">
                   {user.initials}
                 </AvatarFallback>
               </Avatar>

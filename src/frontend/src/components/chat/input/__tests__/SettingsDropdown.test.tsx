@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,27 @@ const navigate = vi.fn();
 
 vi.mock("@/hooks/useAppNavigate", () => ({
   useAppNavigate: () => ({ navigate }),
+}));
+
+vi.mock("@/components/ui/menubar", () => ({
+  Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  MenubarContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  MenubarLabel: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  MenubarItem: ({
+    children,
+    onSelect,
+  }: {
+    children: ReactNode;
+    onSelect?: () => void;
+  }) => <button onClick={onSelect}>{children}</button>,
 }));
 
 describe("SettingsDropdown", () => {
@@ -30,8 +51,9 @@ describe("SettingsDropdown", () => {
       root.render(<SettingsDropdown />);
     });
 
-    const button = container.querySelector(
-      'button[aria-label="Open runtime settings"]',
+    const button = Array.from(container.querySelectorAll("button")).find(
+      (candidate) =>
+        candidate.textContent?.includes("Open runtime settings") ?? false,
     );
 
     act(() => {
@@ -60,8 +82,9 @@ describe("SettingsDropdown", () => {
       root.render(<SettingsDropdown />);
     });
 
-    const button = container.querySelector(
-      'button[aria-label="Open runtime settings"]',
+    const button = Array.from(container.querySelectorAll("button")).find(
+      (candidate) =>
+        candidate.textContent?.includes("Open runtime settings") ?? false,
     );
 
     act(() => {

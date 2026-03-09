@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
 import {
@@ -11,13 +12,12 @@ import { SendButton } from "@/components/chat/input/SendButton";
 import { SettingsDropdown } from "@/components/chat/input/SettingsDropdown";
 import {
   PromptInput,
-  PromptInputActions,
   PromptInputBody,
   PromptInputFooter,
   PromptInputHeader,
   PromptInputTextarea,
   PromptInputTools,
-} from "@/components/chat/prompt-input";
+} from "@/components/ai-elements/prompt-input";
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 
 interface ChatInputProps {
@@ -40,7 +40,7 @@ function createAttachmentId() {
   ) {
     return crypto.randomUUID();
   }
-  return `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `attachment-${nanoid()}`;
 }
 
 function revokeAttachmentPreview(attachment: AttachedFile) {
@@ -62,6 +62,7 @@ function ChatInput({
   className,
 }: ChatInputProps) {
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  const hasContent = value.trim().length > 0;
 
   useEffect(
     () => () => {
@@ -106,15 +107,13 @@ function ChatInput({
 
   return (
     <PromptInput
-      value={value}
-      onChange={onChange}
-      onSubmit={handleSubmit}
-      isLoading={isLoading}
-      isReceiving={isReceiving}
       className={className}
+      onSubmit={async () => {
+        handleSubmit();
+      }}
     >
       {attachments.length > 0 ? (
-        <PromptInputHeader>
+        <PromptInputHeader className="px-1 pb-1 pt-1">
           {attachments.map((attachment) => (
             <AttachmentChip
               key={attachment.id}
@@ -126,10 +125,17 @@ function ChatInput({
       ) : null}
 
       <PromptInputBody>
-        <PromptInputTextarea placeholder={placeholder} />
+        <PromptInputTextarea
+          aria-label="Message"
+          className="min-h-12 px-2 pb-2.5 pt-3.5"
+          disabled={isLoading}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          placeholder={placeholder}
+          value={value}
+        />
       </PromptInputBody>
 
-      <PromptInputFooter>
+      <PromptInputFooter className="px-1 pb-1 pt-0">
         <PromptInputTools>
           <AttachmentDropdown
             onFilesSelected={handleFilesSelected}
@@ -139,14 +145,18 @@ function ChatInput({
           <SettingsDropdown />
         </PromptInputTools>
 
-        <PromptInputActions>
+        <div className="flex items-center gap-1">
           <ExecutionModeDropdown
             value={executionMode}
             onChange={onExecutionModeChange}
           />
 
-          <SendButton />
-        </PromptInputActions>
+          <SendButton
+            disabled={isLoading || !hasContent}
+            isLoading={isLoading}
+            isReceiving={isReceiving}
+          />
+        </div>
       </PromptInputFooter>
     </PromptInput>
   );

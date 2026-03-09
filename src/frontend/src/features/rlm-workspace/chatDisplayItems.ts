@@ -12,13 +12,32 @@ type GroupableTracePart = Extract<
     kind: "tool" | "sandbox" | "environment_variables" | "status_note";
   }
 >;
+type AttachableTracePart = Exclude<
+  ChatRenderPart,
+  {
+    kind: "reasoning" | "chain_of_thought" | "confirmation";
+  }
+>;
 
 type ReasoningTracePart = Extract<ChatRenderPart, { kind: "reasoning" }>;
+type TrajectoryTracePart = Extract<ChatRenderPart, { kind: "chain_of_thought" }>;
 
 export interface AssistantTurnReasoningItem {
   key: string;
   message: ChatMessage;
   part: ReasoningTracePart;
+}
+
+export interface AssistantTurnTrajectoryItem {
+  key: string;
+  message: ChatMessage;
+  part: TrajectoryTracePart;
+}
+
+export interface AssistantTurnTracePartItem {
+  key: string;
+  message: ChatMessage;
+  part: AttachableTracePart;
 }
 
 export interface ToolSessionItem {
@@ -47,8 +66,13 @@ export type TraceDisplayItem =
 export interface AssistantTurnDisplayItem {
   kind: "assistant_turn";
   key: string;
+  turnId: string;
   message?: ChatMessage;
+  isPendingShell: boolean;
   reasoningItems: AssistantTurnReasoningItem[];
+  trajectoryItems: AssistantTurnTrajectoryItem[];
+  attachedToolSessions: Array<Extract<TraceDisplayItem, { kind: "tool_session" }>>;
+  attachedTraceParts: AssistantTurnTracePartItem[];
 }
 
 export type ChatDisplayItem =
@@ -166,6 +190,41 @@ function isReasoningTracePart(
   return part.kind === "reasoning";
 }
 
+function isAttachableTracePart(
+  part: ChatRenderPart,
+): part is AttachableTracePart {
+  return (
+    part.kind !== "reasoning" &&
+    part.kind !== "chain_of_thought" &&
+    part.kind !== "confirmation"
+  );
+}
+
+function createAssistantTurn(
+  key: string,
+  turnId: string,
+  options?: {
+    message?: ChatMessage;
+    isPendingShell?: boolean;
+  },
+): AssistantTurnDisplayItem {
+  return {
+    kind: "assistant_turn",
+    key,
+    turnId,
+    message: options?.message,
+    isPendingShell: options?.isPendingShell ?? false,
+    reasoningItems: [],
+    trajectoryItems: [],
+    attachedToolSessions: [],
+    attachedTraceParts: [],
+  };
+}
+
+export function buildPendingAssistantTurnId(userMessageId: string) {
+  return `pending:${userMessageId}`;
+}
+
 type PendingTraceDisplay = {
   items: Array<TraceDisplayItem | AssistantTurnDisplayItem>;
 };
@@ -206,13 +265,18 @@ function buildTraceDisplayItems(messages: ChatMessage[]): PendingTraceDisplay {
       if (isReasoningTracePart(part)) {
         flushActiveSession();
         if (!activeReasoningTurn) {
-          activeReasoningTurn = {
-            kind: "assistant_turn",
-            key,
-            reasoningItems: [],
-          };
+          activeReasoningTurn = createAssistantTurn(key, key);
         }
         activeReasoningTurn.reasoningItems.push({ key, message, part });
+        continue;
+      }
+
+      if (part.kind === "chain_of_thought") {
+        flushActiveSession();
+        if (!activeReasoningTurn) {
+          activeReasoningTurn = createAssistantTurn(key, key);
+        }
+        activeReasoningTurn.trajectoryItems.push({ key, message, part });
         continue;
       }
 
@@ -263,64 +327,158 @@ function isSummaryReasoningOnlyAssistantTurn(
   return (
     item?.kind === "assistant_turn" &&
     item.message == null &&
-    item.reasoningItems.length > 0 &&
+    item.attachedToolSessions.length === 0 &&
+    item.attachedTraceParts.length === 0 &&
+    (item.reasoningItems.length > 0 || item.trajectoryItems.length > 0) &&
     item.reasoningItems.every(
       (reasoningItem) => reasoningItem.message.traceSource === "summary",
+    ) &&
+    item.trajectoryItems.every(
+      (trajectoryItem) => trajectoryItem.message.traceSource === "summary",
     )
   );
 }
 
+function isReasoningOnlyAssistantTurn(
+  item: TraceDisplayItem | AssistantTurnDisplayItem | undefined,
+): item is AssistantTurnDisplayItem {
+  return (
+    item?.kind === "assistant_turn" &&
+    item.message == null &&
+    item.attachedToolSessions.length === 0 &&
+    item.attachedTraceParts.length === 0 &&
+    (item.reasoningItems.length > 0 || item.trajectoryItems.length > 0)
+  );
+}
+
+function attachPendingTraceItems(
+  pending: Array<TraceDisplayItem | AssistantTurnDisplayItem>,
+  targetTurn: AssistantTurnDisplayItem,
+) {
+  const remainingPending: TraceDisplayItem[] = [];
+
+  for (const pendingItem of pending) {
+    if (pendingItem.kind === "assistant_turn" && isReasoningOnlyAssistantTurn(pendingItem)) {
+      targetTurn.reasoningItems.push(...pendingItem.reasoningItems);
+      targetTurn.trajectoryItems.push(...pendingItem.trajectoryItems);
+      continue;
+    }
+
+    if (pendingItem.kind === "tool_session") {
+      targetTurn.attachedToolSessions.push(pendingItem);
+      continue;
+    }
+
+    const attachableParts = pendingItem.renderParts.flatMap((part) =>
+      isAttachableTracePart(part)
+        ? [{ key: pendingItem.key, message: pendingItem.message, part }]
+        : [],
+    );
+    if (attachableParts.length > 0) {
+      targetTurn.attachedTraceParts.push(...attachableParts);
+      const remainingParts = pendingItem.renderParts.filter(
+        (part) => !isAttachableTracePart(part),
+      );
+      if (remainingParts.length > 0) {
+        remainingPending.push({
+          ...pendingItem,
+          renderParts: remainingParts,
+        });
+      }
+      continue;
+    }
+
+    remainingPending.push(pendingItem);
+  }
+
+  return remainingPending;
+}
+
+interface BuildChatDisplayItemsOptions {
+  showPendingAssistantShell?: boolean;
+}
+
 export function buildChatDisplayItems(
   messages: ChatMessage[],
+  options?: BuildChatDisplayItemsOptions,
 ): ChatDisplayItem[] {
   const items: ChatDisplayItem[] = [];
   let pendingTraceMessages: ChatMessage[] = [];
+  let currentTurnUserMessageId: string | null = null;
+  let activeAssistantTurn: AssistantTurnDisplayItem | null = null;
+  const showPendingAssistantShell = options?.showPendingAssistantShell ?? false;
 
-  const flushPendingTraceMessages = (assistantMessage?: ChatMessage) => {
+  const flushPendingTraceMessages = (targetTurn?: AssistantTurnDisplayItem) => {
     if (pendingTraceMessages.length === 0) return false;
     const pending = buildTraceDisplayItems(pendingTraceMessages).items;
+    const remainingPending = targetTurn
+      ? attachPendingTraceItems(pending, targetTurn)
+      : pending;
 
-    if (assistantMessage) {
-      const lastPending = pending[pending.length - 1];
-      if (lastPending?.kind === "assistant_turn" && !lastPending.message) {
-        lastPending.message = assistantMessage;
-      } else {
-        pending.push({
-          kind: "assistant_turn",
-          key: assistantMessage.id,
-          message: assistantMessage,
-          reasoningItems: [],
-        });
-      }
-    }
-
-    if (!assistantMessage) {
+    if (!targetTurn) {
       const lastItem = items[items.length - 1];
       if (lastItem?.kind === "assistant_turn" && lastItem.message) {
-        const remainingPending: Array<
-          TraceDisplayItem | AssistantTurnDisplayItem
-        > = [];
-        let mergedSummaryReasoning = false;
-
-        for (const pendingItem of pending) {
-          if (!isSummaryReasoningOnlyAssistantTurn(pendingItem)) {
-            remainingPending.push(pendingItem);
-            continue;
-          }
-          lastItem.reasoningItems.push(...pendingItem.reasoningItems);
-          mergedSummaryReasoning = true;
-        }
-
-        if (mergedSummaryReasoning) {
-          pending.length = 0;
-          pending.push(...remainingPending);
+        const trailingSummaryReasoning = remainingPending.filter(
+          (pendingItem) => isSummaryReasoningOnlyAssistantTurn(pendingItem),
+        );
+        if (trailingSummaryReasoning.length > 0) {
+          lastItem.reasoningItems.push(
+            ...trailingSummaryReasoning.flatMap((pendingItem) => pendingItem.reasoningItems),
+          );
+          lastItem.trajectoryItems.push(
+            ...trailingSummaryReasoning.flatMap((pendingItem) => pendingItem.trajectoryItems),
+          );
+          const nonSummaryPending = remainingPending.filter(
+            (pendingItem) => !isSummaryReasoningOnlyAssistantTurn(pendingItem),
+          );
+          items.push(...nonSummaryPending);
+          pendingTraceMessages = [];
+          return true;
         }
       }
     }
 
-    items.push(...pending);
+    items.push(...remainingPending);
     pendingTraceMessages = [];
     return true;
+  };
+
+  const finalizeCurrentTurn = () => {
+    if (pendingTraceMessages.length === 0) {
+      if (
+        showPendingAssistantShell &&
+        currentTurnUserMessageId &&
+        !activeAssistantTurn
+      ) {
+        const pendingTurn = createAssistantTurn(
+          buildPendingAssistantTurnId(currentTurnUserMessageId),
+          buildPendingAssistantTurnId(currentTurnUserMessageId),
+          { isPendingShell: true },
+        );
+        items.push(pendingTurn);
+        activeAssistantTurn = pendingTurn;
+      }
+      return;
+    }
+
+    if (activeAssistantTurn) {
+      flushPendingTraceMessages(activeAssistantTurn);
+      return;
+    }
+
+    if (showPendingAssistantShell && currentTurnUserMessageId) {
+      const pendingTurn = createAssistantTurn(
+        buildPendingAssistantTurnId(currentTurnUserMessageId),
+        buildPendingAssistantTurnId(currentTurnUserMessageId),
+        { isPendingShell: true },
+      );
+      flushPendingTraceMessages(pendingTurn);
+      items.push(pendingTurn);
+      activeAssistantTurn = pendingTurn;
+      return;
+    }
+
+    flushPendingTraceMessages();
   };
 
   for (const message of messages) {
@@ -329,25 +487,40 @@ export function buildChatDisplayItems(
       continue;
     }
 
-    if (message.type === "assistant") {
-      const flushedPendingTrace = flushPendingTraceMessages(message);
-      if (!flushedPendingTrace) {
-        const lastItem = items[items.length - 1];
-        if (lastItem?.kind === "assistant_turn" && !lastItem.message) {
-          lastItem.message = message;
-        } else {
-          items.push({
-            kind: "assistant_turn",
-            key: message.id,
-            message,
-            reasoningItems: [],
-          });
-        }
-      }
+    if (message.type === "user") {
+      finalizeCurrentTurn();
+      activeAssistantTurn = null;
+      currentTurnUserMessageId = message.id;
+      items.push({
+        kind: "message",
+        key: message.id,
+        message,
+      });
       continue;
     }
 
-    flushPendingTraceMessages();
+    if (message.type === "assistant") {
+      const assistantTurn: AssistantTurnDisplayItem =
+        activeAssistantTurn?.isPendingShell
+          ? activeAssistantTurn
+          : createAssistantTurn(message.id, message.id, {
+              message,
+            });
+      flushPendingTraceMessages(assistantTurn);
+      assistantTurn.key = message.id;
+      assistantTurn.turnId = message.id;
+      assistantTurn.message = message;
+      assistantTurn.isPendingShell = false;
+      if (assistantTurn !== activeAssistantTurn) {
+        items.push(assistantTurn);
+      }
+      activeAssistantTurn = assistantTurn;
+      continue;
+    }
+
+    if (message.type !== "trace") {
+      finalizeCurrentTurn();
+    }
     items.push({
       kind: "message",
       key: message.id,
@@ -355,6 +528,6 @@ export function buildChatDisplayItems(
     });
   }
 
-  flushPendingTraceMessages();
+  finalizeCurrentTurn();
   return items;
 }

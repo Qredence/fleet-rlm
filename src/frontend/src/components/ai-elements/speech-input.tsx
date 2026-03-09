@@ -1,9 +1,8 @@
-
 import type { ComponentProps } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { MicIcon, SquareIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -189,7 +188,7 @@ export const SpeechInput = ({
         }
       }
     },
-    []
+    [],
   );
 
   // Start MediaRecorder recording
@@ -292,12 +291,12 @@ export const SpeechInput = ({
       {isListening &&
         [0, 1, 2].map((index) => (
           <div
-            className="absolute inset-0 animate-ping rounded-full border-2 border-red-400/30"
+            className={cn(
+              "absolute inset-0 animate-ping rounded-full border-2 border-red-400/30 [animation-duration:2s]",
+              index === 1 && "[animation-delay:0.3s]",
+              index === 2 && "[animation-delay:0.6s]",
+            )}
             key={index}
-            style={{
-              animationDelay: `${index * 0.3}s`,
-              animationDuration: "2s",
-            }}
           />
         ))}
 
@@ -306,9 +305,9 @@ export const SpeechInput = ({
         className={cn(
           "relative z-10 rounded-full transition-all duration-300",
           isListening
-            ? "bg-destructive text-white hover:bg-destructive/80 hover:text-white"
+            ? "bg-destructive text-destructive-foreground hover:bg-destructive/80 hover:text-destructive-foreground"
             : "bg-primary text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground",
-          className
+          className,
         )}
         disabled={isDisabled}
         onClick={toggleListening}

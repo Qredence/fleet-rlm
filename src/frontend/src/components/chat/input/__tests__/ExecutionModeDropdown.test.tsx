@@ -10,26 +10,28 @@ import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDrop
   }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => (
+vi.mock("@/components/ui/menubar", () => ({
+  Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarTrigger: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => (
+  MenubarContent: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
+  MenubarLabel: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
+  MenubarRadioGroup: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  DropdownMenuItem: ({
+  MenubarRadioItem: ({
     children,
-    onClick,
+    onSelect,
   }: {
     children: ReactNode;
-    onClick?: () => void;
-  }) => <button onClick={onClick}>{children}</button>,
+    onSelect?: () => void;
+  }) => <button onClick={onSelect}>{children}</button>,
 }));
 
 describe("ExecutionModeDropdown", () => {

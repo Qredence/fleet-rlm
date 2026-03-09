@@ -98,7 +98,7 @@ export function ArtifactTimeline({
   if (ordered.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-        Timeline will appear as execution steps stream in.
+        Timeline fills in as steps arrive.
       </div>
     );
   }
@@ -112,20 +112,18 @@ export function ArtifactTimeline({
 
   return (
     <ScrollArea className="h-full pr-1">
-      <div className="space-y-4 pb-2">
-        <section className="rounded-[26px] border border-border-subtle/80 bg-linear-to-br from-card via-card/95 to-muted/20 p-4 shadow-[0_18px_48px_-32px_rgba(15,23,42,0.28)]">
-          <div className="flex items-start justify-between gap-3">
+      <div className="space-y-3 pb-2">
+        <section className="rounded-[22px] border border-border-subtle/80 bg-linear-to-br from-card via-card/95 to-muted/15 p-3.5 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.24)]">
+          <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                 Execution timeline
               </p>
-              <h2 className="mt-1 text-sm font-medium text-foreground">
-                Scan the run, then jump into the important step.
-              </h2>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Selecting a step keeps the REPL and preview panels focused on
-                the same part of the trace.
-              </p>
+              {activeStep ? (
+                <p className="mt-1 text-sm font-medium text-foreground">
+                  {activeStep.label}
+                </p>
+              ) : null}
             </div>
 
             {activeStep ? (
@@ -135,7 +133,7 @@ export function ArtifactTimeline({
             ) : null}
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-border-subtle/70 bg-background/75 px-3 py-1.5">
               <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                 Steps
@@ -162,21 +160,21 @@ export function ArtifactTimeline({
                 {durationLabel ?? "Live"}
               </span>
             </span>
-          </div>
 
-          {activeStep ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-border-subtle/70 bg-background/65 px-3 py-2.5">
-              <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                Focused step
+            {activeStep ? (
+              <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-border-subtle/70 bg-background/75 px-3 py-1.5">
+                <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Focused
+                </span>
+                <span className="truncate text-sm text-foreground">
+                  {activeStep.label}
+                </span>
               </span>
-              <span className="text-sm text-foreground">
-                {activeStep.label}
-              </span>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </section>
 
-        <div className="relative space-y-3">
+        <div className="relative space-y-2.5">
           {ordered.map((step, index) => {
             const Icon = ICONS[step.type] ?? Brain;
             const meta = STEP_TYPE_META[step.type];
@@ -209,14 +207,14 @@ export function ArtifactTimeline({
               <div
                 key={step.id}
                 className="relative"
-                style={{ paddingInlineStart: "3.1rem" }}
+                style={{ paddingInlineStart: "2.8rem" }}
               >
                 {hasConnector ? (
-                  <div className="absolute left-[1.1rem] top-12 bottom-[-0.95rem] w-px bg-linear-to-b from-border-strong/50 via-border-subtle/40 to-transparent" />
+                  <div className="absolute left-[0.95rem] top-10 bottom-[-0.75rem] w-px bg-linear-to-b from-border-strong/50 via-border-subtle/40 to-transparent" />
                 ) : null}
 
                 <div
-                  className="absolute left-0 top-4 flex size-9 items-center justify-center rounded-full border border-border-subtle/80 bg-background/90 shadow-sm"
+                  className="absolute left-0 top-3 flex size-8 items-center justify-center rounded-full border border-border-subtle/80 bg-background/92 shadow-sm"
                   style={{
                     boxShadow: selected
                       ? `0 0 0 1px color-mix(in srgb, ${meta.color} 35%, transparent)`
@@ -224,7 +222,7 @@ export function ArtifactTimeline({
                   }}
                 >
                   <div
-                    className="rounded-full p-1.5"
+                    className="rounded-full p-1.25"
                     style={{
                       backgroundColor: `color-mix(in srgb, ${meta.color} 18%, transparent)`,
                     }}
@@ -241,9 +239,9 @@ export function ArtifactTimeline({
                   type="button"
                   onClick={() => onSelectStep(step.id)}
                   className={cn(
-                    "group w-full rounded-[24px] border px-4 py-4 text-left transition-[border-color,background-color,box-shadow]",
+                    "group w-full rounded-[20px] border px-3.5 py-3.5 text-left transition-[border-color,background-color,box-shadow]",
                     selected
-                      ? "border-accent/40 bg-accent/7 shadow-[0_20px_48px_-30px_rgba(59,130,246,0.42)]"
+                      ? "border-accent/40 bg-accent/7 shadow-[0_18px_44px_-34px_rgba(59,130,246,0.38)]"
                       : "border-border-subtle/80 bg-card/55 hover:border-border-strong hover:bg-card/85",
                   )}
                 >
@@ -273,18 +271,18 @@ export function ArtifactTimeline({
                       ) : null}
                     </div>
 
-                    <h3 className="mt-2 text-base font-medium leading-tight text-foreground">
+                    <h3 className="mt-1.5 text-sm font-medium leading-snug text-foreground">
                       {step.label}
                     </h3>
 
                     {showSummary ? (
-                      <p className="mt-2 text-[13px] leading-6 text-muted-foreground whitespace-pre-wrap break-words">
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground whitespace-pre-wrap break-words">
                         {summary}
                       </p>
                     ) : null}
 
                     {chips.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                         {chips.map((chip) => (
                           <span
                             key={`${step.id}-${chip}`}

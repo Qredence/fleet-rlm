@@ -7,19 +7,6 @@
 // Main input component
 export { ChatInput } from "./ChatInput";
 
-// Prompt input subdirectory
-export {
-  PromptInput,
-  usePromptInput,
-  PromptInputHeader,
-  PromptInputBody,
-  PromptInputTextarea,
-  PromptInputFooter,
-  PromptInputTools,
-  PromptInputActions,
-  PromptInputSubmit,
-} from "./prompt-input";
-
 // Input controls subdirectory
 export { AgentDropdown } from "./input/AgentDropdown";
 export { AttachmentChip, type AttachedFile } from "./input/AttachmentChip";

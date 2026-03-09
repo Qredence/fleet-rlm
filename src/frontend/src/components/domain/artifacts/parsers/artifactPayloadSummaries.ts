@@ -41,6 +41,11 @@ function firstLine(value: string, max = 160): string {
   return line?.trim() ?? "";
 }
 
+function joinFragments(values: unknown[]): string {
+  const merged = values.map((value) => asText(value)).join("");
+  return compact(merged.replace(/\s+/g, " "));
+}
+
 function summarizeStructuredOutput(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     return value.length === 0
@@ -141,12 +146,12 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
   if (step.type === "llm") {
     const output = asRecord(step.output);
     if (Array.isArray(output?.reasoning) && output.reasoning.length > 0) {
-      const latest = asText(output.reasoning[output.reasoning.length - 1]);
-      return `Reasoning: ${compact(latest, 110)}`;
+      const combined = joinFragments(output.reasoning);
+      return combined ? `Reasoning: ${combined}` : step.label;
     }
     if (Array.isArray(output?.status) && output.status.length > 0) {
-      const latest = asText(output.status[output.status.length - 1]);
-      return `Status: ${compact(latest, 110)}`;
+      const combined = joinFragments(output.status);
+      return combined ? `Status: ${combined}` : step.label;
     }
     // Unpack the {streaming, text} envelope emitted by the backend LLM step
     if (typeof output?.text === "string" && output.text.trim()) {

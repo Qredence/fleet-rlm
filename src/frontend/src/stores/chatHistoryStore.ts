@@ -14,6 +14,7 @@ import {
 } from "zustand/middleware";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
+import type { ExecutionStep } from "@/stores/artifactStore";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -21,6 +22,7 @@ export interface Conversation {
   id: string;
   title: string;
   messages: ChatMessage[];
+  turnArtifactsByMessageId?: Record<string, ExecutionStep[]>;
   phase: CreationPhase;
   createdAt: string;
   updatedAt: string;
@@ -32,6 +34,7 @@ interface ChatHistoryState {
     messages: ChatMessage[],
     phase: CreationPhase,
     conversationId?: string | null,
+    turnArtifactsByMessageId?: Record<string, ExecutionStep[]>,
   ) => string;
   loadConversation: (id: string) => Conversation | null;
   deleteConversation: (id: string) => void;
@@ -40,9 +43,10 @@ interface ChatHistoryState {
 
 // ── Constants ────────────────────────────────────────────────────────
 
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 const STORAGE_KEY = "hax-fleet:chat-history";
 const VERSIONED_KEY = `${STORAGE_KEY}:v${STORAGE_VERSION}`;
+const LEGACY_VERSIONED_KEYS = [`${STORAGE_KEY}:v1`];
 const MAX_CONVERSATIONS = 50;
 type ChatHistoryPersistedState = Pick<ChatHistoryState, "conversations">;
 
@@ -114,11 +118,13 @@ function toPersistedChatHistory(
 
 const chatHistoryStorage: PersistStorage<ChatHistoryPersistedState> = {
   getItem: (name) => {
-    const currentValue = toPersistedChatHistory(
-      parseStoredJson(localStorage.getItem(name)),
-    );
-    if (currentValue) {
-      return currentValue;
+    for (const key of [name, ...LEGACY_VERSIONED_KEYS]) {
+      const storedValue = toPersistedChatHistory(
+        parseStoredJson(localStorage.getItem(key)),
+      );
+      if (storedValue) {
+        return storedValue;
+      }
     }
 
     const legacyValue = toConversationArray(
@@ -148,7 +154,12 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
     (set, get) => ({
       conversations: [],
 
-      saveConversation: (messages, phase, conversationId) => {
+      saveConversation: (
+        messages,
+        phase,
+        conversationId,
+        turnArtifactsByMessageId,
+      ) => {
         const now = new Date().toISOString();
 
         // Don't save empty conversations
@@ -170,6 +181,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
               const updatedConv: Conversation = {
                 ...existing,
                 messages,
+                turnArtifactsByMessageId,
                 phase,
                 title,
                 updatedAt: now,
@@ -183,6 +195,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
                 id: conversationId,
                 title,
                 messages,
+                turnArtifactsByMessageId,
                 phase,
                 createdAt: now,
                 updatedAt: now,
@@ -194,6 +207,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
               id: finalId,
               title,
               messages,
+              turnArtifactsByMessageId,
               phase,
               createdAt: now,
               updatedAt: now,

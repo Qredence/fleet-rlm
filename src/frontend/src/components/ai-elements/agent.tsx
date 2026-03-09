@@ -9,7 +9,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { BotIcon } from "lucide-react";
 import { memo } from "react";
 

@@ -19,6 +19,13 @@ export type PromptFeature =
 /** Prompt execution mode selected via toolbar chip */
 export type PromptMode = "auto" | "workspace" | "webSearch" | "cowork";
 
+/** Active tab inside the workspace Message Inspector. */
+export type InspectorTab =
+  | "trajectory"
+  | "execution"
+  | "evidence"
+  | "graph";
+
 // ── Domain Types ────────────────────────────────────────────────────
 export interface Skill {
   id: string;
@@ -193,6 +200,7 @@ export type ChatRenderPart =
       parts: { type: "text"; text: string }[];
       isStreaming: boolean;
       duration?: number;
+      label?: string;
       runtimeContext?: RuntimeContext;
     }
   | {

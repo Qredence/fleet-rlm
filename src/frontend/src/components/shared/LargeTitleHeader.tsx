@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { typo } from "@/lib/config/typo";
+import { cn } from "@/lib/utils/cn";
 
 interface LargeTitleHeaderProps {
   /** Large title text */
@@ -54,11 +55,8 @@ export function LargeTitleHeader({
   /* ── Desktop: simple static header ─────────────────────────────── */
   if (!isMobile) {
     return (
-      <div className="pt-4 md:pt-6 pb-4 border-b border-border-subtle shrink-0 max-w-[800px] w-full mx-auto px-6">
-        <h2
-          className="text-foreground mb-1"
-          style={{ ...typo.h3, textWrap: "balance" }}
-        >
+      <div className="pt-4 md:pt-6 pb-4 border-b border-border-subtle shrink-0 max-w-200 w-full mx-auto px-6">
+        <h2 className="mb-1 text-balance text-foreground" style={typo.h3}>
           {title}
         </h2>
         {subtitle && (
@@ -76,18 +74,12 @@ export function LargeTitleHeader({
     <>
       {/* Compact sticky title — pins to top of scroll viewport */}
       <div
-        className="sticky top-0 z-10 flex items-center justify-center overflow-hidden"
-        style={{
-          height: isCollapsed ? 44 : 0,
-          opacity: isCollapsed ? 1 : 0,
-          backgroundColor: "var(--glass-nav-bg)",
-          backdropFilter: "blur(var(--glass-nav-blur))",
-          WebkitBackdropFilter: "blur(var(--glass-nav-blur))",
-          borderBottom: isCollapsed
-            ? "0.5px solid var(--glass-nav-border)"
-            : "none",
-          transition: "height 0.2s ease, opacity 0.15s ease",
-        }}
+        className={cn(
+          "glass-nav-surface sticky top-0 z-10 flex items-center justify-center overflow-hidden transition-[height,opacity]",
+          isCollapsed
+            ? "h-11 border-b border-b-(--color-border-disabled) opacity-100"
+            : "h-0 border-b-0 opacity-0",
+        )}
       >
         <span className="text-foreground truncate px-4" style={typo.label}>
           {title}
@@ -103,16 +95,7 @@ export function LargeTitleHeader({
 
       {/* Large title area */}
       <div className="px-4 pt-2 pb-3 w-full">
-        <h2
-          className="text-foreground"
-          style={{
-            fontFamily: "var(--font-family)",
-            fontSize: "var(--text-h2)",
-            fontWeight: "var(--font-weight-semibold)",
-            lineHeight: "var(--line-height-tight)",
-            textWrap: "balance",
-          }}
-        >
+        <h2 className="font-app text-foreground text-balance" style={typo.h2}>
           {title}
         </h2>
         {subtitle && (

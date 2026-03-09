@@ -44,10 +44,15 @@ export const Streamdown = memo(function Streamdown({
         isAnimating={streaming}
         parseIncompleteMarkdown
         className={cn(
-          "text-sm leading-6 text-foreground",
+          "text-[14px] leading-5.25 text-foreground",
+          "[&_p]:text-[14px] [&_li]:text-[14px] [&_pre]:text-[14px]",
+          "[&_h1]:text-[14px] [&_h1]:leading-5.25 [&_h1]:font-semibold",
+          "[&_h2]:text-[14px] [&_h2]:leading-5.25 [&_h2]:font-semibold",
+          "[&_h3]:text-[14px] [&_h3]:leading-5.25 [&_h3]:font-semibold",
+          "[&_h4]:text-[14px] [&_h4]:leading-5.25 [&_h4]:font-semibold",
           "[&_p]:mb-3 [&_p:last-child]:mb-0",
           "[&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-muted/40 [&_pre]:p-3",
-          "[&_code]:font-mono [&_code]:text-xs",
+          "[&_code]:font-mono [&_code]:text-[14px] [&_code]:leading-5.25",
           "[&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6",
           "[&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6",
           "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground",

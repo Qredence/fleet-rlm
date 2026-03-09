@@ -16,7 +16,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
   if (!outputStep) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-        Final artifact output will appear here when execution completes.
+        Final output appears here.
       </div>
     );
   }
