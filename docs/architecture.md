@@ -211,71 +211,232 @@ The service layer provides HTTP and WebSocket APIs:
 | `analytics/mlflow_integration.py` | MLflow tracing for DSPy optimization |
 | `analytics/posthog_callback.py` | PostHog telemetry callback |
 
-## Data Flow
+## Data Flow Diagrams
 
 ### Chat Turn Flow
 
+This diagram shows the complete flow of a chat turn from user message to response streaming, based on the WebSocket runtime in `src/fleet_rlm/server/routers/ws/`.
+
 ```mermaid
 sequenceDiagram
-    participant User
-    participant WS as WebSocket
+    autonumber
+    participant User as User
+    participant WS as WebSocket<br/>(ws/api.py)
+    participant MsgLoop as message_loop.py
     participant Runtime as chat_runtime.py
-    participant Agent as RLMReActChatAgent
-    participant Tools as Tools
-    participant Sandbox as Modal Sandbox
-    participant DB as Neon Postgres
+    participant Agent as RLMReActChatAgent<br/>(agent.py)
+    participant StreamCtx as StreamingContext<br/>(streaming_context.py)
+    participant Stream as streaming.py
+    participant Tools as Tools<br/>(react/tools/)
+    participant Interpreter as ModalInterpreter<br/>(interpreter.py)
+    participant Modal as Modal Sandbox
+    participant DB as Neon Postgres<br/>(db/repository.py)
 
-    User->>WS: Send message
-    WS->>Runtime: Forward to chat_runtime
-    Runtime->>Agent: Process with RLMReActChatAgent
-    Agent->>Agent: ReAct loop (think → act → observe)
-    Agent->>Tools: Execute tool calls
-    Tools->>Sandbox: Run code in Modal
-    Sandbox-->>Tools: Return results
-    Tools-->>Agent: Tool results
-    Agent-->>Runtime: Stream trajectory events
-    Runtime-->>WS: Stream events to client
-    WS-->>User: Display response
-    Agent->>DB: Persist conversation state
+    User->>WS: WSMessage {type: "message"}
+    WS->>MsgLoop: parse_ws_message_or_send_error()
+    MsgLoop->>Runtime: _prepare_chat_runtime()
+    Runtime->>Runtime: resolve_admitted_identity()
+    Runtime->>Runtime: _build_chat_agent_context()
+    Runtime-->>MsgLoop: _PreparedChatRuntime
+    MsgLoop->>Agent: agent.chat_stream(message)
+
+    Agent->>StreamCtx: StreamingContext.from_agent(agent)
+    StreamCtx-->>Agent: Immutable context snapshot
+    Agent->>Stream: aiter_chat_turn_stream()
+
+    loop ReAct Loop
+        Agent->>Agent: think → act → observe
+        Agent->>Tools: Execute tool call
+        Tools->>Interpreter: interpreter.execute(code)
+        Interpreter->>Modal: Run code in sandbox
+        Modal-->>Interpreter: Execution result
+        Interpreter-->>Tools: Return result
+        Tools-->>Agent: Tool result
+        Agent->>Stream: Emit StreamEvent
+        Stream-->>WS: Stream trajectory events
+        WS-->>User: Display incremental response
+    end
+
+    Agent-->>MsgLoop: Final response
+    MsgLoop->>DB: persist_session_state()
+    MsgLoop-->>WS: Stream complete
+    WS-->>User: Turn finished
 ```
+
+**Key Components:**
+
+| Component | Source File | Role |
+|-----------|-------------|------|
+| `parse_ws_message_or_send_error` | `ws/message_loop.py` | Parse incoming WebSocket JSON into `WSMessage` |
+| `_prepare_chat_runtime` | `ws/chat_runtime.py` | Initialize agent with planner LM, delegate LM, repository |
+| `StreamingContext` | `react/streaming_context.py` | Immutable snapshot of agent state for event enrichment |
+| `aiter_chat_turn_stream` | `react/streaming.py` | Async iterator yielding `StreamEvent` objects |
 
 ### RLM Delegation Flow
 
+This diagram shows how parent agents spawn child RLM instances for recursive reasoning, based on `src/fleet_rlm/react/delegate_sub_agent.py`.
+
 ```mermaid
 sequenceDiagram
-    participant Parent as Parent Agent
+    autonumber
+    participant Parent as Parent Agent<br/>(RLMReActChatAgent)
     participant Delegate as delegate_sub_agent.py
-    participant Child as Child dspy.RLM
-    participant MLflow as MLflow
+    participant Builder as rlm_runtime_modules.py
+    participant ChildCtx as Child Interpreter
+    participant ChildRLM as Child dspy.RLM
+    participant StreamCb as StreamEventCallback
+    participant LLM as Language Model
 
-    Parent->>Delegate: Spawn delegate with task
-    Delegate->>Child: Create child RLM instance
-    Child->>Child: Recursive reasoning loop
-    Child-->>Delegate: Return result
-    Delegate->>MLflow: Log trace
-    Delegate-->>Parent: Aggregated result
+    Parent->>Delegate: spawn_delegate_sub_agent_async(prompt, context)
+    Delegate->>Delegate: _claim_delegate_slot_or_error()
+
+    alt Delegate budget exhausted
+        Delegate-->>Parent: {status: "error", error: "budget reached"}
+    end
+
+    Delegate->>Delegate: _remaining_llm_budget(agent)
+    Delegate->>Delegate: _build_child_interpreter(agent)
+
+    alt Parent has live sandbox
+        Note over ChildCtx: Reuse parent interpreter
+    else No live sandbox
+        Note over ChildCtx: Create new ModalInterpreter
+        ChildCtx->>ChildCtx: Share LLM budget with parent
+    end
+
+    Delegate->>Builder: build_recursive_subquery_rlm(interpreter, max_iters)
+    Builder-->>Delegate: Child RLM module
+
+    Delegate->>Delegate: _delegate_streaming_context(agent)
+    Delegate-->>StreamCb: Create callback for trajectory events
+
+    Delegate->>ChildRLM: dspy.streamify(child_module)
+    ChildRLM->>ChildRLM: Recursive ReAct loop
+
+    loop Child Iteration
+        ChildRLM->>LLM: LLM call
+        LLM-->>ChildRLM: Response
+        ChildRLM->>StreamCb: Emit trajectory_step event
+        StreamCb-->>Parent: Forward to parent's event stream
+    end
+
+    ChildRLM-->>Delegate: dspy.Prediction
+    Delegate->>Delegate: _normalize_delegate_result()
+    Delegate-->>Parent: {status: "ok", answer, trajectory, depth}
 ```
+
+**Key Components:**
+
+| Function | Source File | Purpose |
+|----------|-------------|---------|
+| `spawn_delegate_sub_agent_async` | `react/delegate_sub_agent.py` | Main entry point for delegation |
+| `_claim_delegate_slot_or_error` | `react/delegate_sub_agent.py` | Enforce `delegate_max_calls_per_turn` limit |
+| `_build_child_interpreter` | `react/delegate_sub_agent.py` | Create or reuse ModalInterpreter for child |
+| `build_recursive_subquery_rlm` | `react/rlm_runtime_modules.py` | Construct `dspy.RLM` module with sandbox tools |
+| `_delegate_streaming_context` | `react/delegate_sub_agent.py` | Build `StreamingContext` for child depth tracking |
+
+**Depth and Budget Controls:**
+- `max_depth`: Maximum recursion depth (default: 2)
+- `delegate_max_calls_per_turn`: Maximum delegate calls per parent turn (default: 8)
+- `max_llm_calls`: LLM call budget shared between parent and children
 
 ### Sandbox Execution Flow
 
+This diagram shows how code execution flows from tool calls through the ModalInterpreter to the sandbox driver, based on `src/fleet_rlm/core/interpreter.py` and `driver.py`.
+
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent/Tool
-    participant Interpreter as ModalInterpreter
-    participant Driver as sandbox_driver
-    participant Modal as Modal Cloud
-    participant Volume as Modal Volume
+    autonumber
+    participant Tool as Tool<br/>(react/tools/)
+    participant Interp as ModalInterpreter<br/>(interpreter.py)
+    participant VolOps as VolumeOpsMixin<br/>(volume_ops.py)
+    participant Driver as sandbox_driver<br/>(driver.py)
+    participant Sandbox as Modal.Sandbox
+    participant Volume as Modal.Volume
 
-    Agent->>Interpreter: Execute code
-    Interpreter->>Driver: Get sandbox driver
-    Driver->>Modal: Create/lookup sandbox
-    Modal-->>Driver: Sandbox instance
-    Driver->>Modal: Execute Python code
-    Modal-->>Driver: Execution result
-    Driver->>Volume: Persist outputs (optional)
-    Driver-->>Interpreter: Return result
-    Interpreter-->>Agent: Execution result
+    Tool->>Interp: interpreter.execute(code, variables, tool_names)
+    Interp->>Interp: _ensure_started()
+
+    alt Sandbox not running
+        Interp->>Sandbox: modal.Sandbox.create(image, secrets, timeout)
+        Sandbox-->>Interp: Sandbox instance
+        Interp->>Interp: Start driver process
+        Interp->>Driver: stdin: JSON command
+    end
+
+    Interp->>Interp: Build JSON command
+    Note over Interp: {code, variables, tool_names,<br/>output_names, execution_profile}
+
+    Interp->>Driver: stdin: JSON command
+    Driver->>Driver: Parse JSON, prepare globals
+    Driver->>Driver: inject_sandbox_helpers(globals)
+
+    Note over Driver: Inject built-ins:<br/>SUBMIT, Final, llm_query,<br/>workspace_read/write, etc.
+
+    Driver->>Driver: exec(code, sandbox_globals)
+
+    alt Code calls llm_query
+        Driver->>Interp: {"tool_call": {"name": "llm_query", "args": [...]}}
+        Interp->>Interp: _check_and_increment_llm_calls()
+        Interp->>Interp: Execute LLM call
+        Interp->>Driver: {"tool_result": ...}
+    end
+
+    alt Code sets Final variable
+        Driver->>Driver: Detect Final in globals
+        Driver-->>Interp: {"final": Final_value}
+    else Code calls SUBMIT
+        Driver-->>Interp: {"final": submit_value}
+    end
+
+    Interp-->>Tool: ExecutionResult(stdout, stderr, final)
+
+    opt Volume persistence enabled
+        Tool->>VolOps: volume.commit()
+        VolOps->>Volume: Commit changes
+    end
 ```
+
+**JSON Protocol:**
+
+The driver communicates via JSON over stdin/stdout:
+
+```json
+// Input command
+{
+  "code": "result = analyze_data(df)\nFinal = result",
+  "variables": {"df": {...}},
+  "tool_names": ["llm_query"],
+  "output_names": ["result"],
+  "execution_profile": "ROOT_INTERLOCUTOR"
+}
+
+// Output
+{
+  "stdout": "...",
+  "stderr": "",
+  "final": {"result": {...}}
+}
+```
+
+**Execution Profiles:**
+
+| Profile | When Used | Tool Exposure |
+|---------|-----------|---------------|
+| `ROOT_INTERLOCUTOR` | Primary user chat | Full tools + sandbox helpers |
+| `RLM_ROOT` | RLM query mode | Full tools + sandbox helpers |
+| `RLM_DELEGATE` | Child RLM delegation | Restricted tools, bounded execution |
+| `MAINTENANCE` | Administrative tasks | Minimal tools |
+
+**Key Components:**
+
+| Component | Source File | Role |
+|-----------|-------------|------|
+| `ModalInterpreter` | `core/interpreter.py` | Main interpreter class, manages sandbox lifecycle |
+| `sandbox_driver` | `core/driver.py` | Long-lived JSON protocol driver inside sandbox |
+| `VolumeOpsMixin` | `core/volume_ops.py` | Volume persistence operations (upload, commit, reload) |
+| `ExecutionProfile` | `core/interpreter.py` | Enum controlling sandbox helper/tool exposure |
+| `inject_sandbox_helpers` | `core/driver_factories.py` | Inject `SUBMIT`, `Final`, `llm_query`, etc. into sandbox globals |
 
 ## API and Streaming Surfaces
 
