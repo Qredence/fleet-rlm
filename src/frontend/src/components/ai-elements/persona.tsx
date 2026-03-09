@@ -266,12 +266,18 @@ export const Persona: FC<PersonaProps> = memo(
       }
     }, [state, listeningInput, thinkingInput, speakingInput, asleepInput]);
 
-    const Component = source.hasModel ? PersonaWithModel : PersonaWithoutModel;
+    if (source.hasModel) {
+      return (
+        <PersonaWithModel rive={rive} source={source}>
+          <RiveComponent className={cn("size-16 shrink-0", className)} />
+        </PersonaWithModel>
+      );
+    }
 
     return (
-      <Component rive={rive} source={source}>
+      <PersonaWithoutModel>
         <RiveComponent className={cn("size-16 shrink-0", className)} />
-      </Component>
+      </PersonaWithoutModel>
     );
   }
 );
