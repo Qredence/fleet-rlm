@@ -21,10 +21,12 @@ Fleet-RLM uses **Neon/PostgreSQL** as its primary persistence layer with SQLAlch
 
 Example connection string format:
 
-```bash
-# Neon: postgresql://<user>:<password>@<host>/<database>?sslmode=require
-# Local: postgresql://<user>:<password>@localhost:5432/<database>
-DATABASE_URL=postgresql://<user>:<password>@<host>/<database>
+```text
+# Neon
+DATABASE_URL=postgresql://user:password@host.example.com/dbname?sslmode=require
+
+# Local PostgreSQL
+DATABASE_URL=postgresql://user:password@localhost:5432/dbname
 ```
 
 ## Connection Management

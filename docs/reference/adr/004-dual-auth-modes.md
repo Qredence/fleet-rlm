@@ -86,23 +86,31 @@ Development mode provides flexible authentication for local development:
 
 #### Authentication Methods
 
-1. **Debug Headers** (when `ALLOW_DEBUG_AUTH=true`):
-   ```http
-   X-Debug-Tenant-Id: tenant-123
-   X-Debug-User-Id: user-456
-   X-Debug-Email: alice@example.com
-   ```
+**1. Debug Headers** (when `ALLOW_DEBUG_AUTH=true`):
 
-2. **HS256 Bearer Token**:
-   ```python
-   import jwt
-   token = jwt.encode({"tid": "tenant-123", "oid": "user-456"}, DEV_JWT_SECRET, algorithm="HS256")
-   ```
+```http
+X-Debug-Tenant-Id: tenant-123
+X-Debug-User-Id: user-456
+X-Debug-Email: alice@example.com
+```
 
-3. **WebSocket Query Parameters**:
-   ```
-   ws://localhost:8000/api/v1/ws/chat?debug_tenant_id=tenant-123&debug_user_id=user-456
-   ```
+**2. HS256 Bearer Token**:
+
+```python
+import jwt
+
+token = jwt.encode(
+    {"tid": "tenant-123", "oid": "user-456"},
+    DEV_JWT_SECRET,
+    algorithm="HS256",
+)
+```
+
+**3. WebSocket Query Parameters**:
+
+```text
+ws://localhost:8000/api/v1/ws/chat?debug_tenant_id=tenant-123&debug_user_id=user-456
+```
 
 #### Configuration
 

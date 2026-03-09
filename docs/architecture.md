@@ -401,21 +401,25 @@ sequenceDiagram
 
 The driver communicates via JSON over stdin/stdout:
 
+**Input command:**
+
 ```json
-// Input command
 {
   "code": "result = analyze_data(df)\nFinal = result",
-  "variables": {"df": {...}},
+  "variables": {"df": {}},
   "tool_names": ["llm_query"],
   "output_names": ["result"],
   "execution_profile": "ROOT_INTERLOCUTOR"
 }
+```
 
-// Output
+**Output:**
+
+```json
 {
   "stdout": "...",
   "stderr": "",
-  "final": {"result": {...}}
+  "final": {"result": {}}
 }
 ```
 

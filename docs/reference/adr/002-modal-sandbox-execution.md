@@ -70,7 +70,6 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         secret_name: str = "LITELLM",
         volume_name: str | None = None,
         max_llm_calls: int = 50,
-        ...
     ): ...
 
     def execute(self, code: str) -> Any: ...
@@ -100,11 +99,15 @@ These tools respect the `max_llm_calls` budget to prevent runaway API costs.
 
 The interpreter communicates with the sandbox via JSON over stdin/stdout:
 
-```json
-// Request
-{"type": "execute", "code": "result = 1 + 1"}
+**Request:**
 
-// Response
+```json
+{"type": "execute", "code": "result = 1 + 1"}
+```
+
+**Response:**
+
+```json
 {"type": "result", "value": 2, "stdout": "", "stderr": ""}
 ```
 
