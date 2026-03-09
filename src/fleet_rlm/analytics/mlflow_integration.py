@@ -611,11 +611,19 @@ def search_annotated_trace_rows(
     if not experiment_ids:
         return []
 
-    traces = mlflow.search_traces(
-        experiment_ids=experiment_ids,
-        max_results=max_results,
-        return_type="list",
-    )
+    try:
+        traces = mlflow.search_traces(
+            experiment_ids=experiment_ids,
+            max_results=max_results,
+            return_type="list",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to search MLflow traces for experiments %s: %s",
+            experiment_ids,
+            exc,
+        )
+        return []
     rows: list[dict[str, Any]] = []
     for trace in traces:
         row = trace_to_dataset_row(trace)
