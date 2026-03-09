@@ -142,7 +142,6 @@ async def _initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) 
 
 def _initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
     """Load planner/delegate LMs into process state."""
-    initialize_mlflow(MlflowConfig.from_env())
     model_name = cfg.agent_model
     if model_name is None:
         state.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
