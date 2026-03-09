@@ -347,10 +347,7 @@ def run_react_chat_once(
             result = agent.chat_turn(message)
             if not include_trajectory:
                 result.pop("trajectory", None)
-            return merge_trace_result_metadata(
-                result,
-                response_preview=result.get("assistant_response"),
-            )
+            return result
 
 
 async def arun_react_chat_once(
