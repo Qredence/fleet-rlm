@@ -6,6 +6,7 @@
  * NavigationStore — no props drilled to children.
  */
 import { Drawer } from "vaul";
+import { useEffect } from "react";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { TopHeader } from "@/app/layout/TopHeader";
 import { ChatPanel } from "@/app/layout/ChatPanel";
@@ -13,7 +14,15 @@ import { BuilderPanel } from "@/app/layout/BuilderPanel";
 import { MobileTabBar } from "@/features/shell/MobileTabBar";
 
 function MobileShell() {
-  const { isCanvasOpen, setIsCanvasOpen } = useNavigationStore();
+  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
+    useNavigationStore();
+
+  useEffect(() => {
+    registerCanvasHandlers({
+      open: () => setIsCanvasOpen(true),
+      close: () => setIsCanvasOpen(false),
+    });
+  }, [registerCanvasHandlers, setIsCanvasOpen]);
 
   return (
     <div
