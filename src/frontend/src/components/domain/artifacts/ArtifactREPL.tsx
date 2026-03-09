@@ -13,8 +13,9 @@ import {
   SandboxTabContent,
 } from "@/components/ai-elements/sandbox";
 import { ToolOutput } from "@/components/ai-elements/tool";
+import { mapToolState } from "@/lib/utils/ai-elements-state";
 
-// Local tool state type for internal use
+// Local tool state type for internal use (matches ChatRenderToolState)
 type LocalToolState = "input-streaming" | "running" | "output-available" | "output-error";
 
 // ── Read-only CodeMirror code viewer ───────────────────────────────
@@ -181,7 +182,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
         <Sandbox defaultOpen>
           <SandboxHeader
             title={target.label || "Code"}
-            state={inferToolState(target)}
+            state={mapToolState(inferToolState(target))}
           />
           <SandboxContent>
             <SandboxTabs defaultValue="code">

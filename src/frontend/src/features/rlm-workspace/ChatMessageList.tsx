@@ -270,7 +270,7 @@ function renderInlineCitations(
         </InlineCitationText>
         <InlineCitationCard>
           <InlineCitationCardTrigger
-            sources={part.citations.map((c) => c.title)}
+            sources={part.citations.map((c) => c.url)}
           />
           <InlineCitationCardBody>
             <div className="space-y-3">

@@ -61,11 +61,11 @@ const matchJsxTag = (code: string) => {
   }
 
   return {
-    attributes: attributes.trim(),
+    attributes: (attributes ?? "").trim(),
     endIndex: match.index + fullMatch.length,
     startIndex: match.index,
     tag: fullMatch,
-    tagName,
+    tagName: tagName ?? "",
     type,
   };
 };
