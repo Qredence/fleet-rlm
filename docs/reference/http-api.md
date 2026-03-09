@@ -360,23 +360,413 @@ Records human feedback and optional ground truth for an MLflow trace.
 
 ## WebSocket Endpoints
 
-WebSocket endpoints are documented in detail in the WebSocket API reference. Summary:
+Real-time bidirectional communication for chat and execution observability.
+
+---
 
 ### `WS /api/v1/ws/chat`
 
-Primary chat interface for RLM conversations.
+Primary streaming chat interface for RLM conversations. Supports message streaming, cancellation, and command dispatch.
 
-**Incoming message types:** `message`, `cancel`, `command`
+**Connection:**
 
-**Outgoing message types:** `event`, `command_result`, `error`
+```
+ws://localhost:8000/api/v1/ws/chat
+```
+
+**Authentication:** Bearer token in subprotocol header when `AUTH_REQUIRED=true`.
+
+---
+
+#### Incoming Frame Types
+
+Clients send JSON frames with a `type` field indicating the message kind.
+
+##### `message` — Chat Message
+
+Send a user message to initiate or continue a conversation.
+
+**Payload:**
+
+```json
+{
+  "type": "message",
+  "content": "Explain the architecture of fleet-rlm",
+  "docs_path": null,
+  "trace": true,
+  "trace_mode": "compact",
+  "execution_mode": "auto",
+  "workspace_id": "default",
+  "user_id": "anonymous",
+  "session_id": "session-uuid"
+}
+```
+
+**Fields:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `type` | `"message"` | yes | — | Frame type identifier |
+| `content` | string | yes | — | User message text |
+| `docs_path` | string | no | `null` | Path to preload documents |
+| `trace` | boolean | no | `true` | Enable tracing |
+| `trace_mode` | `"compact"` \| `"verbose"` \| `"off"` | no | `"compact"` | Trace output verbosity |
+| `execution_mode` | `"auto"` \| `"rlm_only"` \| `"tools_only"` | no | `"auto"` | Execution strategy |
+| `workspace_id` | string | no | `"default"` | Workspace identifier |
+| `user_id` | string | no | `"anonymous"` | User identifier |
+| `session_id` | string | no | auto-generated | Session identifier |
+
+**Execution Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `auto` | Full RLM with tools, delegation, and RLM fallback |
+| `rlm_only` | Deep reasoning only, no tool execution |
+| `tools_only` | Direct tool execution without RLM reasoning |
+
+---
+
+##### `cancel` — Cancel In-Flight Request
+
+Request cancellation of the currently streaming turn.
+
+**Payload:**
+
+```json
+{
+  "type": "cancel"
+}
+```
+
+**Behavior:** Sets an internal cancel flag. The agent checks this flag during iteration and stops processing, emitting a `cancelled` event.
+
+---
+
+##### `command` — Execute Agent Command
+
+Dispatch a command to the agent for direct execution (outside of chat flow).
+
+**Payload:**
+
+```json
+{
+  "type": "command",
+  "command": "save_buffer",
+  "args": {
+    "path": "/output/result.txt",
+    "content": "Hello, world!"
+  },
+  "workspace_id": "default",
+  "user_id": "anonymous",
+  "session_id": "session-uuid"
+}
+```
+
+**Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"command"` | yes | Frame type identifier |
+| `command` | string | yes | Command name to execute |
+| `args` | object | yes | Command arguments (must be JSON object) |
+| `workspace_id` | string | no | Workspace identifier |
+| `user_id` | string | no | User identifier |
+| `session_id` | string | no | Session identifier |
+
+**Available Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `save_buffer` | Save content to volume path |
+| `load_volume` | Load file from volume |
+| `write_to_file` | Write to sandbox filesystem |
+| `resolve_hitl` | Resolve human-in-the-loop prompt |
+
+**Special Command: `resolve_hitl`**
+
+```json
+{
+  "type": "command",
+  "command": "resolve_hitl",
+  "args": {
+    "message_id": "hitl-msg-uuid",
+    "action_label": "Approve"
+  }
+}
+```
+
+---
+
+#### Outgoing Frame Types
+
+The server sends JSON frames in response to client messages and streaming events.
+
+##### `event` — Streaming Event
+
+Emitted during chat turns to stream agent progress.
+
+**Payload:**
+
+```json
+{
+  "type": "event",
+  "data": {
+    "kind": "thought",
+    "text": "Analyzing the user's request...",
+    "payload": {
+      "depth": 0,
+      "execution_profile": "ROOT_INTERLOCUTOR"
+    },
+    "timestamp": "2026-03-09T12:00:00.000Z",
+    "version": 2,
+    "event_id": "event-uuid"
+  }
+}
+```
+
+**Event Kinds:**
+
+| Kind | Description |
+|------|-------------|
+| `thought` | Agent reasoning step |
+| `tool_call` | Tool invocation starting |
+| `tool_result` | Tool execution result |
+| `delegation` | RLM sub-agent delegation |
+| `delegation_result` | Sub-agent result summary |
+| `final` | Final response text |
+| `cancelled` | Request was cancelled |
+| `error` | Error occurred |
+| `hitl_request` | Human-in-the-loop prompt |
+| `hitl_resolved` | HITL resolution received |
+
+**Event Data Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | Event type identifier |
+| `text` | string | Human-readable content |
+| `payload` | object \| null | Structured event data |
+| `timestamp` | string | ISO 8601 timestamp |
+| `version` | integer | Schema version (currently 2) |
+| `event_id` | string | Unique event identifier |
+
+**Payload Fields by Kind:**
+
+- **`tool_call`**: `{ tool_name, tool_args, depth, runtime }`
+- **`tool_result`**: `{ tool_name, result, depth, runtime }`
+- **`delegation`**: `{ query, depth, runtime }`
+- **`delegation_result`**: `{ result_preview, depth, runtime }`
+- **`final`**: `{ trace_id, run_id, runtime }`
+- **`error`**: `{ error_type, code }`
+
+---
+
+##### `command_result` — Command Execution Result
+
+Response to a `command` frame.
+
+**Payload (success):**
+
+```json
+{
+  "type": "command_result",
+  "command": "save_buffer",
+  "result": {
+    "status": "ok",
+    "saved_path": "/output/result.txt"
+  },
+  "version": 1,
+  "event_id": "event-uuid"
+}
+```
+
+**Payload (error):**
+
+```json
+{
+  "type": "command_result",
+  "command": "save_buffer",
+  "result": {
+    "status": "error",
+    "error": "Path cannot be empty",
+    "message_id": null
+  },
+  "version": 1,
+  "event_id": "event-uuid"
+}
+```
+
+---
+
+##### `error` — Error Frame
+
+Sent when an error occurs that doesn't fit the event stream model.
+
+**Payload:**
+
+```json
+{
+  "type": "error",
+  "code": "planner_missing",
+  "message": "Planner LM not configured",
+  "details": {
+    "error_type": "RuntimeError"
+  }
+}
+```
+
+**Error Codes:**
+
+| Code | Description |
+|------|-------------|
+| `planner_missing` | No planner LLM configured |
+| `llm_timeout` | LLM call timed out |
+| `llm_rate_limited` | Rate limit from LLM provider |
+| `sandbox_unavailable` | Modal sandbox unreachable |
+| `auth_failed` | Authentication failed |
+| `auth_provider_missing` | Auth required but no provider |
+| `internal_error` | Unhandled exception |
+
+---
 
 ### `WS /api/v1/ws/execution`
 
-Execution stream for observability consumers.
+Dedicated execution observability stream for Artifact Canvas consumers. Provides structured execution graph events separate from the chat stream.
 
-**Query params:** `workspace_id`, `user_id`, `session_id` (required)
+**Connection:**
 
-**Event types:** `execution_started`, `execution_step`, `execution_completed`
+```
+ws://localhost:8000/api/v1/ws/execution?workspace_id=default&user_id=anonymous&session_id=session-uuid
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `workspace_id` | string | yes | Workspace to subscribe to |
+| `user_id` | string | yes | User to subscribe to |
+| `session_id` | string | yes | Session to subscribe to |
+
+**Authentication:** Bearer token in subprotocol header when `AUTH_REQUIRED=true`.
+
+---
+
+#### Execution Event Types
+
+All events share a common envelope structure with the event `type` in the top-level.
+
+##### `execution_started` — Run Started
+
+Emitted when a new chat turn begins processing.
+
+**Payload:**
+
+```json
+{
+  "type": "execution_started",
+  "run_id": "default:anonymous:session-uuid:1",
+  "workspace_id": "default",
+  "user_id": "anonymous",
+  "session_id": "session-uuid",
+  "step": null
+}
+```
+
+---
+
+##### `execution_step` — Step Completed
+
+Emitted for each LLM call, tool execution, REPL block, or output.
+
+**Payload:**
+
+```json
+{
+  "type": "execution_step",
+  "run_id": "default:anonymous:session-uuid:1",
+  "workspace_id": "default",
+  "user_id": "anonymous",
+  "session_id": "session-uuid",
+  "step": {
+    "id": "step-uuid",
+    "parent_id": null,
+    "type": "llm",
+    "label": "Planner reasoning",
+    "depth": 0,
+    "actor_kind": "root_rlm",
+    "actor_id": "agent-uuid",
+    "lane_key": "root",
+    "input": { "query": "Hello" },
+    "output": { "response": "Hi there!" },
+    "timestamp": 1709992800.0
+  }
+}
+```
+
+**Step Types:**
+
+| Type | Description |
+|------|-------------|
+| `llm` | LLM call |
+| `tool` | Tool execution |
+| `repl` | REPL code block |
+| `memory` | Memory operation |
+| `output` | Final output |
+
+**Actor Kinds:**
+
+| Kind | Description |
+|------|-------------|
+| `root_rlm` | Root RLM agent |
+| `sub_agent` | Delegated sub-agent |
+| `delegate` | Delegate worker |
+| `unknown` | Unspecified |
+
+---
+
+##### `execution_completed` — Run Completed
+
+Emitted when a chat turn finishes (success, failure, or cancellation).
+
+**Payload:**
+
+```json
+{
+  "type": "execution_completed",
+  "run_id": "default:anonymous:session-uuid:1",
+  "workspace_id": "default",
+  "user_id": "anonymous",
+  "session_id": "session-uuid",
+  "step": {
+    "id": "final-step-uuid",
+    "parent_id": "step-uuid",
+    "type": "output",
+    "label": "Final response",
+    "depth": 0,
+    "actor_kind": "root_rlm",
+    "actor_id": "agent-uuid",
+    "lane_key": "root",
+    "input": null,
+    "output": "Here's the answer...",
+    "timestamp": 1709992850.0
+  }
+}
+```
+
+---
+
+#### Execution Event Envelope
+
+All execution events share this structure:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"execution_started"` \| `"execution_step"` \| `"execution_completed"` | Event type |
+| `run_id` | string | Unique run identifier |
+| `workspace_id` | string | Workspace identifier |
+| `user_id` | string | User identifier |
+| `session_id` | string | Session identifier |
+| `step` | object \| null | Step payload (null for `execution_started`) |
 
 ---
 
