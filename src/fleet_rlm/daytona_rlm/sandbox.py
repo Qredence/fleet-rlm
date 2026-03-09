@@ -1,4 +1,4 @@
-"""Daytona sandbox adapter for the experimental RLM pilot."""
+"""Guide-native Daytona sandbox adapter for the experimental RLM pilot."""
 
 from __future__ import annotations
 
@@ -22,9 +22,11 @@ from .protocol import (
     decode_frame,
     encode_frame,
 )
+from .types import PromptHandle, PromptManifest, PromptSliceRef
 
 _HOST_CALLBACK_REQUEST_TYPE = "host_callback_request"
 _EXECUTION_RESPONSE_TYPE = "execute_response"
+_OUTPUT_ONLY_SUBMIT_SCHEMA = [{"name": "output", "type": "object"}]
 
 
 def _load_daytona_sdk() -> Any:
@@ -168,11 +170,16 @@ class DaytonaSandboxSession:
         code: str,
         callback_handler: Callable[[HostCallbackRequest], HostCallbackResponse],
         timeout: float,
+        submit_schema: list[dict[str, Any]] | None = None,
     ) -> ExecutionResponse:
         """Execute one code block through the persistent sandbox-side driver."""
 
         self.start_driver(timeout=timeout)
-        request = ExecutionRequest(request_id=uuid.uuid4().hex, code=code)
+        request = ExecutionRequest(
+            request_id=uuid.uuid4().hex,
+            code=code,
+            submit_schema=submit_schema,
+        )
         self._send_frame(request.to_dict())
 
         while True:
@@ -217,6 +224,78 @@ class DaytonaSandboxSession:
         self.close_driver()
         if hasattr(self.sandbox, "delete"):
             self.sandbox.delete()
+
+    def store_prompt(
+        self,
+        *,
+        text: str,
+        kind: str = "manual",
+        label: str | None = None,
+        timeout: float = 30.0,
+    ) -> PromptHandle:
+        payload = self._run_driver_helper(
+            code=(
+                f"handle = store_prompt({text!r}, kind={kind!r}, label={label!r})\n"
+                "SUBMIT(output=handle)"
+            ),
+            timeout=timeout,
+        )
+        return PromptHandle.from_raw(payload)
+
+    def list_prompts(self, *, timeout: float = 30.0) -> PromptManifest:
+        payload = self._run_driver_helper(
+            code="manifest = list_prompts()\nSUBMIT(output=manifest)",
+            timeout=timeout,
+        )
+        return PromptManifest.from_raw(payload)
+
+    def read_prompt_slice(
+        self,
+        *,
+        handle_id: str,
+        start_line: int = 1,
+        num_lines: int = 120,
+        start_char: int | None = None,
+        char_count: int | None = None,
+        timeout: float = 30.0,
+    ) -> tuple[PromptSliceRef, str]:
+        payload = self._run_driver_helper(
+            code=(
+                "slice_result = read_prompt_slice("
+                f"{handle_id!r}, "
+                f"start_line={start_line}, "
+                f"num_lines={num_lines}, "
+                f"start_char={start_char!r}, "
+                f"char_count={char_count!r})\n"
+                "SUBMIT(output=slice_result)"
+            ),
+            timeout=timeout,
+        )
+        slice_ref = PromptSliceRef.from_raw(payload)
+        return slice_ref, str(payload.get("text", "") or "")
+
+    def _run_driver_helper(self, *, code: str, timeout: float) -> dict[str, Any]:
+        def _unexpected_callback(request: HostCallbackRequest) -> HostCallbackResponse:
+            raise RuntimeError(
+                f"Prompt helper execution does not expect host callbacks: {request.name}"
+            )
+
+        response = self.execute_code(
+            code=code,
+            callback_handler=_unexpected_callback,
+            timeout=timeout,
+            submit_schema=_OUTPUT_ONLY_SUBMIT_SCHEMA,
+        )
+        if response.error:
+            raise RuntimeError(response.error)
+        if response.final_artifact is None:
+            raise RuntimeError("Prompt helper did not produce a final artifact.")
+        payload = response.final_artifact.get("value")
+        if isinstance(payload, dict) and "output" in payload:
+            payload = payload.get("output")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Prompt helper returned an invalid payload.")
+        return payload
 
     def _send_frame(self, payload: dict[str, Any]) -> None:
         if self._driver_command_id is None:

@@ -52,6 +52,7 @@ def run_daytona_smoke(
     driver_started = False
     persisted_state_value: Any = None
     finalization_mode = "unknown"
+    prompt_handle: Any = None
 
     try:
         runtime_instance = runtime
@@ -94,10 +95,16 @@ def run_daytona_smoke(
         driver_started = True
 
         termination_phase = "exec_step_1"
-        first = _run_timed(
-            phase_timings_ms,
-            "exec_step_1",
-            lambda: session.execute_code(
+
+        def _step_one() -> Any:
+            nonlocal prompt_handle
+            prompt_handle = session.store_prompt(
+                text="Smoke prompt persistence check.\nThis prompt must survive.",
+                kind="smoke",
+                label="smoke-prompt",
+                timeout=timeout,
+            )
+            return session.execute_code(
                 code=(
                     'readme_preview = read_file("README.md")[:120]\n'
                     "if not readme_preview:\n"
@@ -106,7 +113,12 @@ def run_daytona_smoke(
                 ),
                 callback_handler=_unexpected_callback,
                 timeout=timeout,
-            ),
+            )
+
+        first = _run_timed(
+            phase_timings_ms,
+            "exec_step_1",
+            _step_one,
         )
         if first.final_artifact is not None:
             raise RuntimeError(
@@ -114,21 +126,41 @@ def run_daytona_smoke(
             )
 
         termination_phase = "exec_step_2"
+
+        def _step_two() -> Any:
+            if prompt_handle is None:
+                raise RuntimeError("Smoke validation did not create a prompt handle.")
+            prompt_slice, prompt_text = session.read_prompt_slice(
+                handle_id=prompt_handle.handle_id,
+                start_line=1,
+                num_lines=2,
+                timeout=timeout,
+            )
+            if "Smoke prompt persistence check." not in prompt_text:
+                raise RuntimeError("Prompt handle did not survive across driver turns.")
+            if prompt_slice.handle_id != prompt_handle.handle_id:
+                raise RuntimeError("Prompt slice returned the wrong handle.")
+            return session.execute_code(
+                code="counter += 3\nSUBMIT(output=counter)",
+                callback_handler=_unexpected_callback,
+                timeout=timeout,
+            )
+
         second = _run_timed(
             phase_timings_ms,
             "exec_step_2",
-            lambda: session.execute_code(
-                code='counter += 3\nFINAL_VAR("counter")',
-                callback_handler=_unexpected_callback,
-                timeout=timeout,
-            ),
+            _step_two,
         )
 
         artifact = second.final_artifact
         if artifact is None:
             raise RuntimeError("Smoke validation did not produce a final artifact.")
 
-        persisted_state_value = artifact.get("value")
+        artifact_value = artifact.get("value")
+        if isinstance(artifact_value, dict) and "output" in artifact_value:
+            persisted_state_value = artifact_value.get("output")
+        else:
+            persisted_state_value = artifact_value
         finalization_mode = str(artifact.get("finalization_mode", "unknown"))
         termination_phase = "completed"
     except Exception as exc:

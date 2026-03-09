@@ -14,6 +14,7 @@ from fleet_rlm.analytics import MlflowTraceRequestContext, new_client_request_id
 from fleet_rlm.db.models import RunStatus
 
 from .chat_runtime import _ChatSessionState, _PreparedChatRuntime
+from .daytona_streaming import run_daytona_streaming_turn
 from .helpers import (
     _error_envelope,
     _get_execution_emitter,
@@ -85,6 +86,32 @@ async def _process_chat_message(
     if not message:
         await _try_send_json(
             websocket, {"type": "error", "message": "Message content cannot be empty"}
+        )
+        return session.last_loaded_docs_path
+
+    runtime_mode = getattr(msg, "runtime_mode", "modal_chat")
+    if runtime_mode == "daytona_pilot":
+        repo_url = str(getattr(msg, "repo_url", "") or "").strip()
+        if not repo_url:
+            await _try_send_json(
+                websocket,
+                _error_envelope(
+                    code="daytona_repo_url_required",
+                    message="Daytona runtime requires repo_url.",
+                ),
+            )
+            return session.last_loaded_docs_path
+
+        session.cancel_flag["cancelled"] = False
+        await run_daytona_streaming_turn(
+            websocket=websocket,
+            planner_lm=runtime.planner_lm,
+            message=message,
+            repo_url=repo_url,
+            repo_ref=getattr(msg, "repo_ref", None),
+            max_depth=getattr(msg, "max_depth", None),
+            batch_concurrency=getattr(msg, "batch_concurrency", None),
+            cancel_check=lambda: session.cancel_flag["cancelled"],
         )
         return session.last_loaded_docs_path
 

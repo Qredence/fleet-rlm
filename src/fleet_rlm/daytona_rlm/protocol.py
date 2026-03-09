@@ -33,6 +33,7 @@ class ExecutionRequest:
 
     request_id: str
     code: str
+    submit_schema: list[dict[str, Any]] | None = None
     type: str = "execute_request"
 
     def to_dict(self) -> dict[str, Any]:

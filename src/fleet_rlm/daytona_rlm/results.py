@@ -16,6 +16,6 @@ def persist_result(
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
     path = output_root / f"{result.run_id}.json"
-    path.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
     result.result_path = str(path)
+    path.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
     return path

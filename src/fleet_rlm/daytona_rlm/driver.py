@@ -1,4 +1,4 @@
-"""Sandbox-resident driver source for the Daytona-backed RLM pilot."""
+"""Guide-native sandbox-resident driver source for the Daytona-backed RLM pilot."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ DAYTONA_DRIVER_SOURCE = (
     import glob
     import io
     import json
+    import keyword
     import os
     import pathlib
     import re
@@ -26,6 +27,9 @@ DAYTONA_DRIVER_SOURCE = (
 
     FRAME_PREFIX = "__fleet_rlm_daytona__:"
     REPO_PATH = sys.argv[1]
+    FLEET_ROOT = pathlib.Path(REPO_PATH) / ".fleet-rlm"
+    PROMPT_ROOT = FLEET_ROOT / "prompts"
+    PROMPT_MANIFEST_PATH = PROMPT_ROOT / "manifest.json"
     STATE: dict[str, object] = {
         "__builtins__": __builtins__,
         "json": json,
@@ -93,6 +97,155 @@ DAYTONA_DRIVER_SOURCE = (
             return str(path.relative_to(REPO_PATH))
         except ValueError:
             return str(path)
+
+
+    def collapse_preview(text: str, limit: int = 240) -> str:
+        collapsed = re.sub(r"\s+", " ", str(text)).strip()
+        if len(collapsed) <= limit:
+            return collapsed
+        return collapsed[:limit].rstrip()
+
+
+    def ensure_prompt_store() -> None:
+        PROMPT_ROOT.mkdir(parents=True, exist_ok=True)
+        if not PROMPT_MANIFEST_PATH.exists():
+            PROMPT_MANIFEST_PATH.write_text(
+                json.dumps({"handles": []}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+
+    def load_prompt_manifest() -> dict[str, object]:
+        ensure_prompt_store()
+        try:
+            payload = json.loads(PROMPT_MANIFEST_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {"handles": []}
+        handles = payload.get("handles", [])
+        if not isinstance(handles, list):
+            handles = []
+        return {"handles": [item for item in handles if isinstance(item, dict)]}
+
+
+    def save_prompt_manifest(handles: list[dict[str, object]]) -> None:
+        ensure_prompt_store()
+        PROMPT_MANIFEST_PATH.write_text(
+            json.dumps({"handles": handles}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
+    def store_prompt(
+        text: str,
+        kind: str = "manual",
+        label: str | None = None,
+    ) -> dict[str, object]:
+        ensure_prompt_store()
+        normalized_kind = str(kind or "manual").strip() or "manual"
+        normalized_label = str(label).strip() if label is not None else ""
+        prompt_text = str(text)
+        handle_id = f"prompt-{uuid.uuid4().hex}"
+        prompt_path = PROMPT_ROOT / f"{handle_id}.txt"
+        prompt_path.write_text(prompt_text, encoding="utf-8")
+
+        handle = {
+            "handle_id": handle_id,
+            "kind": normalized_kind,
+            "label": normalized_label or None,
+            "path": display_path(prompt_path),
+            "char_count": len(prompt_text),
+            "line_count": len(prompt_text.splitlines()),
+            "preview": collapse_preview(prompt_text),
+        }
+        manifest = load_prompt_manifest()
+        handles = list(manifest["handles"])
+        handles.append(handle)
+        save_prompt_manifest(handles)
+        return handle
+
+
+    def list_prompts() -> dict[str, object]:
+        manifest = load_prompt_manifest()
+        handles = list(manifest["handles"])
+        return {
+            "status": "ok",
+            "count": len(handles),
+            "handles": handles,
+        }
+
+
+    def read_prompt_slice(
+        handle_id: str,
+        start_line: int = 1,
+        num_lines: int = 120,
+        start_char: int | None = None,
+        char_count: int | None = None,
+    ) -> dict[str, object]:
+        manifest = load_prompt_manifest()
+        handle = next(
+            (
+                item
+                for item in manifest["handles"]
+                if str(item.get("handle_id", "")) == str(handle_id)
+            ),
+            None,
+        )
+        if handle is None:
+            return {
+                "status": "error",
+                "error": f"Prompt handle not found: {handle_id}",
+            }
+
+        handle_path = pathlib.Path(resolve_path(str(handle.get("path", ""))))
+        if not handle_path.exists():
+            return {
+                "status": "error",
+                "error": f"Prompt path not found: {display_path(handle_path)}",
+                "handle_id": str(handle_id),
+            }
+
+        text = handle_path.read_text(encoding="utf-8", errors="replace")
+        total_chars = len(text)
+        total_lines = len(text.splitlines())
+
+        if start_char is not None:
+            start_idx = max(0, int(start_char))
+            count = max(0, int(char_count if char_count is not None else 4000))
+            slice_text = text[start_idx : start_idx + count]
+            end_char = start_idx + len(slice_text)
+            return {
+                "status": "ok",
+                "handle_id": str(handle_id),
+                "kind": handle.get("kind"),
+                "label": handle.get("label"),
+                "path": handle.get("path"),
+                "start_char": start_idx,
+                "end_char": end_char,
+                "total_chars": total_chars,
+                "total_lines": total_lines,
+                "text": slice_text,
+                "preview": collapse_preview(slice_text),
+            }
+
+        lines = text.splitlines()
+        start_idx = max(0, int(start_line) - 1)
+        end_idx = min(len(lines), start_idx + max(0, int(num_lines)))
+        slice_lines = lines[start_idx:end_idx]
+        slice_text = "\n".join(slice_lines)
+        end_line = start_idx + len(slice_lines)
+        return {
+            "status": "ok",
+            "handle_id": str(handle_id),
+            "kind": handle.get("kind"),
+            "label": handle.get("label"),
+            "path": handle.get("path"),
+            "start_line": start_idx + 1 if slice_lines else int(start_line),
+            "end_line": end_line if slice_lines else int(start_line),
+            "total_chars": total_chars,
+            "total_lines": total_lines,
+            "text": slice_text,
+            "preview": collapse_preview(slice_text),
+        }
 
 
     def read_file_slice(
@@ -462,30 +615,148 @@ DAYTONA_DRIVER_SOURCE = (
 
     final_artifact: dict[str, object] | None = None
     callback_count = 0
+    submit_schema: list[dict[str, str | None]] = []
+
+    def normalize_submit_schema(raw: object) -> list[dict[str, str | None]]:
+        if not isinstance(raw, list):
+            return []
+
+        fields: list[dict[str, str | None]] = []
+        seen: set[str] = set()
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "") or "").strip()
+            if not name or not name.isidentifier() or keyword.iskeyword(name):
+                continue
+            if name in seen:
+                continue
+            seen.add(name)
+            type_expr = str(item.get("type", "") or "").strip() or None
+            fields.append({"name": name, "type": type_expr})
+        return fields
+
+
+    def build_submit_signature(fields: list[dict[str, str | None]]) -> str:
+        if not fields:
+            return "output=None, **kwargs"
+
+        parts: list[str] = []
+        for field in fields:
+            name = field["name"]
+            type_expr = field.get("type") or "object"
+            parts.append(f"{name}: {type_expr} = None")
+        parts.append("**kwargs")
+        return ", ".join(parts)
+
+
+    def normalize_submit_value(
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        fields: list[dict[str, str | None]],
+    ) -> object:
+        if kwargs:
+            cleaned = {str(key): value for key, value in kwargs.items() if value is not None}
+            return cleaned
+        if not args:
+            return {}
+        if fields:
+            mapped: dict[str, object] = {}
+            for index, field in enumerate(fields):
+                if index >= len(args):
+                    break
+                value = args[index]
+                if value is None:
+                    continue
+                mapped[str(field["name"])] = value
+            if mapped:
+                return mapped
+        if len(args) == 1:
+            return args[0]
+        return list(args)
+
+
+    def install_submit(raw_schema: object) -> None:
+        global submit_schema
+        submit_schema = normalize_submit_schema(raw_schema)
+        if not submit_schema:
+            source = (
+                "def SUBMIT(output=None, **kwargs):\n"
+                "    if kwargs:\n"
+                "        cleaned = {k: v for k, v in kwargs.items() if v is not None}\n"
+                "        return _submit_impl(_finalization_mode='SUBMIT', **cleaned)\n"
+                "    if output is not None:\n"
+                "        return _submit_impl(output, _finalization_mode='SUBMIT')\n"
+                "    return _submit_impl(_finalization_mode='SUBMIT')\n"
+            )
+        else:
+            signature = build_submit_signature(submit_schema)
+            source = (
+                f"def SUBMIT({signature}):\n"
+                "    provided = {k: v for k, v in locals().items() if k not in {'kwargs'} and v is not None}\n"
+                "    if kwargs:\n"
+                "        provided.update({k: v for k, v in kwargs.items() if v is not None})\n"
+                "    if provided:\n"
+                "        return _submit_impl(_finalization_mode='SUBMIT', **provided)\n"
+                "    if 'output' in locals() and output is not None:\n"
+                "        return _submit_impl(output, _finalization_mode='SUBMIT')\n"
+                "    return _submit_impl(_finalization_mode='SUBMIT')\n"
+            )
+        exec(source, STATE, STATE)
+
+
+    def _submit_impl(
+        *args: object,
+        _finalization_mode: str = "SUBMIT",
+        _variable_name: str | None = None,
+        **kwargs: object,
+    ) -> object:
+        global final_artifact
+        value = normalize_submit_value(args, kwargs, submit_schema)
+        final_artifact = {
+            "kind": "markdown",
+            "value": value,
+            "variable_name": _variable_name,
+            "finalization_mode": _finalization_mode,
+        }
+        return value
 
 
     def FINAL(value: object) -> object:
-        global final_artifact
-        final_artifact = {
-            "kind": "markdown",
-            "value": value,
-            "finalization_mode": "FINAL",
-        }
-        return value
+        if isinstance(value, dict):
+            return _submit_impl(
+                _finalization_mode="FINAL",
+                **{str(key): item for key, item in value.items()},
+            )
+        if isinstance(value, str):
+            return _submit_impl(
+                _finalization_mode="FINAL",
+                final_markdown=value,
+            )
+        return _submit_impl(value, _finalization_mode="FINAL")
 
 
     def FINAL_VAR(variable_name: str) -> object:
-        global final_artifact
         if variable_name not in STATE:
             raise NameError(f"Variable '{variable_name}' is not defined")
         value = STATE[variable_name]
-        final_artifact = {
-            "kind": "markdown",
-            "value": value,
-            "variable_name": variable_name,
-            "finalization_mode": "FINAL_VAR",
-        }
-        return value
+        if isinstance(value, dict):
+            return _submit_impl(
+                _finalization_mode="FINAL_VAR",
+                _variable_name=variable_name,
+                **{str(key): item for key, item in value.items()},
+            )
+        if isinstance(value, str):
+            return _submit_impl(
+                _finalization_mode="FINAL_VAR",
+                _variable_name=variable_name,
+                final_markdown=value,
+            )
+        return _submit_impl(
+            value,
+            _finalization_mode="FINAL_VAR",
+            _variable_name=variable_name,
+        )
 
 
     def request_host_callback(name: str, payload: dict[str, object]) -> object:
@@ -514,30 +785,45 @@ DAYTONA_DRIVER_SOURCE = (
             return message.get("value")
 
 
-    def rlm_query(task: str) -> object:
-        return request_host_callback("rlm_query", {"task": task})
+    def llm_query(task: object) -> object:
+        return request_host_callback("llm_query", {"task": task})
 
 
-    def rlm_query_batched(tasks: list[str]) -> object:
-        return request_host_callback("rlm_query_batched", {"tasks": tasks})
+    def llm_query_batched(tasks: list[object]) -> object:
+        return request_host_callback("llm_query_batched", {"tasks": tasks})
+
+
+    def rlm_query(task: object) -> object:
+        return llm_query(task)
+
+
+    def rlm_query_batched(tasks: list[object]) -> object:
+        return llm_query_batched(tasks)
 
 
     STATE.update(
         {
             "run": run,
             "read_file": read_file,
+            "store_prompt": store_prompt,
+            "list_prompts": list_prompts,
+            "read_prompt_slice": read_prompt_slice,
             "read_file_slice": read_file_slice,
             "list_files": list_files,
             "find_files": find_files,
             "grep_repo": grep_repo,
             "chunk_text": chunk_text,
             "chunk_file": chunk_file,
+            "llm_query": llm_query,
+            "llm_query_batched": llm_query_batched,
             "rlm_query": rlm_query,
             "rlm_query_batched": rlm_query_batched,
+            "_submit_impl": _submit_impl,
             "FINAL": FINAL,
             "FINAL_VAR": FINAL_VAR,
         }
     )
+    install_submit(None)
 
     emit({"type": "driver_ready", "message": "ready"})
 
@@ -552,6 +838,7 @@ DAYTONA_DRIVER_SOURCE = (
 
         final_artifact = None
         callback_count = 0
+        install_submit(message.get("submit_schema"))
         stdout = io.StringIO()
         stderr = io.StringIO()
         error_text: str | None = None

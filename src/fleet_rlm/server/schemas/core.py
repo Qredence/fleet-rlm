@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from fleet_rlm import __version__
 
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
+RuntimeMode = Literal["modal_chat", "daytona_pilot"]
 
 
 class ChatRequest(BaseModel):
@@ -86,6 +87,11 @@ class WSMessage(BaseModel):
     trace: bool = True
     trace_mode: Literal["compact", "verbose", "off"] | None = None
     execution_mode: ExecutionMode = "auto"
+    runtime_mode: RuntimeMode = "modal_chat"
+    repo_url: str | None = None
+    repo_ref: str | None = None
+    max_depth: int | None = None
+    batch_concurrency: int | None = None
     workspace_id: str = "default"
     user_id: str = "anonymous"
     session_id: str | None = None
