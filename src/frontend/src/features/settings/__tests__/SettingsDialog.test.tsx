@@ -19,10 +19,10 @@ vi.mock("@/components/ui/dialog", () => ({
   ),
 }));
 
-vi.mock("@/hooks/useNavigation", () => ({
-  useNavigation: () => ({
+vi.mock("@/stores/themeStore", () => ({
+  useThemeStore: () => ({
     isDark: false,
-    toggleTheme: vi.fn(),
+    toggle: vi.fn(),
   }),
 }));
 

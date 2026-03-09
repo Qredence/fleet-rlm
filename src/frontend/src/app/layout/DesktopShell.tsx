@@ -4,7 +4,7 @@
  * Owns the resizable split-panel layout (react-resizable-panels),
  * panel animation state, and desktop-specific canvas open/close logic.
  *
- * Registers panel-aware canvas handlers with NavigationContext so that
+ * Registers panel-aware canvas handlers with NavigationStore so that
  * any component calling `openCanvas()` / `closeCanvas()` will drive
  * the imperative panel API correctly.
  */
@@ -15,7 +15,7 @@ import {
   PanelResizeHandle,
   type ImperativePanelHandle,
 } from "react-resizable-panels";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { TopHeader } from "@/app/layout/TopHeader";
 import { ChatPanel } from "@/app/layout/ChatPanel";
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
@@ -26,7 +26,7 @@ const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
 
 function DesktopShell() {
   const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
-    useNavigation();
+    useNavigationStore();
 
   /* ── Panel animation state ─────────────────────────────────── */
   const builderPanelRef = useRef<ImperativePanelHandle>(null);

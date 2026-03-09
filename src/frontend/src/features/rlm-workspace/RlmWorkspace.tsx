@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { TriangleAlert } from "lucide-react";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
-import { useChatHistory } from "@/hooks/useChatHistory";
+import { useChatHistoryStore } from "@/stores/chatHistoryStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
  * RlmWorkspace — chat-first DSPy.RLM runtime surface.
  *
  * Chat logic (messages, phases, backend events) lives in `useBackendChatRuntime`.
- * Shared session state still flows through `NavigationContext` so it persists
+ * Shared session state still flows through `NavigationStore` so it persists
  * across shell navigation.
  *
- * Conversation history is managed by `useChatHistory` (localStorage-backed).
+ * Conversation history is managed by `useChatHistoryStore` (localStorage-backed).
  * Auto-saves the current conversation when `sessionId` changes (new session),
  * and allows loading past conversations from the welcome state.
  */
@@ -81,7 +81,7 @@ export function RlmWorkspace() {
     ],
   );
 
-  const { sessionId } = useNavigation();
+  const { sessionId } = useNavigationStore();
 
   // Chat history
   const {
@@ -90,7 +90,7 @@ export function RlmWorkspace() {
     loadConversation: loadConv,
     deleteConversation,
     clearHistory,
-  } = useChatHistory();
+  } = useChatHistoryStore();
 
   // ── History panel toggle ─────────────────────────────────────────
   const [showHistory, setShowHistory] = useState(false);

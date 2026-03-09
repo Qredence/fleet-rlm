@@ -33,7 +33,7 @@ import {
   settingsSections,
   type SettingsSection,
 } from "@/features/settings/types";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useThemeStore } from "@/stores/themeStore";
 import { typo } from "@/lib/config/typo";
 
 const sectionDescriptions: Record<SettingsSection, string> = {
@@ -156,7 +156,7 @@ function MobileSectionNav({
 /**
  * SettingsDialog — theme and preference configuration.
  *
- * Consumes `isDark` / `toggleTheme` from NavigationContext.
+ * Consumes `isDark` / `toggleTheme` from ThemeStore.
  * `open` / `onOpenChange` are required props; `initialSection` optionally
  * focuses a specific settings section when opening.
  */
@@ -165,7 +165,7 @@ export function SettingsDialog({
   onOpenChange,
   initialSection,
 }: SettingsDialogProps) {
-  const { isDark, toggleTheme } = useNavigation();
+  const { isDark, toggle: toggleTheme } = useThemeStore();
   const isMobile = useIsMobile();
   const [activeSection, setActiveSection] = useState<SettingsSection>(() =>
     resolveInitialSection(initialSection),

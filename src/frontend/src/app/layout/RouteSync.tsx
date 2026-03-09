@@ -1,22 +1,22 @@
 /**
- * RouteSync — bi-directional sync between the URL and NavigationContext.
+ * RouteSync — bi-directional sync between the URL and NavigationStore.
  *
- * Rendered inside RootLayout (below both RouterProvider and NavigationProvider).
+ * Rendered inside RootLayout (below RouterProvider).
  * On every location change it updates `activeNav` and clears stale selection
  * state when moving across the supported workspace/volumes surfaces.
  *
- * Direction: URL → NavigationContext (one-way).
- * The reverse direction (NavigationContext → URL) is handled by navigation
+ * Direction: URL → NavigationStore (one-way).
+ * The reverse direction (NavigationStore → URL) is handled by navigation
  * trigger points using `useAppNavigate()`.
  */
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router";
 import { pathToNav } from "@/hooks/useAppNavigate";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 
 function RouteSync() {
   const location = useLocation();
-  const { setActiveNav, selectFile, openCanvas, activeNav } = useNavigation();
+  const { setActiveNav, selectFile, openCanvas, activeNav } = useNavigationStore();
 
   // Track previous section to avoid redundant updates
   const prevSectionRef = useRef("");

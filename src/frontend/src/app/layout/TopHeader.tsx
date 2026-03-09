@@ -1,7 +1,7 @@
 import { LayoutGroup } from "motion/react";
 import { PanelRight, SquarePen } from "lucide-react";
 import type { NavItem } from "@/lib/data/types";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { UserMenu } from "@/features/shell/UserMenu";
@@ -37,7 +37,7 @@ const navItems: { key: NavItem; label: string }[] = [
  * User menu (avatar dropdown) replaces the standalone settings icon.
  */
 export function TopHeader() {
-  const { activeNav, isCanvasOpen, toggleCanvas, newSession } = useNavigation();
+  const { activeNav, isCanvasOpen, toggleCanvas, newSession } = useNavigationStore();
   const { navigateTo, navigate } = useAppNavigate();
   const isMobile = useIsMobile();
 

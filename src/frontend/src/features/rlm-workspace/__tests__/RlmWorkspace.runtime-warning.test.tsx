@@ -22,8 +22,8 @@ vi.mock("@/hooks/useStickToBottom", () => ({
   useStickToBottom: () => ({ scrollRef: null, contentRef: null }),
 }));
 
-vi.mock("@/hooks/useNavigation", () => ({
-  useNavigation: () => ({
+vi.mock("@/stores/navigationStore", () => ({
+  useNavigationStore: () => ({
     sessionId: 1,
   }),
 }));
@@ -34,8 +34,8 @@ vi.mock("@/hooks/useAppNavigate", () => ({
   }),
 }));
 
-vi.mock("@/hooks/useChatHistory", () => ({
-  useChatHistory: () => ({
+vi.mock("@/stores/chatHistoryStore", () => ({
+  useChatHistoryStore: () => ({
     conversations: [],
     saveConversation: vi.fn(),
     loadConversation: vi.fn(),

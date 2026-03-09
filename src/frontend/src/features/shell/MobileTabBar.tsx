@@ -1,6 +1,6 @@
 import { MessageSquare, HardDrive } from "lucide-react";
 import type { NavItem } from "@/lib/data/types";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
 import { isSectionSupported } from "@/lib/rlm-api";
@@ -14,10 +14,10 @@ const tabs: { key: NavItem; label: string; icon: typeof MessageSquare }[] = [
 /**
  * iOS 26 Liquid Glass floating tab bar for the supported shell surfaces.
  *
- * All state consumed from NavigationContext — zero props.
+ * All state consumed from NavigationStore — zero props.
  */
 export function MobileTabBar() {
-  const { activeNav } = useNavigation();
+  const { activeNav } = useNavigationStore();
   const { navigateTo } = useAppNavigate();
 
   return (

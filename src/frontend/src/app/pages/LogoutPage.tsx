@@ -3,7 +3,7 @@
  *
  * Shows a brief "signing out" state, then transitions to a confirmation
  * screen with a redirect back to login. This page lives outside the app
- * shell -- it doesn't depend on AuthProvider or NavigationProvider.
+ * shell -- it doesn't depend on AuthProvider or navigation stores.
  *
  * Signs out of the browser session and clears local access tokens.
  */

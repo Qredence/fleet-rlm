@@ -1,5 +1,5 @@
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
-import type { Conversation } from "@/hooks/useChatHistory";
+import type { Conversation } from "@/stores/chatHistoryStore";
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 
 export interface ChatSubmitAttachment {

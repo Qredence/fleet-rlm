@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { useNavigation } from "@/hooks/useNavigation";
-import type { Conversation } from "@/hooks/useChatHistory";
+import { useNavigationStore } from "@/stores/navigationStore";
+import type { Conversation } from "@/stores/chatHistoryStore";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/features/rlm-workspace/backendArtifactEventAdapter";
@@ -96,7 +96,7 @@ export function useBackendChatRuntime(): ChatRuntime {
     sessionId: navSessionId,
     isCanvasOpen,
     openCanvas,
-  } = useNavigation();
+  } = useNavigationStore();
   const clearArtifactSteps = useArtifactStore((state) => state.clear);
 
   const {

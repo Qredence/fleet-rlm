@@ -1,12 +1,11 @@
 /**
  * Top-level provider composition.
  *
- * Wraps the app in AuthProvider (mock auth) and NavigationProvider (state)
- * so that both DesktopShell and MobileShell can consume shared context.
+ * Wraps the app in AuthProvider (mock auth).
+ * Navigation state is now handled by Zustand stores (no provider needed).
  */
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/hooks/useAuth";
-import { NavigationProvider } from "@/hooks/useNavigation";
 import { QueryProvider } from "@/app/providers/QueryProvider";
 
 interface Props {
@@ -16,9 +15,7 @@ interface Props {
 function AppProviders({ children }: Props) {
   return (
     <QueryProvider>
-      <AuthProvider>
-        <NavigationProvider>{children}</NavigationProvider>
-      </AuthProvider>
+      <AuthProvider>{children}</AuthProvider>
     </QueryProvider>
   );
 }

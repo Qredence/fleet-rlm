@@ -17,7 +17,8 @@ import { Command } from "cmdk";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { typo } from "@/lib/config/typo";
 import type { NavItem } from "@/lib/data/types";
-import { useNavigation } from "@/hooks/useNavigation";
+import { useNavigationStore } from "@/stores/navigationStore";
+import { useThemeStore } from "@/stores/themeStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { cn } from "@/lib/utils/cn";
 
@@ -39,7 +40,8 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
-  const { newSession, isDark, toggleTheme } = useNavigation();
+  const { newSession } = useNavigationStore();
+  const { isDark, toggle: toggleTheme } = useThemeStore();
   const { navigateTo, navigate } = useAppNavigate();
   const telemetry = useTelemetry();
 

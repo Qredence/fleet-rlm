@@ -2,8 +2,8 @@
  * RootLayout — top-level route component for the authenticated app shell.
  *
  * Renders:
- *   1. AppProviders (AuthProvider + NavigationProvider)
- *   2. RouteSync (URL -> NavigationContext synchronisation)
+ *   1. AppProviders (AuthProvider)
+ *   2. RouteSync (URL -> NavigationStore synchronisation)
  *   3. Desktop or Mobile shell (based on viewport)
  *   4. Global overlays (CommandPalette, Toaster)
  *
