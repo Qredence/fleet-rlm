@@ -112,12 +112,14 @@ curl -H "Authorization: Bearer $TOKEN" \
 When `ALLOW_QUERY_AUTH_TOKENS=true`, WebSocket connections can authenticate via query parameters:
 
 **Debug auth (when `ALLOW_DEBUG_AUTH=true`):**
-```
+
+```text
 ws://localhost:8000/api/v1/ws/chat?debug_tenant_id=tenant-123&debug_user_id=user-456
 ```
 
 **Token auth:**
-```
+
+```text
 ws://localhost:8000/api/v1/ws/chat?access_token=<hs256-jwt>
 ```
 
@@ -203,7 +205,7 @@ Entra tokens map to normalized identity:
 
 For WebSocket connections, include the access token in the query string:
 
-```
+```text
 wss://your-api.com/api/v1/ws/chat?access_token=<entra-access-token>
 ```
 

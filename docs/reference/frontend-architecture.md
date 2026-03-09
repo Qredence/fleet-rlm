@@ -4,7 +4,7 @@ This document describes the component architecture of the Fleet-RLM frontend (`s
 
 ## Directory Structure Overview
 
-```
+```text
 src/frontend/src/
 ├── app/                    # Application shell and routing
 │   ├── layout/             # Layout components (DesktopShell, MobileShell)

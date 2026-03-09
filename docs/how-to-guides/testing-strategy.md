@@ -73,7 +73,7 @@ uv run pytest -q -m "benchmark"
 
 Tests are organized by scope in the `tests/` directory:
 
-```
+```text
 tests/
 ├── conftest.py           # Shared fixtures and marker registration
 ├── unit/                 # Fast unit tests for isolated modules
@@ -172,7 +172,7 @@ bun run test:watch
 
 ### Frontend Test Organization
 
-```
+```text
 src/frontend/src/
 ├── __tests__/            # Shared test utilities
 ├── features/

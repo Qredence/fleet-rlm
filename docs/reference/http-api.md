@@ -370,7 +370,7 @@ Primary streaming chat interface for RLM conversations. Supports message streami
 
 **Connection:**
 
-```
+```text
 ws://localhost:8000/api/v1/ws/chat
 ```
 
@@ -635,7 +635,7 @@ Dedicated execution observability stream for Artifact Canvas consumers. Provides
 
 **Connection:**
 
-```
+```text
 ws://localhost:8000/api/v1/ws/execution?workspace_id=default&user_id=anonymous&session_id=session-uuid
 ```
 

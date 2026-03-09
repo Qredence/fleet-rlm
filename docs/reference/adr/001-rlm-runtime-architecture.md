@@ -55,7 +55,7 @@ Real-time response streaming via `streaming_context.py` and `streaming.py` provi
 
 Long-context or specialized tasks are delegated to child RLM instances:
 
-```
+```text
 Parent Agent → delegate_sub_agent.spawn_delegate_sub_agent_async()
     → Child dspy.RLM → Result aggregation
 ```

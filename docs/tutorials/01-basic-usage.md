@@ -90,7 +90,7 @@ fleet web
 
 This launches a local server. Open your browser to:
 
-```
+```text
 http://localhost:8000
 ```
 

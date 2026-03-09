@@ -50,7 +50,7 @@ Run this before submitting a PR to catch issues early.
 
 ## Project Structure
 
-```
+```text
 src/frontend/src/
 ├── app/                    # Application shell and routing
 │   ├── layout/             # Layout components (DesktopShell, MobileShell)
@@ -270,7 +270,7 @@ Vitest runs in jsdom environment for browser API simulation.
 
 Tests are colocated with source files in `__tests__/` subdirectories:
 
-```
+```text
 src/
 ├── features/rlm-workspace/__tests__/
 │   ├── ChatMessageList.ai-elements.test.tsx

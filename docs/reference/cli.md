@@ -13,7 +13,7 @@ There are two command entrypoints:
 
 The `fleet-rlm` command provides the primary CLI interface.
 
-```
+```text
 Usage: fleet-rlm [OPTIONS] COMMAND [ARGS]...
 
 Run DSPy RLM demos backed by a Modal sandbox.
@@ -29,7 +29,7 @@ Commands:
 
 Bootstrap Claude Code scaffold assets to a user-level directory. Copies bundled RLM skills, agents, teams, and hooks from the installed `fleet-rlm` package to `~/.claude/` (or a custom target).
 
-```
+```text
 Usage: fleet-rlm init [OPTIONS]
 
 Options:
@@ -65,7 +65,7 @@ uv run fleet-rlm init --force
 
 Run the FastAPI HTTP/WebSocket server. This is the backend for the Web UI and is invoked by `fleet web`.
 
-```
+```text
 Usage: fleet-rlm serve-api [OPTIONS]
 
 Options:
@@ -88,7 +88,7 @@ uv run fleet-rlm serve-api --host 0.0.0.0 --port 8080
 
 Run the FastMCP server for Model Context Protocol integration. Requires the `mcp` extra to be installed.
 
-```
+```text
 Usage: fleet-rlm serve-mcp [OPTIONS]
 
 Options:
@@ -121,7 +121,7 @@ uv run fleet-rlm serve-mcp --transport streamable-http --host 0.0.0.0 --port 800
 
 Start standalone in-process interactive terminal chat with the RLM agent.
 
-```
+```text
 Usage: fleet-rlm chat [OPTIONS]
 
 Options:
@@ -154,7 +154,7 @@ uv run fleet-rlm chat --trace --trace-mode verbose
 
 The `fleet` command is a lightweight launcher that provides quick access to terminal chat and the Web UI.
 
-```
+```text
 usage: fleet [-h] [--docs-path DOCS_PATH] [--trace-mode {compact,verbose,off}]
              [--volume-name VOLUME_NAME] [--secret-name SECRET_NAME]
              [{web}]
