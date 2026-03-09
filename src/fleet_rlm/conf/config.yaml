@@ -31,7 +31,7 @@ memory:
   archival_path: "/data/memory"
 
 rlm_settings:
-  max_depth: 3
+  max_depth: 2
   max_iters: 60
   deep_max_iters: 60
   enable_adaptive_iters: true

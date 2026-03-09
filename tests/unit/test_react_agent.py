@@ -151,6 +151,24 @@ def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
     assert len(agent.history.messages) == 2
 
 
+def test_chat_turn_defers_mlflow_metadata_merge_to_callers(monkeypatch):
+    records = []
+    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
+    monkeypatch.setattr(
+        "fleet_rlm.analytics.mlflow_integration.trace_result_metadata",
+        lambda response_preview=None: {
+            "mlflow_trace_id": "trace-123",
+            "mlflow_client_request_id": "req-123",
+        },
+    )
+
+    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    result = agent.chat_turn("hello")
+
+    assert "mlflow_trace_id" not in result
+    assert "mlflow_client_request_id" not in result
+
+
 def test_parallel_semantic_map_uses_llm_query_batched(monkeypatch):
     records = []
     monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))

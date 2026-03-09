@@ -92,17 +92,17 @@ def get_mlflow_config() -> MlflowConfig:
 def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     """Best-effort idempotent MLflow initialization for DSPy runtimes."""
     resolved = config or MlflowConfig.from_env()
+    identity = _mlflow_identity(resolved)
 
     global _INIT_IDENTITY, _INITIALIZED, _ACTIVE_CONFIG
-    _ACTIVE_CONFIG = resolved
-
-    if not resolved.enabled:
-        _INITIALIZED = False
-        _INIT_IDENTITY = _mlflow_identity(resolved)
-        return False
-
-    identity = _mlflow_identity(resolved)
     with _CLIENT_LOCK:
+        _ACTIVE_CONFIG = resolved
+
+        if not resolved.enabled:
+            _INITIALIZED = False
+            _INIT_IDENTITY = identity
+            return False
+
         if _INITIALIZED and _INIT_IDENTITY == identity:
             return True
 

@@ -151,14 +151,14 @@ Notes:
 Install and run the MLflow MCP server with `uv`:
 
 ```bash
-uv run --with "mlflow[mcp]>=3.5.1" mlflow mcp run
+uv run --with "mlflow[mcp]>=3.10.0" mlflow mcp run
 ```
 
 If your MCP client supports per-server env vars, point it at the same tracking server:
 
 ```bash
 MLFLOW_TRACKING_URI=http://127.0.0.1:5000 \
-uv run --with "mlflow[mcp]>=3.5.1" mlflow mcp run
+uv run --with "mlflow[mcp]>=3.10.0" mlflow mcp run
 ```
 
 Document the client-specific config in your local editor setup, but do not commit `.cursor/mcp.json`, `.vscode/mcp.json`, or other editor-local MCP files into this repository.

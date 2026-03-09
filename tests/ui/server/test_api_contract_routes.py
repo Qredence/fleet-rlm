@@ -255,14 +255,40 @@ def test_create_app_serves_spa_index_from_frontend_dist(
     assert logo.text == "<svg>logo</svg>"
 
 
+def _fake_trace_feedback_trace(
+    *,
+    trace_id: str,
+    client_request_id: str,
+    user_id: str = "user-a",
+    workspace_id: str = "tenant-a",
+):
+    info = {
+        "trace_id": trace_id,
+        "client_request_id": client_request_id,
+        "trace_metadata": {
+            "mlflow.trace.user": user_id,
+            "fleet_rlm.workspace_id": workspace_id,
+        },
+    }
+    return SimpleNamespace(
+        info=SimpleNamespace(
+            trace_id=trace_id,
+            client_request_id=client_request_id,
+            trace_metadata=info["trace_metadata"],
+        ),
+        to_dict=lambda: {"info": info},
+    )
+
+
 def test_trace_feedback_logs_feedback_by_trace_id(
     default_client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
-    fake_trace = SimpleNamespace(
-        info=SimpleNamespace(trace_id="trace-1", client_request_id="req-1")
+    fake_trace = _fake_trace_feedback_trace(
+        trace_id="trace-1",
+        client_request_id="req-1",
     )
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
@@ -305,8 +331,9 @@ def test_trace_feedback_resolves_by_client_request_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list[dict[str, object]] = []
-    fake_trace = SimpleNamespace(
-        info=SimpleNamespace(trace_id="trace-2", client_request_id="req-2")
+    fake_trace = _fake_trace_feedback_trace(
+        trace_id="trace-2",
+        client_request_id="req-2",
     )
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
@@ -331,6 +358,42 @@ def test_trace_feedback_resolves_by_client_request_id(
     assert response.status_code == 200
     assert captured[0]["client_request_id"] == "req-2"
     assert response.json()["trace_id"] == "trace-2"
+
+
+def test_trace_feedback_returns_403_for_other_users_trace(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_trace = _fake_trace_feedback_trace(
+        trace_id="trace-3",
+        client_request_id="req-3",
+        user_id="someone-else",
+    )
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.resolve_trace",
+        lambda **kwargs: fake_trace,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.traces.log_trace_feedback",
+        lambda **kwargs: pytest.fail(
+            "feedback logging should not run for another user's trace"
+        ),
+    )
+
+    response = default_client.post(
+        "/api/v1/traces/feedback",
+        headers=auth_headers,
+        json={
+            "trace_id": "trace-3",
+            "is_correct": True,
+        },
+    )
+
+    assert response.status_code == 403
+    assert "not allowed" in response.json()["detail"]
 
 
 def test_trace_feedback_returns_503_when_mlflow_disabled(

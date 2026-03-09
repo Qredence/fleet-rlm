@@ -18,7 +18,6 @@ from typing import Any, Callable, Iterable, Literal
 
 import dspy
 
-from ..analytics import merge_trace_result_metadata
 from ..core.interpreter import ModalInterpreter
 from ..models import StreamEvent
 from .commands import execute_command as _execute_command
@@ -706,17 +705,14 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         final_reasoning: str,
         ctx: StreamingContext,
     ) -> dict[str, Any]:
-        return merge_trace_result_metadata(
-            ctx.enrich(
-                {
-                    "trajectory": trajectory,
-                    "history_turns": self.history_turns(),
-                    "guardrail_warnings": guardrail_warnings,
-                    "final_reasoning": final_reasoning,
-                    **self._turn_metrics(),
-                }
-            ),
-            response_preview=final_reasoning,
+        return ctx.enrich(
+            {
+                "trajectory": trajectory,
+                "history_turns": self.history_turns(),
+                "guardrail_warnings": guardrail_warnings,
+                "final_reasoning": final_reasoning,
+                **self._turn_metrics(),
+            }
         )
 
     async def _aiter_forced_rlm_turn_stream(
@@ -912,10 +908,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         }
         if include_core_memory_snapshot:
             payload["core_memory_snapshot"] = self.get_core_memory_snapshot()
-        return merge_trace_result_metadata(
-            payload,
-            response_preview=assistant_response,
-        )
+        return payload
 
     def _prepare_turn(self, user_request: str) -> int:
         """Initialize per-turn counters and compute effective iteration budget."""
