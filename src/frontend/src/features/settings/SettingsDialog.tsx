@@ -35,6 +35,7 @@ import {
 } from "@/features/settings/types";
 import { useThemeStore } from "@/stores/themeStore";
 import { typo } from "@/lib/config/typo";
+import { cn } from "@/lib/utils/cn";
 
 const sectionDescriptions: Record<SettingsSection, string> = {
   appearance: "Control theme and interface appearance.",
@@ -77,12 +78,10 @@ function SectionContent({
 
   return (
     <div
-      className="flex flex-col min-h-0"
-      style={{
-        height: isMobile
-          ? "var(--settings-dialog-section-height-mobile)"
-          : "100%",
-      }}
+      className={cn(
+        "flex min-h-0 flex-col",
+        isMobile ? "h-(--settings-dialog-section-height-mobile)" : "h-full",
+      )}
     >
       <div className="shrink-0 border-b border-border-subtle/70">
         <div className={isMobile ? "px-4 pt-3 pb-3" : "px-6 pt-5 pb-3"}>
@@ -182,27 +181,14 @@ export function SettingsDialog({
     return (
       <Drawer.Root open={open} onOpenChange={onOpenChange}>
         <Drawer.Portal>
-          <Drawer.Overlay
-            className="fixed inset-0 z-50"
-            style={{ backgroundColor: "var(--glass-overlay)" }}
-          />
+          <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-50" />
           <Drawer.Content
-            className="fixed inset-x-0 bottom-0 z-50 flex flex-col outline-none"
-            style={{
-              height: "var(--settings-dialog-height-mobile)",
-              borderTopLeftRadius: "var(--radius-card)",
-              borderTopRightRadius: "var(--radius-card)",
-              backgroundColor: "var(--glass-sheet-bg)",
-              backdropFilter: "blur(var(--glass-sheet-blur))",
-              WebkitBackdropFilter: "blur(var(--glass-sheet-blur))",
-              borderTop: "0.5px solid var(--glass-sheet-border)",
-            }}
+            className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-(--settings-dialog-height-mobile) flex-col outline-none"
           >
             {/* iOS 26 grab handle */}
             <div className="flex items-center justify-center py-2 shrink-0">
               <div
-                className="h-1.25 w-9 rounded-full"
-                style={{ backgroundColor: "var(--glass-sheet-handle)" }}
+                className="surface-glass-handle h-1.25 w-9 rounded-full"
                 aria-hidden="true"
               />
             </div>
@@ -293,8 +279,7 @@ export function SettingsDialog({
           </Sidebar>
 
           <main
-            className="flex min-h-0 flex-1 flex-col overflow-hidden"
-            style={{ height: "var(--settings-dialog-height-desktop)" }}
+            className="flex min-h-0 h-(--settings-dialog-height-desktop) flex-1 flex-col overflow-hidden"
           >
             <SectionContent
               isDark={isDark}

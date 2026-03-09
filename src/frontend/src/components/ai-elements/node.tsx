@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { Handle, Position } from "@xyflow/react";
 
 export type NodeProps = ComponentProps<typeof Card> & {

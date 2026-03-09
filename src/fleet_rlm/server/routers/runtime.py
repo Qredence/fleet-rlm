@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.server.runtime_settings import (
@@ -21,7 +22,7 @@ from fleet_rlm.server.runtime_settings import (
 )
 from fleet_rlm.utils.modal import load_modal_config
 
-from ..deps import ServerStateDep
+from ..deps import ServerStateDep, require_http_identity
 from ..schemas.core import (
     RuntimeActiveModels,
     RuntimeConnectivityTestResponse,
@@ -34,13 +35,32 @@ from ..schemas.core import (
     VolumeTreeResponse,
 )
 
-router = APIRouter(prefix="/runtime", tags=["runtime"])
+router = APIRouter(
+    prefix="/runtime",
+    tags=["runtime"],
+    dependencies=[Depends(require_http_identity)],
+)
 
 _RUNTIME_TEST_TIMEOUT_SECONDS = 20
 
 
 def _utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _json_model_response(payload: Any) -> JSONResponse:
+    """Serialize runtime API payloads eagerly before returning to FastAPI.
+
+    In the live server, several runtime endpoints were reaching access-log
+    `200 OK` but hanging before clients received response headers. Eagerly
+    materializing the JSON body here keeps the runtime/settings UI responsive
+    while preserving the existing response models and OpenAPI contract.
+    """
+    if hasattr(payload, "model_dump"):
+        content = payload.model_dump(mode="json")
+    else:
+        content = payload
+    return JSONResponse(content=content)
 
 
 def _runtime_setting_overrides(
@@ -150,7 +170,7 @@ def _lm_preflight() -> tuple[dict[str, bool], list[str]]:
 
 
 @router.get("/settings", response_model=RuntimeSettingsSnapshot)
-async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot:
+async def get_runtime_settings(state: ServerStateDep) -> JSONResponse:
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
         extra_values=_runtime_setting_overrides(
@@ -159,14 +179,14 @@ async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot
         ),
         env_path=state.config.env_path,
     )
-    return RuntimeSettingsSnapshot(**snapshot)
+    return _json_model_response(RuntimeSettingsSnapshot(**snapshot))
 
 
 @router.patch("/settings", response_model=RuntimeSettingsUpdateResponse)
 async def patch_runtime_settings(
     state: ServerStateDep,
     request: RuntimeSettingsUpdateRequest,
-) -> RuntimeSettingsUpdateResponse:
+) -> JSONResponse:
     config = state.config
     if config.app_env != "local":
         raise HTTPException(
@@ -217,13 +237,13 @@ async def patch_runtime_settings(
         default_max_tokens=config.agent_delegate_max_tokens,
     )
 
-    return RuntimeSettingsUpdateResponse(**result)
+    return _json_model_response(RuntimeSettingsUpdateResponse(**result))
 
 
 @router.post("/tests/modal", response_model=RuntimeConnectivityTestResponse)
 async def test_modal_connection(
     state: ServerStateDep,
-) -> RuntimeConnectivityTestResponse:
+) -> JSONResponse:
     checks, guidance = _modal_preflight(secret_name=state.config.secret_name)
     preflight_ok = checks["credentials_available"] and checks["secret_name_set"]
 
@@ -239,7 +259,7 @@ async def test_modal_connection(
             error="Modal preflight checks failed.",
         )
         _cache_runtime_test(state=state, result=result)
-        return result
+        return _json_model_response(result)
 
     latency_ms: int | None = None
     output_preview: str | None = None
@@ -286,11 +306,11 @@ async def test_modal_connection(
         error=error,
     )
     _cache_runtime_test(state=state, result=result)
-    return result
+    return _json_model_response(result)
 
 
 @router.post("/tests/lm", response_model=RuntimeConnectivityTestResponse)
-async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestResponse:
+async def test_lm_connection(state: ServerStateDep) -> JSONResponse:
     checks, guidance = _lm_preflight()
     preflight_ok = checks["model_set"] and checks["api_key_set"]
 
@@ -306,7 +326,7 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
             error="LM preflight checks failed.",
         )
         _cache_runtime_test(state=state, result=result)
-        return result
+        return _json_model_response(result)
 
     latency_ms: int | None = None
     output_preview: str | None = None
@@ -364,11 +384,11 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
         error=error,
     )
     _cache_runtime_test(state=state, result=result)
-    return result
+    return _json_model_response(result)
 
 
 @router.get("/status", response_model=RuntimeStatusResponse)
-async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
+async def get_runtime_status(state: ServerStateDep) -> JSONResponse:
     llm_checks, llm_guidance = _lm_preflight()
     modal_checks, modal_guidance = _modal_preflight(
         secret_name=state.config.secret_name
@@ -398,31 +418,35 @@ async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
             "Run Runtime connection tests to validate live provider connectivity."
         )
 
-    return RuntimeStatusResponse(
-        app_env=state.config.app_env,
-        write_enabled=state.config.app_env == "local",
-        ready=ready,
-        active_models=RuntimeActiveModels(
-            planner=_resolve_active_model(state.config.agent_model, "DSPY_LM_MODEL"),
-            delegate=_resolve_active_model(
-                state.config.agent_delegate_model, "DSPY_DELEGATE_LM_MODEL"
+    return _json_model_response(
+        RuntimeStatusResponse(
+            app_env=state.config.app_env,
+            write_enabled=state.config.app_env == "local",
+            ready=ready,
+            active_models=RuntimeActiveModels(
+                planner=_resolve_active_model(
+                    state.config.agent_model, "DSPY_LM_MODEL"
+                ),
+                delegate=_resolve_active_model(
+                    state.config.agent_delegate_model, "DSPY_DELEGATE_LM_MODEL"
+                ),
+                delegate_small=_resolve_active_model(
+                    state.config.agent_delegate_small_model,
+                    "DSPY_DELEGATE_LM_SMALL_MODEL",
+                ),
             ),
-            delegate_small=_resolve_active_model(
-                state.config.agent_delegate_small_model,
-                "DSPY_DELEGATE_LM_SMALL_MODEL",
-            ),
-        ),
-        llm={
-            **llm_checks,
-            "planner_configured": state.planner_lm is not None,
-        },
-        modal={
-            **modal_checks,
-            "secret_name": state.config.secret_name,
-            "configured_volume": state.config.volume_name or "",
-        },
-        tests=RuntimeTestCache(modal=modal_test, lm=lm_test),
-        guidance=guidance,
+            llm={
+                **llm_checks,
+                "planner_configured": state.planner_lm is not None,
+            },
+            modal={
+                **modal_checks,
+                "secret_name": state.config.secret_name,
+                "configured_volume": state.config.volume_name or "",
+            },
+            tests=RuntimeTestCache(modal=modal_test, lm=lm_test),
+            guidance=guidance,
+        )
     )
 
 
@@ -431,7 +455,7 @@ async def get_volume_tree(
     state: ServerStateDep,
     root_path: Annotated[str, Query()] = "/",
     max_depth: Annotated[int, Query(ge=1, le=10)] = 3,
-) -> VolumeTreeResponse:
+) -> JSONResponse:
     """List the file tree of the configured Modal Volume."""
     volume_name = state.config.volume_name
     if not volume_name:
@@ -454,7 +478,7 @@ async def get_volume_tree(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Volume listing failed: {exc}")
 
-    return VolumeTreeResponse(**result)
+    return _json_model_response(VolumeTreeResponse(**result))
 
 
 @router.get("/volume/file", response_model=VolumeFileContentResponse)
@@ -462,7 +486,7 @@ async def get_volume_file_content(
     state: ServerStateDep,
     path: Annotated[str, Query(min_length=1)],
     max_bytes: Annotated[int, Query(ge=1, le=1_000_000)] = 200_000,
-) -> VolumeFileContentResponse:
+) -> JSONResponse:
     """Read a volume file as UTF-8 text for frontend preview."""
     volume_name = state.config.volume_name
     if not volume_name:
@@ -499,4 +523,4 @@ async def get_volume_file_content(
             raise HTTPException(status_code=400, detail="Path must point to a file.")
         raise HTTPException(status_code=502, detail=f"Volume file read failed: {exc}")
 
-    return VolumeFileContentResponse(**result)
+    return _json_model_response(VolumeFileContentResponse(**result))

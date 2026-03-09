@@ -1,4 +1,4 @@
-import { type RefObject, type ReactNode } from "react";
+import { type RefObject, type ReactNode, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { Clock } from "lucide-react";
 import type {
@@ -9,10 +9,13 @@ import type {
 } from "@/lib/data/types";
 import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
-import { mapToolState, mapConfirmationState, mapTaskStatus } from "@/lib/utils/ai-elements-state";
+import {
+  mapToolState,
+  mapConfirmationState,
+  mapTaskStatus,
+} from "@/lib/utils/ai-elements-state";
 import { Streamdown } from "@/components/ui/streamdown";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Separator } from "@/components/ui/separator";
 import {
   Conversation,
   ConversationContent,
@@ -24,7 +27,11 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai-elements/reasoning";
+import {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+} from "@/components/ai-elements/reasoning";
 import {
   Queue,
   QueueItem,
@@ -110,24 +117,60 @@ import {
   ConfirmationRequest,
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
+import { Suggestion } from "@/components/ai-elements/suggestion";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { ClarificationCard } from "@/features/rlm-workspace/ClarificationCard";
-import { SuggestionChip } from "@/components/ui/suggestion-chip";
 import {
   SuggestionIconBolt,
   SuggestionIconTune,
   SuggestionIconSparkle,
 } from "@/components/shared/SuggestionIcons";
+
+const MONO_BASE_STYLE = {
+  ...typo.labelRegular,
+  fontFamily: "var(--font-mono)",
+} as const;
+
+const MONO_BASE_MEDIUM_STYLE = {
+  ...MONO_BASE_STYLE,
+  fontWeight: "var(--font-weight-medium)",
+} as const;
+
+const DISPLAY_TITLE_STYLE = {
+  ...typo.display,
+  fontWeight: "var(--font-weight-medium)",
+  lineHeight: "var(--font-heading-xl-line-height)",
+  letterSpacing: "var(--font-heading-xl-tracking)",
+  textWrap: "balance",
+} as const;
+
+const DISPLAY_SUBTITLE_STYLE = {
+  ...typo.display,
+  fontWeight: "var(--font-weight-normal)",
+  letterSpacing: "var(--font-heading-xl-tracking)",
+  textWrap: "balance",
+} as const;
+
+const SYSTEM_MESSAGE_STYLE = {
+  ...typo.micro,
+  fontWeight: "var(--font-weight-semibold)",
+} as const;
 import {
   fadeUp,
   fadeUpReduced,
 } from "@/features/rlm-workspace/animation-presets";
 import {
   buildChatDisplayItems,
+  buildPendingAssistantTurnId,
   type AssistantTurnDisplayItem,
   type ToolSessionItem,
   type TraceDisplayItem,
 } from "@/features/rlm-workspace/chatDisplayItems";
+import { buildAssistantContentModel } from "@/features/rlm-workspace/assistant-content/buildAssistantContentModel";
+import { AssistantTurnContent } from "@/features/rlm-workspace/assistant-content/AssistantTurnContent";
+import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/runtimeBadges";
+import { useNavigationStore } from "@/stores/navigationStore";
+import type { InspectorTab } from "@/lib/data/types";
 
 const suggestions = [
   {
@@ -185,26 +228,6 @@ function hitlConfirmationState(
   const label = String(data.resolvedLabel ?? "").toLowerCase();
   if (/(reject|deny|decline|cancel|no)/.test(label)) return "rejected";
   return "approved";
-}
-
-function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {
-  if (!ctx) return null;
-  const pills: string[] = [];
-  if (ctx.depth > 0) pills.push(`depth ${ctx.depth}/${ctx.maxDepth}`);
-  if (ctx.executionMode && ctx.executionMode !== "react") {
-    pills.push(`mode ${ctx.executionMode}`);
-  }
-  if (ctx.sandboxActive) pills.push("sandbox");
-  if (ctx.sandboxId) pills.push(`sandbox ${ctx.sandboxId.slice(0, 10)}`);
-  if (ctx.volumeName) pills.push(ctx.volumeName);
-  if (ctx.executionProfile !== "ROOT_INTERLOCUTOR")
-    pills.push(ctx.executionProfile.toLowerCase().replace(/_/g, " "));
-  if (pills.length === 0) return null;
-  return (
-    <div className="text-[10px] leading-relaxed text-muted-foreground">
-      {pills.join(" · ")}
-    </div>
-  );
 }
 
 function shouldOpenToolRow(
@@ -335,7 +358,10 @@ function renderAttachments(
             type: "file",
             filename: attachment.name ?? "unknown",
             url: attachment.url ?? "",
-            mediaType: attachment.mimeType ?? attachment.mediaType ?? "application/octet-stream",
+            mediaType:
+              attachment.mimeType ??
+              attachment.mediaType ??
+              "application/octet-stream",
           }}
         >
           <AttachmentPreview />
@@ -387,7 +413,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                   ? "border-destructive/25 bg-destructive/5 text-destructive"
                   : "border-border-subtle/80 bg-muted/15",
               )}
-              style={typo.base}
+              style={typo.labelRegular}
             >
               {item.part.errorText ? (
                 item.part.errorText
@@ -407,7 +433,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
             </div>
             <pre
               className="overflow-x-auto rounded-md border-subtle/80 bg-muted/20 px-2.5 py-2 text-foreground"
-              style={{ ...typo.base, fontFamily: "var(--font-family-mono)" }}
+              style={MONO_BASE_STYLE}
             >
               <code>{item.part.code}</code>
             </pre>
@@ -429,14 +455,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
             )}
           >
             <div className="flex items-center gap-2">
-              <span
-                className="text-foreground"
-                style={{
-                  ...typo.base,
-                  fontFamily: "var(--font-family-mono)",
-                  fontWeight: "var(--font-weight-medium)",
-                }}
-              >
+              <span className="text-foreground" style={MONO_BASE_MEDIUM_STYLE}>
                 {variable.name}
               </span>
               {variable.required ? (
@@ -445,13 +464,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 </span>
               ) : null}
             </div>
-            <span
-              className="text-muted-foreground"
-              style={{
-                ...typo.base,
-                fontFamily: "var(--font-family-mono)",
-              }}
-            >
+            <span className="text-muted-foreground" style={MONO_BASE_STYLE}>
               {variable.value}
             </span>
           </div>
@@ -489,7 +502,7 @@ function renderToolSession(
                 data-slot="tool-session-item"
               >
                 <div className="space-y-2 py-0.5">
-                  <div className="text-foreground" style={typo.base}>
+                  <div className="text-foreground" style={typo.labelRegular}>
                     {toolSessionLine(sessionItem)}
                   </div>
                   {renderToolSessionItemDetails(sessionItem)}
@@ -507,12 +520,22 @@ function renderReasoningPart(
   part: Extract<ChatRenderPart, { kind: "reasoning" }>,
   key: string,
   embedded = false,
+  showSectionLabel = false,
 ) {
   // Combine parts into a single text string for ReasoningContent
-  const reasoningText = part.parts.map(p => p.text).join("\n");
+  const reasoningText = part.parts.map((p) => p.text).join("\n");
+  const sectionLabel = part.label?.trim() || "reasoning";
 
   return (
     <div key={key} className="space-y-1">
+      {showSectionLabel ? (
+        <div
+          className="text-[11px] lowercase tracking-[0.08em] text-muted-foreground"
+          style={MONO_BASE_MEDIUM_STYLE}
+        >
+          {sectionLabel}
+        </div>
+      ) : null}
       <Reasoning
         isStreaming={part.isStreaming}
         duration={part.duration}
@@ -567,7 +590,7 @@ function renderCompactStatusAlert(
     >
       <AlertDescription>
         <div className="space-y-1">
-          <div style={typo.base}>{content}</div>
+          <div style={typo.labelRegular}>{content}</div>
           <RuntimeContextBadge ctx={runtimeContext} />
         </div>
       </AlertDescription>
@@ -575,104 +598,36 @@ function renderCompactStatusAlert(
   );
 }
 
-function buildAssistantTurnReasoningParts(item: AssistantTurnDisplayItem) {
-  const fromTrace = item.reasoningItems.map((reasoningItem) => ({
-    key: reasoningItem.key,
-    part: reasoningItem.part,
-  }));
-  const message = item.message;
-  const fromMessage =
-    message?.renderParts?.flatMap((part, idx) =>
-      part.kind === "reasoning"
-        ? [{ key: `${message.id}-${part.kind}-${idx}`, part }]
-        : [],
-    ) ?? [];
-  return [...fromTrace, ...fromMessage];
-}
-
-function mergeReasoningParts(
-  reasoningParts: ReturnType<typeof buildAssistantTurnReasoningParts>,
+function renderAssistantTurn(
+  item: AssistantTurnDisplayItem,
+  options: {
+    selected: boolean;
+    onOpenTab: (tab: InspectorTab) => void;
+  },
 ) {
-  if (reasoningParts.length === 0) return [];
-
-  const mergedText = reasoningParts
-    .flatMap(({ part }) => part.parts)
-    .map((part) => part.text)
-    .join("");
-  const lastPart = reasoningParts[reasoningParts.length - 1]?.part;
-  const runtimeContext = [...reasoningParts]
-    .reverse()
-    .find(({ part }) => part.runtimeContext)?.part.runtimeContext;
-  const duration = [...reasoningParts]
-    .reverse()
-    .find(({ part }) => part.duration != null)?.part.duration;
-
-  if (!lastPart) return [];
-
-  return [
-    {
-      key: reasoningParts[0]?.key ?? "reasoning",
-      part: {
-        kind: "reasoning" as const,
-        parts: [{ type: "text" as const, text: mergedText }],
-        isStreaming: lastPart.isStreaming,
-        ...(duration != null ? { duration } : {}),
-        ...(runtimeContext ? { runtimeContext } : {}),
-      },
-    },
-  ];
-}
-
-function buildAssistantTurnSupplementalParts(item: AssistantTurnDisplayItem) {
   return (
-    item.message?.renderParts?.filter((part) => part.kind !== "reasoning") ?? []
+    <AssistantTurnContent
+      model={buildAssistantContentModel(item)}
+      selected={options.selected}
+      onOpenTab={options.onOpenTab}
+    />
   );
 }
 
-function renderAssistantTurn(item: AssistantTurnDisplayItem) {
-  const reasoningParts = mergeReasoningParts(
-    buildAssistantTurnReasoningParts(item),
-  );
-  const supplementalParts = buildAssistantTurnSupplementalParts(item);
-  const assistantContent = item.message?.content ?? "";
-  const hasReasoning = reasoningParts.length > 0;
-  const hasAssistantContent = assistantContent.length > 0;
-  const showStreamingShell =
-    Boolean(item.message?.streaming) && !hasAssistantContent && !hasReasoning;
-  const shouldRenderBubble =
-    hasReasoning || hasAssistantContent || showStreamingShell;
-
+function LoadingState() {
   return (
-    <Message from="assistant" className="mb-4" key={item.key}>
-      <MessageContent className="w-full space-y-2.5">
-        {shouldRenderBubble ? (
-          <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
-            <div className="flex flex-col gap-3">
-              {reasoningParts.map(({ key, part }) =>
-                renderReasoningPart(part, key, true),
-              )}
-              {hasReasoning && hasAssistantContent ? (
-                <Separator className="bg-border-subtle/70" />
-              ) : null}
-              {hasAssistantContent ? (
-                <MessageResponse>
-                  {assistantContent}
-                </MessageResponse>
-              ) : null}
-              {showStreamingShell ? (
-                <Shimmer as="span" className="text-sm text-muted-foreground">
-                  Loading
-                </Shimmer>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {supplementalParts.map((part, idx) =>
-          renderTracePart(part, `${item.key}-${part.kind}-${idx}`),
-        )}
-      </MessageContent>
-    </Message>
+    <div className="flex flex-col gap-2">
+      <Shimmer
+        as="span"
+        className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+      >
+        Loading
+      </Shimmer>
+      <div className="space-y-1.5">
+        <div className="h-2.5 w-36 rounded-full bg-muted/70" />
+        <div className="h-2.5 w-24 rounded-full bg-muted/45" />
+      </div>
+    </div>
   );
 }
 
@@ -692,7 +647,13 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                 <ChainOfThoughtStep
                   key={step.id}
                   label={step.label}
-                  status={mapTaskStatus(step.status as "pending" | "in_progress" | "completed" | "error")}
+                  status={mapTaskStatus(
+                    step.status as
+                      | "pending"
+                      | "in_progress"
+                      | "completed"
+                      | "error",
+                  )}
                 >
                   {step.details?.map((detail, idx) => (
                     <div key={`${step.id}-detail-${idx}`}>{detail}</div>
@@ -732,10 +693,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       );
     case "task":
       return (
-        <Task
-          key={key}
-          defaultOpen={shouldOpenTaskRow(part.status)}
-        >
+        <Task key={key} defaultOpen={shouldOpenTaskRow(part.status)}>
           <TaskTrigger title={part.title} />
           <TaskContent>
             {part.items?.length ? (
@@ -760,10 +718,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
     case "tool": {
       const outputText = stringifyValue(part.output);
       return (
-        <Tool
-          key={key}
-          defaultOpen={shouldOpenToolRow(part.state)}
-        >
+        <Tool key={key} defaultOpen={shouldOpenToolRow(part.state)}>
           <ToolHeader
             type={`tool-${part.toolType}`}
             state={mapToolState(part.state)}
@@ -792,14 +747,8 @@ function renderTracePart(part: ChatRenderPart, key: string) {
       const code = part.code ?? "";
       const output = part.output ?? "";
       return (
-        <Sandbox
-          key={key}
-          defaultOpen={shouldOpenToolRow(part.state)}
-        >
-          <SandboxHeader
-            title={part.title}
-            state={mapToolState(part.state)}
-          />
+        <Sandbox key={key} defaultOpen={shouldOpenToolRow(part.state)}>
+          <SandboxHeader title={part.title} state={mapToolState(part.state)} />
           <SandboxContent>
             <div className="px-2.5 py-1.5">
               <RuntimeContextBadge ctx={part.runtimeContext} />
@@ -815,14 +764,17 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                 {part.errorText ? (
                   <div
                     className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive"
-                    style={typo.base}
+                    style={typo.labelRegular}
                   >
                     {part.errorText}
                   </div>
                 ) : output ? (
                   <Streamdown content={output} streaming={false} />
                 ) : (
-                  <div className="text-muted-foreground" style={typo.base}>
+                  <div
+                    className="text-muted-foreground"
+                    style={typo.labelRegular}
+                  >
                     No output yet
                   </div>
                 )}
@@ -831,15 +783,15 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                 {code ? (
                   <pre
                     className="overflow-x-auto rounded-md border-subtle bg-muted/30 p-2"
-                    style={{
-                      ...typo.base,
-                      fontFamily: "var(--font-family-mono)",
-                    }}
+                    style={MONO_BASE_STYLE}
                   >
                     <code>{code}</code>
                   </pre>
                 ) : (
-                  <div className="text-muted-foreground" style={typo.base}>
+                  <div
+                    className="text-muted-foreground"
+                    style={typo.labelRegular}
+                  >
                     No code captured
                   </div>
                 )}
@@ -903,7 +855,12 @@ function renderTracePart(part: ChatRenderPart, key: string) {
           state={mapConfirmationState(part.state)}
           approval={{
             id: key,
-            approved: part.state === "approved" ? true : part.state === "rejected" ? false : undefined,
+            approved:
+              part.state === "approved"
+                ? true
+                : part.state === "rejected"
+                  ? false
+                  : undefined,
           }}
         >
           <ConfirmationTitle>{part.question}</ConfirmationTitle>
@@ -958,60 +915,80 @@ export function ChatMessageList({
   hasHistory,
   historyPanel,
 }: ChatMessageListProps) {
+  const { selectedAssistantTurnId, selectInspectorTurn, isCanvasOpen } =
+    useNavigationStore();
   const prefersReduced = useReducedMotion();
   const preset = prefersReduced ? fadeUpReduced : fadeUp;
   const hasStreamingAssistant = messages.some(
     (msg) => msg.type === "assistant" && msg.streaming,
   );
-  let activeTurnStartIndex = 0;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.type === "user") {
-      activeTurnStartIndex = index + 1;
-      break;
-    }
-  }
-  const displayItems = buildChatDisplayItems(messages);
-  const hasVisibleAssistantTurn = buildChatDisplayItems(
-    messages.slice(activeTurnStartIndex),
-  ).some(
+  const lastUserIndex = messages.findLastIndex(
+    (message) => message.type === "user",
+  );
+  const lastUserMessageId =
+    lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
+  const activeTurnAssistantMessageId =
+    lastUserIndex >= 0
+      ? ([...messages.slice(lastUserIndex + 1)]
+          .reverse()
+          .find((message) => message.type === "assistant")?.id ?? null)
+      : null;
+  const displayItems = buildChatDisplayItems(messages, {
+    showPendingAssistantShell: isTyping,
+  });
+  const hasVisibleAssistantTurn = displayItems.some(
     (item) => item.kind === "assistant_turn",
   );
   const showTypingShimmer =
     isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
 
+  useEffect(() => {
+    if (!selectedAssistantTurnId || !lastUserMessageId) return;
+    const pendingTurnId = buildPendingAssistantTurnId(lastUserMessageId);
+    if (
+      selectedAssistantTurnId !== pendingTurnId ||
+      !activeTurnAssistantMessageId
+    ) {
+      return;
+    }
+    useNavigationStore.setState({
+      selectedAssistantTurnId: activeTurnAssistantMessageId,
+    });
+  }, [
+    activeTurnAssistantMessageId,
+    lastUserMessageId,
+    selectedAssistantTurnId,
+  ]);
+
   return (
-    <Conversation className="bg-background">
-      <ConversationContent>
+    <Conversation
+      className={cn("bg-background", messages.length === 0 && "flex-none")}
+    >
+      <ConversationContent
+        className={cn(
+          "mx-auto w-full max-w-175",
+          messages.length === 0 ? "gap-3 pb-0" : "min-h-full",
+        )}
+      >
         {messages.length === 0 && (
           <motion.div {...preset}>
             <ConversationEmptyState
               icon={null}
               className={cn(
-                "pt-16 pb-8 text-left items-start",
-                isMobile && "pt-10",
+                "h-auto w-full items-start justify-start gap-5 px-0 pb-2 pt-10 text-left",
+                isMobile ? "pt-6" : "pt-8",
               )}
             >
-              <div className="flex flex-col justify-center pb-1.25 w-full mb-10">
+              <div className="mb-4 flex w-full flex-col justify-center pb-1.25">
                 <h2
                   className="text-foreground w-full"
-                  style={{
-                    ...typo.display,
-                    fontWeight: "var(--font-weight-medium)",
-                    lineHeight: "var(--line-height-display)",
-                    letterSpacing: "var(--letter-spacing-display-title)",
-                    textWrap: "balance",
-                  }}
+                  style={DISPLAY_TITLE_STYLE}
                 >
                   Agentic Fleet Session
                 </h2>
                 <p
                   className="text-muted-foreground w-full"
-                  style={{
-                    ...typo.display,
-                    fontWeight: "var(--font-weight-regular)",
-                    letterSpacing: "var(--letter-spacing-display-subtitle)",
-                    textWrap: "balance",
-                  }}
+                  style={DISPLAY_SUBTITLE_STYLE}
                 >
                   What do you need ?
                 </p>
@@ -1023,19 +1000,37 @@ export function ChatMessageList({
                 aria-label="Suggestion actions"
               >
                 {suggestions.map((s, i) => (
-                  <SuggestionChip
+                  <motion.div
                     key={s.text}
-                    icon={s.Icon}
-                    label={s.text}
-                    index={i}
-                    onClick={onSuggestionClick}
-                  />
+                    initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={
+                      prefersReduced
+                        ? { duration: 0.01 }
+                        : { delay: 0.15 + i * 0.08 }
+                    }
+                  >
+                    <Suggestion
+                      suggestion={s.text}
+                      onClick={onSuggestionClick}
+                      variant="secondary"
+                      className="h-auto border border-border-subtle px-4 py-2.5 hover:border-border-strong"
+                    >
+                      <s.Icon />
+                      <span
+                        data-slot="suggestion-chip-label"
+                        className="text-foreground"
+                      >
+                        {s.text}
+                      </span>
+                    </Suggestion>
+                  </motion.div>
                 ))}
               </div>
 
               {hasHistory && !showHistory && (
                 <motion.div
-                  className="w-full mt-6"
+                  className="mt-4 w-full"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={
@@ -1065,178 +1060,187 @@ export function ChatMessageList({
           <AnimatePresence>{historyPanel}</AnimatePresence>
         )}
 
-        {displayItems.map((displayItem) => {
-          if (displayItem.kind === "tool_session") {
-            return (
-              <motion.div key={displayItem.key} {...preset}>
-                {renderToolSession(displayItem)}
-              </motion.div>
-            );
-          }
+        {messages.length > 0 && (
+          <div className="mt-auto flex flex-col gap-4">
+            {displayItems.map((displayItem) => {
+              if (displayItem.kind === "tool_session") {
+                return (
+                  <motion.div key={displayItem.key} {...preset}>
+                    {renderToolSession(displayItem)}
+                  </motion.div>
+                );
+              }
 
-          if (displayItem.kind === "assistant_turn") {
-            return (
-              <motion.div key={displayItem.key} {...preset}>
-                {renderAssistantTurn(displayItem)}
-              </motion.div>
-            );
-          }
+              if (displayItem.kind === "assistant_turn") {
+                const turnId = displayItem.turnId;
+                return (
+                  <motion.div key={displayItem.key} {...preset}>
+                    {renderAssistantTurn(displayItem, {
+                      selected:
+                        isCanvasOpen && selectedAssistantTurnId === turnId,
+                      onOpenTab: (tab) => selectInspectorTurn(turnId, tab),
+                    })}
+                  </motion.div>
+                );
+              }
 
-          const msg =
-            displayItem.kind === "trace_message"
-              ? {
-                  ...displayItem.message,
-                  renderParts: displayItem.renderParts,
-                }
-              : displayItem.message;
-
-          return (
-            <motion.div key={displayItem.key} {...preset}>
-              {msg.type === "system" && (
-                <div className="flex items-center gap-4 py-4">
-                  <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
-                  <span
-                    className="text-muted-foreground shrink-0 uppercase tracking-[0.2em] opacity-40 whitespace-pre-line"
-                    style={{
-                      ...typo.micro,
-                      fontWeight: "var(--font-weight-semibold)",
-                    }}
-                  >
-                    {msg.content}
-                  </span>
-                  <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
-                </div>
-              )}
-
-              {msg.type === "user" && (
-                <Message from="user" className="mb-4">
-                  <MessageContent className="max-w-[85%] md:max-w-lg rounded-xl border-subtle/80 bg-card/70 px-3.5 py-2.5">
-                    <div className="text-[13px] leading-relaxed text-foreground whitespace-pre-wrap">
-                      {msg.content}
-                    </div>
-                  </MessageContent>
-                </Message>
-              )}
-
-              {(msg.type === "assistant" ||
-                msg.type === "trace" ||
-                msg.type === "reasoning") && (
-                <Message from="assistant" className="mb-4">
-                  <MessageContent className="w-full space-y-2.5">
-                    {msg.renderParts?.map((part, idx) =>
-                      renderTracePart(part, `${msg.id}-${part.kind}-${idx}`),
-                    )}
-                    {msg.type === "assistant" && msg.content ? (
-                      <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
-                        <MessageResponse>
-                          {msg.content}
-                        </MessageResponse>
-                      </div>
-                    ) : null}
-                    {msg.type === "assistant" &&
-                    msg.streaming &&
-                    !msg.content ? (
-                      <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
-                        <Shimmer
-                          as="span"
-                          className="text-sm text-muted-foreground"
-                        >
-                          Loading
-                        </Shimmer>
-                      </div>
-                    ) : null}
-                  </MessageContent>
-                </Message>
-              )}
-
-              {msg.type === "hitl" && msg.hitlData && (
-                <div className="mb-6">
-                  <Confirmation
-                    state={mapConfirmationState(hitlConfirmationState(msg))}
-                    approval={{
-                      id: msg.id,
-                      approved: hitlConfirmationState(msg) === "approved" ? true : hitlConfirmationState(msg) === "rejected" ? false : undefined,
-                    }}
-                  >
-                    <ConfirmationTitle className="text-sm font-medium">
-                      Checkpoint
-                    </ConfirmationTitle>
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      {msg.hitlData.question}
-                    </div>
-                    <ConfirmationRequest>
-                      <ConfirmationActions>
-                        {msg.hitlData.actions.map((action) => (
-                          <ConfirmationAction
-                            key={action.label}
-                            onClick={() => onResolveHitl(msg.id, action.label)}
-                            className={cn(
-                              action.variant === "primary" &&
-                                "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
-                            )}
-                          >
-                            {action.label}
-                          </ConfirmationAction>
-                        ))}
-                      </ConfirmationActions>
-                    </ConfirmationRequest>
-                    <ConfirmationAccepted>
-                      <div className="mt-3 text-xs text-primary">
-                        Resolved: {msg.hitlData.resolvedLabel ?? "Approved"}
-                      </div>
-                    </ConfirmationAccepted>
-                    <ConfirmationRejected>
-                      <div className="mt-3 text-xs text-destructive">
-                        Resolved: {msg.hitlData.resolvedLabel ?? "Rejected"}
-                      </div>
-                    </ConfirmationRejected>
-                  </Confirmation>
-                </div>
-              )}
-
-              {msg.type === "clarification" && msg.clarificationData && (
-                <div className="mb-8">
-                  <ClarificationCard
-                    data={msg.clarificationData}
-                    onResolve={(answer) =>
-                      onResolveClarification(msg.id, answer)
+              const msg =
+                displayItem.kind === "trace_message"
+                  ? {
+                      ...displayItem.message,
+                      renderParts: displayItem.renderParts,
                     }
-                  />
-                </div>
-              )}
+                  : displayItem.message;
 
-              {msg.type === "reasoning" &&
-                msg.reasoningData &&
-                !msg.renderParts?.length && (
-                  <div className="mb-4">
-                    <Reasoning
-                      isStreaming={msg.reasoningData.isThinking}
-                      duration={msg.reasoningData.duration}
-                    >
-                      <ReasoningTrigger />
-                      <ReasoningContent>
-                        {msg.reasoningData.parts.map(p => p.text).join("\n")}
-                      </ReasoningContent>
-                    </Reasoning>
-                  </div>
-                )}
+              return (
+                <motion.div key={displayItem.key} {...preset}>
+                  {msg.type === "system" && (
+                    <div className="flex items-center gap-4 py-4">
+                      <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
+                      <span
+                        className="text-muted-foreground shrink-0 uppercase tracking-[0.2em] opacity-40 whitespace-pre-line"
+                        style={SYSTEM_MESSAGE_STYLE}
+                      >
+                        {msg.content}
+                      </span>
+                      <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
+                    </div>
+                  )}
 
-              {msg.type === "plan_update" &&
-                renderLegacyStatusCard(msg.content, "accent")}
-              {msg.type === "rlm_executing" &&
-                renderLegacyStatusCard(msg.content, "primary")}
-              {msg.type === "memory_update" &&
-                renderLegacyStatusCard(msg.content, "success")}
-            </motion.div>
-          );
-        })}
+                  {msg.type === "user" && (
+                    <Message from="user" className="mb-2.5">
+                      <MessageContent className="max-w-[85%] md:max-w-lg rounded-xl border-subtle/80 bg-card/70 px-3.5 py-2.5">
+                        <div className="text-[13px] leading-relaxed text-foreground whitespace-pre-wrap">
+                          {msg.content}
+                        </div>
+                      </MessageContent>
+                    </Message>
+                  )}
+
+                  {(msg.type === "assistant" ||
+                    msg.type === "trace" ||
+                    msg.type === "reasoning") && (
+                    <Message from="assistant" className="mb-2.5">
+                      <MessageContent className="w-full space-y-2.5">
+                        {msg.renderParts?.map((part, idx) =>
+                          renderTracePart(
+                            part,
+                            `${msg.id}-${part.kind}-${idx}`,
+                          ),
+                        )}
+                        {msg.type === "assistant" && msg.content ? (
+                          <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
+                            <MessageResponse>{msg.content}</MessageResponse>
+                          </div>
+                        ) : null}
+                        {msg.type === "assistant" &&
+                        msg.streaming &&
+                        !msg.content ? (
+                          <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
+                            <LoadingState />
+                          </div>
+                        ) : null}
+                      </MessageContent>
+                    </Message>
+                  )}
+
+                  {msg.type === "hitl" && msg.hitlData && (
+                    <div className="mb-4">
+                      <Confirmation
+                        state={mapConfirmationState(hitlConfirmationState(msg))}
+                        approval={{
+                          id: msg.id,
+                          approved:
+                            hitlConfirmationState(msg) === "approved"
+                              ? true
+                              : hitlConfirmationState(msg) === "rejected"
+                                ? false
+                                : undefined,
+                        }}
+                      >
+                        <ConfirmationTitle className="text-sm font-medium">
+                          Checkpoint
+                        </ConfirmationTitle>
+                        <div className="mt-2 text-sm text-muted-foreground">
+                          {msg.hitlData.question}
+                        </div>
+                        <ConfirmationRequest>
+                          <ConfirmationActions>
+                            {msg.hitlData.actions.map((action) => (
+                              <ConfirmationAction
+                                key={action.label}
+                                onClick={() =>
+                                  onResolveHitl(msg.id, action.label)
+                                }
+                                className={cn(
+                                  action.variant === "primary" &&
+                                    "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
+                                )}
+                              >
+                                {action.label}
+                              </ConfirmationAction>
+                            ))}
+                          </ConfirmationActions>
+                        </ConfirmationRequest>
+                        <ConfirmationAccepted>
+                          <div className="mt-3 text-xs text-primary">
+                            Resolved: {msg.hitlData.resolvedLabel ?? "Approved"}
+                          </div>
+                        </ConfirmationAccepted>
+                        <ConfirmationRejected>
+                          <div className="mt-3 text-xs text-destructive">
+                            Resolved: {msg.hitlData.resolvedLabel ?? "Rejected"}
+                          </div>
+                        </ConfirmationRejected>
+                      </Confirmation>
+                    </div>
+                  )}
+
+                  {msg.type === "clarification" && msg.clarificationData && (
+                    <div className="mb-5">
+                      <ClarificationCard
+                        data={msg.clarificationData}
+                        onResolve={(answer) =>
+                          onResolveClarification(msg.id, answer)
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {msg.type === "reasoning" &&
+                    msg.reasoningData &&
+                    !msg.renderParts?.length && (
+                      <div className="mb-2.5">
+                        <Reasoning
+                          isStreaming={msg.reasoningData.isThinking}
+                          duration={msg.reasoningData.duration}
+                        >
+                          <ReasoningTrigger />
+                          <ReasoningContent>
+                            {msg.reasoningData.parts
+                              .map((p) => p.text)
+                              .join("\n")}
+                          </ReasoningContent>
+                        </Reasoning>
+                      </div>
+                    )}
+
+                  {msg.type === "plan_update" &&
+                    renderLegacyStatusCard(msg.content, "accent")}
+                  {msg.type === "rlm_executing" &&
+                    renderLegacyStatusCard(msg.content, "primary")}
+                  {msg.type === "memory_update" &&
+                    renderLegacyStatusCard(msg.content, "success")}
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
 
         {showTypingShimmer && (
           <Message from="assistant" className="pt-2">
             <MessageContent className="max-w-xl">
-              <Shimmer as="span" className="text-sm text-muted-foreground">
-                Loading
-              </Shimmer>
+              <LoadingState />
             </MessageContent>
           </Message>
         )}

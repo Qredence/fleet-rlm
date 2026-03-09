@@ -161,6 +161,27 @@ Output: ./data/processed_metrics.json`,
   },
 ];
 
+const CONSOLE_OUTPUT_STYLE = {
+  fontFamily: "var(--font-mono)",
+  fontSize: "var(--font-text-xs-size)",
+  fontWeight: "var(--font-text-xs-weight)",
+  lineHeight: "var(--font-text-xs-line-height)",
+  letterSpacing: "var(--font-text-xs-tracking)",
+  color: "var(--color-text)",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+} as const;
+
+const EDITOR_TEXTAREA_STYLE = {
+  fontFamily: "var(--font-mono)",
+  fontSize: "var(--font-text-xs-size)",
+  fontWeight: "var(--font-text-xs-weight)",
+  lineHeight: "var(--font-text-xs-line-height)",
+  letterSpacing: "var(--font-text-xs-tracking)",
+  color: "var(--color-text)",
+  caretColor: "var(--color-background-info-solid)",
+} as const;
+
 // ── Console output sub-component ────────────────────────────────────
 
 function ConsoleOutput({
@@ -183,10 +204,7 @@ function ConsoleOutput({
   return (
     <div className="flex flex-col h-full">
       {/* Console header */}
-      <div
-        className="flex items-center gap-2 px-4 py-2 border-t border-border-subtle shrink-0"
-        style={{ backgroundColor: "var(--bg-elevated-primary)" }}
-      >
+      <div className="flex items-center gap-2 border-t border-border-subtle bg-[var(--color-surface-secondary)] px-4 py-2 shrink-0">
         <Terminal
           className="size-3.5 text-muted-foreground"
           aria-hidden="true"
@@ -217,23 +235,10 @@ function ConsoleOutput({
       {/* Output area */}
       <div
         ref={scrollRef}
-        className="flex-1 min-h-0 overflow-auto p-4"
-        style={{
-          backgroundColor: "var(--card)",
-          overscrollBehavior: "contain",
-        }}
+        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-card p-4"
       >
         {output ? (
-          <pre
-            style={{
-              ...typo.mono,
-              color: "var(--foreground)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
-            {output}
-          </pre>
+          <pre style={CONSOLE_OUTPUT_STYLE}>{output}</pre>
         ) : (
           <span className="text-muted-foreground" style={typo.mono}>
             {">"} Waiting for execution{"\u2026"}
@@ -352,10 +357,7 @@ export function CodeArtifact() {
   return (
     <div className="flex flex-col h-full bg-background">
       {/* File tab bar */}
-      <div
-        className="flex items-center border-b border-border-subtle overflow-x-auto no-scrollbar shrink-0"
-        style={{ backgroundColor: "var(--bg-elevated-primary)" }}
-      >
+      <div className="flex items-center overflow-x-auto border-b border-border-subtle bg-[var(--color-surface-secondary)] no-scrollbar shrink-0">
         {mockFiles.map((file) => {
           const isActive = file.id === activeFileId;
           const fileModified = (editedCode[file.id] ?? file.code) !== file.code;
@@ -383,8 +385,7 @@ export function CodeArtifact() {
               {file.name}
               {fileModified && (
                 <span
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: "var(--accent)" }}
+                  className="h-1.5 w-1.5 rounded-full bg-accent shrink-0"
                   aria-label="Modified"
                 />
               )}
@@ -475,18 +476,14 @@ export function CodeArtifact() {
         <div
           ref={editorRef}
           className={cn(
-            "min-h-0 overflow-hidden flex-1",
+            "min-h-0 flex-1 overflow-hidden bg-card",
             !editorReady && "hidden",
           )}
-          style={{ backgroundColor: "var(--card)" }}
         />
 
         {/* Textarea fallback when CodeMirror fails to load */}
         {!editorReady && (
-          <div
-            className="flex-1 min-h-0 overflow-hidden"
-            style={{ backgroundColor: "var(--card)" }}
-          >
+          <div className="flex-1 min-h-0 overflow-hidden bg-card">
             <textarea
               value={currentCode}
               onChange={(e) => {
@@ -496,11 +493,7 @@ export function CodeArtifact() {
                 }));
               }}
               className="w-full h-full resize-none bg-transparent text-foreground p-4 outline-none"
-              style={{
-                ...typo.mono,
-                color: "var(--foreground)",
-                caretColor: "var(--accent)",
-              }}
+              style={EDITOR_TEXTAREA_STYLE}
               spellCheck={false}
               aria-label={`Code editor: ${activeFile.name}`}
             />

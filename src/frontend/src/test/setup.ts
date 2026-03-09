@@ -42,14 +42,14 @@ Object.defineProperty(window, "matchMedia", {
 
 // -- ResizeObserver -------------------------------------------------------
 // Required by several Radix UI / layout components.
-global.ResizeObserver = class ResizeObserver {
+globalThis.ResizeObserver = class ResizeObserver {
   observe() {}
   unobserve() {}
   disconnect() {}
 };
 
 // -- IntersectionObserver -------------------------------------------------
-global.IntersectionObserver = class MockIntersectionObserver {
+globalThis.IntersectionObserver = class MockIntersectionObserver {
   readonly root: Element | Document | null = null;
   readonly rootMargin: string = "";
   readonly thresholds: ReadonlyArray<number> = [];

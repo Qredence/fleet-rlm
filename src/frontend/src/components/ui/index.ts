@@ -80,7 +80,7 @@ export { Streamdown, type StreamdownProps } from "./streamdown";
 export { SuggestionChip, type SuggestionChipProps } from "./suggestion-chip";
 
 // Utilities
-export { cn } from "./utils";
+export { cn } from "@/lib/utils/cn";
 export { buttonVariants, type ButtonVariantProps } from "./button-variants";
 export { badgeVariants, type BadgeVariantProps } from "./badge-variants";
 export { toggleVariants, type ToggleVariantProps } from "./toggle-variants";

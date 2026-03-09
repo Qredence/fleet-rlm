@@ -54,7 +54,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     <form onSubmit={handleSubmit} className="space-y-5">
       {/* Logo + Title */}
       <div className="flex flex-col items-center gap-3 pb-2">
-        <BrandMark className="w-8 h-[15px] text-foreground" />
+        <BrandMark className="w-8 h-3.75 text-foreground" />
         <div className="text-center">
           <h2 className="text-foreground" style={typo.h3}>
             Sign in to Fleet RLM
@@ -117,27 +117,14 @@ export function LoginDialog({
     return (
       <Drawer.Root open={open} onOpenChange={onOpenChange}>
         <Drawer.Portal>
-          <Drawer.Overlay
-            className="fixed inset-0 z-50"
-            style={{ backgroundColor: "var(--glass-overlay)" }}
-          />
+          <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-50" />
           <Drawer.Content
-            className="fixed inset-x-0 bottom-0 z-50 flex flex-col outline-none"
-            style={{
-              maxHeight: "85dvh",
-              borderTopLeftRadius: "var(--radius-card)",
-              borderTopRightRadius: "var(--radius-card)",
-              backgroundColor: "var(--glass-sheet-bg)",
-              backdropFilter: "blur(var(--glass-sheet-blur))",
-              WebkitBackdropFilter: "blur(var(--glass-sheet-blur))",
-              borderTop: "0.5px solid var(--glass-sheet-border)",
-            }}
+            className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col outline-none"
           >
             {/* Grab handle */}
             <div className="flex items-center justify-center py-2 shrink-0">
               <div
-                className="w-9 h-[5px] rounded-full"
-                style={{ backgroundColor: "var(--glass-sheet-handle)" }}
+                className="surface-glass-handle h-1.25 w-9 rounded-full"
                 aria-hidden="true"
               />
             </div>
@@ -171,7 +158,7 @@ export function LoginDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[400px] p-6 rounded-card">
+      <DialogContent className="sm:max-w-100 p-6 rounded-card">
         <DialogTitle className="sr-only">Sign In</DialogTitle>
         <DialogDescription className="sr-only">
           Sign in to your Fleet RLM account

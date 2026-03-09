@@ -15,17 +15,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { ChevronsUpDownIcon } from "lucide-react";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 const deviceIdRegex = /\(([\da-fA-F]{4}:[\da-fA-F]{4})\)$/;
 
@@ -35,8 +27,6 @@ interface MicSelectorContextType {
   onValueChange?: (value: string) => void;
   open: boolean;
   onOpenChange?: (open: boolean) => void;
-  width: number;
-  setWidth?: (width: number) => void;
 }
 
 const MicSelectorContext = createContext<MicSelectorContextType>({
@@ -44,9 +34,7 @@ const MicSelectorContext = createContext<MicSelectorContextType>({
   onOpenChange: undefined,
   onValueChange: undefined,
   open: false,
-  setWidth: undefined,
   value: undefined,
-  width: 200,
 });
 
 export type MicSelectorProps = ComponentProps<typeof Popover> & {
@@ -76,7 +64,6 @@ export const MicSelector = ({
     onChange: controlledOnOpenChange,
     prop: controlledOpen,
   });
-  const [width, setWidth] = useState(200);
   const { devices, loading, hasPermission, loadDevices } = useAudioDevices();
 
   useEffect(() => {
@@ -91,11 +78,9 @@ export const MicSelector = ({
       onOpenChange,
       onValueChange,
       open,
-      setWidth,
       value,
-      width,
     }),
-    [devices, onOpenChange, onValueChange, open, setWidth, value, width]
+    [devices, onOpenChange, onValueChange, open, value]
   );
 
   return (
@@ -111,33 +96,9 @@ export const MicSelectorTrigger = ({
   children,
   ...props
 }: MicSelectorTriggerProps) => {
-  const { setWidth } = useContext(MicSelectorContext);
-  const ref = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    // Create a ResizeObserver to detect width changes
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const newWidth = (entry.target as HTMLElement).offsetWidth;
-        if (newWidth) {
-          setWidth?.(newWidth);
-        }
-      }
-    });
-
-    if (ref.current) {
-      resizeObserver.observe(ref.current);
-    }
-
-    // Clean up the observer when component unmounts
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [setWidth]);
-
   return (
     <PopoverTrigger asChild>
-      <Button variant="outline" {...props} ref={ref}>
+      <Button variant="outline" {...props}>
         {children}
         <ChevronsUpDownIcon
           className="shrink-0 text-muted-foreground"
@@ -157,12 +118,11 @@ export const MicSelectorContent = ({
   popoverOptions,
   ...props
 }: MicSelectorContentProps) => {
-  const { width, onValueChange, value } = useContext(MicSelectorContext);
+  const { onValueChange, value } = useContext(MicSelectorContext);
 
   return (
     <PopoverContent
-      className={cn("p-0", className)}
-      style={{ width }}
+      className={cn("w-(--radix-popover-trigger-width) p-0", className)}
       {...popoverOptions}
     >
       <Command onValueChange={onValueChange} value={value} {...props} />

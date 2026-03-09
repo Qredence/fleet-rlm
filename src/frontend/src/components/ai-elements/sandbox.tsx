@@ -13,7 +13,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { ChevronDownIcon, Code } from "lucide-react";
 
 import { getStatusBadge } from "./tool";

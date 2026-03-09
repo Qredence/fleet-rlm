@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const CURRENT_VERSIONED_KEY = "hax-fleet:chat-history:v2";
 const VERSIONED_KEY = "hax-fleet:chat-history:v1";
 const LEGACY_KEY = "hax-fleet:chat-history";
 
@@ -73,5 +74,71 @@ describe("useChatHistoryStore", () => {
     expect(useChatHistoryStore.getState().conversations).toEqual([
       legacyConversation,
     ]);
+  });
+
+  it("persists turn-scoped artifacts with saved conversations", async () => {
+    const { useChatHistoryStore } = await import("@/stores/chatHistoryStore");
+
+    const conversationId = useChatHistoryStore.getState().saveConversation(
+      [
+        {
+          id: "user-1",
+          type: "user",
+          content: "Inspect this turn",
+        },
+        {
+          id: "assistant-1",
+          type: "assistant",
+          content: "Done",
+          streaming: false,
+        },
+      ],
+      "idle",
+      undefined,
+      {
+        "assistant-1": [
+          {
+            id: "step-1",
+            type: "llm",
+            label: "Planned answer",
+            timestamp: 1,
+          },
+        ],
+      },
+    );
+
+    const loaded = useChatHistoryStore.getState().loadConversation(conversationId);
+    const persisted = JSON.parse(
+      localStorage.getItem(CURRENT_VERSIONED_KEY) ?? "null",
+    ) as {
+      state?: {
+        conversations?: Array<{
+          turnArtifactsByMessageId?: Record<string, unknown[]>;
+        }>;
+      };
+    } | null;
+
+    expect(loaded?.turnArtifactsByMessageId).toEqual({
+      "assistant-1": [
+        {
+          id: "step-1",
+          type: "llm",
+          label: "Planned answer",
+          timestamp: 1,
+        },
+      ],
+    });
+    expect(
+      persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId,
+    ).toEqual({
+      "assistant-1": [
+        {
+          id: "step-1",
+          type: "llm",
+          label: "Planned answer",
+          timestamp: 1,
+        },
+      ],
+    });
   });
 });

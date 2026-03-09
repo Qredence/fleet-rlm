@@ -208,6 +208,27 @@ publish:
 }`,
 };
 
+const METADATA_LABEL_STYLE = {
+  fontFamily: "var(--font-sans)",
+  fontSize: "var(--font-text-2xs-size)",
+  fontWeight: "var(--font-text-2xs-weight)",
+  lineHeight: "var(--font-text-2xs-line-height)",
+  letterSpacing: "var(--font-text-2xs-tracking)",
+  minWidth: "var(--label-min-width)",
+} as const;
+
+const FILE_PREVIEW_SURFACE_STYLE = {
+  backgroundColor: "var(--color-surface-secondary)",
+} as const;
+
+const TEXT_PREVIEW_STYLE = {
+  fontFamily: "var(--font-mono)",
+  fontSize: "var(--font-text-2xs-size)",
+  fontWeight: "var(--font-text-2xs-weight)",
+  lineHeight: "var(--font-text-xs-line-height)",
+  letterSpacing: "var(--font-text-2xs-tracking)",
+} as const;
+
 // ── Metadata row ────────────────────────────────────────────────────
 
 function MetadataRow({
@@ -224,7 +245,7 @@ function MetadataRow({
       <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <span
         className="text-muted-foreground shrink-0"
-        style={{ ...typo.helper, minWidth: "var(--label-min-width)" }}
+        style={METADATA_LABEL_STYLE}
       >
         {label}
       </span>
@@ -277,7 +298,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
 
   return (
     <ScrollArea className={cn("h-full", className)}>
-      <div className={cn("max-w-[800px] mx-auto", isMobile ? "p-4" : "p-6")}>
+      <div className={cn("max-w-200 mx-auto", isMobile ? "p-4" : "p-6")}>
         {/* File header */}
         <div className="flex items-start gap-3 mb-4">
           <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
@@ -366,9 +387,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
             </div>
             <div
               className="rounded-lg border-subtle overflow-hidden"
-              style={{
-                backgroundColor: "var(--input-background, var(--muted))",
-              }}
+              style={FILE_PREVIEW_SURFACE_STYLE}
             >
               {/* Loading state (API mode only) */}
               {!mock && isContentLoading && (
@@ -402,12 +421,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                 ) : (
                   <pre
                     className="p-4 overflow-x-auto text-foreground whitespace-pre-wrap wrap-break-word"
-                    style={{
-                      fontFamily: "var(--font-family-mono)",
-                      fontSize: "var(--text-helper)",
-                      fontWeight: "var(--font-weight-regular)",
-                      lineHeight: "var(--line-height-loose)",
-                    }}
+                    style={TEXT_PREVIEW_STYLE}
                   >
                     {resolvedContent}
                   </pre>
@@ -437,7 +451,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                 Binary file
               </p>
               <p
-                className="text-muted-foreground max-w-[300px]"
+                className="text-muted-foreground max-w-75"
                 style={typo.caption}
               >
                 This file cannot be previewed in the browser. Download it or

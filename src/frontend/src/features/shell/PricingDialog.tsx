@@ -258,26 +258,13 @@ export function PricingDialog({ open, onOpenChange }: PricingDialogProps) {
     return (
       <Drawer.Root open={open} onOpenChange={onOpenChange}>
         <Drawer.Portal>
-          <Drawer.Overlay
-            className="fixed inset-0 z-50"
-            style={{ backgroundColor: "var(--glass-overlay)" }}
-          />
+          <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-50" />
           <Drawer.Content
-            className="fixed inset-x-0 bottom-0 z-50 flex flex-col outline-none"
-            style={{
-              height: "95dvh",
-              borderTopLeftRadius: "var(--radius-card)",
-              borderTopRightRadius: "var(--radius-card)",
-              backgroundColor: "var(--glass-sheet-bg)",
-              backdropFilter: "blur(var(--glass-sheet-blur))",
-              WebkitBackdropFilter: "blur(var(--glass-sheet-blur))",
-              borderTop: "0.5px solid var(--glass-sheet-border)",
-            }}
+            className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-[95dvh] flex-col outline-none"
           >
             <div className="flex items-center justify-center py-2 shrink-0">
               <div
-                className="w-9 h-[5px] rounded-full"
-                style={{ backgroundColor: "var(--glass-sheet-handle)" }}
+                className="surface-glass-handle h-[5px] w-9 rounded-full"
                 aria-hidden="true"
               />
             </div>

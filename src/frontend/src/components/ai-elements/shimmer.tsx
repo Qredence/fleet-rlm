@@ -2,7 +2,7 @@
 import type { MotionProps } from "motion/react";
 import type { CSSProperties, ElementType, JSX } from "react";
 
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { motion } from "motion/react";
 import { memo, useMemo } from "react";
 

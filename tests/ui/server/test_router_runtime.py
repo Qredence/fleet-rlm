@@ -5,8 +5,23 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
+
+
+def _staging_bearer_headers() -> dict[str, str]:
+    token = jwt.encode(
+        {
+            "tid": "tenant-a",
+            "oid": "user-a",
+            "email": "alice@example.com",
+            "name": "Alice",
+        },
+        "staging-test-secret",
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_runtime_settings_masks_secrets(
@@ -155,9 +170,20 @@ def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
 def test_runtime_settings_patch_non_local_forbidden(staging_client: TestClient):
     response = staging_client.patch(
         "/api/v1/runtime/settings",
+        headers=_staging_bearer_headers(),
         json={"updates": {"DSPY_LM_MODEL": "openai/gpt-4o-mini"}},
     )
     assert response.status_code == 403
+
+
+def test_runtime_routes_require_auth_when_auth_required(
+    staging_client: TestClient,
+) -> None:
+    settings = staging_client.get("/api/v1/runtime/settings")
+    volume_tree = staging_client.get("/api/v1/runtime/volume/tree")
+
+    assert settings.status_code == 401
+    assert volume_tree.status_code == 401
 
 
 def test_runtime_settings_patch_rejects_unsupported_key(local_client: TestClient):

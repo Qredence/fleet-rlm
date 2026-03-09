@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { Panel as PanelPrimitive } from "@xyflow/react";
 
 type PanelProps = ComponentProps<typeof PanelPrimitive>;

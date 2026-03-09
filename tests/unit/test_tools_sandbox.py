@@ -21,6 +21,8 @@ class _FakeInterpreter:
         self._volume = None
         self.tools: dict[str, Any] = {}
         self.async_execute = False
+        self.reload_calls = 0
+        self.areload_calls = 0
 
     def execute(
         self, code: str, variables: dict[str, Any], execution_profile: Any = None
@@ -56,6 +58,12 @@ class _FakeInterpreter:
     def shutdown(self):
         """Mock shutdown method for interpreter lifecycle."""
         pass
+
+    def reload(self):
+        self.reload_calls += 1
+
+    async def areload(self):
+        self.areload_calls += 1
 
 
 class _VolumeTextInterpreter(_FakeInterpreter):
@@ -151,6 +159,7 @@ def test_process_document_uses_cached_document_text(mock_agent):
 def test_process_document_with_non_empty_volume_payload(mock_agent):
     """process_document should report chars/lines for loaded volume text."""
     mock_agent.interpreter = _VolumeTextInterpreter("alpha\nbeta\ngamma")
+    mock_agent.interpreter._volume = True
 
     def _set_document(alias: str, content: str) -> None:
         mock_agent.documents[alias] = content
@@ -167,6 +176,7 @@ def test_process_document_with_non_empty_volume_payload(mock_agent):
     assert result["path"] == "/data/workspace/doc.txt"
     assert result["chars"] == len("alpha\nbeta\ngamma")
     assert result["lines"] == 3
+    assert mock_agent.interpreter.reload_calls == 1
 
 
 def test_rlm_query_spawns_child_rlm(mock_agent, monkeypatch: pytest.MonkeyPatch):
@@ -508,6 +518,7 @@ def test_propose_core_memory_update_uses_runtime_module(mock_agent):
 
 
 def test_memory_tree_uses_runtime_module(mock_agent):
+    mock_agent.interpreter._volume = True
     module_calls = _configure_runtime_modules(
         mock_agent,
         {
@@ -533,6 +544,8 @@ def test_memory_tree_uses_runtime_module(mock_agent):
     result = tree_tool()
 
     assert len(module_calls["memory_tree"]) == 1
+    assert mock_agent.interpreter.areload_calls == 1
+    assert mock_agent.interpreter.reload_calls == 0
     assert result["status"] == "ok"
     assert result["nodes"] == [
         {"path": "/data/memory/a.txt", "type": "file", "size_bytes": 4, "depth": 1}

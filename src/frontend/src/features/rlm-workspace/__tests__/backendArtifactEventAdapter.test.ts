@@ -91,7 +91,7 @@ describe("applyWsFrameToArtifacts", () => {
     expect(step?.depth).toBe(0);
   });
 
-  it("emits discrete llm/tool steps for reasoning/status/tool_call/tool_result", () => {
+  it("merges adjacent reasoning and status into a single live llm step", () => {
     applyWsFrameToArtifacts(
       makeEvent(
         "reasoning_step",
@@ -126,23 +126,27 @@ describe("applyWsFrameToArtifacts", () => {
     );
 
     const state = useArtifactStore.getState();
-    expect(state.steps).toHaveLength(4);
+    expect(state.steps).toHaveLength(3);
     expect(state.steps.map((step) => step.type)).toEqual([
-      "llm",
       "llm",
       "tool",
       "tool",
     ]);
-    expect(state.steps.map((step) => step.sequence)).toEqual([1, 2, 3, 4]);
+    expect(state.steps.map((step) => step.sequence)).toEqual([1, 2, 3]);
     expect(state.steps.map((step) => step.label)).toEqual([
       "Reasoning",
-      "Status",
       "Tool: grep",
       "Tool: grep",
     ]);
 
-    expect(state.steps[2]?.input).toEqual({ pattern: "foo" });
-    expect(state.steps[3]?.output).toBe("match line");
+    expect(state.steps[0]?.output).toEqual({
+      streaming: true,
+      text: "",
+      reasoning: ["Analyze prompt"],
+      status: ["Planning next step"],
+    });
+    expect(state.steps[1]?.input).toEqual({ pattern: "foo" });
+    expect(state.steps[2]?.output).toBe("match line");
   });
 
   it("uses trajectory_step as fallback only when live trace is absent", () => {
@@ -195,11 +199,55 @@ describe("applyWsFrameToArtifacts", () => {
     );
 
     const steps = useArtifactStore.getState().steps;
-    expect(steps).toHaveLength(2);
+    expect(steps).toHaveLength(1);
     expect(steps[0]?.label).toBe("Reasoning");
-    expect(steps[1]?.label).toBe("Status");
     expect(steps[0]?.sequence).toBe(1);
-    expect(steps[1]?.sequence).toBe(2);
-    expect((steps[0]?.timestamp ?? 0) > (steps[1]?.timestamp ?? 0)).toBe(true);
+    expect(steps[0]?.output).toEqual({
+      streaming: true,
+      text: "",
+      reasoning: ["First arrival"],
+      status: ["Second arrival"],
+    });
+    expect(steps[0]?.timestamp).toBe(Date.parse("2026-03-01T12:00:00Z"));
+  });
+
+  it("starts a new llm step when later reasoning resumes after tool activity", () => {
+    applyWsFrameToArtifacts(
+      makeEvent("reasoning_step", "First thought", undefined, "2026-03-01T12:00:01Z"),
+    );
+    applyWsFrameToArtifacts(
+      makeEvent(
+        "tool_call",
+        "Running grep",
+        { tool_name: "grep", tool_input: { pattern: "foo" } },
+        "2026-03-01T12:00:02Z",
+      ),
+    );
+    applyWsFrameToArtifacts(
+      makeEvent("reasoning_step", "Second thought", undefined, "2026-03-01T12:00:03Z"),
+    );
+
+    const state = useArtifactStore.getState();
+    expect(state.steps.map((step) => step.type)).toEqual(["llm", "tool", "llm"]);
+    expect(state.steps.map((step) => step.label)).toEqual([
+      "Reasoning",
+      "Tool: grep",
+      "Reasoning",
+    ]);
+    expect(state.steps[0]?.sequence).toBe(1);
+    expect(state.steps[1]?.sequence).toBe(2);
+    expect(state.steps[2]?.sequence).toBe(3);
+    expect(state.steps[0]?.output).toEqual({
+      streaming: true,
+      text: "",
+      reasoning: ["First thought"],
+      status: [],
+    });
+    expect(state.steps[2]?.output).toEqual({
+      streaming: true,
+      text: "",
+      reasoning: ["Second thought"],
+      status: [],
+    });
   });
 });

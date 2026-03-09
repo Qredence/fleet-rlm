@@ -62,16 +62,11 @@ function SignupPage() {
         initial={{ opacity: 0, y: prefersReduced ? 0 : 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={prefersReduced ? springs.instant : springs.default}
-        className="w-full max-w-[400px] border border-border-subtle p-8"
-        style={{
-          borderRadius: "var(--radius-card)",
-          boxShadow: "var(--shadow-200-stronger)",
-          backgroundColor: "var(--card)",
-        }}
+        className="surface-raised-card w-full max-w-100 border border-border-subtle p-8"
       >
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
           <div className="flex flex-col items-center gap-3 pb-2">
-            <BrandMark className="w-8 h-[15px] text-foreground" />
+            <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
               <h1 className="text-foreground" style={typo.h3}>
                 Create your account

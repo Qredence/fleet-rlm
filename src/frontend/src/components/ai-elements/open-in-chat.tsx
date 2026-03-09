@@ -1,4 +1,3 @@
-
 import type { ComponentProps } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -10,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import {
   ChevronDownIcon,
   ExternalLinkIcon,
@@ -209,7 +208,7 @@ export type OpenInContentProps = ComponentProps<typeof DropdownMenuContent>;
 export const OpenInContent = ({ className, ...props }: OpenInContentProps) => (
   <DropdownMenuContent
     align="start"
-    className={cn("w-[240px]", className)}
+    className={cn("w-60", className)}
     {...props}
   />
 );

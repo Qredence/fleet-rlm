@@ -7,7 +7,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
@@ -50,6 +50,7 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   duration?: number;
+  autoClose?: boolean;
 };
 
 const AUTO_CLOSE_DELAY = 1000;
@@ -63,6 +64,7 @@ export const Reasoning = memo(
     defaultOpen,
     onOpenChange,
     duration: durationProp,
+    autoClose = true,
     children,
     ...props
   }: ReasoningProps) => {
@@ -107,6 +109,7 @@ export const Reasoning = memo(
     // Auto-close when streaming ends (once only, and only if it ever streamed)
     useEffect(() => {
       if (
+        autoClose &&
         hasEverStreamedRef.current &&
         !isStreaming &&
         isOpen &&
@@ -119,7 +122,7 @@ export const Reasoning = memo(
 
         return () => clearTimeout(timer);
       }
-    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed]);
+    }, [autoClose, isStreaming, isOpen, setIsOpen, hasAutoClosed]);
 
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {
@@ -210,7 +213,12 @@ export const ReasoningContent = memo(
   ({ className, children, dir, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        "mt-4 text-sm",
+        "mt-4 text-[14px] leading-5.25 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        "[&_p]:text-[14px] [&_li]:text-[14px] [&_pre]:text-[14px] [&_code]:text-[14px] [&_code]:leading-5.25",
+        "[&_h1]:text-[14px] [&_h1]:leading-5.25 [&_h1]:font-semibold",
+        "[&_h2]:text-[14px] [&_h2]:leading-5.25 [&_h2]:font-semibold",
+        "[&_h3]:text-[14px] [&_h3]:leading-5.25 [&_h3]:font-semibold",
+        "[&_h4]:text-[14px] [&_h4]:leading-5.25 [&_h4]:font-semibold",
         "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
         className
       )}

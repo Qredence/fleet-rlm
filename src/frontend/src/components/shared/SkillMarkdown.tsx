@@ -7,6 +7,31 @@ interface Props {
   content: string;
 }
 
+const BOLD_STYLE = {
+  fontWeight: "var(--font-weight-semibold)",
+} as CSSProperties;
+
+const RELAXED_LINE_HEIGHT_STYLE = {
+  lineHeight: "var(--line-height-relaxed)",
+} as CSSProperties;
+
+const MARKDOWN_H4_STYLE = {
+  ...typo.h4,
+  fontWeight: "var(--font-weight-semibold)",
+} as CSSProperties;
+
+const MARKDOWN_HEADING_STYLES: Record<
+  number,
+  { style: CSSProperties; className: string }
+> = {
+  1: { style: typo.h2 ?? {}, className: "mb-4 mt-6 text-foreground" },
+  2: { style: typo.h3 ?? {}, className: "mb-3 mt-5 text-foreground" },
+  3: {
+    style: MARKDOWN_H4_STYLE,
+    className: "mb-2 mt-4 text-foreground",
+  },
+};
+
 function safeHref(href: string): string | undefined {
   try {
     const parsed = new URL(href);
@@ -59,7 +84,7 @@ function parseInline(text: string): ReactNode[] {
         <strong
           key={match.index}
           className="text-foreground"
-          style={{ fontWeight: "var(--font-weight-semibold)" } as CSSProperties}
+          style={BOLD_STYLE}
         >
           {match[2].slice(2, -2)}
         </strong>,
@@ -70,7 +95,7 @@ function parseInline(text: string): ReactNode[] {
         <strong
           key={match.index}
           className="text-foreground"
-          style={{ fontWeight: "var(--font-weight-semibold)" } as CSSProperties}
+          style={BOLD_STYLE}
         >
           {match[3].slice(2, -2)}
         </strong>,
@@ -244,21 +269,8 @@ function parseBlocks(md: string): Block[] {
 function renderBlock(block: Block, index: number): ReactNode {
   switch (block.type) {
     case "heading": {
-      const styles: Record<
-        number,
-        { style: CSSProperties; className: string }
-      > = {
-        1: { style: typo.h2 ?? {}, className: "mb-4 mt-6 text-foreground" },
-        2: { style: typo.h3 ?? {}, className: "mb-3 mt-5 text-foreground" },
-        3: {
-          style: {
-            ...typo.h4,
-            fontWeight: "var(--font-weight-semibold)",
-          } as CSSProperties,
-          className: "mb-2 mt-4 text-foreground",
-        },
-      };
-      const cfg = styles[block.level ?? 1] ?? styles[3]!;
+      const cfg =
+        MARKDOWN_HEADING_STYLES[block.level ?? 1] ?? MARKDOWN_HEADING_STYLES[3]!;
       const Tag = `h${block.level ?? 1}` as "h1" | "h2" | "h3";
       return (
         <Tag key={index} className={cfg.className} style={cfg.style}>
@@ -309,7 +321,7 @@ function renderBlock(block: Block, index: number): ReactNode {
           style={typo.labelRegular}
         >
           {block.items?.map((item, j) => (
-            <li key={j} style={{ lineHeight: "var(--line-height-relaxed)" }}>
+            <li key={j} style={RELAXED_LINE_HEIGHT_STYLE}>
               {parseInline(item)}
             </li>
           ))}
@@ -324,7 +336,7 @@ function renderBlock(block: Block, index: number): ReactNode {
           style={typo.labelRegular}
         >
           {block.items?.map((item, j) => (
-            <li key={j} style={{ lineHeight: "var(--line-height-relaxed)" }}>
+            <li key={j} style={RELAXED_LINE_HEIGHT_STYLE}>
               {parseInline(item)}
             </li>
           ))}

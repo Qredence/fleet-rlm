@@ -102,6 +102,15 @@ function getCurrentLlmStep(
   return undefined;
 }
 
+function getAdjacentLlmStep(steps: ExecutionStep[]): ExecutionStep | undefined {
+  const latest = steps[steps.length - 1];
+  if (!latest || latest.type !== "llm") return undefined;
+
+  const output = asRecord(latest.output);
+  if (output?.streaming === false) return undefined;
+  return latest;
+}
+
 function upsert(step: ExecutionStep): void {
   useArtifactStore.getState().upsertStep(step);
 }
@@ -168,15 +177,15 @@ function appendIntoLlmStep(entry: {
 }): void {
   if (!entry.text.trim()) return;
 
-  const { steps, activeStepId } = useArtifactStore.getState();
-  const current = getCurrentLlmStep(steps, activeStepId);
+  const { steps } = useArtifactStore.getState();
+  const current = getAdjacentLlmStep(steps);
 
   if (!current) {
     const id = nextId("llm");
     add({
       id,
       type: "llm",
-      label: "LLM reasoning",
+      label: entry.bucket === "status" ? "Status" : "Reasoning",
       timestamp: entry.timestamp,
       output: {
         streaming: true,
@@ -217,41 +226,6 @@ function appendIntoLlmStep(entry: {
     },
   });
   setActive(current.id);
-}
-
-function addLlmTraceStep(
-  kind: "reasoning_step" | "status",
-  text: string,
-  payload: Record<string, unknown> | undefined,
-  timestamp: number,
-): void {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-
-  const output =
-    kind === "reasoning_step"
-      ? {
-          text: trimmed,
-          reasoning: [trimmed],
-          streaming: false,
-        }
-      : {
-          text: trimmed,
-          status: [trimmed],
-          streaming: false,
-        };
-
-  add({
-    id: nextId("llm"),
-    type: "llm",
-    label: kind === "reasoning_step" ? "Reasoning" : "Status",
-    input: {
-      source_event: kind,
-      payload,
-    },
-    output,
-    timestamp,
-  });
 }
 
 function addToolStep(
@@ -404,11 +378,11 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
       return;
     case "reasoning_step":
       markLiveTraceSeen();
-      addLlmTraceStep(kind, text, payload, epoch);
+      appendIntoLlmStep({ bucket: "reasoning", text, timestamp: epoch });
       return;
     case "status":
       markLiveTraceSeen();
-      addLlmTraceStep(kind, text, payload, epoch);
+      appendIntoLlmStep({ bucket: "status", text, timestamp: epoch });
       return;
     case "tool_call":
     case "tool_result":

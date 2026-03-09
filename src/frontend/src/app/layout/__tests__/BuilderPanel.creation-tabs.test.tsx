@@ -43,38 +43,25 @@ vi.mock("@/features/artifacts/CanvasSwitcher", () => ({
   CanvasSwitcher: () => <div>CanvasSwitcher</div>,
 }));
 
-vi.mock("@/components/domain/artifacts/ArtifactCanvas", () => ({
-  ArtifactCanvas: ({
-    showTabs,
-    activeTab,
-  }: {
-    showTabs?: boolean;
-    activeTab?: string;
-  }) => (
-    <div>
-      ArtifactCanvas showTabs:{String(showTabs)} activeTab:{activeTab}
-    </div>
-  ),
-}));
-
-vi.mock("@/features/artifacts/CodeArtifact", () => ({
-  CodeArtifact: () => <div>CodeArtifact</div>,
-}));
-
 vi.mock("@/features/artifacts/FileDetail", () => ({
   FileDetail: ({ file }: { file: { name: string } }) => (
     <div>FileDetail:{file.name}</div>
   ),
 }));
 
+vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () => ({
+  MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
+}));
+
 vi.mock("@/lib/rlm-api", () => ({
   isRlmCoreEnabled: () => true,
   isSectionSupported: () => true,
   UNSUPPORTED_SECTION_REASON: "Unsupported",
+  createBackendSessionId: () => "session-test",
 }));
 
-describe("BuilderPanel workspace header tabs", () => {
-  it("shows artifact tabs in the header and replaces the execution dropdown switcher", () => {
+describe("BuilderPanel workspace inspector", () => {
+  it("shows the message inspector header and hides the legacy canvas switcher", () => {
     const queryClient = new QueryClient();
     const html = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
@@ -82,14 +69,10 @@ describe("BuilderPanel workspace header tabs", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain('role="tablist"');
-    expect(html).toContain("Graph");
-    expect(html).toContain("REPL");
-    expect(html).toContain("Timeline");
-    expect(html).toContain("Preview");
+    expect(html).toContain("Workspace");
+    expect(html).toContain("Message Inspector");
+    expect(html).toContain("MessageInspectorPanel");
     expect(html).not.toContain("CanvasSwitcher");
-    expect(html).toContain("ArtifactCanvas showTabs:false");
-    expect(html).toContain("hover:bg-white/8");
-    expect(html).toContain("bg-white/12");
+    expect(html).not.toContain("ArtifactCanvas");
   });
 });

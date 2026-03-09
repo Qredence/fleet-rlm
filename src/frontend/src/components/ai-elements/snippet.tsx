@@ -8,7 +8,7 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "@/components/ui/input-group";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils/cn";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import {
   createContext,

@@ -21,37 +21,15 @@ export function MobileTabBar() {
   const { navigateTo } = useAppNavigate();
 
   return (
-    <div
-      className="shrink-0 flex justify-center pointer-events-none"
-      style={{
-        paddingBottom:
-          "max(var(--glass-tab-bar-inset), env(safe-area-inset-bottom, 8px))",
-        paddingLeft: "var(--glass-tab-bar-inset)",
-        paddingRight: "var(--glass-tab-bar-inset)",
-        paddingTop: "var(--space-1)",
-      }}
-    >
+    <div className="mobile-tab-bar-safe-inset pointer-events-none flex shrink-0 justify-center">
       <nav
-        className="pointer-events-auto relative overflow-hidden"
-        style={{
-          height: "var(--glass-tab-bar-height)",
-          borderRadius: "var(--glass-tab-bar-radius)",
-          backgroundColor: "var(--glass-tab-bg)",
-          backdropFilter: "blur(var(--glass-tab-blur))",
-          WebkitBackdropFilter: "blur(var(--glass-tab-blur))",
-          boxShadow: "var(--glass-tab-shadow)",
-          border: "0.5px solid var(--glass-tab-border)",
-        }}
+        className="surface-glass-tab-bar pointer-events-auto relative overflow-hidden"
         role="tablist"
         aria-label="Main navigation"
       >
         {/* Glass highlight — top edge specular rim */}
         <div
-          className="pointer-events-none absolute inset-x-0 top-0 h-px"
-          style={{
-            background:
-              "linear-gradient(90deg, transparent 8%, var(--glass-tab-highlight) 50%, transparent 92%)",
-          }}
+          className="surface-glass-tab-highlight pointer-events-none absolute inset-x-0 top-0 h-px"
           aria-hidden="true"
         />
 
@@ -79,9 +57,9 @@ export function MobileTabBar() {
                   "relative flex-1 flex flex-col items-center justify-center gap-0.5",
                   "touch-target min-w-13",
                   "transition-colors",
+                  "font-app",
                   !isSupported && "opacity-50",
                 )}
-                style={{ fontFamily: "var(--font-family)" }}
               >
                 <Icon
                   className={cn(
@@ -92,17 +70,10 @@ export function MobileTabBar() {
                 />
                 <span
                   className={cn(
-                    "transition-colors",
+                    "font-app text-[length:var(--font-text-3xs-size)] leading-[var(--font-text-3xs-line-height)] tracking-[var(--font-text-3xs-tracking)] transition-colors",
+                    isActive ? "font-medium" : "font-normal",
                     isActive ? "text-accent" : "text-muted-foreground",
                   )}
-                  style={{
-                    fontFamily: "var(--font-family)",
-                    fontSize: "var(--text-micro)",
-                    fontWeight: isActive
-                      ? "var(--font-weight-medium)"
-                      : "var(--font-weight-regular)",
-                    lineHeight: "var(--line-height-tight)",
-                  }}
                 >
                   {tab.label}
                 </span>

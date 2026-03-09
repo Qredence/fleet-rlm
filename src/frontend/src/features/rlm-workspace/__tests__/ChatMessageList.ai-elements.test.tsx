@@ -1,11 +1,74 @@
-import { createRef } from "react";
+import { act, createRef } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
 import type { ChatMessage } from "@/lib/data/types";
+import { useNavigationStore } from "@/stores/navigationStore";
+
+function renderChatMessageList(messages: ChatMessage[]) {
+  return renderToStaticMarkup(
+    <ChatMessageList
+      messages={messages}
+      isTyping={false}
+      isMobile={false}
+      scrollRef={createRef<HTMLDivElement>()}
+      contentRef={createRef<HTMLDivElement>()}
+      isAtBottom={true}
+      scrollToBottom={() => {}}
+      onSuggestionClick={() => {}}
+      onResolveHitl={() => {}}
+      onResolveClarification={() => {}}
+      showHistory={false}
+      hasHistory={false}
+      historyPanel={null}
+    />,
+  );
+}
+
+function mountChatMessageList(messages: ChatMessage[]) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+
+  act(() => {
+    root.render(
+      <ChatMessageList
+        messages={messages}
+        isTyping={false}
+        isMobile={false}
+        scrollRef={createRef<HTMLDivElement>()}
+        contentRef={createRef<HTMLDivElement>()}
+        isAtBottom={true}
+        scrollToBottom={() => {}}
+        onSuggestionClick={() => {}}
+        onResolveHitl={() => {}}
+        onResolveClarification={() => {}}
+        showHistory={false}
+        hasHistory={false}
+        historyPanel={null}
+      />,
+    );
+  });
+
+  return { container, root };
+}
 
 describe("ChatMessageList (AI Elements render parts)", () => {
-  it("renders reasoning, chain-of-thought, queue, tool, sandbox, env vars, confirmation, and citations", () => {
+  beforeEach(() => {
+    useNavigationStore.setState({
+      isCanvasOpen: false,
+      selectedAssistantTurnId: null,
+      activeInspectorTab: "trajectory",
+      activeNav: "workspace",
+    });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("renders assistant zones, standalone trace rows, confirmation, and evidence in the new composition layout", () => {
     const messages: ChatMessage[] = [
       {
         id: "trace-1",
@@ -20,7 +83,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
           },
           {
             kind: "chain_of_thought",
-            title: "Execution trace",
+            title: "Trajectory",
             steps: [
               {
                 id: "s1",
@@ -28,9 +91,9 @@ describe("ChatMessageList (AI Elements render parts)", () => {
                 label: "Inspect adapter",
                 status: "complete",
                 details: [
-                  "Tool: read_file",
-                  "Input received",
-                  "Observation received",
+                  "Tool · read_file",
+                  "Input · pattern=ChatMessageList",
+                  "Observation · match",
                 ],
               },
             ],
@@ -131,38 +194,18 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       },
     ];
 
-    const html = renderToStaticMarkup(
-      <ChatMessageList
-        messages={messages}
-        isTyping={false}
-        isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
-        onSuggestionClick={() => {}}
-        onResolveHitl={() => {}}
-        onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
-      />,
-    );
+    const html = renderChatMessageList(messages);
 
-    expect(html).toContain("Execution trace");
-    // Reasoning content is inside a Collapsible that doesn't render in static markup
-    // The reasoning trigger (with "Thought for X seconds" text) is rendered
+    expect(html).toContain('data-slot="assistant-trajectory"');
+    expect(html).toContain('data-slot="assistant-evidence-preview"');
     expect(html).toContain("Render queue");
     expect(html).toContain("Executing PythonInterpreter");
-    expect(html).toContain("grep");
+    expect(html).not.toContain('data-slot="assistant-execution-highlights"');
+    expect(html).not.toContain('data-slot="assistant-summary-bar"');
     expect(html).toContain("Python REPL");
-    expect(html).toContain("Tool: Environment variables");
+    expect(html).toContain("Fleet docs");
+    expect(html).toContain("Conversation docs");
     expect(html).toContain("Approve action?");
-    expect(html).toContain("Sources");
-    // Note: Grid variant attachments don't show filename in static markup
-    // The attachment is rendered but the info component returns null for grid variant
-    // Inline citation shows hostname, not [1] number
-    expect(html).toContain("elements.ai-sdk.dev");
     expect(html).toContain("Done with sources");
   });
 
@@ -212,26 +255,9 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       },
     ];
 
-    const html = renderToStaticMarkup(
-      <ChatMessageList
-        messages={messages}
-        isTyping={false}
-        isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
-        onSuggestionClick={() => {}}
-        onResolveHitl={() => {}}
-        onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
-      />,
-    );
+    const html = renderChatMessageList(messages);
 
-    // Reasoning trigger text (collapsible is closed by default with isStreaming: false)
-    const reasoningIndex = html.indexOf("Thought for");
+    const reasoningIndex = html.indexOf('data-slot="assistant-trajectory"');
     const toolIndex = html.indexOf("search_files");
     const taskIndex = html.indexOf("Executing search_files");
 
@@ -284,31 +310,384 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       },
     ];
 
-    const html = renderToStaticMarkup(
-      <ChatMessageList
-        messages={messages}
-        isTyping={false}
-        isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
-        onSuggestionClick={() => {}}
-        onResolveHitl={() => {}}
-        onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
-      />,
+    const html = renderChatMessageList(messages);
+
+    expect(html.match(/data-slot="assistant-trajectory"/g)?.length).toBe(1);
+    expect(html).toContain("Prefix ");
+    expect(html).toContain("suffix and final sentence.");
+    expect(html).toContain('data-streamdown="inline-code"');
+    expect(html).toContain(">code<");
+  });
+
+  it("renders answer and compact trajectory zones without exposing backend reasoning labels", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "trace-reasoning-live",
+        type: "trace",
+        content: "reasoning",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "reasoning",
+            label: "reasoning",
+            parts: [{ type: "text", text: "Investigating the request." }],
+            isStreaming: false,
+          },
+        ],
+      },
+      {
+        id: "assistant-output",
+        type: "assistant",
+        content: "The result is ready.",
+        streaming: false,
+      },
+      {
+        id: "trace-final-reasoning",
+        type: "trace",
+        content: "final reasoning",
+        traceSource: "summary",
+        renderParts: [
+          {
+            kind: "reasoning",
+            label: "final_reasoning",
+            parts: [
+              { type: "text", text: "This is the concise final rationale." },
+            ],
+            isStreaming: false,
+          },
+        ],
+      },
+    ];
+
+    const html = renderChatMessageList(messages);
+
+    expect(html).toContain('data-slot="assistant-answer"');
+    expect(html).toContain('data-slot="assistant-trajectory"');
+    expect(html).not.toContain("final_reasoning");
+    expect(html).not.toContain("thought_0");
+    expect(html).toContain("The result is ready.");
+    expect(html).toContain("This is the concise final rationale.");
+  });
+
+  it("renders trajectory summaries in order with synthesis last", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "assistant-output",
+        type: "assistant",
+        content: "Architecture extracted.",
+        streaming: false,
+      },
+      {
+        id: "trace-thought-1",
+        type: "trace",
+        content: "trajectory thought",
+        traceSource: "summary",
+        renderParts: [
+          {
+            kind: "reasoning",
+            label: "thought_1",
+            parts: [{ type: "text", text: "Read deeper implementation docs." }],
+            isStreaming: false,
+          },
+        ],
+      },
+      {
+        id: "trace-thought-0",
+        type: "trace",
+        content: "trajectory thought",
+        traceSource: "summary",
+        renderParts: [
+          {
+            kind: "reasoning",
+            label: "thought_0",
+            parts: [{ type: "text", text: "List the repository first." }],
+            isStreaming: false,
+          },
+        ],
+      },
+      {
+        id: "trace-final-reasoning",
+        type: "trace",
+        content: "final reasoning",
+        traceSource: "summary",
+        renderParts: [
+          {
+            kind: "reasoning",
+            label: "final_reasoning",
+            parts: [
+              {
+                type: "text",
+                text: "This supports the final architecture summary.",
+              },
+            ],
+            isStreaming: false,
+          },
+        ],
+      },
+    ];
+
+    const html = renderChatMessageList(messages);
+
+    const answerIndex = html.indexOf("Architecture extracted.");
+    const trajectoryPreviewIndex = html.indexOf('data-slot="assistant-trajectory"');
+    const thought0Index = html.indexOf("List the repository first.");
+    const thought1Index = html.indexOf("Read deeper implementation docs.");
+    const synthesisIndex = html.indexOf(
+      "This supports the final architecture summary.",
     );
 
-    // Merged reasoning: collapsible is closed by default (isStreaming: false from last part)
-    // Content is not rendered in static markup, but we can verify:
-    // 1. Only one reasoning trigger is rendered (not three separate ones)
-    // 2. The duration is from the last part
-    expect(html.match(/Thought for/g)?.length).toBe(1);
-    // data-slot="reasoning-inline" was removed in architecture simplification
-    // The reasoning content would be visible when collapsible is open in browser
+    expect(answerIndex).toBeGreaterThanOrEqual(0);
+    expect(trajectoryPreviewIndex).toBeGreaterThan(answerIndex);
+    expect(thought0Index).toBeGreaterThan(trajectoryPreviewIndex);
+    expect(thought1Index).toBeGreaterThan(thought0Index);
+    expect(synthesisIndex).toBeGreaterThan(thought1Index);
+    expect(html).toContain("Architecture extracted.");
+    expect(html).toContain("Synthesis");
+  });
+
+  it("renders attached execution inside the assistant turn after answer and trajectory", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "trace-reasoning",
+        type: "trace",
+        content: "reasoning",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "reasoning",
+            parts: [{ type: "text", text: "Inspecting the workspace." }],
+            isStreaming: false,
+          },
+        ],
+      },
+      {
+        id: "trace-tool-call",
+        type: "trace",
+        content: "tool call",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "read_buffer",
+            toolType: "read_buffer",
+            state: "running",
+            stepIndex: 2,
+            input: { path: "notes.md" },
+          },
+        ],
+      },
+      {
+        id: "trace-tool-result",
+        type: "trace",
+        content: "tool result",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "read_buffer",
+            toolType: "read_buffer",
+            state: "output-available",
+            stepIndex: 2,
+            output: "loaded",
+          },
+        ],
+      },
+      {
+        id: "trace-tool-call-2",
+        type: "trace",
+        content: "tool call",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "read_buffer",
+            toolType: "read_buffer",
+            state: "running",
+            stepIndex: 3,
+            input: { path: "archive.md" },
+          },
+        ],
+      },
+      {
+        id: "trace-tool-result-2",
+        type: "trace",
+        content: "tool result",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "read_buffer",
+            toolType: "read_buffer",
+            state: "output-available",
+            stepIndex: 3,
+            output: "loaded again",
+          },
+        ],
+      },
+      {
+        id: "assistant-final",
+        type: "assistant",
+        content: "I checked the buffer.",
+        streaming: false,
+      },
+    ];
+
+    const html = renderChatMessageList(messages);
+
+    const answerIndex = html.indexOf('data-slot="assistant-answer"');
+    const trajectoryIndex = html.indexOf('data-slot="assistant-trajectory"');
+    const executionIndex = html.indexOf(
+      'data-slot="assistant-execution-highlights"',
+    );
+
+    expect(answerIndex).toBeGreaterThanOrEqual(0);
+    expect(trajectoryIndex).toBeGreaterThan(answerIndex);
+    expect(executionIndex).toBeGreaterThan(trajectoryIndex);
+    expect(html).toContain("Read buffer");
+    expect(html).toContain("Read buffer ×2");
+    expect(html).toContain("I checked the buffer.");
+  });
+
+  it("renders answerless assistant turns using only non-empty zones", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "trace-reasoning-only",
+        type: "trace",
+        content: "reasoning",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "reasoning",
+            parts: [
+              { type: "text", text: "Thinking without a final answer yet." },
+            ],
+            isStreaming: false,
+          },
+        ],
+      },
+    ];
+
+    const html = renderChatMessageList(messages);
+
+    expect(html).toContain('data-slot="assistant-trajectory"');
+    expect(html).not.toContain('data-slot="assistant-answer"');
+    expect(html).not.toContain('data-slot="assistant-summary-bar"');
+  });
+
+  it("opens the inspector for the selected turn from chat sections and the turn card", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "trace-reasoning",
+        type: "trace",
+        content: "reasoning",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "reasoning",
+            parts: [{ type: "text", text: "Inspect the selected response." }],
+            isStreaming: false,
+          },
+        ],
+      },
+      {
+        id: "trace-tool-call",
+        type: "trace",
+        content: "tool call",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "read_file",
+            toolType: "read_file",
+            state: "output-available",
+            stepIndex: 0,
+            input: { path: "README.md" },
+            output: "Loaded",
+          },
+        ],
+      },
+      {
+        id: "trace-task",
+        type: "trace",
+        content: "task",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "task",
+            title: "Inspecting supporting docs",
+            status: "in_progress",
+            items: [{ id: "task-1", text: "Reading README.md" }],
+          },
+        ],
+      },
+      {
+        id: "assistant-1",
+        type: "assistant",
+        content: "I checked the docs and left supporting evidence.",
+        streaming: false,
+        renderParts: [
+          {
+            kind: "sources",
+            title: "Sources",
+            sources: [
+              {
+                sourceId: "src-1",
+                kind: "file",
+                title: "README.md",
+                description: "Project usage notes",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const { container, root } = mountChatMessageList(messages);
+
+    const trajectorySection = container.querySelector(
+      '[data-slot="assistant-trajectory"]',
+    );
+    const executionPreview = container.querySelector(
+      '[data-slot="assistant-execution-highlights"] button',
+    );
+    const evidencePreview = container.querySelector(
+      '[data-slot="assistant-evidence-preview"] button',
+    );
+    const turnCard = container.querySelector('[data-slot="assistant-turn-content"]');
+
+    expect(container.querySelector('[data-slot="assistant-summary-bar"]')).toBeNull();
+    expect(trajectorySection).not.toBeNull();
+    expect(executionPreview).not.toBeNull();
+    expect(evidencePreview).not.toBeNull();
+    expect(turnCard).not.toBeNull();
+
+    act(() => {
+      executionPreview?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(useNavigationStore.getState().selectedAssistantTurnId).toBe("assistant-1");
+    expect(useNavigationStore.getState().activeInspectorTab).toBe("execution");
+    expect(useNavigationStore.getState().isCanvasOpen).toBe(true);
+
+    act(() => {
+      evidencePreview?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(useNavigationStore.getState().activeInspectorTab).toBe("evidence");
+
+    const refreshedTurnCard = container.querySelector(
+      '[data-slot="assistant-turn-content"]',
+    );
+
+    act(() => {
+      refreshedTurnCard?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    expect(useNavigationStore.getState().activeInspectorTab).toBe("trajectory");
+    expect(refreshedTurnCard?.className).toContain("border-accent/20");
+
+    act(() => {
+      root.unmount();
+    });
   });
 
   it("renders runtime context badges for reasoning and status rows", () => {
@@ -361,23 +740,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       },
     ];
 
-    const html = renderToStaticMarkup(
-      <ChatMessageList
-        messages={messages}
-        isTyping={false}
-        isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
-        onSuggestionClick={() => {}}
-        onResolveHitl={() => {}}
-        onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
-      />,
-    );
+    const html = renderChatMessageList(messages);
 
     expect(html).toContain("depth 1/3");
     expect(html).toContain("mode rlm");
@@ -538,7 +901,9 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html).toContain("Tool: read_buffer");
 
     const callIndex = html.indexOf("Calling tool: read_buffer");
-    const reasoningIndex = html.indexOf("Thought for"); // Reasoning trigger (content not in static markup)
+    const reasoningIndex = html.indexOf(
+      'data-slot="assistant-trajectory"',
+    );
     const resultIndex = html.indexOf("Tool: read_buffer");
 
     expect(callIndex).toBeGreaterThanOrEqual(0);
@@ -759,27 +1124,12 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       },
     ];
 
-    const html = renderToStaticMarkup(
-      <ChatMessageList
-        messages={messages}
-        isTyping={false}
-        isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
-        onSuggestionClick={() => {}}
-        onResolveHitl={() => {}}
-        onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
-      />,
-    );
+    const html = renderChatMessageList(messages);
 
-    // Reasoning content is in a closed collapsible (isStreaming: false)
-    // Check for the reasoning trigger instead
-    expect(html).toContain("Thought for");
+    expect(html).toContain(
+      "This is a long reasoning line that must remain fully visible without truncation in compact mode.",
+    );
+    expect(html).toContain('data-slot="assistant-trajectory"');
     // data-slot="reasoning-inline" was removed in architecture simplification
     expect(html).not.toContain('data-slot="reasoning-inline"');
 
@@ -789,8 +1139,10 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html).toContain("Executing planner");
     expect(html).toContain("Saved memory");
 
-    // Verify the order: reasoning -> tool call -> tool result -> task in_progress -> task completed
-    const reasoningTriggerIndex = html.indexOf("Thought for");
+    // Verify the order: trajectory preview -> tool call -> tool result -> task in_progress -> task completed
+    const reasoningTriggerIndex = html.indexOf(
+      'data-slot="assistant-trajectory"',
+    );
     const loadDocumentIndex = html.indexOf("load_document");
     const buildIndex = html.indexOf("build_index");
     const executingPlannerIndex = html.indexOf("Executing planner");
@@ -824,6 +1176,59 @@ describe("ChatMessageList (AI Elements render parts)", () => {
 
     expect(html).toContain("Loading");
     expect(html).toContain("Agentic Fleet Session");
+  });
+
+  it("renders a pending assistant shell with live trajectory while the turn is still typing", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "user-1",
+        type: "user",
+        content: "Inspect the workspace",
+      },
+      {
+        id: "trace-reasoning-1",
+        type: "trace",
+        content: "reasoning",
+        traceSource: "live",
+        renderParts: [
+          {
+            kind: "reasoning",
+            parts: [
+              {
+                type: "text",
+                text: "This reasoning should stay fully visible in the active assistant turn.",
+              },
+            ],
+            isStreaming: true,
+          },
+        ],
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessageList
+        messages={messages}
+        isTyping={true}
+        isMobile={false}
+        scrollRef={createRef<HTMLDivElement>()}
+        contentRef={createRef<HTMLDivElement>()}
+        isAtBottom={true}
+        scrollToBottom={() => {}}
+        onSuggestionClick={() => {}}
+        onResolveHitl={() => {}}
+        onResolveClarification={() => {}}
+        showHistory={false}
+        hasHistory={false}
+        historyPanel={null}
+      />,
+    );
+
+    expect(html).toContain('data-slot="assistant-turn-content"');
+    expect(html).toContain('data-slot="assistant-loading"');
+    expect(html).toContain('data-slot="assistant-trajectory"');
+    expect(html).toContain(
+      "This reasoning should stay fully visible in the active assistant turn.",
+    );
   });
 
   it("keeps the typing shimmer visible on a follow-up turn before assistant output arrives", () => {
@@ -865,5 +1270,43 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     );
 
     expect(html).toContain("Loading");
+    expect(html).toContain('data-slot="assistant-turn-content"');
+  });
+
+  it("bottom-aligns non-empty conversations without using justify-end on the scroll content", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "user-1",
+        type: "user",
+        content: "Scroll regression check",
+      },
+      {
+        id: "assistant-1",
+        type: "assistant",
+        content: "Bottom alignment should not break vertical scrolling.",
+        streaming: false,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessageList
+        messages={messages}
+        isTyping={false}
+        isMobile={false}
+        scrollRef={createRef<HTMLDivElement>()}
+        contentRef={createRef<HTMLDivElement>()}
+        isAtBottom={true}
+        scrollToBottom={() => {}}
+        onSuggestionClick={() => {}}
+        onResolveHitl={() => {}}
+        onResolveClarification={() => {}}
+        showHistory={false}
+        hasHistory={false}
+        historyPanel={null}
+      />,
+    );
+
+    expect(html).toContain("mt-auto flex flex-col gap-4");
+    expect(html).not.toContain("min-h-full justify-end");
   });
 });

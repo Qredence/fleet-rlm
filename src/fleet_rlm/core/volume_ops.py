@@ -15,6 +15,7 @@ Classes:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import mimetypes
@@ -260,6 +261,7 @@ class VolumeOpsMixin:
     volume_name: str | None
     volume_mount_path: str
     _volume: modal.Volume | None
+    _sandbox: modal.Sandbox | None
 
     def _resolve_volume(self) -> modal.Volume:
         """Return a Volume V2 handle (created lazily if needed).
@@ -286,12 +288,42 @@ class VolumeOpsMixin:
             self._volume.commit()
 
     def reload(self) -> None:
-        """Reload volume to see changes from other containers.
+        """Refresh mounted sandbox volumes to see changes from other containers.
 
-        Only works if a volume was specified at init. No-op otherwise.
+        Only works when a volume is configured and the sandbox is already
+        running. Cold-start interpreters do not need an explicit reload because
+        the latest volume state is mounted during sandbox creation.
         """
-        if self._volume is not None:
-            self._volume.reload()
+        if self._volume is None:
+            return
+
+        sandbox = getattr(self, "_sandbox", None)
+        if sandbox is None:
+            return
+
+        reload_volumes = getattr(sandbox, "reload_volumes", None)
+        if callable(reload_volumes):
+            reload_volumes()
+
+    async def areload(self) -> None:
+        """Asynchronously refresh mounted sandbox volumes when available."""
+        if self._volume is None:
+            return
+
+        sandbox = getattr(self, "_sandbox", None)
+        if sandbox is None:
+            return
+
+        reload_volumes = getattr(sandbox, "reload_volumes", None)
+        if not callable(reload_volumes):
+            return
+
+        reload_volumes_aio = getattr(reload_volumes, "aio", None)
+        if callable(reload_volumes_aio):
+            await reload_volumes_aio()
+            return
+
+        await asyncio.to_thread(reload_volumes)
 
     def upload_to_volume(
         self,

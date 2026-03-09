@@ -3,19 +3,23 @@ import { AtSign, Paperclip, Plus } from "lucide-react";
 
 import { IconButton } from "@/components/ui/icon-button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Menubar,
+  MenubarContent,
+  MenubarItem,
+  MenubarMenu,
+  MenubarTrigger,
+} from "@/components/ui/menubar";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils/cn";
 import {
   PROMPT_INPUT_ICON_BUTTON_CLASSNAME,
   PROMPT_INPUT_ICON_BUTTON_VARIANT,
+  PROMPT_INPUT_MENUBAR_CLASSNAME,
+  PROMPT_INPUT_MENU_CONTENT_CLASSNAME,
 } from "./composerActionStyles";
 
 interface AttachmentDropdownProps {
@@ -52,58 +56,61 @@ function AttachmentDropdown({
         onChange={handleFileChange}
       />
 
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
+      <Menubar className={PROMPT_INPUT_MENUBAR_CLASSNAME}>
+        <MenubarMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
               <span className="inline-flex">
-                <IconButton
-                  type="button"
-                  aria-label="Prompt features"
-                  variant={PROMPT_INPUT_ICON_BUTTON_VARIANT}
-                  className={PROMPT_INPUT_ICON_BUTTON_CLASSNAME}
-                >
-                  <Plus className="size-5" />
-                </IconButton>
+                <MenubarTrigger asChild>
+                  <IconButton
+                    type="button"
+                    aria-label="Prompt features"
+                    className={PROMPT_INPUT_ICON_BUTTON_CLASSNAME}
+                    size="icon-sm"
+                    variant={PROMPT_INPUT_ICON_BUTTON_VARIANT}
+                  >
+                    <Plus className="size-4" />
+                  </IconButton>
+                </MenubarTrigger>
               </span>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={6}>
-            Prompt features
-          </TooltipContent>
-        </Tooltip>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              Prompt features
+            </TooltipContent>
+          </Tooltip>
 
-        <DropdownMenuContent
-          align="start"
-          className="w-56 border-border bg-popover"
-        >
-          <DropdownMenuItem
-            className="gap-2.5 py-2.5 px-3 rounded-lg cursor-pointer"
-            onClick={() => {
-              if (!uploadsEnabled) {
-                onUnsupportedSelect?.();
-                return;
-              }
-              fileInputRef.current?.click();
-            }}
+          <MenubarContent
+            align="start"
+            className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-60")}
           >
-            <Paperclip className="h-4 w-4" />
-            <span className="text-sm">
-              {uploadsEnabled
-                ? "Add images, PDFs or CSVs"
-                : "Add images, PDFs or CSVs (coming soon)"}
-            </span>
-          </DropdownMenuItem>
+            <MenubarItem
+              className="prompt-composer-menu-item cursor-pointer gap-3 rounded-xl px-3 py-2.5"
+              onSelect={() => {
+                if (!uploadsEnabled) {
+                  onUnsupportedSelect?.();
+                  return;
+                }
+                fileInputRef.current?.click();
+              }}
+            >
+              <Paperclip className="h-4 w-4" />
+              <span className="text-sm">
+                {uploadsEnabled
+                  ? "Add images, PDFs or CSVs"
+                  : "Add images, PDFs or CSVs (coming soon)"}
+              </span>
+            </MenubarItem>
 
-          <DropdownMenuItem
-            className="gap-2.5 py-2.5 px-3 rounded-lg cursor-not-allowed opacity-60"
-            disabled
-          >
-            <AtSign className="h-4 w-4" />
-            <span className="text-sm">Add context (coming soon)</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <MenubarItem
+              className="prompt-composer-menu-item prompt-composer-menu-item-muted cursor-not-allowed gap-3 rounded-xl px-3 py-2.5 opacity-70"
+              disabled
+            >
+              <AtSign className="h-4 w-4" />
+              <span className="text-sm">Add context (coming soon)</span>
+            </MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
+      </Menubar>
     </>
   );
 }

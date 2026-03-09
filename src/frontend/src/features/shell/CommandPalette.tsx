@@ -93,8 +93,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   return (
     <div className="fixed inset-0 z-100">
       <div
-        className="absolute inset-0"
-        style={{ backgroundColor: "var(--glass-overlay)" }}
+        className="surface-glass-overlay absolute inset-0"
         onClick={close}
         aria-hidden="true"
       />
@@ -105,14 +104,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         aria-modal="true"
         aria-label="Command palette"
       >
-        <div
-          className="w-full max-w-140 overflow-hidden border-subtle"
-          style={{
-            borderRadius: "var(--radius-card)",
-            backgroundColor: "var(--popover)",
-            boxShadow: "var(--shadow-200-stronger)",
-          }}
-        >
+        <div className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-[var(--shadow-200-stronger)]">
           <Command
             loop
             shouldFilter
@@ -142,10 +134,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </kbd>
             </div>
 
-            <Command.List
-              className="max-h-90 overflow-y-auto p-2"
-              style={{ overscrollBehavior: "contain" }}
-            >
+            <Command.List className="max-h-90 overflow-y-auto overscroll-contain p-2">
               <Command.Empty
                 className="py-8 text-center text-muted-foreground"
                 style={typo.caption}

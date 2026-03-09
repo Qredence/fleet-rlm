@@ -541,15 +541,7 @@ def test_build_final_payload_filters_unsafe_external_urls():
     assert file_attachment["url"] is None
 
 
-def test_build_final_payload_defers_mlflow_metadata_to_ws_boundary(monkeypatch):
-    monkeypatch.setattr(
-        "fleet_rlm.analytics.mlflow_integration.trace_result_metadata",
-        lambda response_preview=None: {
-            "mlflow_trace_id": "trace-123",
-            "mlflow_client_request_id": "req-123",
-        },
-    )
-
+def test_build_final_payload_omits_mlflow_metadata():
     payload = _build_final_payload(
         final_prediction=dspy.Prediction(assistant_response="Done"),
         trajectory={},

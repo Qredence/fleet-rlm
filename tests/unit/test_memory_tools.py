@@ -24,6 +24,7 @@ class _FakeInterpreter:
         self.start_calls = 0
         self.shutdown_calls = 0
         self.commit_calls = 0
+        self.reload_calls = 0
         self.execute_calls: list[tuple[str, dict]] = []
         self.default_execution_profile = "RLM_DELEGATE"
         self._volume = True  # Pretend we have a volume
@@ -36,6 +37,9 @@ class _FakeInterpreter:
 
     def commit(self):
         self.commit_calls += 1
+
+    def reload(self):
+        self.reload_calls += 1
 
     @contextmanager
     def execution_profile(self, profile):
@@ -105,6 +109,7 @@ def test_memory_read_generates_read_code(monkeypatch):
 
     assert 'open(path, "r"' in code
     assert vars["path"] == "/data/test.txt"
+    assert fake_interpreter.reload_calls == 1
 
 
 def test_memory_list_generates_listdir_code(monkeypatch):
@@ -126,6 +131,7 @@ def test_memory_list_generates_listdir_code(monkeypatch):
 
     assert "os.listdir(path)" in code
     assert vars["path"] == "/data/docs"
+    assert fake_interpreter.reload_calls == 1
 
 
 def test_memory_write_generates_write_code_and_commits(monkeypatch):

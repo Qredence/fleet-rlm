@@ -181,21 +181,11 @@ describe("applyWsFrameToMessages", () => {
       messages,
       (_part, message) => message.traceSource === "trajectory",
     );
-    expect(fallbackPrimary.map((row) => row.part.kind)).toEqual([
-      "reasoning",
-      "tool",
-    ]);
+    expect(fallbackPrimary.map((row) => row.part.kind)).toEqual(["reasoning"]);
 
     const fallbackReasoning = fallbackPrimary[0]?.part;
     if (fallbackReasoning?.kind === "reasoning") {
       expect(fallbackReasoning.parts[0]?.text).toBe("Read file");
-    }
-
-    const fallbackTool = fallbackPrimary[1]?.part;
-    if (fallbackTool?.kind === "tool") {
-      expect(fallbackTool.toolType).toBe("read_file");
-      expect(fallbackTool.state).toBe("output-available");
-      expect(fallbackTool.output).toBe("Found entrypoint");
     }
 
     const cot = findFirstPart(messages, (p) => p.kind === "chain_of_thought");
@@ -204,6 +194,10 @@ describe("applyWsFrameToMessages", () => {
       expect(cot.steps).toHaveLength(1);
       expect(cot.steps[0]?.label).toContain("Inspect entrypoint");
       expect(cot.steps[0]?.status).toBe("active");
+      expect(cot.steps[0]?.details).toContain("Tool · read_file");
+      expect(cot.steps[0]?.details).toContain(
+        "Observation · Found entrypoint",
+      );
     }
   });
 
@@ -276,15 +270,7 @@ describe("applyWsFrameToMessages", () => {
     ).toEqual(["First thought", "Second thought"]);
 
     const tools = findAllParts(messages, (part) => part.kind === "tool");
-    expect(tools).toHaveLength(2);
-    if (tools[0]?.kind === "tool" && tools[1]?.kind === "tool") {
-      expect(tools[0].toolType).toBe("list_files");
-      expect(tools[1].toolType).toBe("glob_search");
-      expect(tools[0].input).toEqual({ path: "src" });
-      expect(tools[1].input).toEqual({ path: ".", pattern: "**/*" });
-      expect(tools[0].output).toEqual(["a.py", "b.py"]);
-      expect(tools[1].output).toEqual({ count: 2 });
-    }
+    expect(tools).toHaveLength(0);
 
     const cot = findFirstPart(
       messages,
@@ -295,9 +281,12 @@ describe("applyWsFrameToMessages", () => {
       expect(cot.steps).toHaveLength(2);
       expect(cot.steps[0]?.index).toBe(0);
       expect(cot.steps[1]?.index).toBe(1);
-      expect(cot.steps[0]?.details).toContain("Input received");
-      expect(cot.steps[0]?.details).toContain("Observation received");
-      expect(cot.steps[0]?.details?.join(" ")).not.toContain("pattern");
+      expect(cot.steps[0]?.details).toContain("Input · path=src");
+      expect(cot.steps[0]?.details).toContain("Observation · a.py, b.py");
+      expect(cot.steps[1]?.details).toContain(
+        "Input · path=., pattern=**/*",
+      );
+      expect(cot.steps[1]?.details).toContain("Observation · count=2");
     }
   });
 
@@ -541,7 +530,7 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
-  it("keeps trajectory fallback and later live tool result as separate rows", () => {
+  it("keeps trajectory fallback reasoning and later live tool result as separate rows", () => {
     let messages = applyWsFrameToMessages(
       [],
       makeEvent("trajectory_step", "trace", {
@@ -563,20 +552,20 @@ describe("applyWsFrameToMessages", () => {
       }),
     ).messages;
 
+    const reasoningRows = traceRows(messages, (part) => part.kind === "reasoning");
     const toolRows = traceRows(messages, (part) => part.kind === "tool");
-    expect(toolRows).toHaveLength(2);
 
-    const first = toolRows[0];
-    const second = toolRows[1];
-    expect(first?.message.traceSource).toBe("trajectory");
-    expect(second?.message.traceSource).toBe("live");
+    expect(reasoningRows).toHaveLength(1);
+    expect(toolRows).toHaveLength(1);
+    expect(reasoningRows[0]?.message.traceSource).toBe("trajectory");
+    expect(toolRows[0]?.message.traceSource).toBe("live");
 
-    if (first?.part.kind === "tool") {
-      expect(first.part.state).toBe("running");
+    if (reasoningRows[0]?.part.kind === "reasoning") {
+      expect(reasoningRows[0].part.parts[0]?.text).toBe("Run grep");
     }
-    if (second?.part.kind === "tool") {
-      expect(second.part.state).toBe("output-available");
-      expect(second.part.output).toEqual({ matches: 3 });
+    if (toolRows[0]?.part.kind === "tool") {
+      expect(toolRows[0].part.state).toBe("output-available");
+      expect(toolRows[0].part.output).toEqual({ matches: 3 });
     }
   });
 
@@ -662,6 +651,11 @@ describe("applyWsFrameToMessages", () => {
     const result = applyWsFrameToMessages(
       messages,
       makeEvent("final", "Done", {
+        trajectory: {
+          thought_1: "Second trajectory thought",
+          thought_0: "First trajectory thought",
+        },
+        final_reasoning: "The evidence lines up with the cited sources.",
         citations: [
           {
             source_id: "src-b",
@@ -752,6 +746,29 @@ describe("applyWsFrameToMessages", () => {
       if (task.kind === "task") {
         expect(task.status).toBe("completed");
       }
+    }
+
+    const finalReasoningRows = traceRows(
+      result.messages,
+      (part, message) =>
+        part.kind === "reasoning" && message.traceSource === "summary",
+    );
+    expect(finalReasoningRows).toHaveLength(3);
+
+    const summaryLabels = finalReasoningRows.map((row) =>
+      row.part.kind === "reasoning" ? row.part.label : undefined,
+    );
+    expect(summaryLabels).toEqual([
+      "thought_0",
+      "thought_1",
+      "final_reasoning",
+    ]);
+
+    const finalReasoning = finalReasoningRows[2]?.part;
+    if (finalReasoning?.kind === "reasoning") {
+      expect(finalReasoning.parts[0]?.text).toBe(
+        "The evidence lines up with the cited sources.",
+      );
     }
   });
 

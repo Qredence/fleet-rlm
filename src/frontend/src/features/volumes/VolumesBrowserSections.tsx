@@ -18,6 +18,17 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import { countFiles, formatDate, formatFileSize } from "@/lib/volumes/browser";
 
+function getTreeIndentStyle(depth: number) {
+  return {
+    paddingLeft: `calc(var(--tree-indent-base) + (${depth} * var(--tree-indent-step)))`,
+  };
+}
+
+const FILE_SIZE_STYLE = {
+  ...typo.micro,
+  fontVariantNumeric: "tabular-nums",
+} as const;
+
 function fileIcon(name: string, _mime?: string) {
   if (name.endsWith(".md")) {
     return <FileText className="w-3.5 h-3.5 text-chart-2" />;
@@ -71,9 +82,7 @@ export function FsItem({
           isMobile ? "py-3 touch-target" : "py-2",
           isVolume && "bg-muted/50",
         )}
-        style={{
-          paddingLeft: `calc(var(--tree-indent-base) + (${depth} * var(--tree-indent-step)))`,
-        }}
+        style={getTreeIndentStyle(depth)}
         onClick={() => {
           if (isFile) {
             onSelectFile(node);
@@ -122,10 +131,7 @@ export function FsItem({
         {isFile && node.size ? (
           <span
             className="text-muted-foreground shrink-0"
-            style={{
-              ...typo.micro,
-              fontVariantNumeric: "tabular-nums",
-            }}
+            style={FILE_SIZE_STYLE}
           >
             {formatFileSize(node.size)}
           </span>

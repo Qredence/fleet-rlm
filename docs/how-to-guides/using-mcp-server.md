@@ -2,16 +2,57 @@
 
 The Model Context Protocol (MCP) lets AI clients call `fleet-rlm` tools through `serve-mcp`.
 
-{% hint style="warning" %}
-MCP support is **work in progress** and **not recommended** for production use.
-{% endhint %}
+> **Note:** MCP support is **work in progress** and **not recommended** for production use.
+
+## Quick Start
+
+```bash
+uv run fleet-rlm serve-mcp
+```
+
+By default, the MCP server runs with `stdio` transport for local tool integration.
+
+## Command Options
+
+```
+Usage: fleet-rlm serve-mcp [OPTIONS]
+
+Run optional FastMCP server surface (requires `--extra mcp`).
+
+Options:
+  --transport TEXT     FastMCP transport: stdio, sse, streamable-http
+                       [default: stdio]
+  --host TEXT          Host for HTTP transports [default: 127.0.0.1]
+  --port INTEGER       Port for HTTP transports [default: 8001]
+  --help               Show this message and exit.
+```
+
+### Transport Options
+
+| Transport | Description |
+|-----------|-------------|
+| `stdio` | Standard input/output transport (default). Best for local CLI integration and Claude Desktop. |
+| `sse` | Server-Sent Events transport. Runs an HTTP server on the specified host and port. |
+| `streamable-http` | Streaming HTTP transport. Runs an HTTP server on the specified host and port. |
+
+### HTTP Transport Defaults
+
+When using `sse` or `streamable-http` transports:
+- **Host:** `127.0.0.1` (localhost only by default)
+- **Port:** `8001`
+
+Example with HTTP transport:
+
+```bash
+uv run fleet-rlm serve-mcp --transport sse --host 0.0.0.0 --port 8001
+```
 
 ## Configure Claude Desktop
 
 Add to your MCP config file:
 
-* macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-* Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -28,7 +69,9 @@ Add to your MCP config file:
 }
 ```
 
-You can pass Hydra overrides at startup:
+## Hydra Overrides
+
+You can pass Hydra overrides at startup to customize runtime behavior:
 
 ```bash
 uv run fleet-rlm serve-mcp --transport stdio \
@@ -36,25 +79,61 @@ uv run fleet-rlm serve-mcp --transport stdio \
   agent.guardrail_mode=warn
 ```
 
+Common overrides include:
+- `interpreter.async_execute=true|false` - Enable async tool execution
+- `agent.guardrail_mode=off|warn|strict` - Set output guardrail behavior
+- `agent.max_output_chars=10000` - Limit output length
+
 ## Tools Exposed by MCP
 
-Current tool surface from `src/fleet_rlm/mcp/server.py`:
+The MCP server exposes the following tools from `src/fleet_rlm/mcp/server.py`:
 
-* `chat_turn`: single ReAct turn for chat-style interaction
-* `analyze_long_document`: long-context analysis
-* `summarize_long_document`: long-context summarization
-* `grounded_answer`: chunked answer with citations
-* `triage_incident_logs`: incident/log triage workflow
-* `memory_tree`: bounded memory/volume tree inspection
-* `memory_structure_audit`: memory layout audit recommendations
-* `clarification_questions`: generate safe clarifying questions for risky operations
+| Tool | Description |
+|------|-------------|
+| `chat_turn` | Single ReAct turn for chat-style interaction |
+| `analyze_long_document` | Long-context analysis of documents |
+| `summarize_long_document` | Long-context summarization of documents |
+| `grounded_answer` | Chunked answer with citations |
+| `triage_incident_logs` | Incident/log triage workflow |
+| `memory_tree` | Bounded memory/volume tree inspection |
+| `memory_structure_audit` | Memory layout audit recommendations |
+| `clarification_questions` | Generate safe clarifying questions for risky operations |
+
+## Prerequisites
+
+Ensure MCP dependencies are installed:
+
+```bash
+uv sync --all-extras --dev
+```
+
+Or specifically install the MCP extra:
+
+```bash
+uv sync --extra mcp
+```
 
 ## Troubleshooting
 
-* Check client logs (for Claude Desktop: `~/Library/Logs/Claude/mcp.log`).
-* Confirm MCP dependencies are installed: `uv sync --extra dev --extra mcp`.
-* Validate server launch locally:
+1. **Check client logs** (for Claude Desktop: `~/Library/Logs/Claude/mcp.log`)
 
-```bash
-uv run fleet-rlm serve-mcp --transport stdio
-```
+2. **Verify MCP dependencies** are installed:
+   ```bash
+   uv sync --extra mcp
+   ```
+
+3. **Test server launch locally**:
+   ```bash
+   uv run fleet-rlm serve-mcp --transport stdio
+   ```
+
+4. **For HTTP transport issues**, verify the host and port are accessible:
+   ```bash
+   # Test SSE transport
+   curl http://127.0.0.1:8001/sse
+   ```
+
+## Related Documentation
+
+- [Installation Guide](installation.md) - Setting up fleet-rlm
+- [Runtime Settings](runtime-settings.md) - Configuring model and runtime behavior

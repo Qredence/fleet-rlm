@@ -268,6 +268,7 @@ function appendReasoningEvent(
   text: string,
   traceSource: ChatMessage["traceSource"],
   payload?: Record<string, unknown>,
+  label = "reasoning",
 ): ChatMessage[] {
   if (text.length === 0) return messages;
   const runtimeContext = parseRuntimeContext(payload);
@@ -277,6 +278,7 @@ function appendReasoningEvent(
       kind: "reasoning",
       parts: [{ type: "text", text }],
       isStreaming: false,
+      label,
       ...(runtimeContext ? { runtimeContext } : {}),
     },
     text,
@@ -501,16 +503,93 @@ function normalizeTrajectorySteps(
   ];
 }
 
+function normalizeTrajectoryStepsFromFinalPayload(
+  payload?: Record<string, unknown>,
+): NormalizedTrajectoryStep[] {
+  if (!payload) return [];
+
+  const rawTrajectory = payload.trajectory;
+  if (Array.isArray(rawTrajectory)) {
+    return rawTrajectory
+      .map((entry, idx) => {
+        const record = asRecord(entry);
+        if (!record) return null;
+        const index = asOptionalNumber(record.index) ?? idx;
+        return normalizeTrajectoryStep(record, index);
+      })
+      .filter((step): step is NormalizedTrajectoryStep => step != null);
+  }
+
+  const trajectoryRecord = asRecord(rawTrajectory);
+  if (trajectoryRecord) {
+    return normalizeTrajectorySteps("", trajectoryRecord);
+  }
+
+  return normalizeTrajectorySteps("", payload);
+}
+
+function truncateTrajectoryDetail(value: string, maxLength = 96) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function summarizeTrajectoryValue(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string") {
+    const trimmed = value.replace(/\s+/g, " ").trim();
+    return trimmed ? truncateTrajectoryDetail(trimmed) : undefined;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const rendered = value
+      .map((entry) => summarizeTrajectoryValue(entry))
+      .filter((entry): entry is string => Boolean(entry));
+    if (rendered.length === 0) return undefined;
+    const preview = rendered.slice(0, 3).join(", ");
+    return rendered.length > 3
+      ? `${truncateTrajectoryDetail(preview)} (+${rendered.length - 3} more)`
+      : truncateTrajectoryDetail(preview);
+  }
+
+  const record = asRecord(value);
+  if (record) {
+    const entries = Object.entries(record)
+      .map(([key, entryValue]) => {
+        const rendered = summarizeTrajectoryValue(entryValue);
+        return rendered ? `${key}=${rendered}` : null;
+      })
+      .filter((entry): entry is string => entry != null);
+    if (entries.length > 0) {
+      const preview = entries.slice(0, 3).join(", ");
+      return entries.length > 3
+        ? `${truncateTrajectoryDetail(preview)} (+${entries.length - 3} more)`
+        : truncateTrajectoryDetail(preview);
+    }
+  }
+
+  try {
+    return truncateTrajectoryDetail(JSON.stringify(value));
+  } catch {
+    return truncateTrajectoryDetail(String(value));
+  }
+}
+
 function trajectoryStepDetails(step: NormalizedTrajectoryStep): string[] {
   const details: string[] = [];
   if (step.toolName) {
-    details.push(`Tool: ${step.toolName}`);
+    details.push(`Tool · ${step.toolName}`);
   }
   if (step.toolInput !== undefined) {
-    details.push("Input received");
+    details.push(
+      `Input · ${summarizeTrajectoryValue(step.toolInput) ?? "Available"}`,
+    );
   }
   if (step.toolOutput !== undefined) {
-    details.push("Observation received");
+    details.push(
+      `Observation · ${summarizeTrajectoryValue(step.toolOutput) ?? "Available"}`,
+    );
   }
   return details;
 }
@@ -536,7 +615,7 @@ function upsertChainOfThought(
       messages,
       {
         kind: "chain_of_thought",
-        title: "Execution trace",
+        title: "Trajectory",
         steps: [traceStep],
       },
       step.label,
@@ -578,66 +657,14 @@ function upsertChainOfThought(
   return copy;
 }
 
-function appendTrajectoryToolPart(
-  messages: ChatMessage[],
-  step: NormalizedTrajectoryStep,
-  parentPayload?: Record<string, unknown>,
-): ChatMessage[] {
-  if (
-    !step.toolName &&
-    step.toolInput === undefined &&
-    step.toolOutput === undefined
-  ) {
-    return messages;
-  }
-
-  const payload: Record<string, unknown> = {
-    step_index: step.index,
-    tool_name: step.toolName ?? `trajectory_step_${step.index + 1}`,
-  };
-  // Forward runtime context from the parent trajectory_step event
-  const parentRuntime = asRecord(parentPayload?.runtime);
-  if (parentRuntime) {
-    payload.runtime = parentRuntime;
-  }
-  if (step.toolInput !== undefined) {
-    payload.tool_input = step.toolInput;
-    payload.tool_args = step.toolInput;
-    payload.input = step.toolInput;
-  }
-  if (step.toolOutput !== undefined) {
-    payload.tool_output = step.toolOutput;
-    payload.output = step.toolOutput;
-    payload.observation = step.toolOutput;
-  }
-
-  const stateKind: "tool_call" | "tool_result" =
-    step.toolOutput !== undefined ? "tool_result" : "tool_call";
-  const displayText = step.toolName
-    ? `Tool: ${step.toolName}`
-    : `Step ${step.index + 1}`;
-  return appendToolLikePart(
-    messages,
-    stateKind,
-    displayText,
-    payload,
-    appendTracePart,
-    { traceSource: "trajectory" },
-  );
-}
-
 function applyTrajectoryStep(
   messages: ChatMessage[],
   step: NormalizedTrajectoryStep,
-  parentPayload?: Record<string, unknown>,
   includePrimaryFallback = false,
 ): ChatMessage[] {
   let next = messages;
   if (includePrimaryFallback && step.thought) {
     next = appendReasoningEvent(next, step.thought, "trajectory");
-  }
-  if (includePrimaryFallback) {
-    next = appendTrajectoryToolPart(next, step, parentPayload);
   }
   next = upsertChainOfThought(next, step);
   return next;
@@ -653,10 +680,28 @@ function applyTrajectoryEvent(
 
   const includePrimaryFallback = !hasLiveTraceInCurrentTurn(messages);
   return steps.reduce<ChatMessage[]>(
-    (acc, step) =>
-      applyTrajectoryStep(acc, step, payload, includePrimaryFallback),
+    (acc, step) => applyTrajectoryStep(acc, step, includePrimaryFallback),
     messages,
   );
+}
+
+function appendFinalTrajectoryThoughts(
+  messages: ChatMessage[],
+  payload?: Record<string, unknown>,
+): ChatMessage[] {
+  const steps = normalizeTrajectoryStepsFromFinalPayload(payload);
+  if (steps.length === 0) return messages;
+
+  return steps.reduce<ChatMessage[]>((acc, step) => {
+    if (!step.thought) return acc;
+    return appendReasoningEvent(
+      acc,
+      step.thought,
+      "summary",
+      payload,
+      `thought_${step.index}`,
+    );
+  }, messages);
 }
 
 function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
@@ -1009,6 +1054,7 @@ function applyEvent(
       let next = completeAssistant(messages, text);
       next = finishReasoning(next);
       next = finalizeTraceParts(next);
+      next = appendFinalTrajectoryThoughts(next, payload);
 
       const finalReasoning =
         typeof payload?.final_reasoning === "string"
@@ -1017,9 +1063,10 @@ function applyEvent(
       if (finalReasoning) {
         next = appendReasoningEvent(
           next,
-          `Final reasoning: ${finalReasoning}`,
+          finalReasoning,
           "summary",
           payload,
+          "final_reasoning",
         );
       }
 

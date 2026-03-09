@@ -57,13 +57,10 @@ export function RootLayout() {
  */
 export function RootHydrateFallback() {
   return (
-    <div
-      className="flex items-center justify-center h-dvh w-dvw bg-background"
-      style={{ fontFamily: "var(--font-family)" }}
-    >
+    <div className="font-app flex h-dvh w-dvw items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4">
         {/* Pulsing skeleton blocks that match the app's visual language */}
-        <div className="flex w-[280px] flex-col gap-3">
+        <div className="flex w-70 flex-col gap-3">
           <div className="h-3 w-20 rounded-md bg-muted animate-pulse mx-auto" />
           <div className="h-2 w-40 rounded-md bg-muted animate-pulse mx-auto" />
         </div>
