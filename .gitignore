@@ -37,7 +37,7 @@ venv/
 tmp/
 **/tmp/
 **/.tmp*/
-
+results/
 # Frontend local smoke helpers (ad-hoc scripts)
 src/frontend/smoke-*.mjs
 src/frontend/.tmp-*.mjs
