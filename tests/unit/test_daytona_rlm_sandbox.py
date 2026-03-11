@@ -9,12 +9,15 @@ from fleet_rlm.daytona_rlm.protocol import (
     DriverReady,
     ExecutionRequest,
     ExecutionResponse,
+    RunErrorEnvelope,
+    RunStartRequest,
     ShutdownAck,
     ShutdownRequest,
     decode_frame,
     encode_frame,
 )
 from fleet_rlm.daytona_rlm.sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
+from fleet_rlm.daytona_rlm.types import DaytonaRunCancelled
 
 
 class _FakeArtifacts:
@@ -37,8 +40,10 @@ class _FakeDriverProcess:
         self.started = False
         self.closed = False
         self._final_artifact: dict[str, object] | None = None
+        self._submit_fields: list[str] = []
         self.env.update(
             {
+                "SUBMIT": self._submit,
                 "FINAL": self._final,
                 "FINAL_VAR": self._final_var,
             }
@@ -47,23 +52,72 @@ class _FakeDriverProcess:
     def _emit(self, payload: dict[str, object]) -> None:
         self.stdout += encode_frame(payload) + "\n"
 
-    def _final(self, value: object) -> object:
-        self._final_artifact = {
-            "kind": "markdown",
-            "value": value,
-            "finalization_mode": "FINAL",
-        }
-        return value
+    def _submit_impl(
+        self,
+        *args: object,
+        finalization_mode: str,
+        variable_name: str | None = None,
+        **kwargs: object,
+    ) -> object:
+        if kwargs:
+            value: object = {
+                key: value for key, value in kwargs.items() if value is not None
+            }
+        elif self._submit_fields and args:
+            value = {
+                self._submit_fields[index]: item
+                for index, item in enumerate(args)
+                if index < len(self._submit_fields) and item is not None
+            }
+            if not value and len(args) == 1:
+                value = args[0]
+        elif len(args) == 1:
+            value = args[0]
+        elif args:
+            value = list(args)
+        else:
+            value = {}
 
-    def _final_var(self, variable_name: str) -> object:
-        value = self.env[variable_name]
         self._final_artifact = {
             "kind": "markdown",
             "value": value,
             "variable_name": variable_name,
-            "finalization_mode": "FINAL_VAR",
+            "finalization_mode": finalization_mode,
         }
         return value
+
+    def _submit(self, *args: object, **kwargs: object) -> object:
+        return self._submit_impl(*args, finalization_mode="SUBMIT", **kwargs)
+
+    def _final(self, value: object) -> object:
+        if isinstance(value, dict):
+            return self._submit_impl(finalization_mode="FINAL", **value)
+        if isinstance(value, str):
+            return self._submit_impl(
+                finalization_mode="FINAL",
+                final_markdown=value,
+            )
+        return self._submit_impl(value, finalization_mode="FINAL")
+
+    def _final_var(self, variable_name: str) -> object:
+        value = self.env[variable_name]
+        if isinstance(value, dict):
+            return self._submit_impl(
+                finalization_mode="FINAL_VAR",
+                variable_name=variable_name,
+                **value,
+            )
+        if isinstance(value, str):
+            return self._submit_impl(
+                finalization_mode="FINAL_VAR",
+                variable_name=variable_name,
+                final_markdown=value,
+            )
+        return self._submit_impl(
+            value,
+            finalization_mode="FINAL_VAR",
+            variable_name=variable_name,
+        )
 
     def start(self) -> None:
         self.started = True
@@ -85,8 +139,14 @@ class _FakeDriverProcess:
             request = ExecutionRequest(
                 request_id=str(frame["request_id"]),
                 code=str(frame["code"]),
+                submit_schema=frame.get("submit_schema"),
             )
             self._final_artifact = None
+            self._submit_fields = [
+                str(item.get("name"))
+                for item in (request.submit_schema or [])
+                if isinstance(item, dict) and item.get("name")
+            ]
             error: str | None = None
             try:
                 exec(request.code, self.env, self.env)
@@ -201,11 +261,19 @@ class _FakeSandbox:
         self.deleted = True
 
 
+def _resolved_config() -> ResolvedDaytonaConfig:
+    return ResolvedDaytonaConfig(
+        api_key="key",
+        api_url="https://api.daytona.example",
+    )
+
+
 def test_daytona_sandbox_session_file_and_process_helpers():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
         session_request_cls=SimpleNamespace,
+        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
         repo_path="/workdir/workspace/repo",
@@ -226,11 +294,12 @@ def test_daytona_sandbox_session_file_and_process_helpers():
     assert sandbox.process.exec_calls == [("pwd", "/workdir/workspace/repo")]
 
 
-def test_daytona_sandbox_driver_persists_state_and_detects_final_var():
+def test_daytona_sandbox_driver_persists_state_and_supports_submit():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
         session_request_cls=SimpleNamespace,
+        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
         repo_path="/workdir/workspace/repo",
@@ -243,7 +312,7 @@ def test_daytona_sandbox_driver_persists_state_and_detects_final_var():
         timeout=1.0,
     )
     second = session.execute_code(
-        code='counter += 3\nFINAL_VAR("counter")',
+        code="counter += 3\nSUBMIT(counter)",
         callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
         timeout=1.0,
     )
@@ -251,7 +320,39 @@ def test_daytona_sandbox_driver_persists_state_and_detects_final_var():
     assert first.final_artifact is None
     assert second.final_artifact is not None
     assert second.final_artifact["value"] == 5
-    assert second.final_artifact["finalization_mode"] == "FINAL_VAR"
+    assert second.final_artifact["finalization_mode"] == "SUBMIT"
+
+
+def test_daytona_sandbox_driver_supports_typed_submit_schema():
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        session_request_cls=SimpleNamespace,
+        resolved_config=_resolved_config(),
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        repo_path="/workdir/workspace/repo",
+    )
+
+    session.start_driver(timeout=1.0)
+    response = session.execute_code(
+        code='SUBMIT(summary="Readable summary", final_markdown="## Heading\\nBody")',
+        callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
+        timeout=1.0,
+        submit_schema=[
+            {"name": "summary", "type": "str | None"},
+            {"name": "final_markdown", "type": "str | None"},
+            {"name": "output", "type": "object"},
+        ],
+    )
+
+    assert response.error is None
+    assert response.final_artifact is not None
+    assert response.final_artifact["value"] == {
+        "summary": "Readable summary",
+        "final_markdown": "## Heading\nBody",
+    }
+    assert response.final_artifact["finalization_mode"] == "SUBMIT"
 
 
 def test_daytona_sandbox_driver_returns_structured_errors():
@@ -259,6 +360,7 @@ def test_daytona_sandbox_driver_returns_structured_errors():
     session = DaytonaSandboxSession(
         sandbox=sandbox,
         session_request_cls=SimpleNamespace,
+        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
         repo_path="/workdir/workspace/repo",
@@ -280,6 +382,7 @@ def test_daytona_sandbox_close_driver_cleans_up_process_session():
     session = DaytonaSandboxSession(
         sandbox=sandbox,
         session_request_cls=SimpleNamespace,
+        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
         repo_path="/workdir/workspace/repo",
@@ -289,6 +392,61 @@ def test_daytona_sandbox_close_driver_cleans_up_process_session():
     session.close_driver(timeout=1.0)
 
     assert sandbox.process.deleted_sessions == [session._driver_session_id]
+
+
+def test_daytona_sandbox_runtime_command_uses_resolved_daytona_config(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
+    monkeypatch.delenv("DAYTONA_TARGET", raising=False)
+
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        session_request_cls=SimpleNamespace,
+        resolved_config=ResolvedDaytonaConfig(
+            api_key="dotenv-key",
+            api_url="https://dotenv.daytona.example",
+            target="eu-west",
+        ),
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        repo_path="/workdir/workspace/repo",
+    )
+
+    command = session._build_runtime_command()
+
+    assert "export DAYTONA_API_KEY=dotenv-key" in command
+    assert "export DAYTONA_API_URL=https://dotenv.daytona.example" in command
+    assert "export DAYTONA_TARGET=eu-west" in command
+
+
+def test_daytona_sandbox_run_rollout_maps_cancelled_runtime_errors():
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        session_request_cls=SimpleNamespace,
+        resolved_config=_resolved_config(),
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        repo_path="/workdir/workspace/repo",
+    )
+    session._runtime_started = True
+    session._runtime_command_id = "cmd-1"
+    session.start_controller = lambda timeout=120.0: None
+    session._send_runtime_frame = lambda payload: None
+    session._read_until_runtime = lambda predicate, timeout: RunErrorEnvelope(
+        request_id="req-1",
+        error="Request cancelled.",
+        category="cancelled",
+    ).to_dict()
+
+    with pytest.raises(DaytonaRunCancelled, match="Request cancelled."):
+        session.run_rollout(
+            request=RunStartRequest(request_id="req-1", payload={}),
+            timeout=1.0,
+        )
 
 
 def test_daytona_runtime_clones_branch(monkeypatch: pytest.MonkeyPatch):

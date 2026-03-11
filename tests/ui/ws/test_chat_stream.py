@@ -87,6 +87,105 @@ def test_websocket_accepts_query_auth_in_dev_mode(ws_client, fake_agent: FakeCha
         assert data["data"]["text"] == "ok"
 
 
+def test_websocket_routes_daytona_runtime_messages_to_daytona_adapter(
+    ws_client, websocket_auth_headers, monkeypatch
+):
+    async def _fake_daytona_streaming_turn(**kwargs):
+        websocket = kwargs["websocket"]
+        assert kwargs["repo_url"] == "https://github.com/qredence/fleet-rlm.git"
+        assert kwargs["repo_ref"] == "main"
+        assert kwargs["max_depth"] == 3
+        assert kwargs["batch_concurrency"] == 5
+        await websocket.send_json(
+            {
+                "type": "event",
+                "data": {
+                    "kind": "status",
+                    "text": "Bootstrapping Daytona sandbox",
+                    "payload": {
+                        "runtime": {
+                            "depth": 0,
+                            "max_depth": 3,
+                            "execution_profile": "DAYTONA_PILOT",
+                            "sandbox_active": True,
+                            "effective_max_iters": 50,
+                            "runtime_mode": "daytona_pilot",
+                            "sandbox_id": "sbx-1234567890",
+                        }
+                    },
+                    "timestamp": ts(1.0).isoformat(),
+                    "version": 2,
+                    "event_id": "evt-status",
+                },
+            }
+        )
+        await websocket.send_json(
+            {
+                "type": "event",
+                "data": {
+                    "kind": "final",
+                    "text": "Daytona done",
+                    "payload": {
+                        "history_turns": 1,
+                        "runtime_mode": "daytona_pilot",
+                    },
+                    "timestamp": ts(2.0).isoformat(),
+                    "version": 2,
+                    "event_id": "evt-final",
+                },
+            }
+        )
+
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.ws.chat_connection.run_daytona_streaming_turn",
+        _fake_daytona_streaming_turn,
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+                "repo_url": "https://github.com/qredence/fleet-rlm.git",
+                "repo_ref": "main",
+                "max_depth": 3,
+                "batch_concurrency": 5,
+            }
+        )
+
+        status = websocket.receive_json()
+        final = websocket.receive_json()
+
+    assert status["type"] == "event"
+    assert status["data"]["kind"] == "status"
+    assert status["data"]["payload"]["runtime"]["runtime_mode"] == "daytona_pilot"
+    assert final["type"] == "event"
+    assert final["data"]["kind"] == "final"
+    assert final["data"]["text"] == "Daytona done"
+
+
+def test_websocket_rejects_daytona_runtime_without_repo_url(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+            }
+        )
+        error = websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "daytona_repo_url_required"
+
+
 def test_execution_websocket_requires_session_id_query_param(
     ws_client, websocket_auth_headers
 ):

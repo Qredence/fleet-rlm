@@ -152,5 +152,23 @@ def test_ws_message_accepts_execution_mode() -> None:
     assert message.execution_mode == "tools_only"
 
 
+def test_ws_message_accepts_daytona_runtime_fields() -> None:
+    message = WSMessage(
+        type="message",
+        content="hello",
+        runtime_mode="daytona_pilot",
+        repo_url="https://github.com/qredence/fleet-rlm.git",
+        repo_ref="main",
+        max_depth=3,
+        batch_concurrency=6,
+    )
+
+    assert message.runtime_mode == "daytona_pilot"
+    assert message.repo_url == "https://github.com/qredence/fleet-rlm.git"
+    assert message.repo_ref == "main"
+    assert message.max_depth == 3
+    assert message.batch_concurrency == 6
+
+
 async def _noop_persist(*, include_volume_save: bool = True) -> None:
     _ = include_volume_save

@@ -14,7 +14,7 @@ def test_daytona_smoke_live(require_daytona_runtime) -> None:
 
     assert result.driver_started is True
     assert result.persisted_state_value == 5
-    assert result.finalization_mode == "FINAL_VAR"
+    assert result.finalization_mode == "SUBMIT"
     assert result.termination_phase == "completed"
     assert result.error_category is None
     assert result.error_message is None
