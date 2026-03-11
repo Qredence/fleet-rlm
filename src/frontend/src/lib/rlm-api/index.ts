@@ -15,27 +15,12 @@ export {
 } from "@/lib/rlm-api/messages";
 export { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 export {
-  keysToCamel,
-  keysToSnake,
-  adaptTask,
-  adaptTasks,
-  adaptTaxonomyNode,
-  adaptTaxonomy,
-  adaptAnalytics,
-  adaptUserProfile,
-  adaptChatMessage,
-  adaptMemoryEntry,
-  adaptMemoryEntries,
-  adaptFsNode,
-  adaptFsTree,
-} from "@/lib/rlm-api/adapters";
-export { authEndpoints } from "@/lib/rlm-api/auth";
-export {
   streamChatOverWs,
   sendCommandOverWs,
   subscribeToExecutionStream,
   createBackendSessionId,
 } from "@/lib/rlm-api/wsClient";
+export { authEndpoints } from "@/lib/rlm-api/auth";
 export type {
   WsTraceMode,
   WsRuntimeMode,

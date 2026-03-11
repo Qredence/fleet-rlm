@@ -65,7 +65,7 @@
   --color-border-strong: var(--alpha-15);
   --color-border-disabled: var(--alpha-06);
   --color-background-disabled: var(--alpha-05);
-  --color-ring: #0169cc;
+  --color-ring: #8c8c8c;
   --color-ring-primary: var(--color-ring);
   --color-ring-primary-soft: var(--color-ring-primary);
   --color-ring-primary-solid: var(--color-ring-primary);
@@ -679,9 +679,9 @@
   /* The default color for text or elements that appear on top of muted colored elements. */
   --muted-foreground: var(--color-text-secondary);
   /* The accent color used for highlights, links, and other interactive elements. */
-  --accent: var(--color-background-info-solid);
+  --accent: var(--color-background-primary-soft);
   /* The default color for text or elements that appear on top of accent colored elements. */
-  --accent-foreground: var(--color-text-info-solid);
+  --accent-foreground: var(--color-text);
   /* The color used for background in destructive actions, such as delete buttons or error messages. */
   --destructive: var(--color-background-danger-solid);
   /* The default color for text or elements that appear on top of destructive colored elements. */
@@ -765,9 +765,9 @@
   /* The default color for text or elements that appear on top of primary colored elements in sidebars and navigation menus. */
   --sidebar-primary-foreground: var(--color-text-primary-solid);
   /* The accent color used for highlights, links, and other interactive elements in sidebars and navigation menus. */
-  --sidebar-accent: var(--color-background-info-solid);
+  --sidebar-accent: var(--color-background-primary-soft);
   /* The default color for text or elements that appear on top of accent colored elements in sidebars and navigation menus. */
-  --sidebar-accent-foreground: var(--color-text-info-solid);
+  --sidebar-accent-foreground: var(--color-text);
   /* The default border color for elements in sidebars and navigation menus. */
   --sidebar-border: var(--color-border);
   /* The default color for focus rings, outlines, and other focus indicators in sidebars and navigation menus. */

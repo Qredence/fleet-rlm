@@ -35,8 +35,14 @@ describe("useThemeStore", () => {
     document.documentElement.style.colorScheme = "";
   });
 
-  it("hydrates the previous theme key into the new persisted store", async () => {
-    localStorage.setItem("theme", "dark");
+  it("hydrates the current persisted theme key", async () => {
+    localStorage.setItem(
+      "theme-storage",
+      JSON.stringify({
+        state: { isDark: true },
+        version: 1,
+      }),
+    );
 
     const { useThemeStore } = await import("@/stores/themeStore");
 
