@@ -272,7 +272,10 @@ class TaskSourceProvenance:
         ]
         if not any(stable_parts[1:]):
             return None
-        digest = hashlib.sha1("|".join(stable_parts).encode("utf-8")).hexdigest()[:16]
+        digest = hashlib.sha1(
+            "|".join(stable_parts).encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()[:16]
         return f"src-{digest}"
 
     def to_dict(self) -> dict[str, Any]:

@@ -347,8 +347,7 @@ class SandboxExecutionKernel:
 
     def run(self, command: str, cwd: str | None = None) -> dict[str, object]:
         completed = subprocess.run(
-            command,
-            shell=True,
+            ["/bin/bash", "-lc", command],
             cwd=str(self._resolve_path(cwd)) if cwd else self.repo_path,
             capture_output=True,
             text=True,
