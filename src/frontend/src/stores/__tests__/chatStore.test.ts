@@ -48,6 +48,11 @@ function resetStore() {
     isStreaming: false,
     sessionId: "mock-session-id",
     error: null,
+    runtimeMode: "modal_chat",
+    daytonaRepoUrl: "",
+    daytonaRepoRef: "",
+    daytonaMaxDepth: 2,
+    daytonaBatchConcurrency: 4,
     streamController: null,
   });
 }
@@ -65,12 +70,23 @@ describe("useChatStore — state management", () => {
 
   // ── initial state ──────────────────────────────────────────────────────────
   it("starts with empty messages, not streaming, and a session id", () => {
-    const { messages, isStreaming, sessionId, error } = useChatStore.getState();
+    const {
+      messages,
+      isStreaming,
+      sessionId,
+      error,
+      runtimeMode,
+      daytonaMaxDepth,
+      daytonaBatchConcurrency,
+    } = useChatStore.getState();
     expect(messages).toEqual([]);
     expect(isStreaming).toBe(false);
     expect(typeof sessionId).toBe("string");
     expect(sessionId.length).toBeGreaterThan(0);
     expect(error).toBeNull();
+    expect(runtimeMode).toBe("modal_chat");
+    expect(daytonaMaxDepth).toBe(2);
+    expect(daytonaBatchConcurrency).toBe(4);
   });
 
   // ── setSessionId ───────────────────────────────────────────────────────────
@@ -237,6 +253,7 @@ describe("useChatStore — streamMessage", () => {
       content: "test",
       trace: true,
       trace_mode: "compact",
+      runtime_mode: "modal_chat",
       execution_mode: "auto",
       analytics_enabled: true,
       session_id: "sess-abc",
@@ -256,8 +273,32 @@ describe("useChatStore — streamMessage", () => {
 
     const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
     expect(payload).toMatchObject({
+      runtime_mode: "modal_chat",
       execution_mode: "tools_only",
     });
+  });
+
+  it("sends Daytona runtime payload fields without execution mode", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+    useChatStore.setState({
+      runtimeMode: "daytona_pilot",
+      daytonaRepoUrl: "https://github.com/qredence/fleet-rlm.git",
+      daytonaRepoRef: "main",
+      daytonaMaxDepth: 3,
+      daytonaBatchConcurrency: 6,
+    });
+
+    await useChatStore.getState().streamMessage("trace the repo");
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      runtime_mode: "daytona_pilot",
+      repo_url: "https://github.com/qredence/fleet-rlm.git",
+      repo_ref: "main",
+      max_depth: 3,
+      batch_concurrency: 6,
+    });
+    expect(payload).not.toHaveProperty("execution_mode");
   });
 
   it("uses trace override=false to disable websocket trace mode", async () => {
