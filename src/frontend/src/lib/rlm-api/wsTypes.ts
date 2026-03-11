@@ -1,6 +1,7 @@
 export type WsTraceMode = "compact" | "verbose" | "off";
 
 export type WsExecutionMode = "auto" | "rlm_only" | "tools_only";
+export type WsRuntimeMode = "modal_chat" | "daytona_pilot";
 
 export type WsConnectionStatus =
   | "connecting"
@@ -21,6 +22,11 @@ export interface WsMessageRequest {
   trace?: boolean;
   trace_mode?: WsTraceMode;
   execution_mode?: WsExecutionMode;
+  runtime_mode?: WsRuntimeMode;
+  repo_url?: string | null;
+  repo_ref?: string | null;
+  max_depth?: number | null;
+  batch_concurrency?: number | null;
   analytics_enabled?: boolean;
   workspace_id?: string;
   user_id?: string;
@@ -49,6 +55,7 @@ export type WsEventKind =
   | "assistant_token"
   | "reasoning_step"
   | "status"
+  | "warning"
   | "tool_call"
   | "tool_result"
   | "trajectory_step"
@@ -81,6 +88,7 @@ export interface WsRuntimeContext {
   effective_max_iters: number;
   volume_name?: string;
   execution_mode?: string;
+  runtime_mode?: string;
   sandbox_id?: string;
 }
 

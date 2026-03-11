@@ -38,6 +38,7 @@ export {
 } from "@/lib/rlm-api/wsClient";
 export type {
   WsTraceMode,
+  WsRuntimeMode,
   WsConnectionStatus,
   WsConnectionOptions,
   WsMessageRequest,

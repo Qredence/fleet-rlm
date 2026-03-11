@@ -191,6 +191,7 @@ export interface RuntimeContext {
   effectiveMaxIters: number;
   volumeName?: string;
   executionMode?: string;
+  runtimeMode?: string;
   sandboxId?: string;
 }
 

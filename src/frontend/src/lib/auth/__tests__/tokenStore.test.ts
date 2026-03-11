@@ -3,6 +3,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const CANONICAL_KEY = "fleet-rlm:access-token";
 const LEGACY_KEY = "fleet_access_token";
 
+const createStorageMock = () => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: vi.fn((key: string) => store[key] || null),
+    setItem: vi.fn((key: string, value: string) => {
+      store[key] = value.toString();
+    }),
+    removeItem: vi.fn((key: string) => {
+      delete store[key];
+    }),
+    clear: vi.fn(() => {
+      store = {};
+    }),
+  };
+};
+
 type TokenStoreModule = Awaited<typeof import("@/lib/auth/tokenStore")>;
 
 async function loadTokenStore(): Promise<TokenStoreModule> {
@@ -11,13 +27,11 @@ async function loadTokenStore(): Promise<TokenStoreModule> {
 }
 
 beforeEach(() => {
-  localStorage.clear();
-  sessionStorage.clear();
+  Object.defineProperty(window, "localStorage", { value: createStorageMock(), writable: true });
+  Object.defineProperty(window, "sessionStorage", { value: createStorageMock(), writable: true });
 });
 
 afterEach(() => {
-  localStorage.clear();
-  sessionStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });

@@ -14,6 +14,7 @@ import type {
   WsEventKind,
   WsEventPayload,
   WsMessageRequest,
+  WsRuntimeMode,
   WsServerError,
   WsServerEvent,
   WsServerMessage,
@@ -22,6 +23,7 @@ import type {
 
 export type {
   WsTraceMode,
+  WsRuntimeMode,
   WsConnectionStatus,
   WsConnectionOptions,
   WsMessageRequest,
