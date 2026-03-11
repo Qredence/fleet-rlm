@@ -39,6 +39,17 @@ def _render_final_text(value: Any) -> str:
         return str(value)
 
 
+def _render_cancelled_text(result: Any) -> str:
+    summary = getattr(result, "summary", None)
+    warnings = (
+        list(getattr(summary, "warnings", []) or []) if summary is not None else []
+    )
+    base = getattr(summary, "error", None) or "Daytona run cancelled."
+    if warnings:
+        return f"{base}\n\nWarnings:\n- " + "\n- ".join(warnings)
+    return str(base)
+
+
 async def _emit_stream_event(websocket: WebSocket, event: StreamEvent) -> bool:
     return await _try_send_json(
         websocket, {"type": "event", "data": _event_dict(event)}
@@ -142,21 +153,29 @@ async def run_daytona_streaming_turn(
     runtime_payload = {
         "depth": root.depth if root is not None else 0,
         "max_depth": result.budget.max_depth,
-        "execution_profile": "DAYTONA_PILOT",
+        "execution_profile": "DAYTONA_PILOT_SELF_ORCHESTRATED",
         "sandbox_active": root is not None and root.sandbox_id is not None,
         "effective_max_iters": result.budget.max_iterations,
         "runtime_mode": "daytona_pilot",
         "execution_mode": "daytona_pilot",
         "sandbox_id": root.sandbox_id if root is not None else None,
+        "run_id": result.run_id,
     }
-    final_text = _render_final_text(
-        result.final_artifact.value if result.final_artifact else ""
+    terminal_kind = (
+        "cancelled" if result.summary.termination_reason == "cancelled" else "final"
+    )
+    terminal_text = (
+        _render_cancelled_text(result)
+        if terminal_kind == "cancelled"
+        else _render_final_text(
+            result.final_artifact.value if result.final_artifact else ""
+        )
     )
     await _emit_stream_event(
         websocket,
         StreamEvent(
-            kind="final",
-            text=final_text,
+            kind=terminal_kind,  # type: ignore[arg-type]
+            text=terminal_text,
             payload={
                 "history_turns": 1,
                 "runtime_mode": "daytona_pilot",
@@ -169,6 +188,7 @@ async def run_daytona_streaming_turn(
                 ),
                 "summary": result.summary.to_dict(),
                 "result_path": result.result_path,
+                "run_result": result.to_dict(),
                 "runtime": runtime_payload,
             },
             timestamp=datetime.now(timezone.utc),
