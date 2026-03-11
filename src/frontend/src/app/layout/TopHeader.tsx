@@ -12,7 +12,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
-import { NavTab } from "@/features/shell/NavTab";
+import { NavTab } from "@/components/shared/NavTab";
 import { cn } from "@/lib/utils/cn";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
 import { isSectionSupported } from "@/lib/rlm-api";

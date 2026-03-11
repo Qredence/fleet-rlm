@@ -53,6 +53,7 @@ import {
 import type { ChatRenderToolState } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
 import { mapToolState } from "@/lib/utils/ai-elements-state";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/runtimeBadges";
 import type {
   AssistantContentModel,
@@ -145,7 +146,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
         <RuntimeContextBadge ctx={item.runtimeContext} />
         {item.part.errorText || item.part.output ? (
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className={inspectorStyles.heading.detail}>
               Output
             </div>
             <div
@@ -170,7 +171,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
         ) : null}
         {item.part.code ? (
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className={inspectorStyles.heading.detail}>
               Code
             </div>
             <pre
@@ -201,7 +202,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 {variable.name}
               </span>
               {variable.required ? (
-                <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span className={inspectorStyles.heading.detail}>
                   required
                 </span>
               ) : null}
@@ -235,7 +236,7 @@ function renderExecutionSection(section: ExecutionSection) {
         <ToolContent className="space-y-3">
           <div className="text-xs text-muted-foreground">{section.summary}</div>
           {section.runtimeBadges.length ? (
-            <div className="text-[10px] leading-relaxed text-muted-foreground">
+            <div className={inspectorStyles.runtime.inline}>
               {section.runtimeBadges.join(" · ")}
             </div>
           ) : null}
@@ -488,7 +489,7 @@ export function ExecutionDetailsGroup({
 
   return (
     <section className="space-y-3" data-slot="assistant-execution">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+      <div className={inspectorStyles.heading.section}>
         Execution
       </div>
       <div className="space-y-3">

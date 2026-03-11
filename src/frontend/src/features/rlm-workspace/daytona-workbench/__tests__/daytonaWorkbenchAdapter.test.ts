@@ -28,12 +28,15 @@ function makeEvent(
 
 describe("daytonaWorkbenchAdapter", () => {
   it("hydrates a rich final run_result into nodes, prompts, and final artifact", () => {
-    const started = startDaytonaWorkbenchRun(createInitialDaytonaWorkbenchState(), {
-      task: "Analyze the repo",
-      repoUrl: "https://github.com/qredence/fleet-rlm.git",
-      repoRef: "main",
-      contextPaths: ["/Users/zocho/Documents/spec.pdf"],
-    });
+    const started = startDaytonaWorkbenchRun(
+      createInitialDaytonaWorkbenchState(),
+      {
+        task: "Analyze the repo",
+        repoUrl: "https://github.com/qredence/fleet-rlm.git",
+        repoRef: "main",
+        contextPaths: ["/Users/zocho/Documents/spec.pdf"],
+      },
+    );
 
     const next = applyDaytonaFrameToWorkbenchState(
       started,
@@ -101,7 +104,8 @@ describe("daytonaWorkbenchAdapter", () => {
                     label: "Root task",
                     char_count: 9001,
                     line_count: 120,
-                    preview: "A long root task preview that should stay visible.",
+                    preview:
+                      "A long root task preview that should stay visible.",
                   },
                 ],
               },
@@ -143,18 +147,23 @@ describe("daytonaWorkbenchAdapter", () => {
     expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
     expect(next.finalArtifact?.textPreview).toContain("Readable final summary");
     expect(next.summary?.terminationReason).toBe("completed");
-    expect(next.nodes["root-node"]?.promptHandles[0]?.handleId).toBe("prompt-1");
+    expect(next.nodes["root-node"]?.promptHandles[0]?.handleId).toBe(
+      "prompt-1",
+    );
     expect(next.nodes["root-node"]?.childLinks[0]?.task.source?.path).toBe(
       "src/fleet_rlm/analytics/scorers.py",
     );
   });
 
   it("tracks incremental node metadata from status events before final hydration", () => {
-    const started = startDaytonaWorkbenchRun(createInitialDaytonaWorkbenchState(), {
-      task: "Analyze the repo",
-      repoUrl: "https://github.com/qredence/fleet-rlm.git",
-      contextPaths: ["/workspace/docs"],
-    });
+    const started = startDaytonaWorkbenchRun(
+      createInitialDaytonaWorkbenchState(),
+      {
+        task: "Analyze the repo",
+        repoUrl: "https://github.com/qredence/fleet-rlm.git",
+        contextPaths: ["/workspace/docs"],
+      },
+    );
 
     const next = applyDaytonaFrameToWorkbenchState(
       started,
@@ -234,10 +243,13 @@ describe("daytonaWorkbenchAdapter", () => {
   });
 
   it("marks a pending Daytona run as errored without dropping source context", () => {
-    const started = startDaytonaWorkbenchRun(createInitialDaytonaWorkbenchState(), {
-      task: "Analyze local docs",
-      contextPaths: ["/Users/zocho/Documents/spec.pdf"],
-    });
+    const started = startDaytonaWorkbenchRun(
+      createInitialDaytonaWorkbenchState(),
+      {
+        task: "Analyze local docs",
+        contextPaths: ["/Users/zocho/Documents/spec.pdf"],
+      },
+    );
 
     const next = failDaytonaWorkbenchRun(
       started,

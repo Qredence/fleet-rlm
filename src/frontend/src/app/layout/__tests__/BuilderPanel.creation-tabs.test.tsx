@@ -62,8 +62,8 @@ vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () =
   MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
 }));
 
-vi.mock("@/features/rlm-workspace/daytona-workbench/DaytonaWorkbench", () => ({
-  DaytonaWorkbench: () => <div>DaytonaWorkbench</div>,
+vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
+  RunWorkbench: () => <div>RunWorkbench</div>,
 }));
 
 vi.mock("@/lib/rlm-api", () => ({
@@ -100,8 +100,8 @@ describe("BuilderPanel workspace inspector", () => {
     );
 
     expect(html).toContain("Workspace");
-    expect(html).toContain("Daytona Workbench");
-    expect(html).toContain("DaytonaWorkbench");
+    expect(html).toContain("Run Workbench");
+    expect(html).toContain("RunWorkbench");
     expect(html).not.toContain("MessageInspectorPanel");
   });
 });

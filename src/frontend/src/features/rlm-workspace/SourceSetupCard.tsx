@@ -2,14 +2,14 @@ import { useState } from "react";
 import { ChevronDown, TriangleAlert } from "lucide-react";
 
 import type {
-  DetectedDaytonaRepoContext,
-  ResolvedDaytonaRepoContext,
-} from "@/features/rlm-workspace/daytonaRepoContext";
+  DetectedRepoContext,
+  ResolvedRepoContext,
+} from "@/lib/utils/repoContext";
 import {
-  buildDaytonaSourceStateLabel,
-  parseDaytonaContextPaths,
-} from "@/features/rlm-workspace/daytonaSourceContext";
-import type { DaytonaContextSourceSummary } from "@/features/rlm-workspace/daytona-workbench/types";
+  buildSourceStateLabel,
+  parseContextPaths,
+} from "@/lib/utils/sourceContext";
+import type { ContextSourceSummary } from "@/features/rlm-workspace/run-workbench/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils/cn";
 
 function sourceBadge(
-  resolvedRepoContext: ResolvedDaytonaRepoContext | null,
+  resolvedRepoContext: ResolvedRepoContext | null,
   hasContextPaths: boolean,
   hasInvalidManualOverride: boolean,
   hasActiveRunSources: boolean,
@@ -47,7 +47,7 @@ function sourceBadge(
   }
   return (
     <Badge variant="outline">
-      {buildDaytonaSourceStateLabel({
+      {buildSourceStateLabel({
         hasRepo: Boolean(resolvedRepoContext?.repoUrl),
         hasContext: hasContextPaths,
       })}
@@ -55,7 +55,7 @@ function sourceBadge(
   );
 }
 
-interface DaytonaSetupCardProps {
+interface SourceSetupCardProps {
   manualRepoUrl: string;
   onManualRepoUrlChange: (value: string) => void;
   contextPaths: string;
@@ -66,15 +66,15 @@ interface DaytonaSetupCardProps {
   onMaxDepthChange: (value: number) => void;
   batchConcurrency: number;
   onBatchConcurrencyChange: (value: number) => void;
-  detectedRepoContext: DetectedDaytonaRepoContext | null;
-  resolvedRepoContext: ResolvedDaytonaRepoContext | null;
+  detectedRepoContext: DetectedRepoContext | null;
+  resolvedRepoContext: ResolvedRepoContext | null;
   hasInvalidManualOverride: boolean;
   activeRunRepoUrl?: string | null;
-  activeRunContextSources?: DaytonaContextSourceSummary[];
+  activeRunContextSources?: ContextSourceSummary[];
   isActiveRunContextVisible?: boolean;
 }
 
-function DaytonaSetupCard({
+function SourceSetupCard({
   manualRepoUrl,
   onManualRepoUrlChange,
   contextPaths,
@@ -91,10 +91,10 @@ function DaytonaSetupCard({
   activeRunRepoUrl,
   activeRunContextSources = [],
   isActiveRunContextVisible = false,
-}: DaytonaSetupCardProps) {
+}: SourceSetupCardProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const parsedContextPaths = parseDaytonaContextPaths(contextPaths);
+  const parsedContextPaths = parseContextPaths(contextPaths);
   const hasManualOverride = manualRepoUrl.trim().length > 0;
   const hasResolvedRepo = Boolean(resolvedRepoContext?.repoUrl);
   const hasActiveRunSources =
@@ -104,16 +104,15 @@ function DaytonaSetupCard({
     !hasInvalidManualOverride &&
     isActiveRunContextVisible &&
     (Boolean(activeRunRepoUrl) || activeRunContextSources.length > 0);
-  const displayedRepoUrl = hasManualOverride
-    ? manualRepoUrl
-    : (resolvedRepoContext?.repoUrl ?? activeRunRepoUrl ?? "");
+  const displayedRepoUrl =
+    hasManualOverride
+      ? manualRepoUrl
+      : resolvedRepoContext?.repoUrl ?? activeRunRepoUrl ?? "";
   const detectedRepoDiffers =
     hasManualOverride &&
     detectedRepoContext != null &&
     detectedRepoContext.repoUrl !== resolvedRepoContext?.repoUrl;
-  const effectiveHasRepo = Boolean(
-    resolvedRepoContext?.repoUrl ?? activeRunRepoUrl,
-  );
+  const effectiveHasRepo = Boolean(resolvedRepoContext?.repoUrl ?? activeRunRepoUrl);
   const effectiveContextCount =
     parsedContextPaths.length > 0
       ? parsedContextPaths.length
@@ -124,8 +123,8 @@ function DaytonaSetupCard({
   const collapsedSummary = hasInvalidManualOverride
     ? "Manual repository override needs attention before the next run."
     : effectiveHasRepo || effectiveContextCount > 0
-      ? "Daytona will use this source mix for the next run."
-      : "No external sources are configured yet. Daytona will run in reasoning-only mode.";
+      ? "This source mix will be used for the next run."
+      : "No external sources are configured yet. The runtime will use reasoning-only mode.";
 
   const handleExpandedChange = (nextValue: boolean) => {
     setIsExpanded(nextValue);
@@ -138,11 +137,10 @@ function DaytonaSetupCard({
     <Card>
       <CardHeader className="gap-2">
         <div className="flex flex-col gap-1">
-          <CardTitle>Daytona source setup</CardTitle>
+          <CardTitle>Source setup</CardTitle>
           <CardDescription>
-            Review the source mix for the next Daytona run, then expand only
-            when you want to edit repository, local context, or advanced
-            settings.
+            Review the source mix for the next run, then expand only when
+            you want to edit repository, local context, or advanced settings.
           </CardDescription>
         </div>
         <CardAction className="flex flex-wrap items-center gap-2">
@@ -159,8 +157,7 @@ function DaytonaSetupCard({
           ) : null}
           {effectiveContextCount > 0 ? (
             <Badge variant="secondary">
-              {effectiveContextCount} local{" "}
-              {effectiveContextCount === 1 ? "path" : "paths"}
+              {effectiveContextCount} local {effectiveContextCount === 1 ? "path" : "paths"}
             </Badge>
           ) : null}
           <Button
@@ -178,11 +175,11 @@ function DaytonaSetupCard({
         <>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="daytona-repo-url">Repository URL</Label>
+              <Label htmlFor="source-repo-url">Repository URL</Label>
               <div className="flex flex-col gap-2 md:flex-row md:items-center">
                 <Input
-                  id="daytona-repo-url"
-                  aria-label="Daytona repository URL"
+                  id="source-repo-url"
+                  aria-label="Repository URL"
                   value={displayedRepoUrl}
                   onChange={(event) =>
                     onManualRepoUrlChange(event.currentTarget.value)
@@ -201,16 +198,16 @@ function DaytonaSetupCard({
                 ) : null}
               </div>
               <p className="text-sm text-muted-foreground">
-                Optional. GitHub, GitLab, and Bitbucket HTTPS repo URLs can
-                still be auto-detected from the prompt.
+                Optional. GitHub, GitLab, and Bitbucket HTTPS repo URLs can still be
+                auto-detected from the prompt.
               </p>
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="daytona-context-paths">Context paths</Label>
+              <Label htmlFor="source-context-paths">Context paths</Label>
               <Textarea
-                id="daytona-context-paths"
-                aria-label="Daytona context paths"
+                id="source-context-paths"
+                aria-label="Context paths"
                 value={contextPaths}
                 onChange={(event) =>
                   onContextPathsChange(event.currentTarget.value)
@@ -222,8 +219,8 @@ function DaytonaSetupCard({
                 className="min-h-24"
               />
               <p className="text-sm text-muted-foreground">
-                Optional. Enter one readable host file or directory path per
-                line. Daytona stages these directly into its workspace.
+                Optional. Enter one readable host file or directory path per line.
+                Daytona stages these directly into its workspace.
               </p>
             </div>
 
@@ -232,8 +229,8 @@ function DaytonaSetupCard({
                 <TriangleAlert />
                 <AlertTitle>Manual repository URL is invalid</AlertTitle>
                 <AlertDescription>
-                  Enter a valid HTTPS repository URL or clear the override to
-                  keep the run in local-context or reasoning-only mode.
+                  Enter a valid HTTPS repository URL or clear the override to keep the
+                  run in local-context or reasoning-only mode.
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -252,10 +249,7 @@ function DaytonaSetupCard({
 
             {resolvedRepoContext?.source !== "manual" && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
-                Using{" "}
-                <span className="font-medium">
-                  {detectedRepoContext.repoUrl}
-                </span>{" "}
+                Using <span className="font-medium">{detectedRepoContext.repoUrl}</span>{" "}
                 from the current prompt.
               </p>
             ) : null}
@@ -263,9 +257,8 @@ function DaytonaSetupCard({
             {hasActiveRunSources ? (
               <div className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3 text-sm text-muted-foreground">
                 <p>
-                  Active Daytona run is using the current source mix shown
-                  above. Update the repo URL or context paths here to change the
-                  next run.
+                  The active run is using the current source mix shown above.
+                  Update the repo URL or context paths to change the next run.
                 </p>
               </div>
             ) : null}
@@ -273,10 +266,8 @@ function DaytonaSetupCard({
             {detectedRepoDiffers && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
                 The current prompt also mentions{" "}
-                <span className="font-medium">
-                  {detectedRepoContext.repoUrl}
-                </span>
-                , but the manual repo override will be used for this run.
+                <span className="font-medium">{detectedRepoContext.repoUrl}</span>,
+                but the manual repo override will be used for this run.
               </p>
             ) : null}
 
@@ -286,7 +277,7 @@ function DaytonaSetupCard({
               <div className="flex items-center justify-between gap-3">
                 <div className="flex flex-col gap-1">
                   <p className="text-sm font-medium text-foreground">
-                    Advanced Daytona settings
+                    Advanced settings
                   </p>
                   <p className="text-sm text-muted-foreground">
                     Repo ref applies only when a repository is configured.
@@ -309,10 +300,10 @@ function DaytonaSetupCard({
               <CollapsibleContent className="mt-4">
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-repo-ref">Repository ref</Label>
+                    <Label htmlFor="source-repo-ref">Repository ref</Label>
                     <Input
-                      id="daytona-repo-ref"
-                      aria-label="Daytona repository ref"
+                      id="source-repo-ref"
+                      aria-label="Repository ref"
                       value={repoRef}
                       disabled={!effectiveHasRepo}
                       onChange={(event) =>
@@ -322,10 +313,10 @@ function DaytonaSetupCard({
                     />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-max-depth">Max depth</Label>
+                    <Label htmlFor="source-max-depth">Max depth</Label>
                     <Input
-                      id="daytona-max-depth"
-                      aria-label="Daytona max depth"
+                      id="source-max-depth"
+                      aria-label="Max depth"
                       type="number"
                       min={0}
                       value={String(maxDepth)}
@@ -337,12 +328,12 @@ function DaytonaSetupCard({
                     />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-batch-concurrency">
+                    <Label htmlFor="source-batch-concurrency">
                       Batch concurrency
                     </Label>
                     <Input
-                      id="daytona-batch-concurrency"
-                      aria-label="Daytona batch concurrency"
+                      id="source-batch-concurrency"
+                      aria-label="Batch concurrency"
                       type="number"
                       min={1}
                       value={String(batchConcurrency)}
@@ -360,7 +351,7 @@ function DaytonaSetupCard({
 
           <CardFooter className="border-t">
             <p className="text-sm text-muted-foreground">
-              Daytona runs use the recursive RLM runtime and stage local context
+              Runs use the recursive RLM runtime and stage local context
               directly inside the sandbox workspace.
             </p>
           </CardFooter>
@@ -378,32 +369,28 @@ function DaytonaSetupCard({
 
             {effectiveContextCount > 0 ? (
               <p className="text-sm text-foreground">
-                <span className="font-medium">Local context:</span>{" "}
-                {effectiveContextCount}{" "}
-                {effectiveContextCount === 1 ? "path" : "paths"}
+                <span className="font-medium">Local context:</span> {" "}
+                {effectiveContextCount} {effectiveContextCount === 1 ? "path" : "paths"}
               </p>
             ) : null}
 
             {resolvedRepoContext?.source !== "manual" && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
-                Prompt-detected repo will be used unless you add a manual
-                override.
+                Prompt-detected repo will be used unless you add a manual override.
               </p>
             ) : null}
 
             {hasActiveRunSources ? (
               <p className="text-sm text-muted-foreground">
-                Active Daytona run is using the current source mix shown above.
+                The active run is using the current source mix shown above.
               </p>
             ) : null}
 
             {detectedRepoDiffers && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
                 The current prompt also mentions{" "}
-                <span className="font-medium">
-                  {detectedRepoContext.repoUrl}
-                </span>
-                , but the manual repo override will be used for this run.
+                <span className="font-medium">{detectedRepoContext.repoUrl}</span>,
+                but the manual repo override will be used for this run.
               </p>
             ) : null}
           </div>
@@ -423,4 +410,4 @@ function DaytonaSetupCard({
   );
 }
 
-export { DaytonaSetupCard };
+export { SourceSetupCard };

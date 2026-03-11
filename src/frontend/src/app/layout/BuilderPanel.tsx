@@ -17,7 +17,7 @@ import {
   type CanvasMode,
 } from "@/features/artifacts/CanvasSwitcher";
 import { FileDetail } from "@/features/artifacts/FileDetail";
-import { DaytonaWorkbench } from "@/features/rlm-workspace/daytona-workbench/DaytonaWorkbench";
+import { RunWorkbench } from "@/features/rlm-workspace/run-workbench/RunWorkbench";
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
 import {
   isRlmCoreEnabled,
@@ -93,7 +93,7 @@ export function BuilderPanel() {
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
-  const showDaytonaWorkbench =
+  const showRunWorkbench =
     activeNav === "workspace" &&
     !isUnsupportedNav &&
     runtimeMode === "daytona_pilot";
@@ -144,8 +144,8 @@ export function BuilderPanel() {
                   Workspace
                 </div>
                 <div className="truncate text-sm font-medium text-foreground">
-                  {showDaytonaWorkbench
-                    ? "Daytona Workbench"
+                  {showRunWorkbench
+                    ? "Run Workbench"
                     : "Message Inspector"}
                 </div>
               </div>
@@ -195,10 +195,10 @@ export function BuilderPanel() {
           </ErrorBoundary>
         ) : showInspector ? (
           <ErrorBoundary
-            name={showDaytonaWorkbench ? "Daytona Workbench" : "Message Inspector"}
+            name={showRunWorkbench ? "Run Workbench" : "Message Inspector"}
           >
-            {showDaytonaWorkbench ? (
-              <DaytonaWorkbench />
+            {showRunWorkbench ? (
+              <RunWorkbench />
             ) : (
               <MessageInspectorPanel />
             )}

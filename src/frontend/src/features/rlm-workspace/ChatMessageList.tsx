@@ -118,12 +118,12 @@ import {
 } from "@/components/ai-elements/confirmation";
 import { Suggestion } from "@/components/ai-elements/suggestion";
 import { TextShimmer } from "@/components/ui/text-shimmer";
-import { ClarificationCard } from "@/features/rlm-workspace/ClarificationCard";
+import { ClarificationCard } from "@/features/rlm-workspace/components/ClarificationCard";
 import {
   SuggestionIconBolt,
   SuggestionIconTune,
   SuggestionIconSparkle,
-} from "@/components/shared/SuggestionIcons";
+} from "@/features/rlm-workspace/components/SuggestionIcons";
 
 const MONO_BASE_STYLE = {
   fontSize: "var(--font-text-sm-size)",

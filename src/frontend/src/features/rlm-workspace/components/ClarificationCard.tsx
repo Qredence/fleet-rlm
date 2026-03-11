@@ -5,8 +5,8 @@ import type { ChatMessage } from "@/lib/data/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RadioOptionCard } from "@/components/ui/radio-option-card";
-import { SectionHeader } from "@/components/shared/SectionHeader";
-import { ResolvedChip } from "@/components/shared/ResolvedChip";
+import { SectionHeader } from "@/features/rlm-workspace/components/SectionHeader";
+import { ResolvedChip } from "@/features/rlm-workspace/components/ResolvedChip";
 
 interface Props {
   data: NonNullable<ChatMessage["clarificationData"]>;

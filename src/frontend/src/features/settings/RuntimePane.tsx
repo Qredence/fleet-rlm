@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SettingsRow } from "@/features/settings/SettingsRow";
+import { SettingsRow } from "@/features/settings/components/SettingsRow";
 import {
   computeRuntimeUpdates,
   useRuntimeSettings,

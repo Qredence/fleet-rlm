@@ -1,7 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
-import { cn } from "@/lib/utils/cn";
 import {
   Card,
   CardContent,
@@ -12,6 +11,7 @@ import type {
   ExecutionSection,
   ToolSessionItem,
 } from "@/features/rlm-workspace/assistant-content/types";
+import { inspectorStyles, inspectorInsetClass } from "@/features/rlm-workspace/shared/inspector-styles";
 import {
   runtimeContextStrings,
   statusTone,
@@ -25,12 +25,12 @@ export function renderBadges(
 ) {
   if (values.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className={inspectorStyles.badge.row}>
       {values.map((value) => (
         <Badge
           key={value}
           variant={variant}
-          className="rounded-full text-[10px] font-medium"
+          className={inspectorStyles.badge.meta}
         >
           {value}
         </Badge>
@@ -74,17 +74,10 @@ export function DetailBlock({
   if (!value) return null;
   return (
     <div className="space-y-1.5">
-      <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+      <div className={inspectorStyles.heading.detail}>
         {label}
       </div>
-      <div
-        className={cn(
-          "rounded-xl border px-3 py-2 text-sm",
-          tone === "error"
-            ? "border-destructive/20 bg-destructive/5 text-destructive"
-            : "border-border-subtle/80 bg-muted/25 text-foreground",
-        )}
-      >
+      <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
         <Streamdown content={value} streaming={false} />
       </div>
     </div>
@@ -93,7 +86,7 @@ export function DetailBlock({
 
 export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSessionItem[] }) {
   return (
-    <div className="space-y-3">
+    <div className={inspectorStyles.stack.cards}>
       {sessionItems.map((item) => {
         const badges = runtimeContextStrings(item.runtimeContext);
         const state = toolSessionItemState(item);
@@ -111,8 +104,8 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
         const codeValue = item.part.kind === "sandbox" ? item.part.code : "";
 
         return (
-          <Card key={item.key} className="gap-3 rounded-2xl border-border-subtle/80 shadow-none">
-            <CardHeader className="px-4 pt-4">
+          <Card key={item.key} className={inspectorStyles.card.root}>
+            <CardHeader className={inspectorStyles.card.header}>
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="space-y-1">
                   <CardTitle className="text-sm font-medium text-foreground">
@@ -121,13 +114,13 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
                       : `${item.eventKind.replace("_", " ")}: ${item.toolName ?? "tool"}`}
                   </CardTitle>
                 </div>
-                <Badge variant={tone.variant} className="rounded-full">
+                <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
                   {tone.label}
                 </Badge>
               </div>
               {renderBadges(badges)}
             </CardHeader>
-            <CardContent className="space-y-3 px-4 pb-4">
+            <CardContent className={inspectorStyles.card.contentStack}>
               <DetailBlock label="Input" value={inputValue} />
               <DetailBlock
                 label="Output"
@@ -158,11 +151,11 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       return <ToolSessionDetails sessionItems={section.session.items} />;
     case "queue":
       return (
-        <div className="space-y-2">
+        <div className={inspectorStyles.stack.compact}>
           {section.part.items.map((item) => (
             <div
               key={item.id}
-              className="rounded-xl border border-border-subtle/80 bg-muted/20 px-3 py-2"
+              className={inspectorInsetClass("strong")}
             >
               <div className="text-sm font-medium text-foreground">{item.label}</div>
               {item.description ? (
@@ -176,11 +169,11 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       );
     case "task":
       return (
-        <div className="space-y-2">
+        <div className={inspectorStyles.stack.compact}>
           {(section.part.items ?? []).map((item) => (
             <div
               key={item.id}
-              className="rounded-xl border border-border-subtle/80 bg-muted/20 px-3 py-2"
+              className={inspectorInsetClass("strong")}
             >
               <div className="text-sm text-foreground">{item.text}</div>
             </div>
@@ -189,7 +182,7 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       );
     case "tool":
       return (
-        <div className="space-y-3">
+        <div className={inspectorStyles.stack.cards}>
           <DetailBlock label="Input" value={stringifyValue(section.part.input)} />
           <DetailBlock
             label="Output"
@@ -202,7 +195,7 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       );
     case "sandbox":
       return (
-        <div className="space-y-3">
+        <div className={inspectorStyles.stack.cards}>
           <DetailBlock label="Code" value={section.part.code} />
           <DetailBlock
             label="Output"
@@ -215,18 +208,18 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       );
     case "environment_variables":
       return (
-        <div className="space-y-2">
+        <div className={inspectorStyles.stack.compact}>
           {section.part.variables.map((variable) => (
             <div
               key={variable.name}
-              className="rounded-xl border border-border-subtle/80 bg-muted/20 px-3 py-2"
+              className={inspectorInsetClass("strong")}
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-foreground">
                   {variable.name}
                 </span>
                 {variable.required ? (
-                  <Badge variant="secondary" className="rounded-full">
+                  <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                     required
                   </Badge>
                 ) : null}
@@ -240,7 +233,7 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       );
     case "status_note":
       return (
-        <div className="space-y-3">
+        <div className={inspectorStyles.stack.cards}>
           <DetailBlock
             label="Status"
             value={section.part.text}

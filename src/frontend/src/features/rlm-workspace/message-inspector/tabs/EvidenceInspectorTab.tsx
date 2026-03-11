@@ -15,7 +15,9 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { cn } from "@/lib/utils/cn";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import { inspectorStyles, inspectorInsetClass } from "@/features/rlm-workspace/shared/inspector-styles";
 import { ExternalAnchor } from "../components/inspector-components";
 
 export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }: { model: AssistantContentModel }) {
@@ -23,18 +25,18 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }
   return (
     <TabsContent value="evidence" className="min-h-0 flex-1">
       <ScrollArea className="h-full">
-        <div className="space-y-4 px-4 pb-4">
+        <div className={inspectorStyles.tab.content}>
           {evidence.citations.length > 0 ? (
-            <section className="space-y-2">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            <section className={inspectorStyles.stack.section}>
+              <div className={inspectorStyles.heading.section}>
                 Citations
               </div>
               {evidence.citations.map((citation, index) => (
                 <Card
                   key={`${citation.url}-${index}`}
-                  className="gap-3 rounded-2xl border-border-subtle/80 shadow-none"
+                  className={inspectorStyles.card.root}
                 >
-                  <CardHeader className="px-4 pt-4">
+                  <CardHeader className={inspectorStyles.card.header}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="space-y-1">
                         <CardTitle className="text-sm font-medium text-foreground">
@@ -46,18 +48,18 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }
                           <CardDescription>{citation.description}</CardDescription>
                         ) : null}
                       </div>
-                      <Badge variant="accent" className="rounded-full">
+                      <Badge variant="accent" className={inspectorStyles.badge.status}>
                         #{citation.number ?? index + 1}
                       </Badge>
                     </div>
                   </CardHeader>
                   {citation.quote ? (
-                    <CardContent className="px-4 pb-4">
+                    <CardContent className={inspectorStyles.card.content}>
                       <Accordion type="single" collapsible>
                         <AccordionItem value="quote">
                           <AccordionTrigger>Show excerpt</AccordionTrigger>
                           <AccordionContent>
-                            <div className="rounded-xl border border-border-subtle/80 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                            <div className={cn(inspectorInsetClass(), "text-sm")}>
                               {citation.quote}
                             </div>
                           </AccordionContent>
@@ -71,28 +73,28 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }
           ) : null}
 
           {evidence.sources.length > 0 ? (
-            <section className="space-y-2">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            <section className={inspectorStyles.stack.section}>
+              <div className={inspectorStyles.heading.section}>
                 Sources
               </div>
               {evidence.sources.map((source) => (
                 <Card
                   key={source.sourceId}
-                  className="gap-3 rounded-2xl border-border-subtle/80 shadow-none"
+                  className={inspectorStyles.card.root}
                 >
-                  <CardHeader className="px-4 pt-4">
+                  <CardHeader className={inspectorStyles.card.header}>
                     <div className="space-y-2">
                       <CardTitle className="text-sm font-medium text-foreground">
                         <ExternalAnchor href={source.url ?? source.canonicalUrl}>
                           {source.title}
                         </ExternalAnchor>
                       </CardTitle>
-                      <div className="flex flex-wrap gap-1.5">
-                        <Badge variant="secondary" className="rounded-full capitalize">
+                      <div className={inspectorStyles.badge.row}>
+                        <Badge variant="secondary" className={cn(inspectorStyles.badge.status, "capitalize")}>
                           {source.kind}
                         </Badge>
                         {source.displayUrl ? (
-                          <Badge variant="outline" className="rounded-full">
+                          <Badge variant="outline" className={inspectorStyles.badge.meta}>
                             {source.displayUrl}
                           </Badge>
                         ) : null}
@@ -100,19 +102,19 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }
                     </div>
                   </CardHeader>
                   {source.description || source.quote ? (
-                    <CardContent className="px-4 pb-4">
+                    <CardContent className={inspectorStyles.card.content}>
                       <Accordion type="single" collapsible>
                         <AccordionItem value="snippet">
                           <AccordionTrigger>Show supporting snippet</AccordionTrigger>
                           <AccordionContent>
-                            <div className="space-y-2">
+                            <div className={inspectorStyles.stack.compact}>
                               {source.description ? (
-                                <div className="rounded-xl border border-border-subtle/80 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                                <div className={cn(inspectorInsetClass(), "text-sm")}>
                                   {source.description}
                                 </div>
                               ) : null}
                               {source.quote ? (
-                                <div className="rounded-xl border border-border-subtle/80 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                                <div className={cn(inspectorInsetClass(), "text-sm")}>
                                   {source.quote}
                                 </div>
                               ) : null}
@@ -128,16 +130,16 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }
           ) : null}
 
           {evidence.attachments.length > 0 ? (
-            <section className="space-y-2">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            <section className={inspectorStyles.stack.section}>
+              <div className={inspectorStyles.heading.section}>
                 Attachments
               </div>
               {evidence.attachments.map((attachment) => (
                 <Card
                   key={attachment.attachmentId}
-                  className="gap-3 rounded-2xl border-border-subtle/80 shadow-none"
+                  className={inspectorStyles.card.root}
                 >
-                  <CardHeader className="px-4 pt-4">
+                  <CardHeader className={inspectorStyles.card.header}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="space-y-1">
                         <CardTitle className="text-sm font-medium text-foreground">
@@ -149,14 +151,14 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }
                           <CardDescription>{attachment.description}</CardDescription>
                         ) : null}
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className={inspectorStyles.badge.row}>
                         {attachment.mimeType || attachment.mediaType ? (
-                          <Badge variant="secondary" className="rounded-full">
+                          <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                             {attachment.mimeType ?? attachment.mediaType}
                           </Badge>
                         ) : null}
                         {attachment.sizeBytes != null ? (
-                          <Badge variant="outline" className="rounded-full">
+                          <Badge variant="outline" className={inspectorStyles.badge.meta}>
                             {attachment.sizeBytes} bytes
                           </Badge>
                         ) : null}
@@ -169,8 +171,8 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({ model }
           ) : null}
 
           {!evidence.hasContent ? (
-            <Card className="gap-3 rounded-2xl border-border-subtle/80 shadow-none">
-              <CardHeader className="px-4 pt-4">
+            <Card className={inspectorStyles.card.root}>
+              <CardHeader className={inspectorStyles.card.header}>
                 <CardTitle className="text-sm font-medium">No evidence attached</CardTitle>
                 <CardDescription>
                   This response does not include explicit citations, sources, or attachments.

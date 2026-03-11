@@ -15,6 +15,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { useNavigationStore } from "@/stores/navigationStore";
 import type { InspectorTab } from "@/lib/data/types";
 import type { ExecutionStep } from "@/stores/artifactStore";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import { executionSectionState, statusTone } from "./utils/inspector-utils";
 import { renderBadges } from "./components/inspector-components";
 
@@ -183,32 +184,32 @@ export function MessageInspectorPanel() {
                   ? "Assistant turn in progress"
                   : "Selected assistant turn"}
               </CardTitle>
-              <Badge variant={turnStatus.variant} className="rounded-full">
+              <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
                 {turnStatus.label}
               </Badge>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
               {model.summary.trajectoryCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.trajectoryCount} trajector
                   {model.summary.trajectoryCount === 1 ? "y" : "ies"}
                 </Badge>
               ) : null}
               {model.summary.toolSessionCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.toolSessionCount} tool session
                   {model.summary.toolSessionCount === 1 ? "" : "s"}
                 </Badge>
               ) : null}
               {model.summary.sourceCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.sourceCount} source
                   {model.summary.sourceCount === 1 ? "" : "s"}
                 </Badge>
               ) : null}
               {model.summary.attachmentCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.attachmentCount} attachment
                   {model.summary.attachmentCount === 1 ? "" : "s"}
                 </Badge>
