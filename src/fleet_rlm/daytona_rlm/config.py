@@ -9,6 +9,7 @@ from typing import Mapping
 
 from dotenv import dotenv_values
 from .diagnostics import DaytonaDiagnosticError
+from .types import SandboxLmRuntimeConfig
 
 
 class DaytonaConfigError(DaytonaDiagnosticError):
@@ -74,4 +75,44 @@ def resolve_daytona_config(
         api_key=api_key,
         api_url=api_url,
         target=target,
+    )
+
+
+def resolve_daytona_lm_runtime_config(
+    env: Mapping[str, str] | None = None,
+) -> SandboxLmRuntimeConfig:
+    """Resolve the LM config that Daytona sandboxes should boot locally."""
+
+    values = dict(env) if env is not None else _load_env_sources()
+    api_key = (
+        values.get("DSPY_LLM_API_KEY", "").strip()
+        or values.get("DSPY_LM_API_KEY", "").strip()
+    )
+    model = values.get("DSPY_LM_MODEL", "").strip()
+    if not model or not api_key:
+        raise DaytonaConfigError(
+            "Missing DSPY_LM_MODEL or DSPY_LLM_API_KEY / DSPY_LM_API_KEY. "
+            "Daytona self-orchestrated runs require sandbox-local LM config."
+        )
+
+    raw_max_tokens = values.get("DSPY_LM_MAX_TOKENS", "").strip()
+    try:
+        max_tokens = int(raw_max_tokens) if raw_max_tokens else 64_000
+    except ValueError:
+        max_tokens = 64_000
+
+    delegate_model = values.get("DSPY_DELEGATE_LM_MODEL", "").strip() or None
+    delegate_api_key = (
+        values.get("DSPY_DELEGATE_LM_API_KEY", "").strip() or None or api_key
+    )
+    delegate_api_base = values.get("DSPY_DELEGATE_LM_API_BASE", "").strip() or None
+
+    return SandboxLmRuntimeConfig(
+        model=model,
+        api_key=api_key,
+        api_base=values.get("DSPY_LM_API_BASE", "").strip() or None,
+        max_tokens=max_tokens,
+        delegate_model=delegate_model,
+        delegate_api_key=delegate_api_key if delegate_model else None,
+        delegate_api_base=delegate_api_base if delegate_model else None,
     )

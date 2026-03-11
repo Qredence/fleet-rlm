@@ -14,7 +14,7 @@ def _coerce_mapping(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def encode_frame(payload: dict[str, Any]) -> str:
-    """Encode a JSON-line frame for the sandbox driver."""
+    """Encode a JSON-line frame for the sandbox driver/runtime."""
 
     return f"{FRAME_PREFIX}{json.dumps(payload, ensure_ascii=False, default=repr)}"
 
@@ -71,7 +71,7 @@ class ExecutionResponse:
 
 @dataclass(slots=True)
 class HostCallbackRequest:
-    """Request emitted by sandbox code that needs a host-side recursive call."""
+    """Request emitted by sandbox code that needs a host-side callback."""
 
     callback_id: str
     name: str
@@ -133,3 +133,113 @@ class ShutdownAck:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class RunReady:
+    """Ready signal for the sandbox-self-orchestrated runtime."""
+
+    message: str = "ready"
+    type: str = "run_ready"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class RunStartRequest:
+    """Request to start one sandbox-self-orchestrated Daytona rollout."""
+
+    request_id: str
+    payload: dict[str, Any]
+    type: str = "run_start"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RunStartRequest":
+        return cls(
+            request_id=str(payload["request_id"]),
+            payload=_coerce_mapping(payload.get("payload", {}) or {}),
+        )
+
+
+@dataclass(slots=True)
+class RunCancelRequest:
+    """Request to cancel the active sandbox-self-orchestrated run."""
+
+    request_id: str
+    type: str = "run_cancel"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RunCancelRequest":
+        return cls(request_id=str(payload["request_id"]))
+
+
+@dataclass(slots=True)
+class RunEventFrame:
+    """Structured streaming event emitted from the sandbox runtime."""
+
+    request_id: str
+    kind: str
+    text: str = ""
+    payload: dict[str, Any] | None = None
+    type: str = "run_event"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RunEventFrame":
+        return cls(
+            request_id=str(payload["request_id"]),
+            kind=str(payload.get("kind", "") or ""),
+            text=str(payload.get("text", "") or ""),
+            payload=_coerce_mapping(payload.get("payload", {}) or {}),
+        )
+
+
+@dataclass(slots=True)
+class RunResultEnvelope:
+    """Terminal successful result emitted by the sandbox runtime."""
+
+    request_id: str
+    result: dict[str, Any]
+    type: str = "run_result"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RunResultEnvelope":
+        return cls(
+            request_id=str(payload["request_id"]),
+            result=_coerce_mapping(payload.get("result", {}) or {}),
+        )
+
+
+@dataclass(slots=True)
+class RunErrorEnvelope:
+    """Terminal error emitted by the sandbox runtime."""
+
+    request_id: str
+    error: str
+    category: str | None = None
+    type: str = "run_error"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RunErrorEnvelope":
+        return cls(
+            request_id=str(payload["request_id"]),
+            error=str(payload.get("error", "") or ""),
+            category=str(payload["category"])
+            if payload.get("category") is not None
+            else None,
+        )

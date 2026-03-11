@@ -23,6 +23,55 @@ class RolloutBudget:
     result_truncation_limit: int = 10_000
     batch_concurrency: int = 4
 
+    @classmethod
+    def from_raw(cls, raw: Any) -> "RolloutBudget":
+        if not isinstance(raw, dict):
+            return cls()
+        return cls(
+            max_sandboxes=_coerce_positive_int(raw.get("max_sandboxes")) or 50,
+            max_depth=_coerce_nonnegative_int(raw.get("max_depth")) or 2,
+            max_iterations=_coerce_positive_int(raw.get("max_iterations")) or 50,
+            global_timeout=_coerce_positive_int(raw.get("global_timeout")) or 3600,
+            result_truncation_limit=(
+                _coerce_positive_int(raw.get("result_truncation_limit")) or 10_000
+            ),
+            batch_concurrency=_coerce_positive_int(raw.get("batch_concurrency")) or 4,
+        )
+
+
+@dataclass(slots=True)
+class SandboxLmRuntimeConfig:
+    """Serializable LM bootstrap config passed into sandbox-local runtimes."""
+
+    model: str
+    api_key: str
+    api_base: str | None = None
+    max_tokens: int = 64_000
+    delegate_model: str | None = None
+    delegate_api_key: str | None = None
+    delegate_api_base: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "SandboxLmRuntimeConfig":
+        if not isinstance(raw, dict):
+            raise ValueError("Sandbox LM config must be a dict.")
+        model = _normalize_optional_text(raw.get("model"))
+        api_key = _normalize_optional_text(raw.get("api_key"))
+        if model is None or api_key is None:
+            raise ValueError("Sandbox LM config requires model and api_key.")
+        return cls(
+            model=model,
+            api_key=api_key,
+            api_base=_normalize_optional_text(raw.get("api_base")),
+            max_tokens=_coerce_positive_int(raw.get("max_tokens")) or 64_000,
+            delegate_model=_normalize_optional_text(raw.get("delegate_model")),
+            delegate_api_key=_normalize_optional_text(raw.get("delegate_api_key")),
+            delegate_api_base=_normalize_optional_text(raw.get("delegate_api_base")),
+        )
+
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _PROMPT_PREVIEW_LIMIT = 240
@@ -285,6 +334,22 @@ class ChildLink:
             "status": self.status,
         }
 
+    @classmethod
+    def from_raw(cls, raw: Any) -> "ChildLink":
+        if not isinstance(raw, dict):
+            raise ValueError("Child link payload must be a dict.")
+        return cls(
+            child_id=_normalize_optional_text(raw.get("child_id")),
+            callback_name=_normalize_optional_text(raw.get("callback_name"))
+            or "llm_query",
+            task=RecursiveTaskSpec.from_raw(raw.get("task", {})),
+            result_preview=_normalize_optional_text(
+                raw.get("result_preview"), limit=280
+            )
+            or "",
+            status=_normalize_optional_text(raw.get("status")) or "completed",
+        )
+
 
 @dataclass(slots=True)
 class ChildTaskResult:
@@ -309,6 +374,19 @@ class FinalArtifact:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @classmethod
+    def from_raw(cls, raw: Any) -> "FinalArtifact":
+        if not isinstance(raw, dict):
+            raise ValueError("Final artifact payload must be a dict.")
+        return cls(
+            kind=_normalize_optional_text(raw.get("kind")) or "markdown",
+            value=raw.get("value"),
+            variable_name=_normalize_optional_text(raw.get("variable_name")),
+            finalization_mode=(
+                _normalize_optional_text(raw.get("finalization_mode")) or "fallback"
+            ),
+        )
+
 
 @dataclass(slots=True)
 class ExecutionObservation:
@@ -324,6 +402,20 @@ class ExecutionObservation:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "ExecutionObservation":
+        if not isinstance(raw, dict):
+            raise ValueError("Execution observation payload must be a dict.")
+        return cls(
+            iteration=_coerce_positive_int(raw.get("iteration")) or 1,
+            code=str(raw.get("code", "") or ""),
+            stdout=str(raw.get("stdout", "") or ""),
+            stderr=str(raw.get("stderr", "") or ""),
+            error=_normalize_optional_text(raw.get("error")),
+            duration_ms=_coerce_nonnegative_int(raw.get("duration_ms")) or 0,
+            callback_count=_coerce_nonnegative_int(raw.get("callback_count")) or 0,
+        )
 
 
 @dataclass(slots=True)
@@ -345,6 +437,7 @@ class AgentNode:
     observations: list[ExecutionObservation] = field(default_factory=list)
     child_ids: list[str] = field(default_factory=list)
     child_links: list[ChildLink] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     final_artifact: FinalArtifact | None = None
     iteration_count: int = 0
     error: str | None = None
@@ -355,10 +448,65 @@ class AgentNode:
         payload["prompt_handles"] = [item.to_dict() for item in self.prompt_handles]
         payload["observations"] = [item.to_dict() for item in self.observations]
         payload["child_links"] = [item.to_dict() for item in self.child_links]
+        payload["warnings"] = list(self.warnings)
         payload["final_artifact"] = (
             self.final_artifact.to_dict() if self.final_artifact is not None else None
         )
         return payload
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "AgentNode":
+        if not isinstance(raw, dict):
+            raise ValueError("Agent node payload must be a dict.")
+        return cls(
+            node_id=_normalize_optional_text(raw.get("node_id")) or "",
+            parent_id=_normalize_optional_text(raw.get("parent_id")),
+            depth=_coerce_nonnegative_int(raw.get("depth")) or 0,
+            task=str(raw.get("task", "") or ""),
+            repo=str(raw.get("repo", "") or ""),
+            ref=_normalize_optional_text(raw.get("ref")),
+            sandbox_id=_normalize_optional_text(raw.get("sandbox_id")),
+            workspace_path=_normalize_optional_text(raw.get("workspace_path")),
+            status=_normalize_optional_text(raw.get("status")) or "running",
+            prompt_handles=[
+                PromptHandle.from_raw(item)
+                for item in raw.get("prompt_handles", []) or []
+                if isinstance(item, dict)
+            ],
+            prompt_previews=[
+                str(item)
+                for item in raw.get("prompt_previews", []) or []
+                if isinstance(item, str)
+            ],
+            response_previews=[
+                str(item)
+                for item in raw.get("response_previews", []) or []
+                if isinstance(item, str)
+            ],
+            observations=[
+                ExecutionObservation.from_raw(item)
+                for item in raw.get("observations", []) or []
+                if isinstance(item, dict)
+            ],
+            child_ids=[
+                str(item) for item in raw.get("child_ids", []) or [] if item is not None
+            ],
+            child_links=[
+                ChildLink.from_raw(item)
+                for item in raw.get("child_links", []) or []
+                if isinstance(item, dict)
+            ],
+            warnings=[
+                str(item) for item in raw.get("warnings", []) or [] if item is not None
+            ],
+            final_artifact=(
+                FinalArtifact.from_raw(raw.get("final_artifact"))
+                if isinstance(raw.get("final_artifact"), dict)
+                else None
+            ),
+            iteration_count=_coerce_nonnegative_int(raw.get("iteration_count")) or 0,
+            error=_normalize_optional_text(raw.get("error")),
+        )
 
 
 @dataclass(slots=True)
@@ -369,9 +517,26 @@ class RolloutSummary:
     sandboxes_used: int
     termination_reason: str
     error: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "RolloutSummary":
+        if not isinstance(raw, dict):
+            raise ValueError("Rollout summary payload must be a dict.")
+        return cls(
+            duration_ms=_coerce_nonnegative_int(raw.get("duration_ms")) or 0,
+            sandboxes_used=_coerce_nonnegative_int(raw.get("sandboxes_used")) or 0,
+            termination_reason=(
+                _normalize_optional_text(raw.get("termination_reason")) or "completed"
+            ),
+            error=_normalize_optional_text(raw.get("error")),
+            warnings=[
+                str(item) for item in raw.get("warnings", []) or [] if item is not None
+            ],
+        )
 
 
 @dataclass(slots=True)
@@ -406,6 +571,53 @@ class DaytonaRunResult:
             "summary": self.summary.to_dict(),
             "result_path": self.result_path,
         }
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "DaytonaRunResult":
+        if not isinstance(raw, dict):
+            raise ValueError("Daytona run result payload must be a dict.")
+        budget_raw = raw.get("budget")
+        if not isinstance(budget_raw, dict):
+            raise ValueError("Daytona run result requires a budget dict.")
+        nodes_raw = raw.get("nodes")
+        if not isinstance(nodes_raw, dict):
+            raise ValueError("Daytona run result requires nodes.")
+        return cls(
+            run_id=_normalize_optional_text(raw.get("run_id")) or "",
+            repo=str(raw.get("repo", "") or ""),
+            ref=_normalize_optional_text(raw.get("ref")),
+            task=str(raw.get("task", "") or ""),
+            budget=RolloutBudget(
+                max_sandboxes=_coerce_positive_int(budget_raw.get("max_sandboxes"))
+                or 50,
+                max_depth=_coerce_nonnegative_int(budget_raw.get("max_depth")) or 2,
+                max_iterations=_coerce_positive_int(budget_raw.get("max_iterations"))
+                or 50,
+                global_timeout=_coerce_positive_int(budget_raw.get("global_timeout"))
+                or 3600,
+                result_truncation_limit=_coerce_positive_int(
+                    budget_raw.get("result_truncation_limit")
+                )
+                or 10_000,
+                batch_concurrency=_coerce_positive_int(
+                    budget_raw.get("batch_concurrency")
+                )
+                or 4,
+            ),
+            root_id=_normalize_optional_text(raw.get("root_id")) or "",
+            nodes={
+                str(node_id): AgentNode.from_raw(node_payload)
+                for node_id, node_payload in nodes_raw.items()
+                if isinstance(node_payload, dict)
+            },
+            final_artifact=(
+                FinalArtifact.from_raw(raw.get("final_artifact"))
+                if isinstance(raw.get("final_artifact"), dict)
+                else None
+            ),
+            summary=RolloutSummary.from_raw(raw.get("summary", {})),
+            result_path=_normalize_optional_text(raw.get("result_path")),
+        )
 
 
 @dataclass(slots=True)
