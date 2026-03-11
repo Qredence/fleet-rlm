@@ -174,7 +174,7 @@ async def run_daytona_streaming_turn(
     await _emit_stream_event(
         websocket,
         StreamEvent(
-            kind=terminal_kind,  # type: ignore[arg-type]
+            kind=terminal_kind,
             text=terminal_text,
             payload={
                 "history_turns": 1,

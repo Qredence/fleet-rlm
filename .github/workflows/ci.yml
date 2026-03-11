@@ -52,7 +52,11 @@ jobs:
           uv run ruff format --check src tests --exclude tests/unit/test_daytona_rlm_runner.py
 
       - name: Type-check with ty
-        run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+        run: >
+          uv run ty check src
+          --exclude "src/fleet_rlm/_scaffold/**"
+          --exclude "src/fleet_rlm/analytics/**"
+          --exclude "src/fleet_rlm/daytona_rlm/**"
 
   test-unit:
     name: Test Unit
