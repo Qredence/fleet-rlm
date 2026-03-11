@@ -8,12 +8,12 @@ import { cn } from "@/lib/utils/cn";
 import {
   NODE_WIDTH,
   STEP_TYPE_META,
-} from "@/components/domain/artifacts/GraphStepNode.constants";
+} from "@/features/artifacts/GraphStepNode.constants";
 import {
   extractErrorDetails,
   extractReplCodePreview,
   extractTrajectoryChain,
-} from "@/components/domain/artifacts/graphNodeDetailParsers";
+} from "@/features/artifacts/graphNodeDetailParsers";
 
 // ── Node data shape ─────────────────────────────────────────────────
 

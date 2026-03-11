@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { typo } from "@/lib/config/typo";
 import { Separator } from "@/components/ui/separator";
 
 interface Props {
@@ -15,21 +14,13 @@ const RELAXED_LINE_HEIGHT_STYLE = {
   lineHeight: "var(--line-height-relaxed)",
 } as CSSProperties;
 
-const MARKDOWN_H4_STYLE = {
-  ...typo.h4,
-  fontWeight: "var(--font-weight-semibold)",
-} as CSSProperties;
-
 const MARKDOWN_HEADING_STYLES: Record<
   number,
-  { style: CSSProperties; className: string }
+  { className: string }
 > = {
-  1: { style: typo.h2 ?? {}, className: "mb-4 mt-6 text-foreground" },
-  2: { style: typo.h3 ?? {}, className: "mb-3 mt-5 text-foreground" },
-  3: {
-    style: MARKDOWN_H4_STYLE,
-    className: "mb-2 mt-4 text-foreground",
-  },
+  1: { className: "mb-4 mt-6 text-foreground typo-h2" },
+  2: { className: "mb-3 mt-5 text-foreground typo-h3" },
+  3: { className: "mb-2 mt-4 text-foreground typo-h4 font-semibold" },
 };
 
 function safeHref(href: string): string | undefined {
@@ -47,7 +38,7 @@ function safeHref(href: string): string | undefined {
 // ── Lightweight, zero-dependency Markdown renderer ─────────────────
 // Supports: headings, paragraphs, bold, italic, inline code,
 // fenced code blocks, unordered/ordered lists, blockquotes, links,
-// horizontal rules.  All styling uses the shared `typo` helper and
+// horizontal rules.  All styling uses Tailwind utility classes and
 // design-system CSS variables — no hardcoded colours or fonts.
 
 // ── Inline token parser ────────────────────────────────────────────
@@ -72,8 +63,7 @@ function parseInline(text: string): ReactNode[] {
       result.push(
         <code
           key={match.index}
-          className="bg-muted px-1.5 py-0.5 rounded text-foreground"
-          style={typo.mono}
+          className="bg-muted px-1.5 py-0.5 rounded text-foreground typo-mono"
         >
           {code}
         </code>,
@@ -273,7 +263,7 @@ function renderBlock(block: Block, index: number): ReactNode {
         MARKDOWN_HEADING_STYLES[block.level ?? 1] ?? MARKDOWN_HEADING_STYLES[3]!;
       const Tag = `h${block.level ?? 1}` as "h1" | "h2" | "h3";
       return (
-        <Tag key={index} className={cfg.className} style={cfg.style}>
+        <Tag key={index} className={cfg.className}>
           {parseInline(block.content)}
         </Tag>
       );
@@ -283,8 +273,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <p
           key={index}
-          className="mb-3 text-muted-foreground"
-          style={typo.labelRegular}
+          className="mb-3 text-muted-foreground typo-label-regular"
         >
           {parseInline(block.content)}
         </p>
@@ -294,8 +283,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <pre key={index} className="mb-4 overflow-x-auto">
           <code
-            className="block bg-muted p-4 rounded-lg overflow-x-auto text-foreground"
-            style={typo.mono}
+            className="block bg-muted p-4 rounded-lg overflow-x-auto text-foreground typo-mono"
           >
             {block.content}
           </code>
@@ -306,8 +294,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <blockquote
           key={index}
-          className="border-l-4 border-accent pl-4 italic my-4 text-muted-foreground"
-          style={typo.labelRegular}
+          className="border-l-4 border-accent pl-4 italic my-4 text-muted-foreground typo-label-regular"
         >
           {parseInline(block.content)}
         </blockquote>
@@ -317,8 +304,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <ul
           key={index}
-          className="mb-3 ml-5 flex list-disc flex-col gap-1.5 text-muted-foreground"
-          style={typo.labelRegular}
+          className="mb-3 ml-5 flex list-disc flex-col gap-1.5 text-muted-foreground typo-label-regular"
         >
           {block.items?.map((item, j) => (
             <li key={j} style={RELAXED_LINE_HEIGHT_STYLE}>
@@ -332,8 +318,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <ol
           key={index}
-          className="mb-3 ml-5 flex list-decimal flex-col gap-1.5 text-muted-foreground"
-          style={typo.labelRegular}
+          className="mb-3 ml-5 flex list-decimal flex-col gap-1.5 text-muted-foreground typo-label-regular"
         >
           {block.items?.map((item, j) => (
             <li key={j} style={RELAXED_LINE_HEIGHT_STYLE}>

@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-import type { AuthContextValue } from "@/hooks/auth-types";
+import type { AuthContextValue } from "@/lib/auth/types";
 
 const noopAsync = async () => false as boolean;
 const noopVoid = () => {};

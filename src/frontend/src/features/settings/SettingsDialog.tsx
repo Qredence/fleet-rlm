@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Drawer } from "vaul";
 import { X } from "lucide-react";
 import {
@@ -28,22 +28,14 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
+import { GroupedSettingsPane } from "@/features/settings/GroupedSettingsPane";
 import {
+  sectionDescriptions,
   settingsSections,
   type SettingsSection,
 } from "@/features/settings/types";
 import { useThemeStore } from "@/stores/themeStore";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
-
-const sectionDescriptions: Record<SettingsSection, string> = {
-  appearance: "Control theme and interface appearance.",
-  telemetry: "Configure anonymous telemetry preferences.",
-  litellm:
-    "Manage LiteLLM-compatible runtime model and provider integration settings.",
-  runtime: "Configure runtime credentials and run Modal/LM connection tests.",
-};
 
 interface SettingsDialogProps {
   open: boolean;
@@ -71,9 +63,8 @@ function SectionContent({
   activeSection: SettingsSection;
   isMobile: boolean;
 }) {
-  const activeMeta = useMemo(
-    () => settingsSections.find((section) => section.key === activeSection),
-    [activeSection],
+  const activeMeta = settingsSections.find(
+    (section) => section.key === activeSection,
   );
 
   return (
@@ -86,7 +77,7 @@ function SectionContent({
       <div className="shrink-0 border-b border-border-subtle/70">
         <div className={isMobile ? "px-4 pt-3 pb-3" : "px-6 pt-5 pb-3"}>
           {isMobile ? (
-            <span className="text-foreground" style={typo.h4}>
+            <span className="text-foreground typo-h4">
               {activeMeta?.label}
             </span>
           ) : (
@@ -110,7 +101,7 @@ function SectionContent({
 
       <ScrollArea className="flex-1">
         <div className={isMobile ? "px-4 pb-4" : "px-6 pb-6"}>
-          <SettingsPaneContent
+          <GroupedSettingsPane
             isDark={isDark}
             onToggleTheme={onToggleTheme}
             section={activeSection}
@@ -129,7 +120,11 @@ function MobileSectionNav({
   onSelectSection: (section: SettingsSection) => void;
 }) {
   return (
-    <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-4 py-2">
+    <div
+      className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-4 py-2"
+      role="tablist"
+      aria-label="Settings sections"
+    >
       <div className="flex w-max items-center gap-2">
         {settingsSections.map((section) => {
           const Icon = section.icon;
@@ -139,6 +134,8 @@ function MobileSectionNav({
               key={section.key}
               variant={isActive ? "secondary" : "ghost"}
               size="sm"
+              role="tab"
+              aria-selected={isActive}
               className="touch-target rounded-full"
               onClick={() => onSelectSection(section.key)}
             >
@@ -196,7 +193,7 @@ export function SettingsDialog({
             {/* Sheet header with close button */}
             <div className="flex items-center justify-between px-4 pb-3 shrink-0">
               <Drawer.Title>
-                <span className="text-foreground" style={typo.h3}>
+                <span className="text-foreground typo-h3">
                   Settings
                 </span>
               </Drawer.Title>
@@ -248,7 +245,7 @@ export function SettingsDialog({
               <SidebarGroup>
                 <SidebarGroupContent>
                   <div className="px-3 pt-4 pb-2">
-                    <h2 className="text-foreground" style={typo.h4}>
+                    <h2 className="text-foreground typo-h4">
                       Settings
                     </h2>
                   </div>
@@ -263,6 +260,11 @@ export function SettingsDialog({
                           >
                             <button
                               type="button"
+                              aria-current={
+                                section.key === activeSection
+                                  ? "true"
+                                  : undefined
+                              }
                               onClick={() => setActiveSection(section.key)}
                             >
                               <Icon />

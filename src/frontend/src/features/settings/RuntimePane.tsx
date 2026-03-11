@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SettingsRow } from "@/components/shared/SettingsRow";
+import { SettingsRow } from "@/features/settings/SettingsRow";
 import {
   computeRuntimeUpdates,
   useRuntimeSettings,
@@ -12,6 +12,7 @@ import {
   type RuntimeSecretEditableKey,
 } from "@/features/settings/useRuntimeSettings";
 import { shouldHydrateRuntimeForm } from "@/features/settings/runtimePaneHydration";
+import { errorMessage } from "@/features/settings/settingsErrors";
 import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
 
 type RuntimeField = {
@@ -108,11 +109,6 @@ function testSummary(test: RuntimeConnectivityTestResponse | null | undefined) {
 function testVariant(test: RuntimeConnectivityTestResponse | null | undefined) {
   if (!test) return "outline" as const;
   return test.ok ? ("success" as const) : ("destructive-subtle" as const);
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Unexpected error";
 }
 
 export function RuntimePane() {
@@ -361,6 +357,7 @@ export function RuntimePane() {
                 value={formValues[field.key] ?? ""}
                 placeholder={field.placeholder}
                 autoComplete="off"
+                aria-label={field.label}
                 onChange={(event) => {
                   const value = event.target.value;
                   setFormValues((prev) => ({ ...prev, [field.key]: value }));
@@ -386,6 +383,7 @@ export function RuntimePane() {
                     type="button"
                     size="sm"
                     variant={clearSecretFlags[secretKey] ? "soft" : "outline"}
+                    aria-pressed={clearSecretFlags[secretKey] ?? false}
                     className="rounded-lg"
                     onClick={() => {
                       const nextClear = !(clearSecretFlags[secretKey] ?? false);
@@ -414,7 +412,7 @@ export function RuntimePane() {
         description="Writes to .env (local only), updates process env, and refreshes in-memory runtime."
       >
         <Button
-          variant="fill"
+          variant="secondary"
           className="rounded-lg"
           onClick={handleSave}
           disabled={saveDisabled}
@@ -424,7 +422,7 @@ export function RuntimePane() {
       </SettingsRow>
 
       <div className="border-b border-border-subtle/70 py-4">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)] lg:items-start lg:gap-6">
+        <div className="space-y-3">
           <div className="min-w-0">
             <span
               data-slot="settings-row-label"
@@ -442,39 +440,41 @@ export function RuntimePane() {
           </div>
 
           <div className="min-w-0 rounded-xl border border-border-subtle/70 bg-muted/15 p-4">
-            <div className="grid gap-2.5 sm:grid-cols-2">
+            <div className="grid gap-2.5">
+              <div className="grid gap-2.5 grid-cols-2">
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  className="w-full justify-center rounded-lg"
+                  onClick={handleTestModal}
+                  disabled={testModalConnection.isPending}
+                >
+                  {testModalConnection.isPending
+                    ? "Testing Modal…"
+                    : "Test Modal"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-full justify-center rounded-lg"
+                  onClick={handleTestLm}
+                  disabled={testLmConnection.isPending}
+                >
+                  {testLmConnection.isPending
+                    ? "Testing LM…"
+                    : "Test LM"}
+                </Button>
+              </div>
               <Button
-                variant="soft"
+                variant="secondary"
                 size="lg"
                 className="w-full justify-center rounded-lg"
-                onClick={handleTestModal}
-                disabled={testModalConnection.isPending}
-              >
-                {testModalConnection.isPending
-                  ? "Testing Modal…"
-                  : "Test Modal Connection"}
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="w-full justify-center rounded-lg"
-                onClick={handleTestLm}
-                disabled={testLmConnection.isPending}
-              >
-                {testLmConnection.isPending
-                  ? "Testing LM…"
-                  : "Test LM Connection"}
-              </Button>
-              <Button
-                variant="fill"
-                size="lg"
-                className="w-full justify-center rounded-lg sm:col-span-2"
                 onClick={handleTestAll}
                 disabled={
                   testModalConnection.isPending || testLmConnection.isPending
                 }
               >
-                Test Credentials + Connection
+                Test All Connections
               </Button>
             </div>
 
@@ -516,13 +516,13 @@ export function RuntimePane() {
         label="Preflight Checks"
         description="Credential and provider availability."
       >
-        <div className="flex flex-wrap justify-end gap-1.5">
+        <div className="flex flex-wrap justify-end gap-1.5 max-w-[60%]">
           {llmChecks.map(([key, ok]) => (
             <Badge
               key={`llm-${key}`}
               variant={ok ? "success" : "destructive-subtle"}
             >
-              LM {formatCheckLabel(key)}: {ok ? "configured" : "missing"}
+              LM {formatCheckLabel(key)}
             </Badge>
           ))}
           {modalChecks.map(([key, ok]) => (
@@ -530,7 +530,7 @@ export function RuntimePane() {
               key={`modal-${key}`}
               variant={ok ? "success" : "destructive-subtle"}
             >
-              Modal {formatCheckLabel(key)}: {ok ? "configured" : "missing"}
+              Modal {formatCheckLabel(key)}
             </Badge>
           ))}
         </div>

@@ -3,9 +3,9 @@ import { Brain, Terminal, Wrench, Database, FileOutput } from "lucide-react";
 import type { ArtifactStepType, ExecutionStep } from "@/stores/artifactStore";
 import { cn } from "@/lib/utils/cn";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { summarizeArtifactStep } from "@/components/domain/artifacts/parsers/artifactPayloadSummaries";
-import { STEP_TYPE_META } from "@/components/domain/artifacts/GraphStepNode.constants";
-import { extractToolBadgeFromStep } from "@/components/domain/artifacts/graphToolBadge";
+import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
+import { STEP_TYPE_META } from "@/features/artifacts/GraphStepNode.constants";
+import { extractToolBadgeFromStep } from "@/features/artifacts/graphToolBadge";
 
 interface ArtifactTimelineProps {
   steps: ExecutionStep[];

@@ -8,6 +8,7 @@ import {
 } from "@/lib/rlm-api";
 import type { ChatMessage } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
+import { parseDaytonaContextPaths } from "@/features/rlm-workspace/daytonaSourceContext";
 import { telemetryClient } from "@/lib/telemetry/client";
 import type {
   WsExecutionMode,
@@ -22,6 +23,7 @@ interface StreamMessageOptions {
   runtimeMode?: WsRuntimeMode;
   repoUrl?: string;
   repoRef?: string;
+  contextPaths?: string[];
   maxDepth?: number;
   batchConcurrency?: number;
 }
@@ -36,6 +38,7 @@ interface ChatStore {
   runtimeMode: WsRuntimeMode;
   daytonaRepoUrl: string;
   daytonaRepoRef: string;
+  daytonaContextPaths: string;
   daytonaMaxDepth: number;
   daytonaBatchConcurrency: number;
 
@@ -45,6 +48,7 @@ interface ChatStore {
   setRuntimeMode: (mode: WsRuntimeMode) => void;
   setDaytonaRepoUrl: (value: string) => void;
   setDaytonaRepoRef: (value: string) => void;
+  setDaytonaContextPaths: (value: string) => void;
   setDaytonaMaxDepth: (value: number) => void;
   setDaytonaBatchConcurrency: (value: number) => void;
   setMessages: (
@@ -82,6 +86,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   runtimeMode: "modal_chat",
   daytonaRepoUrl: "",
   daytonaRepoRef: "",
+  daytonaContextPaths: "",
   daytonaMaxDepth: 2,
   daytonaBatchConcurrency: 4,
   streamController: null,
@@ -98,6 +103,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setRuntimeMode: (runtimeMode) => set({ runtimeMode }),
   setDaytonaRepoUrl: (daytonaRepoUrl) => set({ daytonaRepoUrl }),
   setDaytonaRepoRef: (daytonaRepoRef) => set({ daytonaRepoRef }),
+  setDaytonaContextPaths: (daytonaContextPaths) => set({ daytonaContextPaths }),
   setDaytonaMaxDepth: (daytonaMaxDepth) => set({ daytonaMaxDepth }),
   setDaytonaBatchConcurrency: (daytonaBatchConcurrency) =>
     set({ daytonaBatchConcurrency }),
@@ -153,6 +159,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       runtimeMode,
       daytonaRepoUrl,
       daytonaRepoRef,
+      daytonaContextPaths,
       daytonaMaxDepth,
       daytonaBatchConcurrency,
     } = get();
@@ -184,9 +191,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (resolvedRuntimeMode === "modal_chat") {
       payload.execution_mode = options?.executionMode ?? "auto";
     } else {
-      payload.repo_url = options?.repoUrl ?? daytonaRepoUrl;
+      const repoUrl = options?.repoUrl ?? daytonaRepoUrl;
+      payload.repo_url = repoUrl || null;
       const repoRef = options?.repoRef ?? daytonaRepoRef;
-      payload.repo_ref = repoRef.trim() ? repoRef : null;
+      payload.repo_ref = repoUrl && repoRef.trim() ? repoRef : null;
+      const contextPaths =
+        options?.contextPaths ?? parseDaytonaContextPaths(daytonaContextPaths);
+      payload.context_paths =
+        contextPaths.length > 0 ? contextPaths : null;
       payload.max_depth = options?.maxDepth ?? daytonaMaxDepth;
       payload.batch_concurrency =
         options?.batchConcurrency ?? daytonaBatchConcurrency;

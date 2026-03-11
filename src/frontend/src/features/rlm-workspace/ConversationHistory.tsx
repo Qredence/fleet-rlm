@@ -12,7 +12,6 @@ import { useState, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { MessageSquare, Trash2, Clock, X } from "lucide-react";
 import { springs } from "@/lib/config/motion-config";
-import { typo } from "@/lib/config/typo";
 import type { Conversation } from "@/stores/chatHistoryStore";
 import { cn } from "@/lib/utils/cn";
 import { IconButton } from "@/components/ui/icon-button";
@@ -145,7 +144,7 @@ export function ConversationHistory({
       <div className="flex items-center justify-between px-1 mb-4">
         <div className="flex items-center gap-2">
           <Clock className="size-4 text-muted-foreground" aria-hidden="true" />
-          <span className="text-foreground" style={typo.h4}>
+          <span className="text-foreground typo-h4">
             Recent Conversations
           </span>
         </div>
@@ -188,10 +187,10 @@ export function ConversationHistory({
               aria-hidden="true"
             />
           </div>
-          <p className="text-muted-foreground" style={typo.label}>
+          <p className="text-muted-foreground typo-label">
             No conversations yet
           </p>
-          <p className="text-muted-foreground mt-1" style={typo.caption}>
+          <p className="text-muted-foreground mt-1 typo-caption">
             Start a chat to see your history here
           </p>
         </div>
@@ -203,8 +202,7 @@ export function ConversationHistory({
                 <div key={group} className="flex flex-col gap-1.5">
                   {/* Group label */}
                   <span
-                    className="text-muted-foreground uppercase tracking-[0.12em] px-1 mb-0.5"
-                    style={typo.micro}
+                    className="text-muted-foreground uppercase tracking-[0.12em] px-1 mb-0.5 typo-micro"
                   >
                     {group}
                   </span>
@@ -246,8 +244,7 @@ export function ConversationHistory({
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span
-                                className="text-foreground truncate"
-                                style={typo.label}
+                                className="text-foreground truncate typo-label"
                               >
                                 {conv.title}
                               </span>
@@ -258,8 +255,8 @@ export function ConversationHistory({
                                     conv.phase === "complete"
                                       ? "bg-accent/10 text-accent"
                                       : "bg-muted text-muted-foreground",
+                                    "typo-micro",
                                   )}
-                                  style={typo.micro}
                                 >
                                   {badge}
                                 </span>
@@ -267,20 +264,17 @@ export function ConversationHistory({
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span
-                                className="text-muted-foreground"
-                                style={typo.helper}
+                                className="text-muted-foreground typo-helper"
                               >
                                 {msgCount} messages
                               </span>
                               <span
-                                className="text-muted-foreground"
-                                style={typo.helper}
+                                className="text-muted-foreground typo-helper"
                               >
                                 &middot;
                               </span>
                               <span
-                                className="text-muted-foreground"
-                                style={typo.helper}
+                                className="text-muted-foreground typo-helper"
                               >
                                 {relativeTime(conv.updatedAt)}
                               </span>

@@ -7,6 +7,7 @@ import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/features/rlm-workspace/backendArtifactEventAdapter";
 import { buildChatDisplayItems } from "@/features/rlm-workspace/chatDisplayItems";
+import { parseDaytonaContextPaths } from "@/features/rlm-workspace/daytonaSourceContext";
 import type {
   ChatRuntime,
   ChatSubmitOptions,
@@ -117,6 +118,7 @@ export function useBackendChatRuntime(): ChatRuntime {
     runtimeMode,
     daytonaRepoUrl,
     daytonaRepoRef,
+    daytonaContextPaths,
     streamMessage,
     stopStreaming,
     resetSession,
@@ -220,6 +222,8 @@ export function useBackendChatRuntime(): ChatRuntime {
           task: text,
           repoUrl: options?.repoUrl ?? daytonaRepoUrl,
           repoRef: options?.repoRef ?? daytonaRepoRef,
+          contextPaths:
+            options?.contextPaths ?? parseDaytonaContextPaths(daytonaContextPaths),
         });
       }
       setPhase("understanding");
@@ -245,6 +249,7 @@ export function useBackendChatRuntime(): ChatRuntime {
             runtimeMode: options?.runtimeMode,
             repoUrl: options?.repoUrl,
             repoRef: options?.repoRef,
+            contextPaths: options?.contextPaths,
             maxDepth: options?.maxDepth,
             batchConcurrency: options?.batchConcurrency,
           },
@@ -253,22 +258,23 @@ export function useBackendChatRuntime(): ChatRuntime {
         const message =
           error instanceof Error ? error.message : "Unknown streaming error";
         if (!terminalSeen) {
-          if (
-            resolvedRuntimeMode === "daytona_pilot" &&
-            !receivedFrame
-          ) {
+          if (resolvedRuntimeMode === "daytona_pilot") {
+            useDaytonaWorkbenchStore.getState().failRun(message);
+          } else if (!receivedFrame) {
             resetDaytonaWorkbench();
           }
           applyWsFrameToArtifacts({ type: "error", message });
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: createLocalMessageId("sys"),
-              type: "system",
-              content: `Backend error: ${message}`,
-              phase: 1,
-            },
-          ]);
+          if (resolvedRuntimeMode !== "daytona_pilot") {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: createLocalMessageId("sys"),
+                type: "system",
+                content: `Backend error: ${message}`,
+                phase: 1,
+              },
+            ]);
+          }
           setPhase("idle");
           setCreationPhase("idle");
         }
@@ -291,6 +297,7 @@ export function useBackendChatRuntime(): ChatRuntime {
       resetDaytonaWorkbench,
       streamMessage,
       runtimeMode,
+      daytonaContextPaths,
       daytonaRepoRef,
       daytonaRepoUrl,
       setCreationPhase,

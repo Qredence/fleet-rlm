@@ -1,4 +1,3 @@
-import { typo } from "@/lib/config/typo";
 import { useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { MessageSquare, Pencil, CircleCheck } from "lucide-react";
@@ -43,11 +42,11 @@ export function ClarificationCard({ data, onResolve }: Props) {
               icon={<CircleCheck className="text-chart-3" />}
               className="mb-2"
             >
-              <span className="text-muted-foreground" style={typo.helper}>
+              <span className="text-muted-foreground typo-helper">
                 {data.stepLabel}
               </span>
             </SectionHeader>
-            <p className="text-muted-foreground mb-1" style={typo.caption}>
+            <p className="text-muted-foreground mb-1 typo-caption">
               {data.question}
             </p>
             <div className="mt-2">
@@ -77,11 +76,11 @@ export function ClarificationCard({ data, onResolve }: Props) {
             icon={<MessageSquare className="text-muted-foreground" />}
             className="mb-1"
           >
-            <span className="text-muted-foreground" style={typo.helper}>
+            <span className="text-muted-foreground typo-helper">
               {data.stepLabel}
             </span>
           </SectionHeader>
-          <p className="text-foreground mb-4" style={typo.label}>
+          <p className="text-foreground mb-4 typo-label">
             {data.question}
           </p>
 
@@ -128,8 +127,7 @@ export function ClarificationCard({ data, onResolve }: Props) {
                             onChange={(e) => setCustomText(e.target.value)}
                             placeholder="Describe your specific requirement&#x2026;"
                             rows={2}
-                            className="w-full px-3 py-2 rounded-lg border-subtle bg-background text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:border-ring resize-none"
-                            style={typo.labelRegular}
+                            className="w-full px-3 py-2 rounded-lg border-subtle bg-background text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:border-ring resize-none typo-label-regular"
                           />
                         </div>
                       </motion.div>

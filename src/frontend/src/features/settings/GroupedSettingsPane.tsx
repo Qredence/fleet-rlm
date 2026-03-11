@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { toast } from "sonner";
 
-import { SettingsRow } from "@/components/shared/SettingsRow";
+import { SettingsRow } from "@/features/settings/SettingsRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils/cn";
 import { RuntimePane } from "@/features/settings/RuntimePane";
 import { SettingsToggleRow } from "@/features/settings/SettingsToggleRow";
+import { errorMessage } from "@/features/settings/settingsErrors";
 import type { SettingsSection } from "@/features/settings/types";
 import {
   computeLmRuntimeUpdates,
@@ -19,11 +20,6 @@ interface GroupedSettingsPaneProps {
   isDark: boolean;
   onToggleTheme: () => void;
   section?: SettingsSection;
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Unexpected error";
 }
 
 export function GroupedSettingsPane({
@@ -166,6 +162,7 @@ export function GroupedSettingsPane({
             <div className="flex items-center gap-1 bg-secondary rounded-lg p-0.5">
               <Button
                 variant="ghost"
+                aria-pressed={!isDark}
                 className={cn(
                   "gap-1.5 px-3 py-1.5 h-auto rounded-md",
                   !isDark && "bg-background shadow-sm",
@@ -182,6 +179,7 @@ export function GroupedSettingsPane({
               </Button>
               <Button
                 variant="ghost"
+                aria-pressed={isDark}
                 className={cn(
                   "gap-1.5 px-3 py-1.5 h-auto rounded-md",
                   isDark && "bg-background shadow-sm",
@@ -276,6 +274,7 @@ export function GroupedSettingsPane({
               value={lmModel}
               placeholder=""
               autoComplete="off"
+              aria-label="Planner LM model"
               onChange={(event) => setLmModel(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -290,6 +289,7 @@ export function GroupedSettingsPane({
               value={delegateLmModel}
               placeholder=""
               autoComplete="off"
+              aria-label="Delegate LM model"
               onChange={(event) => setDelegateLmModel(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -304,6 +304,7 @@ export function GroupedSettingsPane({
               value={delegateLmSmallModel}
               placeholder=""
               autoComplete="off"
+              aria-label="Delegate small LM model"
               onChange={(event) => setDelegateLmSmallModel(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -318,6 +319,7 @@ export function GroupedSettingsPane({
               value={apiBase}
               placeholder=""
               autoComplete="off"
+              aria-label="Custom API endpoint"
               onChange={(event) => setApiBase(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -332,6 +334,7 @@ export function GroupedSettingsPane({
               value={apiKeyInput}
               placeholder=""
               autoComplete="off"
+              aria-label="API key"
               onChange={(event) => {
                 setApiKeyInput(event.target.value);
                 setClearApiKeyOnSave(false);
@@ -347,6 +350,7 @@ export function GroupedSettingsPane({
                 type="button"
                 size="sm"
                 variant={clearApiKeyOnSave ? "secondary" : "outline"}
+                aria-pressed={clearApiKeyOnSave}
                 className="rounded-lg"
                 onClick={() => {
                   const nextClear = !clearApiKeyOnSave;

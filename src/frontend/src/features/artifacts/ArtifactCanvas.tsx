@@ -4,10 +4,10 @@ import { GitBranch, TerminalSquare, ListTree, FileCode2 } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useArtifactStore } from "@/stores/artifactStore";
-import { ArtifactGraph } from "@/components/domain/artifacts/ArtifactGraph";
-import { ArtifactREPL } from "@/components/domain/artifacts/ArtifactREPL";
-import { ArtifactTimeline } from "@/components/domain/artifacts/ArtifactTimeline";
-import { ArtifactPreview } from "@/components/domain/artifacts/ArtifactPreview";
+import { ArtifactGraph } from "@/features/artifacts/ArtifactGraph";
+import { ArtifactREPL } from "@/features/artifacts/ArtifactREPL";
+import { ArtifactTimeline } from "@/features/artifacts/ArtifactTimeline";
+import { ArtifactPreview } from "@/features/artifacts/ArtifactPreview";
 
 export type ArtifactTab = "graph" | "repl" | "timeline" | "preview";
 

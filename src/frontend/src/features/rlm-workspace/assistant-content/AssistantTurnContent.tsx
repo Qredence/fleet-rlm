@@ -18,8 +18,8 @@ function visibleSections(model: AssistantContentModel) {
       ? "answer"
       : null,
     model.summary.show ? "summary" : null,
-    model.trajectory.hasContent ? "trajectory" : null,
     model.execution.hasChatHighlights ? "execution" : null,
+    model.trajectory.hasContent ? "trajectory" : null,
     model.evidence.hasContent ? "evidence" : null,
   ].filter(Boolean);
 }
@@ -113,14 +113,14 @@ export function AssistantTurnContent({
                   <Separator className="bg-border-subtle/70" />
                 ) : null}
                 <div className="space-y-3">
-                  {model.trajectory.hasContent ? (
-                    <TrajectoryTimeline trajectory={model.trajectory} />
-                  ) : null}
                   {model.execution.hasChatHighlights ? (
                     <ExecutionHighlightsGroup
                       execution={model.execution}
                       onOpenTab={(tab) => onOpenTab?.(tab)}
                     />
+                  ) : null}
+                  {model.trajectory.hasContent ? (
+                    <TrajectoryTimeline trajectory={model.trajectory} />
                   ) : null}
                   {model.evidence.hasContent ? (
                     <EvidencePreview

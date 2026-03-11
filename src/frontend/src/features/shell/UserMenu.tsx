@@ -15,7 +15,6 @@ import {
   ChevronDown,
   LogIn,
 } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -80,7 +79,7 @@ export function UserMenu() {
           onClick={() => setLoginOpen(true)}
         >
           <LogIn className="size-4" />
-          <span style={typo.label}>Sign In</span>
+          <span className="typo-label">Sign In</span>
         </Button>
 
         <LoginDialog
@@ -135,14 +134,12 @@ export function UserMenu() {
               </Avatar>
               <div className="flex-1 min-w-0">
                 <span
-                  className="text-foreground block truncate"
-                  style={typo.label}
+                  className="text-foreground block truncate typo-label"
                 >
                   {user.name}
                 </span>
                 <span
-                  className="text-muted-foreground block truncate"
-                  style={typo.helper}
+                  className="text-muted-foreground block truncate typo-helper"
                 >
                   {user.email}
                 </span>
@@ -165,21 +162,19 @@ export function UserMenu() {
                 setSettingsInitialSection(undefined);
                 setSettingsOpen(true);
               }}
-              style={typo.label}
+              className="typo-label"
             >
-              <Settings className="size-4" />
+              <Settings className="size-4 typo-label" />
               Settings
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setPricingOpen(true)}
-              style={typo.label}
             >
-              <CreditCard className="size-4" />
+              <CreditCard className="size-4 typo-label" />
               Pricing Plan
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setIntegrationsOpen(true)}
-              style={typo.label}
             >
               <Blocks className="size-4" />
               Integrations
@@ -193,7 +188,7 @@ export function UserMenu() {
               logout();
             }}
             variant="destructive"
-            style={typo.label}
+            className="typo-label"
           >
             <LogOut className="size-4" />
             Sign Out

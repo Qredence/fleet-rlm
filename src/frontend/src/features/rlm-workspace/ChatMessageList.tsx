@@ -7,7 +7,6 @@ import type {
   ChatRenderToolState,
   RuntimeContext,
 } from "@/lib/data/types";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import {
   mapToolState,
@@ -118,7 +117,7 @@ import {
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
 import { Suggestion } from "@/components/ai-elements/suggestion";
-import { Shimmer } from "@/components/ai-elements/shimmer";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 import { ClarificationCard } from "@/features/rlm-workspace/ClarificationCard";
 import {
   SuggestionIconBolt,
@@ -127,8 +126,11 @@ import {
 } from "@/components/shared/SuggestionIcons";
 
 const MONO_BASE_STYLE = {
-  ...typo.labelRegular,
+  fontSize: "var(--font-text-sm-size)",
+  fontWeight: "var(--font-text-sm-weight)",
   fontFamily: "var(--font-mono)",
+  lineHeight: "var(--font-text-sm-line-height)",
+  letterSpacing: "var(--font-text-sm-tracking)",
 } as const;
 
 const MONO_BASE_MEDIUM_STYLE = {
@@ -137,7 +139,8 @@ const MONO_BASE_MEDIUM_STYLE = {
 } as const;
 
 const DISPLAY_TITLE_STYLE = {
-  ...typo.display,
+  fontSize: "var(--font-heading-xl-size)",
+  fontFamily: "var(--font-sans)",
   fontWeight: "var(--font-weight-medium)",
   lineHeight: "var(--font-heading-xl-line-height)",
   letterSpacing: "var(--font-heading-xl-tracking)",
@@ -145,14 +148,19 @@ const DISPLAY_TITLE_STYLE = {
 } as const;
 
 const DISPLAY_SUBTITLE_STYLE = {
-  ...typo.display,
+  fontSize: "var(--font-heading-xl-size)",
+  fontFamily: "var(--font-sans)",
   fontWeight: "var(--font-weight-normal)",
+  lineHeight: "var(--font-heading-xl-line-height)",
   letterSpacing: "var(--font-heading-xl-tracking)",
   textWrap: "balance",
 } as const;
 
 const SYSTEM_MESSAGE_STYLE = {
-  ...typo.micro,
+  fontSize: "var(--font-text-3xs-size)",
+  fontFamily: "var(--font-sans)",
+  lineHeight: "var(--font-text-3xs-line-height)",
+  letterSpacing: "var(--font-text-3xs-tracking)",
   fontWeight: "var(--font-weight-semibold)",
 } as const;
 import {
@@ -412,8 +420,8 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 item.part.errorText
                   ? "border-destructive/25 bg-destructive/5 text-destructive"
                   : "border-border-subtle/80 bg-muted/15",
+                "typo-label-regular",
               )}
-              style={typo.labelRegular}
             >
               {item.part.errorText ? (
                 item.part.errorText
@@ -502,7 +510,7 @@ function renderToolSession(
                 data-slot="tool-session-item"
               >
                 <div className="space-y-2 py-0.5">
-                  <div className="text-foreground" style={typo.labelRegular}>
+                  <div className="text-foreground typo-label-regular">
                     {toolSessionLine(sessionItem)}
                   </div>
                   {renderToolSessionItemDetails(sessionItem)}
@@ -590,7 +598,7 @@ function renderCompactStatusAlert(
     >
       <AlertDescription>
         <div className="space-y-1">
-          <div style={typo.labelRegular}>{content}</div>
+          <div className="typo-label-regular">{content}</div>
           <RuntimeContextBadge ctx={runtimeContext} />
         </div>
       </AlertDescription>
@@ -616,17 +624,10 @@ function renderAssistantTurn(
 
 function LoadingState() {
   return (
-    <div className="flex flex-col gap-2">
-      <Shimmer
-        as="span"
-        className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground"
-      >
-        Loading
-      </Shimmer>
-      <div className="space-y-1.5">
-        <div className="h-2.5 w-36 rounded-full bg-muted/70" />
-        <div className="h-2.5 w-24 rounded-full bg-muted/45" />
-      </div>
+    <div>
+      <TextShimmer as="span" className="text-sm text-muted-foreground">
+        Generating code...
+      </TextShimmer>
     </div>
   );
 }
@@ -763,8 +764,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
               <SandboxTabContent value="output">
                 {part.errorText ? (
                   <div
-                    className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive"
-                    style={typo.labelRegular}
+                    className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive typo-label-regular"
                   >
                     {part.errorText}
                   </div>
@@ -772,8 +772,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                   <Streamdown content={output} streaming={false} />
                 ) : (
                   <div
-                    className="text-muted-foreground"
-                    style={typo.labelRegular}
+                    className="text-muted-foreground typo-label-regular"
                   >
                     No output yet
                   </div>
@@ -789,8 +788,7 @@ function renderTracePart(part: ChatRenderPart, key: string) {
                   </pre>
                 ) : (
                   <div
-                    className="text-muted-foreground"
-                    style={typo.labelRegular}
+                    className="text-muted-foreground typo-label-regular"
                   >
                     No code captured
                   </div>
@@ -1046,7 +1044,7 @@ export function ChatMessageList({
                       className="size-4 text-muted-foreground"
                       aria-hidden="true"
                     />
-                    <span className="text-muted-foreground" style={typo.label}>
+                    <span className="text-muted-foreground typo-label">
                       View recent conversations
                     </span>
                   </button>

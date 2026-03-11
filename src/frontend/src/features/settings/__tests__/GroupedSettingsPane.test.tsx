@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
+import { GroupedSettingsPane } from "@/features/settings/GroupedSettingsPane";
 
 vi.mock("@/features/settings/useRuntimeSettings", () => ({
   computeRuntimeUpdates: (
@@ -54,7 +54,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
           DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gpt-4o-mini",
           DSPY_LM_MAX_TOKENS: "64000",
           DSPY_LM_API_BASE: "https://litellm.example.com/v1",
-          DSPY_LLM_API_KEY: "sk-test",
+          DSPY_LLM_API_KEY: "[REDACTED:api-key]",
           MODAL_TOKEN_ID: "modal-id",
           MODAL_TOKEN_SECRET: "modal-secret",
           SECRET_NAME: "LITELLM",
@@ -103,10 +103,10 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
   }),
 }));
 
-describe("SettingsPaneContent", () => {
-  it("renders the grouped v0.4.8 settings surface by default", () => {
+describe("GroupedSettingsPane", () => {
+  it("renders the grouped settings surface by default", () => {
     const html = renderToStaticMarkup(
-      <SettingsPaneContent isDark={false} onToggleTheme={vi.fn()} />,
+      <GroupedSettingsPane isDark={false} onToggleTheme={vi.fn()} />,
     );
 
     expect(html).toContain("Theme");
@@ -130,7 +130,7 @@ describe("SettingsPaneContent", () => {
 
   it("renders telemetry-only content when section is telemetry", () => {
     const html = renderToStaticMarkup(
-      <SettingsPaneContent
+      <GroupedSettingsPane
         isDark={false}
         onToggleTheme={vi.fn()}
         section="telemetry"
@@ -146,7 +146,7 @@ describe("SettingsPaneContent", () => {
 
   it("renders runtime-only content when section is runtime", () => {
     const html = renderToStaticMarkup(
-      <SettingsPaneContent
+      <GroupedSettingsPane
         isDark={false}
         onToggleTheme={vi.fn()}
         section="runtime"

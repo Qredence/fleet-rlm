@@ -13,13 +13,13 @@ import type { ArtifactActorKind, ExecutionStep } from "@/stores/artifactStore";
 import {
   NODE_WIDTH,
   STEP_TYPE_META,
-} from "@/components/domain/artifacts/GraphStepNode.constants";
+} from "@/features/artifacts/GraphStepNode.constants";
 import {
   GraphStepNode,
   type GraphStepNodeData,
-} from "@/components/domain/artifacts/GraphStepNode";
-import { extractToolBadgeFromStep } from "@/components/domain/artifacts/graphToolBadge";
-import { summarizeArtifactStep } from "@/components/domain/artifacts/parsers/artifactPayloadSummaries";
+} from "@/features/artifacts/GraphStepNode";
+import { extractToolBadgeFromStep } from "@/features/artifacts/graphToolBadge";
+import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 
 interface ArtifactGraphProps {
   steps: ExecutionStep[];

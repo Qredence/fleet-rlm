@@ -1,7 +1,7 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SkillMarkdown } from "@/components/shared/SkillMarkdown";
 import type { ExecutionStep } from "@/stores/artifactStore";
-import { buildArtifactPreviewModel } from "@/components/domain/artifacts/parsers/artifactPayloadSummaries";
+import { buildArtifactPreviewModel } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 
 interface ArtifactPreviewProps {
   steps: ExecutionStep[];

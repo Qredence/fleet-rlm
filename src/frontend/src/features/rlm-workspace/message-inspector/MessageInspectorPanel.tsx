@@ -101,16 +101,6 @@ function selectedTurnStatus(
   return "completed";
 }
 
-function selectedTurnDescription(model: AssistantContentModel) {
-  if (model.answer.showStreamingShell) {
-    return "Live trajectory and execution details for the in-progress assistant turn.";
-  }
-  if (model.answer.hasContent) {
-    return "Expanded trajectory, execution details, evidence, and relationships for this assistant response.";
-  }
-  return "Expanded trajectory, execution details, evidence, and relationships for this assistant turn.";
-}
-
 export function MessageInspectorPanel() {
   const messages = useChatStore((state) => state.messages);
   const isStreaming = useChatStore((state) => state.isStreaming);
@@ -184,23 +174,15 @@ export function MessageInspectorPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="px-4 py-4">
-        <Card className="gap-3 rounded-2xl border-border-subtle/80 bg-card/70 shadow-none">
-          <CardHeader className="space-y-3 px-4 pt-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-1">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Message Inspector
-                </div>
-                <CardTitle className="text-sm font-medium text-foreground">
-                  {selectedTurn.isPendingShell
-                    ? "Assistant turn in progress"
-                    : "Selected assistant turn"}
-                </CardTitle>
-                <CardDescription className="max-w-prose text-sm leading-6">
-                  {selectedTurnDescription(model)}
-                </CardDescription>
-              </div>
+      <div className="px-4 py-2">
+        <Card className="gap-0 rounded-xl border-border-subtle/80 bg-card/70 shadow-none">
+          <CardHeader className="space-y-2 px-3 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-sm font-medium text-foreground">
+                {selectedTurn.isPendingShell
+                  ? "Assistant turn in progress"
+                  : "Selected assistant turn"}
+              </CardTitle>
               <Badge variant={turnStatus.variant} className="rounded-full">
                 {turnStatus.label}
               </Badge>
@@ -245,7 +227,7 @@ export function MessageInspectorPanel() {
         onValueChange={(value) => setInspectorTab(value as InspectorTab)}
         className="min-h-0 flex-1 gap-0"
       >
-        <div className="px-4 py-3">
+        <div className="px-4 py-2">
           <TabsList className="flex w-full">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>

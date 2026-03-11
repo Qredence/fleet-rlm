@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { nanoid } from "nanoid";
+import { FlaskConical } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -7,6 +8,7 @@ import {
   type AttachedFile,
 } from "@/components/chat/input/AttachmentChip";
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
+import { Button } from "@/components/ui/button";
 import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
 import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown";
 import { SendButton } from "@/components/chat/input/SendButton";
@@ -20,6 +22,11 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
+import {
+  PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
+  PROMPT_INPUT_ACTION_BUTTON_SIZE,
+} from "@/components/chat/input/composerActionStyles";
+import { cn } from "@/lib/utils/cn";
 
 interface ChatInputProps {
   value: string;
@@ -51,6 +58,27 @@ function revokeAttachmentPreview(attachment: AttachedFile) {
   if (attachment.previewUrl) {
     URL.revokeObjectURL(attachment.previewUrl);
   }
+}
+
+function DaytonaRuntimeIndicator() {
+  return (
+    <Button
+      type="button"
+      size={PROMPT_INPUT_ACTION_BUTTON_SIZE}
+      variant="ghost"
+      disabled
+      className={cn(
+        PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
+        "justify-center gap-2 text-muted-foreground opacity-100",
+      )}
+      aria-label="Daytona runtime: recursive RLM"
+    >
+      <FlaskConical className="size-4 shrink-0" />
+      <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
+        Daytona RLM
+      </span>
+    </Button>
+  );
 }
 
 function ChatInput({
@@ -168,7 +196,9 @@ function ChatInput({
               value={executionMode}
               onChange={onExecutionModeChange}
             />
-          ) : null}
+          ) : (
+            <DaytonaRuntimeIndicator />
+          )}
 
           <SendButton
             disabled={isLoading || !canSubmitMessage}

@@ -27,7 +27,6 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
-import { typo } from "@/lib/config/typo";
 import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -209,7 +208,7 @@ function ConsoleOutput({
           className="size-3.5 text-muted-foreground"
           aria-hidden="true"
         />
-        <span className="text-muted-foreground" style={typo.helper}>
+        <span className="text-muted-foreground typo-helper">
           Console Output
         </span>
         {isRunning && (
@@ -225,7 +224,7 @@ function ConsoleOutput({
             }
           >
             <Circle className="size-2" fill="var(--chart-3)" stroke="none" />
-            <span className="text-chart-3" style={typo.micro}>
+            <span className="text-chart-3 typo-micro">
               Running
             </span>
           </motion.span>
@@ -240,7 +239,7 @@ function ConsoleOutput({
         {output ? (
           <pre style={CONSOLE_OUTPUT_STYLE}>{output}</pre>
         ) : (
-          <span className="text-muted-foreground" style={typo.mono}>
+          <span className="text-muted-foreground typo-mono">
             {">"} Waiting for execution{"\u2026"}
           </span>
         )}
@@ -372,8 +371,8 @@ export function CodeArtifact() {
                 isActive
                   ? "border-accent text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                "typo-helper",
               )}
-              style={typo.helper}
             >
               <FileCode2
                 className={cn(
@@ -441,11 +440,11 @@ export function CodeArtifact() {
 
         <div className="ml-auto flex items-center gap-2">
           {isModified && (
-            <span className="text-accent" style={typo.micro}>
+            <span className="text-accent typo-micro">
               Modified
             </span>
           )}
-          <span className="text-muted-foreground" style={typo.micro}>
+          <span className="text-muted-foreground typo-micro">
             Python 3.12
           </span>
           <button
@@ -457,7 +456,7 @@ export function CodeArtifact() {
             )}
           >
             <Terminal className="size-3 text-muted-foreground" />
-            <span className="text-muted-foreground" style={typo.micro}>
+            <span className="text-muted-foreground typo-micro">
               Console
             </span>
             <motion.span

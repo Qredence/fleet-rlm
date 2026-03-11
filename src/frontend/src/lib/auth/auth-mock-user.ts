@@ -1,4 +1,4 @@
-import type { UserProfile } from "@/hooks/auth-types";
+import type { UserProfile } from "@/lib/auth/types";
 
 const MOCK_USER: UserProfile = {
   id: "usr_01",

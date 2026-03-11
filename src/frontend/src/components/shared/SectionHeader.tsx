@@ -27,7 +27,7 @@ interface SectionHeaderProps {
  * @example
  * ```tsx
  * <SectionHeader icon={<MessageSquare className="text-muted-foreground" />} className="mb-1">
- *   <span className="text-muted-foreground" style={typo.helper}>{data.stepLabel}</span>
+ *   <span className="text-muted-foreground typo-helper">{data.stepLabel}</span>
  * </SectionHeader>
  * ```
  */

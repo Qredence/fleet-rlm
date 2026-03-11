@@ -2,6 +2,7 @@ import type { WsServerMessage } from "@/lib/rlm-api";
 import type {
   DaytonaArtifactSummary,
   DaytonaChildLinkSummary,
+  DaytonaContextSourceSummary,
   DaytonaPromptHandleSummary,
   DaytonaRunNode,
   DaytonaWorkbenchStateData,
@@ -61,6 +62,31 @@ function normalizeWarnings(value: unknown): string[] {
     .map((item) => asText(item))
     .filter((item): item is string => Boolean(item))
     .map((item) => collapseWhitespace(item, ARTIFACT_PREVIEW_LIMIT));
+}
+
+function normalizeContextSource(
+  raw: unknown,
+): DaytonaContextSourceSummary | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const sourceId =
+    asText(record.source_id ?? record.sourceId) ??
+    asText(record.host_path ?? record.hostPath);
+  const hostPath = asText(record.host_path ?? record.hostPath);
+  if (!sourceId || !hostPath) return null;
+  return {
+    sourceId,
+    kind: asText(record.kind) ?? "file",
+    hostPath,
+    stagedPath: asText(record.staged_path ?? record.stagedPath),
+    sourceType: asText(record.source_type ?? record.sourceType),
+    extractionMethod: asText(
+      record.extraction_method ?? record.extractionMethod,
+    ),
+    fileCount: asNumber(record.file_count ?? record.fileCount),
+    skippedCount: asNumber(record.skipped_count ?? record.skippedCount),
+    warnings: normalizeWarnings(record.warnings),
+  };
 }
 
 function normalizePromptHandle(raw: unknown): DaytonaPromptHandleSummary | null {
@@ -344,6 +370,9 @@ function hydrateFromRunResult(
     runId: asText(raw.run_id ?? raw.runId) ?? state.runId,
     repoUrl: asText(raw.repo) ?? state.repoUrl,
     repoRef: asText(raw.ref) ?? state.repoRef ?? null,
+    contextSources: asArray(raw.context_sources ?? raw.contextSources)
+      .map((item) => normalizeContextSource(item))
+      .filter((item): item is DaytonaContextSourceSummary => item !== null),
     task: asText(raw.task) ?? state.task,
     rootId,
     nodes,
@@ -360,6 +389,7 @@ function hydrateFromRunResult(
 export function createInitialDaytonaWorkbenchState(): DaytonaWorkbenchStateData {
   return {
     status: "idle",
+    contextSources: [],
     nodes: {},
     nodeOrder: [],
     timeline: [],
@@ -373,7 +403,12 @@ export function createInitialDaytonaWorkbenchState(): DaytonaWorkbenchStateData 
 
 export function startDaytonaWorkbenchRun(
   _state: DaytonaWorkbenchStateData,
-  input: { task: string; repoUrl: string; repoRef?: string | null },
+  input: {
+    task: string;
+    repoUrl?: string;
+    repoRef?: string | null;
+    contextPaths?: string[];
+  },
 ): DaytonaWorkbenchStateData {
   return {
     ...createInitialDaytonaWorkbenchState(),
@@ -381,6 +416,37 @@ export function startDaytonaWorkbenchRun(
     task: input.task,
     repoUrl: input.repoUrl,
     repoRef: input.repoRef ?? null,
+    contextSources: (input.contextPaths ?? []).map((hostPath, index) => ({
+      sourceId: `pending-${index + 1}`,
+      kind: "local_path",
+      hostPath,
+    })),
+  };
+}
+
+export function failDaytonaWorkbenchRun(
+  state: DaytonaWorkbenchStateData,
+  errorMessage: string,
+): DaytonaWorkbenchStateData {
+  const message = collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) || "Daytona run failed.";
+
+  return {
+    ...state,
+    status: "error",
+    errorMessage: message,
+    summary: {
+      ...state.summary,
+      terminationReason: state.summary?.terminationReason ?? "failed",
+      error: message,
+    },
+    timeline: [
+      ...state.timeline,
+      {
+        id: `local-error-${state.timeline.length + 1}`,
+        kind: "error",
+        text: message,
+      },
+    ],
   };
 }
 
@@ -473,6 +539,12 @@ export function applyDaytonaFrameToWorkbenchState(
     next = hydrateFromRunResult(next, runResult);
   }
 
+  const payloadContextSources = asArray(
+    payload?.context_sources ?? payload?.contextSources,
+  )
+    .map((item) => normalizeContextSource(item))
+    .filter((item): item is DaytonaContextSourceSummary => item !== null);
+
   const statusFromKind =
     frame.data.kind === "final"
       ? "completed"
@@ -504,9 +576,17 @@ export function applyDaytonaFrameToWorkbenchState(
     ...next,
     status: statusFromKind as DaytonaWorkbenchStateData["status"],
     runId: runtimeRunId,
+    daytonaMode:
+      asText(payload?.daytona_mode ?? payload?.daytonaMode) ??
+      asText(runtime?.daytona_mode ?? runtime?.daytonaMode) ??
+      next.daytonaMode,
     rootId,
     selectedNodeId:
       next.selectedNodeId ?? rootId ?? next.nodeOrder[0] ?? null,
+    contextSources:
+      payloadContextSources.length > 0
+        ? payloadContextSources
+        : next.contextSources,
     finalArtifact:
       normalizeArtifact(payload?.final_artifact ?? payload?.finalArtifact) ??
       next.finalArtifact ??

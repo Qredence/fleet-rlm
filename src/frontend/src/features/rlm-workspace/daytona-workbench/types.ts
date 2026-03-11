@@ -9,7 +9,7 @@ export type DaytonaRunStatus =
   | "error"
   | "cancelled";
 
-export type DaytonaDetailTab = "prompts" | "node" | "final";
+export type DaytonaDetailTab = "timeline" | "prompts" | "node" | "final";
 
 export interface DaytonaPromptHandleSummary {
   handleId: string;
@@ -50,6 +50,18 @@ export interface DaytonaArtifactSummary {
   variableName?: string;
   finalizationMode?: string;
   textPreview?: string;
+}
+
+export interface DaytonaContextSourceSummary {
+  sourceId: string;
+  kind: string;
+  hostPath: string;
+  stagedPath?: string;
+  sourceType?: string;
+  extractionMethod?: string;
+  fileCount?: number;
+  skippedCount?: number;
+  warnings?: string[];
 }
 
 export interface DaytonaRunNode {
@@ -99,7 +111,9 @@ export interface DaytonaWorkbenchStateData {
   runId?: string;
   repoUrl?: string;
   repoRef?: string | null;
+  daytonaMode?: string;
   task?: string;
+  contextSources: DaytonaContextSourceSummary[];
   rootId?: string;
   errorMessage?: string | null;
   nodes: Record<string, DaytonaRunNode>;

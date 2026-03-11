@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 
 interface LargeTitleHeaderProps {
@@ -56,11 +55,11 @@ export function LargeTitleHeader({
   if (!isMobile) {
     return (
       <div className="pt-4 md:pt-6 pb-4 border-b border-border-subtle shrink-0 max-w-200 w-full mx-auto px-6">
-        <h2 className="mb-1 text-balance text-foreground" style={typo.h3}>
+        <h2 className="mb-1 text-balance text-foreground typo-h3">
           {title}
         </h2>
         {subtitle && (
-          <p className="text-muted-foreground mt-1" style={typo.caption}>
+          <p className="text-muted-foreground mt-1 typo-caption">
             {subtitle}
           </p>
         )}
@@ -81,7 +80,7 @@ export function LargeTitleHeader({
             : "h-0 border-b-0 opacity-0",
         )}
       >
-        <span className="text-foreground truncate px-4" style={typo.label}>
+        <span className="text-foreground truncate px-4 typo-label">
           {title}
         </span>
       </div>
@@ -95,11 +94,11 @@ export function LargeTitleHeader({
 
       {/* Large title area */}
       <div className="px-4 pt-2 pb-3 w-full">
-        <h2 className="font-app text-foreground text-balance" style={typo.h2}>
+        <h2 className="font-app text-foreground text-balance typo-h2">
           {title}
         </h2>
         {subtitle && (
-          <p className="text-muted-foreground mt-1" style={typo.caption}>
+          <p className="text-muted-foreground mt-1 typo-caption">
             {subtitle}
           </p>
         )}

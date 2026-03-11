@@ -1,29 +1,7 @@
-import {
-  Bot,
-  Cpu,
-  User,
-  Bell,
-  Settings as SettingsIcon,
-  CreditCard,
-  Paintbrush,
-  Database,
-  Info,
-} from "lucide-react";
+import { Bot, Cpu, Bell, Paintbrush } from "lucide-react";
 
-// ── Settings categories ─────────────────────────────────────────────
-export const categories = [
-  { key: "account", label: "Account", icon: User },
-  { key: "billing", label: "Billing", icon: CreditCard },
-  { key: "general", label: "General", icon: SettingsIcon },
-  { key: "notifications", label: "Notifications", icon: Bell },
-  { key: "personalization", label: "Personalization", icon: Paintbrush },
-  { key: "data", label: "Data & Privacy", icon: Database },
-  { key: "about", label: "About", icon: Info },
-] as const;
+// ── Live settings sections ──────────────────────────────────────────
 
-export type Category = (typeof categories)[number]["key"];
-
-// ── Live settings sections (v0.4.8) ────────────────────────────────
 export const settingsSections = [
   { key: "appearance", label: "Appearance", icon: Paintbrush },
   { key: "telemetry", label: "Telemetry", icon: Bell },
@@ -32,3 +10,12 @@ export const settingsSections = [
 ] as const;
 
 export type SettingsSection = (typeof settingsSections)[number]["key"];
+
+/** Per-section description used in dialog headers and page subtitles. */
+export const sectionDescriptions: Record<SettingsSection, string> = {
+  appearance: "Control theme and interface appearance.",
+  telemetry: "Configure anonymous telemetry preferences.",
+  litellm:
+    "Manage LiteLLM-compatible runtime model and provider integration settings.",
+  runtime: "Configure runtime credentials and run Modal/LM connection tests.",
+};

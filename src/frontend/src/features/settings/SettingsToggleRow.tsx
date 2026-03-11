@@ -1,5 +1,5 @@
-import { SettingsRow } from "@/components/shared/SettingsRow";
-import { ToggleSwitch } from "@/components/shared/ToggleSwitch";
+import { SettingsRow } from "@/features/settings/SettingsRow";
+import { Switch } from "@/components/ui/switch";
 
 // ── Toggle row ──────────────────────────────────────────────────────
 interface SettingsToggleRowProps {
@@ -17,7 +17,7 @@ export function SettingsToggleRow({
 }: SettingsToggleRowProps) {
   return (
     <SettingsRow label={label} description={description}>
-      <ToggleSwitch checked={checked} onChange={onChange} />
+      <Switch checked={checked} onCheckedChange={onChange} />
     </SettingsRow>
   );
 }

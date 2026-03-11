@@ -1,7 +1,6 @@
 import { type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { typo } from "@/lib/config/typo";
 import { Badge } from "@/components/ui/badge";
 
 export interface PanelHeaderChipProps {
@@ -55,13 +54,12 @@ export function PanelHeaderChip({
       {icon}
       <span
         data-slot="panel-header-chip-label"
-        className="text-foreground truncate"
-        style={typo.label}
+        className="text-foreground truncate typo-label"
       >
         {label}
       </span>
       {version && (
-        <Badge variant="secondary" className="rounded-full" style={typo.mono}>
+        <Badge variant="secondary" className="rounded-full typo-mono">
           v{version}
         </Badge>
       )}

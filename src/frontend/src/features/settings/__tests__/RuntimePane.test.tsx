@@ -115,10 +115,8 @@ describe("RuntimePane", () => {
     expect(html).toContain(
       "rounded-xl border border-border-subtle/70 bg-muted/15 p-4",
     );
-    expect(html).toContain("sm:col-span-2");
-    expect(html).toContain('data-variant="soft"');
     expect(html).toContain('data-variant="outline"');
-    expect(html).toContain('data-variant="fill"');
-    expect(html).toContain("w-full justify-center rounded-lg sm:col-span-2");
+    expect(html).toContain('data-variant="secondary"');
+    expect(html).toContain("w-full justify-center rounded-lg");
   });
 });

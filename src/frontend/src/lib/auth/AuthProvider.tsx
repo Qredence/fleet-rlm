@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
-import { AuthContext } from "@/hooks/auth-context";
-import { MOCK_USER } from "@/hooks/auth-mock-user";
+import { AuthContext } from "@/lib/auth/auth-context";
+import { MOCK_USER } from "@/lib/auth/auth-mock-user";
 import { getAccessToken } from "@/lib/auth/tokenStore";
 import {
   initializeEntraSession,
@@ -14,7 +14,7 @@ import type {
   AuthContextValue,
   PlanTier,
   UserProfile,
-} from "@/hooks/auth-types";
+} from "@/lib/auth/types";
 
 interface AuthProviderProps {
   children: ReactNode;

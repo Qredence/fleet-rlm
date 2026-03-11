@@ -9,7 +9,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useReducedMotion } from "motion/react";
 import { Search, HardDrive, TriangleAlert, RefreshCw } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import type { FsNode } from "@/lib/data/types";
 import { useFilesystem } from "@/hooks/useFilesystem";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -93,8 +92,7 @@ export function VolumesBrowser() {
       {/* Expand / collapse + refresh */}
       <div className="flex items-center justify-between mb-3">
         <div
-          className="flex items-center gap-1 text-muted-foreground"
-          style={typo.helper}
+          className="flex items-center gap-1 text-muted-foreground typo-helper"
         >
           <HardDrive className="w-3.5 h-3.5" />
           <span>Modal Volume</span>
@@ -116,8 +114,8 @@ export function VolumesBrowser() {
             className={cn(
               "px-0 h-auto text-muted-foreground hover:text-foreground",
               isMobile && "touch-target px-2",
+              "typo-helper",
             )}
-            style={typo.helper}
             onClick={expandAllFs}
           >
             Expand
@@ -128,8 +126,8 @@ export function VolumesBrowser() {
             className={cn(
               "px-0 h-auto text-muted-foreground hover:text-foreground",
               isMobile && "touch-target px-2",
+              "typo-helper",
             )}
-            style={typo.helper}
             onClick={collapseAllFs}
           >
             Collapse
@@ -144,8 +142,7 @@ export function VolumesBrowser() {
           onChange={(e) => setFsSearch(e.target.value)}
           placeholder="Search files…"
           aria-label="Search files"
-          className={cn("pl-9", isMobile && "touch-target")}
-          style={typo.label}
+          className={cn("pl-9 typo-label", isMobile && "touch-target")}
         />
       </div>
     </div>
@@ -173,8 +170,8 @@ export function VolumesBrowser() {
           {isDegraded ? (
             <Alert className={cn("mb-3", isMobile ? "mx-4" : "mx-6")}>
               <TriangleAlert className="text-muted-foreground" />
-              <AlertTitle style={typo.label}>Volume API unavailable</AlertTitle>
-              <AlertDescription style={typo.caption}>
+              <AlertTitle className="typo-label">Volume API unavailable</AlertTitle>
+              <AlertDescription className="typo-caption">
                 {filesystemDegradedReason ??
                   "The backend volume endpoint is unavailable right now."}
               </AlertDescription>
@@ -183,8 +180,7 @@ export function VolumesBrowser() {
 
           {isLoading && filesystem.length === 0 ? (
             <div
-              className="flex items-center justify-center py-12 text-muted-foreground"
-              style={typo.label}
+              className="flex items-center justify-center py-12 text-muted-foreground typo-label"
             >
               Loading volume tree…
             </div>
@@ -207,7 +203,7 @@ export function VolumesBrowser() {
 
       {/* Footer */}
       <div className="px-4 md:px-6 py-3 border-t border-border-subtle shrink-0">
-        <span className="text-muted-foreground" style={typo.helper}>
+        <span className="text-muted-foreground typo-helper">
           {fsStats.volumes} volumes · {fsStats.totalFiles} files
           {filesystemDataSource !== "mock" &&
             filesystemDataSource !== "fallback" && <> · Live</>}

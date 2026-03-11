@@ -13,6 +13,7 @@ export interface WsConnectionOptions {
   maxRetries?: number; // default 5
   initialBackoff?: number; // default 1000ms
   maxBackoff?: number; // default 30000ms
+  firstFrameTimeoutMs?: number; // default 15000ms for request/response streams
 }
 
 export interface WsMessageRequest {
@@ -25,6 +26,7 @@ export interface WsMessageRequest {
   runtime_mode?: WsRuntimeMode;
   repo_url?: string | null;
   repo_ref?: string | null;
+  context_paths?: string[] | null;
   max_depth?: number | null;
   batch_concurrency?: number | null;
   analytics_enabled?: boolean;
@@ -89,6 +91,7 @@ export interface WsRuntimeContext {
   volume_name?: string;
   execution_mode?: string;
   runtime_mode?: string;
+  daytona_mode?: string;
   sandbox_id?: string;
 }
 

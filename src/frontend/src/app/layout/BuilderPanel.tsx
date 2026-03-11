@@ -1,7 +1,7 @@
 import { X, PanelRight } from "lucide-react";
 import { useCallback } from "react";
-import { typo } from "@/lib/config/typo";
 import { useNavigationStore } from "@/stores/navigationStore";
+import { useChatStore } from "@/stores/chatStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -17,6 +17,7 @@ import {
   type CanvasMode,
 } from "@/features/artifacts/CanvasSwitcher";
 import { FileDetail } from "@/features/artifacts/FileDetail";
+import { DaytonaWorkbench } from "@/features/rlm-workspace/daytona-workbench/DaytonaWorkbench";
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
 import {
   isRlmCoreEnabled,
@@ -36,10 +37,10 @@ function UnsupportedState({
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
         <PanelRight className="h-6 w-6 text-muted-foreground" />
       </div>
-      <p className="mb-1 text-foreground" style={typo.label}>
+      <p className="mb-1 text-foreground typo-label">
         {sectionLabel} unavailable
       </p>
-      <p className="text-muted-foreground" style={typo.caption}>
+      <p className="text-muted-foreground typo-caption">
         {reason || "This functionality is currently disabled or unsupported."}
       </p>
     </div>
@@ -52,10 +53,10 @@ function EmptyCanvas() {
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
         <PanelRight className="h-6 w-6 text-muted-foreground" />
       </div>
-      <p className="mb-1 text-foreground" style={typo.label}>
+      <p className="mb-1 text-foreground typo-label">
         No active panel
       </p>
-      <p className="text-muted-foreground" style={typo.caption}>
+      <p className="text-muted-foreground typo-caption">
         Open a file in Volumes or select an assistant response to inspect it.
       </p>
     </div>
@@ -86,11 +87,16 @@ function getHeaderLabel(mode: CanvasMode): string {
 
 export function BuilderPanel() {
   const { activeNav, closeCanvas, selectedFileNode } = useNavigationStore();
+  const runtimeMode = useChatStore((state) => state.runtimeMode);
   const { navigateTo } = useAppNavigate();
   const isMobile = useIsMobile();
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
+  const showDaytonaWorkbench =
+    activeNav === "workspace" &&
+    !isUnsupportedNav &&
+    runtimeMode === "daytona_pilot";
 
   const showInspector = activeNav === "workspace" && !isUnsupportedNav;
   const showFileDetail =
@@ -138,7 +144,9 @@ export function BuilderPanel() {
                   Workspace
                 </div>
                 <div className="truncate text-sm font-medium text-foreground">
-                  Message Inspector
+                  {showDaytonaWorkbench
+                    ? "Daytona Workbench"
+                    : "Message Inspector"}
                 </div>
               </div>
             ) : (
@@ -186,8 +194,14 @@ export function BuilderPanel() {
             />
           </ErrorBoundary>
         ) : showInspector ? (
-          <ErrorBoundary name="Message Inspector">
-            <MessageInspectorPanel />
+          <ErrorBoundary
+            name={showDaytonaWorkbench ? "Daytona Workbench" : "Message Inspector"}
+          >
+            {showDaytonaWorkbench ? (
+              <DaytonaWorkbench />
+            ) : (
+              <MessageInspectorPanel />
+            )}
           </ErrorBoundary>
         ) : showFileDetail && selectedFileNode ? (
           <ErrorBoundary name="File Detail">

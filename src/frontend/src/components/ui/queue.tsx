@@ -35,7 +35,6 @@ import {
   CollapsibleContent,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils/cn";
-import { typo } from "@/lib/config/typo";
 
 // ── Queue (root) ────────────────────────────────────────────────────
 
@@ -132,11 +131,11 @@ function QueueSectionLabel({
       data-slot="queue-section-label"
       className={cn("flex items-center gap-2", className)}
     >
-      <span className="text-foreground" style={typo.label}>
+      <span className="text-foreground typo-label">
         {label}
       </span>
       {count != null && (
-        <span className="text-muted-foreground" style={typo.helper}>
+        <span className="text-muted-foreground typo-helper">
           {count}
         </span>
       )}
@@ -258,8 +257,8 @@ function QueueItemContent({
         "flex-1 min-w-0",
         completed ? "text-foreground" : "text-foreground",
         className,
+        "typo-label",
       )}
-      style={typo.label}
     >
       {children}
     </span>
@@ -286,8 +285,8 @@ function QueueItemDescription({
         "w-full pl-6",
         completed ? "text-muted-foreground" : "text-muted-foreground/70",
         className,
+        "typo-caption",
       )}
-      style={typo.caption}
     >
       {children}
     </span>

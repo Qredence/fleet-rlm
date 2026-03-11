@@ -10,8 +10,8 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { GitBranch } from "lucide-react";
-import { ArtifactGraph } from "@/components/domain/artifacts/ArtifactGraph";
-import { summarizeArtifactStep } from "@/components/domain/artifacts/parsers/artifactPayloadSummaries";
+import { ArtifactGraph } from "@/features/artifacts/ArtifactGraph";
+import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 import type { ExecutionStep } from "@/stores/artifactStore";
 import { stringifyValue } from "../utils/inspector-utils";
 import { DetailBlock } from "../components/inspector-components";

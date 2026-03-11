@@ -13,12 +13,13 @@ import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
 import { DaytonaSetupCard } from "@/features/rlm-workspace/DaytonaSetupCard";
 import { ConversationHistory } from "@/features/rlm-workspace/ConversationHistory";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
-import { DaytonaWorkbench } from "@/features/rlm-workspace/daytona-workbench/DaytonaWorkbench";
+import { useDaytonaWorkbenchStore } from "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore";
 import {
   detectDaytonaRepoContext,
   normalizeDaytonaRepoUrl,
   resolveDaytonaRepoContext,
 } from "@/features/rlm-workspace/daytonaRepoContext";
+import { parseDaytonaContextPaths } from "@/features/rlm-workspace/daytonaSourceContext";
 import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
@@ -67,6 +68,10 @@ export function RlmWorkspace() {
   const setDaytonaRepoUrl = useChatStore((state) => state.setDaytonaRepoUrl);
   const daytonaRepoRef = useChatStore((state) => state.daytonaRepoRef);
   const setDaytonaRepoRef = useChatStore((state) => state.setDaytonaRepoRef);
+  const daytonaContextPaths = useChatStore((state) => state.daytonaContextPaths);
+  const setDaytonaContextPaths = useChatStore(
+    (state) => state.setDaytonaContextPaths,
+  );
   const daytonaMaxDepth = useChatStore((state) => state.daytonaMaxDepth);
   const setDaytonaMaxDepth = useChatStore((state) => state.setDaytonaMaxDepth);
   const daytonaBatchConcurrency = useChatStore(
@@ -74,6 +79,13 @@ export function RlmWorkspace() {
   );
   const setDaytonaBatchConcurrency = useChatStore(
     (state) => state.setDaytonaBatchConcurrency,
+  );
+  const activeDaytonaRunStatus = useDaytonaWorkbenchStore((state) => state.status);
+  const activeDaytonaRunRepoUrl = useDaytonaWorkbenchStore(
+    (state) => state.repoUrl,
+  );
+  const activeDaytonaRunContextSources = useDaytonaWorkbenchStore(
+    (state) => state.contextSources,
   );
   const detectedDaytonaRepoContext =
     runtimeMode === "daytona_pilot"
@@ -94,8 +106,17 @@ export function RlmWorkspace() {
           promptText: inputValue,
         })
       : null;
+  const parsedDaytonaContextPaths =
+    runtimeMode === "daytona_pilot"
+      ? parseDaytonaContextPaths(daytonaContextPaths)
+      : [];
   const canSubmitDaytonaRun =
-    runtimeMode !== "daytona_pilot" || resolvedDaytonaRepoContext != null;
+    runtimeMode !== "daytona_pilot" || !hasInvalidManualDaytonaRepoOverride;
+  const showActiveDaytonaRunContext =
+    runtimeMode === "daytona_pilot" &&
+    (activeDaytonaRunStatus === "bootstrapping" ||
+      activeDaytonaRunStatus === "running" ||
+      activeDaytonaRunStatus === "cancelling");
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
@@ -113,7 +134,14 @@ export function RlmWorkspace() {
         executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
         runtimeMode,
         repoUrl: effectiveDaytonaRepoUrl,
-        repoRef: runtimeMode === "daytona_pilot" ? daytonaRepoRef : undefined,
+        repoRef:
+          runtimeMode === "daytona_pilot" && effectiveDaytonaRepoUrl
+            ? daytonaRepoRef
+            : undefined,
+        contextPaths:
+          runtimeMode === "daytona_pilot"
+            ? parsedDaytonaContextPaths
+            : undefined,
         maxDepth: runtimeMode === "daytona_pilot" ? daytonaMaxDepth : undefined,
         batchConcurrency:
           runtimeMode === "daytona_pilot"
@@ -137,6 +165,7 @@ export function RlmWorkspace() {
       runtimeMode,
       resolvedDaytonaRepoContext,
       daytonaRepoRef,
+      parsedDaytonaContextPaths,
       daytonaMaxDepth,
       daytonaBatchConcurrency,
     ],
@@ -250,7 +279,7 @@ export function RlmWorkspace() {
   const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;
-  const showDaytonaWorkbench = runtimeMode === "daytona_pilot";
+  const showDaytonaSetup = runtimeMode === "daytona_pilot";
 
   const composer = (
     <ChatInput
@@ -278,119 +307,90 @@ export function RlmWorkspace() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
-      {showDaytonaWorkbench ? (
-        <>
-          <div className="shrink-0 border-b border-border-subtle/80 bg-background/95 px-4 py-4 md:px-6">
-            <div className="mx-auto flex w-full max-w-200 flex-col gap-4">
-              {showRuntimeWarning ? (
-                <Alert className="border-accent/25 bg-accent/5 text-foreground">
-                  <TriangleAlert className="size-4" />
-                  <AlertTitle>Runtime warning</AlertTitle>
-                  <AlertDescription>
-                    <div className="space-y-3">
-                      <p>{runtimeGuidance[0]}</p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-lg"
-                        onClick={handleOpenRuntimeSettings}
-                      >
-                        Open Runtime Settings
-                      </Button>
-                    </div>
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-              <DaytonaSetupCard
-                manualRepoUrl={daytonaRepoUrl}
-                onManualRepoUrlChange={setDaytonaRepoUrl}
-                repoRef={daytonaRepoRef}
-                onRepoRefChange={setDaytonaRepoRef}
-                maxDepth={daytonaMaxDepth}
-                onMaxDepthChange={setDaytonaMaxDepth}
-                batchConcurrency={daytonaBatchConcurrency}
-                onBatchConcurrencyChange={setDaytonaBatchConcurrency}
-                detectedRepoContext={detectedDaytonaRepoContext}
-                resolvedRepoContext={resolvedDaytonaRepoContext}
-                hasInvalidManualOverride={hasInvalidManualDaytonaRepoOverride}
+      {/* Messages */}
+      <div className="flex-1 min-h-0">
+        <ChatMessageList
+          messages={messages}
+          isTyping={isTyping}
+          isMobile={isMobile}
+          scrollRef={scrollRef}
+          contentRef={contentRef}
+          isAtBottom={isAtBottom}
+          scrollToBottom={scrollToBottom}
+          onSuggestionClick={setInputValue}
+          onResolveHitl={resolveHitl}
+          onResolveClarification={resolveClarification}
+          showHistory={showHistory}
+          onToggleHistory={handleToggleHistory}
+          hasHistory={conversations.length > 0}
+          historyPanel={
+            showHistory ? (
+              <ConversationHistory
+                conversations={conversations}
+                onSelect={handleSelectConversation}
+                onDelete={deleteConversation}
+                onClearAll={clearHistory}
+                onClose={handleCloseHistory}
               />
-              <div className="rounded-card border border-border-subtle/80 bg-card p-3 shadow-sm">
-                {composer}
-              </div>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden px-4 py-4 md:px-6">
-            <div className="mx-auto flex h-full w-full max-w-200 min-h-0">
-              <DaytonaWorkbench />
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          {/* Messages */}
-          <div className="flex-1 min-h-0">
-            <ChatMessageList
-              messages={messages}
-              isTyping={isTyping}
-              isMobile={isMobile}
-              scrollRef={scrollRef}
-              contentRef={contentRef}
-              isAtBottom={isAtBottom}
-              scrollToBottom={scrollToBottom}
-              onSuggestionClick={setInputValue}
-              onResolveHitl={resolveHitl}
-              onResolveClarification={resolveClarification}
-              showHistory={showHistory}
-              onToggleHistory={handleToggleHistory}
-              hasHistory={conversations.length > 0}
-              historyPanel={
-                showHistory ? (
-                  <ConversationHistory
-                    conversations={conversations}
-                    onSelect={handleSelectConversation}
-                    onDelete={deleteConversation}
-                    onClearAll={clearHistory}
-                    onClose={handleCloseHistory}
-                  />
-                ) : null
-              }
-            />
-          </div>
+            ) : null
+          }
+        />
+      </div>
 
-          {/* Input composer */}
-          <div
-            className={cn(
-              "sticky bottom-0 z-10 shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 md:px-6",
-              hasMessages || showRuntimeWarning ? "pt-5" : "pt-2",
-            )}
-          >
-            <div className="mx-auto w-full max-w-200">
-              <div className="flex flex-col gap-4">
-                {showRuntimeWarning ? (
-                  <Alert className="border-accent/25 bg-accent/5 text-foreground">
-                    <TriangleAlert className="size-4" />
-                    <AlertTitle>Runtime warning</AlertTitle>
-                    <AlertDescription>
-                      <div className="space-y-3">
-                        <p>{runtimeGuidance[0]}</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="rounded-lg"
-                          onClick={handleOpenRuntimeSettings}
-                        >
-                          Open Runtime Settings
-                        </Button>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                <div className="mx-auto w-full max-w-175">{composer}</div>
+      {/* Input composer */}
+      <div
+        className={cn(
+          "sticky bottom-0 z-10 shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 md:px-6",
+          hasMessages || showRuntimeWarning || showDaytonaSetup ? "pt-5" : "pt-2",
+        )}
+      >
+        <div className="mx-auto w-full max-w-200">
+          <div className="flex flex-col gap-4">
+            {showRuntimeWarning ? (
+              <Alert className="border-accent/25 bg-accent/5 text-foreground">
+                <TriangleAlert className="size-4" />
+                <AlertTitle>Runtime warning</AlertTitle>
+                <AlertDescription>
+                  <div className="space-y-3">
+                    <p>{runtimeGuidance[0]}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={handleOpenRuntimeSettings}
+                    >
+                      Open Runtime Settings
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {showDaytonaSetup ? (
+              <div className="mx-auto w-full max-w-175">
+                <DaytonaSetupCard
+                  manualRepoUrl={daytonaRepoUrl}
+                  onManualRepoUrlChange={setDaytonaRepoUrl}
+                  contextPaths={daytonaContextPaths}
+                  onContextPathsChange={setDaytonaContextPaths}
+                  repoRef={daytonaRepoRef}
+                  onRepoRefChange={setDaytonaRepoRef}
+                  maxDepth={daytonaMaxDepth}
+                  onMaxDepthChange={setDaytonaMaxDepth}
+                  batchConcurrency={daytonaBatchConcurrency}
+                  onBatchConcurrencyChange={setDaytonaBatchConcurrency}
+                  detectedRepoContext={detectedDaytonaRepoContext}
+                  resolvedRepoContext={resolvedDaytonaRepoContext}
+                  hasInvalidManualOverride={hasInvalidManualDaytonaRepoOverride}
+                  activeRunRepoUrl={activeDaytonaRunRepoUrl}
+                  activeRunContextSources={activeDaytonaRunContextSources}
+                  isActiveRunContextVisible={showActiveDaytonaRunContext}
+                />
               </div>
-            </div>
+            ) : null}
+            <div className="mx-auto w-full max-w-175">{composer}</div>
           </div>
-        </>
-      )}
+        </div>
+      </div>
     </div>
   );
 }

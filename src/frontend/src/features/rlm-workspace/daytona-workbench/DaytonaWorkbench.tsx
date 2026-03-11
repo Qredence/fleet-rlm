@@ -10,9 +10,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils/cn";
+import { buildDaytonaSourceStateLabel } from "@/features/rlm-workspace/daytonaSourceContext";
 import { useDaytonaWorkbenchStore } from "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore";
 import type {
   DaytonaArtifactSummary,
+  DaytonaContextSourceSummary,
   DaytonaPromptHandleSummary,
   DaytonaRunNode,
   DaytonaTimelineEntry,
@@ -161,6 +163,65 @@ function ArtifactPanel({ artifact }: { artifact?: DaytonaArtifactSummary | null 
   );
 }
 
+function SourceList({
+  repoUrl,
+  repoRef,
+  contextSources,
+}: {
+  repoUrl?: string;
+  repoRef?: string | null;
+  contextSources: DaytonaContextSourceSummary[];
+}) {
+  if (!repoUrl && contextSources.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">No external sources</p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {repoUrl ? (
+        <div className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">Repo</Badge>
+            {repoRef ? <Badge variant="outline">Ref {repoRef}</Badge> : null}
+          </div>
+          <p className="mt-2 text-sm font-medium text-foreground break-all">
+            {repoUrl}
+          </p>
+        </div>
+      ) : null}
+
+      {contextSources.map((source) => (
+        <div
+          key={source.sourceId}
+          className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">
+              {source.kind === "directory" ? "Directory" : "Local context"}
+            </Badge>
+            {source.fileCount != null ? (
+              <Badge variant="outline">{source.fileCount} files</Badge>
+            ) : null}
+            {source.skippedCount ? (
+              <Badge variant="outline">{source.skippedCount} skipped</Badge>
+            ) : null}
+          </div>
+          <p className="mt-2 text-sm font-medium text-foreground break-all">
+            {source.hostPath}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+            {source.sourceType ? <span>{source.sourceType}</span> : null}
+            {source.extractionMethod ? <span>{source.extractionMethod}</span> : null}
+            {source.stagedPath ? <span>{source.stagedPath}</span> : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TimelineRow({
   entry,
   isSelected,
@@ -214,7 +275,9 @@ export function DaytonaWorkbench() {
     runId,
     repoUrl,
     repoRef,
+    daytonaMode,
     task,
+    contextSources,
     rootId,
     nodes,
     timeline,
@@ -233,67 +296,71 @@ export function DaytonaWorkbench() {
     (selectedNodeId ? nodes[selectedNodeId] : undefined) ??
     (rootId ? nodes[rootId] : undefined) ??
     (firstTreeNodeId ? nodes[firstTreeNodeId] : undefined);
+  const sourceStateLabel = buildDaytonaSourceStateLabel({
+    hasRepo: Boolean(repoUrl),
+    hasContext: contextSources.length > 0,
+  });
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col gap-4"
+      className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden"
       data-testid="daytona-workbench"
     >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardHeader className="gap-2">
-            <CardDescription>Runtime state</CardDescription>
-            <div className="flex items-center gap-2">
-              <Badge variant={runStatusVariant(status)}>{status}</Badge>
-              {summary?.terminationReason ? (
-                <Badge variant="outline">{summary.terminationReason}</Badge>
-              ) : null}
+      <Card className="shrink-0">
+        <CardHeader className="gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-base">Daytona Workbench</CardTitle>
+            <Badge variant={runStatusVariant(status)}>{status}</Badge>
+            <Badge variant="secondary">{sourceStateLabel}</Badge>
+            {daytonaMode ? <Badge variant="outline">{daytonaMode}</Badge> : null}
+            {summary?.terminationReason ? (
+              <Badge variant="outline">{summary.terminationReason}</Badge>
+            ) : null}
+          </div>
+          <CardDescription>
+            Live recursive Daytona workspace details, grounded in metadata and previews.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              External sources
+            </p>
+            <div className="pt-1">
+              <SourceList
+                repoUrl={repoUrl}
+                repoRef={repoRef}
+                contextSources={contextSources}
+              />
             </div>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="gap-2">
-            <CardDescription>Repository</CardDescription>
-            <CardTitle className="text-sm font-medium break-all">
-              {repoUrl ?? "Waiting for repo"}
-            </CardTitle>
-            {repoRef ? (
-              <CardDescription>Ref {repoRef}</CardDescription>
-            ) : null}
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="gap-2">
-            <CardDescription>Run graph</CardDescription>
-            <CardTitle className="text-sm font-medium">
-              {Object.keys(nodes).length} nodes
-            </CardTitle>
-            {runId ? (
-              <CardDescription className="break-all">{runId}</CardDescription>
-            ) : null}
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="gap-2">
-            <CardDescription>Current task</CardDescription>
-            <CardTitle className="text-sm font-medium">
+            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+              <span>{Object.keys(nodes).length} nodes</span>
+              {summary?.durationMs != null ? <span>{summary.durationMs} ms</span> : null}
+            </div>
+          </div>
+          <Separator />
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Task
+            </p>
+            <p className="text-sm text-foreground">
               {task ?? "Send a Daytona task to begin."}
-            </CardTitle>
-            {summary?.durationMs != null ? (
-              <CardDescription>{summary.durationMs} ms</CardDescription>
+            </p>
+            {runId ? (
+              <p className="text-xs text-muted-foreground break-all">{runId}</p>
             ) : null}
-          </CardHeader>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {errorMessage ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div className="shrink-0 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {errorMessage}
         </div>
       ) : null}
 
       {summary?.warnings?.length ? (
-        <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+        <div className="shrink-0 rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
           <p className="font-medium">Cancellation warnings</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             {summary.warnings.map((warning) => (
@@ -303,187 +370,187 @@ export function DaytonaWorkbench() {
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_24rem]">
-        <Card className="min-h-0" data-testid="daytona-run-tree">
-          <CardHeader className="gap-2">
-            <CardTitle className="text-base">Run tree</CardTitle>
-            <CardDescription>
-              Recursive Daytona nodes and child links.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1 pb-4">
-            <ScrollArea className="h-full pr-2">
-              <div className="space-y-2">
-                {treeOrder.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Start a Daytona run to see the recursive node tree.
-                  </p>
-                ) : (
-                  treeOrder.map((nodeId) => {
-                    const node = nodes[nodeId];
-                    if (!node) return null;
-                    return (
-                      <button
-                        key={node.nodeId}
-                        type="button"
-                        onClick={() => selectNode(node.nodeId)}
-                        className={cn(
-                          "w-full rounded-xl border px-3 py-3 text-left transition-colors",
-                          selectedNode?.nodeId === node.nodeId
-                            ? "border-accent bg-accent/10"
-                            : "border-border-subtle/80 bg-muted/15 hover:bg-muted/35",
-                        )}
-                        style={{ marginLeft: `${node.depth * 12}px` }}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium text-foreground">
-                            {node.task}
-                          </span>
-                          <Badge variant={nodeStatusVariant(node.status)}>
-                            {node.status}
-                          </Badge>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                          <span>depth {node.depth}</span>
-                          <span>{node.childLinks.length} child links</span>
-                          {node.warnings?.length ? (
-                            <span>{node.warnings.length} warnings</span>
-                          ) : null}
-                          {node.promptHandles.length > 0 ? (
-                            <span>{node.promptHandles.length} prompts</span>
-                          ) : null}
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        <Card className="min-h-0" data-testid="daytona-timeline">
-          <CardHeader className="gap-2">
-            <CardTitle className="text-base">Live timeline</CardTitle>
-            <CardDescription>
-              Structured run events streamed from the Daytona runtime.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1 pb-4">
-            <ScrollArea className="h-full pr-2">
-              <div className="space-y-3">
-                {timeline.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Timeline events will appear here during the Daytona run.
-                  </p>
-                ) : (
-                  timeline.map((entry) => (
-                    <TimelineRow
-                      key={entry.id}
-                      entry={entry}
-                      isSelected={selectedNode?.nodeId != null && entry.nodeId === selectedNode.nodeId}
-                      onSelect={() => {
-                        if (entry.nodeId) selectNode(entry.nodeId);
-                      }}
-                    />
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        <Card className="min-h-0" data-testid="daytona-detail-tabs">
-          <CardHeader className="gap-2">
-            <CardTitle className="text-base">Details</CardTitle>
-            <CardDescription>
-              Prompt objects, selected node details, and the final artifact.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1 pb-4">
-            <Tabs
-              className="h-full"
-              value={selectedTab}
-              onValueChange={(value) => selectTab(value as "prompts" | "node" | "final")}
-            >
-              <TabsList className="w-full">
-                <TabsTrigger value="prompts">Prompt objects</TabsTrigger>
-                <TabsTrigger value="node">Node</TabsTrigger>
-                <TabsTrigger value="final">Final</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="prompts" className="h-full">
-                <ScrollArea className="h-full pr-2">
-                  <PromptHandleList handles={selectedNode?.promptHandles ?? []} />
-                </ScrollArea>
-              </TabsContent>
-
-              <TabsContent value="node" className="h-full">
-                <ScrollArea className="h-full pr-2">
-                  {selectedNode ? (
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-sm font-semibold text-foreground">
-                            {selectedNode.task}
-                          </h3>
-                          <Badge variant={nodeStatusVariant(selectedNode.status)}>
-                            {selectedNode.status}
-                          </Badge>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                          <span>node {selectedNode.nodeId}</span>
-                          {selectedNode.parentId ? (
-                            <span>parent {selectedNode.parentId}</span>
-                          ) : null}
-                          <span>depth {selectedNode.depth}</span>
-                          {selectedNode.sandboxId ? (
-                            <span>sandbox {selectedNode.sandboxId}</span>
-                          ) : null}
-                        </div>
+      <Card
+        className="flex min-h-0 flex-[0.95] flex-col"
+        data-testid="daytona-run-tree"
+      >
+        <CardHeader className="gap-2">
+          <CardTitle className="text-base">Run tree</CardTitle>
+          <CardDescription>
+            Recursive nodes, child links, and status transitions.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="min-h-0 flex-1 pb-4">
+          <ScrollArea className="h-full pr-2">
+            <div className="space-y-2">
+              {treeOrder.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Start a Daytona run to see the recursive node tree.
+                </p>
+              ) : (
+                treeOrder.map((nodeId) => {
+                  const node = nodes[nodeId];
+                  if (!node) return null;
+                  return (
+                    <button
+                      key={node.nodeId}
+                      type="button"
+                      onClick={() => selectNode(node.nodeId)}
+                      className={cn(
+                        "w-full rounded-xl border px-3 py-3 text-left transition-colors",
+                        selectedNode?.nodeId === node.nodeId
+                          ? "border-accent bg-accent/10"
+                          : "border-border-subtle/80 bg-muted/15 hover:bg-muted/35",
+                      )}
+                      style={{ marginLeft: `${node.depth * 10}px` }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-foreground">
+                          {node.task}
+                        </span>
+                        <Badge variant={nodeStatusVariant(node.status)}>
+                          {node.status}
+                        </Badge>
                       </div>
+                      <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                        <span>depth {node.depth}</span>
+                        <span>{node.childLinks.length} child links</span>
+                        {node.promptHandles.length > 0 ? (
+                          <span>{node.promptHandles.length} prompts</span>
+                        ) : null}
+                        {node.warnings?.length ? (
+                          <span>{node.warnings.length} warnings</span>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
 
-                      {selectedNode.workspacePath ? (
-                        <>
-                          <Separator />
-                          <div>
-                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                              Workspace
-                            </p>
-                            <p className="mt-2 text-sm text-foreground break-all">
-                              {selectedNode.workspacePath}
-                            </p>
+      <Card
+        className="flex min-h-0 flex-[1.15] flex-col"
+        data-testid="daytona-detail-tabs"
+      >
+        <CardHeader className="gap-2">
+          <CardTitle className="text-base">Details</CardTitle>
+          <CardDescription>
+            Timeline, selected node context, prompt objects, and the final artifact.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="min-h-0 flex-1 pb-4">
+          <Tabs
+            className="flex h-full min-h-0 flex-col"
+            value={selectedTab}
+            onValueChange={(value) =>
+              selectTab(value as "timeline" | "node" | "prompts" | "final")
+            }
+          >
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="timeline">Timeline</TabsTrigger>
+              <TabsTrigger value="node">Node</TabsTrigger>
+              <TabsTrigger value="prompts">Prompts</TabsTrigger>
+              <TabsTrigger value="final">Final</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="timeline" className="min-h-0 flex-1">
+              <ScrollArea className="h-full pr-2">
+                <div className="space-y-3">
+                  {timeline.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Timeline events will appear here during the Daytona run.
+                    </p>
+                  ) : (
+                    timeline.map((entry) => (
+                      <TimelineRow
+                        key={entry.id}
+                        entry={entry}
+                        isSelected={
+                          selectedNode?.nodeId != null &&
+                          entry.nodeId === selectedNode.nodeId
+                        }
+                        onSelect={() => {
+                          if (entry.nodeId) selectNode(entry.nodeId);
+                        }}
+                      />
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="node" className="min-h-0 flex-1">
+              <ScrollArea className="h-full pr-2">
+                {selectedNode ? (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-semibold text-foreground">
+                          {selectedNode.task}
+                        </h3>
+                        <Badge variant={nodeStatusVariant(selectedNode.status)}>
+                          {selectedNode.status}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                        <span>node {selectedNode.nodeId}</span>
+                        {selectedNode.parentId ? (
+                          <span>parent {selectedNode.parentId}</span>
+                        ) : null}
+                        <span>depth {selectedNode.depth}</span>
+                        {selectedNode.sandboxId ? (
+                          <span>sandbox {selectedNode.sandboxId}</span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {selectedNode.workspacePath ? (
+                      <>
+                        <Separator />
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Workspace
+                          </p>
+                          <p className="mt-2 text-sm text-foreground break-all">
+                            {selectedNode.workspacePath}
+                          </p>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {selectedNode.warnings?.length ? (
+                      <>
+                        <Separator />
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Warnings
+                          </p>
+                          <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3">
+                            <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900 dark:text-amber-100">
+                              {selectedNode.warnings.map((warning) => (
+                                <li key={warning}>{warning}</li>
+                              ))}
+                            </ul>
                           </div>
-                        </>
-                      ) : null}
+                        </div>
+                      </>
+                    ) : null}
 
-                      {selectedNode.warnings?.length ? (
-                        <>
-                          <Separator />
-                          <div className="space-y-2">
-                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                              Warnings
-                            </p>
-                            <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3">
-                              <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900 dark:text-amber-100">
-                                {selectedNode.warnings.map((warning) => (
-                                  <li key={warning}>{warning}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          </div>
-                        </>
-                      ) : null}
-
-                      {selectedNode.childLinks.length > 0 ? (
-                        <>
-                          <Separator />
-                          <div className="space-y-3">
-                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                              Child links
-                            </p>
-                            {selectedNode.childLinks.map(
-                              (link: DaytonaRunNode["childLinks"][number], index: number) => (
+                    {selectedNode.childLinks.length > 0 ? (
+                      <>
+                        <Separator />
+                        <div className="space-y-3">
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Child links
+                          </p>
+                          {selectedNode.childLinks.map(
+                            (
+                              link: DaytonaRunNode["childLinks"][number],
+                              index: number,
+                            ) => (
                               <div
                                 key={`${link.callbackName}-${index}-${link.childId ?? "none"}`}
                                 className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3"
@@ -502,7 +569,8 @@ export function DaytonaWorkbench() {
                                       ? `:${link.task.source.startLine}`
                                       : ""}
                                     {link.task.source.endLine != null &&
-                                    link.task.source.endLine !== link.task.source.startLine
+                                    link.task.source.endLine !==
+                                      link.task.source.startLine
                                       ? `-${link.task.source.endLine}`
                                       : ""}
                                   </p>
@@ -513,36 +581,41 @@ export function DaytonaWorkbench() {
                                   </p>
                                 ) : null}
                               </div>
-                              ),
-                            )}
-                          </div>
-                        </>
-                      ) : null}
+                            ),
+                          )}
+                        </div>
+                      </>
+                    ) : null}
 
-                      {selectedNode.finalArtifact ? (
-                        <>
-                          <Separator />
-                          <ArtifactPanel artifact={selectedNode.finalArtifact} />
-                        </>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Select a node to inspect its details.
-                    </p>
-                  )}
-                </ScrollArea>
-              </TabsContent>
+                    {selectedNode.finalArtifact ? (
+                      <>
+                        <Separator />
+                        <ArtifactPanel artifact={selectedNode.finalArtifact} />
+                      </>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Select a node to inspect its details.
+                  </p>
+                )}
+              </ScrollArea>
+            </TabsContent>
 
-              <TabsContent value="final" className="h-full">
-                <ScrollArea className="h-full pr-2">
-                  <ArtifactPanel artifact={finalArtifact} />
-                </ScrollArea>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-      </div>
+            <TabsContent value="prompts" className="min-h-0 flex-1">
+              <ScrollArea className="h-full pr-2">
+                <PromptHandleList handles={selectedNode?.promptHandles ?? []} />
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="final" className="min-h-0 flex-1">
+              <ScrollArea className="h-full pr-2">
+                <ArtifactPanel artifact={finalArtifact} />
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
     </div>
   );
 }

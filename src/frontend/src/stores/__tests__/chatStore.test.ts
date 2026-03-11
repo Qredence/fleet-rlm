@@ -51,6 +51,7 @@ function resetStore() {
     runtimeMode: "modal_chat",
     daytonaRepoUrl: "",
     daytonaRepoRef: "",
+    daytonaContextPaths: "",
     daytonaMaxDepth: 2,
     daytonaBatchConcurrency: 4,
     streamController: null,
@@ -284,6 +285,7 @@ describe("useChatStore — streamMessage", () => {
       runtimeMode: "daytona_pilot",
       daytonaRepoUrl: "https://github.com/qredence/fleet-rlm.git",
       daytonaRepoRef: "main",
+      daytonaContextPaths: "/Users/zocho/Documents/spec.pdf\n/workspace/docs",
       daytonaMaxDepth: 3,
       daytonaBatchConcurrency: 6,
     });
@@ -295,6 +297,7 @@ describe("useChatStore — streamMessage", () => {
       runtime_mode: "daytona_pilot",
       repo_url: "https://github.com/qredence/fleet-rlm.git",
       repo_ref: "main",
+      context_paths: ["/Users/zocho/Documents/spec.pdf", "/workspace/docs"],
       max_depth: 3,
       batch_concurrency: 6,
     });
