@@ -8,6 +8,7 @@ import {
 } from "@/components/chat/input/AttachmentChip";
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
 import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
+import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown";
 import { SendButton } from "@/components/chat/input/SendButton";
 import { SettingsDropdown } from "@/components/chat/input/SettingsDropdown";
 import {
@@ -18,7 +19,7 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
-import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 
 interface ChatInputProps {
   value: string;
@@ -27,8 +28,11 @@ interface ChatInputProps {
   isLoading?: boolean;
   isReceiving?: boolean;
   attachmentsEnabled?: boolean;
+  runtimeMode: WsRuntimeMode;
+  onRuntimeModeChange: (mode: WsRuntimeMode) => void;
   executionMode: WsExecutionMode;
   onExecutionModeChange: (mode: WsExecutionMode) => void;
+  canSubmit?: boolean;
   placeholder?: string;
   className?: string;
 }
@@ -56,13 +60,17 @@ function ChatInput({
   isLoading = false,
   isReceiving = false,
   attachmentsEnabled = true,
+  runtimeMode,
+  onRuntimeModeChange,
   executionMode,
   onExecutionModeChange,
+  canSubmit = true,
   placeholder = "Ask anything…",
   className,
 }: ChatInputProps) {
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const hasContent = value.trim().length > 0;
+  const canSubmitMessage = hasContent && canSubmit;
 
   useEffect(
     () => () => {
@@ -92,11 +100,12 @@ function ChatInput({
   }, []);
 
   const handleSubmit = useCallback(() => {
+    if (!canSubmitMessage) return;
     const currentAttachments = [...attachments];
     currentAttachments.forEach(revokeAttachmentPreview);
     setAttachments([]);
     onSend(currentAttachments);
-  }, [attachments, onSend]);
+  }, [attachments, canSubmitMessage, onSend]);
 
   const handleUnsupportedAttachmentSelect = useCallback(() => {
     toast.info("File upload is not available yet", {
@@ -105,6 +114,23 @@ function ChatInput({
     });
   }, []);
 
+  const headerContent =
+    attachments.length > 0 ? (
+      <PromptInputHeader className="flex flex-col gap-3 px-1 pb-1 pt-1">
+        {attachments.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((attachment) => (
+              <AttachmentChip
+                key={attachment.id}
+                attachment={attachment}
+                onRemove={handleRemoveAttachment}
+              />
+            ))}
+          </div>
+        ) : null}
+      </PromptInputHeader>
+    ) : null;
+
   return (
     <PromptInput
       className={className}
@@ -112,17 +138,7 @@ function ChatInput({
         handleSubmit();
       }}
     >
-      {attachments.length > 0 ? (
-        <PromptInputHeader className="px-1 pb-1 pt-1">
-          {attachments.map((attachment) => (
-            <AttachmentChip
-              key={attachment.id}
-              attachment={attachment}
-              onRemove={handleRemoveAttachment}
-            />
-          ))}
-        </PromptInputHeader>
-      ) : null}
+      {headerContent}
 
       <PromptInputBody>
         <PromptInputTextarea
@@ -146,13 +162,16 @@ function ChatInput({
         </PromptInputTools>
 
         <div className="flex items-center gap-1">
-          <ExecutionModeDropdown
-            value={executionMode}
-            onChange={onExecutionModeChange}
-          />
+          <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
+          {runtimeMode === "modal_chat" ? (
+            <ExecutionModeDropdown
+              value={executionMode}
+              onChange={onExecutionModeChange}
+            />
+          ) : null}
 
           <SendButton
-            disabled={isLoading || !hasContent}
+            disabled={isLoading || !canSubmitMessage}
             isLoading={isLoading}
             isReceiving={isReceiving}
           />

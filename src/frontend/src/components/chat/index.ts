@@ -12,6 +12,7 @@ export { AgentDropdown } from "./input/AgentDropdown";
 export { AttachmentChip, type AttachedFile } from "./input/AttachmentChip";
 export { AttachmentDropdown } from "./input/AttachmentDropdown";
 export { ExecutionModeDropdown } from "./input/ExecutionModeDropdown";
+export { RuntimeModeDropdown } from "./input/RuntimeModeDropdown";
 export { SendButton } from "./input/SendButton";
 export { SettingsDropdown } from "./input/SettingsDropdown";
 export { ThinkButton } from "./input/ThinkButton";
