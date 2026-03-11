@@ -211,6 +211,57 @@ class PromptManifest:
 
 
 @dataclass(slots=True)
+class ContextSource:
+    """Host-sourced local context staged into the Daytona workspace."""
+
+    source_id: str
+    kind: str
+    host_path: str
+    staged_path: str
+    source_type: str | None = None
+    extraction_method: str | None = None
+    file_count: int = 1
+    skipped_count: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "ContextSource":
+        if not isinstance(raw, dict):
+            raise ValueError("Context source payload must be a dict.")
+        source_id = _normalize_optional_text(raw.get("source_id"))
+        kind = _normalize_optional_text(raw.get("kind"))
+        host_path = _normalize_optional_text(raw.get("host_path"))
+        staged_path = _normalize_optional_text(raw.get("staged_path"))
+        if (
+            source_id is None
+            or kind is None
+            or host_path is None
+            or staged_path is None
+        ):
+            raise ValueError(
+                "Context source requires source_id, kind, host_path, and staged_path."
+            )
+        return cls(
+            source_id=source_id,
+            kind=kind,
+            host_path=host_path,
+            staged_path=staged_path,
+            source_type=_normalize_optional_text(raw.get("source_type")),
+            extraction_method=_normalize_optional_text(raw.get("extraction_method")),
+            file_count=_coerce_positive_int(raw.get("file_count")) or 1,
+            skipped_count=_coerce_nonnegative_int(raw.get("skipped_count")) or 0,
+            warnings=[
+                str(item)
+                for item in raw.get("warnings", []) or []
+                if item is not None and str(item).strip()
+            ],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class TaskSourceProvenance:
     """Normalized provenance for one recursive child task."""
 
@@ -431,6 +482,7 @@ class AgentNode:
     task: str
     repo: str
     ref: str | None
+    context_sources: list[ContextSource] = field(default_factory=list)
     sandbox_id: str | None = None
     workspace_path: str | None = None
     status: str = "running"
@@ -448,6 +500,7 @@ class AgentNode:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["task"] = _persisted_text_preview(self.task)
+        payload["context_sources"] = [item.to_dict() for item in self.context_sources]
         payload["prompt_handles"] = [item.to_dict() for item in self.prompt_handles]
         payload["observations"] = [item.to_dict() for item in self.observations]
         payload["child_links"] = [item.to_dict() for item in self.child_links]
@@ -468,6 +521,11 @@ class AgentNode:
             task=str(raw.get("task", "") or ""),
             repo=str(raw.get("repo", "") or ""),
             ref=_normalize_optional_text(raw.get("ref")),
+            context_sources=[
+                ContextSource.from_raw(item)
+                for item in raw.get("context_sources", []) or []
+                if isinstance(item, dict)
+            ],
             sandbox_id=_normalize_optional_text(raw.get("sandbox_id")),
             workspace_path=_normalize_optional_text(raw.get("workspace_path")),
             status=_normalize_optional_text(raw.get("status")) or "running",
@@ -549,6 +607,7 @@ class DaytonaRunResult:
     run_id: str
     repo: str
     ref: str | None
+    context_sources: list[ContextSource]
     task: str
     budget: RolloutBudget
     root_id: str
@@ -562,6 +621,7 @@ class DaytonaRunResult:
             "run_id": self.run_id,
             "repo": self.repo,
             "ref": self.ref,
+            "context_sources": [item.to_dict() for item in self.context_sources],
             "task": _persisted_text_preview(self.task),
             "budget": asdict(self.budget),
             "root_id": self.root_id,
@@ -589,6 +649,11 @@ class DaytonaRunResult:
             run_id=_normalize_optional_text(raw.get("run_id")) or "",
             repo=str(raw.get("repo", "") or ""),
             ref=_normalize_optional_text(raw.get("ref")),
+            context_sources=[
+                ContextSource.from_raw(item)
+                for item in raw.get("context_sources", []) or []
+                if isinstance(item, dict)
+            ],
             task=str(raw.get("task", "") or ""),
             budget=RolloutBudget(
                 max_sandboxes=_coerce_positive_int(budget_raw.get("max_sandboxes"))
