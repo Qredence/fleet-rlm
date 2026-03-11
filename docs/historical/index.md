@@ -14,5 +14,4 @@ Archived audits and codebase snapshots that are kept for reference but are not t
 - [Architecture Overview](../architecture.md)
 - [Reference Index](../reference/index.md)
 - [Explanation Index](../explanation/index.md)
-- [`PLANS.md`](../../PLANS.md)
-- [`TASKS.md`](../../TASKS.md)
+- Local planning documents such as `PLANS.md` and `TASKS.md` when present in the repo root.
