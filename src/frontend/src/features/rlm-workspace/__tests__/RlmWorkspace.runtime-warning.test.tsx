@@ -64,6 +64,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
 
 vi.mock("@/lib/rlm-api", () => ({
   isRlmCoreEnabled: () => true,
+  createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
 vi.mock("@/features/rlm-workspace/ChatMessageList", () => ({

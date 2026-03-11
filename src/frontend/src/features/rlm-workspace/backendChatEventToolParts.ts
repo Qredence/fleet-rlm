@@ -119,6 +119,7 @@ function parseRuntimeContext(
   if (depth == null || maxDepth == null || !executionProfile) return undefined;
   const volumeName = asOptionalText(raw.volume_name);
   const executionMode = asOptionalText(raw.execution_mode);
+  const runtimeMode = asOptionalText(raw.runtime_mode);
   const sandboxId = asOptionalText(raw.sandbox_id);
   return {
     depth,
@@ -128,6 +129,7 @@ function parseRuntimeContext(
     effectiveMaxIters: asOptionalNumber(raw.effective_max_iters) ?? 10,
     ...(volumeName ? { volumeName } : {}),
     ...(executionMode ? { executionMode } : {}),
+    ...(runtimeMode ? { runtimeMode } : {}),
     ...(sandboxId ? { sandboxId } : {}),
   };
 }

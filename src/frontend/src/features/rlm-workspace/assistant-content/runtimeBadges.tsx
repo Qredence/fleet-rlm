@@ -5,6 +5,9 @@ export function getRuntimeBadgeStrings(ctx?: RuntimeContext): string[] {
 
   const pills: string[] = [];
   if (ctx.depth > 0) pills.push(`depth ${ctx.depth}/${ctx.maxDepth}`);
+  if (ctx.runtimeMode && ctx.runtimeMode !== "modal_chat") {
+    pills.push(`runtime ${ctx.runtimeMode}`);
+  }
   if (ctx.executionMode && ctx.executionMode !== "react") {
     pills.push(`mode ${ctx.executionMode}`);
   }

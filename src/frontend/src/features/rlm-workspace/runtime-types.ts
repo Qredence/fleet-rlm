@@ -1,6 +1,6 @@
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import type { Conversation } from "@/stores/chatHistoryStore";
-import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import type { ExecutionStep } from "@/stores/artifactStore";
 
 export interface ChatSubmitAttachment {
@@ -13,6 +13,11 @@ export interface ChatSubmitAttachment {
 export interface ChatSubmitOptions {
   traceEnabled?: boolean;
   executionMode?: WsExecutionMode;
+  runtimeMode?: WsRuntimeMode;
+  repoUrl?: string;
+  repoRef?: string;
+  maxDepth?: number;
+  batchConcurrency?: number;
   attachments?: ChatSubmitAttachment[];
 }
 
