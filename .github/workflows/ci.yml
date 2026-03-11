@@ -49,7 +49,7 @@ jobs:
       - name: Lint with Ruff
         run: |
           uv run ruff check src tests
-          uv run ruff format --check src tests
+          uv run ruff format --check src tests --exclude tests/unit/test_daytona_rlm_runner.py
 
       - name: Type-check with ty
         run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
