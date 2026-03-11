@@ -27,6 +27,11 @@ from .mlflow_integration import (
     update_current_mlflow_trace,
 )
 from .posthog_callback import PostHogLLMCallback
+from .scorers import (
+    build_rlm_scorers,
+    get_default_judge_model,
+    reasoning_quality_scorer,
+)
 
 
 __all__ = [
@@ -54,6 +59,9 @@ __all__ = [
     "trace_result_metadata",
     "trace_to_dataset_row",
     "update_current_mlflow_trace",
+    "build_rlm_scorers",
+    "get_default_judge_model",
+    "reasoning_quality_scorer",
 ]
 
 

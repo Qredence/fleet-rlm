@@ -96,6 +96,12 @@ def evaluate_trace_rows(
         include_safety=include_safety,
         guidelines=guidelines,
     )
+
+    from .scorers import build_rlm_scorers
+
+    rlm_scorers = build_rlm_scorers()
+    scorers.extend(rlm_scorers)
+
     return mlflow.genai.evaluate(
         data=dataset,
         scorers=scorers,
