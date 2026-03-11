@@ -1,0 +1,1 @@
+// simple mock for localstorage
