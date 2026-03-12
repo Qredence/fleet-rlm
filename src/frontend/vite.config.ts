@@ -1,5 +1,4 @@
 import { defineConfig } from "vite";
-import path from "path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react-swc";
 
@@ -16,7 +15,7 @@ export default defineConfig({
     ],
     alias: {
       // Alias @ to the src directory
-      "@": path.resolve(__dirname, "./src"),
+      "@": `${import.meta.dirname}/src`,
     },
   },
 
@@ -32,6 +31,16 @@ export default defineConfig({
         ws: true,
       },
     },
+    warmup: {
+      clientFiles: [
+        "src/app/App.tsx",
+        "src/app/routes.ts",
+        "src/app/layout/RootLayout.tsx",
+        "src/features/rlm-workspace/RlmWorkspace.tsx",
+        "src/features/rlm-workspace/ChatMessageList.tsx",
+        "src/components/chat/ChatInput.tsx",
+      ],
+    },
   },
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
@@ -39,7 +48,6 @@ export default defineConfig({
 
   // Force Vite to pre-bundle CodeMirror packages and their transitive deps
   optimizeDeps: {
-    holdUntilCrawlEnd: false,
     include: [
       "react",
       "react-dom",
@@ -63,18 +71,24 @@ export default defineConfig({
 
   build: {
     minify: "oxc",
-    rollupOptions: {
+    cssMinify: "lightningcss",
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          "vendor-ui": [
-            "@radix-ui/react-accordion",
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-dropdown-menu",
-            "lucide-react",
-            "motion",
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor-ui",
+              test: /radix-ui|lucide-react|motion/,
+            },
+            {
+              name: "vendor-editor",
+              test: /codemirror/,
+            },
+            {
+              name: "vendor-state",
+              test: /zustand|tanstack\/react-query|react-router/,
+            },
           ],
-          "vendor-editor": ["codemirror"],
-          "vendor-state": ["zustand", "@tanstack/react-query", "react-router"],
         },
       },
     },

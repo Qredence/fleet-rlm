@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactFlow, {
+import {
+  ReactFlow,
   Background,
   PanOnScrollMode,
   type Edge,
   type Node,
   type NodeMouseHandler,
   type NodeTypes,
-} from "reactflow";
-import "reactflow/dist/style.css";
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 import type { ArtifactActorKind, ExecutionStep } from "@/stores/artifactStore";
 import {
