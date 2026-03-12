@@ -6,52 +6,56 @@ All notable changes to this project are documented in this file.
 
 ### Highlights (User Impact)
 
-- Reworked the skill-creation trace UI so reasoning, task, tool, sandbox, and final-output events render as a cleaner unified execution timeline.
-- Upgraded the builder panel to a tabbed artifact canvas that adapts to available execution data, making it easier to move between graph, timeline, REPL, and preview views.
-- Removed a large set of unused frontend modules and placeholder surfaces, reducing maintenance overhead and clarifying the active web app structure.
-- Added per-turn execution mode controls (`Auto`, `RLM only`, `Tools only`) and streamed child-RLM delegation back through the live chat timeline, giving operators tighter control over when deep recursive execution is used.
-- Migrated navigation, theme, and persisted chat-history state to dedicated Zustand stores while completing more of the workspace ownership cleanup.
-- Standardized more of the AI Elements workspace UI around shared CSS variables/utilities and fixed follow-up citation/rendering issues, making the refreshed interface more consistent in daily use.
+- Expanded the experimental Daytona runtime so a run can now start from a repo, staged local context files/directories, both together, or reasoning-only input, with better live visibility into recursive child work.
+- Added a dedicated run-inspection experience across the workspace with grouped execution traces, message-inspector tabs, and a clearer support rail for recursive RLM sessions.
+- Upgraded the chat composer and runtime controls with per-turn execution mode selection plus cleaner runtime metadata, so operators can decide when to force deep RLM delegation versus normal tool use.
+- Published a comprehensive documentation refresh covering setup, testing, deployment, runtime settings, APIs, architecture diagrams, ADRs, and frontend module structure.
+- Added MLflow tracing, export, evaluation, and scorer workflows to make offline analysis and DSPy optimization easier.
+- Continued the frontend cleanup/polish pass by removing unused surfaces and improving navigation, conversation history, loading states, and builder/workbench chrome.
 
 ### Added
 
-- **Change:** Added animated artifact tabs in the builder panel plus focused tests for tab visibility, builder-panel routing, prompt actions, attachment controls, and artifact-store behavior.
-  **Outcome:** The execution canvas is easier to navigate and frontend regressions around panel state are covered more thoroughly.
-- **Change:** Added dedicated runtime type definitions for the backend-driven skill-creation flow.
-  **Outcome:** Chat runtime contracts are easier to maintain without depending on the removed mock simulation hook.
-- **Change:** Added an execution-mode dropdown to the chat composer and extended chat request / WebSocket schemas to carry `auto`, `rlm_only`, and `tools_only` turn overrides.
-  **Outcome:** Operators can choose whether a turn should use normal tools, force recursive RLM delegation, or let the runtime decide automatically without changing global settings.
-- **Change:** Added dedicated frontend trace-normalization helpers for backend event references/tool parts plus store coverage for navigation, theme, and persisted chat history.
-  **Outcome:** The workspace has clearer UI data-shaping seams and better regression coverage around the new global client-state primitives.
+- **Change:** Added Daytona workbench/store/type adapters, message-inspector tabs for evidence/execution/graph/trajectory views, a dedicated `RunWorkbench` surface, and a new conversation-history panel.
+  **Outcome:** Operators can inspect recursive Daytona state, child nodes, evidence, execution details, and prior conversations from a more coherent workspace support rail.
+- **Change:** Added Daytona CLI/WebSocket support for optional `repo_url`, optional `context_paths`, and reasoning-only turns, plus sandbox prompt management and host-side document ingestion for PDFs and supported office/web documents.
+  **Outcome:** The experimental runtime can analyze local supporting material or pure reasoning tasks without requiring every session to begin from a cloned repository.
+- **Change:** Added an execution-mode dropdown to the chat composer, dedicated runtime mode types, and more explicit chat/runtime state wiring.
+  **Outcome:** Operators can choose `Auto`, `RLM only`, or `Tools only` behavior per turn and see runtime context reflected more clearly in the UI contract.
+- **Change:** Added MLflow trace export/evaluation/optimization scripts and integrated RLM scorers into analytics workflows.
+  **Outcome:** Contributors now have a clearer path for offline evaluation, trace correlation, and DSPy optimization loops.
+- **Change:** Added substantial docs/reference material including developer setup, testing strategy, deployment, CLI/API/WebSocket references, frontend architecture notes, ADRs, and architecture/data-flow diagrams.
+  **Outcome:** Onboarding and day-to-day reference coverage are much stronger across backend, frontend, and operational surfaces.
 
 ### Changed
 
-- **Change:** Redesigned `ChatMessageList` and related AI Elements primitives to coalesce contiguous reasoning, tool, sandbox, and task events into richer grouped trace rows.
+- **Change:** Reworked `ChatMessageList` and related AI Elements primitives to coalesce reasoning, task, tool, sandbox, and final-output events into richer grouped trace rows.
   **Outcome:** Long-running chat traces are easier to scan and no longer fragment important execution context across many small rows.
-- **Change:** Updated the builder panel to use the canonical domain artifact canvas instead of the older split code-artifact path.
-  **Outcome:** Artifact navigation now behaves more consistently across live runs and file-preview workflows.
-- **Change:** Completed more of the frontend ownership cleanup by moving live chat modules into canonical `features/rlm-workspace/*` and `src/stores/*` homes, with matching layout guidance in `src/frontend/AGENTS.md`.
+- **Change:** Updated the builder/workbench shell with animated artifact tabs, clearer support-rail framing, refreshed header/navigation styling, improved mobile/desktop panel controls, and more intentional composer chrome.
+  **Outcome:** The workspace is easier to navigate and feels more cohesive across run inspection, artifact browsing, and chat composition.
+- **Change:** Completed more of the frontend ownership cleanup by moving live chat modules into canonical `features/rlm-workspace/*` and `src/stores/*` homes while continuing to generalize Daytona-specific helpers into shared run-workbench/repo/source utilities.
   **Outcome:** The active workspace architecture is clearer and less dependent on temporary transition seams while refactoring continues.
 - **Change:** Updated the ReAct chat runtime and delegate-sub-agent flow to apply execution mode per turn, filter tool availability accordingly, and stream child-RLM work through the existing websocket trajectory pipeline.
   **Outcome:** Deep symbolic turns are easier to reason about live, and recursive delegation can now be forced or disabled without changing the top-level chat runtime.
-- **Change:** Split workspace trace rendering into dedicated display-item/reference/tool-part helpers and continued simplifying `RlmWorkspace` ownership boundaries.
-  **Outcome:** The live chat timeline is easier to maintain and renders grouped trace/citation content more consistently.
-- **Change:** Migrated navigation, theme, and chat-history persistence away from ad-hoc hooks/providers into dedicated Zustand stores reused across the app shell.
-  **Outcome:** Shell state is more predictable across route changes and easier to evolve without threading extra providers through the component tree.
-- **Change:** Replaced more inline style literals with shared CSS variables/Tailwind utilities and expanded AI Elements/shared component exports to support the cleaned-up workspace architecture.
-  **Outcome:** The frontend has more consistent typography, spacing, and border treatment with fewer one-off styling paths to maintain.
+- **Change:** Updated Daytona streaming/runtime wiring to emit bootstrapping status earlier, stream structured context-source metadata, improve cancellation handling, and use `daytona_mode="recursive_rlm"` consistently.
+  **Outcome:** Daytona sessions communicate setup state more clearly and frontend consumers get a cleaner contract for recursive run inspection.
+- **Change:** Improved runtime/router behavior with HTTP identity requirements, eager JSON serialization, extended async volume reload support, and stronger token/runtime-mode storage coverage.
+  **Outcome:** Runtime APIs respond more predictably and related UI state is safer across reloads and session changes.
+- **Change:** Refreshed docs/architecture guidance to reflect the Daytona pilot, CLI integration, snapshot archival, and historical cross-linking fixes.
+  **Outcome:** Project guidance matches the current runtime structure more closely and stale links are reduced.
 
 ### Fixed
 
-- **Change:** Improved pending-event draining in streaming internals and raised explicit errors when delegate streaming completes without a prediction.
-  **Outcome:** Child-RLM failures surface earlier and long-running trace streams are less likely to stall or replay pending events inefficiently.
+- **Change:** Improved pending-event draining in streaming internals, raised explicit errors when delegate streaming completes without a prediction, and tightened Daytona cancellation/security handling.
+  **Outcome:** Child-RLM failures surface earlier and long-running trace streams are less likely to stall or linger in a confusing state.
 - **Change:** Fixed inline citation URL handling plus follow-up null-safety/export issues across AI Elements and artifact helpers.
   **Outcome:** Citations resolve to the correct targets more reliably and richer workspace components are less brittle when payloads are partial.
+- **Change:** Repaired MLflow metadata merging/trace lookup issues, frontend button and execution-canvas regressions, mobile canvas cleanup leaks, and several documentation formatting/link problems.
+  **Outcome:** Analytics traces are more trustworthy, workspace UI regressions are reduced, and project docs are easier to navigate without broken references.
 
 ### Removed
 
-- **Change:** Removed the legacy mock skill-creation simulation stack, unused taxonomy graph modules, placeholder settings panes, and stale feature-chat/artifact components that were no longer wired into the live app.
-  **Outcome:** Smaller frontend surface area with less dead code and fewer parallel architectures to maintain.
+- **Change:** Removed the legacy mock skill-creation simulation stack, unused taxonomy graph modules, placeholder settings panes, stale feature-chat/artifact components, duplicated Daytona-only helper paths, orphan docs readmes, and outdated audit/code-health snapshots.
+  **Outcome:** Smaller frontend/documentation surface area with less dead code, lower maintenance overhead, and fewer competing "canonical" paths to keep in sync.
 
 ## [0.4.95] - 2026-03-05
 
