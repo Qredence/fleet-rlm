@@ -117,10 +117,15 @@ def chat(
 
 @app.command("daytona-rlm")
 def daytona_rlm(
-    repo: str = typer.Option(
-        ...,
+    repo: str | None = typer.Option(
+        None,
         "--repo",
-        help="Repository URL to clone into the Daytona sandbox.",
+        help="Optional repository URL to clone into the Daytona sandbox.",
+    ),
+    context_path: list[Path] = typer.Option(
+        [],
+        "--context-path",
+        help="Optional local file or directory path to stage into the Daytona workspace. Repeat for multiple paths.",
     ),
     task: str = typer.Option(
         ...,
@@ -178,6 +183,9 @@ def daytona_rlm(
     try:
         from .daytona_rlm import RolloutBudget, run_daytona_rlm_pilot
 
+        if ref and not repo:
+            raise ValueError("--ref requires --repo.")
+
         budget = RolloutBudget(
             max_sandboxes=max_sandboxes,
             max_depth=max_depth,
@@ -189,6 +197,7 @@ def daytona_rlm(
         result = run_daytona_rlm_pilot(
             repo=repo,
             ref=ref,
+            context_paths=[str(path) for path in context_path],
             task=task,
             budget=budget,
             output_dir=output_dir,

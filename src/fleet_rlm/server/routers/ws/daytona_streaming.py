@@ -61,8 +61,9 @@ async def run_daytona_streaming_turn(
     websocket: WebSocket,
     planner_lm: Any,
     message: str,
-    repo_url: str,
+    repo_url: str | None,
     repo_ref: str | None,
+    context_paths: list[str] | None,
     max_depth: int | None,
     batch_concurrency: int | None,
     cancel_check: Any,
@@ -77,18 +78,43 @@ async def run_daytona_streaming_turn(
     def enqueue_event(event: StreamEvent) -> None:
         loop.call_soon_threadsafe(queue.put_nowait, event)
 
+    budget = RolloutBudget(
+        max_depth=max_depth if max_depth is not None else RolloutBudget().max_depth,
+        batch_concurrency=(
+            batch_concurrency
+            if batch_concurrency is not None
+            else RolloutBudget().batch_concurrency
+        ),
+    )
+
+    if not await _emit_stream_event(
+        websocket,
+        StreamEvent(
+            kind="status",
+            text="Bootstrapping Daytona sandbox",
+            payload={
+                "runtime": {
+                    "runtime_mode": "daytona_pilot",
+                    "daytona_mode": "recursive_rlm",
+                    "run_id": None,
+                    "depth": 0,
+                    "max_depth": budget.max_depth,
+                    "effective_max_iters": budget.max_iterations,
+                    "sandbox_active": False,
+                },
+                "runtime_mode": "daytona_pilot",
+                "daytona_mode": "recursive_rlm",
+                "repo_url": repo_url,
+                "repo_ref": repo_ref,
+                "context_paths": context_paths or [],
+            },
+            timestamp=datetime.now(timezone.utc),
+        ),
+    ):
+        return
+
     def run_blocking() -> None:
         try:
-            budget = RolloutBudget(
-                max_depth=max_depth
-                if max_depth is not None
-                else RolloutBudget().max_depth,
-                batch_concurrency=(
-                    batch_concurrency
-                    if batch_concurrency is not None
-                    else RolloutBudget().batch_concurrency
-                ),
-            )
             runner = DaytonaRLMRunner(
                 lm=planner_lm,
                 budget=budget,
@@ -98,6 +124,7 @@ async def run_daytona_streaming_turn(
             result_box["result"] = runner.run(
                 repo=repo_url,
                 ref=repo_ref,
+                context_paths=context_paths,
                 task=message,
             )
         except BaseException as exc:  # pragma: no cover - surfaced to async path
@@ -157,7 +184,7 @@ async def run_daytona_streaming_turn(
         "sandbox_active": root is not None and root.sandbox_id is not None,
         "effective_max_iters": result.budget.max_iterations,
         "runtime_mode": "daytona_pilot",
-        "execution_mode": "daytona_pilot",
+        "daytona_mode": "recursive_rlm",
         "sandbox_id": root.sandbox_id if root is not None else None,
         "run_id": result.run_id,
     }
@@ -179,8 +206,9 @@ async def run_daytona_streaming_turn(
             payload={
                 "history_turns": 1,
                 "runtime_mode": "daytona_pilot",
-                "repo_url": result.repo,
+                "repo_url": result.repo or None,
                 "repo_ref": result.ref,
+                "context_sources": [item.to_dict() for item in result.context_sources],
                 "final_artifact": (
                     result.final_artifact.to_dict()
                     if result.final_artifact is not None
