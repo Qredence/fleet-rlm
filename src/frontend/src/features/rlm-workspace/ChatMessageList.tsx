@@ -15,6 +15,7 @@ import {
 } from "@/lib/utils/ai-elements-state";
 import { Streamdown } from "@/components/ui/streamdown";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import {
   Conversation,
   ConversationContent,
@@ -148,12 +149,13 @@ const DISPLAY_TITLE_STYLE = {
 } as const;
 
 const DISPLAY_SUBTITLE_STYLE = {
-  fontSize: "var(--font-heading-xl-size)",
+  fontSize: "var(--font-heading-lg-size)",
   fontFamily: "var(--font-sans)",
   fontWeight: "var(--font-weight-normal)",
-  lineHeight: "var(--font-heading-xl-line-height)",
-  letterSpacing: "var(--font-heading-xl-tracking)",
+  lineHeight: "var(--font-heading-lg-line-height)",
+  letterSpacing: "var(--font-heading-lg-tracking)",
   textWrap: "balance",
+  opacity: "0.6",
 } as const;
 
 const SYSTEM_MESSAGE_STYLE = {
@@ -183,15 +185,23 @@ import type { InspectorTab } from "@/lib/data/types";
 const suggestions = [
   {
     text: "Analyze a codebase and extract its architecture",
+    title: "Architecture pass",
     Icon: SuggestionIconBolt,
   },
   {
     text: "Summarize this document and find key insights",
+    title: "Document brief",
     Icon: SuggestionIconTune,
   },
   {
     text: "Write and execute a Python script for me",
+    title: "Python runner",
     Icon: SuggestionIconSparkle,
+  },
+  {
+    text: "Review this work and surface what to improve",
+    title: "Critique my work",
+    Icon: SuggestionIconBolt,
   },
 ];
 
@@ -977,23 +987,29 @@ export function ChatMessageList({
                 isMobile ? "pt-6" : "pt-8",
               )}
             >
-              <div className="mb-4 flex w-full flex-col justify-center pb-1.25">
-                <h2
-                  className="text-foreground w-full"
-                  style={DISPLAY_TITLE_STYLE}
-                >
-                  Agentic Fleet Session
-                </h2>
-                <p
-                  className="text-muted-foreground w-full"
-                  style={DISPLAY_SUBTITLE_STYLE}
-                >
-                  What do you need ?
-                </p>
+              <div className="mb-4 flex w-full flex-col justify-center gap-2 pb-1.25">
+                <Badge variant="outline" className="w-fit px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground border-border-subtle/80 bg-card/60">
+                  Operator workspace
+                </Badge>
+
+                <div className="space-y-1">
+                  <h2
+                    className="text-foreground w-full"
+                    style={DISPLAY_TITLE_STYLE}
+                  >
+                    Agentic Fleet Session
+                  </h2>
+                  <p
+                    className="text-muted-foreground w-full"
+                    style={DISPLAY_SUBTITLE_STYLE}
+                  >
+                    What do you need?
+                  </p>
+                </div>
               </div>
 
               <div
-                className="flex flex-wrap items-center justify-start gap-3 w-full"
+                className="grid w-full grid-cols-2 gap-2"
                 aria-live="polite"
                 aria-label="Suggestion actions"
               >
@@ -1011,16 +1027,11 @@ export function ChatMessageList({
                     <Suggestion
                       suggestion={s.text}
                       onClick={onSuggestionClick}
-                      variant="secondary"
-                      className="h-auto border border-border-subtle px-4 py-2.5 hover:border-border-strong"
+                      variant="outline"
+                      className="w-full justify-start gap-2 rounded-xl px-3"
                     >
-                      <s.Icon />
-                      <span
-                        data-slot="suggestion-chip-label"
-                        className="text-foreground"
-                      >
-                        {s.text}
-                      </span>
+                      <s.Icon data-icon="inline-start" />
+                      {s.title}
                     </Suggestion>
                   </motion.div>
                 ))}

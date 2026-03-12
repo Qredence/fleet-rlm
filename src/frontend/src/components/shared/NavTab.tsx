@@ -29,18 +29,28 @@ export function NavTab({
       aria-disabled={disabled || undefined}
       disabled={disabled}
       className={cn(
-        "relative flex items-center justify-center h-9 px-2 shrink-0 rounded-lg transition-colors",
+        "relative flex h-9 shrink-0 items-center justify-center rounded-lg border px-3 transition-colors duration-150",
         disabled
-          ? "text-muted-foreground/50 cursor-not-allowed"
+          ? "cursor-not-allowed border-transparent text-muted-foreground/50"
           : isActive
-            ? "text-foreground"
-            : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            ? "border-transparent text-foreground"
+            : "border-transparent text-muted-foreground/75 hover:bg-background/70 hover:text-foreground",
       )}
     >
-      <span className="relative z-10 font-app text-[length:var(--font-text-sm-size)] font-normal leading-[var(--font-text-sm-line-height)] tracking-[var(--font-text-sm-tracking)]">
+      <span
+        className={cn(
+          "relative z-10 font-app text-[length:var(--font-text-sm-size)] leading-[var(--font-text-sm-line-height)] tracking-[var(--font-text-sm-tracking)]",
+          isActive ? "font-medium" : "font-normal",
+        )}
+      >
         {label}
       </span>
-      {isActive && <AnimatedIndicator layoutId={layoutId} />}
+      {isActive && (
+        <AnimatedIndicator
+          layoutId={layoutId}
+          className="border border-border-subtle/80 bg-background/95 shadow-[0_1px_0_rgba(255,255,255,0.04)]"
+        />
+      )}
     </button>
   );
 }

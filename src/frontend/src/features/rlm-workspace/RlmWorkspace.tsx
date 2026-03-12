@@ -387,7 +387,9 @@ export function RlmWorkspace() {
                 />
               </div>
             ) : null}
-            <div className="mx-auto w-full max-w-175">{composer}</div>
+            <div className="mx-auto w-full max-w-175 rounded-2xl ring-1 ring-border/30">
+              {composer}
+            </div>
           </div>
         </div>
       </div>
