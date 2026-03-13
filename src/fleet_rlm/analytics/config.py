@@ -26,7 +26,7 @@ class PostHogConfig(BaseModel):
     redact_sensitive: bool = Field(default=True)
 
     @classmethod
-    def from_env(cls) -> "PostHogConfig":
+    def from_env(cls) -> PostHogConfig:
         """Load analytics configuration from environment variables."""
         api_key = (
             os.getenv("POSTHOG_API_KEY") or ""
@@ -72,7 +72,7 @@ class MlflowConfig(BaseModel):
     dspy_log_evals: bool = Field(default=False)
 
     @classmethod
-    def from_env(cls) -> "MlflowConfig":
+    def from_env(cls) -> MlflowConfig:
         """Load MLflow configuration from environment variables."""
         tracking_uri = (
             os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5000"
