@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { nanoid } from "nanoid";
-import { FlaskConical } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -8,7 +7,6 @@ import {
   type AttachedFile,
 } from "@/components/chat/input/AttachmentChip";
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
-import { Button } from "@/components/ui/button";
 import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
 import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown";
 import { SendButton } from "@/components/chat/input/SendButton";
@@ -22,11 +20,6 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
-import {
-  PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
-  PROMPT_INPUT_ACTION_BUTTON_SIZE,
-} from "@/components/chat/input/composerActionStyles";
-import { cn } from "@/lib/utils/cn";
 
 interface ChatInputProps {
   value: string;
@@ -60,27 +53,6 @@ function revokeAttachmentPreview(attachment: AttachedFile) {
   }
 }
 
-function DaytonaRuntimeIndicator() {
-  return (
-    <Button
-      type="button"
-      size={PROMPT_INPUT_ACTION_BUTTON_SIZE}
-      variant="ghost"
-      disabled
-      className={cn(
-        PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
-        "justify-center gap-2 text-muted-foreground opacity-100",
-      )}
-      aria-label="Daytona runtime: recursive RLM"
-    >
-      <FlaskConical className="size-4 shrink-0" />
-      <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
-        Daytona RLM
-      </span>
-    </Button>
-  );
-}
-
 function ChatInput({
   value,
   onChange,
@@ -107,16 +79,17 @@ function ChatInput({
     [attachments],
   );
 
-  const handleFilesSelected = useCallback((files: File[]) => {
-    const newAttachments: AttachedFile[] = files.map((file) => ({
-      id: createAttachmentId(),
-      file,
-      previewUrl: file.type.startsWith("image/")
-        ? URL.createObjectURL(file)
-        : undefined,
-    }));
-
-    setAttachments((prev) => [...prev, ...newAttachments]);
+  const handleFilesSelected = useCallback((files: File[] | FileList) => {
+    if (files.length > 0) {
+      const newAttachments: AttachedFile[] = Array.from(files).map((file) => ({
+        id: createAttachmentId(),
+        file,
+        previewUrl: file.type.startsWith("image/")
+          ? URL.createObjectURL(file)
+          : undefined,
+      }));
+      setAttachments((prev) => [...prev, ...newAttachments]);
+    }
   }, []);
 
   const handleRemoveAttachment = useCallback((id: string) => {
@@ -145,69 +118,64 @@ function ChatInput({
   const headerContent =
     attachments.length > 0 ? (
       <PromptInputHeader className="flex flex-col gap-3 px-1 pb-1 pt-1">
-        {attachments.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {attachments.map((attachment) => (
-              <AttachmentChip
-                key={attachment.id}
-                attachment={attachment}
-                onRemove={handleRemoveAttachment}
-              />
-            ))}
-          </div>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {attachments.map((attachment) => (
+            <AttachmentChip
+              key={attachment.id}
+              attachment={attachment}
+              onRemove={handleRemoveAttachment}
+            />
+          ))}
+        </div>
       </PromptInputHeader>
     ) : null;
 
   return (
-    <PromptInput
-      className={className}
-      onSubmit={async () => {
-        handleSubmit();
-      }}
-    >
-      {headerContent}
+    <div className={className}>
+      <PromptInput
+        onSubmit={async () => {
+          handleSubmit();
+        }}
+      >
+        {headerContent}
 
-      <PromptInputBody>
-        <PromptInputTextarea
-          aria-label="Message"
-          className="min-h-12 px-2 pb-2.5 pt-3.5"
-          disabled={isLoading}
-          onChange={(event) => onChange(event.currentTarget.value)}
-          placeholder={placeholder}
-          value={value}
-        />
-      </PromptInputBody>
-
-      <PromptInputFooter className="px-1 pb-1 pt-0">
-        <PromptInputTools>
-          <AttachmentDropdown
-            onFilesSelected={handleFilesSelected}
-            uploadsEnabled={attachmentsEnabled}
-            onUnsupportedSelect={handleUnsupportedAttachmentSelect}
+        <PromptInputBody>
+          <PromptInputTextarea
+            aria-label="Message"
+            className="min-h-10 px-2 pb-2 pt-3"
+            disabled={isLoading}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            placeholder={placeholder}
+            value={value}
           />
-          <SettingsDropdown />
-        </PromptInputTools>
+        </PromptInputBody>
 
-        <div className="flex items-center gap-1">
-          <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
-          {runtimeMode === "modal_chat" ? (
+        <PromptInputFooter className="px-1 pb-1 pt-0">
+          <PromptInputTools>
+            <AttachmentDropdown
+              uploadsEnabled={attachmentsEnabled}
+              onFilesSelected={handleFilesSelected}
+              onUnsupportedSelect={handleUnsupportedAttachmentSelect}
+            />
+            <SettingsDropdown />
             <ExecutionModeDropdown
               value={executionMode}
               onChange={onExecutionModeChange}
             />
-          ) : (
-            <DaytonaRuntimeIndicator />
-          )}
+            <RuntimeModeDropdown
+              value={runtimeMode}
+              onChange={onRuntimeModeChange}
+            />
+          </PromptInputTools>
 
           <SendButton
             disabled={isLoading || !canSubmitMessage}
             isLoading={isLoading}
             isReceiving={isReceiving}
           />
-        </div>
-      </PromptInputFooter>
-    </PromptInput>
+        </PromptInputFooter>
+      </PromptInput>
+    </div>
   );
 }
 

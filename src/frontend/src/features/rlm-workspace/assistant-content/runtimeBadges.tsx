@@ -1,3 +1,4 @@
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import type { RuntimeContext } from "@/lib/data/types";
 
 export function getRuntimeBadgeStrings(ctx?: RuntimeContext): string[] {
@@ -25,7 +26,7 @@ export function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {
   if (pills.length === 0) return null;
 
   return (
-    <div className="text-[10px] leading-relaxed text-muted-foreground">
+    <div className={inspectorStyles.runtime.inline}>
       {pills.join(" · ")}
     </div>
   );

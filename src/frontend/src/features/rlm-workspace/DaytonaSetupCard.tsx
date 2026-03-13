@@ -27,8 +27,19 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils/cn";
@@ -104,15 +115,16 @@ function DaytonaSetupCard({
     !hasInvalidManualOverride &&
     isActiveRunContextVisible &&
     (Boolean(activeRunRepoUrl) || activeRunContextSources.length > 0);
-  const displayedRepoUrl =
-    hasManualOverride
-      ? manualRepoUrl
-      : resolvedRepoContext?.repoUrl ?? activeRunRepoUrl ?? "";
+  const displayedRepoUrl = hasManualOverride
+    ? manualRepoUrl
+    : (resolvedRepoContext?.repoUrl ?? activeRunRepoUrl ?? "");
   const detectedRepoDiffers =
     hasManualOverride &&
     detectedRepoContext != null &&
     detectedRepoContext.repoUrl !== resolvedRepoContext?.repoUrl;
-  const effectiveHasRepo = Boolean(resolvedRepoContext?.repoUrl ?? activeRunRepoUrl);
+  const effectiveHasRepo = Boolean(
+    resolvedRepoContext?.repoUrl ?? activeRunRepoUrl,
+  );
   const effectiveContextCount =
     parsedContextPaths.length > 0
       ? parsedContextPaths.length
@@ -139,8 +151,9 @@ function DaytonaSetupCard({
         <div className="flex flex-col gap-1">
           <CardTitle>Daytona source setup</CardTitle>
           <CardDescription>
-            Review the source mix for the next Daytona run, then expand only when
-            you want to edit repository, local context, or advanced settings.
+            Review the source mix for the next Daytona run, then expand only
+            when you want to edit repository, local context, or advanced
+            settings.
           </CardDescription>
         </div>
         <CardAction className="flex flex-wrap items-center gap-2">
@@ -157,7 +170,8 @@ function DaytonaSetupCard({
           ) : null}
           {effectiveContextCount > 0 ? (
             <Badge variant="secondary">
-              {effectiveContextCount} local {effectiveContextCount === 1 ? "path" : "paths"}
+              {effectiveContextCount} local{" "}
+              {effectiveContextCount === 1 ? "path" : "paths"}
             </Badge>
           ) : null}
           <Button
@@ -173,64 +187,72 @@ function DaytonaSetupCard({
 
       {isExpanded ? (
         <>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="daytona-repo-url">Repository URL</Label>
-              <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                <Input
-                  id="daytona-repo-url"
-                  aria-label="Daytona repository URL"
-                  value={displayedRepoUrl}
-                  onChange={(event) =>
-                    onManualRepoUrlChange(event.currentTarget.value)
-                  }
-                  placeholder="https://github.com/qredence/fleet-rlm.git"
-                />
-                {hasManualOverride ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onManualRepoUrlChange("")}
-                  >
-                    Clear repo
-                  </Button>
-                ) : null}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Optional. GitHub, GitLab, and Bitbucket HTTPS repo URLs can still be
-                auto-detected from the prompt.
-              </p>
-            </div>
+          <CardContent className="flex flex-col gap-6">
+            <FieldGroup className="gap-4">
+              <Field>
+                <FieldLabel htmlFor="daytona-repo-url">
+                  Repository URL
+                </FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="daytona-repo-url"
+                    aria-label="Daytona repository URL"
+                    value={displayedRepoUrl}
+                    onChange={(event) =>
+                      onManualRepoUrlChange(event.currentTarget.value)
+                    }
+                    placeholder="https://github.com/qredence/fleet-rlm.git"
+                  />
+                  {hasManualOverride ? (
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onManualRepoUrlChange("")}
+                      >
+                        Clear repo
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  ) : null}
+                </InputGroup>
+                <FieldDescription>
+                  Optional. GitHub, GitLab, and Bitbucket HTTPS repo URLs can
+                  still be auto-detected from the prompt.
+                </FieldDescription>
+              </Field>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="daytona-context-paths">Context paths</Label>
-              <Textarea
-                id="daytona-context-paths"
-                aria-label="Daytona context paths"
-                value={contextPaths}
-                onChange={(event) =>
-                  onContextPathsChange(event.currentTarget.value)
-                }
-                placeholder={[
-                  "/Users/zocho/Documents/spec.pdf",
-                  "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
-                ].join("\n")}
-                className="min-h-24"
-              />
-              <p className="text-sm text-muted-foreground">
-                Optional. Enter one readable host file or directory path per line.
-                Daytona stages these directly into its workspace.
-              </p>
-            </div>
+              <Field>
+                <FieldLabel htmlFor="daytona-context-paths">
+                  Context paths
+                </FieldLabel>
+                <Textarea
+                  id="daytona-context-paths"
+                  aria-label="Daytona context paths"
+                  value={contextPaths}
+                  onChange={(event) =>
+                    onContextPathsChange(event.currentTarget.value)
+                  }
+                  placeholder={[
+                    "/Users/zocho/Documents/spec.pdf",
+                    "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+                  ].join("\n")}
+                  className="min-h-24"
+                />
+                <FieldDescription>
+                  Optional. Enter one readable host file or directory path per
+                  line. Daytona stages these directly into its workspace.
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
 
             {hasInvalidManualOverride ? (
               <Alert>
                 <TriangleAlert />
                 <AlertTitle>Manual repository URL is invalid</AlertTitle>
                 <AlertDescription>
-                  Enter a valid HTTPS repository URL or clear the override to keep the
-                  run in local-context or reasoning-only mode.
+                  Enter a valid HTTPS repository URL or clear the override to
+                  keep the run in local-context or reasoning-only mode.
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -249,7 +271,10 @@ function DaytonaSetupCard({
 
             {resolvedRepoContext?.source !== "manual" && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
-                Using <span className="font-medium">{detectedRepoContext.repoUrl}</span>{" "}
+                Using{" "}
+                <span className="font-medium">
+                  {detectedRepoContext.repoUrl}
+                </span>{" "}
                 from the current prompt.
               </p>
             ) : null}
@@ -257,8 +282,9 @@ function DaytonaSetupCard({
             {hasActiveRunSources ? (
               <div className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3 text-sm text-muted-foreground">
                 <p>
-                  Active Daytona run is using the current source mix shown above.
-                  Update the repo URL or context paths here to change the next run.
+                  Active Daytona run is using the current source mix shown
+                  above. Update the repo URL or context paths here to change the
+                  next run.
                 </p>
               </div>
             ) : null}
@@ -266,8 +292,10 @@ function DaytonaSetupCard({
             {detectedRepoDiffers && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
                 The current prompt also mentions{" "}
-                <span className="font-medium">{detectedRepoContext.repoUrl}</span>,
-                but the manual repo override will be used for this run.
+                <span className="font-medium">
+                  {detectedRepoContext.repoUrl}
+                </span>
+                , but the manual repo override will be used for this run.
               </p>
             ) : null}
 
@@ -298,9 +326,11 @@ function DaytonaSetupCard({
               </div>
 
               <CollapsibleContent className="mt-4">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-repo-ref">Repository ref</Label>
+                <FieldGroup className="gap-4 md:grid md:grid-cols-3">
+                  <Field>
+                    <FieldLabel htmlFor="daytona-repo-ref">
+                      Repository ref
+                    </FieldLabel>
                     <Input
                       id="daytona-repo-ref"
                       aria-label="Daytona repository ref"
@@ -311,9 +341,11 @@ function DaytonaSetupCard({
                       }
                       placeholder="main"
                     />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-max-depth">Max depth</Label>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="daytona-max-depth">
+                      Max depth
+                    </FieldLabel>
                     <Input
                       id="daytona-max-depth"
                       aria-label="Daytona max depth"
@@ -326,11 +358,11 @@ function DaytonaSetupCard({
                         )
                       }
                     />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-batch-concurrency">
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="daytona-batch-concurrency">
                       Batch concurrency
-                    </Label>
+                    </FieldLabel>
                     <Input
                       id="daytona-batch-concurrency"
                       aria-label="Daytona batch concurrency"
@@ -343,8 +375,8 @@ function DaytonaSetupCard({
                         )
                       }
                     />
-                  </div>
-                </div>
+                  </Field>
+                </FieldGroup>
               </CollapsibleContent>
             </Collapsible>
           </CardContent>
@@ -369,14 +401,16 @@ function DaytonaSetupCard({
 
             {effectiveContextCount > 0 ? (
               <p className="text-sm text-foreground">
-                <span className="font-medium">Local context:</span> {" "}
-                {effectiveContextCount} {effectiveContextCount === 1 ? "path" : "paths"}
+                <span className="font-medium">Local context:</span>{" "}
+                {effectiveContextCount}{" "}
+                {effectiveContextCount === 1 ? "path" : "paths"}
               </p>
             ) : null}
 
             {resolvedRepoContext?.source !== "manual" && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
-                Prompt-detected repo will be used unless you add a manual override.
+                Prompt-detected repo will be used unless you add a manual
+                override.
               </p>
             ) : null}
 
@@ -389,8 +423,10 @@ function DaytonaSetupCard({
             {detectedRepoDiffers && detectedRepoContext ? (
               <p className="text-sm text-muted-foreground">
                 The current prompt also mentions{" "}
-                <span className="font-medium">{detectedRepoContext.repoUrl}</span>,
-                but the manual repo override will be used for this run.
+                <span className="font-medium">
+                  {detectedRepoContext.repoUrl}
+                </span>
+                , but the manual repo override will be used for this run.
               </p>
             ) : null}
           </div>

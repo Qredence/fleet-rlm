@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type {
   ArtifactActorKind,
   ArtifactStepType,
@@ -17,7 +17,7 @@ import {
 
 // ── Node data shape ─────────────────────────────────────────────────
 
-export interface GraphStepNodeData {
+export interface GraphStepNodeData extends Record<string, unknown> {
   label: string;
   type: ArtifactStepType;
   actorKind?: ArtifactActorKind | null;
@@ -60,7 +60,7 @@ function formatElapsed(ms: number): string {
 const GraphStepNode = memo(function GraphStepNode({
   data,
   selected,
-}: NodeProps<GraphStepNodeData>) {
+}: NodeProps<Node<GraphStepNodeData>>) {
   const meta = STEP_TYPE_META[data.type];
   const Icon = meta.Icon;
   const isExpanded = data.expanded === true;

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +14,8 @@ import fleet_rlm.analytics.mlflow_integration as mlflow_integration
 @pytest.fixture(autouse=True)
 def _reset_mlflow_integration_state(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mlflow_integration, "_INIT_IDENTITY", None)
+    monkeypatch.setattr(mlflow_integration, "_INIT_ATTEMPTED", False)
+    monkeypatch.setattr(mlflow_integration, "_LAST_INIT_WAS_AUTH_FAILURE", False)
     monkeypatch.setattr(mlflow_integration, "_INITIALIZED", False)
     monkeypatch.setattr(mlflow_integration, "_ACTIVE_CONFIG", None)
     yield
@@ -101,6 +105,131 @@ def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
     assert calls["autolog"] == 1
 
 
+def test_initialize_mlflow_retries_after_non_auth_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    calls = {"set_experiment": 0}
+
+    def _set_experiment(**kwargs):
+        _ = kwargs
+        calls["set_experiment"] += 1
+        raise RuntimeError("boom")
+
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: None,
+        set_experiment=_set_experiment,
+        dspy=SimpleNamespace(autolog=lambda **kwargs: None),
+    )
+
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    caplog.set_level(logging.WARNING)
+
+    config = MlflowConfig(enabled=True, tracking_uri="https://mlflow.example.com")
+
+    assert mlflow_integration.initialize_mlflow(config) is False
+    assert mlflow_integration.initialize_mlflow(config) is False
+    assert calls["set_experiment"] == 2
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 2
+
+
+def test_initialize_mlflow_retries_when_auth_env_changes(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls = {"set_experiment": 0}
+
+    def _set_experiment(**kwargs):
+        _ = kwargs
+        calls["set_experiment"] += 1
+        if not os.getenv("MLFLOW_TRACKING_TOKEN"):
+            raise RuntimeError("error code 403 != 200")
+
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: None,
+        set_experiment=_set_experiment,
+        dspy=SimpleNamespace(autolog=lambda **kwargs: None),
+    )
+
+    monkeypatch.delenv("MLFLOW_TRACKING_TOKEN", raising=False)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    monkeypatch.setattr(mlflow_integration, "_existing_trace_callback", object)
+
+    config = MlflowConfig(enabled=True, tracking_uri="https://mlflow.example.com")
+
+    assert mlflow_integration.initialize_mlflow(config) is False
+    monkeypatch.setenv("MLFLOW_TRACKING_TOKEN", "token-123")
+    assert mlflow_integration.initialize_mlflow(config) is True
+    assert calls["set_experiment"] == 2
+
+
+def test_initialize_mlflow_logs_actionable_warning_for_http_403(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    calls = {"set_experiment": 0}
+
+    def _set_experiment(**kwargs):
+        _ = kwargs
+        calls["set_experiment"] += 1
+        raise RuntimeError(
+            "API request to endpoint /api/2.0/mlflow/experiments/get-by-name "
+            "failed with error code 403 != 200. Response body: ''"
+        )
+
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: None,
+        set_experiment=_set_experiment,
+        dspy=SimpleNamespace(autolog=lambda **kwargs: None),
+    )
+
+    monkeypatch.delenv("MLFLOW_TRACKING_TOKEN", raising=False)
+    monkeypatch.delenv("MLFLOW_TRACKING_USERNAME", raising=False)
+    monkeypatch.delenv("MLFLOW_TRACKING_PASSWORD", raising=False)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+
+    caplog.set_level(logging.DEBUG)
+
+    assert (
+        mlflow_integration.initialize_mlflow(
+            MlflowConfig(
+                enabled=True,
+                tracking_uri="https://user:secret@mlflow.example.com/api?token=hidden",
+            )
+        )
+        is False
+    )
+    assert (
+        mlflow_integration.initialize_mlflow(
+            MlflowConfig(
+                enabled=True,
+                tracking_uri="https://user:secret@mlflow.example.com/api?token=hidden",
+            )
+        )
+        is False
+    )
+
+    warning_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+    ]
+    assert any("HTTP 403" in message for message in warning_messages)
+    assert any("MLFLOW_TRACKING_TOKEN" in message for message in warning_messages)
+    assert any(
+        "https://user:***@mlflow.example.com/api" in message
+        for message in warning_messages
+    )
+    assert all(
+        "secret" not in message and "token=hidden" not in message
+        for message in warning_messages
+    )
+    assert any(
+        record.levelno == logging.DEBUG and record.exc_info is not None
+        for record in caplog.records
+    )
+    assert calls["set_experiment"] == 1
+
+
 def test_trace_result_metadata_returns_empty_when_mlflow_disabled():
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=False)
     with mlflow_integration.mlflow_request_context(
@@ -174,6 +303,15 @@ def test_sanitize_log_field_escapes_newlines_and_carriage_returns() -> None:
     assert (
         mlflow_integration._sanitize_log_field("trace-1\r\nforged-entry")
         == "trace-1\\r\\nforged-entry"
+    )
+
+
+def test_sanitize_tracking_uri_redacts_credentials_and_query() -> None:
+    assert (
+        mlflow_integration._sanitize_tracking_uri(
+            "https://user:secret@mlflow.example.com/api?token=hidden"
+        )
+        == "https://user:***@mlflow.example.com/api"
     )
 
 

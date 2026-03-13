@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  detectDaytonaRepoContext,
-  normalizeDaytonaRepoUrl,
-  resolveDaytonaRepoContext,
-} from "@/features/rlm-workspace/daytonaRepoContext";
+  detectRepoContext,
+  normalizeRepoUrl,
+  resolveRepoContext,
+} from "@/lib/utils/repoContext";
 
-describe("daytonaRepoContext", () => {
+describe("repoContext", () => {
   it("detects a bare GitHub repo URL from prompt text", () => {
     expect(
-      detectDaytonaRepoContext(
+      detectRepoContext(
         "Please inspect https://github.com/qredence/fleet-rlm and summarize it.",
       ),
     ).toEqual({
@@ -21,7 +21,7 @@ describe("daytonaRepoContext", () => {
 
   it("detects an @url repo mention from prompt text", () => {
     expect(
-      detectDaytonaRepoContext(
+      detectRepoContext(
         "Analyze @https://github.com/qredence/fleet-rlm/tree/main/src for the tracing flow.",
       ),
     ).toEqual({
@@ -33,7 +33,7 @@ describe("daytonaRepoContext", () => {
 
   it("ignores non-repository URLs", () => {
     expect(
-      detectDaytonaRepoContext(
+      detectRepoContext(
         "Use https://example.com/docs and then answer the question.",
       ),
     ).toBeNull();
@@ -41,7 +41,7 @@ describe("daytonaRepoContext", () => {
 
   it("keeps manual overrides authoritative when they are valid", () => {
     expect(
-      resolveDaytonaRepoContext({
+      resolveRepoContext({
         manualRepoUrl: "https://gitlab.com/example/project",
         promptText: "Also inspect https://github.com/qredence/fleet-rlm",
       }),
@@ -53,7 +53,7 @@ describe("daytonaRepoContext", () => {
 
   it("does not fall back to detected repos while an invalid manual override is present", () => {
     expect(
-      resolveDaytonaRepoContext({
+      resolveRepoContext({
         manualRepoUrl: "not-a-repo",
         promptText: "Analyze https://github.com/qredence/fleet-rlm",
       }),
@@ -62,7 +62,7 @@ describe("daytonaRepoContext", () => {
 
   it("normalizes manual repo URLs for supported hosts", () => {
     expect(
-      normalizeDaytonaRepoUrl("https://github.com/qredence/fleet-rlm.git"),
+      normalizeRepoUrl("https://github.com/qredence/fleet-rlm.git"),
     ).toBe("https://github.com/qredence/fleet-rlm");
   });
 });

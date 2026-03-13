@@ -129,6 +129,7 @@ def _make_run_result(
         run_id="run-123",
         repo=repo,
         ref=ref,
+        context_sources=[],
         task=task,
         budget=RolloutBudget(),
         root_id=root_id,
@@ -152,7 +153,9 @@ class _FakeRunSession:
         error: BaseException | None = None,
     ) -> None:
         self.repo_path = "/workspace/repo"
+        self.workspace_path = self.repo_path
         self.sandbox_id = "sbx-root"
+        self.context_sources = []
         self.result = result
         self.events = events or []
         self.error = error
@@ -189,6 +192,31 @@ class _FakeRuntime:
 
     def create_repo_session(self, *, repo_url: str, ref: str | None):
         self.calls.append((repo_url, ref))
+        return self.session
+
+
+class _WorkspaceAwareFakeRuntime(_FakeRuntime):
+    def __init__(self, session: _FakeRunSession):
+        super().__init__(session)
+        self.workspace_calls: list[tuple[str | None, str | None, list[str] | None]] = []
+
+    def create_workspace_session(
+        self,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None,
+    ):
+        self.workspace_calls.append((repo_url, ref, context_paths))
+        self.session.context_sources = [
+            SimpleNamespace(
+                to_dict=lambda: {
+                    "source_id": "ctx-1",
+                    "kind": "file",
+                    "host_path": "/Users/zocho/Documents/spec.pdf",
+                }
+            )
+        ]
         return self.session
 
 
@@ -233,6 +261,7 @@ def test_child_run_payload_serializes_slotted_budget() -> None:
         depth=1,
         repo="https://github.com/example/repo.git",
         ref="main",
+        context_sources=[],
         task="inspect README",
         budget=RolloutBudget(max_depth=3, batch_concurrency=6),
         lm_config=_fake_runtime_config(),
@@ -463,6 +492,42 @@ def test_runner_passes_cancel_check_through_to_self_orchestrated_session(
     assert session.cancel_values == [True]
 
 
+def test_runner_uses_workspace_session_and_emits_context_sources(tmp_path: Path):
+    result = _make_run_result(
+        repo="",
+        final_value={
+            "summary": (
+                "The run completed with staged local context and no repository "
+                "clone, proving the workspace bootstrap path is active."
+            )
+        },
+    )
+    result.context_sources = []
+    session = _FakeRunSession(result=result)
+    runtime = _WorkspaceAwareFakeRuntime(session)
+    runner = DaytonaRLMRunner(runtime=runtime, output_dir=tmp_path)
+
+    returned = runner.run(
+        repo=None,
+        task="inspect document context",
+        context_paths=["/Users/zocho/Documents/spec.pdf"],
+    )
+
+    assert returned.result_path is not None
+    assert runtime.workspace_calls == [
+        (None, None, ["/Users/zocho/Documents/spec.pdf"])
+    ]
+    request = session.requests[0]
+    assert request.payload["repo"] == ""
+    assert request.payload["context_sources"] == [
+        {
+            "source_id": "ctx-1",
+            "kind": "file",
+            "host_path": "/Users/zocho/Documents/spec.pdf",
+        }
+    ]
+
+
 def test_child_run_payload_serializes_budget_as_plain_dict():
     payload = _ChildRunPayload(
         run_id="run-1",
@@ -471,6 +536,7 @@ def test_child_run_payload_serializes_budget_as_plain_dict():
         depth=1,
         repo="https://github.com/example/repo.git",
         ref="main",
+        context_sources=[],
         task="inspect child",
         budget=RolloutBudget(max_depth=3, batch_concurrency=6),
         lm_config=_fake_runtime_config(),
@@ -540,9 +606,9 @@ def test_self_orchestrated_runtime_deletes_child_sandbox_on_child_failure(
             )
             self.process = SimpleNamespace(
                 create_session=lambda session_id: None,
-                execute_session_command=lambda session_id,
-                request,
-                timeout=None: SimpleNamespace(cmd_id=self._command_id),
+                execute_session_command=lambda session_id, request, timeout=None: (
+                    SimpleNamespace(cmd_id=self._command_id)
+                ),
                 get_session_command_logs=lambda session_id, command_id: SimpleNamespace(
                     stdout=self._stdout + "\n",
                     stderr="",

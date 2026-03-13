@@ -59,9 +59,70 @@ def test_daytona_rlm_cli_invokes_runner(monkeypatch, tmp_path: Path):
     assert called["repo"] == "https://github.com/example/repo.git"
     assert called["task"] == "inspect repo"
     assert called["output_dir"] == tmp_path
+    assert called["context_paths"] == []
     assert called["budget"].max_depth == 3
     assert called["budget"].batch_concurrency == 7
     assert "run_id: run-123" in result.stdout
+
+
+def test_daytona_rlm_cli_accepts_context_paths_without_repo(
+    monkeypatch, tmp_path: Path
+):
+    class _FakeArtifact:
+        def to_dict(self):
+            return {"kind": "markdown", "value": "done"}
+
+    class _FakeResult:
+        run_id = "run-ctx"
+        result_path = str(tmp_path / "run-ctx.json")
+        final_artifact = _FakeArtifact()
+
+    called: dict[str, object] = {}
+
+    def _fake_run_daytona_rlm_pilot(**kwargs):
+        called.update(kwargs)
+        return _FakeResult()
+
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.run_daytona_rlm_pilot",
+        _fake_run_daytona_rlm_pilot,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "daytona-rlm",
+            "--context-path",
+            "/Users/zocho/Documents/spec.pdf",
+            "--context-path",
+            "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+            "--task",
+            "inspect docs",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert called["repo"] is None
+    assert called["context_paths"] == [
+        "/Users/zocho/Documents/spec.pdf",
+        "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+    ]
+
+
+def test_daytona_rlm_cli_rejects_ref_without_repo():
+    result = runner.invoke(
+        app,
+        [
+            "daytona-rlm",
+            "--task",
+            "inspect docs",
+            "--ref",
+            "main",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--ref requires --repo." in result.stderr
 
 
 def test_daytona_smoke_cli_invokes_runner(monkeypatch):

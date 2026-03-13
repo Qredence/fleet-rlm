@@ -43,6 +43,7 @@ from .types import (
     AgentNode,
     ChildLink,
     ChildTaskResult,
+    ContextSource,
     DaytonaRunResult,
     DaytonaRunCancelled,
     ExecutionObservation,
@@ -124,6 +125,12 @@ def _safe_repo_name(repo_url: str) -> str:
         tail = tail[:-4]
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", tail).strip("-")
     return cleaned or "repo"
+
+
+def _safe_workspace_name(repo_url: str | None) -> str:
+    if repo_url:
+        return _safe_repo_name(repo_url)
+    return "daytona-workspace"
 
 
 def _looks_like_commit(ref: str) -> bool:
@@ -784,6 +791,7 @@ class _ChildRunPayload:
     depth: int
     repo: str
     ref: str | None
+    context_sources: list[ContextSource]
     task: str
     budget: RolloutBudget
     lm_config: SandboxLmRuntimeConfig
@@ -799,6 +807,7 @@ class _ChildRunPayload:
             "depth": self.depth,
             "repo": self.repo,
             "ref": self.ref,
+            "context_sources": [item.to_dict() for item in self.context_sources],
             "task": self.task,
             "budget": asdict(self.budget),
             "lm_config": self.lm_config.to_dict(),
@@ -836,6 +845,7 @@ class SelfOrchestratedNodeRuntime:
         depth: int,
         repo: str,
         ref: str | None,
+        context_sources: list[ContextSource] | None = None,
         task: str,
         repo_path: str,
         sandbox_id: str | None,
@@ -853,6 +863,7 @@ class SelfOrchestratedNodeRuntime:
         self.depth = depth
         self.repo = repo
         self.ref = ref
+        self.context_sources = list(context_sources or [])
         self.task = task
         self.repo_path = repo_path
         self.sandbox_id = sandbox_id
@@ -906,6 +917,7 @@ class SelfOrchestratedNodeRuntime:
             run_id=self.run_id,
             repo=self.repo,
             ref=self.ref,
+            context_sources=list(self.context_sources),
             task=self.task,
             budget=self.budget,
             root_id=self.node_id,
@@ -924,6 +936,7 @@ class SelfOrchestratedNodeRuntime:
             task=self.task,
             repo=self.repo,
             ref=self.ref,
+            context_sources=list(self.context_sources),
             sandbox_id=self.sandbox_id,
             workspace_path=self.repo_path,
         )
@@ -943,9 +956,13 @@ class SelfOrchestratedNodeRuntime:
             ),
         )
         system_prompt = build_system_prompt(
-            repo_path=self.repo_path, budget=self.budget
+            workspace_path=self.repo_path, budget=self.budget
         )
-        user_prompt = build_user_prompt(repo=self.repo, ref=self.ref)
+        user_prompt = build_user_prompt(
+            repo=self.repo or None,
+            ref=self.ref,
+            context_sources=self.context_sources,
+        )
         observation_text = "No execution has happened yet."
 
         for iteration in range(1, self.budget.max_iterations + 1):
@@ -1339,6 +1356,7 @@ class SelfOrchestratedNodeRuntime:
             task=task_spec.task,
             repo=self.repo,
             ref=self.ref,
+            context_sources=list(self.context_sources),
             sandbox_id=getattr(sandbox, "id", None),
             status="bootstrapping",
         )
@@ -1349,12 +1367,7 @@ class SelfOrchestratedNodeRuntime:
             repo_path = self._build_repo_path(sandbox, self.repo)
             child_node.sandbox_id = child_sandbox_id
             child_node.workspace_path = repo_path
-            self._clone_repo(
-                sandbox=sandbox,
-                repo_url=self.repo,
-                ref=self.ref,
-                repo_path=repo_path,
-            )
+            self._prepare_child_workspace(sandbox=sandbox, workspace_path=repo_path)
             child_payload = _ChildRunPayload(
                 run_id=self.run_id,
                 node_id=child_node_id,
@@ -1362,6 +1375,7 @@ class SelfOrchestratedNodeRuntime:
                 depth=node.depth + 1,
                 repo=self.repo,
                 ref=self.ref,
+                context_sources=list(self.context_sources),
                 task=task_spec.task,
                 budget=self.budget,
                 lm_config=self.lm_config,
@@ -1554,6 +1568,7 @@ class SelfOrchestratedNodeRuntime:
                 task=str(node_payload.get("task") or f"Node {node_id[:8]}"),
                 repo=self.repo,
                 ref=self.ref,
+                context_sources=list(self.context_sources),
                 sandbox_id=str(
                     node_payload.get("sandbox_id")
                     or payload.get("sandbox_id")
@@ -1595,6 +1610,17 @@ class SelfOrchestratedNodeRuntime:
             node_payload.get("workspace_path") or existing.workspace_path or ""
         )
         existing.workspace_path = workspace_path or existing.workspace_path
+        context_sources_raw = (
+            node_payload.get("context_sources") or payload.get("context_sources") or []
+        )
+        if isinstance(context_sources_raw, list):
+            parsed_context_sources = [
+                ContextSource.from_raw(item)
+                for item in context_sources_raw
+                if isinstance(item, dict)
+            ]
+            if parsed_context_sources:
+                existing.context_sources = parsed_context_sources
         existing.iteration_count = int(
             node_payload.get("iteration_count")
             or payload.get("iteration_count")
@@ -1651,6 +1677,9 @@ class SelfOrchestratedNodeRuntime:
             existing.task = child_node.task
             existing.repo = child_node.repo
             existing.ref = child_node.ref
+            existing.context_sources = (
+                child_node.context_sources or existing.context_sources
+            )
             existing.sandbox_id = child_node.sandbox_id or existing.sandbox_id
             existing.workspace_path = (
                 child_node.workspace_path or existing.workspace_path
@@ -1701,7 +1730,7 @@ class SelfOrchestratedNodeRuntime:
         work_dir = (
             sandbox.get_work_dir() if hasattr(sandbox, "get_work_dir") else "/workspace"
         )
-        repo_name = _safe_repo_name(repo_url)
+        repo_name = _safe_workspace_name(repo_url or None)
         return str(PurePosixPath(work_dir) / "workspace" / repo_name)
 
     @staticmethod
@@ -1719,6 +1748,38 @@ class SelfOrchestratedNodeRuntime:
             else:
                 clone_kwargs["branch"] = ref
         sandbox.git.clone(**clone_kwargs)
+
+    def _copy_context_tree_to_child(self, *, sandbox: Any, workspace_path: str) -> None:
+        local_context_root = pathlib.Path(self.repo_path) / ".fleet-rlm" / "context"
+        if not local_context_root.exists():
+            return
+
+        remote_context_root = PurePosixPath(workspace_path) / ".fleet-rlm" / "context"
+        sandbox.fs.create_folder(str(remote_context_root), "755")
+        for local_path in sorted(local_context_root.rglob("*")):
+            relative = local_path.relative_to(local_context_root)
+            remote_path = remote_context_root / relative.as_posix()
+            if local_path.is_dir():
+                sandbox.fs.create_folder(str(remote_path), "755")
+                continue
+            sandbox.fs.create_folder(str(remote_path.parent), "755")
+            sandbox.fs.upload_file(local_path.read_bytes(), str(remote_path))
+
+    def _prepare_child_workspace(self, *, sandbox: Any, workspace_path: str) -> None:
+        work_dir = (
+            sandbox.get_work_dir() if hasattr(sandbox, "get_work_dir") else "/workspace"
+        )
+        sandbox.fs.create_folder(str(PurePosixPath(work_dir) / "workspace"), "755")
+        if self.repo:
+            self._clone_repo(
+                sandbox=sandbox,
+                repo_url=self.repo,
+                ref=self.ref,
+                repo_path=workspace_path,
+            )
+        else:
+            sandbox.fs.create_folder(str(PurePosixPath(workspace_path)), "755")
+        self._copy_context_tree_to_child(sandbox=sandbox, workspace_path=workspace_path)
 
     def _env_exports(self) -> str:
         env_pairs = {
@@ -2045,6 +2106,7 @@ class SelfOrchestratedNodeRuntime:
                 "effective_max_iters": self.budget.max_iterations,
                 "execution_mode": "daytona_pilot",
                 "runtime_mode": "daytona_pilot",
+                "daytona_mode": "recursive_rlm",
                 "sandbox_id": node.sandbox_id if node is not None else self.sandbox_id,
                 "run_id": self.run_id,
             },
@@ -2059,6 +2121,7 @@ class SelfOrchestratedNodeRuntime:
                 "status": node.status,
                 "sandbox_id": node.sandbox_id,
                 "workspace_path": node.workspace_path,
+                "context_sources": [item.to_dict() for item in node.context_sources],
                 "prompt_handles": [handle.to_dict() for handle in node.prompt_handles],
                 "prompt_manifest": {
                     "handles": [handle.to_dict() for handle in node.prompt_handles]
@@ -2077,6 +2140,9 @@ class SelfOrchestratedNodeRuntime:
             payload["depth"] = node.depth
             payload["repo"] = node.repo
             payload["ref"] = node.ref
+            payload["context_sources"] = [
+                item.to_dict() for item in node.context_sources
+            ]
             payload["status"] = node.status
             payload["node_status"] = node.status
             payload["prompt_handles"] = [
@@ -2191,9 +2257,14 @@ def _run_payload(
         depth=int(payload.get("depth", 0) or 0),
         repo=str(payload["repo"]),
         ref=(str(payload["ref"]) if payload.get("ref") else None),
+        context_sources=[
+            ContextSource.from_raw(item)
+            for item in payload.get("context_sources", []) or []
+            if isinstance(item, dict)
+        ],
         task=str(payload["task"]),
-        repo_path=str(payload["repo_path"])
-        if payload.get("repo_path")
+        repo_path=str(payload.get("workspace_path") or payload.get("repo_path"))
+        if payload.get("workspace_path") or payload.get("repo_path")
         else str(pathlib.Path.cwd()),
         sandbox_id=(str(payload["sandbox_id"]) if payload.get("sandbox_id") else None),
         budget=budget,
@@ -2227,7 +2298,11 @@ def _run_payload(
 def _run_child_request(request_path: str) -> int:
     payload = json.loads(pathlib.Path(request_path).read_text(encoding="utf-8"))
     request_id = f"child-{uuid.uuid4().hex}"
-    payload["repo_path"] = payload.get("repo_path") or str(pathlib.Path.cwd())
+    payload["workspace_path"] = (
+        payload.get("workspace_path")
+        or payload.get("repo_path")
+        or str(pathlib.Path.cwd())
+    )
     result = _run_payload(
         payload,
         request_id=request_id,
@@ -2268,8 +2343,10 @@ def main(argv: list[str] | None = None) -> int:
             request_id=str(frame["request_id"]),
             payload=dict(frame.get("payload", {}) or {}),
         )
-        request.payload["repo_path"] = request.payload.get("repo_path") or str(
-            pathlib.Path.cwd()
+        request.payload["workspace_path"] = (
+            request.payload.get("workspace_path")
+            or request.payload.get("repo_path")
+            or str(pathlib.Path.cwd())
         )
         global _GLOBAL_CANCEL_WATCHER
         _GLOBAL_CANCEL_WATCHER = _CancelWatcher(request.request_id)

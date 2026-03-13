@@ -1,19 +1,5 @@
-export function parseDaytonaContextPaths(value: string): string[] {
-  return value
-    .split(/\r?\n/g)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-export function buildDaytonaSourceStateLabel({
-  hasRepo,
-  hasContext,
-}: {
-  hasRepo: boolean;
-  hasContext: boolean;
-}): "Repo" | "Repo + local context" | "Local context only" | "Reasoning only" {
-  if (hasRepo && hasContext) return "Repo + local context";
-  if (hasRepo) return "Repo";
-  if (hasContext) return "Local context only";
-  return "Reasoning only";
-}
+// Compatibility aliases for Daytona-specific imports while shared source helpers remain canonical.
+export {
+  buildSourceStateLabel as buildDaytonaSourceStateLabel,
+  parseContextPaths as parseDaytonaContextPaths,
+} from "@/lib/utils/sourceContext";

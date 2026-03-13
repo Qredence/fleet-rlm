@@ -91,13 +91,18 @@ async def _process_chat_message(
 
     runtime_mode = getattr(msg, "runtime_mode", "modal_chat")
     if runtime_mode == "daytona_pilot":
-        repo_url = str(getattr(msg, "repo_url", "") or "").strip()
-        if not repo_url:
+        repo_url = str(getattr(msg, "repo_url", "") or "").strip() or None
+        repo_ref = str(getattr(msg, "repo_ref", "") or "").strip() or None
+        raw_context_paths = getattr(msg, "context_paths", None) or []
+        context_paths = [
+            str(item).strip() for item in raw_context_paths if str(item).strip()
+        ]
+        if repo_ref and not repo_url:
             await _try_send_json(
                 websocket,
                 _error_envelope(
-                    code="daytona_repo_url_required",
-                    message="Daytona runtime requires repo_url.",
+                    code="daytona_repo_ref_requires_repo",
+                    message="Daytona repo_ref requires repo_url.",
                 ),
             )
             return session.last_loaded_docs_path
@@ -108,7 +113,8 @@ async def _process_chat_message(
             planner_lm=runtime.planner_lm,
             message=message,
             repo_url=repo_url,
-            repo_ref=getattr(msg, "repo_ref", None),
+            repo_ref=repo_ref,
+            context_paths=context_paths,
             max_depth=getattr(msg, "max_depth", None),
             batch_concurrency=getattr(msg, "batch_concurrency", None),
             cancel_check=lambda: session.cancel_flag["cancelled"],

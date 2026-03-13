@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
-import type { SettingsSection } from "@/features/settings/types";
 import {
   PROMPT_INPUT_ICON_BUTTON_CLASSNAME,
   PROMPT_INPUT_ICON_BUTTON_VARIANT,
@@ -25,7 +24,7 @@ import {
 } from "./composerActionStyles";
 
 interface OpenSettingsEventDetail {
-  section?: SettingsSection;
+  section?: string;
 }
 
 function SettingsDropdown() {

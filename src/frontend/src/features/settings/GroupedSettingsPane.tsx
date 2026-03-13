@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { toast } from "sonner";
 
-import { SettingsRow } from "@/features/settings/SettingsRow";
+import { SettingsRow } from "@/features/settings/components/SettingsRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils/cn";
 import { RuntimePane } from "@/features/settings/RuntimePane";
-import { SettingsToggleRow } from "@/features/settings/SettingsToggleRow";
+import { SettingsToggleRow } from "@/features/settings/components/SettingsToggleRow";
 import { errorMessage } from "@/features/settings/settingsErrors";
 import type { SettingsSection } from "@/features/settings/types";
 import {

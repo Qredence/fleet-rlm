@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from .types import RolloutBudget
+from .types import ContextSource, RolloutBudget
 
 
-def build_system_prompt(*, repo_path: str, budget: RolloutBudget) -> str:
+def build_system_prompt(*, workspace_path: str, budget: RolloutBudget) -> str:
     """Return the strict-RLM pilot system prompt."""
 
     return (
         "You are an experimental Recursive Language Model operating over a "
-        "Daytona-backed repository sandbox.\n\n"
+        "Daytona-backed workspace sandbox.\n\n"
         "Work in Python code blocks executed inside a persistent sandbox-side "
-        "Python driver. Build intermediate state in variables, inspect the repo "
+        "Python driver. Build intermediate state in variables, inspect the workspace "
         "programmatically, and finish by calling SUBMIT(...).\n\n"
-        f"Repository root inside the sandbox: {repo_path}\n"
+        f"Workspace root inside the sandbox: {workspace_path}\n"
         f"Budget: max_iterations={budget.max_iterations}, "
         f"max_sandboxes={budget.max_sandboxes}, "
         f"max_depth={budget.max_depth}, "
@@ -40,8 +40,8 @@ def build_system_prompt(*, repo_path: str, budget: RolloutBudget) -> str:
         "1. Always reply with exactly one Python code block unless you are already "
         "finalizing from a previous execution.\n"
         "2. Large task or observation payloads may be externalized as prompt handles instead of being shown inline. When that happens, inspect them with list_prompts() and read_prompt_slice(...).\n"
-        "3. Prefer read_file_slice, grep_repo, and chunk_file over ad hoc shell commands for repo inspection.\n"
-        "4. For repository analysis, first discover candidate files or slices, then create structured child task specs and use llm_query_batched(...) for multi-slice analysis.\n"
+        "3. Prefer read_file_slice, grep_repo, and chunk_file over ad hoc shell commands for workspace inspection.\n"
+        "4. For repository, document, or directory analysis, first discover candidate files or slices, then create structured child task specs and use llm_query_batched(...) for multi-slice analysis.\n"
         "5. Structured child task specs should look like {'task': '...', 'label': '...', 'source': {'kind': 'grep_hit|file_slice|chunk|manual', 'path': '...', 'start_line': 1, 'end_line': 4, 'chunk_index': 0, 'pattern': '...', 'header': '...', 'preview': '...'}}.\n"
         "6. Keep child prompts concise, aggregate child outputs in Python variables, and synthesize the final answer from that aggregated state.\n"
         "7. Prefer SUBMIT(summary=...) or SUBMIT(final_markdown=...) for the final root answer. Use SUBMIT(output=...) only for structured intermediate child payloads.\n"
@@ -51,13 +51,39 @@ def build_system_prompt(*, repo_path: str, budget: RolloutBudget) -> str:
     )
 
 
-def build_user_prompt(*, repo: str, ref: str | None) -> str:
+def build_user_prompt(
+    *,
+    repo: str | None,
+    ref: str | None,
+    context_sources: list[ContextSource] | None = None,
+) -> str:
     """Build the per-node user prompt."""
 
-    ref_text = ref or "default branch"
+    context_lines = []
+    for source in context_sources or []:
+        counts = [f"staged at {source.staged_path}"]
+        if source.file_count:
+            counts.append(f"{source.file_count} files")
+        if source.skipped_count:
+            counts.append(f"{source.skipped_count} skipped")
+        if source.source_type:
+            counts.append(source.source_type)
+        context_lines.append(
+            f"- {source.kind}: {source.host_path} ({', '.join(counts)})"
+        )
+
+    repo_section = (
+        f"Repository: {repo}\nRef: {ref or 'default branch'}"
+        if repo
+        else "Repository: none"
+    )
+    context_section = (
+        "Local context sources:\n" + "\n".join(context_lines)
+        if context_lines
+        else "Local context sources: none"
+    )
     return (
-        f"Repository: {repo}\n"
-        f"Ref: {ref_text}\n"
-        "Explore the repository, perform the requested analysis, and produce the "
-        "final answer through SUBMIT(...)."
+        f"{repo_section}\n"
+        f"{context_section}\n"
+        "Explore the available workspace context, perform the requested analysis or reasoning, and produce the final answer through SUBMIT(...)."
     )

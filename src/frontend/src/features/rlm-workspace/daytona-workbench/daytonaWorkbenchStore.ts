@@ -31,8 +31,7 @@ export const useDaytonaWorkbenchStore = create<DaytonaWorkbenchStore>(
   (set, get) => ({
     ...createInitialDaytonaWorkbenchState(),
     reset: () => set(createInitialDaytonaWorkbenchState()),
-    beginRun: (input) =>
-      set((state) => startDaytonaWorkbenchRun(state, input)),
+    beginRun: (input) => set((state) => startDaytonaWorkbenchRun(state, input)),
     failRun: (errorMessage) =>
       set((state) => failDaytonaWorkbenchRun(state, errorMessage)),
     applyFrame: (frame) =>

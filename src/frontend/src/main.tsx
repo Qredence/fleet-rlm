@@ -1,6 +1,11 @@
 import { createRoot } from "react-dom/client";
+import { lazy, Suspense } from "react";
 import App from "@/app/App.tsx";
 import "./styles/index.css";
+
+const Agentation = import.meta.env.DEV
+  ? lazy(() => import("agentation").then((m) => ({ default: m.Agentation })))
+  : () => null;
 
 // PostHog analytics initialization
 import posthog from "posthog-js";
@@ -36,5 +41,10 @@ window.addEventListener("pageshow", () => {
 createRoot(document.getElementById("root")!).render(
   <PostHogProvider client={posthog}>
     <App />
+    {import.meta.env.DEV ? (
+      <Suspense fallback={null}>
+        <Agentation />
+      </Suspense>
+    ) : null}
   </PostHogProvider>,
 );

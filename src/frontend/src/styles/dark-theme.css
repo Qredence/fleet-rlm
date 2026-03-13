@@ -53,7 +53,7 @@
   --color-border-strong: var(--alpha-20);
   --color-border-disabled: var(--alpha-06);
   --color-background-disabled: var(--alpha-05);
-  --color-ring: #0285ff;
+  --color-ring: #8c8c8c;
   --color-ring-primary: var(--color-ring);
   --color-ring-primary-soft: var(--color-ring-primary);
   --color-ring-primary-solid: var(--color-ring-primary);
@@ -257,8 +257,8 @@
   --color-secondary-foreground: var(--color-text-secondary-soft);
   --color-muted: var(--color-background-primary-soft);
   --color-muted-foreground: var(--color-text-secondary);
-  --color-accent: var(--color-background-info-solid);
-  --color-accent-foreground: var(--color-text-info-solid);
+  --color-accent: var(--color-background-primary-soft);
+  --color-accent-foreground: var(--color-text);
   --color-destructive: var(--color-background-danger-solid);
   --color-destructive-foreground: var(--color-text-danger-solid);
   --color-border: var(--color-border);
@@ -286,8 +286,8 @@
   --color-sidebar-foreground: var(--color-text);
   --color-sidebar-primary: var(--color-background-primary-solid);
   --color-sidebar-primary-foreground: var(--color-text-primary-solid);
-  --color-sidebar-accent: var(--color-background-info-solid);
-  --color-sidebar-accent-foreground: var(--color-text-info-solid);
+  --color-sidebar-accent: var(--color-background-primary-soft);
+  --color-sidebar-accent-foreground: var(--color-text);
   --color-sidebar-border: var(--color-border);
   --color-sidebar-ring: var(--color-ring);
 

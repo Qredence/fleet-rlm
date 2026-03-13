@@ -15,6 +15,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { useNavigationStore } from "@/stores/navigationStore";
 import type { InspectorTab } from "@/lib/data/types";
 import type { ExecutionStep } from "@/stores/artifactStore";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import { executionSectionState, statusTone } from "./utils/inspector-utils";
 import { renderBadges } from "./components/inspector-components";
 
@@ -35,7 +36,7 @@ function EmptyInspectorState({
 }) {
   return (
     <div className="flex h-full items-center justify-center px-4 py-6">
-      <Card className="w-full max-w-md border-border-subtle/80 bg-card/70 shadow-none">
+      <Card className="w-full max-w-md border-border-subtle/80 bg-card/75 shadow-none">
         <CardHeader>
           <CardTitle>Message Inspector</CardTitle>
           <CardDescription>
@@ -175,40 +176,45 @@ export function MessageInspectorPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="px-4 py-2">
-        <Card className="gap-0 rounded-xl border-border-subtle/80 bg-card/70 shadow-none">
-          <CardHeader className="space-y-2 px-3 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="text-sm font-medium text-foreground">
-                {selectedTurn.isPendingShell
-                  ? "Assistant turn in progress"
-                  : "Selected assistant turn"}
-              </CardTitle>
-              <Badge variant={turnStatus.variant} className="rounded-full">
+        <Card className="gap-0 rounded-xl border-border-subtle/80 bg-card/75 shadow-none">
+          <CardHeader className="space-y-3 px-3 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="space-y-1">
+                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  Message Inspector
+                </p>
+                <CardTitle className="text-sm font-medium text-foreground">
+                  {selectedTurn.isPendingShell
+                    ? "Assistant turn in progress"
+                    : "Selected assistant turn"}
+                </CardTitle>
+              </div>
+              <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
                 {turnStatus.label}
               </Badge>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
               {model.summary.trajectoryCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.trajectoryCount} trajector
                   {model.summary.trajectoryCount === 1 ? "y" : "ies"}
                 </Badge>
               ) : null}
               {model.summary.toolSessionCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.toolSessionCount} tool session
                   {model.summary.toolSessionCount === 1 ? "" : "s"}
                 </Badge>
               ) : null}
               {model.summary.sourceCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.sourceCount} source
                   {model.summary.sourceCount === 1 ? "" : "s"}
                 </Badge>
               ) : null}
               {model.summary.attachmentCount > 0 ? (
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {model.summary.attachmentCount} attachment
                   {model.summary.attachmentCount === 1 ? "" : "s"}
                 </Badge>
@@ -228,7 +234,7 @@ export function MessageInspectorPanel() {
         className="min-h-0 flex-1 gap-0"
       >
         <div className="px-4 py-2">
-          <TabsList className="flex w-full">
+          <TabsList className="flex w-full rounded-xl border border-border-subtle/70 bg-card/70 p-1">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>
                 {tab.label}

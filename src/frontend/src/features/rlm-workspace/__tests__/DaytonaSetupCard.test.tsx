@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { DaytonaSetupCard } from "@/features/rlm-workspace/DaytonaSetupCard";
+import { SourceSetupCard } from "@/features/rlm-workspace/SourceSetupCard";
 
-describe("DaytonaSetupCard", () => {
+describe("SourceSetupCard", () => {
   const baseProps = {
     manualRepoUrl: "",
     onManualRepoUrlChange: vi.fn(),
@@ -22,7 +22,7 @@ describe("DaytonaSetupCard", () => {
 
   it("shows the active run repo context without falling back to repository required", () => {
     const html = renderToStaticMarkup(
-      <DaytonaSetupCard
+      <SourceSetupCard
         {...baseProps}
         activeRunRepoUrl="https://github.com/qredence/fleet-rlm"
         activeRunContextSources={[
@@ -38,25 +38,27 @@ describe("DaytonaSetupCard", () => {
 
     expect(html).toContain("Active run context");
     expect(html).toContain("Edit source setup");
-    expect(html).toContain("Active Daytona run is using the current source mix shown above.");
+    expect(html).toContain(
+      "The active run is using the current source mix shown above.",
+    );
     expect(html).toContain("https://github.com/qredence/fleet-rlm");
     expect(html).not.toContain("Repository required");
   });
 
   it("defaults to a compact reasoning-only summary", () => {
-    const html = renderToStaticMarkup(<DaytonaSetupCard {...baseProps} />);
+    const html = renderToStaticMarkup(<SourceSetupCard {...baseProps} />);
 
     expect(html).toContain("Reasoning only");
     expect(html).toContain("Edit source setup");
     expect(html).toContain(
-      "No external sources are configured yet. Daytona will run in reasoning-only mode.",
+      "No external sources are configured yet. The runtime will use reasoning-only mode.",
     );
-    expect(html).not.toContain("Daytona repository URL");
+    expect(html).not.toContain("Repository URL");
   });
 
   it("shows a combined repo and local context badge when both are configured", () => {
     const html = renderToStaticMarkup(
-      <DaytonaSetupCard
+      <SourceSetupCard
         {...baseProps}
         contextPaths={"/Users/zocho/Documents/spec.pdf\n/workspace/docs"}
         resolvedRepoContext={{
@@ -72,7 +74,7 @@ describe("DaytonaSetupCard", () => {
 
   it("keeps invalid manual overrides visible without fully expanding the card", () => {
     const html = renderToStaticMarkup(
-      <DaytonaSetupCard
+      <SourceSetupCard
         {...baseProps}
         manualRepoUrl="not-a-valid-repo-url"
         hasInvalidManualOverride
@@ -83,7 +85,8 @@ describe("DaytonaSetupCard", () => {
     expect(html).toContain(
       "Manual repository override needs attention before the next run.",
     );
-    expect(html).toContain("Expand source setup to fix the URL or clear the override.");
-    expect(html).not.toContain("Daytona repository URL");
+    expect(html).toContain(
+      "Expand source setup to fix the URL or clear the override.",
+    );
   });
 });
