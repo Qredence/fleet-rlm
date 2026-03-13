@@ -1,7 +1,7 @@
 PYTHON_SOURCES = src tests
 PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
-.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold release-check clean mlflow-server
+.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold sync-ui build-ui release-check clean mlflow-server
 
 help:
 	@echo "Targets:"
@@ -23,6 +23,8 @@ help:
 	@echo "  make frontend-check    - Run frontend checks when src/frontend exists"
 	@echo "  make quality-gate      - Run lint + format-check + typecheck + test + metadata-check + frontend-check"
 	@echo "  make check             - Alias for quality-gate"
+	@echo "  make sync-ui           - Copy src/frontend/dist/ into src/fleet_rlm/ui/dist/"
+	@echo "  make build-ui          - Build the frontend and sync packaged UI assets"
 	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5000"
 	@echo "  make clean             - Remove caches and local generated artifacts"
 	@echo "  make sync-scaffold     - Sync .claude/ to src/fleet_rlm/_scaffold/"
@@ -98,7 +100,17 @@ sync-scaffold:
 	rsync -a --delete .claude/agents/ src/fleet_rlm/_scaffold/agents/
 	@echo "Scaffold sync complete"
 
-release-check: clean quality-gate security-check
+sync-ui:
+	@echo "Syncing frontend dist to packaged UI assets..."
+	rm -rf src/fleet_rlm/ui/dist
+	mkdir -p src/fleet_rlm/ui
+	cp -R src/frontend/dist src/fleet_rlm/ui/dist
+
+build-ui:
+	cd src/frontend && bun install --frozen-lockfile && bun run build
+	$(MAKE) sync-ui
+
+release-check: clean quality-gate security-check build-ui
 	rm -rf dist build
 	uv build
 	uv run python scripts/check_wheel_frontend_sync.py

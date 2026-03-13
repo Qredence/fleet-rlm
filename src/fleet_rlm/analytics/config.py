@@ -55,7 +55,12 @@ class PostHogConfig(BaseModel):
 
 
 class MlflowConfig(BaseModel):
-    """MLflow tracing/evaluation configuration."""
+    """MLflow tracing/evaluation configuration.
+
+    MLflow-native auth environment variables such as ``MLFLOW_TRACKING_TOKEN`` and
+    ``MLFLOW_TRACKING_USERNAME`` / ``MLFLOW_TRACKING_PASSWORD`` are consumed
+    directly by the MLflow client and intentionally not duplicated here.
+    """
 
     enabled: bool = Field(default=True)
     tracking_uri: str = Field(default="http://127.0.0.1:5000")

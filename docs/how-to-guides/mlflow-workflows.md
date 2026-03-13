@@ -31,6 +31,22 @@ export MLFLOW_DSPY_LOG_COMPILES=false
 export MLFLOW_DSPY_LOG_EVALS=false
 ```
 
+For protected remote MLflow servers, configure one of MLflow's native auth mechanisms before starting the app or running export/eval scripts:
+
+```bash
+# bearer-token auth
+export MLFLOW_TRACKING_TOKEN=replace-with-token
+
+# or basic auth
+export MLFLOW_TRACKING_USERNAME=replace-with-username
+export MLFLOW_TRACKING_PASSWORD=replace-with-password
+
+# optional only for development against self-signed certs
+# export MLFLOW_TRACKING_INSECURE_TLS=true
+```
+
+If you do not want MLflow for a given environment, set `MLFLOW_ENABLED=false` and startup will skip MLflow initialization entirely.
+
 When MLflow is enabled:
 
 - WebSocket chat turns generate one `mlflow_client_request_id` per turn.
@@ -85,9 +101,9 @@ The exported rows use this shape:
 {
   "trace_id": "tr-...",
   "client_request_id": "chat-...",
-  "inputs": {"question": "What happened?"},
+  "inputs": { "question": "What happened?" },
   "outputs": "The deployment failed because ...",
-  "expectations": {"expected_response": "The deployment failed because ..."},
+  "expectations": { "expected_response": "The deployment failed because ..." },
   "feedback": {
     "response_is_correct": {
       "value": false,

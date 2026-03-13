@@ -27,8 +27,19 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils/cn";
@@ -176,56 +187,64 @@ function DaytonaSetupCard({
 
       {isExpanded ? (
         <>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="daytona-repo-url">Repository URL</Label>
-              <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                <Input
-                  id="daytona-repo-url"
-                  aria-label="Daytona repository URL"
-                  value={displayedRepoUrl}
-                  onChange={(event) =>
-                    onManualRepoUrlChange(event.currentTarget.value)
-                  }
-                  placeholder="https://github.com/qredence/fleet-rlm.git"
-                />
-                {hasManualOverride ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onManualRepoUrlChange("")}
-                  >
-                    Clear repo
-                  </Button>
-                ) : null}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Optional. GitHub, GitLab, and Bitbucket HTTPS repo URLs can
-                still be auto-detected from the prompt.
-              </p>
-            </div>
+          <CardContent className="flex flex-col gap-6">
+            <FieldGroup className="gap-4">
+              <Field>
+                <FieldLabel htmlFor="daytona-repo-url">
+                  Repository URL
+                </FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="daytona-repo-url"
+                    aria-label="Daytona repository URL"
+                    value={displayedRepoUrl}
+                    onChange={(event) =>
+                      onManualRepoUrlChange(event.currentTarget.value)
+                    }
+                    placeholder="https://github.com/qredence/fleet-rlm.git"
+                  />
+                  {hasManualOverride ? (
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onManualRepoUrlChange("")}
+                      >
+                        Clear repo
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  ) : null}
+                </InputGroup>
+                <FieldDescription>
+                  Optional. GitHub, GitLab, and Bitbucket HTTPS repo URLs can
+                  still be auto-detected from the prompt.
+                </FieldDescription>
+              </Field>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="daytona-context-paths">Context paths</Label>
-              <Textarea
-                id="daytona-context-paths"
-                aria-label="Daytona context paths"
-                value={contextPaths}
-                onChange={(event) =>
-                  onContextPathsChange(event.currentTarget.value)
-                }
-                placeholder={[
-                  "/Users/zocho/Documents/spec.pdf",
-                  "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
-                ].join("\n")}
-                className="min-h-24"
-              />
-              <p className="text-sm text-muted-foreground">
-                Optional. Enter one readable host file or directory path per
-                line. Daytona stages these directly into its workspace.
-              </p>
-            </div>
+              <Field>
+                <FieldLabel htmlFor="daytona-context-paths">
+                  Context paths
+                </FieldLabel>
+                <Textarea
+                  id="daytona-context-paths"
+                  aria-label="Daytona context paths"
+                  value={contextPaths}
+                  onChange={(event) =>
+                    onContextPathsChange(event.currentTarget.value)
+                  }
+                  placeholder={[
+                    "/Users/zocho/Documents/spec.pdf",
+                    "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+                  ].join("\n")}
+                  className="min-h-24"
+                />
+                <FieldDescription>
+                  Optional. Enter one readable host file or directory path per
+                  line. Daytona stages these directly into its workspace.
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
 
             {hasInvalidManualOverride ? (
               <Alert>
@@ -307,9 +326,11 @@ function DaytonaSetupCard({
               </div>
 
               <CollapsibleContent className="mt-4">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-repo-ref">Repository ref</Label>
+                <FieldGroup className="gap-4 md:grid md:grid-cols-3">
+                  <Field>
+                    <FieldLabel htmlFor="daytona-repo-ref">
+                      Repository ref
+                    </FieldLabel>
                     <Input
                       id="daytona-repo-ref"
                       aria-label="Daytona repository ref"
@@ -320,9 +341,11 @@ function DaytonaSetupCard({
                       }
                       placeholder="main"
                     />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-max-depth">Max depth</Label>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="daytona-max-depth">
+                      Max depth
+                    </FieldLabel>
                     <Input
                       id="daytona-max-depth"
                       aria-label="Daytona max depth"
@@ -335,11 +358,11 @@ function DaytonaSetupCard({
                         )
                       }
                     />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="daytona-batch-concurrency">
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="daytona-batch-concurrency">
                       Batch concurrency
-                    </Label>
+                    </FieldLabel>
                     <Input
                       id="daytona-batch-concurrency"
                       aria-label="Daytona batch concurrency"
@@ -352,8 +375,8 @@ function DaytonaSetupCard({
                         )
                       }
                     />
-                  </div>
-                </div>
+                  </Field>
+                </FieldGroup>
               </CollapsibleContent>
             </Collapsible>
           </CardContent>

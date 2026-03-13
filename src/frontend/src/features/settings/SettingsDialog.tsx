@@ -8,7 +8,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +26,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { GroupedSettingsPane } from "@/features/settings/GroupedSettingsPane";
 import {
@@ -119,32 +119,41 @@ function MobileSectionNav({
   activeSection: SettingsSection;
   onSelectSection: (section: SettingsSection) => void;
 }) {
+  const handleValueChange = (value: string) => {
+    if (
+      value &&
+      settingsSections.some((section) => section.key === value)
+    ) {
+      onSelectSection(value as SettingsSection);
+    }
+  };
+
   return (
-    <div
-      className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-4 py-2"
-      role="tablist"
-      aria-label="Settings sections"
-    >
-      <div className="flex w-max items-center gap-2">
+    <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-4 py-2">
+      <ToggleGroup
+        type="single"
+        value={activeSection}
+        onValueChange={handleValueChange}
+        variant="outline"
+        size="sm"
+        aria-label="Settings sections"
+        className="w-max"
+      >
         {settingsSections.map((section) => {
           const Icon = section.icon;
-          const isActive = section.key === activeSection;
           return (
-            <Button
+            <ToggleGroupItem
               key={section.key}
-              variant={isActive ? "secondary" : "ghost"}
-              size="sm"
-              role="tab"
-              aria-selected={isActive}
-              className="touch-target rounded-full"
-              onClick={() => onSelectSection(section.key)}
+              value={section.key}
+              aria-label={section.label}
+              className="touch-target min-w-max px-3"
             >
-              <Icon className="size-4" />
+              <Icon aria-hidden="true" />
               {section.label}
-            </Button>
+            </ToggleGroupItem>
           );
         })}
-      </div>
+      </ToggleGroup>
     </div>
   );
 }
