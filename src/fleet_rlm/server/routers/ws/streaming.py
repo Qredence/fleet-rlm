@@ -41,6 +41,7 @@ async def run_streaming_turn(
     analytics_enabled: bool | None,
     persist_session_state: Callable[..., Awaitable[None]],
     mlflow_trace_context: MlflowTraceRequestContext | None = None,
+    agent_stream_kwargs: dict[str, Any] | None = None,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
 
@@ -72,6 +73,7 @@ async def run_streaming_turn(
                 step_builder=step_builder,
                 analytics_enabled=analytics_enabled,
                 persist_session_state=persist_session_state,
+                agent_stream_kwargs=agent_stream_kwargs,
             )
         else:
             with mlflow_request_context(mlflow_trace_context):
@@ -86,6 +88,7 @@ async def run_streaming_turn(
                     step_builder=step_builder,
                     analytics_enabled=analytics_enabled,
                     persist_session_state=persist_session_state,
+                    agent_stream_kwargs=agent_stream_kwargs,
                 )
     except WebSocketDisconnect:
         raise
@@ -114,6 +117,7 @@ async def _stream_agent_events(
     step_builder: ExecutionStepBuilder,
     analytics_enabled: bool | None,
     persist_session_state: Callable[..., Awaitable[None]],
+    agent_stream_kwargs: dict[str, Any] | None = None,
 ) -> None:
     with runtime_telemetry_enabled_context(analytics_enabled):
         async for event in agent.aiter_chat_turn_stream(
@@ -121,6 +125,7 @@ async def _stream_agent_events(
             trace=trace,
             cancel_check=cancel_check,
             docs_path=docs_path,
+            **(agent_stream_kwargs or {}),
         ):
             await _emit_stream_event(
                 websocket=websocket,
@@ -182,13 +187,17 @@ async def _emit_stream_event(
         return
 
     if event.kind in {"cancelled", "error"}:
+        # Surface terminal Daytona/chat failures to the client before any
+        # slower lifecycle bookkeeping so the UI does not sit in a spinner
+        # when persistence or completion hooks stall.
+        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+            raise WebSocketDisconnect(code=1001)
+        await persist_session_state(include_volume_save=True)
         status = RunStatus.CANCELLED if event.kind == "cancelled" else RunStatus.FAILED
         error_json = (
             {"error": event.text, "kind": event.kind} if event.kind == "error" else None
         )
         await lifecycle.complete_run(status, step=step, error_json=error_json)
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
 
 
 async def _handle_stream_error(
