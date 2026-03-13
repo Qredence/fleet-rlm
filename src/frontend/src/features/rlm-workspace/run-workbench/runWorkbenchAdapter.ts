@@ -1,20 +1,25 @@
+import type { ChatAttachmentItem, ChatSourceItem } from "@/lib/data/types";
 import type { WsServerMessage } from "@/lib/rlm-api";
+import { normalizeDaytonaMode } from "@/features/rlm-workspace/run-workbench/daytonaMode";
 import type {
+  ActivityEntry,
   ArtifactSummary,
-  ChildLinkSummary,
+  CallbackSourceSummary,
+  CallbackSummary,
   ContextSourceSummary,
+  IterationSummary,
   PromptHandleSummary,
-  RunNode,
-  RunWorkbenchState,
   RunSummary,
-  TimelineEntry,
+  RunWorkbenchState,
 } from "@/features/rlm-workspace/run-workbench/types";
 
 const PROMPT_PREVIEW_LIMIT = 220;
 const ARTIFACT_PREVIEW_LIMIT = 320;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
   return value as Record<string, unknown>;
 }
 
@@ -57,6 +62,32 @@ function previewText(value: unknown, limit: number): string {
   return collapseWhitespace(stringifyValue(value), limit);
 }
 
+function preferredArtifactText(value: unknown): string | undefined {
+  const direct = asText(value);
+  if (direct) return direct;
+
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  for (const key of [
+    "final_markdown",
+    "summary",
+    "text",
+    "content",
+    "message",
+  ]) {
+    const candidate = asText(record[key]);
+    if (candidate) return candidate;
+  }
+
+  const nestedValue = record.value;
+  if (nestedValue !== value) {
+    return preferredArtifactText(nestedValue);
+  }
+
+  return undefined;
+}
+
 function normalizeWarnings(value: unknown): string[] {
   return asArray(value)
     .map((item) => asText(item))
@@ -64,9 +95,7 @@ function normalizeWarnings(value: unknown): string[] {
     .map((item) => collapseWhitespace(item, ARTIFACT_PREVIEW_LIMIT));
 }
 
-function normalizeContextSource(
-  raw: unknown,
-): ContextSourceSummary | null {
+function normalizeContextSource(raw: unknown): ContextSourceSummary | null {
   const record = asRecord(raw);
   if (!record) return null;
   const sourceId =
@@ -93,9 +122,7 @@ function normalizePromptHandle(raw: unknown): PromptHandleSummary | null {
   const record = asRecord(raw);
   if (!record) return null;
   const handleId =
-    asText(record.handle_id) ??
-    asText(record.handleId) ??
-    asText(record.id);
+    asText(record.handle_id) ?? asText(record.handleId) ?? asText(record.id);
   if (!handleId) return null;
   return {
     handleId,
@@ -108,10 +135,43 @@ function normalizePromptHandle(raw: unknown): PromptHandleSummary | null {
   };
 }
 
+function dedupePromptHandles(
+  handles: PromptHandleSummary[],
+): PromptHandleSummary[] {
+  const deduped = new Map<string, PromptHandleSummary>();
+  for (const handle of handles) {
+    deduped.set(handle.handleId, handle);
+  }
+  return [...deduped.values()];
+}
+
+function collectPromptHandlePayloads(
+  payload?: Record<string, unknown>,
+): unknown[] {
+  const node = asRecord(payload?.node);
+  const promptManifest = asRecord(
+    payload?.prompt_manifest ??
+      payload?.promptManifest ??
+      node?.prompt_manifest ??
+      node?.promptManifest,
+  );
+
+  return [
+    ...asArray(
+      payload?.prompts ?? payload?.prompt_handles ?? payload?.promptHandles,
+    ),
+    ...asArray(node?.prompt_handles ?? node?.promptHandles),
+    ...asArray(promptManifest?.handles),
+  ];
+}
+
 function normalizeArtifact(raw: unknown): ArtifactSummary | null {
   const record = asRecord(raw);
   if (!record) {
-    const textPreview = previewText(raw, ARTIFACT_PREVIEW_LIMIT);
+    const textPreview = previewText(
+      preferredArtifactText(raw) ?? raw,
+      ARTIFACT_PREVIEW_LIMIT,
+    );
     if (!textPreview) return null;
     return {
       value: raw,
@@ -121,7 +181,7 @@ function normalizeArtifact(raw: unknown): ArtifactSummary | null {
 
   const value = record.value;
   const textPreview = previewText(
-    record.summary ?? record.final_markdown ?? value,
+    preferredArtifactText(record) ?? preferredArtifactText(value) ?? value,
     ARTIFACT_PREVIEW_LIMIT,
   );
   return {
@@ -135,98 +195,284 @@ function normalizeArtifact(raw: unknown): ArtifactSummary | null {
   };
 }
 
-function normalizeChildLink(raw: unknown): ChildLinkSummary | null {
+function normalizeSource(raw: unknown): ChatSourceItem | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const taskRecord = asRecord(record.task);
-  const taskText =
-    asText(taskRecord?.task) ??
-    asText(record.task_text) ??
-    asText(record.task);
-  if (!taskText) return null;
+  const sourceId =
+    asText(record.source_id ?? record.sourceId) ??
+    asText(record.id) ??
+    asText(record.path);
+  const title =
+    asText(record.title) ??
+    asText(record.path) ??
+    asText(record.host_path ?? record.hostPath) ??
+    "Source";
+  if (!sourceId) return null;
 
-  const sourceRecord = asRecord(taskRecord?.source ?? record.source);
+  const kindRaw = asText(record.kind)?.toLowerCase();
+  const kind: ChatSourceItem["kind"] =
+    kindRaw === "web" ||
+    kindRaw === "file" ||
+    kindRaw === "artifact" ||
+    kindRaw === "tool_output"
+      ? kindRaw
+      : "other";
+
   return {
-    childId: asText(record.child_id ?? record.childId) ?? null,
-    callbackName:
-      asText(record.callback_name ?? record.callbackName) ?? "llm_query",
-    status: asText(record.status) ?? "unknown",
+    sourceId,
+    kind,
+    title,
+    url: asText(record.url),
+    canonicalUrl: asText(record.canonical_url ?? record.canonicalUrl),
+    displayUrl:
+      asText(record.display_url ?? record.displayUrl) ??
+      asText(record.host_path ?? record.hostPath) ??
+      asText(record.path),
+    description: asText(record.description),
+    quote: asText(record.quote),
+  };
+}
+
+function dedupeSources(sources: ChatSourceItem[]): ChatSourceItem[] {
+  const deduped = new Map<string, ChatSourceItem>();
+  for (const source of sources) {
+    const key =
+      source.kind === "web"
+        ? (source.canonicalUrl ??
+          source.url ??
+          source.displayUrl ??
+          source.sourceId)
+        : (source.sourceId ??
+          source.canonicalUrl ??
+          source.url ??
+          source.displayUrl);
+    deduped.set(key, source);
+  }
+  return [...deduped.values()];
+}
+
+function callbackSourceKey(source?: CallbackSourceSummary): string {
+  if (!source) return "";
+  return [
+    source.kind,
+    source.sourceId,
+    source.path,
+    source.startLine,
+    source.endLine,
+    source.chunkIndex,
+    source.header,
+    source.pattern,
+  ]
+    .map((value) => String(value ?? ""))
+    .join("|");
+}
+
+function normalizeAttachment(raw: unknown): ChatAttachmentItem | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const attachmentId =
+    asText(record.attachment_id ?? record.attachmentId) ??
+    asText(record.id) ??
+    asText(record.name);
+  if (!attachmentId) return null;
+  return {
+    attachmentId,
+    name: asText(record.name) ?? asText(record.title) ?? "Attachment",
+    url: asText(record.url),
+    previewUrl: asText(record.preview_url ?? record.previewUrl),
+    mimeType: asText(record.mime_type ?? record.mimeType),
+    mediaType: asText(record.media_type ?? record.mediaType),
+    sizeBytes: asNumber(record.size_bytes ?? record.sizeBytes),
+    kind: asText(record.kind),
+    description: asText(record.description),
+  };
+}
+
+function dedupeAttachments(
+  attachments: ChatAttachmentItem[],
+): ChatAttachmentItem[] {
+  const deduped = new Map<string, ChatAttachmentItem>();
+  for (const attachment of attachments) {
+    deduped.set(attachment.attachmentId, attachment);
+  }
+  return [...deduped.values()];
+}
+
+function normalizeCallbackSource(
+  raw: unknown,
+): CallbackSourceSummary | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  return {
+    kind: asText(record.kind),
+    sourceId: asText(record.source_id ?? record.sourceId),
+    path: asText(record.path),
+    startLine: asNumber(record.start_line ?? record.startLine),
+    endLine: asNumber(record.end_line ?? record.endLine),
+    chunkIndex: asNumber(record.chunk_index ?? record.chunkIndex),
+    header: asText(record.header),
+    pattern: asText(record.pattern),
+    preview: asText(record.preview),
+  };
+}
+
+function normalizeCallback(raw: unknown): CallbackSummary | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const task = asText(record.task);
+  const callbackName =
+    asText(record.callback_name ?? record.callbackName) ??
+    asText(record.tool_name ?? record.toolName);
+  if (!task || !callbackName) return null;
+  return {
+    id:
+      asText(record.id) ??
+      `${callbackName}-${record.iteration ?? "na"}-${task.slice(0, 24)}`,
+    callbackName,
+    iteration: asNumber(record.iteration),
+    status: asText(record.status) ?? "completed",
+    task,
+    label: asText(record.label),
     resultPreview: previewText(
       record.result_preview ?? record.resultPreview,
       ARTIFACT_PREVIEW_LIMIT,
     ),
-    task: {
-      task: taskText,
-      label: asText(taskRecord?.label),
-      source: sourceRecord
-        ? {
-            kind: asText(sourceRecord.kind),
-            sourceId: asText(sourceRecord.source_id ?? sourceRecord.sourceId),
-            path: asText(sourceRecord.path),
-            startLine: asNumber(
-              sourceRecord.start_line ?? sourceRecord.startLine,
-            ),
-            endLine: asNumber(sourceRecord.end_line ?? sourceRecord.endLine),
-            preview: previewText(sourceRecord.preview, PROMPT_PREVIEW_LIMIT),
-          }
-        : undefined,
-    },
+    source: normalizeCallbackSource(record.source),
   };
 }
 
-function normalizeNode(nodeId: string, raw: unknown): RunNode | null {
+function dedupeCallbacks(callbacks: CallbackSummary[]): CallbackSummary[] {
+  const deduped = new Map<string, CallbackSummary>();
+  for (const callback of callbacks) {
+    const key = [
+      callback.callbackName,
+      callback.iteration ?? "na",
+      callback.task,
+      callback.label ?? "",
+      callbackSourceKey(callback.source),
+    ].join("|");
+    const current = deduped.get(key);
+    if (!current) {
+      deduped.set(key, callback);
+      continue;
+    }
+    deduped.set(key, {
+      ...current,
+      ...callback,
+      resultPreview: callback.resultPreview ?? current.resultPreview,
+      source: callback.source ?? current.source,
+    });
+  }
+  return [...deduped.values()];
+}
+
+function findLatestRunningCallback(
+  callbacks: CallbackSummary[],
+  {
+    callbackName,
+    iteration,
+  }: {
+    callbackName: string;
+    iteration: number | undefined;
+  },
+): CallbackSummary | undefined {
+  for (let index = callbacks.length - 1; index >= 0; index -= 1) {
+    const callback = callbacks[index];
+    if (!callback) continue;
+    if (callback.callbackName !== callbackName) continue;
+    if (callback.iteration !== iteration) continue;
+    if (callback.status !== "running") continue;
+    return callback;
+  }
+  return undefined;
+}
+
+function upsertCallback(
+  callbacks: CallbackSummary[],
+  callback: CallbackSummary,
+): CallbackSummary[] {
+  const next = [...callbacks];
+  const index = next.findIndex((item) => item.id === callback.id);
+  if (index < 0) {
+    next.push(callback);
+    return dedupeCallbacks(next);
+  }
+
+  next[index] = {
+    ...next[index],
+    ...callback,
+    task: callback.task || next[index]?.task || "",
+    label: callback.label ?? next[index]?.label,
+    resultPreview: callback.resultPreview ?? next[index]?.resultPreview,
+    source: callback.source ?? next[index]?.source,
+  };
+  return dedupeCallbacks(next);
+}
+
+function normalizeIteration(raw: unknown): IterationSummary | null {
   const record = asRecord(raw);
   if (!record) return null;
-
-  const promptManifest = asRecord(record.prompt_manifest ?? record.promptManifest);
-  const promptHandles = [
-    ...asArray(record.prompt_handles ?? record.promptHandles),
-    ...asArray(promptManifest?.handles),
-  ]
-    .map((item) => normalizePromptHandle(item))
-    .filter((item): item is PromptHandleSummary => item !== null);
-
-  const childIds = asArray(record.child_ids ?? record.childIds)
-    .map((item) => asText(item))
-    .filter((item): item is string => Boolean(item));
-
-  const childLinks = asArray(record.child_links ?? record.childLinks)
-    .map((item) => normalizeChildLink(item))
-    .filter((item): item is ChildLinkSummary => item !== null);
+  const iteration = asNumber(record.iteration);
+  if (iteration == null) return null;
+  const error = asText(record.error) ?? null;
+  const statusRaw = asText(record.status)?.toLowerCase();
+  const status: IterationSummary["status"] =
+    statusRaw === "pending" ||
+    statusRaw === "running" ||
+    statusRaw === "completed" ||
+    statusRaw === "error"
+      ? statusRaw
+      : error
+        ? "error"
+        : "completed";
+  const summary =
+    asText(record.summary) ??
+    asText(record.reasoning_summary ?? record.reasoningSummary) ??
+    (error ? collapseWhitespace(error, ARTIFACT_PREVIEW_LIMIT) : "");
 
   return {
-    nodeId,
-    parentId: asText(record.parent_id ?? record.parentId) ?? null,
-    depth: asNumber(record.depth) ?? 0,
-    task: asText(record.task) ?? `Node ${nodeId.slice(0, 8)}`,
-    status: asText(record.status) ?? "running",
-    sandboxId: asText(record.sandbox_id ?? record.sandboxId),
-    workspacePath: asText(record.workspace_path ?? record.workspacePath),
-    iterationCount: asNumber(record.iteration_count ?? record.iterationCount),
-    error: asText(record.error) ?? null,
-    warnings: normalizeWarnings(record.warnings),
-    promptHandles,
-    childIds,
-    childLinks,
-    finalArtifact: normalizeArtifact(record.final_artifact ?? record.finalArtifact),
+    id: `iteration-${iteration}`,
+    iteration,
+    status,
+    phase: asText(record.phase),
+    summary: summary || `Iteration ${iteration}`,
+    reasoningSummary: asText(
+      record.reasoning_summary ?? record.reasoningSummary,
+    ),
+    code: typeof record.code === "string" ? record.code : undefined,
+    stdout: typeof record.stdout === "string" ? record.stdout : undefined,
+    stderr: typeof record.stderr === "string" ? record.stderr : undefined,
+    error,
+    durationMs: asNumber(record.duration_ms ?? record.durationMs),
+    callbackCount: asNumber(record.callback_count ?? record.callbackCount),
+    finalized: Boolean(record.finalized),
   };
 }
 
-function mergeNode(
-  current: RunNode | undefined,
-  next: RunNode,
-): RunNode {
-  return {
-    ...current,
-    ...next,
-    promptHandles:
-      next.promptHandles.length > 0 ? next.promptHandles : current?.promptHandles ?? [],
-    childIds: next.childIds.length > 0 ? next.childIds : current?.childIds ?? [],
-    childLinks:
-      next.childLinks.length > 0 ? next.childLinks : current?.childLinks ?? [],
-    warnings: next.warnings?.length ? next.warnings : current?.warnings ?? [],
-    finalArtifact: next.finalArtifact ?? current?.finalArtifact ?? null,
-  };
+function upsertIteration(
+  iterations: IterationSummary[],
+  partial: IterationSummary,
+): IterationSummary[] {
+  const next = [...iterations];
+  const index = next.findIndex((item) => item.iteration === partial.iteration);
+  if (index < 0) {
+    next.push(partial);
+  } else {
+    next[index] = {
+      ...next[index],
+      ...partial,
+      phase: partial.phase ?? next[index]?.phase,
+      summary: partial.summary || next[index]?.summary || "",
+      code: partial.code ?? next[index]?.code,
+      stdout: partial.stdout ?? next[index]?.stdout,
+      stderr: partial.stderr ?? next[index]?.stderr,
+      error: partial.error ?? next[index]?.error ?? null,
+      durationMs: partial.durationMs ?? next[index]?.durationMs,
+      callbackCount: partial.callbackCount ?? next[index]?.callbackCount,
+      finalized: partial.finalized ?? next[index]?.finalized,
+    };
+  }
+  return next.sort((left, right) => left.iteration - right.iteration);
 }
 
 function normalizeSummary(raw: unknown): RunSummary | undefined {
@@ -243,54 +489,13 @@ function normalizeSummary(raw: unknown): RunSummary | undefined {
   };
 }
 
-function extractRuntime(payload?: Record<string, unknown>): Record<string, unknown> | undefined {
+function extractRuntime(
+  payload?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   return asRecord(payload?.runtime) ?? payload;
 }
 
-function inferNodeFromPayload(
-  payload?: Record<string, unknown>,
-): Partial<RunNode> | null {
-  if (!payload) return null;
-  const nodeRecord =
-    asRecord(payload.node) ??
-    (payload.node_id ? payload : undefined);
-  if (!nodeRecord) return null;
-  const nodeId = asText(nodeRecord.node_id ?? nodeRecord.nodeId);
-  if (!nodeId) return null;
-  const promptManifest = asRecord(nodeRecord.prompt_manifest ?? nodeRecord.promptManifest);
-  const promptHandles = [
-    ...asArray(nodeRecord.prompt_handles ?? nodeRecord.promptHandles),
-    ...asArray(promptManifest?.handles),
-  ]
-    .map((item) => normalizePromptHandle(item))
-    .filter((item): item is PromptHandleSummary => item !== null);
-  return {
-    nodeId,
-    parentId: asText(nodeRecord.parent_id ?? nodeRecord.parentId) ?? null,
-    depth: asNumber(nodeRecord.depth) ?? 0,
-    task: asText(nodeRecord.task) ?? `Node ${nodeId.slice(0, 8)}`,
-    status: asText(nodeRecord.status) ?? "running",
-    sandboxId:
-      asText(nodeRecord.sandbox_id ?? nodeRecord.sandboxId) ??
-      asText(extractRuntime(payload)?.sandbox_id),
-    promptHandles,
-    childIds: asArray(nodeRecord.child_ids ?? nodeRecord.childIds)
-      .map((item) => asText(item))
-      .filter((item): item is string => Boolean(item)),
-    childLinks: asArray(nodeRecord.child_links ?? nodeRecord.childLinks)
-      .map((item) => normalizeChildLink(item))
-      .filter((item): item is ChildLinkSummary => item !== null),
-    finalArtifact: normalizeArtifact(
-      nodeRecord.final_artifact ?? nodeRecord.finalArtifact,
-    ),
-    workspacePath: asText(nodeRecord.workspace_path ?? nodeRecord.workspacePath),
-    iterationCount: asNumber(nodeRecord.iteration_count ?? nodeRecord.iterationCount),
-    error: asText(nodeRecord.error) ?? null,
-    warnings: normalizeWarnings(nodeRecord.warnings),
-  };
-}
-
-function buildTimelineEntry(frame: WsServerMessage): TimelineEntry {
+function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
   if (frame.type === "error") {
     return {
       id: `frame-error-${Date.now()}`,
@@ -300,52 +505,20 @@ function buildTimelineEntry(frame: WsServerMessage): TimelineEntry {
   }
 
   const payload = asRecord(frame.data.payload);
-  const runtime = extractRuntime(payload);
-  const nodeRecord = asRecord(payload?.node);
-  const promptManifest = asRecord(
-    payload?.prompt_manifest ?? nodeRecord?.prompt_manifest,
-  );
-  const promptHandles = [
-    ...asArray(payload?.prompt_handles),
-    ...asArray(nodeRecord?.prompt_handles),
-    ...asArray(promptManifest?.handles),
-  ]
-    .map((item) => normalizePromptHandle(item))
-    .filter((item): item is PromptHandleSummary => item !== null);
-
-  const artifact = normalizeArtifact(
-    payload?.final_artifact ?? payload?.artifact ?? nodeRecord?.final_artifact,
-  );
-
   return {
-    id: String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`),
+    id: String(
+      frame.data.event_id ??
+        `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`,
+    ),
     kind: frame.data.kind,
     text: frame.data.text,
     timestamp: frame.data.timestamp,
-    nodeId:
-      asText(nodeRecord?.node_id ?? nodeRecord?.nodeId) ??
-      asText(payload?.node_id ?? payload?.nodeId),
-    parentId:
-      asText(nodeRecord?.parent_id ?? nodeRecord?.parentId) ??
-      asText(payload?.parent_id ?? payload?.parentId) ??
-      null,
-    depth:
-      asNumber(nodeRecord?.depth) ??
-      asNumber(payload?.depth) ??
-      asNumber(runtime?.depth),
-    sandboxId:
-      asText(nodeRecord?.sandbox_id ?? nodeRecord?.sandboxId) ??
-      asText(payload?.sandbox_id ?? payload?.sandboxId) ??
-      asText(runtime?.sandbox_id),
+    iteration: asNumber(payload?.iteration),
     phase: asText(payload?.phase),
-    status:
-      asText(nodeRecord?.status) ??
-      asText(payload?.status) ??
-      asText(payload?.node_status),
-    promptHandleCount: promptHandles.length || undefined,
-    artifactPreview: artifact?.textPreview,
+    status: asText(payload?.status),
+    durationMs: asNumber(payload?.duration_ms ?? payload?.durationMs),
+    callbackCount: asNumber(payload?.callback_count ?? payload?.callbackCount),
     warning: asText(payload?.warning),
-    rawPayload: payload,
   };
 }
 
@@ -353,31 +526,46 @@ function hydrateFromRunResult(
   state: RunWorkbenchState,
   raw: Record<string, unknown>,
 ): RunWorkbenchState {
-  const nodesRaw = asRecord(raw.nodes) ?? {};
-  const nodes = { ...state.nodes };
-  const nodeOrder = [...state.nodeOrder];
+  const prompts = dedupePromptHandles(
+    asArray(raw.prompts ?? raw.prompt_handles ?? raw.promptHandles)
+      .map((item) => normalizePromptHandle(item))
+      .filter((item): item is PromptHandleSummary => item !== null),
+  );
+  const iterations = asArray(raw.iterations)
+    .map((item) => normalizeIteration(item))
+    .filter((item): item is IterationSummary => item !== null);
+  const callbacks = dedupeCallbacks(
+    asArray(raw.callbacks)
+      .map((item) => normalizeCallback(item))
+      .filter((item): item is CallbackSummary => item !== null),
+  );
+  const sources = dedupeSources(
+    asArray(raw.sources)
+      .map((item) => normalizeSource(item))
+      .filter((item): item is ChatSourceItem => item !== null),
+  );
+  const attachments = dedupeAttachments(
+    asArray(raw.attachments)
+      .map((item) => normalizeAttachment(item))
+      .filter((item): item is ChatAttachmentItem => item !== null),
+  );
 
-  for (const [nodeId, nodePayload] of Object.entries(nodesRaw)) {
-    const normalized = normalizeNode(nodeId, nodePayload);
-    if (!normalized) continue;
-    nodes[nodeId] = mergeNode(nodes[nodeId], normalized);
-    if (!nodeOrder.includes(nodeId)) nodeOrder.push(nodeId);
-  }
-
-  const rootId = asText(raw.root_id ?? raw.rootId) ?? state.rootId;
   return {
     ...state,
     runId: asText(raw.run_id ?? raw.runId) ?? state.runId,
     repoUrl: asText(raw.repo) ?? state.repoUrl,
     repoRef: asText(raw.ref) ?? state.repoRef ?? null,
+    task: asText(raw.task) ?? state.task,
     contextSources: asArray(raw.context_sources ?? raw.contextSources)
       .map((item) => normalizeContextSource(item))
       .filter((item): item is ContextSourceSummary => item !== null),
-    task: asText(raw.task) ?? state.task,
-    rootId,
-    nodes,
-    nodeOrder,
-    selectedNodeId: state.selectedNodeId ?? rootId ?? nodeOrder[0] ?? null,
+    promptHandles: prompts,
+    iterations,
+    callbacks,
+    sources,
+    attachments,
+    selectedIterationId: state.selectedIterationId ?? iterations[0]?.id ?? null,
+    selectedCallbackId: state.selectedCallbackId ?? callbacks[0]?.id ?? null,
     finalArtifact:
       normalizeArtifact(raw.final_artifact ?? raw.finalArtifact) ??
       state.finalArtifact ??
@@ -389,14 +577,24 @@ function hydrateFromRunResult(
 export function createInitialRunWorkbenchState(): RunWorkbenchState {
   return {
     status: "idle",
+    runId: undefined,
+    repoUrl: undefined,
+    repoRef: null,
+    daytonaMode: undefined,
+    task: undefined,
     contextSources: [],
-    nodes: {},
-    nodeOrder: [],
-    timeline: [],
-    selectedNodeId: null,
-    selectedTab: "node",
+    iterations: [],
+    callbacks: [],
+    promptHandles: [],
+    sources: [],
+    attachments: [],
+    activity: [],
+    selectedIterationId: null,
+    selectedCallbackId: null,
+    selectedTab: "iterations",
     finalArtifact: null,
     summary: undefined,
+    errorMessage: null,
     lastFrame: null,
   };
 }
@@ -428,7 +626,9 @@ export function failRunWorkbenchRun(
   state: RunWorkbenchState,
   errorMessage: string,
 ): RunWorkbenchState {
-  const message = collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) || "Daytona run failed.";
+  const message =
+    collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) ||
+    "Daytona run failed.";
 
   return {
     ...state,
@@ -439,10 +639,10 @@ export function failRunWorkbenchRun(
       terminationReason: state.summary?.terminationReason ?? "failed",
       error: message,
     },
-    timeline: [
-      ...state.timeline,
+    activity: [
+      ...state.activity,
       {
-        id: `local-error-${state.timeline.length + 1}`,
+        id: `local-error-${state.activity.length + 1}`,
         kind: "error",
         text: message,
       },
@@ -458,7 +658,8 @@ function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
     asText(payload?.runtime_mode) === "daytona_pilot" ||
     asText(runtime?.runtime_mode) === "daytona_pilot" ||
     payload?.run_result != null ||
-    payload?.final_artifact != null
+    payload?.final_artifact != null ||
+    payload?.iterations != null
   );
 }
 
@@ -472,6 +673,18 @@ export function shouldApplyRunFrame(
   return isRunWorkbenchFrame(frame);
 }
 
+function statusFromFrame(
+  current: RunWorkbenchState["status"],
+  frame: WsServerMessage,
+): RunWorkbenchState["status"] {
+  if (frame.type === "error") return "error";
+  if (frame.data.kind === "final") return "completed";
+  if (frame.data.kind === "cancelled") return "cancelled";
+  if (frame.data.kind === "error") return "error";
+  if (current === "idle") return "bootstrapping";
+  return "running";
+}
+
 export function applyFrameToRunWorkbenchState(
   state: RunWorkbenchState,
   frame: WsServerMessage,
@@ -479,12 +692,7 @@ export function applyFrameToRunWorkbenchState(
   let next: RunWorkbenchState = {
     ...state,
     lastFrame: frame,
-  };
-
-  const timelineEntry = buildTimelineEntry(frame);
-  next = {
-    ...next,
-    timeline: [...next.timeline, timelineEntry],
+    activity: [...state.activity, buildActivityEntry(frame)],
   };
 
   if (frame.type === "error") {
@@ -498,46 +706,17 @@ export function applyFrameToRunWorkbenchState(
   const payload = asRecord(frame.data.payload);
   const runtime = extractRuntime(payload);
   const runResult = asRecord(payload?.run_result ?? payload?.runResult);
-  const nodePartial = inferNodeFromPayload(payload);
-
-  if (nodePartial?.nodeId) {
-    const normalizedNode: RunNode = mergeNode(
-      next.nodes[nodePartial.nodeId],
-      {
-        nodeId: nodePartial.nodeId,
-        parentId: nodePartial.parentId ?? null,
-        depth: nodePartial.depth ?? 0,
-        task: nodePartial.task ?? `Node ${nodePartial.nodeId.slice(0, 8)}`,
-        status: nodePartial.status ?? "running",
-        sandboxId: nodePartial.sandboxId,
-        promptHandles: nodePartial.promptHandles ?? [],
-        childIds: nodePartial.childIds ?? [],
-        childLinks: nodePartial.childLinks ?? [],
-        warnings: nodePartial.warnings ?? [],
-        finalArtifact: nodePartial.finalArtifact ?? null,
-        workspacePath: nodePartial.workspacePath,
-        iterationCount: nodePartial.iterationCount,
-        error: nodePartial.error ?? null,
-      },
-    );
-    next = {
-      ...next,
-      nodes: {
-        ...next.nodes,
-        [normalizedNode.nodeId]: normalizedNode,
-      },
-      nodeOrder: next.nodeOrder.includes(normalizedNode.nodeId)
-        ? next.nodeOrder
-        : [...next.nodeOrder, normalizedNode.nodeId],
-      selectedNodeId:
-        next.selectedNodeId ??
-        normalizedNode.nodeId,
-    };
-  }
 
   if (runResult) {
     next = hydrateFromRunResult(next, runResult);
   }
+
+  const payloadPrompts = dedupePromptHandles([
+    ...next.promptHandles,
+    ...collectPromptHandlePayloads(payload)
+      .map((item) => normalizePromptHandle(item))
+      .filter((item): item is PromptHandleSummary => item !== null),
+  ]);
 
   const payloadContextSources = asArray(
     payload?.context_sources ?? payload?.contextSources,
@@ -545,48 +724,113 @@ export function applyFrameToRunWorkbenchState(
     .map((item) => normalizeContextSource(item))
     .filter((item): item is ContextSourceSummary => item !== null);
 
-  const statusFromKind =
-    frame.data.kind === "final"
-      ? "completed"
-      : frame.data.kind === "error"
-        ? "error"
-        : frame.data.kind === "warning"
-          ? next.status === "idle"
-            ? "bootstrapping"
-            : next.status
-        : frame.data.kind === "cancelled"
-          ? "cancelled"
-          : nodePartial?.status === "cancelling" || timelineEntry.status === "cancelling"
-            ? "cancelling"
-          : next.status === "idle"
-            ? "bootstrapping"
-            : "running";
+  if (payloadContextSources.length > 0) {
+    next = {
+      ...next,
+      contextSources: payloadContextSources,
+    };
+  }
 
-  const runtimeRunId =
-    asText(payload?.run_id ?? payload?.runId) ??
-    asText(runtime?.run_id) ??
-    next.runId;
+  if (payloadPrompts.length > 0) {
+    next = {
+      ...next,
+      promptHandles: payloadPrompts,
+    };
+  }
 
-  const rootId =
-    asText(payload?.root_id ?? payload?.rootId) ??
-    asText(runResult?.root_id ?? runResult?.rootId) ??
-    next.rootId;
+  const iterationNumber = asNumber(payload?.iteration);
+  if (iterationNumber != null && !runResult) {
+    next = {
+      ...next,
+      iterations: upsertIteration(next.iterations, {
+        id: `iteration-${iterationNumber}`,
+        iteration: iterationNumber,
+        status:
+          frame.data.kind === "error"
+            ? "error"
+            : frame.data.kind === "final"
+              ? "completed"
+              : "running",
+        phase: asText(payload?.phase),
+        summary: frame.data.text,
+        durationMs: asNumber(payload?.duration_ms ?? payload?.durationMs),
+        callbackCount: asNumber(
+          payload?.callback_count ?? payload?.callbackCount,
+        ),
+      }),
+      selectedIterationId:
+        next.selectedIterationId ?? `iteration-${iterationNumber}`,
+    };
+  }
+
+  const callbackName = asText(payload?.callback_name ?? payload?.callbackName);
+  if (callbackName) {
+    const toolInput = asRecord(payload?.tool_input ?? payload?.toolInput);
+    const toolResult = asRecord(payload?.tool_result ?? payload?.toolResult);
+    const toolTask = asRecord(toolInput?.task);
+    const latestRunningCallback = findLatestRunningCallback(next.callbacks, {
+      callbackName,
+      iteration: iterationNumber,
+    });
+    const callback: CallbackSummary = {
+      id:
+        latestRunningCallback?.id ??
+        `${callbackName}-${iterationNumber ?? "na"}-${next.callbacks.length + 1}`,
+      callbackName,
+      iteration: iterationNumber,
+      status: frame.data.kind === "tool_call" ? "running" : "completed",
+      task:
+        asText(toolInput?.task) ??
+        asText(toolTask?.task) ??
+        latestRunningCallback?.task ??
+        frame.data.text,
+      label: asText(toolTask?.label) ?? latestRunningCallback?.label,
+      resultPreview:
+        previewText(
+          toolResult?.result_preview ??
+            toolResult?.resultPreview ??
+            toolResult?.result_previews ??
+            toolResult?.count,
+          ARTIFACT_PREVIEW_LIMIT,
+        ) || latestRunningCallback?.resultPreview,
+      source:
+        normalizeCallbackSource(toolTask?.source) ??
+        latestRunningCallback?.source,
+    };
+    next = {
+      ...next,
+      callbacks: upsertCallback(next.callbacks, callback),
+      selectedCallbackId: next.selectedCallbackId ?? callback.id,
+    };
+  }
+
+  const payloadSources = dedupeSources([
+    ...next.sources,
+    ...asArray(payload?.sources)
+      .map((item) => normalizeSource(item))
+      .filter((item): item is ChatSourceItem => item !== null),
+  ]);
+  const payloadAttachments = dedupeAttachments([
+    ...next.attachments,
+    ...asArray(payload?.attachments)
+      .map((item) => normalizeAttachment(item))
+      .filter((item): item is ChatAttachmentItem => item !== null),
+  ]);
 
   return {
     ...next,
-    status: statusFromKind as RunWorkbenchState["status"],
-    runId: runtimeRunId,
+    status: statusFromFrame(next.status, frame),
+    runId:
+      asText(payload?.run_id ?? payload?.runId) ??
+      asText(runtime?.run_id) ??
+      next.runId,
     daytonaMode:
-      asText(payload?.daytona_mode ?? payload?.daytonaMode) ??
-      asText(runtime?.daytona_mode ?? runtime?.daytonaMode) ??
-      next.daytonaMode,
-    rootId,
-    selectedNodeId:
-      next.selectedNodeId ?? rootId ?? next.nodeOrder[0] ?? null,
-    contextSources:
-      payloadContextSources.length > 0
-        ? payloadContextSources
-        : next.contextSources,
+      normalizeDaytonaMode(
+        asText(payload?.daytona_mode ?? payload?.daytonaMode) ??
+          asText(runtime?.daytona_mode ?? runtime?.daytonaMode),
+      ) ?? next.daytonaMode,
+    sources: payloadSources,
+    attachments: payloadAttachments,
     finalArtifact:
       normalizeArtifact(payload?.final_artifact ?? payload?.finalArtifact) ??
       next.finalArtifact ??
@@ -595,6 +839,6 @@ export function applyFrameToRunWorkbenchState(
     errorMessage:
       frame.data.kind === "error"
         ? frame.data.text
-        : next.errorMessage ?? null,
+        : (next.errorMessage ?? null),
   };
 }

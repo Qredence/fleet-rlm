@@ -27,9 +27,9 @@ function makeEvent(
 }
 
 describe("runWorkbenchAdapter", () => {
-  it("hydrates a rich final run_result into nodes, prompts, and final artifact", () => {
+  it("hydrates a rich final run_result into analyst-oriented sections", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
-      task: "Analyze the repo",
+      task: "Analyze the diligence corpus",
       repoUrl: "https://github.com/qredence/fleet-rlm.git",
       repoRef: "main",
       contextPaths: ["/Users/zocho/Documents/spec.pdf"],
@@ -42,24 +42,21 @@ describe("runWorkbenchAdapter", () => {
         runtime: {
           runtime_mode: "daytona_pilot",
           run_id: "run-123",
-          daytona_mode: "recursive_rlm",
+          daytona_mode: "host_loop_rlm",
         },
         final_artifact: {
           kind: "markdown",
           value: {
             summary: "Readable final summary of the Daytona run.",
+            final_markdown: "## Final\nDone",
           },
           finalization_mode: "SUBMIT",
-        },
-        summary: {
-          duration_ms: 1234,
-          sandboxes_used: 2,
-          termination_reason: "completed",
         },
         run_result: {
           run_id: "run-123",
           repo: "https://github.com/qredence/fleet-rlm.git",
           ref: "main",
+          task: "Analyze the diligence corpus",
           context_sources: [
             {
               source_id: "ctx-1",
@@ -71,8 +68,66 @@ describe("runWorkbenchAdapter", () => {
               file_count: 1,
             },
           ],
-          task: "Analyze the repo",
-          root_id: "root-node",
+          prompts: [
+            {
+              handle_id: "prompt-1",
+              kind: "task",
+              label: "Root task",
+              char_count: 9001,
+              line_count: 120,
+              preview: "A long root task preview that should stay visible.",
+            },
+          ],
+          iterations: [
+            {
+              iteration: 1,
+              status: "completed",
+              reasoning_summary:
+                "Planner selected a grounded repo-and-doc sweep.",
+              code: "summary = 'Done'\nSUBMIT(summary=summary)",
+              stdout: "done",
+              duration_ms: 123,
+              callback_count: 1,
+              finalized: true,
+            },
+          ],
+          callbacks: [
+            {
+              id: "callback-1",
+              callback_name: "llm_query_batched",
+              iteration: 1,
+              status: "completed",
+              task: "Summarize tracing subsystem",
+              label: "Tracing pass",
+              result_preview: "Summarized tracing subsystem.",
+              source: {
+                kind: "file_slice",
+                source_id: "src-1",
+                path: "src/fleet_rlm/analytics/scorers.py",
+                start_line: 1,
+                end_line: 80,
+                preview: "Tracing scorer file preview",
+              },
+            },
+          ],
+          sources: [
+            {
+              source_id: "ctx-1",
+              kind: "file",
+              title: "spec.pdf",
+              display_url: "/Users/zocho/Documents/spec.pdf",
+              description:
+                "Staged at /workspace/context/spec.pdf.extracted.txt",
+            },
+          ],
+          attachments: [
+            {
+              attachment_id: "ctx-1",
+              name: "spec.pdf",
+              kind: "file",
+              mime_type: "pdf",
+            },
+          ],
           final_artifact: {
             kind: "markdown",
             value: {
@@ -83,49 +138,8 @@ describe("runWorkbenchAdapter", () => {
           },
           summary: {
             duration_ms: 1234,
-            sandboxes_used: 2,
+            sandboxes_used: 1,
             termination_reason: "completed",
-          },
-          nodes: {
-            "root-node": {
-              node_id: "root-node",
-              depth: 0,
-              task: "Analyze the repo",
-              status: "completed",
-              sandbox_id: "sbx-root",
-              prompt_manifest: {
-                handles: [
-                  {
-                    handle_id: "prompt-1",
-                    kind: "task",
-                    label: "Root task",
-                    char_count: 9001,
-                    line_count: 120,
-                    preview: "A long root task preview that should stay visible.",
-                  },
-                ],
-              },
-              child_links: [
-                {
-                  child_id: "child-1",
-                  callback_name: "llm_query_batched",
-                  status: "completed",
-                  result_preview: "Summarized tracing subsystem.",
-                  task: {
-                    task: "Summarize tracing subsystem",
-                    label: "Tracing pass",
-                    source: {
-                      kind: "file_slice",
-                      source_id: "src-1",
-                      path: "src/fleet_rlm/analytics/scorers.py",
-                      start_line: 1,
-                      end_line: 80,
-                      preview: "Tracing scorer file preview",
-                    },
-                  },
-                },
-              ],
-            },
           },
         },
       }),
@@ -133,67 +147,245 @@ describe("runWorkbenchAdapter", () => {
 
     expect(next.status).toBe("completed");
     expect(next.runId).toBe("run-123");
-    expect(next.rootId).toBe("root-node");
-    expect(next.selectedNodeId).toBe("root-node");
-    expect(next.daytonaMode).toBe("recursive_rlm");
-    expect(next.timeline).toHaveLength(1);
+    expect(next.daytonaMode).toBe("host_loop_rlm");
     expect(next.contextSources[0]?.hostPath).toBe(
       "/Users/zocho/Documents/spec.pdf",
     );
-    expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
-    expect(next.finalArtifact?.textPreview).toContain("Readable final summary");
-    expect(next.summary?.terminationReason).toBe("completed");
-    expect(next.nodes["root-node"]?.promptHandles[0]?.handleId).toBe("prompt-1");
-    expect(next.nodes["root-node"]?.childLinks[0]?.task.source?.path).toBe(
+    expect(next.iterations).toHaveLength(1);
+    expect(next.iterations[0]?.reasoningSummary).toContain("grounded");
+    expect(next.callbacks[0]?.source?.path).toBe(
       "src/fleet_rlm/analytics/scorers.py",
     );
+    expect(next.promptHandles[0]?.handleId).toBe("prompt-1");
+    expect(next.sources[0]?.displayUrl).toBe("/Users/zocho/Documents/spec.pdf");
+    expect(next.attachments[0]?.name).toBe("spec.pdf");
+    expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
   });
 
-  it("tracks incremental node metadata from status events before final hydration", () => {
+  it("tracks incremental iteration and callback activity before final hydration", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Analyze the repo",
-      repoUrl: "https://github.com/qredence/fleet-rlm.git",
       contextPaths: ["/workspace/docs"],
     });
 
-    const next = applyFrameToRunWorkbenchState(
+    const withStatus = applyFrameToRunWorkbenchState(
       started,
-      makeEvent("status", "Bootstrapping Daytona sandbox", {
-        runtime: {
-          runtime_mode: "daytona_pilot",
-          run_id: "run-456",
-          sandbox_id: "sbx-boot",
-          depth: 0,
-        },
+      makeEvent("status", "Preparing prompt for iteration 1.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        phase: "prepare_prompt",
+        elapsed_ms: 42,
         node: {
-          node_id: "root-node",
-          depth: 0,
-          task: "Analyze the repo",
-          status: "bootstrapping",
-          prompt_handles: [
-            {
-              handle_id: "prompt-boot",
-              label: "Boot prompt",
-              preview: "Boot preview",
-            },
-          ],
+          prompt_manifest: {
+            handles: [
+              {
+                handle_id: "prompt-boot",
+                label: "Boot prompt",
+                preview: "Boot preview",
+              },
+            ],
+          },
         },
       }),
     );
 
-    expect(next.status).toBe("running");
-    expect(next.runId).toBe("run-456");
-    expect(next.nodes["root-node"]?.sandboxId).toBe("sbx-boot");
-    expect(next.nodes["root-node"]?.promptHandles).toHaveLength(1);
-    expect(next.timeline[0]?.promptHandleCount).toBe(1);
-    expect(next.contextSources[0]?.hostPath).toBe("/workspace/docs");
+    const withCallback = applyFrameToRunWorkbenchState(
+      withStatus,
+      makeEvent("tool_result", "Completed host callback `llm_query`.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        callback_name: "llm_query",
+        tool_input: {
+          task: {
+            task: "Summarize the overview section",
+            source: {
+              kind: "file_slice",
+              path: "docs/overview.md",
+              start_line: 1,
+              end_line: 20,
+            },
+          },
+        },
+        tool_result: {
+          result_preview: "The overview explains the system topology.",
+        },
+      }),
+    );
+
+    expect(withCallback.status).toBe("running");
+    expect(withCallback.iterations[0]?.iteration).toBe(1);
+    expect(withCallback.iterations[0]?.phase).toBe("prepare_prompt");
+    expect(withCallback.promptHandles).toHaveLength(1);
+    expect(withCallback.callbacks[0]?.callbackName).toBe("llm_query");
+    expect(withCallback.callbacks[0]?.source?.path).toBe("docs/overview.md");
+    expect(withCallback.activity).toHaveLength(2);
+    expect(withCallback.contextSources[0]?.hostPath).toBe("/workspace/docs");
+  });
+
+  it("merges tool_result frames into the live callback row when tool_input is absent", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Analyze the repo",
+    });
+
+    const withToolCall = applyFrameToRunWorkbenchState(
+      started,
+      makeEvent("tool_call", "Running host callback `llm_query`.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        callback_name: "llm_query",
+        tool_input: {
+          task: {
+            task: "Summarize the overview section",
+            label: "Overview",
+            source: {
+              kind: "file_slice",
+              path: "docs/overview.md",
+              start_line: 1,
+              end_line: 20,
+            },
+          },
+        },
+      }),
+    );
+
+    const withToolResult = applyFrameToRunWorkbenchState(
+      withToolCall,
+      makeEvent("tool_result", "Completed host callback `llm_query`.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        callback_name: "llm_query",
+        tool_result: {
+          result_preview: "The overview explains the system topology.",
+        },
+      }),
+    );
+
+    expect(withToolResult.callbacks).toHaveLength(1);
+    expect(withToolResult.callbacks[0]?.status).toBe("completed");
+    expect(withToolResult.callbacks[0]?.task).toBe(
+      "Summarize the overview section",
+    );
+    expect(withToolResult.callbacks[0]?.label).toBe("Overview");
+    expect(withToolResult.callbacks[0]?.source?.path).toBe("docs/overview.md");
+    expect(withToolResult.callbacks[0]?.resultPreview).toContain(
+      "system topology",
+    );
+  });
+
+  it("keeps distinct callbacks when the task text repeats across sources", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Analyze the repo",
+    });
+
+    const withFirstCallback = applyFrameToRunWorkbenchState(
+      started,
+      makeEvent("tool_result", "Completed host callback `llm_query`.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        callback_name: "llm_query",
+        tool_input: {
+          task: {
+            task: "Summarize the overview section",
+            source: {
+              kind: "file_slice",
+              source_id: "src-1",
+              path: "docs/overview.md",
+              start_line: 1,
+              end_line: 20,
+            },
+          },
+        },
+        tool_result: {
+          result_preview: "Overview summary.",
+        },
+      }),
+    );
+
+    const withSecondCallback = applyFrameToRunWorkbenchState(
+      withFirstCallback,
+      makeEvent("tool_result", "Completed host callback `llm_query`.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        callback_name: "llm_query",
+        tool_input: {
+          task: {
+            task: "Summarize the overview section",
+            source: {
+              kind: "file_slice",
+              source_id: "src-2",
+              path: "docs/architecture.md",
+              start_line: 1,
+              end_line: 20,
+            },
+          },
+        },
+        tool_result: {
+          result_preview: "Architecture summary.",
+        },
+      }),
+    );
+
+    expect(withSecondCallback.callbacks).toHaveLength(2);
+    expect(
+      withSecondCallback.callbacks.map((item) => item.source?.path),
+    ).toEqual(["docs/overview.md", "docs/architecture.md"]);
+  });
+
+  it("keeps distinct sources when multiple excerpts come from the same file", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Analyze the repo",
+    });
+
+    const next = applyFrameToRunWorkbenchState(
+      started,
+      makeEvent("final", "Done", {
+        runtime_mode: "daytona_pilot",
+        run_result: {
+          run_id: "run-456",
+          repo: "https://github.com/qredence/fleet-rlm.git",
+          task: "Analyze the repo",
+          prompts: [],
+          iterations: [],
+          callbacks: [],
+          sources: [
+            {
+              source_id: "slice-1",
+              kind: "file",
+              title: "overview.md",
+              display_url: "docs/overview.md",
+              description: "lines 1-20",
+              quote: "First excerpt",
+            },
+            {
+              source_id: "slice-2",
+              kind: "file",
+              title: "overview.md",
+              display_url: "docs/overview.md",
+              description: "lines 40-60",
+              quote: "Second excerpt",
+            },
+          ],
+          attachments: [],
+          summary: {
+            duration_ms: 200,
+            sandboxes_used: 1,
+            termination_reason: "completed",
+          },
+        },
+      }),
+    );
+
+    expect(next.sources).toHaveLength(2);
+    expect(next.sources.map((item) => item.sourceId)).toEqual([
+      "slice-1",
+      "slice-2",
+    ]);
   });
 
   it("ignores non-Daytona frames after a completed Daytona run", () => {
     const completed = applyFrameToRunWorkbenchState(
       startRunWorkbenchRun(createInitialRunWorkbenchState(), {
         task: "Analyze the repo",
-        repoUrl: "https://github.com/qredence/fleet-rlm.git",
       }),
       makeEvent("final", "Done", {
         runtime_mode: "daytona_pilot",
@@ -205,16 +397,11 @@ describe("runWorkbenchAdapter", () => {
           run_id: "run-789",
           repo: "https://github.com/qredence/fleet-rlm.git",
           task: "Analyze the repo",
-          root_id: "root-node",
-          budget: {
-            max_sandboxes: 50,
-            max_depth: 2,
-            max_iterations: 50,
-            global_timeout: 3600,
-            result_truncation_limit: 10000,
-            batch_concurrency: 4,
-          },
-          nodes: {},
+          iterations: [],
+          callbacks: [],
+          prompts: [],
+          sources: [],
+          attachments: [],
           summary: {
             duration_ms: 200,
             sandboxes_used: 1,
@@ -250,6 +437,6 @@ describe("runWorkbenchAdapter", () => {
     );
     expect(next.summary?.terminationReason).toBe("failed");
     expect(next.errorMessage).toMatch(/No response arrived/);
-    expect(next.timeline.at(-1)?.kind).toBe("error");
+    expect(next.activity.at(-1)?.kind).toBe("error");
   });
 });
