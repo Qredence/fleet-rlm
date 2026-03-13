@@ -17,7 +17,6 @@ interface ThemeState {
   setDark: (dark: boolean) => void;
 }
 
-const LEGACY_THEME_KEY = "theme";
 const THEME_STORAGE_KEY = "theme-storage";
 const THEME_STORAGE_VERSION = 1;
 type ThemePersistedState = Pick<ThemeState, "isDark">;
@@ -69,22 +68,7 @@ function toPersistedTheme(
 
 const themeStorage: PersistStorage<ThemePersistedState> = {
   getItem: (name) => {
-    const currentValue = toPersistedTheme(
-      parseStoredJson(localStorage.getItem(name)),
-    );
-    if (currentValue) {
-      return currentValue;
-    }
-
-    const legacyTheme = localStorage.getItem(LEGACY_THEME_KEY);
-    if (legacyTheme !== "dark" && legacyTheme !== "light") {
-      return null;
-    }
-
-    return {
-      state: { isDark: legacyTheme === "dark" },
-      version: THEME_STORAGE_VERSION,
-    };
+    return toPersistedTheme(parseStoredJson(localStorage.getItem(name)));
   },
   setItem: (name, value) => {
     localStorage.setItem(name, JSON.stringify(value));

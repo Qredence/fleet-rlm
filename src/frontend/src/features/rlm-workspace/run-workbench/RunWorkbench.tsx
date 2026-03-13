@@ -10,15 +10,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils/cn";
-import { buildDaytonaSourceStateLabel } from "@/features/rlm-workspace/daytonaSourceContext";
-import { useDaytonaWorkbenchStore } from "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore";
+import { buildSourceStateLabel } from "@/lib/utils/sourceContext";
+import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import type {
-  DaytonaArtifactSummary,
-  DaytonaContextSourceSummary,
-  DaytonaPromptHandleSummary,
-  DaytonaRunNode,
-  DaytonaTimelineEntry,
-} from "@/features/rlm-workspace/daytona-workbench/types";
+  ArtifactSummary,
+  ContextSourceSummary,
+  PromptHandleSummary,
+  RunNode,
+  TimelineEntry,
+} from "@/features/rlm-workspace/run-workbench/types";
 
 function stringifyValue(value: unknown): string {
   if (value == null) return "";
@@ -49,7 +49,7 @@ function runStatusVariant(status: string): "default" | "secondary" | "outline" |
 }
 
 function buildTreeOrder(
-  nodes: Record<string, DaytonaRunNode>,
+  nodes: Record<string, RunNode>,
   rootId?: string,
 ): string[] {
   const childMap = new Map<string | null, string[]>();
@@ -94,7 +94,7 @@ function buildTreeOrder(
 function PromptHandleList({
   handles,
 }: {
-  handles: DaytonaPromptHandleSummary[];
+  handles: PromptHandleSummary[];
 }) {
   if (handles.length === 0) {
     return (
@@ -131,7 +131,7 @@ function PromptHandleList({
   );
 }
 
-function ArtifactPanel({ artifact }: { artifact?: DaytonaArtifactSummary | null }) {
+function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
   if (!artifact) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -170,7 +170,7 @@ function SourceList({
 }: {
   repoUrl?: string;
   repoRef?: string | null;
-  contextSources: DaytonaContextSourceSummary[];
+  contextSources: ContextSourceSummary[];
 }) {
   if (!repoUrl && contextSources.length === 0) {
     return (
@@ -227,7 +227,7 @@ function TimelineRow({
   isSelected,
   onSelect,
 }: {
-  entry: DaytonaTimelineEntry;
+  entry: TimelineEntry;
   isSelected: boolean;
   onSelect: () => void;
 }) {
@@ -269,7 +269,7 @@ function TimelineRow({
   );
 }
 
-export function DaytonaWorkbench() {
+export function RunWorkbench() {
   const {
     status,
     runId,
@@ -288,7 +288,7 @@ export function DaytonaWorkbench() {
     finalArtifact,
     summary,
     errorMessage,
-  } = useDaytonaWorkbenchStore();
+  } = useRunWorkbenchStore();
 
   const treeOrder = buildTreeOrder(nodes, rootId);
   const firstTreeNodeId = treeOrder[0];
@@ -296,7 +296,7 @@ export function DaytonaWorkbench() {
     (selectedNodeId ? nodes[selectedNodeId] : undefined) ??
     (rootId ? nodes[rootId] : undefined) ??
     (firstTreeNodeId ? nodes[firstTreeNodeId] : undefined);
-  const sourceStateLabel = buildDaytonaSourceStateLabel({
+  const sourceStateLabel = buildSourceStateLabel({
     hasRepo: Boolean(repoUrl),
     hasContext: contextSources.length > 0,
   });
@@ -304,12 +304,12 @@ export function DaytonaWorkbench() {
   return (
     <div
       className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden"
-      data-testid="daytona-workbench"
+      data-testid="run-workbench"
     >
       <Card className="shrink-0">
         <CardHeader className="gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle className="text-base">Daytona Workbench</CardTitle>
+            <CardTitle className="text-base">Run Workbench</CardTitle>
             <Badge variant={runStatusVariant(status)}>{status}</Badge>
             <Badge variant="secondary">{sourceStateLabel}</Badge>
             {daytonaMode ? <Badge variant="outline">{daytonaMode}</Badge> : null}
@@ -318,7 +318,7 @@ export function DaytonaWorkbench() {
             ) : null}
           </div>
           <CardDescription>
-            Live recursive Daytona workspace details, grounded in metadata and previews.
+            Live recursive workspace details, grounded in metadata and previews.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -344,7 +344,7 @@ export function DaytonaWorkbench() {
               Task
             </p>
             <p className="text-sm text-foreground">
-              {task ?? "Send a Daytona task to begin."}
+              {task ?? "Send a task to begin."}
             </p>
             {runId ? (
               <p className="text-xs text-muted-foreground break-all">{runId}</p>
@@ -372,7 +372,7 @@ export function DaytonaWorkbench() {
 
       <Card
         className="flex min-h-0 flex-[0.95] flex-col"
-        data-testid="daytona-run-tree"
+        data-testid="run-tree"
       >
         <CardHeader className="gap-2">
           <CardTitle className="text-base">Run tree</CardTitle>
@@ -385,7 +385,7 @@ export function DaytonaWorkbench() {
             <div className="space-y-2">
               {treeOrder.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Start a Daytona run to see the recursive node tree.
+                  Start a run to see the recursive node tree.
                 </p>
               ) : (
                 treeOrder.map((nodeId) => {
@@ -433,7 +433,7 @@ export function DaytonaWorkbench() {
 
       <Card
         className="flex min-h-0 flex-[1.15] flex-col"
-        data-testid="daytona-detail-tabs"
+        data-testid="detail-tabs"
       >
         <CardHeader className="gap-2">
           <CardTitle className="text-base">Details</CardTitle>
@@ -461,7 +461,7 @@ export function DaytonaWorkbench() {
                 <div className="space-y-3">
                   {timeline.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      Timeline events will appear here during the Daytona run.
+                      Timeline events will appear here during the run.
                     </p>
                   ) : (
                     timeline.map((entry) => (
@@ -548,7 +548,7 @@ export function DaytonaWorkbench() {
                           </p>
                           {selectedNode.childLinks.map(
                             (
-                              link: DaytonaRunNode["childLinks"][number],
+                              link: RunNode["childLinks"][number],
                               index: number,
                             ) => (
                               <div

@@ -6,28 +6,32 @@ import { RlmWorkspace } from "@/features/rlm-workspace/RlmWorkspace";
 const chatStoreState = {
   runtimeMode: "daytona_pilot" as const,
   setRuntimeMode: vi.fn(),
-  daytonaRepoUrl: "",
-  setDaytonaRepoUrl: vi.fn(),
-  daytonaRepoRef: "main",
-  setDaytonaRepoRef: vi.fn(),
-  daytonaContextPaths: "",
-  setDaytonaContextPaths: vi.fn(),
-  daytonaMaxDepth: 2,
-  setDaytonaMaxDepth: vi.fn(),
-  daytonaBatchConcurrency: 4,
-  setDaytonaBatchConcurrency: vi.fn(),
+  sourceRepoUrl: "",
+  setSourceRepoUrl: vi.fn(),
+  sourceRepoRef: "main",
+  setSourceRepoRef: vi.fn(),
+  sourceContextPaths: "",
+  setSourceContextPaths: vi.fn(),
+  sourceMaxDepth: 2,
+  setSourceMaxDepth: vi.fn(),
+  sourceBatchConcurrency: 4,
+  setSourceBatchConcurrency: vi.fn(),
 };
 
-interface MockDaytonaWorkbenchState {
+interface MockRunWorkbenchState {
   status: "idle" | "running";
   repoUrl: string | undefined;
   contextSources: Array<{ sourceId: string; kind: string; hostPath: string }>;
 }
 
-const daytonaWorkbenchState: MockDaytonaWorkbenchState = {
+const runWorkbenchState: MockRunWorkbenchState = {
   status: "idle" as "idle" | "running",
   repoUrl: undefined as string | undefined,
-  contextSources: [] as Array<{ sourceId: string; kind: string; hostPath: string }>,
+  contextSources: [] as Array<{
+    sourceId: string;
+    kind: string;
+    hostPath: string;
+  }>,
 };
 
 const backendRuntimeState = {
@@ -44,33 +48,29 @@ const backendRuntimeState = {
   loadConversation: vi.fn(),
 };
 
-vi.mock("@posthog/react", () => ({
-  usePostHog: () => ({ capture: vi.fn() }),
+vi.mock("@/features/rlm-workspace/useBackendChatRuntime", () => ({
+  useBackendChatRuntime: () => backendRuntimeState,
+}));
+
+vi.mock("@/hooks/useStickToBottom", () => ({
+  useStickToBottom: () => ({
+    scrollRef: { current: null },
+    contentRef: { current: null },
+    isAtBottom: true,
+    scrollToBottom: vi.fn(),
+  }),
+}));
+
+vi.mock("@/hooks/useAppNavigate", () => ({
+  useAppNavigate: () => ({ navigate: vi.fn(), navigateTo: vi.fn() }),
 }));
 
 vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/hooks/useStickToBottom", () => ({
-  useStickToBottom: () => ({
-    scrollRef: null,
-    contentRef: null,
-    isAtBottom: true,
-    scrollToBottom: vi.fn(),
-  }),
-}));
-
 vi.mock("@/stores/navigationStore", () => ({
-  useNavigationStore: () => ({
-    sessionId: 1,
-  }),
-}));
-
-vi.mock("@/hooks/useAppNavigate", () => ({
-  useAppNavigate: () => ({
-    navigate: vi.fn(),
-  }),
+  useNavigationStore: () => ({ sessionId: 1 }),
 }));
 
 vi.mock("@/stores/chatHistoryStore", () => ({
@@ -83,8 +83,8 @@ vi.mock("@/stores/chatHistoryStore", () => ({
   }),
 }));
 
-vi.mock("@/features/rlm-workspace/useBackendChatRuntime", () => ({
-  useBackendChatRuntime: () => backendRuntimeState,
+vi.mock("@/lib/telemetry/useTelemetry", () => ({
+  useTelemetry: () => ({ capture: vi.fn() }),
 }));
 
 vi.mock("@/features/settings/useRuntimeSettings", () => ({
@@ -101,17 +101,15 @@ vi.mock("@/stores/chatStore", () => ({
     selector(chatStoreState),
 }));
 
-vi.mock(
-  "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore",
-  () => ({
-    useDaytonaWorkbenchStore: (
-      selector: (state: MockDaytonaWorkbenchState) => unknown,
-    ) => selector(daytonaWorkbenchState),
-  }),
-);
+vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
+  useRunWorkbenchStore: (selector: (state: MockRunWorkbenchState) => unknown) =>
+    selector(runWorkbenchState),
+}));
 
 vi.mock("@/features/rlm-workspace/ChatMessageList", () => ({
-  ChatMessageList: () => <div data-testid="chat-message-list">ChatMessageList</div>,
+  ChatMessageList: () => (
+    <div data-testid="chat-message-list">ChatMessageList</div>
+  ),
 }));
 
 vi.mock("@/components/chat/ChatInput", () => ({
@@ -126,29 +124,25 @@ vi.mock("@/components/chat/ChatInput", () => ({
   }) => (
     <div data-testid="chat-input">
       <span>{value}</span>
-      <button
-        type="button"
-        disabled={!canSubmit}
-        onClick={() => onSend([])}
-      >
+      <button type="button" disabled={!canSubmit} onClick={() => onSend([])}>
         Send
       </button>
     </div>
   ),
 }));
 
-describe("RlmWorkspace Daytona workbench mode", () => {
+describe("RlmWorkspace run workbench mode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     chatStoreState.runtimeMode = "daytona_pilot";
-    chatStoreState.daytonaRepoUrl = "";
-    chatStoreState.daytonaRepoRef = "main";
-    chatStoreState.daytonaContextPaths = "";
-    chatStoreState.daytonaMaxDepth = 2;
-    chatStoreState.daytonaBatchConcurrency = 4;
-    daytonaWorkbenchState.status = "idle";
-    daytonaWorkbenchState.repoUrl = undefined;
-    daytonaWorkbenchState.contextSources = [];
+    chatStoreState.sourceRepoUrl = "";
+    chatStoreState.sourceRepoRef = "main";
+    chatStoreState.sourceContextPaths = "";
+    chatStoreState.sourceMaxDepth = 2;
+    chatStoreState.sourceBatchConcurrency = 4;
+    runWorkbenchState.status = "idle";
+    runWorkbenchState.repoUrl = undefined;
+    runWorkbenchState.contextSources = [];
     backendRuntimeState.messages = [
       { id: "m1", type: "assistant", content: "existing chat row" },
     ];
@@ -158,21 +152,21 @@ describe("RlmWorkspace Daytona workbench mode", () => {
     backendRuntimeState.isTyping = false;
   });
 
-  it("keeps the chat body visible and shows Daytona setup above the composer", () => {
+  it("keeps the chat body visible and shows source setup above the composer", () => {
     const html = renderToStaticMarkup(<RlmWorkspace />);
 
     expect(html).toContain("ChatMessageList");
-    expect(html).toContain("Daytona source setup");
+    expect(html).toContain("Source setup");
     expect(html).toContain("Edit source setup");
     expect(html).toContain("Repo");
     expect(html).toContain("Repo ready");
   });
 
-  it("keeps the active run source mix visible while Daytona is running", () => {
+  it("keeps the active run source mix visible while the runtime is running", () => {
     backendRuntimeState.inputValue = "";
-    daytonaWorkbenchState.status = "running";
-    daytonaWorkbenchState.repoUrl = "https://github.com/qredence/fleet-rlm";
-    daytonaWorkbenchState.contextSources = [
+    runWorkbenchState.status = "running";
+    runWorkbenchState.repoUrl = "https://github.com/qredence/fleet-rlm";
+    runWorkbenchState.contextSources = [
       {
         sourceId: "ctx-1",
         kind: "directory",
@@ -183,7 +177,9 @@ describe("RlmWorkspace Daytona workbench mode", () => {
     const html = renderToStaticMarkup(<RlmWorkspace />);
 
     expect(html).toContain("Active run context");
-    expect(html).toContain("Active Daytona run is using the current source mix shown above.");
+    expect(html).toContain(
+      "The active run is using the current source mix shown above.",
+    );
     expect(html).toContain("https://github.com/qredence/fleet-rlm");
     expect(html).toContain("1 local path");
   });

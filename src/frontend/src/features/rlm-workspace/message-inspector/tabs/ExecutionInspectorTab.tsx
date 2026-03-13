@@ -15,6 +15,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import { sectionGroups, executionSectionState, statusTone } from "../utils/inspector-utils";
 import { renderBadges, renderExecutionSectionDetails } from "../components/inspector-components";
 
@@ -23,27 +24,27 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({ model
   return (
     <TabsContent value="execution" className="min-h-0 flex-1">
       <ScrollArea className="h-full">
-        <div className="space-y-4 px-4 pb-4">
+        <div className={inspectorStyles.tab.content}>
           {groups.map((group) => (
-            <section key={group.key} className="space-y-2">
+            <section key={group.key} className={inspectorStyles.stack.section}>
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                <div className={inspectorStyles.heading.section}>
                   {group.label}
                 </div>
-                <Badge variant="secondary" className="rounded-full">
+                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                   {group.sections.length}
                 </Badge>
               </div>
 
-              <div className="space-y-3">
+              <div className={inspectorStyles.stack.cards}>
                 {group.sections.map((section) => {
                   const tone = statusTone(executionSectionState(section));
                   return (
                     <Card
                       key={section.id}
-                      className="gap-3 rounded-2xl border-border-subtle/80 shadow-none"
+                      className={inspectorStyles.card.root}
                     >
-                      <CardHeader className="px-4 pt-4">
+                      <CardHeader className={inspectorStyles.card.header}>
                         <Accordion
                           type="single"
                           collapsible
@@ -61,7 +62,7 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({ model
                                   </div>
                                   <Badge
                                     variant={tone.variant}
-                                    className="rounded-full"
+                                    className={inspectorStyles.badge.status}
                                   >
                                     {tone.label}
                                   </Badge>

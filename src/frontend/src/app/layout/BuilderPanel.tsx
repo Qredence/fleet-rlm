@@ -12,12 +12,13 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
+import { Badge } from "@/components/ui/badge";
 import {
   CanvasSwitcher,
   type CanvasMode,
 } from "@/features/artifacts/CanvasSwitcher";
 import { FileDetail } from "@/features/artifacts/FileDetail";
-import { DaytonaWorkbench } from "@/features/rlm-workspace/daytona-workbench/DaytonaWorkbench";
+import { RunWorkbench } from "@/features/rlm-workspace/run-workbench/RunWorkbench";
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
 import {
   isRlmCoreEnabled,
@@ -93,7 +94,7 @@ export function BuilderPanel() {
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
-  const showDaytonaWorkbench =
+  const showRunWorkbench =
     activeNav === "workspace" &&
     !isUnsupportedNav &&
     runtimeMode === "daytona_pilot";
@@ -101,6 +102,19 @@ export function BuilderPanel() {
   const showInspector = activeNav === "workspace" && !isUnsupportedNav;
   const showFileDetail =
     activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
+
+  const PANEL_INFO = {
+    runWorkbench: {
+      title: "Run Workbench",
+      description: "Inspect recursive run state, child nodes, and final results.",
+    },
+    messageInspector: {
+      title: "Message Inspector",
+      description: "Inspect trajectory, execution, evidence, and graph context.",
+    }
+  };
+
+  const currentPanelInfo = showRunWorkbench ? PANEL_INFO.runWorkbench : PANEL_INFO.messageInspector;
 
   const canvasMode: CanvasMode = showInspector
     ? "creation"
@@ -127,28 +141,32 @@ export function BuilderPanel() {
   );
 
   return (
-    <div className="flex h-full flex-col bg-card">
+    <div className="flex h-full flex-col bg-muted/15">
       <div
         className={cn(
-          "shrink-0 border-b border-border-subtle py-3",
+          "shrink-0 border-b border-border-subtle/80 bg-card/80 py-3 backdrop-blur-sm",
           isMobile ? "px-4" : "px-4 py-4 md:px-6",
         )}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             {showInspector ? (
-              <div className="min-w-0">
-                <div
-                  className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground"
-                >
-                  Workspace
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                    Workspace
+                  </div>
+                  <Badge variant="outline" className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground border-border-subtle/80 bg-background/80">
+                    Support rail
+                  </Badge>
                 </div>
                 <div className="truncate text-sm font-medium text-foreground">
-                  {showDaytonaWorkbench
-                    ? "Daytona Workbench"
-                    : "Message Inspector"}
+                  {currentPanelInfo.title}
                 </div>
-              </div>
+                <p className="truncate text-xs text-muted-foreground">
+                  {currentPanelInfo.description}
+                </p>
+              </>
             ) : (
               <CanvasSwitcher
                 canvasMode={canvasMode}
@@ -195,10 +213,10 @@ export function BuilderPanel() {
           </ErrorBoundary>
         ) : showInspector ? (
           <ErrorBoundary
-            name={showDaytonaWorkbench ? "Daytona Workbench" : "Message Inspector"}
+            name={showRunWorkbench ? "Run Workbench" : "Message Inspector"}
           >
-            {showDaytonaWorkbench ? (
-              <DaytonaWorkbench />
+            {showRunWorkbench ? (
+              <RunWorkbench />
             ) : (
               <MessageInspectorPanel />
             )}

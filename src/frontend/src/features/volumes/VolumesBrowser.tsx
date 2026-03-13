@@ -13,7 +13,6 @@ import type { FsNode } from "@/lib/data/types";
 import { useFilesystem } from "@/hooks/useFilesystem";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { LargeTitleHeader } from "@/components/shared/LargeTitleHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -150,20 +149,26 @@ export function VolumesBrowser() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
-      {/* Desktop: static header outside scroll */}
+      {/* Desktop header */}
       {!isMobile && (
-        <LargeTitleHeader title="Volume Browser" isMobile={false}>
+        <div className="pt-4 md:pt-6 pb-4 border-b border-border-subtle shrink-0 max-w-200 w-full mx-auto px-6">
+          <h2 className="mb-1 text-balance text-foreground typo-h3">
+            Volume Browser
+          </h2>
           {headerChildren}
-        </LargeTitleHeader>
+        </div>
       )}
 
       {/* Tree */}
       <ScrollArea className="flex-1 min-h-0">
-        {/* Mobile: large-title header INSIDE scroll area for collapse behavior */}
+        {/* Mobile header */}
         {isMobile && (
-          <LargeTitleHeader title="Volume Browser" isMobile>
+          <div className="px-4 pt-2 pb-4 w-full">
+            <h2 className="font-app text-foreground text-balance typo-h2 mb-3">
+              Volume Browser
+            </h2>
             {headerChildren}
-          </LargeTitleHeader>
+          </div>
         )}
 
         <div className="py-2 max-w-[800px] w-full mx-auto">
@@ -186,10 +191,10 @@ export function VolumesBrowser() {
             </div>
           ) : (
             filteredFs.map((node) => (
-                <FsItem
-                  key={node.id}
-                  node={node}
-                  depth={0}
+              <FsItem
+                key={node.id}
+                node={node}
+                depth={0}
                 expanded={fsExpanded}
                 onToggle={toggleFsNode}
                 onSelectFile={handleSelectFile}

@@ -70,8 +70,8 @@ vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () =
   MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
 }));
 
-vi.mock("@/features/rlm-workspace/daytona-workbench/DaytonaWorkbench", () => ({
-  DaytonaWorkbench: () => <div>DaytonaWorkbench</div>,
+vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
+  RunWorkbench: () => <div>RunWorkbench</div>,
 }));
 
 vi.mock("@/lib/rlm-api", () => ({

@@ -10,16 +10,16 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils/cn";
 import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
-import { DaytonaSetupCard } from "@/features/rlm-workspace/DaytonaSetupCard";
-import { ConversationHistory } from "@/features/rlm-workspace/ConversationHistory";
+import { SourceSetupCard } from "@/features/rlm-workspace/SourceSetupCard";
+import { ConversationHistory } from "@/components/shared/ConversationHistory";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
-import { useDaytonaWorkbenchStore } from "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore";
+import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import {
-  detectDaytonaRepoContext,
-  normalizeDaytonaRepoUrl,
-  resolveDaytonaRepoContext,
-} from "@/features/rlm-workspace/daytonaRepoContext";
-import { parseDaytonaContextPaths } from "@/features/rlm-workspace/daytonaSourceContext";
+  detectRepoContext,
+  normalizeRepoUrl,
+  resolveRepoContext,
+} from "@/lib/utils/repoContext";
+import { parseContextPaths } from "@/lib/utils/sourceContext";
 import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
@@ -64,66 +64,66 @@ export function RlmWorkspace() {
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
-  const daytonaRepoUrl = useChatStore((state) => state.daytonaRepoUrl);
-  const setDaytonaRepoUrl = useChatStore((state) => state.setDaytonaRepoUrl);
-  const daytonaRepoRef = useChatStore((state) => state.daytonaRepoRef);
-  const setDaytonaRepoRef = useChatStore((state) => state.setDaytonaRepoRef);
-  const daytonaContextPaths = useChatStore((state) => state.daytonaContextPaths);
-  const setDaytonaContextPaths = useChatStore(
-    (state) => state.setDaytonaContextPaths,
+  const sourceRepoUrl = useChatStore((state) => state.sourceRepoUrl);
+  const setSourceRepoUrl = useChatStore((state) => state.setSourceRepoUrl);
+  const sourceRepoRef = useChatStore((state) => state.sourceRepoRef);
+  const setSourceRepoRef = useChatStore((state) => state.setSourceRepoRef);
+  const sourceContextPaths = useChatStore((state) => state.sourceContextPaths);
+  const setSourceContextPaths = useChatStore(
+    (state) => state.setSourceContextPaths,
   );
-  const daytonaMaxDepth = useChatStore((state) => state.daytonaMaxDepth);
-  const setDaytonaMaxDepth = useChatStore((state) => state.setDaytonaMaxDepth);
-  const daytonaBatchConcurrency = useChatStore(
-    (state) => state.daytonaBatchConcurrency,
+  const sourceMaxDepth = useChatStore((state) => state.sourceMaxDepth);
+  const setSourceMaxDepth = useChatStore((state) => state.setSourceMaxDepth);
+  const sourceBatchConcurrency = useChatStore(
+    (state) => state.sourceBatchConcurrency,
   );
-  const setDaytonaBatchConcurrency = useChatStore(
-    (state) => state.setDaytonaBatchConcurrency,
+  const setSourceBatchConcurrency = useChatStore(
+    (state) => state.setSourceBatchConcurrency,
   );
-  const activeDaytonaRunStatus = useDaytonaWorkbenchStore((state) => state.status);
-  const activeDaytonaRunRepoUrl = useDaytonaWorkbenchStore(
+  const activeRunStatus = useRunWorkbenchStore((state) => state.status);
+  const activeRunRepoUrl = useRunWorkbenchStore(
     (state) => state.repoUrl,
   );
-  const activeDaytonaRunContextSources = useDaytonaWorkbenchStore(
+  const activeRunContextSources = useRunWorkbenchStore(
     (state) => state.contextSources,
   );
-  const detectedDaytonaRepoContext =
+  const detectedRepoCtx =
     runtimeMode === "daytona_pilot"
-      ? detectDaytonaRepoContext(inputValue)
+      ? detectRepoContext(inputValue)
       : null;
-  const normalizedManualDaytonaRepoUrl =
+  const normalizedManualRepoUrl =
     runtimeMode === "daytona_pilot"
-      ? normalizeDaytonaRepoUrl(daytonaRepoUrl)
+      ? normalizeRepoUrl(sourceRepoUrl)
       : null;
-  const hasManualDaytonaRepoOverride =
-    runtimeMode === "daytona_pilot" && daytonaRepoUrl.trim().length > 0;
-  const hasInvalidManualDaytonaRepoOverride =
-    hasManualDaytonaRepoOverride && normalizedManualDaytonaRepoUrl == null;
-  const resolvedDaytonaRepoContext =
+  const hasManualRepoOverride =
+    runtimeMode === "daytona_pilot" && sourceRepoUrl.trim().length > 0;
+  const hasInvalidManualRepoOverride =
+    hasManualRepoOverride && normalizedManualRepoUrl == null;
+  const resolvedRepoCtx =
     runtimeMode === "daytona_pilot"
-      ? resolveDaytonaRepoContext({
-          manualRepoUrl: daytonaRepoUrl,
+      ? resolveRepoContext({
+          manualRepoUrl: sourceRepoUrl,
           promptText: inputValue,
         })
       : null;
-  const parsedDaytonaContextPaths =
+  const parsedContextPaths =
     runtimeMode === "daytona_pilot"
-      ? parseDaytonaContextPaths(daytonaContextPaths)
+      ? parseContextPaths(sourceContextPaths)
       : [];
-  const canSubmitDaytonaRun =
-    runtimeMode !== "daytona_pilot" || !hasInvalidManualDaytonaRepoOverride;
-  const showActiveDaytonaRunContext =
+  const canSubmitRun =
+    runtimeMode !== "daytona_pilot" || !hasInvalidManualRepoOverride;
+  const showActiveRunContext =
     runtimeMode === "daytona_pilot" &&
-    (activeDaytonaRunStatus === "bootstrapping" ||
-      activeDaytonaRunStatus === "running" ||
-      activeDaytonaRunStatus === "cancelling");
+    (activeRunStatus === "bootstrapping" ||
+      activeRunStatus === "running" ||
+      activeRunStatus === "cancelling");
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
     (attachments: AttachedFile[]) => {
-      const effectiveDaytonaRepoUrl =
+      const effectiveRepoUrl =
         runtimeMode === "daytona_pilot"
-          ? resolvedDaytonaRepoContext?.repoUrl
+          ? resolvedRepoCtx?.repoUrl
           : undefined;
       if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
         telemetry.capture("chat_session_started", {
@@ -133,19 +133,19 @@ export function RlmWorkspace() {
       originalHandleSubmit({
         executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
         runtimeMode,
-        repoUrl: effectiveDaytonaRepoUrl,
+        repoUrl: effectiveRepoUrl,
         repoRef:
-          runtimeMode === "daytona_pilot" && effectiveDaytonaRepoUrl
-            ? daytonaRepoRef
+          runtimeMode === "daytona_pilot" && effectiveRepoUrl
+            ? sourceRepoRef
             : undefined,
         contextPaths:
           runtimeMode === "daytona_pilot"
-            ? parsedDaytonaContextPaths
+            ? parsedContextPaths
             : undefined,
-        maxDepth: runtimeMode === "daytona_pilot" ? daytonaMaxDepth : undefined,
+        maxDepth: runtimeMode === "daytona_pilot" ? sourceMaxDepth : undefined,
         batchConcurrency:
           runtimeMode === "daytona_pilot"
-            ? daytonaBatchConcurrency
+            ? sourceBatchConcurrency
             : undefined,
         attachments: attachments.map((attachment) => ({
           id: attachment.id,
@@ -163,11 +163,11 @@ export function RlmWorkspace() {
       originalHandleSubmit,
       executionMode,
       runtimeMode,
-      resolvedDaytonaRepoContext,
-      daytonaRepoRef,
-      parsedDaytonaContextPaths,
-      daytonaMaxDepth,
-      daytonaBatchConcurrency,
+      resolvedRepoCtx,
+      sourceRepoRef,
+      parsedContextPaths,
+      sourceMaxDepth,
+      sourceBatchConcurrency,
     ],
   );
 
@@ -279,7 +279,7 @@ export function RlmWorkspace() {
   const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;
-  const showDaytonaSetup = runtimeMode === "daytona_pilot";
+  const showSourceSetup = runtimeMode === "daytona_pilot";
 
   const composer = (
     <ChatInput
@@ -300,7 +300,7 @@ export function RlmWorkspace() {
       onRuntimeModeChange={setRuntimeMode}
       executionMode={executionMode}
       onExecutionModeChange={setExecutionMode}
-      canSubmit={canSubmitDaytonaRun}
+      canSubmit={canSubmitRun}
       className="w-full"
     />
   );
@@ -341,7 +341,7 @@ export function RlmWorkspace() {
       <div
         className={cn(
           "sticky bottom-0 z-10 shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 md:px-6",
-          hasMessages || showRuntimeWarning || showDaytonaSetup ? "pt-5" : "pt-2",
+          hasMessages || showRuntimeWarning || showSourceSetup ? "pt-5" : "pt-2",
         )}
       >
         <div className="mx-auto w-full max-w-200">
@@ -365,29 +365,31 @@ export function RlmWorkspace() {
                 </AlertDescription>
               </Alert>
             ) : null}
-            {showDaytonaSetup ? (
+            {showSourceSetup ? (
               <div className="mx-auto w-full max-w-175">
-                <DaytonaSetupCard
-                  manualRepoUrl={daytonaRepoUrl}
-                  onManualRepoUrlChange={setDaytonaRepoUrl}
-                  contextPaths={daytonaContextPaths}
-                  onContextPathsChange={setDaytonaContextPaths}
-                  repoRef={daytonaRepoRef}
-                  onRepoRefChange={setDaytonaRepoRef}
-                  maxDepth={daytonaMaxDepth}
-                  onMaxDepthChange={setDaytonaMaxDepth}
-                  batchConcurrency={daytonaBatchConcurrency}
-                  onBatchConcurrencyChange={setDaytonaBatchConcurrency}
-                  detectedRepoContext={detectedDaytonaRepoContext}
-                  resolvedRepoContext={resolvedDaytonaRepoContext}
-                  hasInvalidManualOverride={hasInvalidManualDaytonaRepoOverride}
-                  activeRunRepoUrl={activeDaytonaRunRepoUrl}
-                  activeRunContextSources={activeDaytonaRunContextSources}
-                  isActiveRunContextVisible={showActiveDaytonaRunContext}
+                <SourceSetupCard
+                  manualRepoUrl={sourceRepoUrl}
+                  onManualRepoUrlChange={setSourceRepoUrl}
+                  contextPaths={sourceContextPaths}
+                  onContextPathsChange={setSourceContextPaths}
+                  repoRef={sourceRepoRef}
+                  onRepoRefChange={setSourceRepoRef}
+                  maxDepth={sourceMaxDepth}
+                  onMaxDepthChange={setSourceMaxDepth}
+                  batchConcurrency={sourceBatchConcurrency}
+                  onBatchConcurrencyChange={setSourceBatchConcurrency}
+                  detectedRepoContext={detectedRepoCtx}
+                  resolvedRepoContext={resolvedRepoCtx}
+                  hasInvalidManualOverride={hasInvalidManualRepoOverride}
+                  activeRunRepoUrl={activeRunRepoUrl}
+                  activeRunContextSources={activeRunContextSources}
+                  isActiveRunContextVisible={showActiveRunContext}
                 />
               </div>
             ) : null}
-            <div className="mx-auto w-full max-w-175">{composer}</div>
+            <div className="mx-auto w-full max-w-175 rounded-2xl ring-1 ring-border/30">
+              {composer}
+            </div>
           </div>
         </div>
       </div>

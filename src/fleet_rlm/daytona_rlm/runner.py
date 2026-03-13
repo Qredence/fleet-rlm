@@ -50,9 +50,31 @@ class DaytonaRLMRunner:
         self.cancel_check = cancel_check
         self.run_id = str(uuid.uuid4())
 
-    def run(self, *, repo: str, task: str, ref: str | None = None) -> DaytonaRunResult:
+    def run(
+        self,
+        *,
+        repo: str | None,
+        task: str,
+        ref: str | None = None,
+        context_paths: list[str] | None = None,
+    ) -> DaytonaRunResult:
         lm_config = resolve_daytona_lm_runtime_config()
-        session = self.runtime.create_repo_session(repo_url=repo, ref=ref)
+        create_workspace_session = getattr(
+            self.runtime, "create_workspace_session", None
+        )
+        if callable(create_workspace_session):
+            session = create_workspace_session(
+                repo_url=repo,
+                ref=ref,
+                context_paths=context_paths,
+            )
+        else:
+            if context_paths:
+                raise RuntimeError(
+                    "Configured Daytona runtime does not support context_paths."
+                )
+            session = self.runtime.create_repo_session(repo_url=repo, ref=ref)
+        context_sources = [item.to_dict() for item in session.context_sources]
         request = RunStartRequest(
             request_id=uuid.uuid4().hex,
             payload={
@@ -60,9 +82,11 @@ class DaytonaRLMRunner:
                 "node_id": uuid.uuid4().hex,
                 "parent_id": None,
                 "depth": 0,
-                "repo": repo,
+                "repo": repo or "",
                 "ref": ref,
+                "context_sources": context_sources,
                 "task": task,
+                "workspace_path": session.workspace_path,
                 "repo_path": session.repo_path,
                 "sandbox_id": session.sandbox_id,
                 "budget": asdict(self.budget),
@@ -190,9 +214,10 @@ class DaytonaRLMRunner:
 
 def run_daytona_rlm_pilot(
     *,
-    repo: str,
+    repo: str | None,
     task: str,
     ref: str | None = None,
+    context_paths: list[str] | None = None,
     budget: RolloutBudget | None = None,
     output_dir: Path | str = "results/daytona-rlm",
     runtime: Any | None = None,
@@ -206,4 +231,4 @@ def run_daytona_rlm_pilot(
         budget=budget,
         output_dir=output_dir,
     )
-    return runner.run(repo=repo, task=task, ref=ref)
+    return runner.run(repo=repo, task=task, ref=ref, context_paths=context_paths)

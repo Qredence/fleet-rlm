@@ -5,7 +5,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
 
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocked = vi.hoisted(() => ({
   toastError: vi.fn(),
@@ -21,14 +23,19 @@ const mocked = vi.hoisted(() => ({
 }));
 
 const mockChatStoreState = {
-  messages: [] as Array<{ id: string; type: string; content: string; phase?: number }>,
+  messages: [] as Array<{
+    id: string;
+    type: string;
+    content: string;
+    phase?: number;
+  }>,
   turnArtifactsByMessageId: {},
   isStreaming: false,
   sessionId: "session-123",
   runtimeMode: "daytona_pilot" as const,
-  daytonaRepoUrl: "",
-  daytonaRepoRef: "main",
-  daytonaContextPaths: "",
+  sourceRepoUrl: "",
+  sourceRepoRef: "main",
+  sourceContextPaths: "",
   streamMessage: vi.fn(),
   stopStreaming: vi.fn(),
   resetSession: vi.fn(),
@@ -53,8 +60,12 @@ vi.mock("@/stores/navigationStore", () => ({
 }));
 
 vi.mock("@/stores/artifactStore", () => ({
-  useArtifactStore: (selector: (state: { clear: typeof mocked.clearArtifactSteps; steps: [] }) => unknown) =>
-    selector({ clear: mocked.clearArtifactSteps, steps: [] }),
+  useArtifactStore: (
+    selector: (state: {
+      clear: typeof mocked.clearArtifactSteps;
+      steps: [];
+    }) => unknown,
+  ) => selector({ clear: mocked.clearArtifactSteps, steps: [] }),
 }));
 
 vi.mock("@/stores/chatStore", () => ({
@@ -67,8 +78,8 @@ vi.mock("@/stores/chatStore", () => ({
   ),
 }));
 
-vi.mock("@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore", () => ({
-  useDaytonaWorkbenchStore: Object.assign(
+vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
+  useRunWorkbenchStore: Object.assign(
     (selector: (state: typeof mocked.daytonaStoreState) => unknown) =>
       selector(mocked.daytonaStoreState),
     {
@@ -100,9 +111,9 @@ function resetState() {
   mockChatStoreState.isStreaming = false;
   mockChatStoreState.sessionId = "session-123";
   mockChatStoreState.runtimeMode = "daytona_pilot";
-  mockChatStoreState.daytonaRepoUrl = "";
-  mockChatStoreState.daytonaRepoRef = "main";
-  mockChatStoreState.daytonaContextPaths = "";
+  mockChatStoreState.sourceRepoUrl = "";
+  mockChatStoreState.sourceRepoRef = "main";
+  mockChatStoreState.sourceContextPaths = "";
   mockChatStoreState.streamMessage.mockReset();
   mockChatStoreState.stopStreaming.mockReset();
   mockChatStoreState.resetSession.mockReset();
@@ -148,7 +159,9 @@ describe("useBackendChatRuntime Daytona transport failures", () => {
 
   it("surfaces a Daytona stream failure in the workbench instead of appending a generic chat error", async () => {
     mockChatStoreState.streamMessage.mockRejectedValue(
-      new Error("No response arrived from the server within 15 seconds. Try again or check the backend logs."),
+      new Error(
+        "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
+      ),
     );
 
     await act(async () => {

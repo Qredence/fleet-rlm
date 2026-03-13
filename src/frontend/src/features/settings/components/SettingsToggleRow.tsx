@@ -1,4 +1,4 @@
-import { SettingsRow } from "@/features/settings/SettingsRow";
+import { SettingsRow } from "@/features/settings/components/SettingsRow";
 import { Switch } from "@/components/ui/switch";
 
 // ── Toggle row ──────────────────────────────────────────────────────

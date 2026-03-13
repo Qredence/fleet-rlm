@@ -8,7 +8,7 @@ import {
 } from "@/lib/rlm-api";
 import type { ChatMessage } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
-import { parseDaytonaContextPaths } from "@/features/rlm-workspace/daytonaSourceContext";
+import { parseContextPaths } from "@/lib/utils/sourceContext";
 import { telemetryClient } from "@/lib/telemetry/client";
 import type {
   WsExecutionMode,
@@ -36,21 +36,21 @@ interface ChatStore {
   sessionId: string;
   error: string | null;
   runtimeMode: WsRuntimeMode;
-  daytonaRepoUrl: string;
-  daytonaRepoRef: string;
-  daytonaContextPaths: string;
-  daytonaMaxDepth: number;
-  daytonaBatchConcurrency: number;
+  sourceRepoUrl: string;
+  sourceRepoRef: string;
+  sourceContextPaths: string;
+  sourceMaxDepth: number;
+  sourceBatchConcurrency: number;
 
   // Actions
   setSessionId: (id: string) => void;
   resetSession: () => void;
   setRuntimeMode: (mode: WsRuntimeMode) => void;
-  setDaytonaRepoUrl: (value: string) => void;
-  setDaytonaRepoRef: (value: string) => void;
-  setDaytonaContextPaths: (value: string) => void;
-  setDaytonaMaxDepth: (value: number) => void;
-  setDaytonaBatchConcurrency: (value: number) => void;
+  setSourceRepoUrl: (value: string) => void;
+  setSourceRepoRef: (value: string) => void;
+  setSourceContextPaths: (value: string) => void;
+  setSourceMaxDepth: (value: number) => void;
+  setSourceBatchConcurrency: (value: number) => void;
   setMessages: (
     messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
   ) => void;
@@ -84,11 +84,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   sessionId: createBackendSessionId(),
   error: null,
   runtimeMode: "modal_chat",
-  daytonaRepoUrl: "",
-  daytonaRepoRef: "",
-  daytonaContextPaths: "",
-  daytonaMaxDepth: 2,
-  daytonaBatchConcurrency: 4,
+  sourceRepoUrl: "",
+  sourceRepoRef: "",
+  sourceContextPaths: "",
+  sourceMaxDepth: 2,
+  sourceBatchConcurrency: 4,
   streamController: null,
 
   setSessionId: (id) => set({ sessionId: id }),
@@ -101,12 +101,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       error: null,
     }),
   setRuntimeMode: (runtimeMode) => set({ runtimeMode }),
-  setDaytonaRepoUrl: (daytonaRepoUrl) => set({ daytonaRepoUrl }),
-  setDaytonaRepoRef: (daytonaRepoRef) => set({ daytonaRepoRef }),
-  setDaytonaContextPaths: (daytonaContextPaths) => set({ daytonaContextPaths }),
-  setDaytonaMaxDepth: (daytonaMaxDepth) => set({ daytonaMaxDepth }),
-  setDaytonaBatchConcurrency: (daytonaBatchConcurrency) =>
-    set({ daytonaBatchConcurrency }),
+  setSourceRepoUrl: (sourceRepoUrl) => set({ sourceRepoUrl }),
+  setSourceRepoRef: (sourceRepoRef) => set({ sourceRepoRef }),
+  setSourceContextPaths: (sourceContextPaths) => set({ sourceContextPaths }),
+  setSourceMaxDepth: (sourceMaxDepth) => set({ sourceMaxDepth }),
+  setSourceBatchConcurrency: (sourceBatchConcurrency) =>
+    set({ sourceBatchConcurrency }),
 
   setMessages: (updater) =>
     set((state) => ({
@@ -157,11 +157,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       sessionId,
       isStreaming,
       runtimeMode,
-      daytonaRepoUrl,
-      daytonaRepoRef,
-      daytonaContextPaths,
-      daytonaMaxDepth,
-      daytonaBatchConcurrency,
+      sourceRepoUrl,
+      sourceRepoRef,
+      sourceContextPaths,
+      sourceMaxDepth,
+      sourceBatchConcurrency,
     } = get();
 
     if (isStreaming || !text.trim()) return;
@@ -191,17 +191,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (resolvedRuntimeMode === "modal_chat") {
       payload.execution_mode = options?.executionMode ?? "auto";
     } else {
-      const repoUrl = options?.repoUrl ?? daytonaRepoUrl;
+      const repoUrl = options?.repoUrl ?? sourceRepoUrl;
       payload.repo_url = repoUrl || null;
-      const repoRef = options?.repoRef ?? daytonaRepoRef;
+      const repoRef = options?.repoRef ?? sourceRepoRef;
       payload.repo_ref = repoUrl && repoRef.trim() ? repoRef : null;
       const contextPaths =
-        options?.contextPaths ?? parseDaytonaContextPaths(daytonaContextPaths);
+        options?.contextPaths ?? parseContextPaths(sourceContextPaths);
       payload.context_paths =
         contextPaths.length > 0 ? contextPaths : null;
-      payload.max_depth = options?.maxDepth ?? daytonaMaxDepth;
+      payload.max_depth = options?.maxDepth ?? sourceMaxDepth;
       payload.batch_concurrency =
-        options?.batchConcurrency ?? daytonaBatchConcurrency;
+        options?.batchConcurrency ?? sourceBatchConcurrency;
     }
 
     try {

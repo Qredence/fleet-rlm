@@ -17,7 +17,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import { PanelHeaderChip } from "@/features/artifacts/PanelHeaderChip";
+import { PanelHeaderChip } from "@/features/artifacts/components/PanelHeaderChip";
 import type { Skill } from "@/lib/data/types";
 
 /* ── Types ─────────────────────────────────────────────────────────── */

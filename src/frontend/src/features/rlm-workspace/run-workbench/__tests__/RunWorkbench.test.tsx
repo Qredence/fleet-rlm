@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { DaytonaWorkbench } from "@/features/rlm-workspace/daytona-workbench/DaytonaWorkbench";
+import { RunWorkbench } from "@/features/rlm-workspace/run-workbench/RunWorkbench";
 
 vi.mock(
-  "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore",
+  "@/features/rlm-workspace/run-workbench/runWorkbenchStore",
   () => ({
-    useDaytonaWorkbenchStore: () => ({
+    useRunWorkbenchStore: () => ({
       status: "running",
       runId: "run-123",
       repoUrl: "https://github.com/qredence/fleet-rlm",
@@ -95,11 +95,11 @@ vi.mock(
   }),
 );
 
-describe("DaytonaWorkbench", () => {
+describe("RunWorkbench", () => {
   it("renders a compact inspector layout with tree-first details tabs", () => {
-    const html = renderToStaticMarkup(<DaytonaWorkbench />);
+    const html = renderToStaticMarkup(<RunWorkbench />);
 
-    expect(html).toContain("Daytona Workbench");
+    expect(html).toContain("Run Workbench");
     expect(html).toContain("Run tree");
     expect(html).toContain("Details");
     expect(html).toContain("External sources");
