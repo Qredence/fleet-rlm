@@ -29,7 +29,7 @@ describe("SourceSetupCard", () => {
           {
             sourceId: "ctx-1",
             kind: "directory",
-            hostPath: "/Users/zocho/Documents/specs",
+            hostPath: "/workspace/specs",
           },
         ]}
         isActiveRunContextVisible
@@ -60,7 +60,7 @@ describe("SourceSetupCard", () => {
     const html = renderToStaticMarkup(
       <SourceSetupCard
         {...baseProps}
-        contextPaths={"/Users/zocho/Documents/spec.pdf\n/workspace/docs"}
+        contextPaths={"/workspace/spec.pdf\n/workspace/docs"}
         resolvedRepoContext={{
           repoUrl: "https://github.com/qredence/fleet-rlm",
           source: "manual",
@@ -88,5 +88,27 @@ describe("SourceSetupCard", () => {
     expect(html).toContain(
       "Expand source setup to fix the URL or clear the override.",
     );
+  });
+
+  it("does not reuse active run repo context once the active run summary is hidden", () => {
+    const html = renderToStaticMarkup(
+      <SourceSetupCard
+        {...baseProps}
+        activeRunRepoUrl="https://github.com/qredence/fleet-rlm"
+        activeRunContextSources={[
+          {
+            sourceId: "ctx-1",
+            kind: "directory",
+            hostPath: "/workspace/specs",
+          },
+        ]}
+        isActiveRunContextVisible={false}
+      />,
+    );
+
+    expect(html).toContain("Reasoning only");
+    expect(html).not.toContain("Repo ready");
+    expect(html).not.toContain("https://github.com/qredence/fleet-rlm");
+    expect(html).not.toContain("Active run context");
   });
 });

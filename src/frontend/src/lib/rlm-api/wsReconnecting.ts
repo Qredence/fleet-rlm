@@ -166,13 +166,16 @@ export async function createReconnectingWs(
               if (settled || completed || retryState.aborted || firstFrameSeen) {
                 return;
               }
+              const waitSeconds = Math.ceil(firstFrameTimeoutMs / 1000);
+              const secondsLabel =
+                waitSeconds === 1 ? "second" : "seconds";
               completed = true;
               safeClose();
               updateStatus("disconnected");
               finish(() =>
                 reject(
                   createWsError(
-                    `No response arrived from the server within ${Math.ceil(firstFrameTimeoutMs / 1000)} seconds. Try again or check the backend logs.`,
+                    `No response arrived from the server within ${waitSeconds} ${secondsLabel}. Try again or check the backend logs.`,
                   ),
                 ),
               );

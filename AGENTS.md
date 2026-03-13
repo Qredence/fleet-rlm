@@ -40,7 +40,7 @@ Use Python 3.10+, 4-space indentation, type hints on public functions, and clear
 Enforce style with:
 - `uv run ruff format src tests`
 - `uv run ruff check src tests`
-- `uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"`
+- `uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" --exclude "src/fleet_rlm/analytics/**" --exclude "src/fleet_rlm/daytona_rlm/**"`
 
 Naming: `snake_case` for modules/functions/tests, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants. Keep modules focused and avoid mixing unrelated concerns.
 

@@ -164,17 +164,19 @@ export function UserMenu() {
               }}
               className="typo-label"
             >
-              <Settings className="size-4 typo-label" />
+              <Settings className="size-4" />
               Settings
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setPricingOpen(true)}
+              className="typo-label"
             >
-              <CreditCard className="size-4 typo-label" />
+              <CreditCard className="size-4" />
               Pricing Plan
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setIntegrationsOpen(true)}
+              className="typo-label"
             >
               <Blocks className="size-4" />
               Integrations

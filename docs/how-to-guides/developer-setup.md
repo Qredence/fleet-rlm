@@ -250,7 +250,7 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 
 # Type checking
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" --exclude "src/fleet_rlm/analytics/**" --exclude "src/fleet_rlm/daytona_rlm/**"
 ```
 
 ### Start Development Server

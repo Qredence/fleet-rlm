@@ -1,7 +1,7 @@
 "use client";
 
 import type { MotionProps } from "motion/react";
-import type { CSSProperties, ElementType, JSX } from "react";
+import type { CSSProperties, ComponentType, JSX } from "react";
 
 import { cn } from "@/lib/utils/cn";
 import { motion } from "motion/react";
@@ -11,7 +11,7 @@ type MotionHTMLProps = MotionProps & Record<string, unknown>;
 
 interface TextShimmerProps {
   children: string;
-  as?: ElementType;
+  as?: keyof JSX.IntrinsicElements;
   className?: string;
   duration?: number;
   spread?: number;
@@ -20,7 +20,7 @@ interface TextShimmerProps {
 // Cache motion components at module level to avoid creating during render
 const motionComponentCache = new Map<
   keyof JSX.IntrinsicElements,
-  React.ComponentType<MotionHTMLProps>
+  ComponentType<MotionHTMLProps>
 >();
 
 const getMotionComponent = (element: keyof JSX.IntrinsicElements) => {
@@ -39,9 +39,7 @@ function TextShimmerComponent({
   duration = 2,
   spread = 2,
 }: TextShimmerProps) {
-  const MotionComponent = getMotionComponent(
-    Component as keyof JSX.IntrinsicElements,
-  );
+  const MotionComponent = getMotionComponent(Component);
 
   const dynamicSpread = useMemo(() => {
     return children.length * spread;

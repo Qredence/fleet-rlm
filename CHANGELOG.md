@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- No changes yet.
+
+## [0.4.97] - 2026-03-13
+
 ### Highlights (User Impact)
 
 - Expanded the experimental Daytona runtime so a run can now start from a repo, staged local context files/directories, both together, or reasoning-only input, with better live visibility into recursive child work.

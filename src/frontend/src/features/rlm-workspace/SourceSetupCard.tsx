@@ -115,15 +115,18 @@ function SourceSetupCard({
     !hasInvalidManualOverride &&
     isActiveRunContextVisible &&
     (Boolean(activeRunRepoUrl) || activeRunContextSources.length > 0);
-  const displayedRepoUrl =
-    hasManualOverride
-      ? manualRepoUrl
-      : resolvedRepoContext?.repoUrl ?? activeRunRepoUrl ?? "";
+  const visibleActiveRunRepoUrl =
+    isActiveRunContextVisible && activeRunRepoUrl ? activeRunRepoUrl : "";
+  const displayedRepoUrl = hasManualOverride
+    ? manualRepoUrl
+    : (resolvedRepoContext?.repoUrl ?? visibleActiveRunRepoUrl);
   const detectedRepoDiffers =
     hasManualOverride &&
     detectedRepoContext != null &&
     detectedRepoContext.repoUrl !== resolvedRepoContext?.repoUrl;
-  const effectiveHasRepo = Boolean(resolvedRepoContext?.repoUrl ?? activeRunRepoUrl);
+  const effectiveHasRepo = Boolean(
+    resolvedRepoContext?.repoUrl ?? visibleActiveRunRepoUrl,
+  );
   const effectiveContextCount =
     parsedContextPaths.length > 0
       ? parsedContextPaths.length
@@ -229,8 +232,8 @@ function SourceSetupCard({
                     onContextPathsChange(event.currentTarget.value)
                   }
                   placeholder={[
-                    "/Users/zocho/Documents/spec.pdf",
-                    "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+                    "/workspace/spec.pdf",
+                    "/workspace/docs",
                   ].join("\n")}
                   className="min-h-24"
                 />

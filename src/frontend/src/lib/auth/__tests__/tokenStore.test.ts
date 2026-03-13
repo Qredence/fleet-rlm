@@ -55,4 +55,24 @@ describe("tokenStore", () => {
     expect(getAccessToken()).toBeNull();
     expect(sessionStorage.getItem(CANONICAL_KEY)).toBeNull();
   });
+
+  it("migrates canonical localStorage tokens into sessionStorage", async () => {
+    localStorage.setItem(CANONICAL_KEY, "local-canonical");
+
+    const { getAccessToken } = await loadTokenStore();
+
+    expect(getAccessToken()).toBe("local-canonical");
+    expect(sessionStorage.getItem(CANONICAL_KEY)).toBe("local-canonical");
+    expect(localStorage.getItem(CANONICAL_KEY)).toBeNull();
+  });
+
+  it("migrates legacy localStorage tokens into sessionStorage", async () => {
+    localStorage.setItem("fleet_access_token", "legacy-token");
+
+    const { getAccessToken } = await loadTokenStore();
+
+    expect(getAccessToken()).toBe("legacy-token");
+    expect(sessionStorage.getItem(CANONICAL_KEY)).toBe("legacy-token");
+    expect(localStorage.getItem("fleet_access_token")).toBeNull();
+  });
 });

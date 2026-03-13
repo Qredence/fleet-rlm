@@ -211,7 +211,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
       firstFrameTimeoutMs: 50,
     });
     const rejection = expect(streamPromise).rejects.toThrow(
-      /No response arrived from the server within 1 seconds/i,
+      /No response arrived from the server within 1 second/i,
     );
 
     await Promise.resolve();

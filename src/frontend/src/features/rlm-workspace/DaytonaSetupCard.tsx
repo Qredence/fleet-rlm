@@ -115,15 +115,17 @@ function DaytonaSetupCard({
     !hasInvalidManualOverride &&
     isActiveRunContextVisible &&
     (Boolean(activeRunRepoUrl) || activeRunContextSources.length > 0);
+  const visibleActiveRunRepoUrl =
+    isActiveRunContextVisible && activeRunRepoUrl ? activeRunRepoUrl : "";
   const displayedRepoUrl = hasManualOverride
     ? manualRepoUrl
-    : (resolvedRepoContext?.repoUrl ?? activeRunRepoUrl ?? "");
+    : (resolvedRepoContext?.repoUrl ?? visibleActiveRunRepoUrl);
   const detectedRepoDiffers =
     hasManualOverride &&
     detectedRepoContext != null &&
     detectedRepoContext.repoUrl !== resolvedRepoContext?.repoUrl;
   const effectiveHasRepo = Boolean(
-    resolvedRepoContext?.repoUrl ?? activeRunRepoUrl,
+    resolvedRepoContext?.repoUrl ?? visibleActiveRunRepoUrl,
   );
   const effectiveContextCount =
     parsedContextPaths.length > 0
@@ -234,8 +236,8 @@ function DaytonaSetupCard({
                     onContextPathsChange(event.currentTarget.value)
                   }
                   placeholder={[
-                    "/Users/zocho/Documents/spec.pdf",
-                    "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+                    "/workspace/spec.pdf",
+                    "/workspace/docs",
                   ].join("\n")}
                   className="min-h-24"
                 />
