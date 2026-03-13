@@ -49,10 +49,11 @@ function resetStore() {
     sessionId: "mock-session-id",
     error: null,
     runtimeMode: "modal_chat",
-    daytonaRepoUrl: "",
-    daytonaRepoRef: "",
-    daytonaMaxDepth: 2,
-    daytonaBatchConcurrency: 4,
+    sourceRepoUrl: "",
+    sourceRepoRef: "",
+    sourceContextPaths: "",
+    sourceMaxDepth: 2,
+    sourceBatchConcurrency: 4,
     streamController: null,
   });
 }
@@ -76,8 +77,8 @@ describe("useChatStore — state management", () => {
       sessionId,
       error,
       runtimeMode,
-      daytonaMaxDepth,
-      daytonaBatchConcurrency,
+      sourceMaxDepth,
+      sourceBatchConcurrency,
     } = useChatStore.getState();
     expect(messages).toEqual([]);
     expect(isStreaming).toBe(false);
@@ -85,8 +86,8 @@ describe("useChatStore — state management", () => {
     expect(sessionId.length).toBeGreaterThan(0);
     expect(error).toBeNull();
     expect(runtimeMode).toBe("modal_chat");
-    expect(daytonaMaxDepth).toBe(2);
-    expect(daytonaBatchConcurrency).toBe(4);
+    expect(sourceMaxDepth).toBe(2);
+    expect(sourceBatchConcurrency).toBe(4);
   });
 
   // ── setSessionId ───────────────────────────────────────────────────────────
@@ -282,10 +283,11 @@ describe("useChatStore — streamMessage", () => {
     vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
     useChatStore.setState({
       runtimeMode: "daytona_pilot",
-      daytonaRepoUrl: "https://github.com/qredence/fleet-rlm.git",
-      daytonaRepoRef: "main",
-      daytonaMaxDepth: 3,
-      daytonaBatchConcurrency: 6,
+      sourceRepoUrl: "https://github.com/qredence/fleet-rlm.git",
+      sourceRepoRef: "main",
+      sourceContextPaths: "/Users/zocho/Documents/spec.pdf\n/workspace/docs",
+      sourceMaxDepth: 3,
+      sourceBatchConcurrency: 6,
     });
 
     await useChatStore.getState().streamMessage("trace the repo");
@@ -295,6 +297,7 @@ describe("useChatStore — streamMessage", () => {
       runtime_mode: "daytona_pilot",
       repo_url: "https://github.com/qredence/fleet-rlm.git",
       repo_ref: "main",
+      context_paths: ["/Users/zocho/Documents/spec.pdf", "/workspace/docs"],
       max_depth: 3,
       batch_concurrency: 6,
     });

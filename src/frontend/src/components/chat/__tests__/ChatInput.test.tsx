@@ -59,5 +59,6 @@ describe("ChatInput", () => {
     expect(html).not.toContain("Experimental Daytona runtime");
     expect(html).not.toContain('aria-label="Daytona repository URL"');
     expect(html).not.toContain("Tools only");
+    expect(html).toContain("Daytona");
   });
 });

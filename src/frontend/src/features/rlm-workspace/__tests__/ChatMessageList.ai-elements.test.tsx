@@ -541,8 +541,8 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     );
 
     expect(answerIndex).toBeGreaterThanOrEqual(0);
-    expect(trajectoryIndex).toBeGreaterThan(answerIndex);
-    expect(executionIndex).toBeGreaterThan(trajectoryIndex);
+    expect(executionIndex).toBeGreaterThan(answerIndex);
+    expect(trajectoryIndex).toBeGreaterThan(executionIndex);
     expect(html).toContain("Read buffer");
     expect(html).toContain("Read buffer ×2");
     expect(html).toContain("I checked the buffer.");
@@ -1174,7 +1174,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       />,
     );
 
-    expect(html).toContain("Loading");
+    expect(html).toContain("Generating code...");
     expect(html).toContain("Agentic Fleet Session");
   });
 
@@ -1269,7 +1269,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       />,
     );
 
-    expect(html).toContain("Loading");
+    expect(html).toContain("Generating code...");
     expect(html).toContain('data-slot="assistant-turn-content"');
   });
 

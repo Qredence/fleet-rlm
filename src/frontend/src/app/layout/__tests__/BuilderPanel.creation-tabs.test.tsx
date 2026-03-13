@@ -5,6 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
 
+const chatStoreState = {
+  runtimeMode: "modal_chat" as "modal_chat" | "daytona_pilot",
+};
+
 vi.mock("@/stores/navigationStore", () => ({
   useNavigationStore: () => ({
     activeNav: "workspace",
@@ -13,6 +17,11 @@ vi.mock("@/stores/navigationStore", () => ({
     activeFeatures: new Set(),
     selectedFileNode: null,
   }),
+}));
+
+vi.mock("@/stores/chatStore", () => ({
+  useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
+    selector(chatStoreState),
 }));
 
 vi.mock("@/hooks/useAppNavigate", () => ({
@@ -53,6 +62,10 @@ vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () =
   MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
 }));
 
+vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
+  RunWorkbench: () => <div>RunWorkbench</div>,
+}));
+
 vi.mock("@/lib/rlm-api", () => ({
   isRlmCoreEnabled: () => true,
   isSectionSupported: () => true,
@@ -62,6 +75,7 @@ vi.mock("@/lib/rlm-api", () => ({
 
 describe("BuilderPanel workspace inspector", () => {
   it("shows the message inspector header and hides the legacy canvas switcher", () => {
+    chatStoreState.runtimeMode = "modal_chat";
     const queryClient = new QueryClient();
     const html = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
@@ -74,5 +88,20 @@ describe("BuilderPanel workspace inspector", () => {
     expect(html).toContain("MessageInspectorPanel");
     expect(html).not.toContain("CanvasSwitcher");
     expect(html).not.toContain("ArtifactCanvas");
+  });
+
+  it("renders the Daytona workbench when Daytona runtime mode is active", () => {
+    chatStoreState.runtimeMode = "daytona_pilot";
+    const queryClient = new QueryClient();
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <BuilderPanel />
+      </QueryClientProvider>,
+    );
+
+    expect(html).toContain("Workspace");
+    expect(html).toContain("Run Workbench");
+    expect(html).toContain("RunWorkbench");
+    expect(html).not.toContain("MessageInspectorPanel");
   });
 });

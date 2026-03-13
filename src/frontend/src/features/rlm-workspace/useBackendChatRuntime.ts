@@ -7,13 +7,14 @@ import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/features/rlm-workspace/backendArtifactEventAdapter";
 import { buildChatDisplayItems } from "@/features/rlm-workspace/chatDisplayItems";
+import { parseContextPaths } from "@/lib/utils/sourceContext";
 import type {
   ChatRuntime,
   ChatSubmitOptions,
 } from "@/features/rlm-workspace/runtime-types";
 import { useArtifactStore } from "@/stores/artifactStore";
 import { useChatStore } from "@/stores/chatStore";
-import { useDaytonaWorkbenchStore } from "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchStore";
+import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import {
   sendCommandOverWs,
   rlmApiConfig,
@@ -103,10 +104,7 @@ function revertOptimisticHitlResolution(
 }
 
 export function useBackendChatRuntime(): ChatRuntime {
-  const {
-    setCreationPhase,
-    sessionId: navSessionId,
-  } = useNavigationStore();
+  const { setCreationPhase, sessionId: navSessionId } = useNavigationStore();
   const clearArtifactSteps = useArtifactStore((state) => state.clear);
 
   const {
@@ -115,8 +113,9 @@ export function useBackendChatRuntime(): ChatRuntime {
     isStreaming,
     sessionId,
     runtimeMode,
-    daytonaRepoUrl,
-    daytonaRepoRef,
+    sourceRepoUrl,
+    sourceRepoRef,
+    sourceContextPaths,
     streamMessage,
     stopStreaming,
     resetSession,
@@ -132,7 +131,7 @@ export function useBackendChatRuntime(): ChatRuntime {
   const [inputValue, setInputValue] = useState("");
   const [phase, setPhase] = useState<CreationPhase>("idle");
   const [isTyping, setIsTyping] = useState(false);
-  const resetDaytonaWorkbench = useDaytonaWorkbenchStore((state) => state.reset);
+  const resetRunWorkbench = useRunWorkbenchStore((state) => state.reset);
 
   const isFirstMount = useRef(true);
 
@@ -145,11 +144,11 @@ export function useBackendChatRuntime(): ChatRuntime {
     setIsTyping(false);
     clearArtifactSteps();
     clearTurnArtifacts();
-    resetDaytonaWorkbench();
+    resetRunWorkbench();
   }, [
     clearArtifactSteps,
     clearTurnArtifacts,
-    resetDaytonaWorkbench,
+    resetRunWorkbench,
     resetSession,
     setCreationPhase,
     stopStreaming,
@@ -179,7 +178,7 @@ export function useBackendChatRuntime(): ChatRuntime {
       // Any backend frame means the server started responding.
       setIsTyping(false);
 
-      useDaytonaWorkbenchStore.getState().applyFrame(frame);
+      useRunWorkbenchStore.getState().applyFrame(frame);
 
       applyWsFrameToArtifacts(frame);
 
@@ -216,10 +215,12 @@ export function useBackendChatRuntime(): ChatRuntime {
       addMessage(toUserMessage(text));
       const resolvedRuntimeMode = options?.runtimeMode ?? runtimeMode;
       if (resolvedRuntimeMode === "daytona_pilot") {
-        useDaytonaWorkbenchStore.getState().beginRun({
+        useRunWorkbenchStore.getState().beginRun({
           task: text,
-          repoUrl: options?.repoUrl ?? daytonaRepoUrl,
-          repoRef: options?.repoRef ?? daytonaRepoRef,
+          repoUrl: options?.repoUrl ?? sourceRepoUrl,
+          repoRef: options?.repoRef ?? sourceRepoRef,
+          contextPaths:
+            options?.contextPaths ?? parseContextPaths(sourceContextPaths),
         });
       }
       setPhase("understanding");
@@ -245,6 +246,7 @@ export function useBackendChatRuntime(): ChatRuntime {
             runtimeMode: options?.runtimeMode,
             repoUrl: options?.repoUrl,
             repoRef: options?.repoRef,
+            contextPaths: options?.contextPaths,
             maxDepth: options?.maxDepth,
             batchConcurrency: options?.batchConcurrency,
           },
@@ -253,22 +255,23 @@ export function useBackendChatRuntime(): ChatRuntime {
         const message =
           error instanceof Error ? error.message : "Unknown streaming error";
         if (!terminalSeen) {
-          if (
-            resolvedRuntimeMode === "daytona_pilot" &&
-            !receivedFrame
-          ) {
-            resetDaytonaWorkbench();
+          if (resolvedRuntimeMode === "daytona_pilot") {
+            useRunWorkbenchStore.getState().failRun(message);
+          } else if (!receivedFrame) {
+            resetRunWorkbench();
           }
           applyWsFrameToArtifacts({ type: "error", message });
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: createLocalMessageId("sys"),
-              type: "system",
-              content: `Backend error: ${message}`,
-              phase: 1,
-            },
-          ]);
+          if (resolvedRuntimeMode !== "daytona_pilot") {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: createLocalMessageId("sys"),
+                type: "system",
+                content: `Backend error: ${message}`,
+                phase: 1,
+              },
+            ]);
+          }
           setPhase("idle");
           setCreationPhase("idle");
         }
@@ -288,11 +291,12 @@ export function useBackendChatRuntime(): ChatRuntime {
       isStreaming,
       onFrame,
       queryClient,
-      resetDaytonaWorkbench,
+      resetRunWorkbench,
       streamMessage,
       runtimeMode,
-      daytonaRepoRef,
-      daytonaRepoUrl,
+      sourceContextPaths,
+      sourceRepoRef,
+      sourceRepoUrl,
       setCreationPhase,
       addMessage,
       setMessages,
@@ -356,11 +360,11 @@ export function useBackendChatRuntime(): ChatRuntime {
       setPhase(conversation.phase);
       setCreationPhase(conversation.phase);
       setIsTyping(false);
-      resetDaytonaWorkbench();
+      resetRunWorkbench();
     },
     [
       clearArtifactSteps,
-      resetDaytonaWorkbench,
+      resetRunWorkbench,
       setCreationPhase,
       setMessages,
       setTurnArtifactsByMessageId,

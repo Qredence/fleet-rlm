@@ -8,7 +8,6 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
-import { typo } from "@/lib/config/typo";
 import { isEntraAuthConfigured } from "@/lib/auth/entra";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -56,10 +55,10 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="flex flex-col items-center gap-3 pb-2">
         <BrandMark className="w-8 h-3.75 text-foreground" />
         <div className="text-center">
-          <h2 className="text-foreground" style={typo.h3}>
+          <h2 className="text-foreground typo-h3">
             Sign in to Fleet RLM
           </h2>
-          <p className="text-muted-foreground mt-1" style={typo.caption}>
+          <p className="text-muted-foreground mt-1 typo-caption">
             Continue with your Microsoft Entra account
           </p>
         </div>
@@ -74,14 +73,14 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         {loading ? (
           <>
             <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-            <span style={typo.label}>Opening Microsoft sign-in...</span>
+            <span className="typo-label">Opening Microsoft sign-in...</span>
           </>
         ) : (
-          <span style={typo.label}>Continue with Microsoft</span>
+          <span className="typo-label">Continue with Microsoft</span>
         )}
       </Button>
 
-      <p className="text-center text-muted-foreground" style={typo.helper}>
+      <p className="text-center text-muted-foreground typo-helper">
         {authConfigured
           ? "Your Entra access token is reused for both API and WebSocket runtime calls."
           : "This workspace needs Entra SPA settings before Microsoft sign-in can be used."}
@@ -131,7 +130,7 @@ export function LoginDialog({
 
             <div className="flex items-center justify-between px-4 pb-2 shrink-0">
               <Drawer.Title>
-                <span className="text-foreground" style={typo.h3}>
+                <span className="text-foreground typo-h3">
                   Sign In
                 </span>
               </Drawer.Title>

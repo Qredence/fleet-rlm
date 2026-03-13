@@ -41,6 +41,33 @@ function firstLine(value: string, max = 160): string {
   return line?.trim() ?? "";
 }
 
+function joinFragments(values: unknown[]): string {
+  const merged = values.map((value) => asText(value)).join("");
+  return compact(merged.replace(/\s+/g, " "));
+}
+
+function summarizeStructuredOutput(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    return value.length === 0
+      ? "Output list is empty"
+      : `Output list with ${value.length} item${value.length === 1 ? "" : "s"}`;
+  }
+
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).filter(Boolean);
+    if (keys.length === 0) return "Structured output";
+
+    const preview = keys.slice(0, 3).join(", ");
+    const extra = keys.length - 3;
+    return extra > 0
+      ? `Output fields: ${preview} +${extra} more`
+      : `Output fields: ${preview}`;
+  }
+
+  const text = compact(asText(value), 120);
+  return text ? `Output: ${text}` : undefined;
+}
+
 function summarizeToolStep(step: ExecutionStep): string | undefined {
   const inputRecord = asRecord(step.input);
   const outputRecord = asRecord(step.output);
@@ -119,12 +146,12 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
   if (step.type === "llm") {
     const output = asRecord(step.output);
     if (Array.isArray(output?.reasoning) && output.reasoning.length > 0) {
-      const latest = asText(output.reasoning[output.reasoning.length - 1]);
-      return `Reasoning: ${compact(latest, 110)}`;
+      const combined = joinFragments(output.reasoning);
+      return combined ? `Reasoning: ${combined}` : step.label;
     }
     if (Array.isArray(output?.status) && output.status.length > 0) {
-      const latest = asText(output.status[output.status.length - 1]);
-      return `Status: ${compact(latest, 110)}`;
+      const combined = joinFragments(output.status);
+      return combined ? `Status: ${combined}` : step.label;
     }
     // Unpack the {streaming, text} envelope emitted by the backend LLM step
     if (typeof output?.text === "string" && output.text.trim()) {
@@ -148,7 +175,9 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
     }
     const text = typeof out?.text === "string" ? out.text : "";
     if (text.trim()) return compact(text, 120);
-    if (payload != null) return `Structured output (${typeof payload})`;
+    if (payload != null) {
+      return summarizeStructuredOutput(payload) || "Structured output";
+    }
   }
 
   // Generic fallback for plain objects

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
 import time
 import uuid
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
+
+from fleet_rlm.document_ingestion import read_document_content
 
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .diagnostics import DaytonaDiagnosticError
@@ -31,6 +34,7 @@ from .protocol import (
     encode_frame,
 )
 from .types import (
+    ContextSource,
     DaytonaRunCancelled,
     DaytonaRunResult,
     PromptHandle,
@@ -79,6 +83,199 @@ def _safe_repo_name(repo_url: str) -> str:
     return cleaned or "repo"
 
 
+def _safe_workspace_name(repo_url: str | None) -> str:
+    if repo_url:
+        return _safe_repo_name(repo_url)
+    return "daytona-workspace"
+
+
+def _safe_context_slug(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-")
+    return cleaned or "context"
+
+
+def _resolve_local_context_path(path: str) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    resolved = candidate.resolve()
+    if not resolved.exists():
+        raise DaytonaDiagnosticError(
+            f"Context path does not exist: {path}",
+            category="context_stage_error",
+            phase="context_stage",
+        )
+    if not os.access(resolved, os.R_OK):
+        raise DaytonaDiagnosticError(
+            f"Context path is not readable: {resolved}",
+            category="context_stage_error",
+            phase="context_stage",
+        )
+    return resolved
+
+
+def _ensure_remote_parent(fs: Any, remote_path: PurePosixPath) -> None:
+    parent = str(remote_path.parent)
+    if parent and parent not in {".", "/"}:
+        fs.create_folder(parent, "755")
+
+
+def _upload_remote_text(fs: Any, remote_path: PurePosixPath, content: str) -> None:
+    _ensure_remote_parent(fs, remote_path)
+    fs.upload_file(content.encode("utf-8"), str(remote_path))
+
+
+def _build_staged_filename(*, source_path: Path, source_type: str) -> str:
+    if source_type == "text":
+        return source_path.name
+    return f"{source_path.name}.extracted.txt"
+
+
+def _stage_local_file(
+    *,
+    fs: Any,
+    resolved_path: Path,
+    staged_root: PurePosixPath,
+    source_id: str,
+) -> ContextSource:
+    text, metadata = read_document_content(resolved_path)
+    source_type = str(metadata.get("source_type") or "text")
+    staged_relative = staged_root / _build_staged_filename(
+        source_path=resolved_path,
+        source_type=source_type,
+    )
+    _upload_remote_text(fs, staged_relative, text)
+    return ContextSource(
+        source_id=source_id,
+        kind="file",
+        host_path=str(resolved_path),
+        staged_path=str(staged_relative),
+        source_type=source_type,
+        extraction_method=str(metadata.get("extraction_method") or "") or None,
+        file_count=1,
+    )
+
+
+def _stage_local_directory(
+    *,
+    fs: Any,
+    resolved_path: Path,
+    staged_root: PurePosixPath,
+    source_id: str,
+) -> ContextSource:
+    warnings: list[str] = []
+    staged_count = 0
+    skipped_count = 0
+    extraction_methods: set[str] = set()
+    source_types: set[str] = set()
+
+    for local_file in sorted(
+        path for path in resolved_path.rglob("*") if path.is_file()
+    ):
+        relative_path = local_file.relative_to(resolved_path)
+        try:
+            text, metadata = read_document_content(local_file)
+        except Exception as exc:
+            skipped_count += 1
+            warnings.append(f"Skipped {relative_path.as_posix()}: {exc}")
+            continue
+
+        source_type = str(metadata.get("source_type") or "text")
+        extraction_method = str(metadata.get("extraction_method") or "") or None
+        source_types.add(source_type)
+        if extraction_method:
+            extraction_methods.add(extraction_method)
+        destination_name = _build_staged_filename(
+            source_path=local_file,
+            source_type=source_type,
+        )
+        staged_relative = staged_root / relative_path.parent / destination_name
+        _upload_remote_text(fs, staged_relative, text)
+        staged_count += 1
+
+    if staged_count == 0:
+        raise DaytonaDiagnosticError(
+            f"No supported readable files found in directory: {resolved_path}",
+            category="context_stage_error",
+            phase="context_stage",
+        )
+
+    extraction_method = (
+        "mixed"
+        if len(extraction_methods) > 1
+        else next(iter(extraction_methods), None) or "directory_walk"
+    )
+    source_type = (
+        "mixed" if len(source_types) > 1 else next(iter(source_types), None) or "text"
+    )
+    return ContextSource(
+        source_id=source_id,
+        kind="directory",
+        host_path=str(resolved_path),
+        staged_path=str(staged_root),
+        source_type=source_type,
+        extraction_method=extraction_method,
+        file_count=staged_count,
+        skipped_count=skipped_count,
+        warnings=warnings,
+    )
+
+
+def _stage_context_paths(
+    *,
+    sandbox: Any,
+    workspace_path: str,
+    context_paths: list[str] | None,
+) -> list[ContextSource]:
+    raw_paths = [
+        str(item).strip() for item in (context_paths or []) if str(item).strip()
+    ]
+    if not raw_paths:
+        return []
+
+    fs = sandbox.fs
+    context_root = PurePosixPath(workspace_path) / ".fleet-rlm" / "context"
+    fs.create_folder(str(context_root), "755")
+    staged_sources: list[ContextSource] = []
+    for index, raw_path in enumerate(raw_paths, start=1):
+        resolved = _resolve_local_context_path(raw_path)
+        source_id = f"context-{index}"
+        staged_root = (
+            context_root
+            / f"{index:02d}-{_safe_context_slug(resolved.stem or resolved.name)}"
+        )
+        if resolved.is_dir():
+            staged_sources.append(
+                _stage_local_directory(
+                    fs=fs,
+                    resolved_path=resolved,
+                    staged_root=staged_root,
+                    source_id=source_id,
+                )
+            )
+            continue
+        staged_sources.append(
+            _stage_local_file(
+                fs=fs,
+                resolved_path=resolved,
+                staged_root=staged_root,
+                source_id=source_id,
+            )
+        )
+
+    manifest_path = context_root / "manifest.json"
+    _upload_remote_text(
+        fs,
+        manifest_path,
+        json.dumps(
+            {"context_sources": [item.to_dict() for item in staged_sources]},
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+    return staged_sources
+
+
 class DaytonaSandboxSession:
     """A single Daytona sandbox session for one root or child node."""
 
@@ -88,22 +285,32 @@ class DaytonaSandboxSession:
         sandbox: Any,
         session_request_cls: type[Any],
         resolved_config: ResolvedDaytonaConfig | None = None,
-        repo_url: str,
+        repo_url: str | None,
         ref: str | None,
-        repo_path: str,
+        workspace_path: str | None = None,
+        repo_path: str | None = None,
+        context_sources: list[ContextSource] | None = None,
     ) -> None:
+        resolved_workspace_path = workspace_path or repo_path
+        if not resolved_workspace_path:
+            raise ValueError("DaytonaSandboxSession requires workspace_path.")
         self.sandbox = sandbox
         self._session_request_cls = session_request_cls
         self._resolved_config = resolved_config
-        self.repo_url = repo_url
+        self.repo_url = repo_url or ""
         self.ref = ref
-        self.repo_path = repo_path
+        self.workspace_path = resolved_workspace_path
+        # Keep repo_path as a compatibility alias while the pilot expands beyond repos.
+        self.repo_path = resolved_workspace_path
+        self.context_sources = list(context_sources or [])
         self._driver_session_id = f"fleet-rlm-{uuid.uuid4().hex}"
         self._driver_command_id: str | None = None
         self._driver_started = False
         self._stdout_offset = 0
         self._frame_buffer = ""
-        self._driver_path = str(PurePosixPath(repo_path) / ".fleet-rlm" / "driver.py")
+        self._driver_path = str(
+            PurePosixPath(resolved_workspace_path) / ".fleet-rlm" / "driver.py"
+        )
         self._runtime_session_id = f"fleet-rlm-runtime-{uuid.uuid4().hex}"
         self._runtime_command_id: str | None = None
         self._runtime_started = False
@@ -115,7 +322,7 @@ class DaytonaSandboxSession:
         return getattr(self.sandbox, "id", None)
 
     def run(self, command: str, *, cwd: str | None = None) -> dict[str, Any]:
-        response = self.sandbox.process.exec(command, cwd=cwd or self.repo_path)
+        response = self.sandbox.process.exec(command, cwd=cwd or self.workspace_path)
         artifacts = getattr(response, "artifacts", None)
         stdout = ""
         if artifacts is not None:
@@ -459,7 +666,7 @@ class DaytonaSandboxSession:
             for key, value in env_values.items()
             if value
         ]
-        exports.append(f"cd {shlex.quote(self.repo_path)}")
+        exports.append(f"cd {shlex.quote(self.workspace_path)}")
         exports.append(
             "uv run --python 3.12 python -m fleet_rlm.daytona_rlm.sandbox_controller"
         )
@@ -569,7 +776,7 @@ class DaytonaSandboxSession:
         candidate = PurePosixPath(path)
         if candidate.is_absolute():
             return candidate
-        return PurePosixPath(self.repo_path) / candidate
+        return PurePosixPath(self.workspace_path) / candidate
 
 
 class DaytonaSandboxRuntime:
@@ -598,15 +805,25 @@ class DaytonaSandboxRuntime:
                 phase="sandbox_create",
             ) from exc
 
-    def _build_repo_path(self, sandbox: Any, repo_url: str) -> str:
+    def _build_workspace_path(self, sandbox: Any, repo_url: str | None) -> str:
         work_dir = (
             sandbox.get_work_dir() if hasattr(sandbox, "get_work_dir") else "/workspace"
         )
-        repo_name = _safe_repo_name(repo_url)
-        return str(PurePosixPath(work_dir) / "workspace" / repo_name)
+        workspace_name = _safe_workspace_name(repo_url)
+        return str(PurePosixPath(work_dir) / "workspace" / workspace_name)
+
+    def _ensure_workspace_root(self, *, sandbox: Any, workspace_path: str) -> None:
+        try:
+            sandbox.fs.create_folder(str(PurePosixPath(workspace_path)), "755")
+        except Exception as exc:
+            raise DaytonaDiagnosticError(
+                f"Daytona workspace create failure: {exc}",
+                category="sandbox_create_clone_error",
+                phase="sandbox_create",
+            ) from exc
 
     def _clone_repo(
-        self, *, sandbox: Any, repo_url: str, ref: str | None, repo_path: str
+        self, *, sandbox: Any, repo_url: str, ref: str | None, workspace_path: str
     ) -> None:
         try:
             work_dir = (
@@ -616,7 +833,7 @@ class DaytonaSandboxRuntime:
             )
             sandbox.fs.create_folder(str(PurePosixPath(work_dir) / "workspace"), "755")
 
-            clone_kwargs: dict[str, Any] = {"url": repo_url, "path": repo_path}
+            clone_kwargs: dict[str, Any] = {"url": repo_url, "path": workspace_path}
             if ref:
                 if _looks_like_commit(ref):
                     clone_kwargs["commit_id"] = ref
@@ -630,10 +847,14 @@ class DaytonaSandboxRuntime:
                 phase="repo_clone",
             ) from exc
 
-    def create_repo_session_with_diagnostics(
-        self, *, repo_url: str, ref: str | None
+    def create_workspace_session_with_diagnostics(
+        self,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
     ) -> tuple[DaytonaSandboxSession, dict[str, int]]:
-        timings = {"sandbox_create": 0, "repo_clone": 0}
+        timings = {"sandbox_create": 0, "repo_clone": 0, "context_stage": 0}
         sandbox: Any | None = None
         try:
             create_started = time.perf_counter()
@@ -642,16 +863,33 @@ class DaytonaSandboxRuntime:
                 (time.perf_counter() - create_started) * 1000
             )
 
-            repo_path = self._build_repo_path(sandbox, repo_url)
+            workspace_path = self._build_workspace_path(sandbox, repo_url)
+            if not repo_url:
+                self._ensure_workspace_root(
+                    sandbox=sandbox, workspace_path=workspace_path
+                )
 
-            clone_started = time.perf_counter()
-            self._clone_repo(
+            if repo_url:
+                clone_started = time.perf_counter()
+                self._clone_repo(
+                    sandbox=sandbox,
+                    repo_url=repo_url,
+                    ref=ref,
+                    workspace_path=workspace_path,
+                )
+                timings["repo_clone"] = int(
+                    (time.perf_counter() - clone_started) * 1000
+                )
+
+            context_started = time.perf_counter()
+            context_sources = _stage_context_paths(
                 sandbox=sandbox,
-                repo_url=repo_url,
-                ref=ref,
-                repo_path=repo_path,
+                workspace_path=workspace_path,
+                context_paths=context_paths,
             )
-            timings["repo_clone"] = int((time.perf_counter() - clone_started) * 1000)
+            timings["context_stage"] = int(
+                (time.perf_counter() - context_started) * 1000
+            )
 
             session = DaytonaSandboxSession(
                 sandbox=sandbox,
@@ -659,7 +897,8 @@ class DaytonaSandboxRuntime:
                 resolved_config=self._resolved_config,
                 repo_url=repo_url,
                 ref=ref,
-                repo_path=repo_path,
+                workspace_path=workspace_path,
+                context_sources=context_sources,
             )
             return session, timings
         except Exception as exc:
@@ -670,10 +909,34 @@ class DaytonaSandboxRuntime:
                     pass
             raise exc
 
+    def create_repo_session_with_diagnostics(
+        self, *, repo_url: str, ref: str | None
+    ) -> tuple[DaytonaSandboxSession, dict[str, int]]:
+        return self.create_workspace_session_with_diagnostics(
+            repo_url=repo_url,
+            ref=ref,
+            context_paths=None,
+        )
+
+    def create_workspace_session(
+        self,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+    ) -> DaytonaSandboxSession:
+        session, _ = self.create_workspace_session_with_diagnostics(
+            repo_url=repo_url,
+            ref=ref,
+            context_paths=context_paths,
+        )
+        return session
+
     def create_repo_session(
         self, *, repo_url: str, ref: str | None
     ) -> DaytonaSandboxSession:
-        session, _ = self.create_repo_session_with_diagnostics(
-            repo_url=repo_url, ref=ref
+        return self.create_workspace_session(
+            repo_url=repo_url,
+            ref=ref,
+            context_paths=None,
         )
-        return session

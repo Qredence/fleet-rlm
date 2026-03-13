@@ -16,6 +16,7 @@ export interface ChatSubmitOptions {
   runtimeMode?: WsRuntimeMode;
   repoUrl?: string;
   repoRef?: string;
+  contextPaths?: string[];
   maxDepth?: number;
   batchConcurrency?: number;
   attachments?: ChatSubmitAttachment[];

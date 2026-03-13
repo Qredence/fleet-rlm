@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 import logging
+import os
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Callable
+from urllib.parse import urlsplit, urlunsplit
 
 import dspy
 from dspy.utils.callback import BaseCallback
@@ -24,6 +27,8 @@ logger = logging.getLogger(__name__)
 _CLIENT_LOCK = Lock()
 _TRACE_ID_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
+_INIT_ATTEMPTED = False
+_LAST_INIT_WAS_AUTH_FAILURE = False
 _INITIALIZED = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
 _TRACE_IDS_BY_CLIENT_REQUEST_ID: dict[str, str] = {}
@@ -62,6 +67,23 @@ def _mlflow_identity(config: MlflowConfig) -> tuple[Any, ...]:
         config.dspy_log_traces_from_eval,
         config.dspy_log_compiles,
         config.dspy_log_evals,
+        *_mlflow_tracking_auth_identity(),
+    )
+
+
+def _hashed_env_var(name: str) -> str | None:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _mlflow_tracking_auth_identity() -> tuple[Any, ...]:
+    return (
+        (os.getenv("MLFLOW_TRACKING_USERNAME") or "").strip() or None,
+        _hashed_env_var("MLFLOW_TRACKING_PASSWORD"),
+        _hashed_env_var("MLFLOW_TRACKING_TOKEN"),
+        (os.getenv("MLFLOW_TRACKING_INSECURE_TLS") or "").strip().lower() or None,
     )
 
 
@@ -77,6 +99,83 @@ def _sanitize_log_field(value: str) -> str:
     """Escape control characters before including user-provided ids in logs."""
 
     return value.replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _sanitize_tracking_uri(value: str) -> str:
+    """Redact credentials and query strings before logging tracking URIs."""
+
+    candidate = value.strip()
+    if not candidate:
+        return "<unset>"
+
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return candidate
+
+    if not parsed.scheme and not parsed.netloc:
+        return candidate
+
+    netloc = parsed.netloc
+    if "@" in netloc:
+        userinfo, hostinfo = netloc.rsplit("@", 1)
+        username = userinfo.split(":", 1)[0] if userinfo else ""
+        redacted_userinfo = f"{username}:***" if username else "***"
+        netloc = f"{redacted_userinfo}@{hostinfo}"
+
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+
+
+def _has_mlflow_tracking_auth_configured() -> bool:
+    username = (os.getenv("MLFLOW_TRACKING_USERNAME") or "").strip()
+    password = (os.getenv("MLFLOW_TRACKING_PASSWORD") or "").strip()
+    token = (os.getenv("MLFLOW_TRACKING_TOKEN") or "").strip()
+    return bool(token or (username and password))
+
+
+def _log_mlflow_initialization_failure(exc: Exception, *, tracking_uri: str) -> None:
+    """Emit an actionable warning for MLflow init failures without crashing startup."""
+
+    sanitized_tracking_uri = _sanitize_tracking_uri(tracking_uri)
+    detail = str(exc)
+    detail_lower = detail.lower()
+    auth_guidance = (
+        "Configure MLflow auth with MLFLOW_TRACKING_TOKEN or "
+        "MLFLOW_TRACKING_USERNAME/MLFLOW_TRACKING_PASSWORD, or set "
+        "MLFLOW_ENABLED=false to disable MLflow for this environment."
+    )
+
+    if "403" in detail_lower:
+        guidance = auth_guidance
+        if _has_mlflow_tracking_auth_configured():
+            guidance = (
+                "The current process already has MLflow auth environment variables set. "
+                "Verify the credentials and experiment permissions for this tracking server."
+            )
+        logger.warning(
+            "MLflow integration disabled for tracking URI '%s': the tracking server "
+            "rejected experiment access (HTTP 403). %s",
+            sanitized_tracking_uri,
+            guidance,
+        )
+    else:
+        logger.warning(
+            "Failed to initialize MLflow integration for tracking URI '%s'. "
+            "Startup will continue without MLflow. Check connectivity, permissions, "
+            "and MLflow auth configuration. %s",
+            sanitized_tracking_uri,
+            auth_guidance,
+        )
+
+    logger.debug(
+        "MLflow initialization failure details for '%s'.",
+        sanitized_tracking_uri,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+
+
+def _is_auth_forbidden_failure(exc: Exception) -> bool:
+    return "403" in str(exc).lower()
 
 
 def _mlflow_string_literal(value: str) -> str:
@@ -103,22 +202,31 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     resolved = config or MlflowConfig.from_env()
     identity = _mlflow_identity(resolved)
 
-    global _INIT_IDENTITY, _INITIALIZED, _ACTIVE_CONFIG
+    global _INIT_ATTEMPTED, _INIT_IDENTITY, _INITIALIZED, _ACTIVE_CONFIG
+    global _LAST_INIT_WAS_AUTH_FAILURE
     with _CLIENT_LOCK:
         _ACTIVE_CONFIG = resolved
 
+        if (
+            _INIT_ATTEMPTED
+            and _INIT_IDENTITY == identity
+            and (_INITIALIZED or _LAST_INIT_WAS_AUTH_FAILURE)
+        ):
+            return _INITIALIZED
+
         if not resolved.enabled:
             _INITIALIZED = False
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False
-
-        if _INITIALIZED and _INIT_IDENTITY == identity:
-            return True
 
         mlflow = _import_mlflow()
         if mlflow is None:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
             _INITIALIZED = False
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False
 
@@ -141,11 +249,18 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 dspy.configure(callbacks=[*callbacks, FleetMlflowTraceCallback()])
 
             _INITIALIZED = True
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return True
-        except Exception:
-            logger.warning("Failed to initialize MLflow integration.", exc_info=True)
+        except Exception as exc:
+            _log_mlflow_initialization_failure(
+                exc,
+                tracking_uri=resolved.tracking_uri,
+            )
             _INITIALIZED = False
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = _is_auth_forbidden_failure(exc)
             _INIT_IDENTITY = identity
             return False
 

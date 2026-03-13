@@ -90,6 +90,7 @@ class WSMessage(BaseModel):
     runtime_mode: RuntimeMode = "modal_chat"
     repo_url: str | None = None
     repo_ref: str | None = None
+    context_paths: list[str] | None = None
     max_depth: int | None = None
     batch_concurrency: int | None = None
     workspace_id: str = "default"

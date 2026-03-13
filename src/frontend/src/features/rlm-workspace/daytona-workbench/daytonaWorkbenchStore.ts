@@ -4,6 +4,7 @@ import type { WsServerMessage } from "@/lib/rlm-api";
 import {
   applyDaytonaFrameToWorkbenchState,
   createInitialDaytonaWorkbenchState,
+  failDaytonaWorkbenchRun,
   shouldApplyDaytonaFrame,
   startDaytonaWorkbenchRun,
 } from "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchAdapter";
@@ -16,9 +17,11 @@ interface DaytonaWorkbenchStore extends DaytonaWorkbenchStateData {
   reset: () => void;
   beginRun: (input: {
     task: string;
-    repoUrl: string;
+    repoUrl?: string;
     repoRef?: string | null;
+    contextPaths?: string[];
   }) => void;
+  failRun: (errorMessage: string) => void;
   applyFrame: (frame: WsServerMessage) => void;
   selectNode: (nodeId: string | null) => void;
   selectTab: (tab: DaytonaDetailTab) => void;
@@ -28,8 +31,9 @@ export const useDaytonaWorkbenchStore = create<DaytonaWorkbenchStore>(
   (set, get) => ({
     ...createInitialDaytonaWorkbenchState(),
     reset: () => set(createInitialDaytonaWorkbenchState()),
-    beginRun: (input) =>
-      set((state) => startDaytonaWorkbenchRun(state, input)),
+    beginRun: (input) => set((state) => startDaytonaWorkbenchRun(state, input)),
+    failRun: (errorMessage) =>
+      set((state) => failDaytonaWorkbenchRun(state, errorMessage)),
     applyFrame: (frame) =>
       set((state) => {
         if (!shouldApplyDaytonaFrame(state, frame)) return state;

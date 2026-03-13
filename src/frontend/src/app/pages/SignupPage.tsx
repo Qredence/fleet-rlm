@@ -13,7 +13,6 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { Button } from "@/components/ui/button";
@@ -68,16 +67,16 @@ function SignupPage() {
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
-              <h1 className="text-foreground" style={typo.h3}>
+              <h1 className="text-foreground typo-h3">
                 Create your account
               </h1>
-              <p className="text-muted-foreground mt-1" style={typo.caption}>
+              <p className="text-muted-foreground mt-1 typo-caption">
                 Get started with Skill Fleet
               </p>
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signup-name" style={typo.label}>
+            <Label htmlFor="signup-name" className="typo-label">
               Full name
             </Label>
             <Input
@@ -91,7 +90,7 @@ function SignupPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signup-email" style={typo.label}>
+            <Label htmlFor="signup-email" className="typo-label">
               Email
             </Label>
             <Input
@@ -105,7 +104,7 @@ function SignupPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signup-password" style={typo.label}>
+            <Label htmlFor="signup-password" className="typo-label">
               Password
             </Label>
             <Input
@@ -119,7 +118,7 @@ function SignupPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signup-confirm" style={typo.label}>
+            <Label htmlFor="signup-confirm" className="typo-label">
               Confirm password
             </Label>
             <Input
@@ -137,8 +136,7 @@ function SignupPage() {
               initial={{ opacity: 0, y: prefersReduced ? 0 : -4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={prefersReduced ? springs.instant : springs.snappy}
-              className="text-destructive text-center"
-              style={typo.caption}
+              className="text-destructive text-center typo-caption"
               role="alert"
             >
               {error}
@@ -154,15 +152,15 @@ function SignupPage() {
             {loading ? (
               <>
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                <span style={typo.label}>Creating account...</span>
+                <span className="typo-label">Creating account...</span>
               </>
             ) : (
-              <span style={typo.label}>Create Account</span>
+              <span className="typo-label">Create Account</span>
             )}
           </Button>
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-border-subtle" />
-            <span className="text-muted-foreground" style={typo.helper}>
+            <span className="text-muted-foreground typo-helper">
               or
             </span>
             <div className="flex-1 h-px bg-border-subtle" />
@@ -170,14 +168,13 @@ function SignupPage() {
           <div className="text-center">
             <Link
               to="/login"
-              className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-              style={typo.caption}
+              className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground typo-caption"
             >
               <ArrowLeft className="size-3.5" />
               Already have an account? Sign in
             </Link>
           </div>
-          <p className="text-center text-muted-foreground" style={typo.helper}>
+          <p className="text-center text-muted-foreground typo-helper">
             Demo mode &mdash; any details will work
           </p>
         </form>

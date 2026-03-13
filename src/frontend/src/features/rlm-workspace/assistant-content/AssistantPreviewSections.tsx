@@ -3,91 +3,9 @@ import { Streamdown } from "@/components/ui/streamdown";
 import type { InspectorTab } from "@/lib/data/types";
 import type {
   AssistantContentModel,
-  ExecutionSection,
 } from "@/features/rlm-workspace/assistant-content/types";
-import { cn } from "@/lib/utils/cn";
-
-function previewButtonClasses(selected = false) {
-  return cn(
-    "w-full rounded-2xl border border-border-subtle/80 bg-muted/18 px-3.5 py-3 text-left transition-colors hover:border-border-strong hover:bg-muted/28",
-    selected && "border-accent/35 bg-accent/7",
-  );
-}
-
-function previewHeading(label: string) {
-  return (
-    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-      {label}
-    </div>
-  );
-}
-
-function statusTone(
-  status: "pending" | "running" | "completed" | "failed",
-): { label: string; variant: "secondary" | "warning" | "success" | "destructive-subtle" } {
-  switch (status) {
-    case "pending":
-      return { label: "Pending", variant: "secondary" };
-    case "running":
-      return { label: "Running", variant: "warning" };
-    case "failed":
-      return { label: "Failed", variant: "destructive-subtle" };
-    default:
-      return { label: "Completed", variant: "success" };
-  }
-}
-
-function executionSectionState(
-  section: ExecutionSection,
-): "pending" | "running" | "completed" | "failed" {
-  if (section.kind === "tool_session") {
-    const latest = section.session.items[section.session.items.length - 1];
-    if (!latest) return "running";
-    if (
-      latest.part.kind === "tool" ||
-      latest.part.kind === "sandbox"
-    ) {
-      if (latest.part.errorText) return "failed";
-      return latest.part.state === "running" ||
-        latest.part.state === "input-streaming"
-        ? "running"
-        : "completed";
-    }
-    if (latest.part.kind === "status_note") {
-      if (latest.part.tone === "error") return "failed";
-      if (latest.part.tone === "warning") return "running";
-    }
-    return "completed";
-  }
-
-  if (section.kind === "task") {
-    if (section.part.status === "error") return "failed";
-    if (section.part.status === "in_progress") return "running";
-    if (section.part.status === "pending") return "pending";
-    return "completed";
-  }
-
-  if (section.kind === "queue") {
-    return section.part.items.every((item) => item.completed)
-      ? "completed"
-      : "running";
-  }
-
-  if (section.kind === "status_note") {
-    if (section.part.tone === "error") return "failed";
-    if (section.part.tone === "warning") return "running";
-    return "completed";
-  }
-
-  if ("errorText" in section.part && section.part.errorText) return "failed";
-  if (
-    "state" in section.part &&
-    (section.part.state === "running" || section.part.state === "input-streaming")
-  ) {
-    return "running";
-  }
-  return "completed";
-}
+import { inspectorStyles, inspectorPreviewButtonClass } from "@/features/rlm-workspace/shared/inspector-styles";
+import { statusTone } from "@/features/rlm-workspace/message-inspector/utils/inspector-utils";
 
 function summarizeText(value: string, maxLength = 140) {
   const trimmed = value.trim();
@@ -107,7 +25,7 @@ function EvidencePreviewButton({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={previewButtonClasses()} onClick={onClick}>
+    <button type="button" className={inspectorPreviewButtonClass()} onClick={onClick}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1">
           <div className="text-sm font-medium leading-5 text-foreground">
@@ -119,7 +37,7 @@ function EvidencePreviewButton({
             </div>
           ) : null}
         </div>
-        <Badge variant="secondary" className="rounded-full">
+        <Badge variant="secondary" className={inspectorStyles.badge.meta}>
           {iconLabel}
         </Badge>
       </div>
@@ -154,16 +72,16 @@ export function TrajectoryPreview({
         : [];
 
   return (
-    <section className="space-y-2" data-slot="assistant-trajectory-preview">
-      {previewHeading("Trajectory")}
-      <div className="space-y-2">
+    <section className={inspectorStyles.stack.section} data-slot="assistant-trajectory-preview">
+      <div className={inspectorStyles.heading.section}>Trajectory</div>
+      <div className={inspectorStyles.stack.compact}>
         {items.map((item) => {
           const tone = statusTone(item.status);
           return (
             <button
               key={item.id}
               type="button"
-              className={previewButtonClasses()}
+              className={inspectorPreviewButtonClass()}
               onClick={() => onOpenTab("trajectory")}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -180,17 +98,17 @@ export function TrajectoryPreview({
                     </div>
                   ) : null}
                 </div>
-                <Badge variant={tone.variant} className="rounded-full">
+                <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
                   {tone.label}
                 </Badge>
               </div>
               {item.runtimeBadges.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className={inspectorStyles.badge.row}>
                   {item.runtimeBadges.slice(0, 3).map((badge) => (
                     <Badge
                       key={`${item.id}-${badge}`}
                       variant="outline"
-                      className="rounded-full text-[10px]"
+                      className={inspectorStyles.badge.meta}
                     >
                       {badge}
                     </Badge>
@@ -215,16 +133,15 @@ export function ExecutionPreview({
   if (!model.execution.hasContent) return null;
 
   return (
-    <section className="space-y-2" data-slot="assistant-execution-preview">
-      {previewHeading("Execution")}
-      <div className="space-y-2">
+    <section className={inspectorStyles.stack.section} data-slot="assistant-execution-preview">
+      <div className={inspectorStyles.heading.section}>Execution</div>
+      <div className={inspectorStyles.stack.compact}>
         {model.execution.sections.slice(0, 2).map((section) => {
-          const tone = statusTone(executionSectionState(section));
           return (
             <button
               key={section.id}
               type="button"
-              className={previewButtonClasses()}
+              className={inspectorPreviewButtonClass()}
               onClick={() => onOpenTab("execution")}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -236,17 +153,14 @@ export function ExecutionPreview({
                     {summarizeText(section.summary)}
                   </div>
                 </div>
-                <Badge variant={tone.variant} className="rounded-full">
-                  {tone.label}
-                </Badge>
               </div>
               {section.runtimeBadges.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className={inspectorStyles.badge.row}>
                   {section.runtimeBadges.slice(0, 3).map((badge) => (
                     <Badge
                       key={`${section.id}-${badge}`}
                       variant="outline"
-                      className="rounded-full text-[10px]"
+                      className={inspectorStyles.badge.meta}
                     >
                       {badge}
                     </Badge>
@@ -292,9 +206,9 @@ export function EvidencePreview({
   ].slice(0, 2);
 
   return (
-    <section className="space-y-2" data-slot="assistant-evidence-preview">
-      {previewHeading("Evidence")}
-      <div className="space-y-2">
+    <section className={inspectorStyles.stack.section} data-slot="assistant-evidence-preview">
+      <div className={inspectorStyles.heading.section}>Evidence</div>
+      <div className={inspectorStyles.stack.compact}>
         {items.map((item) => (
           <EvidencePreviewButton
             key={item.key}

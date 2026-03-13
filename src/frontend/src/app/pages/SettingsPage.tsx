@@ -7,7 +7,6 @@
  */
 import { useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import { useThemeStore } from "@/stores/themeStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { IconButton } from "@/components/ui/icon-button";
@@ -19,8 +18,9 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 
-import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
+import { GroupedSettingsPane } from "@/features/settings/GroupedSettingsPane";
 import {
+  sectionDescriptions,
   settingsSections,
   type SettingsSection,
 } from "@/features/settings/types";
@@ -41,7 +41,7 @@ export function SettingsPage() {
 
   const sectionTitle =
     settingsSections.find((section) => section.key === selectedSection)
-      ?.label ?? "General";
+      ?.label ?? "Settings";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -65,7 +65,7 @@ export function SettingsPage() {
           </TooltipTrigger>
           <TooltipContent side="bottom">Go back</TooltipContent>
         </Tooltip>
-        <h1 className="text-foreground" style={typo.h3}>
+        <h1 className="text-foreground typo-h3">
           Settings
         </h1>
       </div>
@@ -77,17 +77,18 @@ export function SettingsPage() {
             isMobile ? "px-4 py-3" : "px-6 py-4",
           )}
         >
-          <span className="text-foreground" style={typo.h4}>
+          <span className="text-foreground typo-h4">
             {sectionTitle}
           </span>
           <p className="mt-1 text-sm text-muted-foreground">
-            Functional settings only for v0.4.8: theme, anonymous telemetry,
-            LiteLLM runtime integration, and runtime connectivity diagnostics.
+            {selectedSection
+              ? sectionDescriptions[selectedSection]
+              : "Configure theme, telemetry, LM integration, and runtime connectivity."}
           </p>
         </div>
         <ScrollArea className="flex-1">
           <div className={cn(isMobile ? "px-4" : "px-6")}>
-            <SettingsPaneContent
+            <GroupedSettingsPane
               isDark={isDark}
               onToggleTheme={toggleTheme}
               section={selectedSection}

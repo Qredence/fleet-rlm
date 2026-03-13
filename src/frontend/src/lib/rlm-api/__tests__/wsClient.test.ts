@@ -198,6 +198,31 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     expect(onFrame).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects when the server never emits a first frame", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    const { streamChatOverWs } = await loadWsClientModule();
+    const { sockets } = installSocketFactory();
+
+    const streamPromise = streamChatOverWs(dummyMessage, {
+      onFrame: vi.fn(),
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+      firstFrameTimeoutMs: 50,
+    });
+    const rejection = expect(streamPromise).rejects.toThrow(
+      /No response arrived from the server within 1 second/i,
+    );
+
+    await Promise.resolve();
+
+    sockets[0]?.trigger("open");
+    await vi.advanceTimersByTimeAsync(60);
+
+    await rejection;
+    expect(sockets[0]?.close).toHaveBeenCalled();
+  });
+
   it("sends cancel and waits for a terminal frame before closing chat streams", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
     const { streamChatOverWs } = await loadWsClientModule();

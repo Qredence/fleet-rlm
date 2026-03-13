@@ -2,6 +2,7 @@ import { Attachment, AttachmentInfo, AttachmentPreview, Attachments } from "@/co
 import { InlineCitation, InlineCitationCard, InlineCitationCardBody, InlineCitationCardTrigger, InlineCitationQuote, InlineCitationSource, InlineCitationText } from "@/components/ai-elements/inline-citation";
 import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 
 export function EvidenceGroup({
   evidence,
@@ -12,7 +13,7 @@ export function EvidenceGroup({
 
   return (
     <section className="space-y-3" data-slot="assistant-evidence">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+      <div className={inspectorStyles.heading.section}>
         Evidence
       </div>
 

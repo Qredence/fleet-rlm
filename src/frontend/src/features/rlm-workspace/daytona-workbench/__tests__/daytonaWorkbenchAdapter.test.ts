@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyDaytonaFrameToWorkbenchState,
   createInitialDaytonaWorkbenchState,
+  failDaytonaWorkbenchRun,
   startDaytonaWorkbenchRun,
   shouldApplyDaytonaFrame,
 } from "@/features/rlm-workspace/daytona-workbench/daytonaWorkbenchAdapter";
@@ -27,11 +28,15 @@ function makeEvent(
 
 describe("daytonaWorkbenchAdapter", () => {
   it("hydrates a rich final run_result into nodes, prompts, and final artifact", () => {
-    const started = startDaytonaWorkbenchRun(createInitialDaytonaWorkbenchState(), {
-      task: "Analyze the repo",
-      repoUrl: "https://github.com/qredence/fleet-rlm.git",
-      repoRef: "main",
-    });
+    const started = startDaytonaWorkbenchRun(
+      createInitialDaytonaWorkbenchState(),
+      {
+        task: "Analyze the repo",
+        repoUrl: "https://github.com/qredence/fleet-rlm.git",
+        repoRef: "main",
+        contextPaths: ["/Users/zocho/Documents/spec.pdf"],
+      },
+    );
 
     const next = applyDaytonaFrameToWorkbenchState(
       started,
@@ -40,6 +45,7 @@ describe("daytonaWorkbenchAdapter", () => {
         runtime: {
           runtime_mode: "daytona_pilot",
           run_id: "run-123",
+          daytona_mode: "recursive_rlm",
         },
         final_artifact: {
           kind: "markdown",
@@ -57,6 +63,17 @@ describe("daytonaWorkbenchAdapter", () => {
           run_id: "run-123",
           repo: "https://github.com/qredence/fleet-rlm.git",
           ref: "main",
+          context_sources: [
+            {
+              source_id: "ctx-1",
+              kind: "file",
+              host_path: "/Users/zocho/Documents/spec.pdf",
+              staged_path: "/workspace/context/spec.pdf.extracted.txt",
+              source_type: "pdf",
+              extraction_method: "pypdf",
+              file_count: 1,
+            },
+          ],
           task: "Analyze the repo",
           root_id: "root-node",
           final_artifact: {
@@ -87,7 +104,8 @@ describe("daytonaWorkbenchAdapter", () => {
                     label: "Root task",
                     char_count: 9001,
                     line_count: 120,
-                    preview: "A long root task preview that should stay visible.",
+                    preview:
+                      "A long root task preview that should stay visible.",
                   },
                 ],
               },
@@ -121,21 +139,31 @@ describe("daytonaWorkbenchAdapter", () => {
     expect(next.runId).toBe("run-123");
     expect(next.rootId).toBe("root-node");
     expect(next.selectedNodeId).toBe("root-node");
+    expect(next.daytonaMode).toBe("recursive_rlm");
     expect(next.timeline).toHaveLength(1);
+    expect(next.contextSources[0]?.hostPath).toBe(
+      "/Users/zocho/Documents/spec.pdf",
+    );
     expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
     expect(next.finalArtifact?.textPreview).toContain("Readable final summary");
     expect(next.summary?.terminationReason).toBe("completed");
-    expect(next.nodes["root-node"]?.promptHandles[0]?.handleId).toBe("prompt-1");
+    expect(next.nodes["root-node"]?.promptHandles[0]?.handleId).toBe(
+      "prompt-1",
+    );
     expect(next.nodes["root-node"]?.childLinks[0]?.task.source?.path).toBe(
       "src/fleet_rlm/analytics/scorers.py",
     );
   });
 
   it("tracks incremental node metadata from status events before final hydration", () => {
-    const started = startDaytonaWorkbenchRun(createInitialDaytonaWorkbenchState(), {
-      task: "Analyze the repo",
-      repoUrl: "https://github.com/qredence/fleet-rlm.git",
-    });
+    const started = startDaytonaWorkbenchRun(
+      createInitialDaytonaWorkbenchState(),
+      {
+        task: "Analyze the repo",
+        repoUrl: "https://github.com/qredence/fleet-rlm.git",
+        contextPaths: ["/workspace/docs"],
+      },
+    );
 
     const next = applyDaytonaFrameToWorkbenchState(
       started,
@@ -167,6 +195,7 @@ describe("daytonaWorkbenchAdapter", () => {
     expect(next.nodes["root-node"]?.sandboxId).toBe("sbx-boot");
     expect(next.nodes["root-node"]?.promptHandles).toHaveLength(1);
     expect(next.timeline[0]?.promptHandleCount).toBe(1);
+    expect(next.contextSources[0]?.hostPath).toBe("/workspace/docs");
   });
 
   it("ignores non-Daytona frames after a completed Daytona run", () => {
@@ -211,5 +240,28 @@ describe("daytonaWorkbenchAdapter", () => {
     });
 
     expect(shouldApplyDaytonaFrame(completed, modalFrame)).toBe(false);
+  });
+
+  it("marks a pending Daytona run as errored without dropping source context", () => {
+    const started = startDaytonaWorkbenchRun(
+      createInitialDaytonaWorkbenchState(),
+      {
+        task: "Analyze local docs",
+        contextPaths: ["/Users/zocho/Documents/spec.pdf"],
+      },
+    );
+
+    const next = failDaytonaWorkbenchRun(
+      started,
+      "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
+    );
+
+    expect(next.status).toBe("error");
+    expect(next.contextSources[0]?.hostPath).toBe(
+      "/Users/zocho/Documents/spec.pdf",
+    );
+    expect(next.summary?.terminationReason).toBe("failed");
+    expect(next.errorMessage).toMatch(/No response arrived/);
+    expect(next.timeline.at(-1)?.kind).toBe("error");
   });
 });

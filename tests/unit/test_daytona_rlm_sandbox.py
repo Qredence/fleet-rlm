@@ -559,5 +559,143 @@ def test_daytona_runtime_reports_bootstrap_timings(monkeypatch: pytest.MonkeyPat
     )
 
     assert session.repo_path == "/workdir/workspace/repo"
-    assert set(timings) == {"sandbox_create", "repo_clone"}
+    assert set(timings) == {"sandbox_create", "repo_clone", "context_stage"}
     assert all(isinstance(value, int) for value in timings.values())
+
+
+def test_daytona_runtime_supports_reasoning_only_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_sandbox = _FakeSandbox()
+
+    class _FakeDaytonaConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class _FakeDaytona:
+        def __init__(self, config):
+            self.config = config
+
+        def create(self):
+            return fake_sandbox
+
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
+        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
+    )
+
+    runtime = DaytonaSandboxRuntime(config=_resolved_config())
+    session = runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        context_paths=None,
+    )
+
+    assert session.repo_url == ""
+    assert session.workspace_path == "/workdir/workspace/daytona-workspace"
+    assert session.context_sources == []
+    assert fake_sandbox.git.clone_calls == []
+
+
+def test_daytona_runtime_stages_document_context_without_repo(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    fake_sandbox = _FakeSandbox()
+    doc_path = tmp_path / "spec.pdf"
+    doc_path.write_bytes(b"%PDF-1.7 fake")
+
+    class _FakeDaytonaConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class _FakeDaytona:
+        def __init__(self, config):
+            self.config = config
+
+        def create(self):
+            return fake_sandbox
+
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
+        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox.read_document_content",
+        lambda path: (
+            f"Extracted {path.name}",
+            {
+                "source_type": "pdf",
+                "extraction_method": "pypdf",
+            },
+        ),
+    )
+
+    runtime = DaytonaSandboxRuntime(config=_resolved_config())
+    session = runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        context_paths=[str(doc_path)],
+    )
+
+    assert session.repo_path == "/workdir/workspace/daytona-workspace"
+    assert fake_sandbox.git.clone_calls == []
+    assert len(session.context_sources) == 1
+    source = session.context_sources[0]
+    assert source.host_path == str(doc_path)
+    assert source.source_type == "pdf"
+    assert source.extraction_method == "pypdf"
+    assert source.staged_path.endswith("spec.pdf.extracted.txt")
+    assert any(path.endswith("manifest.json") for path in fake_sandbox.fs.files)
+
+
+def test_daytona_runtime_stages_directory_context_with_skipped_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    fake_sandbox = _FakeSandbox()
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    good_file = docs_dir / "README.md"
+    good_file.write_text("# Example\n", encoding="utf-8")
+    bad_file = docs_dir / "archive.bin"
+    bad_file.write_bytes(b"\x00\x01")
+
+    class _FakeDaytonaConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class _FakeDaytona:
+        def __init__(self, config):
+            self.config = config
+
+        def create(self):
+            return fake_sandbox
+
+    def _fake_read_document_content(path):
+        if path.suffix == ".bin":
+            raise ValueError("unsupported binary file")
+        return ("Directory text", {"source_type": "text"})
+
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
+        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox.read_document_content",
+        _fake_read_document_content,
+    )
+
+    runtime = DaytonaSandboxRuntime(config=_resolved_config())
+    session = runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        context_paths=[str(docs_dir)],
+    )
+
+    assert len(session.context_sources) == 1
+    source = session.context_sources[0]
+    assert source.kind == "directory"
+    assert source.file_count == 1
+    assert source.skipped_count == 1
+    assert source.warnings

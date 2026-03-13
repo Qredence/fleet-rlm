@@ -3,12 +3,23 @@ import type {
   ChatQueueItem,
   ChatRenderPart,
   ChatTraceStep,
-  RuntimeContext,
 } from "@/lib/data/types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
 import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";
+import {
+  asOptionalNumber,
+  asOptionalText,
+  asRecord,
+  parseRuntimeContext,
+} from "@/features/rlm-workspace/backendChatEventPayload";
 import { attachFinalReferences } from "@/features/rlm-workspace/backendChatEventReferences";
+import {
+  normalizeTrajectorySteps,
+  normalizeTrajectoryStepsFromFinalPayload,
+  trajectoryStepDetails,
+  type NormalizedTrajectoryStep,
+} from "@/features/rlm-workspace/backendChatEventTrajectory";
 import {
   appendToolLikePart,
   inferStatusTone,
@@ -19,63 +30,6 @@ interface ApplyFrameResult {
   messages: ChatMessage[];
   terminal: boolean;
   errored: boolean;
-}
-
-interface NormalizedTrajectoryStep {
-  index: number;
-  thought?: string;
-  action?: string;
-  toolName?: string;
-  toolInput?: unknown;
-  toolOutput?: unknown;
-  label: string;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return undefined;
-  return value as Record<string, unknown>;
-}
-
-function asOptionalText(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function asOptionalNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return undefined;
-}
-
-function parseRuntimeContext(
-  payload?: Record<string, unknown>,
-): RuntimeContext | undefined {
-  const raw = asRecord(payload?.runtime) ?? payload;
-  if (!raw) return undefined;
-  const depth = asOptionalNumber(raw.depth);
-  const maxDepth = asOptionalNumber(raw.max_depth);
-  const executionProfile = asOptionalText(raw.execution_profile);
-  if (depth == null || maxDepth == null || !executionProfile) return undefined;
-  const volumeName = asOptionalText(raw.volume_name);
-  const executionMode = asOptionalText(raw.execution_mode);
-  const runtimeMode = asOptionalText(raw.runtime_mode);
-  const sandboxId = asOptionalText(raw.sandbox_id);
-  return {
-    depth,
-    maxDepth,
-    executionProfile,
-    sandboxActive: raw.sandbox_active === true,
-    effectiveMaxIters: asOptionalNumber(raw.effective_max_iters) ?? 10,
-    ...(volumeName ? { volumeName } : {}),
-    ...(executionMode ? { executionMode } : {}),
-    ...(runtimeMode ? { runtimeMode } : {}),
-    ...(sandboxId ? { sandboxId } : {}),
-  };
 }
 
 function nextId(prefix: string): string {
@@ -360,240 +314,6 @@ function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
     renderParts: nextParts,
   };
   return copy;
-}
-
-function trajectoryStepData(
-  payload?: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  const raw = payload?.step_data;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  return raw as Record<string, unknown>;
-}
-
-function normalizeOptionalUnknown(value: unknown): unknown | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
-  }
-  return value;
-}
-
-function parseTrajectoryStepIndex(
-  payload?: Record<string, unknown>,
-  stepData?: Record<string, unknown>,
-): number {
-  return (
-    asOptionalNumber(payload?.step_index) ??
-    asOptionalNumber(stepData?.index) ??
-    0
-  );
-}
-
-function normalizeTrajectoryStep(
-  raw: Record<string, unknown>,
-  index: number,
-  fallbackText?: string,
-): NormalizedTrajectoryStep {
-  const action = asOptionalText(raw.action);
-  const toolName = asOptionalText(raw.tool_name ?? raw.toolName);
-  const thought = asOptionalText(raw.thought) ?? asOptionalText(fallbackText);
-  const toolInput = normalizeOptionalUnknown(
-    raw.tool_args ?? raw.input ?? raw.tool_input ?? raw.toolInput,
-  );
-  const toolOutput = normalizeOptionalUnknown(
-    raw.output ?? raw.observation ?? raw.tool_output ?? raw.toolOutput,
-  );
-  const label =
-    action ||
-    (toolName ? `Tool: ${toolName}` : undefined) ||
-    (thought ? `Step ${index + 1}` : undefined) ||
-    `Step ${index + 1}`;
-
-  return {
-    index,
-    thought,
-    action,
-    toolName,
-    toolInput,
-    toolOutput,
-    label,
-  };
-}
-
-function extractIndexedTrajectorySteps(
-  payload?: Record<string, unknown>,
-): Map<number, Record<string, unknown>> {
-  const stepsByIndex = new Map<number, Record<string, unknown>>();
-  if (!payload) return stepsByIndex;
-
-  const pattern =
-    /^(thought|tool_name|tool_args|tool_input|input|observation|tool_output|output|action)_(\d+)$/;
-  for (const [key, value] of Object.entries(payload)) {
-    const match = key.match(pattern);
-    if (!match) continue;
-    const field = match[1];
-    if (!field) continue;
-    const index = Number(match[2]);
-    if (!Number.isFinite(index)) continue;
-    const current = stepsByIndex.get(index) ?? {};
-    current[field] = value;
-    stepsByIndex.set(index, current);
-  }
-  return stepsByIndex;
-}
-
-function normalizeTrajectorySteps(
-  text: string,
-  payload?: Record<string, unknown>,
-): NormalizedTrajectoryStep[] {
-  const stepsByIndex = extractIndexedTrajectorySteps(payload);
-  const stepData = trajectoryStepData(payload);
-
-  if (stepData) {
-    const index = parseTrajectoryStepIndex(payload, stepData);
-    const merged = {
-      ...(stepsByIndex.get(index) ?? {}),
-      ...stepData,
-    };
-    stepsByIndex.set(index, merged);
-  }
-
-  // Fallback for payloads that expose trajectory fields directly without index.
-  if (!stepData && stepsByIndex.size === 0 && payload) {
-    const inlineStep: Record<string, unknown> = {};
-    for (const field of [
-      "thought",
-      "action",
-      "tool_name",
-      "tool_args",
-      "tool_input",
-      "input",
-      "observation",
-      "tool_output",
-      "output",
-    ]) {
-      if (payload[field] !== undefined) {
-        inlineStep[field] = payload[field];
-      }
-    }
-    if (Object.keys(inlineStep).length > 0) {
-      const index = parseTrajectoryStepIndex(payload);
-      stepsByIndex.set(index, inlineStep);
-    }
-  }
-
-  const sorted = [...stepsByIndex.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([index, raw], position) =>
-      normalizeTrajectoryStep(raw, index, position === 0 ? text : undefined),
-    );
-
-  if (sorted.length > 0) {
-    return sorted;
-  }
-
-  const fallback = text.trim();
-  if (!fallback) return [];
-  const fallbackIndex = parseTrajectoryStepIndex(payload, stepData);
-  return [
-    {
-      index: fallbackIndex,
-      thought: fallback,
-      label: `Step ${fallbackIndex + 1}`,
-    },
-  ];
-}
-
-function normalizeTrajectoryStepsFromFinalPayload(
-  payload?: Record<string, unknown>,
-): NormalizedTrajectoryStep[] {
-  if (!payload) return [];
-
-  const rawTrajectory = payload.trajectory;
-  if (Array.isArray(rawTrajectory)) {
-    return rawTrajectory
-      .map((entry, idx) => {
-        const record = asRecord(entry);
-        if (!record) return null;
-        const index = asOptionalNumber(record.index) ?? idx;
-        return normalizeTrajectoryStep(record, index);
-      })
-      .filter((step): step is NormalizedTrajectoryStep => step != null);
-  }
-
-  const trajectoryRecord = asRecord(rawTrajectory);
-  if (trajectoryRecord) {
-    return normalizeTrajectorySteps("", trajectoryRecord);
-  }
-
-  return normalizeTrajectorySteps("", payload);
-}
-
-function truncateTrajectoryDetail(value: string, maxLength = 96) {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 3)}...`;
-}
-
-function summarizeTrajectoryValue(value: unknown): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string") {
-    const trimmed = value.replace(/\s+/g, " ").trim();
-    return trimmed ? truncateTrajectoryDetail(trimmed) : undefined;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    const rendered = value
-      .map((entry) => summarizeTrajectoryValue(entry))
-      .filter((entry): entry is string => Boolean(entry));
-    if (rendered.length === 0) return undefined;
-    const preview = rendered.slice(0, 3).join(", ");
-    return rendered.length > 3
-      ? `${truncateTrajectoryDetail(preview)} (+${rendered.length - 3} more)`
-      : truncateTrajectoryDetail(preview);
-  }
-
-  const record = asRecord(value);
-  if (record) {
-    const entries = Object.entries(record)
-      .map(([key, entryValue]) => {
-        const rendered = summarizeTrajectoryValue(entryValue);
-        return rendered ? `${key}=${rendered}` : null;
-      })
-      .filter((entry): entry is string => entry != null);
-    if (entries.length > 0) {
-      const preview = entries.slice(0, 3).join(", ");
-      return entries.length > 3
-        ? `${truncateTrajectoryDetail(preview)} (+${entries.length - 3} more)`
-        : truncateTrajectoryDetail(preview);
-    }
-  }
-
-  try {
-    return truncateTrajectoryDetail(JSON.stringify(value));
-  } catch {
-    return truncateTrajectoryDetail(String(value));
-  }
-}
-
-function trajectoryStepDetails(step: NormalizedTrajectoryStep): string[] {
-  const details: string[] = [];
-  if (step.toolName) {
-    details.push(`Tool · ${step.toolName}`);
-  }
-  if (step.toolInput !== undefined) {
-    details.push(
-      `Input · ${summarizeTrajectoryValue(step.toolInput) ?? "Available"}`,
-    );
-  }
-  if (step.toolOutput !== undefined) {
-    details.push(
-      `Observation · ${summarizeTrajectoryValue(step.toolOutput) ?? "Available"}`,
-    );
-  }
-  return details;
 }
 
 function upsertChainOfThought(

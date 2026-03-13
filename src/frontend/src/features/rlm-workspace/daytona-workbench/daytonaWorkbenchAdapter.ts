@@ -2,6 +2,7 @@ import type { WsServerMessage } from "@/lib/rlm-api";
 import type {
   DaytonaArtifactSummary,
   DaytonaChildLinkSummary,
+  DaytonaContextSourceSummary,
   DaytonaPromptHandleSummary,
   DaytonaRunNode,
   DaytonaWorkbenchStateData,
@@ -13,7 +14,8 @@ const PROMPT_PREVIEW_LIMIT = 220;
 const ARTIFACT_PREVIEW_LIMIT = 320;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   return value as Record<string, unknown>;
 }
 
@@ -63,13 +65,38 @@ function normalizeWarnings(value: unknown): string[] {
     .map((item) => collapseWhitespace(item, ARTIFACT_PREVIEW_LIMIT));
 }
 
-function normalizePromptHandle(raw: unknown): DaytonaPromptHandleSummary | null {
+function normalizeContextSource(
+  raw: unknown,
+): DaytonaContextSourceSummary | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const sourceId =
+    asText(record.source_id ?? record.sourceId) ??
+    asText(record.host_path ?? record.hostPath);
+  const hostPath = asText(record.host_path ?? record.hostPath);
+  if (!sourceId || !hostPath) return null;
+  return {
+    sourceId,
+    kind: asText(record.kind) ?? "file",
+    hostPath,
+    stagedPath: asText(record.staged_path ?? record.stagedPath),
+    sourceType: asText(record.source_type ?? record.sourceType),
+    extractionMethod: asText(
+      record.extraction_method ?? record.extractionMethod,
+    ),
+    fileCount: asNumber(record.file_count ?? record.fileCount),
+    skippedCount: asNumber(record.skipped_count ?? record.skippedCount),
+    warnings: normalizeWarnings(record.warnings),
+  };
+}
+
+function normalizePromptHandle(
+  raw: unknown,
+): DaytonaPromptHandleSummary | null {
   const record = asRecord(raw);
   if (!record) return null;
   const handleId =
-    asText(record.handle_id) ??
-    asText(record.handleId) ??
-    asText(record.id);
+    asText(record.handle_id) ?? asText(record.handleId) ?? asText(record.id);
   if (!handleId) return null;
   return {
     handleId,
@@ -114,9 +141,7 @@ function normalizeChildLink(raw: unknown): DaytonaChildLinkSummary | null {
   if (!record) return null;
   const taskRecord = asRecord(record.task);
   const taskText =
-    asText(taskRecord?.task) ??
-    asText(record.task_text) ??
-    asText(record.task);
+    asText(taskRecord?.task) ?? asText(record.task_text) ?? asText(record.task);
   if (!taskText) return null;
 
   const sourceRecord = asRecord(taskRecord?.source ?? record.source);
@@ -152,7 +177,9 @@ function normalizeNode(nodeId: string, raw: unknown): DaytonaRunNode | null {
   const record = asRecord(raw);
   if (!record) return null;
 
-  const promptManifest = asRecord(record.prompt_manifest ?? record.promptManifest);
+  const promptManifest = asRecord(
+    record.prompt_manifest ?? record.promptManifest,
+  );
   const promptHandles = [
     ...asArray(record.prompt_handles ?? record.promptHandles),
     ...asArray(promptManifest?.handles),
@@ -182,7 +209,9 @@ function normalizeNode(nodeId: string, raw: unknown): DaytonaRunNode | null {
     promptHandles,
     childIds,
     childLinks,
-    finalArtifact: normalizeArtifact(record.final_artifact ?? record.finalArtifact),
+    finalArtifact: normalizeArtifact(
+      record.final_artifact ?? record.finalArtifact,
+    ),
   };
 }
 
@@ -194,11 +223,16 @@ function mergeNode(
     ...current,
     ...next,
     promptHandles:
-      next.promptHandles.length > 0 ? next.promptHandles : current?.promptHandles ?? [],
-    childIds: next.childIds.length > 0 ? next.childIds : current?.childIds ?? [],
+      next.promptHandles.length > 0
+        ? next.promptHandles
+        : (current?.promptHandles ?? []),
+    childIds:
+      next.childIds.length > 0 ? next.childIds : (current?.childIds ?? []),
     childLinks:
-      next.childLinks.length > 0 ? next.childLinks : current?.childLinks ?? [],
-    warnings: next.warnings?.length ? next.warnings : current?.warnings ?? [],
+      next.childLinks.length > 0
+        ? next.childLinks
+        : (current?.childLinks ?? []),
+    warnings: next.warnings?.length ? next.warnings : (current?.warnings ?? []),
     finalArtifact: next.finalArtifact ?? current?.finalArtifact ?? null,
   };
 }
@@ -217,7 +251,9 @@ function normalizeSummary(raw: unknown): DaytonaRunSummary | undefined {
   };
 }
 
-function extractRuntime(payload?: Record<string, unknown>): Record<string, unknown> | undefined {
+function extractRuntime(
+  payload?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   return asRecord(payload?.runtime) ?? payload;
 }
 
@@ -226,12 +262,13 @@ function inferNodeFromPayload(
 ): Partial<DaytonaRunNode> | null {
   if (!payload) return null;
   const nodeRecord =
-    asRecord(payload.node) ??
-    (payload.node_id ? payload : undefined);
+    asRecord(payload.node) ?? (payload.node_id ? payload : undefined);
   if (!nodeRecord) return null;
   const nodeId = asText(nodeRecord.node_id ?? nodeRecord.nodeId);
   if (!nodeId) return null;
-  const promptManifest = asRecord(nodeRecord.prompt_manifest ?? nodeRecord.promptManifest);
+  const promptManifest = asRecord(
+    nodeRecord.prompt_manifest ?? nodeRecord.promptManifest,
+  );
   const promptHandles = [
     ...asArray(nodeRecord.prompt_handles ?? nodeRecord.promptHandles),
     ...asArray(promptManifest?.handles),
@@ -257,8 +294,12 @@ function inferNodeFromPayload(
     finalArtifact: normalizeArtifact(
       nodeRecord.final_artifact ?? nodeRecord.finalArtifact,
     ),
-    workspacePath: asText(nodeRecord.workspace_path ?? nodeRecord.workspacePath),
-    iterationCount: asNumber(nodeRecord.iteration_count ?? nodeRecord.iterationCount),
+    workspacePath: asText(
+      nodeRecord.workspace_path ?? nodeRecord.workspacePath,
+    ),
+    iterationCount: asNumber(
+      nodeRecord.iteration_count ?? nodeRecord.iterationCount,
+    ),
     error: asText(nodeRecord.error) ?? null,
     warnings: normalizeWarnings(nodeRecord.warnings),
   };
@@ -292,7 +333,10 @@ function buildTimelineEntry(frame: WsServerMessage): DaytonaTimelineEntry {
   );
 
   return {
-    id: String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`),
+    id: String(
+      frame.data.event_id ??
+        `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`,
+    ),
     kind: frame.data.kind,
     text: frame.data.text,
     timestamp: frame.data.timestamp,
@@ -344,6 +388,9 @@ function hydrateFromRunResult(
     runId: asText(raw.run_id ?? raw.runId) ?? state.runId,
     repoUrl: asText(raw.repo) ?? state.repoUrl,
     repoRef: asText(raw.ref) ?? state.repoRef ?? null,
+    contextSources: asArray(raw.context_sources ?? raw.contextSources)
+      .map((item) => normalizeContextSource(item))
+      .filter((item): item is DaytonaContextSourceSummary => item !== null),
     task: asText(raw.task) ?? state.task,
     rootId,
     nodes,
@@ -360,6 +407,7 @@ function hydrateFromRunResult(
 export function createInitialDaytonaWorkbenchState(): DaytonaWorkbenchStateData {
   return {
     status: "idle",
+    contextSources: [],
     nodes: {},
     nodeOrder: [],
     timeline: [],
@@ -373,7 +421,12 @@ export function createInitialDaytonaWorkbenchState(): DaytonaWorkbenchStateData 
 
 export function startDaytonaWorkbenchRun(
   _state: DaytonaWorkbenchStateData,
-  input: { task: string; repoUrl: string; repoRef?: string | null },
+  input: {
+    task: string;
+    repoUrl?: string;
+    repoRef?: string | null;
+    contextPaths?: string[];
+  },
 ): DaytonaWorkbenchStateData {
   return {
     ...createInitialDaytonaWorkbenchState(),
@@ -381,6 +434,39 @@ export function startDaytonaWorkbenchRun(
     task: input.task,
     repoUrl: input.repoUrl,
     repoRef: input.repoRef ?? null,
+    contextSources: (input.contextPaths ?? []).map((hostPath, index) => ({
+      sourceId: `pending-${index + 1}`,
+      kind: "local_path",
+      hostPath,
+    })),
+  };
+}
+
+export function failDaytonaWorkbenchRun(
+  state: DaytonaWorkbenchStateData,
+  errorMessage: string,
+): DaytonaWorkbenchStateData {
+  const message =
+    collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) ||
+    "Daytona run failed.";
+
+  return {
+    ...state,
+    status: "error",
+    errorMessage: message,
+    summary: {
+      ...state.summary,
+      terminationReason: state.summary?.terminationReason ?? "failed",
+      error: message,
+    },
+    timeline: [
+      ...state.timeline,
+      {
+        id: `local-error-${state.timeline.length + 1}`,
+        kind: "error",
+        text: message,
+      },
+    ],
   };
 }
 
@@ -463,15 +549,19 @@ export function applyDaytonaFrameToWorkbenchState(
       nodeOrder: next.nodeOrder.includes(normalizedNode.nodeId)
         ? next.nodeOrder
         : [...next.nodeOrder, normalizedNode.nodeId],
-      selectedNodeId:
-        next.selectedNodeId ??
-        normalizedNode.nodeId,
+      selectedNodeId: next.selectedNodeId ?? normalizedNode.nodeId,
     };
   }
 
   if (runResult) {
     next = hydrateFromRunResult(next, runResult);
   }
+
+  const payloadContextSources = asArray(
+    payload?.context_sources ?? payload?.contextSources,
+  )
+    .map((item) => normalizeContextSource(item))
+    .filter((item): item is DaytonaContextSourceSummary => item !== null);
 
   const statusFromKind =
     frame.data.kind === "final"
@@ -482,13 +572,14 @@ export function applyDaytonaFrameToWorkbenchState(
           ? next.status === "idle"
             ? "bootstrapping"
             : next.status
-        : frame.data.kind === "cancelled"
-          ? "cancelled"
-          : nodePartial?.status === "cancelling" || timelineEntry.status === "cancelling"
-            ? "cancelling"
-          : next.status === "idle"
-            ? "bootstrapping"
-            : "running";
+          : frame.data.kind === "cancelled"
+            ? "cancelled"
+            : nodePartial?.status === "cancelling" ||
+                timelineEntry.status === "cancelling"
+              ? "cancelling"
+              : next.status === "idle"
+                ? "bootstrapping"
+                : "running";
 
   const runtimeRunId =
     asText(payload?.run_id ?? payload?.runId) ??
@@ -504,9 +595,16 @@ export function applyDaytonaFrameToWorkbenchState(
     ...next,
     status: statusFromKind as DaytonaWorkbenchStateData["status"],
     runId: runtimeRunId,
+    daytonaMode:
+      asText(payload?.daytona_mode ?? payload?.daytonaMode) ??
+      asText(runtime?.daytona_mode ?? runtime?.daytonaMode) ??
+      next.daytonaMode,
     rootId,
-    selectedNodeId:
-      next.selectedNodeId ?? rootId ?? next.nodeOrder[0] ?? null,
+    selectedNodeId: next.selectedNodeId ?? rootId ?? next.nodeOrder[0] ?? null,
+    contextSources:
+      payloadContextSources.length > 0
+        ? payloadContextSources
+        : next.contextSources,
     finalArtifact:
       normalizeArtifact(payload?.final_artifact ?? payload?.finalArtifact) ??
       next.finalArtifact ??
@@ -515,6 +613,6 @@ export function applyDaytonaFrameToWorkbenchState(
     errorMessage:
       frame.data.kind === "error"
         ? frame.data.text
-        : next.errorMessage ?? null,
+        : (next.errorMessage ?? null),
   };
 }

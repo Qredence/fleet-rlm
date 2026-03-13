@@ -71,7 +71,7 @@ vi.mock("@/features/rlm-workspace/ChatMessageList", () => ({
   ChatMessageList: () => <div>ChatMessageList</div>,
 }));
 
-vi.mock("@/features/rlm-workspace/ConversationHistory", () => ({
+vi.mock("@/components/shared/ConversationHistory", () => ({
   ConversationHistory: () => <div>ConversationHistory</div>,
 }));
 

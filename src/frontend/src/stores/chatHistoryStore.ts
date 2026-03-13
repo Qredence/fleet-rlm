@@ -44,9 +44,7 @@ interface ChatHistoryState {
 // ── Constants ────────────────────────────────────────────────────────
 
 const STORAGE_VERSION = 2;
-const STORAGE_KEY = "hax-fleet:chat-history";
-const VERSIONED_KEY = `${STORAGE_KEY}:v${STORAGE_VERSION}`;
-const LEGACY_VERSIONED_KEYS = [`${STORAGE_KEY}:v1`];
+const STORAGE_KEY = "hax-fleet:chat-history:v2";
 const MAX_CONVERSATIONS = 50;
 type ChatHistoryPersistedState = Pick<ChatHistoryState, "conversations">;
 
@@ -79,14 +77,6 @@ function toConversationArray(value: unknown): Conversation[] | null {
 function toPersistedChatHistory(
   value: unknown,
 ): StorageValue<ChatHistoryPersistedState> | null {
-  const directConversations = toConversationArray(value);
-  if (directConversations) {
-    return {
-      state: { conversations: directConversations },
-      version: STORAGE_VERSION,
-    };
-  }
-
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -118,26 +108,7 @@ function toPersistedChatHistory(
 
 const chatHistoryStorage: PersistStorage<ChatHistoryPersistedState> = {
   getItem: (name) => {
-    for (const key of [name, ...LEGACY_VERSIONED_KEYS]) {
-      const storedValue = toPersistedChatHistory(
-        parseStoredJson(localStorage.getItem(key)),
-      );
-      if (storedValue) {
-        return storedValue;
-      }
-    }
-
-    const legacyValue = toConversationArray(
-      parseStoredJson(localStorage.getItem(STORAGE_KEY)),
-    );
-    if (!legacyValue) {
-      return null;
-    }
-
-    return {
-      state: { conversations: legacyValue },
-      version: STORAGE_VERSION,
-    };
+    return toPersistedChatHistory(parseStoredJson(localStorage.getItem(name)));
   },
   setItem: (name, value) => {
     localStorage.setItem(name, JSON.stringify(value));
@@ -238,7 +209,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
       },
     }),
     {
-      name: VERSIONED_KEY,
+      name: STORAGE_KEY,
       version: STORAGE_VERSION,
       storage: chatHistoryStorage,
       partialize: (state) => ({ conversations: state.conversations }),

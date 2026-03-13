@@ -5,6 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
 
+const chatStoreState = {
+  runtimeMode: "modal_chat" as const,
+};
+
 vi.mock("@/stores/navigationStore", () => ({
   useNavigationStore: () => ({
     activeNav: "volumes",
@@ -21,6 +25,11 @@ vi.mock("@/stores/navigationStore", () => ({
       modifiedAt: "2026-03-03T00:00:00Z",
     },
   }),
+}));
+
+vi.mock("@/stores/chatStore", () => ({
+  useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
+    selector(chatStoreState),
 }));
 
 vi.mock("@/hooks/useAppNavigate", () => ({
@@ -59,6 +68,10 @@ vi.mock("@/features/artifacts/FileDetail", () => ({
 
 vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () => ({
   MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
+}));
+
+vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
+  RunWorkbench: () => <div>RunWorkbench</div>,
 }));
 
 vi.mock("@/lib/rlm-api", () => ({

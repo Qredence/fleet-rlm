@@ -10,9 +10,11 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { GitBranch } from "lucide-react";
-import { ArtifactGraph } from "@/components/domain/artifacts/ArtifactGraph";
-import { summarizeArtifactStep } from "@/components/domain/artifacts/parsers/artifactPayloadSummaries";
+import { cn } from "@/lib/utils/cn";
+import { ArtifactGraph } from "@/features/artifacts/ArtifactGraph";
+import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 import type { ExecutionStep } from "@/stores/artifactStore";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import { stringifyValue } from "../utils/inspector-utils";
 import { DetailBlock } from "../components/inspector-components";
 
@@ -45,26 +47,26 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { st
   return (
     <TabsContent value="graph" className="min-h-0 flex-1">
       <ScrollArea className="h-full">
-        <div className="space-y-3 px-4 pb-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            <Card className="gap-2 rounded-2xl border-border-subtle/80 shadow-none">
-              <CardHeader className="px-4 pt-4">
+        <div className={inspectorStyles.tab.content}>
+          <div className={inspectorStyles.graph.statsGrid}>
+            <Card className={inspectorStyles.card.root}>
+              <CardHeader className={inspectorStyles.card.header}>
                 <CardDescription>Steps</CardDescription>
                 <CardTitle className="text-xl font-semibold text-foreground">
                   {steps.length}
                 </CardTitle>
               </CardHeader>
             </Card>
-            <Card className="gap-2 rounded-2xl border-border-subtle/80 shadow-none">
-              <CardHeader className="px-4 pt-4">
+            <Card className={inspectorStyles.card.root}>
+              <CardHeader className={inspectorStyles.card.header}>
                 <CardDescription>Execution lanes</CardDescription>
                 <CardTitle className="text-xl font-semibold text-foreground">
                   {laneCount}
                 </CardTitle>
               </CardHeader>
             </Card>
-            <Card className="gap-2 rounded-2xl border-border-subtle/80 shadow-none">
-              <CardHeader className="px-4 pt-4">
+            <Card className={inspectorStyles.card.root}>
+              <CardHeader className={inspectorStyles.card.header}>
                 <CardDescription>Branch points</CardDescription>
                 <CardTitle className="text-xl font-semibold text-foreground">
                   {branchingParents}
@@ -73,8 +75,8 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { st
             </Card>
           </div>
 
-          <Card className="gap-3 rounded-2xl border-border-subtle/80 shadow-none">
-            <CardHeader className="px-4 pt-4">
+          <Card className={inspectorStyles.card.root}>
+            <CardHeader className={inspectorStyles.card.header}>
               <div className="flex items-center gap-2">
                 <GitBranch className="size-4 text-accent" />
                 <CardTitle className="text-sm font-medium text-foreground">
@@ -85,8 +87,8 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { st
                 Parent-child lineage, actor lanes, and delegated branches for this turn.
               </CardDescription>
             </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div className="h-105 overflow-hidden rounded-2xl border border-border-subtle/80 bg-muted/15">
+            <CardContent className={inspectorStyles.card.content}>
+              <div className={inspectorStyles.graph.canvas}>
                 <ArtifactGraph
                   steps={steps}
                   activeStepId={activeStepId}
@@ -98,28 +100,28 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { st
           </Card>
 
           {selectedStep ? (
-            <Card className="gap-3 rounded-2xl border-border-subtle/80 shadow-none">
-              <CardHeader className="px-4 pt-4">
+            <Card className={inspectorStyles.card.root}>
+              <CardHeader className={inspectorStyles.card.header}>
                 <CardTitle className="text-sm font-medium text-foreground">
                   Selected node
                 </CardTitle>
                 <CardDescription>{selectedStep.label}</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 px-4 pb-4">
+              <CardContent className={inspectorStyles.card.contentStack}>
                 <div className="text-sm text-foreground">
                   {summarizeArtifactStep(selectedStep)}
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="secondary" className="rounded-full capitalize">
+                <div className={inspectorStyles.badge.row}>
+                  <Badge variant="secondary" className={cn(inspectorStyles.badge.meta, "capitalize")}>
                     {selectedStep.type}
                   </Badge>
                   {selectedStep.actor_kind ? (
-                    <Badge variant="outline" className="rounded-full">
+                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
                       {selectedStep.actor_kind.replace(/_/g, " ")}
                     </Badge>
                   ) : null}
                   {selectedStep.actor_id ? (
-                    <Badge variant="outline" className="rounded-full">
+                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
                       {selectedStep.actor_id}
                     </Badge>
                   ) : null}

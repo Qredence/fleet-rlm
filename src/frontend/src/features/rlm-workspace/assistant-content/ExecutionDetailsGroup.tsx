@@ -51,9 +51,9 @@ import {
   EnvironmentVariableValue,
 } from "@/components/ai-elements/environment-variables";
 import type { ChatRenderToolState } from "@/lib/data/types";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import { mapToolState } from "@/lib/utils/ai-elements-state";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/runtimeBadges";
 import type {
   AssistantContentModel,
@@ -62,8 +62,11 @@ import type {
 } from "@/features/rlm-workspace/assistant-content/types";
 
 const MONO_BASE_STYLE = {
-  ...typo.labelRegular,
+  fontSize: "var(--font-text-sm-size)",
+  fontWeight: "var(--font-text-sm-weight)",
   fontFamily: "var(--font-mono)",
+  lineHeight: "var(--font-text-sm-line-height)",
+  letterSpacing: "var(--font-text-sm-tracking)",
 } as const;
 
 const MONO_BASE_MEDIUM_STYLE = {
@@ -143,7 +146,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
         <RuntimeContextBadge ctx={item.runtimeContext} />
         {item.part.errorText || item.part.output ? (
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className={inspectorStyles.heading.detail}>
               Output
             </div>
             <div
@@ -152,8 +155,8 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 item.part.errorText
                   ? "border-destructive/25 bg-destructive/5 text-destructive"
                   : "border-border-subtle/80 bg-muted/15",
+                "typo-label-regular",
               )}
-              style={typo.labelRegular}
             >
               {item.part.errorText ? (
                 item.part.errorText
@@ -168,7 +171,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
         ) : null}
         {item.part.code ? (
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className={inspectorStyles.heading.detail}>
               Code
             </div>
             <pre
@@ -199,7 +202,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 {variable.name}
               </span>
               {variable.required ? (
-                <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span className={inspectorStyles.heading.detail}>
                   required
                 </span>
               ) : null}
@@ -233,7 +236,7 @@ function renderExecutionSection(section: ExecutionSection) {
         <ToolContent className="space-y-3">
           <div className="text-xs text-muted-foreground">{section.summary}</div>
           {section.runtimeBadges.length ? (
-            <div className="text-[10px] leading-relaxed text-muted-foreground">
+            <div className={inspectorStyles.runtime.inline}>
               {section.runtimeBadges.join(" · ")}
             </div>
           ) : null}
@@ -244,7 +247,7 @@ function renderExecutionSection(section: ExecutionSection) {
               data-slot="execution-tool-session-item"
             >
               <div className="space-y-2 py-0.5">
-                <div className="text-foreground" style={typo.labelRegular}>
+                <div className="text-foreground typo-label-regular">
                   {toolSessionLine(sessionItem)}
                 </div>
                 {renderToolSessionItemDetails(sessionItem)}
@@ -382,15 +385,14 @@ function renderExecutionSection(section: ExecutionSection) {
               <SandboxTabContent value="output">
                 {section.part.errorText ? (
                   <div
-                    className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive"
-                    style={typo.labelRegular}
+                    className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive typo-label-regular"
                   >
                     {section.part.errorText}
                   </div>
                 ) : output ? (
                   <Streamdown content={output} streaming={false} />
                 ) : (
-                  <div className="text-muted-foreground" style={typo.labelRegular}>
+                  <div className="text-muted-foreground typo-label-regular">
                     No output yet
                   </div>
                 )}
@@ -404,7 +406,7 @@ function renderExecutionSection(section: ExecutionSection) {
                     <code>{code}</code>
                   </pre>
                 ) : (
-                  <div className="text-muted-foreground" style={typo.labelRegular}>
+                  <div className="text-muted-foreground typo-label-regular">
                     No code captured
                   </div>
                 )}
@@ -469,7 +471,7 @@ function renderExecutionSection(section: ExecutionSection) {
         >
           <AlertDescription>
             <div className="space-y-1">
-              <div style={typo.labelRegular}>{section.summary}</div>
+              <div className="typo-label-regular">{section.summary}</div>
               <RuntimeContextBadge ctx={section.part.runtimeContext} />
             </div>
           </AlertDescription>
@@ -487,7 +489,7 @@ export function ExecutionDetailsGroup({
 
   return (
     <section className="space-y-3" data-slot="assistant-execution">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+      <div className={inspectorStyles.heading.section}>
         Execution
       </div>
       <div className="space-y-3">

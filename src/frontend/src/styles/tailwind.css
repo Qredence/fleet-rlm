@@ -1,5 +1,5 @@
 @import "tailwindcss" source(none);
-@source '../**/*.{js,ts,jsx,tsx}';
+@source '../**/*.{ts,tsx}';
 
 @import "tw-animate-css";
 
@@ -369,16 +369,6 @@
   }
 }
 
-/* Utility: app font family token */
-@utility font-app {
-  font-family: var(--font-sans);
-}
-
-/* Utility: app monospace font family token */
-@utility font-app-mono {
-  font-family: var(--font-mono);
-}
-
 /* Utility: design-token border radii */
 @utility rounded-token {
   border-radius: var(--radius);
@@ -449,16 +439,4 @@
     var(--glass-tab-highlight) 50%,
     transparent 92%
   );
-}
-
-/* Utility: logo mask for the brand mark */
-@utility brand-mark-mask {
-  mask-image: url("/branding/logo-mark.svg");
-  -webkit-mask-image: url("/branding/logo-mark.svg");
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  mask-position: center;
-  -webkit-mask-position: center;
-  mask-size: contain;
-  -webkit-mask-size: contain;
 }

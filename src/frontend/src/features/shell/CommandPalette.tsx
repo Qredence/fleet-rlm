@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { Command } from "cmdk";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { typo } from "@/lib/config/typo";
 import type { NavItem } from "@/lib/data/types";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -122,13 +121,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 value={search}
                 onValueChange={setSearch}
                 placeholder="Search pages and actions..."
-                className="flex-1 h-12 bg-transparent text-foreground placeholder:text-muted-foreground border-0 focus-visible:outline-none"
-                style={typo.label}
+                className="flex-1 h-12 bg-transparent text-foreground placeholder:text-muted-foreground border-0 focus-visible:outline-none typo-label"
                 autoFocus
               />
               <kbd
-                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                style={typo.micro}
+                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro"
               >
                 ESC
               </kbd>
@@ -136,8 +133,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
             <Command.List className="max-h-90 overflow-y-auto overscroll-contain p-2">
               <Command.Empty
-                className="py-8 text-center text-muted-foreground"
-                style={typo.caption}
+                className="py-8 text-center text-muted-foreground typo-caption"
               >
                 No results found.
               </Command.Empty>
@@ -145,8 +141,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               <Command.Group
                 heading={
                   <span
-                    className="text-muted-foreground px-2 pb-1"
-                    style={typo.micro}
+                    className="text-muted-foreground px-2 pb-1 typo-micro"
                   >
                     Pages
                   </span>
@@ -168,7 +163,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                         className="size-4 text-muted-foreground shrink-0"
                         aria-hidden="true"
                       />
-                      <span style={typo.label}>{page.label}</span>
+                      <span className="typo-label">{page.label}</span>
                     </Command.Item>
                   );
                 })}
@@ -177,8 +172,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               <Command.Group
                 heading={
                   <span
-                    className="text-muted-foreground px-2 pb-1"
-                    style={typo.micro}
+                    className="text-muted-foreground px-2 pb-1 typo-micro"
                   >
                     Actions
                   </span>
@@ -204,7 +198,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     className="size-4 text-muted-foreground shrink-0"
                     aria-hidden="true"
                   />
-                  <span style={typo.label}>New Session</span>
+                  <span className="typo-label">New Session</span>
                 </Command.Item>
 
                 <Command.Item
@@ -234,7 +228,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       aria-hidden="true"
                     />
                   )}
-                  <span style={typo.label}>
+                  <span className="typo-label">
                     Switch to {isDark ? "Light" : "Dark"} Mode
                   </span>
                 </Command.Item>
@@ -258,35 +252,32 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     className="size-4 text-muted-foreground shrink-0"
                     aria-hidden="true"
                   />
-                  <span style={typo.label}>Open Settings</span>
+                  <span className="typo-label">Open Settings</span>
                 </Command.Item>
               </Command.Group>
             </Command.List>
 
             <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border-subtle">
-              <span className="text-muted-foreground" style={typo.micro}>
+              <span className="text-muted-foreground typo-micro">
                 Navigate with
               </span>
               <div className="flex items-center gap-1">
                 <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                  style={typo.micro}
+                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro"
                 >
                   &uarr;
                 </kbd>
                 <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                  style={typo.micro}
+                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro"
                 >
                   &darr;
                 </kbd>
               </div>
-              <span className="text-muted-foreground" style={typo.micro}>
+              <span className="text-muted-foreground typo-micro">
                 to select
               </span>
               <kbd
-                className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                style={typo.micro}
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro"
               >
                 &crarr;
               </kbd>

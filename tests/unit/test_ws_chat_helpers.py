@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
 
 from fleet_rlm.models import StreamEvent
+from fleet_rlm.server.routers.ws.daytona_streaming import run_daytona_streaming_turn
 from fleet_rlm.server.routers.ws.streaming import (
     _enqueue_latest_nonblocking,
     _emit_stream_event,
@@ -63,6 +66,14 @@ class _DisconnectingWebSocket:
     async def send_json(self, payload):
         _ = payload
         raise WebSocketDisconnect(code=1001)
+
+
+class _RecordingWebSocket:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send_json(self, payload):
+        self.sent.append(payload)
 
 
 class _LifecycleStub:
@@ -168,6 +179,95 @@ def test_ws_message_accepts_daytona_runtime_fields() -> None:
     assert message.repo_ref == "main"
     assert message.max_depth == 3
     assert message.batch_concurrency == 6
+
+
+def test_daytona_streaming_turn_emits_bootstrap_event_before_blocking_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = _RecordingWebSocket()
+
+    class _FakeRunner:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        def run(self, **kwargs):
+            _ = kwargs
+            time.sleep(0.05)
+            return SimpleNamespace(
+                nodes={},
+                root_id="root-node",
+                budget=SimpleNamespace(max_depth=2, max_iterations=50),
+                final_artifact=SimpleNamespace(
+                    value={"summary": "Done"},
+                    to_dict=lambda: {
+                        "kind": "markdown",
+                        "value": {"summary": "Done"},
+                        "finalization_mode": "SUBMIT",
+                    },
+                ),
+                summary=SimpleNamespace(
+                    termination_reason="completed",
+                    to_dict=lambda: {
+                        "termination_reason": "completed",
+                        "duration_ms": 10,
+                        "sandboxes_used": 1,
+                        "warnings": [],
+                    },
+                ),
+                repo="https://github.com/qredence/fleet-rlm.git",
+                ref=None,
+                context_sources=[],
+                result_path="results/daytona-rlm/fake.json",
+                run_id="run-123",
+                to_dict=lambda: {
+                    "run_id": "run-123",
+                    "repo": "https://github.com/qredence/fleet-rlm.git",
+                    "ref": None,
+                    "context_sources": [],
+                    "task": "hello",
+                    "root_id": "root-node",
+                    "nodes": {},
+                    "summary": {
+                        "termination_reason": "completed",
+                        "duration_ms": 10,
+                        "sandboxes_used": 1,
+                        "warnings": [],
+                    },
+                    "budget": {
+                        "max_depth": 2,
+                        "max_iterations": 50,
+                        "batch_concurrency": 4,
+                    },
+                },
+            )
+
+    monkeypatch.setattr(
+        "fleet_rlm.server.routers.ws.daytona_streaming.DaytonaRLMRunner",
+        _FakeRunner,
+    )
+
+    asyncio.run(
+        run_daytona_streaming_turn(
+            websocket=websocket,
+            planner_lm=object(),
+            message="hello",
+            repo_url="https://github.com/qredence/fleet-rlm.git",
+            repo_ref=None,
+            context_paths=[],
+            max_depth=2,
+            batch_concurrency=4,
+            cancel_check=lambda: False,
+        )
+    )
+
+    assert len(websocket.sent) >= 2
+    assert websocket.sent[0]["type"] == "event"
+    assert websocket.sent[0]["data"]["kind"] == "status"
+    assert websocket.sent[0]["data"]["text"] == "Bootstrapping Daytona sandbox"
+    assert websocket.sent[0]["data"]["payload"]["runtime"]["runtime_mode"] == (
+        "daytona_pilot"
+    )
+    assert websocket.sent[-1]["data"]["kind"] == "final"
 
 
 async def _noop_persist(*, include_volume_save: bool = True) -> None:

@@ -24,7 +24,6 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { typo } from "@/lib/config/typo";
 import type { FsNode } from "@/lib/data/types";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { useFileContent } from "@/hooks/useFilesystem";
@@ -249,7 +248,7 @@ function MetadataRow({
       >
         {label}
       </span>
-      <span className="text-foreground truncate" style={typo.caption}>
+      <span className="text-foreground truncate typo-caption">
         {value}
       </span>
     </div>
@@ -305,18 +304,18 @@ export function FileDetail({ file, className }: FileDetailProps) {
             {getFileIcon(file.name)}
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-foreground truncate" style={typo.h4}>
+            <h3 className="text-foreground truncate typo-h4">
               {file.name}
             </h3>
             <div className="flex items-center gap-2 mt-1">
               <Badge variant="secondary" className="rounded-full">
-                <span style={typo.micro}>
+                <span className="typo-micro">
                   {getMimeLabel(file.name, file.mime)}
                 </span>
               </Badge>
               {file.skillId && (
                 <Badge variant="accent" className="rounded-full">
-                  <span style={typo.micro}>Linked to skill</span>
+                  <span className="typo-micro">Linked to skill</span>
                 </Badge>
               )}
             </div>
@@ -327,8 +326,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
         <div className="flex items-center gap-2 mb-4 p-2.5 rounded-lg bg-muted/50 border-subtle">
           <HardDrive className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <code
-            className="text-foreground flex-1 min-w-0 truncate"
-            style={typo.mono}
+            className="text-foreground flex-1 min-w-0 truncate typo-mono"
           >
             {file.path}
           </code>
@@ -369,7 +367,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
         {isText ? (
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-muted-foreground" style={typo.label}>
+              <span className="text-muted-foreground typo-label">
                 Content Preview
               </span>
               {resolvedContent && (
@@ -379,7 +377,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                   onClick={handleCopyContent}
                 >
                   <Copy className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-muted-foreground" style={typo.helper}>
+                  <span className="text-muted-foreground typo-helper">
                     Copy
                   </span>
                 </Button>
@@ -393,7 +391,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
               {!mock && isContentLoading && (
                 <div className="p-6 flex flex-col items-center gap-2 text-center">
                   <Loader2 className="w-5 h-5 text-muted-foreground animate-spin motion-reduce:animate-none" />
-                  <p className="text-muted-foreground" style={typo.caption}>
+                  <p className="text-muted-foreground typo-caption">
                     Loading file content...
                   </p>
                 </div>
@@ -403,10 +401,10 @@ export function FileDetail({ file, className }: FileDetailProps) {
               {!mock && contentError && !isContentLoading && (
                 <div className="p-4 flex flex-col items-center gap-2 text-center">
                   <ExternalLink className="w-5 h-5 text-destructive" />
-                  <p className="text-muted-foreground" style={typo.caption}>
+                  <p className="text-muted-foreground typo-caption">
                     Failed to load file content.
                   </p>
-                  <p className="text-muted-foreground" style={typo.helper}>
+                  <p className="text-muted-foreground typo-helper">
                     {contentError.message}
                   </p>
                 </div>
@@ -430,10 +428,10 @@ export function FileDetail({ file, className }: FileDetailProps) {
                 /* No content available (mock mode, path not in map) */
                 <div className="p-4 flex flex-col items-center gap-2 text-center">
                   <ExternalLink className="w-5 h-5 text-muted-foreground" />
-                  <p className="text-muted-foreground" style={typo.caption}>
+                  <p className="text-muted-foreground typo-caption">
                     Content preview unavailable in mock mode.
                   </p>
-                  <p className="text-muted-foreground" style={typo.helper}>
+                  <p className="text-muted-foreground typo-helper">
                     Connect the fleet-rlm backend to view file contents.
                   </p>
                 </div>
@@ -447,12 +445,11 @@ export function FileDetail({ file, className }: FileDetailProps) {
               <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
                 {getFileIcon(file.name)}
               </div>
-              <p className="text-foreground" style={typo.label}>
+              <p className="text-foreground typo-label">
                 Binary file
               </p>
               <p
-                className="text-muted-foreground max-w-75"
-                style={typo.caption}
+                className="text-muted-foreground max-w-75 typo-caption"
               >
                 This file cannot be previewed in the browser. Download it or
                 open it with an external tool.
@@ -465,7 +462,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                 )}
               >
                 <ExternalLink className="w-4 h-4" />
-                <span style={typo.label}>Open externally</span>
+                <span className="typo-label">Open externally</span>
               </Button>
             </CardContent>
           </Card>
