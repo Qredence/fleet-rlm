@@ -101,7 +101,7 @@ export function normalizeTrajectorySteps(
   if (stepData) {
     const index = parseTrajectoryStepIndex(payload, stepData);
     const merged = {
-      ...(stepsByIndex.get(index) ?? {}),
+      ...stepsByIndex.get(index),
       ...stepData,
     };
     stepsByIndex.set(index, merged);

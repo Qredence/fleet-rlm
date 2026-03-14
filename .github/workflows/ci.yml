@@ -157,7 +157,7 @@ jobs:
 
       - name: Install Vite+ CLI
         if: steps.frontend.outputs.enabled == 'true'
-        run: npm install -g @voidzero-dev/vite-plus-cli-linux-x64-gnu
+        run: npm install -g vite-plus@0.1.11
 
       - name: Frontend install
         if: steps.frontend.outputs.enabled == 'true'

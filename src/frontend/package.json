@@ -15,7 +15,7 @@
     "type-check": "tsc -p tsconfig.app.json --noEmit",
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",
     "lint": "vp lint src/",
-    "lint:robustness": "bun run lint",
+    "lint:robustness": "pnpm run lint",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "test:e2e": "playwright test",
@@ -24,9 +24,9 @@
     "test:coverage": "vp test run --coverage",
     "api:sync-spec": "mkdir -p openapi && OPENAPI_SPEC_PATH=\"${OPENAPI_SPEC_PATH:-../../openapi.yaml}\" && cp \"$OPENAPI_SPEC_PATH\" openapi/fleet-rlm.openapi.yaml",
     "api:types": "openapi-typescript openapi/fleet-rlm.openapi.yaml -o src/lib/rlm-api/generated/openapi.ts",
-    "api:sync": "bun run api:sync-spec && bun run api:types",
-    "api:check": "bun run api:sync && git diff --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts && git diff --cached --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts",
-    "check": "bun run type-check && bun run lint && bun run test:unit && bun run build && bun run test:e2e"
+    "api:sync": "pnpm run api:sync-spec && pnpm run api:types",
+    "api:check": "pnpm run api:sync && git diff --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts && git diff --cached --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts",
+    "check": "pnpm run type-check && pnpm run lint && pnpm run test:unit && pnpm run build && pnpm run test:e2e"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.4.0",
@@ -132,13 +132,11 @@
     "vite-plus": "^0.1.11",
     "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.11"
   },
-  "packageManager": "pnpm@9.12.0",
-  "pnpm": {
-    "overrides": {
-      "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.11",
-      "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.11"
-    }
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.11",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.11"
   },
+  "packageManager": "pnpm@9.12.0",
   "trustedDependencies": [
     "@tailwindcss/oxide",
     "core-js",
