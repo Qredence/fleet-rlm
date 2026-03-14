@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatInput } from "@/components/chat/ChatInput";
 
@@ -20,12 +20,7 @@ describe("ChatInput", () => {
   };
 
   it("disables submit when the composer is empty", () => {
-    const html = renderToStaticMarkup(
-      <ChatInput
-        value="   "
-        {...baseProps}
-      />,
-    );
+    const html = renderToStaticMarkup(<ChatInput value="   " {...baseProps} />);
 
     expect(html).toContain("disabled");
     expect(html).toContain('aria-label="Submit"');
@@ -34,12 +29,7 @@ describe("ChatInput", () => {
 
   it("shows loading feedback while a response is in flight", () => {
     const html = renderToStaticMarkup(
-      <ChatInput
-        value="hello"
-        isLoading
-        isReceiving
-        {...baseProps}
-      />,
+      <ChatInput value="hello" isLoading isReceiving {...baseProps} />,
     );
 
     expect(html).toContain('aria-label="Sending message"');
@@ -49,11 +39,7 @@ describe("ChatInput", () => {
 
   it("keeps the composer generic even in Daytona mode", () => {
     const html = renderToStaticMarkup(
-      <ChatInput
-        value="summarize this repo"
-        {...baseProps}
-        runtimeMode="daytona_pilot"
-      />,
+      <ChatInput value="summarize this repo" {...baseProps} runtimeMode="daytona_pilot" />,
     );
 
     expect(html).not.toContain("Experimental Daytona runtime");

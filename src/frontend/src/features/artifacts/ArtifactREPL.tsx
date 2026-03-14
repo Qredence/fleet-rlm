@@ -26,12 +26,7 @@ interface CodeViewerProps {
 
 function CodeViewer({ code }: CodeViewerProps) {
   const { containerRef } = useCodeMirror({ value: code, readOnly: true });
-  return (
-    <div
-      ref={containerRef}
-      className="text-xs font-mono overflow-auto min-h-50"
-    />
-  );
+  return <div ref={containerRef} className="text-xs font-mono overflow-auto min-h-50" />;
 }
 
 interface ArtifactReplProps {
@@ -40,15 +35,13 @@ interface ArtifactReplProps {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
 }
 
 function asText(value: unknown): string {
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (!value) return "";
 
   if (typeof value === "object" && !Array.isArray(value)) {
@@ -80,14 +73,10 @@ function resolveCode(step: ExecutionStep | undefined): string {
   if (typeof inputObj === "string") return inputObj;
 
   const input = asRecord(inputObj);
-  return asText(
-    input?.code ?? input?.tool_input ?? input?.prompt ?? step.input,
-  );
+  return asText(input?.code ?? input?.tool_input ?? input?.prompt ?? step.input);
 }
 
-function resolveVariables(
-  step: ExecutionStep | undefined,
-): Record<string, unknown> | undefined {
+function resolveVariables(step: ExecutionStep | undefined): Record<string, unknown> | undefined {
   if (!step) return undefined;
 
   let outputObj: unknown = step.output;
@@ -123,8 +112,7 @@ function resolveOutput(step: ExecutionStep | undefined): string {
 
   const outputRecord = asRecord(outputObj);
   if (outputRecord) {
-    const extracted =
-      outputRecord.tool_output ?? outputRecord.result ?? outputRecord.text;
+    const extracted = outputRecord.tool_output ?? outputRecord.result ?? outputRecord.text;
 
     if (extracted !== undefined) {
       if (typeof extracted === "string") return extracted;
@@ -151,9 +139,7 @@ function inferToolState(step: ExecutionStep | undefined): LocalToolState {
 export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
   const target =
     steps.find((step) => step.id === activeStepId) ??
-    [...steps]
-      .reverse()
-      .find((step) => step.type === "repl" || step.type === "tool");
+    [...steps].reverse().find((step) => step.type === "repl" || step.type === "tool");
 
   const code = resolveCode(target);
   const variables = resolveVariables(target);
@@ -189,9 +175,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
 
               <SandboxTabContent value="code">
                 <div className="rounded-xl border border-border-subtle/80 bg-card/40 overflow-hidden min-h-45">
-                  <CodeViewer
-                    code={code || "# No executable code captured for this step"}
-                  />
+                  <CodeViewer code={code || "# No executable code captured for this step"} />
                 </div>
               </SandboxTabContent>
 
@@ -202,11 +186,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
                       {output || "No output captured."}
                     </pre>
                   }
-                  errorText={
-                    target.label?.toLowerCase().includes("error")
-                      ? output
-                      : undefined
-                  }
+                  errorText={target.label?.toLowerCase().includes("error") ? output : undefined}
                 />
               </SandboxTabContent>
             </SandboxTabs>

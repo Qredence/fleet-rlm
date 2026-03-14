@@ -1,4 +1,3 @@
-
 import type { ComponentProps } from "react";
 
 import {
@@ -10,14 +9,7 @@ import {
 } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils/cn";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 interface SnippetContextType {
   code: string;
@@ -31,12 +23,7 @@ export type SnippetProps = ComponentProps<typeof InputGroup> & {
   code: string;
 };
 
-export const Snippet = ({
-  code,
-  className,
-  children,
-  ...props
-}: SnippetProps) => (
+export const Snippet = ({ code, className, children, ...props }: SnippetProps) => (
   <SnippetContext.Provider value={{ code }}>
     <InputGroup className={cn("font-mono", className)} {...props}>
       {children}
@@ -46,23 +33,15 @@ export const Snippet = ({
 
 export type SnippetAddonProps = ComponentProps<typeof InputGroupAddon>;
 
-export const SnippetAddon = (props: SnippetAddonProps) => (
-  <InputGroupAddon {...props} />
-);
+export const SnippetAddon = (props: SnippetAddonProps) => <InputGroupAddon {...props} />;
 
 export type SnippetTextProps = ComponentProps<typeof InputGroupText>;
 
 export const SnippetText = ({ className, ...props }: SnippetTextProps) => (
-  <InputGroupText
-    className={cn("pl-2 font-normal text-muted-foreground", className)}
-    {...props}
-  />
+  <InputGroupText className={cn("pl-2 font-normal text-muted-foreground", className)} {...props} />
 );
 
-export type SnippetInputProps = Omit<
-  ComponentProps<typeof InputGroupInput>,
-  "readOnly" | "value"
->;
+export type SnippetInputProps = Omit<ComponentProps<typeof InputGroupInput>, "readOnly" | "value">;
 
 export const SnippetInput = ({ className, ...props }: SnippetInputProps) => {
   const { code } = useContext(SnippetContext);
@@ -106,10 +85,7 @@ export const SnippetCopyButton = ({
         await navigator.clipboard.writeText(code);
         setIsCopied(true);
         onCopy?.();
-        timeoutRef.current = window.setTimeout(
-          () => setIsCopied(false),
-          timeout
-        );
+        timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);
       }
     } catch (error) {
       onError?.(error as Error);
@@ -120,7 +96,7 @@ export const SnippetCopyButton = ({
     () => () => {
       window.clearTimeout(timeoutRef.current);
     },
-    []
+    [],
   );
 
   const Icon = isCopied ? CheckIcon : CopyIcon;

@@ -26,20 +26,12 @@ function EvidencePreviewButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className={inspectorPreviewButtonClass()}
-      onClick={onClick}
-    >
+    <button type="button" className={inspectorPreviewButtonClass()} onClick={onClick}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1">
-          <div className="text-sm font-medium leading-5 text-foreground">
-            {label}
-          </div>
+          <div className="text-sm font-medium leading-5 text-foreground">{label}</div>
           {description ? (
-            <div className="text-sm leading-5 text-muted-foreground">
-              {description}
-            </div>
+            <div className="text-sm leading-5 text-muted-foreground">{description}</div>
           ) : null}
         </div>
         <Badge variant="secondary" className={inspectorStyles.badge.meta}>
@@ -77,10 +69,7 @@ export function TrajectoryPreview({
         : [];
 
   return (
-    <section
-      className={inspectorStyles.stack.section}
-      data-slot="assistant-trajectory-preview"
-    >
+    <section className={inspectorStyles.stack.section} data-slot="assistant-trajectory-preview">
       <div className={inspectorStyles.heading.section}>Trajectory</div>
       <div className={inspectorStyles.stack.compact}>
         {items.map((item) => {
@@ -94,22 +83,14 @@ export function TrajectoryPreview({
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="space-y-1">
-                  <div className="text-sm font-medium leading-5 text-foreground">
-                    {item.title}
-                  </div>
+                  <div className="text-sm font-medium leading-5 text-foreground">{item.title}</div>
                   {item.body ? (
                     <div className="text-sm leading-6 text-muted-foreground">
-                      <Streamdown
-                        content={item.body}
-                        streaming={item.status === "running"}
-                      />
+                      <Streamdown content={item.body} streaming={item.status === "running"} />
                     </div>
                   ) : null}
                 </div>
-                <Badge
-                  variant={tone.variant}
-                  className={inspectorStyles.badge.status}
-                >
+                <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
                   {tone.label}
                 </Badge>
               </div>
@@ -144,10 +125,7 @@ export function ExecutionPreview({
   if (!model.execution.hasContent) return null;
 
   return (
-    <section
-      className={inspectorStyles.stack.section}
-      data-slot="assistant-execution-preview"
-    >
+    <section className={inspectorStyles.stack.section} data-slot="assistant-execution-preview">
       <div className={inspectorStyles.heading.section}>Execution</div>
       <div className={inspectorStyles.stack.compact}>
         {model.execution.sections.slice(0, 2).map((section) => {
@@ -220,19 +198,14 @@ export function EvidencePreview({
   ].slice(0, 2);
 
   return (
-    <section
-      className={inspectorStyles.stack.section}
-      data-slot="assistant-evidence-preview"
-    >
+    <section className={inspectorStyles.stack.section} data-slot="assistant-evidence-preview">
       <div className={inspectorStyles.heading.section}>Evidence</div>
       <div className={inspectorStyles.stack.compact}>
         {items.map((item) => (
           <EvidencePreviewButton
             key={item.key}
             label={item.label}
-            description={
-              item.description ? summarizeText(item.description) : undefined
-            }
+            description={item.description ? summarizeText(item.description) : undefined}
             iconLabel={item.badge}
             onClick={() => onOpenTab("evidence")}
           />

@@ -25,9 +25,7 @@ import type { ChatRenderToolState } from "@/lib/data/types";
  * - "approval-responded" → approval responded
  * - "output-denied" → output denied
  */
-export function mapToolState(
-  state: ChatRenderToolState,
-): ToolUIPart["state"] {
+export function mapToolState(state: ChatRenderToolState): ToolUIPart["state"] {
   switch (state) {
     case "input-streaming":
       return "input-streaming";

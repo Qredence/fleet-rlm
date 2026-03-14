@@ -58,9 +58,7 @@ function buildAssistantTurnReasoningParts(item: AssistantTurnDisplayItem) {
   const message = item.message;
   const fromMessage =
     message?.renderParts?.flatMap((part, idx) =>
-      part.kind === "reasoning"
-        ? [{ key: `${message.id}-${part.kind}-${idx}`, part }]
-        : [],
+      part.kind === "reasoning" ? [{ key: `${message.id}-${part.kind}-${idx}`, part }] : [],
     ) ?? [];
   return [...fromTrace, ...fromMessage];
 }
@@ -73,16 +71,12 @@ function buildAssistantTurnTrajectoryParts(item: AssistantTurnDisplayItem) {
   const message = item.message;
   const fromMessage =
     message?.renderParts?.flatMap((part, idx) =>
-      part.kind === "chain_of_thought"
-        ? [{ key: `${message.id}-${part.kind}-${idx}`, part }]
-        : [],
+      part.kind === "chain_of_thought" ? [{ key: `${message.id}-${part.kind}-${idx}`, part }] : [],
     ) ?? [];
   return [...fromTrace, ...fromMessage];
 }
 
-function mergeReasoningParts(
-  reasoningParts: ReturnType<typeof buildAssistantTurnReasoningParts>,
-) {
+function mergeReasoningParts(reasoningParts: ReturnType<typeof buildAssistantTurnReasoningParts>) {
   if (reasoningParts.length === 0) return [] satisfies MergedReasoningPart[];
 
   const groups = new Map<
@@ -119,9 +113,7 @@ function mergeReasoningParts(
   }
 
   return [...groups.entries()]
-    .sort(([leftLabel], [rightLabel]) =>
-      compareReasoningLabels(leftLabel, rightLabel),
-    )
+    .sort(([leftLabel], [rightLabel]) => compareReasoningLabels(leftLabel, rightLabel))
     .map(([label, group]) => ({
       key: group.key,
       label,
@@ -136,8 +128,7 @@ function buildOverviewReasoning(
   mergedReasoning: MergedReasoningPart[],
 ): CompactReasoning | undefined {
   const overviewGroups = mergedReasoning.filter(
-    (group) =>
-      !/^thought_\d+$/.test(group.label) && group.label !== "final_reasoning",
+    (group) => !/^thought_\d+$/.test(group.label) && group.label !== "final_reasoning",
   );
   if (overviewGroups.length === 0) return undefined;
 
@@ -147,9 +138,7 @@ function buildOverviewReasoning(
     text: overviewGroups.map((group) => group.text).join("\n\n"),
     duration: overviewGroups[overviewGroups.length - 1]?.duration,
     isStreaming: overviewGroups.some((group) => group.isStreaming),
-    runtimeBadges: uniqueStrings(
-      overviewGroups.flatMap((group) => group.runtimeBadges),
-    ),
+    runtimeBadges: uniqueStrings(overviewGroups.flatMap((group) => group.runtimeBadges)),
   };
 }
 
@@ -201,32 +190,27 @@ function buildTrajectoryItems(
   trajectoryParts: ReturnType<typeof buildAssistantTurnTrajectoryParts>,
   mergedReasoning: MergedReasoningPart[],
 ) {
-  const cotItems: OrderedTrajectoryItem[] = trajectoryParts.flatMap(
-    ({ part }) =>
-      part.steps.map((step, order) => ({
-        originalOrder: order,
-        item: {
-          id: step.id,
-          index: step.index,
-          title: trajectoryTitle(step.index ?? order, step.label),
-          body: trajectoryBody(step.details),
-          details: step.details,
-          status: mapTrajectoryStatus(step.status),
-          runtimeBadges: getRuntimeBadgeStrings(part.runtimeContext),
-          source: "cot" as const,
-        },
-      })),
+  const cotItems: OrderedTrajectoryItem[] = trajectoryParts.flatMap(({ part }) =>
+    part.steps.map((step, order) => ({
+      originalOrder: order,
+      item: {
+        id: step.id,
+        index: step.index,
+        title: trajectoryTitle(step.index ?? order, step.label),
+        body: trajectoryBody(step.details),
+        details: step.details,
+        status: mapTrajectoryStatus(step.status),
+        runtimeBadges: getRuntimeBadgeStrings(part.runtimeContext),
+        source: "cot" as const,
+      },
+    })),
   );
 
   cotItems.sort((left, right) => {
     const leftIndex =
-      typeof left.item.index === "number"
-        ? left.item.index
-        : Number.POSITIVE_INFINITY;
+      typeof left.item.index === "number" ? left.item.index : Number.POSITIVE_INFINITY;
     const rightIndex =
-      typeof right.item.index === "number"
-        ? right.item.index
-        : Number.POSITIVE_INFINITY;
+      typeof right.item.index === "number" ? right.item.index : Number.POSITIVE_INFINITY;
     if (leftIndex !== rightIndex) return leftIndex - rightIndex;
     return left.originalOrder - right.originalOrder;
   });
@@ -259,30 +243,20 @@ function buildTrajectoryItems(
   const fallbackThoughtItems =
     cotItems.length === 0
       ? thoughtItems
-      : thoughtItems.filter(
-          ({ item }) => item.index == null || !existingIndexes.has(item.index),
-        );
+      : thoughtItems.filter(({ item }) => item.index == null || !existingIndexes.has(item.index));
 
-  const combined = [...cotItems, ...fallbackThoughtItems].sort(
-    (left, right) => {
-      const leftIndex =
-        typeof left.item.index === "number"
-          ? left.item.index
-          : Number.POSITIVE_INFINITY;
-      const rightIndex =
-        typeof right.item.index === "number"
-          ? right.item.index
-          : Number.POSITIVE_INFINITY;
-      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-      return left.originalOrder - right.originalOrder;
-    },
-  );
+  const combined = [...cotItems, ...fallbackThoughtItems].sort((left, right) => {
+    const leftIndex =
+      typeof left.item.index === "number" ? left.item.index : Number.POSITIVE_INFINITY;
+    const rightIndex =
+      typeof right.item.index === "number" ? right.item.index : Number.POSITIVE_INFINITY;
+    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+    return left.originalOrder - right.originalOrder;
+  });
 
   const trajectoryItems: TrajectoryItem[] = combined.map(({ item }) => item);
 
-  const finalReasoning = mergedReasoning.find(
-    (group) => group.label === "final_reasoning",
-  );
+  const finalReasoning = mergedReasoning.find((group) => group.label === "final_reasoning");
   if (finalReasoning) {
     const finalItem: TrajectoryItem = {
       id: finalReasoning.key,
@@ -311,9 +285,7 @@ function buildTrajectoryItems(
 export function buildAssistantTrajectoryModel(
   item: AssistantTurnDisplayItem,
 ): AssistantTrajectoryModel {
-  const reasoningParts = mergeReasoningParts(
-    buildAssistantTurnReasoningParts(item),
-  );
+  const reasoningParts = mergeReasoningParts(buildAssistantTurnReasoningParts(item));
   const overview = buildOverviewReasoning(reasoningParts);
   const { items, hasCot } = buildTrajectoryItems(
     buildAssistantTurnTrajectoryParts(item),

@@ -1,30 +1,17 @@
 // ── Navigation & Phases ─────────────────────────────────────────────
 export type NavItem = "workspace" | "volumes" | "settings";
 
-export type CreationPhase =
-  | "idle"
-  | "understanding"
-  | "generating"
-  | "validating"
-  | "complete";
+export type CreationPhase = "idle" | "understanding" | "generating" | "validating" | "complete";
 
 // ── Prompt Feature & Mode ───────────────────────────────────────────
 /** Toggleable features in the prompt "+" menu */
-export type PromptFeature =
-  | "library"
-  | "contextMemory"
-  | "capabilities"
-  | "webSearch";
+export type PromptFeature = "library" | "contextMemory" | "capabilities" | "webSearch";
 
 /** Prompt execution mode selected via toolbar chip */
 export type PromptMode = "auto" | "workspace" | "webSearch" | "cowork";
 
 /** Active tab inside the workspace Message Inspector. */
-export type InspectorTab =
-  | "trajectory"
-  | "execution"
-  | "evidence"
-  | "graph";
+export type InspectorTab = "trajectory" | "execution" | "evidence" | "graph";
 
 // ── Domain Types ────────────────────────────────────────────────────
 export interface Skill {
@@ -150,12 +137,7 @@ export interface ChatInlineCitation {
   endChar?: number;
 }
 
-export type ChatSourceKind =
-  | "web"
-  | "file"
-  | "artifact"
-  | "tool_output"
-  | "other";
+export type ChatSourceKind = "web" | "file" | "artifact" | "tool_output" | "other";
 
 export interface ChatSourceItem {
   sourceId: string;
@@ -294,12 +276,7 @@ export interface SkillMetadataItem {
 
 // ── Memory ──────────────────────────────────────────────────────────
 
-export type MemoryType =
-  | "fact"
-  | "preference"
-  | "session"
-  | "knowledge"
-  | "directive";
+export type MemoryType = "fact" | "preference" | "session" | "knowledge" | "directive";
 
 export interface MemoryEntry {
   id: string;

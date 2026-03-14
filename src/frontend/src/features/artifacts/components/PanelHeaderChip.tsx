@@ -52,10 +52,7 @@ export function PanelHeaderChip({
       )}
     >
       {icon}
-      <span
-        data-slot="panel-header-chip-label"
-        className="text-foreground truncate typo-label"
-      >
+      <span data-slot="panel-header-chip-label" className="text-foreground truncate typo-label">
         {label}
       </span>
       {version && (

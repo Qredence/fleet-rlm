@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RlmWorkspace } from "@/features/rlm-workspace/RlmWorkspace";
@@ -11,8 +11,7 @@ const chatStoreState = {
 const backendRuntimeState = {
   messages: [{ id: "m1", type: "assistant", content: "existing chat row" }],
   turnArtifactsByMessageId: {},
-  inputValue:
-    "Analyze https://github.com/qredence/fleet-rlm and summarize the tracing flow.",
+  inputValue: "Analyze https://github.com/qredence/fleet-rlm and summarize the tracing flow.",
   setInputValue: vi.fn(),
   phase: "idle",
   isTyping: false,
@@ -73,8 +72,7 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 vi.mock("@/stores/chatStore", () => ({
-  useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
-    selector(chatStoreState),
+  useChatStore: (selector: (state: typeof chatStoreState) => unknown) => selector(chatStoreState),
 }));
 
 vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
@@ -82,9 +80,7 @@ vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
 }));
 
 vi.mock("@/features/rlm-workspace/ChatMessageList", () => ({
-  ChatMessageList: () => (
-    <div data-testid="chat-message-list">ChatMessageList</div>
-  ),
+  ChatMessageList: () => <div data-testid="chat-message-list">ChatMessageList</div>,
 }));
 
 vi.mock("@/components/chat/ChatInput", () => ({
@@ -114,9 +110,7 @@ describe("RlmWorkspace run workbench mode", () => {
     vi.clearAllMocks();
     capturedOnSend = null;
     chatStoreState.runtimeMode = "daytona_pilot";
-    backendRuntimeState.messages = [
-      { id: "m1", type: "assistant", content: "existing chat row" },
-    ];
+    backendRuntimeState.messages = [{ id: "m1", type: "assistant", content: "existing chat row" }];
     backendRuntimeState.inputValue =
       "Analyze https://github.com/qredence/fleet-rlm and summarize the tracing flow.";
     backendRuntimeState.phase = "idle";

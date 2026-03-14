@@ -3,6 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Commands
+
 This is a React + Vite frontend managed by `bun`.
 
 - **Install**: `bun install`
@@ -14,9 +15,10 @@ This is a React + Vite frontend managed by `bun`.
 - **Full QA Check**: `bun run check` (runs types, lint, unit tests, build, and e2e)
 - **API Types Sync**: `bun run api:sync` (syncs OpenAPI spec from backend and generates TS types)
 
-*Note: The FastAPI backend must be running for full functionality. Start it from the root `fleet-rlm` repo with `uv run fleet-rlm serve-api --port 8000`.*
+_Note: The FastAPI backend must be running for full functionality. Start it from the root `fleet-rlm` repo with `uv run fleet-rlm serve-api --port 8000`._
 
 ## High-Level Architecture
+
 - **`src/app/`**: Application shell, top-level layout (`RootLayout.tsx`), routing, and page components.
 - **`src/features/`**: Domain-specific logic, components, and views (e.g., `chat`, `settings`, `skill-library`). This is where feature-specific business logic is encapsulated.
 - **`src/components/ui/`**: Low-level, reusable UI primitives (mostly Shadcn UI).
@@ -30,7 +32,9 @@ This is a React + Vite frontend managed by `bun`.
   - End-to-end tests use Playwright and are located in `tests/e2e/`.
 
 ## Environment Variables
+
 The application relies on a `.env` file (copy from `.env.example`). Key variables include:
+
 - `VITE_FLEET_API_URL` (usually `http://localhost:8000`)
 - `VITE_FLEET_WS_URL` (usually `ws://localhost:8000/ws/chat`)
 

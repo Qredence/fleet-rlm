@@ -43,13 +43,9 @@ interface RuntimeModeDropdownProps {
   onChange: (mode: WsRuntimeMode) => void;
 }
 
-function RuntimeModeDropdown({
-  value,
-  onChange,
-}: RuntimeModeDropdownProps) {
+function RuntimeModeDropdown({ value, onChange }: RuntimeModeDropdownProps) {
   const currentMode =
-    RUNTIME_MODE_OPTIONS.find((option) => option.id === value) ??
-    RUNTIME_MODE_OPTIONS[0]!;
+    RUNTIME_MODE_OPTIONS.find((option) => option.id === value) ?? RUNTIME_MODE_OPTIONS[0]!;
   const CurrentModeIcon = currentMode.icon;
 
   return (
@@ -73,10 +69,7 @@ function RuntimeModeDropdown({
           </Button>
         </MenubarTrigger>
 
-        <MenubarContent
-          align="end"
-          className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-48")}
-        >
+        <MenubarContent align="end" className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-48")}>
           <MenubarRadioGroup value={value}>
             {RUNTIME_MODE_OPTIONS.map((option) => (
               <MenubarRadioItem

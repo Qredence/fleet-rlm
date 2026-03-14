@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { ArtifactGraph } from "@/features/artifacts/ArtifactGraph";
 import type { ExecutionStep } from "@/stores/artifactStore";

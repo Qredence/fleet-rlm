@@ -30,11 +30,7 @@ import { toast } from "sonner";
 import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 import { useCodeMirror } from "@/hooks/useCodeMirror";
 
@@ -204,38 +200,22 @@ function ConsoleOutput({
     <div className="flex flex-col h-full">
       {/* Console header */}
       <div className="flex items-center gap-2 border-t border-border-subtle bg-[var(--color-surface-secondary)] px-4 py-2 shrink-0">
-        <Terminal
-          className="size-3.5 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <span className="text-muted-foreground typo-helper">
-          Console Output
-        </span>
+        <Terminal className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        <span className="text-muted-foreground typo-helper">Console Output</span>
         {isRunning && (
           <motion.span
             className="flex items-center gap-1 ml-auto"
-            animate={
-              prefersReduced ? { opacity: 1 } : { opacity: [0.5, 1, 0.5] }
-            }
-            transition={
-              prefersReduced
-                ? { duration: 0.01 }
-                : { duration: 1.5, repeat: Infinity }
-            }
+            animate={prefersReduced ? { opacity: 1 } : { opacity: [0.5, 1, 0.5] }}
+            transition={prefersReduced ? { duration: 0.01 } : { duration: 1.5, repeat: Infinity }}
           >
             <Circle className="size-2" fill="var(--chart-3)" stroke="none" />
-            <span className="text-chart-3 typo-micro">
-              Running
-            </span>
+            <span className="text-chart-3 typo-micro">Running</span>
           </motion.span>
         )}
       </div>
 
       {/* Output area */}
-      <div
-        ref={scrollRef}
-        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-card p-4"
-      >
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto overscroll-contain bg-card p-4">
         {output ? (
           <pre style={CONSOLE_OUTPUT_STYLE}>{output}</pre>
         ) : (
@@ -274,8 +254,7 @@ export function CodeArtifact() {
     return initial;
   });
 
-  const activeFile =
-    mockFiles.find((f) => f.id === activeFileId) ?? defaultFile;
+  const activeFile = mockFiles.find((f) => f.id === activeFileId) ?? defaultFile;
   const currentCode = editedCode[activeFileId] ?? activeFile.code;
 
   // CodeMirror hook
@@ -298,9 +277,7 @@ export function CodeArtifact() {
     intervalRef.current = setInterval(
       () => {
         if (lineIdx < lines.length) {
-          setConsoleOutput(
-            (prev) => (prev ? prev + "\n" : "") + lines[lineIdx],
-          );
+          setConsoleOutput((prev) => (prev ? prev + "\n" : "") + lines[lineIdx]);
           lineIdx++;
         } else {
           if (intervalRef.current) clearInterval(intervalRef.current);
@@ -439,14 +416,8 @@ export function CodeArtifact() {
         </Tooltip>
 
         <div className="ml-auto flex items-center gap-2">
-          {isModified && (
-            <span className="text-accent typo-micro">
-              Modified
-            </span>
-          )}
-          <span className="text-muted-foreground typo-micro">
-            Python 3.12
-          </span>
+          {isModified && <span className="text-accent typo-micro">Modified</span>}
+          <span className="text-muted-foreground typo-micro">Python 3.12</span>
           <button
             type="button"
             onClick={() => setShowConsole((p) => !p)}
@@ -456,9 +427,7 @@ export function CodeArtifact() {
             )}
           >
             <Terminal className="size-3 text-muted-foreground" />
-            <span className="text-muted-foreground typo-micro">
-              Console
-            </span>
+            <span className="text-muted-foreground typo-micro">Console</span>
             <motion.span
               animate={{ rotate: showConsole ? 180 : 0 }}
               transition={prefersReduced ? springs.instant : springs.snappy}
@@ -474,10 +443,7 @@ export function CodeArtifact() {
         {/* CodeMirror editor container */}
         <div
           ref={editorRef}
-          className={cn(
-            "min-h-0 flex-1 overflow-hidden bg-card",
-            !editorReady && "hidden",
-          )}
+          className={cn("min-h-0 flex-1 overflow-hidden bg-card", !editorReady && "hidden")}
         />
 
         {/* Textarea fallback when CodeMirror fails to load */}
@@ -507,11 +473,7 @@ export function CodeArtifact() {
               initial={prefersReduced ? { height: 180 } : { height: 0 }}
               animate={{ height: 180 }}
               exit={prefersReduced ? { height: 0 } : { height: 0 }}
-              transition={
-                prefersReduced
-                  ? fades.instant
-                  : { duration: 0.2, ease: "easeInOut" }
-              }
+              transition={prefersReduced ? fades.instant : { duration: 0.2, ease: "easeInOut" }}
               className="shrink-0 overflow-hidden border-t border-border-subtle"
             >
               <ConsoleOutput

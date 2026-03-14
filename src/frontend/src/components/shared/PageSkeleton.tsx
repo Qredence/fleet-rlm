@@ -11,13 +11,7 @@ import { cn } from "@/lib/utils/cn";
  * All colours come from `bg-muted` via the Skeleton primitive so it
  * adapts to light/dark mode automatically.
  */
-function PageSkeleton({
-  isMobile,
-  className,
-}: {
-  isMobile?: boolean;
-  className?: string;
-}) {
+function PageSkeleton({ isMobile, className }: { isMobile?: boolean; className?: string }) {
   return (
     <div
       className={cn(
@@ -56,12 +50,7 @@ function PageSkeleton({
  */
 function PanelSkeleton({ className }: { className?: string }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-4 p-5 animate-in fade-in duration-150",
-        className,
-      )}
-    >
+    <div className={cn("flex flex-col gap-4 p-5 animate-in fade-in duration-150", className)}>
       <div className="flex flex-col gap-2">
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-3.5 w-64" />

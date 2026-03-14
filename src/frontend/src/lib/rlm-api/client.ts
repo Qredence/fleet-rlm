@@ -62,10 +62,7 @@ async function requestJson<T>(
   },
 ): Promise<T> {
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(
-    () => timeoutController.abort(),
-    rlmApiConfig.timeoutMs,
-  );
+  const timeoutId = setTimeout(() => timeoutController.abort(), rlmApiConfig.timeoutMs);
 
   const signal = options?.signal
     ? anySignal([options.signal, timeoutController.signal])
@@ -80,9 +77,9 @@ async function requestJson<T>(
         Accept: "application/json",
         ...(options?.body ? { "Content-Type": "application/json" } : {}),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        ...(options?.headers ?? {}),
+        ...options?.headers,
       },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
+      body: options?.body && options?.method !== "GET" ? JSON.stringify(options.body) : undefined,
     });
 
     if (!response.ok) {

@@ -4,7 +4,7 @@
  * Verifies that `rlmApiConfig.wsUrl` (via `getActiveWsUrl`) is derived
  * correctly from environment variables.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 async function loadRlmApiConfigModule() {
   vi.resetModules();

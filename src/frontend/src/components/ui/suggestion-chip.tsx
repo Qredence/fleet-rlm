@@ -29,13 +29,7 @@ interface SuggestionChipProps {
  * Plain function declaration — `const + forwardRef` crashes HMR in
  * Figma Make preview.
  */
-function SuggestionChip({
-  icon: Icon,
-  label,
-  index = 0,
-  onClick,
-  className,
-}: SuggestionChipProps) {
+function SuggestionChip({ icon: Icon, label, index = 0, onClick, className }: SuggestionChipProps) {
   const prefersReduced = useReducedMotion();
 
   return (
@@ -52,9 +46,7 @@ function SuggestionChip({
       )}
       initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={
-        prefersReduced ? { duration: 0.01 } : { delay: 0.15 + index * 0.08 }
-      }
+      transition={prefersReduced ? { duration: 0.01 } : { delay: 0.15 + index * 0.08 }}
       onClick={() => onClick?.(label)}
     >
       <Icon />

@@ -8,10 +8,7 @@ import {
   shouldApplyRunFrame,
   startRunWorkbenchRun,
 } from "@/features/rlm-workspace/run-workbench/runWorkbenchAdapter";
-import type {
-  DetailTab,
-  RunWorkbenchState,
-} from "@/features/rlm-workspace/run-workbench/types";
+import type { DetailTab, RunWorkbenchState } from "@/features/rlm-workspace/run-workbench/types";
 
 interface RunWorkbenchStore extends RunWorkbenchState {
   reset: () => void;
@@ -32,8 +29,7 @@ export const useRunWorkbenchStore = create<RunWorkbenchStore>((set, get) => ({
   ...createInitialRunWorkbenchState(),
   reset: () => set(createInitialRunWorkbenchState()),
   beginRun: (input) => set((state) => startRunWorkbenchRun(state, input)),
-  failRun: (errorMessage) =>
-    set((state) => failRunWorkbenchRun(state, errorMessage)),
+  failRun: (errorMessage) => set((state) => failRunWorkbenchRun(state, errorMessage)),
   applyFrame: (frame) =>
     set((state) => {
       if (!shouldApplyRunFrame(state, frame)) return state;

@@ -1,6 +1,6 @@
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { SettingsDropdown } from "@/components/chat/input/SettingsDropdown";
 
@@ -13,22 +13,12 @@ vi.mock("@/hooks/useAppNavigate", () => ({
 vi.mock("@/components/ui/menubar", () => ({
   Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarTrigger: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
+  MenubarTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
+    <button onClick={onSelect}>{children}</button>
   ),
-  MenubarContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarLabel: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarItem: ({
-    children,
-    onSelect,
-  }: {
-    children: ReactNode;
-    onSelect?: () => void;
-  }) => <button onClick={onSelect}>{children}</button>,
 }));
 
 describe("SettingsDropdown", () => {
@@ -52,8 +42,7 @@ describe("SettingsDropdown", () => {
     });
 
     const button = Array.from(container.querySelectorAll("button")).find(
-      (candidate) =>
-        candidate.textContent?.includes("Open runtime settings") ?? false,
+      (candidate) => candidate.textContent?.includes("Open runtime settings") ?? false,
     );
 
     act(() => {
@@ -62,9 +51,7 @@ describe("SettingsDropdown", () => {
 
     expect(handleOpenSettings).toHaveBeenCalledOnce();
     const [event] = handleOpenSettings.mock.calls[0] ?? [];
-    expect((event as CustomEvent<{ section?: string }>).detail?.section).toBe(
-      "runtime",
-    );
+    expect((event as CustomEvent<{ section?: string }>).detail?.section).toBe("runtime");
     expect(navigate).not.toHaveBeenCalled();
 
     document.removeEventListener("open-settings", handleOpenSettings);
@@ -83,8 +70,7 @@ describe("SettingsDropdown", () => {
     });
 
     const button = Array.from(container.querySelectorAll("button")).find(
-      (candidate) =>
-        candidate.textContent?.includes("Open runtime settings") ?? false,
+      (candidate) => candidate.textContent?.includes("Open runtime settings") ?? false,
     );
 
     act(() => {

@@ -86,16 +86,13 @@ export const inspectorStyles = {
 
   /** Graph tab specifics. */
   graph: {
-    canvas:
-      "h-105 overflow-hidden rounded-2xl border border-border-subtle/80 bg-muted/15",
+    canvas: "h-105 overflow-hidden rounded-2xl border border-border-subtle/80 bg-muted/15",
     statsGrid: "grid gap-3 md:grid-cols-3",
   },
 } as const;
 
 /** Build an inset detail-block className for a given tone. */
-export function inspectorInsetClass(
-  tone: "default" | "strong" | "error" = "default",
-) {
+export function inspectorInsetClass(tone: "default" | "strong" | "error" = "default") {
   return cn(
     inspectorStyles.inset.root,
     tone === "error"
@@ -108,8 +105,5 @@ export function inspectorInsetClass(
 
 /** Build a preview button className, optionally selected. */
 export function inspectorPreviewButtonClass(selected = false) {
-  return cn(
-    inspectorStyles.preview.button,
-    selected && inspectorStyles.preview.selected,
-  );
+  return cn(inspectorStyles.preview.button, selected && inspectorStyles.preview.selected);
 }

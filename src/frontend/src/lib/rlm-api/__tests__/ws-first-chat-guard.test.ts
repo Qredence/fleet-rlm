@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 const LEGACY_HELPER_CALL = "rlmCoreEndpoints.";
 
@@ -117,8 +117,7 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
 
     if (!entry.isFile()) continue;
     if (!/\.(ts|tsx)$/.test(entry.name)) continue;
-    if (entry.name.includes(".test.") || entry.name.includes(".spec."))
-      continue;
+    if (entry.name.includes(".test.") || entry.name.includes(".spec.")) continue;
     files.push(absPath);
   }
 
@@ -152,10 +151,7 @@ describe("ws-first chat guard", () => {
   it("ensures generated OpenAPI no longer contains /api/v1/chat", async () => {
     const thisDir = path.dirname(fileURLToPath(import.meta.url));
     const srcRoot = path.resolve(thisDir, "../../../");
-    const generatedPath = path.resolve(
-      srcRoot,
-      "lib/rlm-api/generated/openapi.ts",
-    );
+    const generatedPath = path.resolve(srcRoot, "lib/rlm-api/generated/openapi.ts");
     const generated = await fs.readFile(generatedPath, "utf8");
     expect(generated.includes('"/api/v1/chat"')).toBe(false);
   });

@@ -15,7 +15,6 @@ export type SettingsSection = (typeof settingsSections)[number]["key"];
 export const sectionDescriptions: Record<SettingsSection, string> = {
   appearance: "Control theme and interface appearance.",
   telemetry: "Configure anonymous telemetry preferences.",
-  litellm:
-    "Manage LiteLLM-compatible runtime model and provider integration settings.",
+  litellm: "Manage LiteLLM-compatible runtime model and provider integration settings.",
   runtime: "Configure runtime credentials and run Modal/LM connection tests.",
 };

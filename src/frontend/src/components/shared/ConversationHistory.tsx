@@ -16,11 +16,7 @@ import type { Conversation } from "@/stores/chatHistoryStore";
 import { cn } from "@/lib/utils/cn";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -87,9 +83,7 @@ function groupConversations(
     map.get(group)!.push(conv);
   }
 
-  return order
-    .filter((g) => map.has(g))
-    .map((g) => ({ group: g, items: map.get(g)! }));
+  return order.filter((g) => map.has(g)).map((g) => ({ group: g, items: map.get(g)! }));
 }
 
 // ── Phase badge helper ───────────────────────────────────────────────
@@ -144,9 +138,7 @@ export function ConversationHistory({
       <div className="flex items-center justify-between px-1 mb-4">
         <div className="flex items-center gap-2">
           <Clock className="size-4 text-muted-foreground" aria-hidden="true" />
-          <span className="text-foreground typo-h4">
-            Recent Conversations
-          </span>
+          <span className="text-foreground typo-h4">Recent Conversations</span>
         </div>
         <div className="flex items-center gap-1">
           {conversations.length > 0 && (
@@ -154,10 +146,7 @@ export function ConversationHistory({
               variant="ghost"
               size="sm"
               onClick={handleClear}
-              className={cn(
-                "transition-colors",
-                confirmClear && "text-destructive",
-              )}
+              className={cn("transition-colors", confirmClear && "text-destructive")}
             >
               {confirmClear ? "Confirm Clear" : "Clear All"}
             </Button>
@@ -166,10 +155,7 @@ export function ConversationHistory({
             <TooltipTrigger asChild>
               <span className="inline-flex">
                 <IconButton onClick={onClose} aria-label="Close history">
-                  <X
-                    className="size-4 text-muted-foreground"
-                    aria-hidden="true"
-                  />
+                  <X className="size-4 text-muted-foreground" aria-hidden="true" />
                 </IconButton>
               </span>
             </TooltipTrigger>
@@ -182,14 +168,9 @@ export function ConversationHistory({
       {conversations.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12">
           <div className="size-10 rounded-lg bg-muted flex items-center justify-center mb-3">
-            <MessageSquare
-              className="size-5 text-muted-foreground"
-              aria-hidden="true"
-            />
+            <MessageSquare className="size-5 text-muted-foreground" aria-hidden="true" />
           </div>
-          <p className="text-muted-foreground typo-label">
-            No conversations yet
-          </p>
+          <p className="text-muted-foreground typo-label">No conversations yet</p>
           <p className="text-muted-foreground mt-1 typo-caption">
             Start a chat to see your history here
           </p>
@@ -201,9 +182,7 @@ export function ConversationHistory({
               {groups.map(({ group, items }) => (
                 <div key={group} className="flex flex-col gap-1.5">
                   {/* Group label */}
-                  <span
-                    className="text-muted-foreground uppercase tracking-[0.12em] px-1 mb-0.5 typo-micro"
-                  >
+                  <span className="text-muted-foreground uppercase tracking-[0.12em] px-1 mb-0.5 typo-micro">
                     {group}
                   </span>
 
@@ -221,9 +200,7 @@ export function ConversationHistory({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                        transition={
-                          prefersReduced ? springs.instant : springs.snappy
-                        }
+                        transition={prefersReduced ? springs.instant : springs.snappy}
                         className="group flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-secondary/60 transition-colors border border-transparent hover:border-border-subtle"
                       >
                         <button
@@ -243,9 +220,7 @@ export function ConversationHistory({
                           {/* Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              <span
-                                className="text-foreground truncate typo-label"
-                              >
+                              <span className="text-foreground truncate typo-label">
                                 {conv.title}
                               </span>
                               {badge && (
@@ -263,19 +238,11 @@ export function ConversationHistory({
                               )}
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
-                              <span
-                                className="text-muted-foreground typo-helper"
-                              >
+                              <span className="text-muted-foreground typo-helper">
                                 {msgCount} messages
                               </span>
-                              <span
-                                className="text-muted-foreground typo-helper"
-                              >
-                                &middot;
-                              </span>
-                              <span
-                                className="text-muted-foreground typo-helper"
-                              >
+                              <span className="text-muted-foreground typo-helper">&middot;</span>
+                              <span className="text-muted-foreground typo-helper">
                                 {relativeTime(conv.updatedAt)}
                               </span>
                             </div>
@@ -291,10 +258,7 @@ export function ConversationHistory({
                                 className="text-muted-foreground hover:text-destructive"
                                 onClick={() => onDelete(conv.id)}
                               >
-                                <Trash2
-                                  className="size-3.5"
-                                  aria-hidden="true"
-                                />
+                                <Trash2 className="size-3.5" aria-hidden="true" />
                               </IconButton>
                             </span>
                           </TooltipTrigger>

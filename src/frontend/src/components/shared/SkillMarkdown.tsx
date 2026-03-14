@@ -14,10 +14,7 @@ const RELAXED_LINE_HEIGHT_STYLE = {
   lineHeight: "var(--line-height-relaxed)",
 } as CSSProperties;
 
-const MARKDOWN_HEADING_STYLES: Record<
-  number,
-  { className: string }
-> = {
+const MARKDOWN_HEADING_STYLES: Record<number, { className: string }> = {
   1: { className: "mb-4 mt-6 text-foreground typo-h2" },
   2: { className: "mb-3 mt-5 text-foreground typo-h3" },
   3: { className: "mb-2 mt-4 text-foreground typo-h4 font-semibold" },
@@ -71,22 +68,14 @@ function parseInline(text: string): ReactNode[] {
     } else if (match[2]) {
       // Bold **text**
       result.push(
-        <strong
-          key={match.index}
-          className="text-foreground"
-          style={BOLD_STYLE}
-        >
+        <strong key={match.index} className="text-foreground" style={BOLD_STYLE}>
           {match[2].slice(2, -2)}
         </strong>,
       );
     } else if (match[3]) {
       // Bold __text__
       result.push(
-        <strong
-          key={match.index}
-          className="text-foreground"
-          style={BOLD_STYLE}
-        >
+        <strong key={match.index} className="text-foreground" style={BOLD_STYLE}>
           {match[3].slice(2, -2)}
         </strong>,
       );
@@ -259,8 +248,7 @@ function parseBlocks(md: string): Block[] {
 function renderBlock(block: Block, index: number): ReactNode {
   switch (block.type) {
     case "heading": {
-      const cfg =
-        MARKDOWN_HEADING_STYLES[block.level ?? 1] ?? MARKDOWN_HEADING_STYLES[3]!;
+      const cfg = MARKDOWN_HEADING_STYLES[block.level ?? 1] ?? MARKDOWN_HEADING_STYLES[3]!;
       const Tag = `h${block.level ?? 1}` as "h1" | "h2" | "h3";
       return (
         <Tag key={index} className={cfg.className}>
@@ -271,10 +259,7 @@ function renderBlock(block: Block, index: number): ReactNode {
 
     case "paragraph":
       return (
-        <p
-          key={index}
-          className="mb-3 text-muted-foreground typo-label-regular"
-        >
+        <p key={index} className="mb-3 text-muted-foreground typo-label-regular">
           {parseInline(block.content)}
         </p>
       );
@@ -282,9 +267,7 @@ function renderBlock(block: Block, index: number): ReactNode {
     case "code":
       return (
         <pre key={index} className="mb-4 overflow-x-auto">
-          <code
-            className="block bg-muted p-4 rounded-lg overflow-x-auto text-foreground typo-mono"
-          >
+          <code className="block bg-muted p-4 rounded-lg overflow-x-auto text-foreground typo-mono">
             {block.content}
           </code>
         </pre>

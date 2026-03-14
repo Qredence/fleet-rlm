@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
 import type { ChatMessage } from "@/lib/data/types";
@@ -168,8 +168,8 @@ describe("MessageInspectorPanel", () => {
     });
 
     const { container, root } = mountInspector();
-    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
-      (tab) => tab.textContent?.trim(),
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map((tab) =>
+      tab.textContent?.trim(),
     );
 
     expect(tabs).toEqual(["Trajectory"]);
@@ -291,15 +291,15 @@ describe("MessageInspectorPanel", () => {
     });
 
     const { container, root } = mountInspector();
-    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
-      (tab) => tab.textContent?.trim(),
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map((tab) =>
+      tab.textContent?.trim(),
     );
 
     expect(tabs).toEqual(["Trajectory", "Execution", "Evidence", "Graph"]);
     expect(container.textContent).toContain("Relationships");
-    expect(
-      container.querySelector('[data-testid="artifact-graph"]')?.textContent,
-    ).toContain("3 steps");
+    expect(container.querySelector('[data-testid="artifact-graph"]')?.textContent).toContain(
+      "3 steps",
+    );
 
     act(() => {
       root.unmount();

@@ -17,10 +17,12 @@ bun run dev
 ## FastAPI Backend Integration (fleet-rlm)
 
 This frontend is FastAPI-only and targets the current backend surface:
+
 - REST: `/health`, `/ready`, `/api/v1/sessions/state`
 - WebSocket: `/api/v1/ws/chat`, `/api/v1/ws/execution`
 
 Unsupported sections remain visible in navigation but are intentionally disabled:
+
 - `skills`
 - `taxonomy`
 - `memory`
@@ -31,6 +33,7 @@ Unsupported sections remain visible in navigation but are intentionally disabled
 Create a local `.env` file from `.env.example`.
 
 Required values:
+
 - `VITE_FLEET_API_URL=http://localhost:8000`
 - `VITE_FLEET_WS_URL=ws://localhost:8000/ws/chat`
 - `VITE_FLEET_WORKSPACE_ID=default`
@@ -61,6 +64,7 @@ bun run api:check
 `api:sync-spec` defaults to the canonical root spec at `../../openapi.yaml` unless `OPENAPI_SPEC_PATH` is set.
 
 Generated file:
+
 - `src/lib/rlm-api/generated/openapi.ts` (do not edit manually)
 
 ## Quality Checks

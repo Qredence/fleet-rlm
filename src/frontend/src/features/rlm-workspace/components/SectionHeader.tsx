@@ -33,10 +33,7 @@ interface SectionHeaderProps {
  */
 function SectionHeader({ icon, children, className }: SectionHeaderProps) {
   return (
-    <div
-      data-slot="section-header"
-      className={cn("flex items-center gap-2", className)}
-    >
+    <div data-slot="section-header" className={cn("flex items-center gap-2", className)}>
       <span className="shrink-0 [&_svg]:w-4 [&_svg]:h-4" aria-hidden="true">
         {icon}
       </span>

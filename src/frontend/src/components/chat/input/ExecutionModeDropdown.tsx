@@ -48,13 +48,9 @@ interface ExecutionModeDropdownProps {
   onChange: (mode: WsExecutionMode) => void;
 }
 
-function ExecutionModeDropdown({
-  value,
-  onChange,
-}: ExecutionModeDropdownProps) {
+function ExecutionModeDropdown({ value, onChange }: ExecutionModeDropdownProps) {
   const currentMode =
-    EXECUTION_MODE_OPTIONS.find((option) => option.id === value) ??
-    EXECUTION_MODE_OPTIONS[0]!;
+    EXECUTION_MODE_OPTIONS.find((option) => option.id === value) ?? EXECUTION_MODE_OPTIONS[0]!;
   const CurrentModeIcon = currentMode.icon;
 
   return (
@@ -78,10 +74,7 @@ function ExecutionModeDropdown({
           </Button>
         </MenubarTrigger>
 
-        <MenubarContent
-          align="end"
-          className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-44")}
-        >
+        <MenubarContent align="end" className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-44")}>
           <MenubarRadioGroup value={value}>
             {EXECUTION_MODE_OPTIONS.map((option) => (
               <MenubarRadioItem

@@ -19,9 +19,7 @@ export function runtimeContextStrings(ctx?: RuntimeContext): string[] {
   return pills;
 }
 
-export function statusTone(
-  status: "pending" | "running" | "completed" | "failed",
-): {
+export function statusTone(status: "pending" | "running" | "completed" | "failed"): {
   label: string;
   variant: "secondary" | "warning" | "success" | "destructive-subtle";
 } {
@@ -55,8 +53,7 @@ export function toolSessionItemState(
 ): "pending" | "running" | "completed" | "failed" {
   if (item.part.kind === "tool" || item.part.kind === "sandbox") {
     if (item.part.errorText) return "failed";
-    return item.part.state === "running" ||
-      item.part.state === "input-streaming"
+    return item.part.state === "running" || item.part.state === "input-streaming"
       ? "running"
       : "completed";
   }
@@ -84,9 +81,7 @@ export function executionSectionState(
   }
 
   if (section.kind === "queue") {
-    return section.part.items.every((item) => item.completed)
-      ? "completed"
-      : "running";
+    return section.part.items.every((item) => item.completed) ? "completed" : "running";
   }
 
   if (section.kind === "status_note") {
@@ -99,8 +94,7 @@ export function executionSectionState(
   }
   if (
     "state" in section.part &&
-    (section.part.state === "running" ||
-      section.part.state === "input-streaming")
+    (section.part.state === "running" || section.part.state === "input-streaming")
   ) {
     return "running";
   }
@@ -128,9 +122,7 @@ export function sectionGroups(sections: ExecutionSection[]) {
     {
       key: "environment",
       label: "Environment",
-      sections: sections.filter(
-        (section) => section.kind === "environment_variables",
-      ),
+      sections: sections.filter((section) => section.kind === "environment_variables"),
     },
     {
       key: "errors",

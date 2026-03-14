@@ -97,8 +97,7 @@ export const mockMemoryEntries: MemoryEntry[] = [
   {
     id: "mem-009",
     type: "preference",
-    content:
-      "User prefers YAML frontmatter over TOML for skill manifest files.",
+    content: "User prefers YAML frontmatter over TOML for skill manifest files.",
     source: "Session: Document Summarization",
     createdAt: "2026-02-09T13:10:00Z",
     updatedAt: "2026-02-09T13:10:00Z",

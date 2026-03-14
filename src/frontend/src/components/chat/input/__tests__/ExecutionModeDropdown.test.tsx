@@ -1,6 +1,6 @@
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
 
@@ -13,18 +13,10 @@ import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDrop
 vi.mock("@/components/ui/menubar", () => ({
   Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarTrigger: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarLabel: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarRadioGroup: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
+  MenubarTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarRadioGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MenubarRadioItem: ({
     children,
     onSelect,
@@ -46,9 +38,7 @@ describe("ExecutionModeDropdown", () => {
     const root = createRoot(container);
 
     act(() => {
-      root.render(
-        <ExecutionModeDropdown value="tools_only" onChange={() => {}} />,
-      );
+      root.render(<ExecutionModeDropdown value="tools_only" onChange={() => {}} />);
     });
 
     expect(container.textContent).toContain("Tools only");

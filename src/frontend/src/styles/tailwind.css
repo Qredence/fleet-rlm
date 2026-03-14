@@ -257,11 +257,7 @@
 
 @utility prompt-composer-submit-button {
   color: var(--color-text);
-  background-color: color-mix(
-    in srgb,
-    var(--color-text) 8%,
-    var(--color-surface-elevated)
-  );
+  background-color: color-mix(in srgb, var(--color-text) 8%, var(--color-surface-elevated));
   border: 0;
   box-shadow: var(--shadow-100);
   transition:
@@ -269,11 +265,7 @@
     color 160ms ease,
     opacity 160ms ease;
   &:hover {
-    background-color: color-mix(
-      in srgb,
-      var(--color-text) 12%,
-      var(--color-surface-elevated)
-    );
+    background-color: color-mix(in srgb, var(--color-text) 12%, var(--color-surface-elevated));
   }
   &:disabled {
     color: var(--color-text-disabled);
@@ -282,11 +274,7 @@
 }
 
 @utility prompt-composer-menu {
-  background-color: color-mix(
-    in srgb,
-    var(--color-surface-elevated) 96%,
-    transparent
-  );
+  background-color: color-mix(in srgb, var(--color-surface-elevated) 96%, transparent);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-400);
@@ -414,10 +402,7 @@
   padding-top: var(--space-1);
   padding-left: var(--glass-tab-bar-inset);
   padding-right: var(--glass-tab-bar-inset);
-  padding-bottom: max(
-    var(--glass-tab-bar-inset),
-    env(safe-area-inset-bottom, 8px)
-  );
+  padding-bottom: max(var(--glass-tab-bar-inset), env(safe-area-inset-bottom, 8px));
 }
 
 /* Utility: floating glass tab bar shell */

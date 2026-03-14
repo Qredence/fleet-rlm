@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -36,8 +36,7 @@ vi.mock("@/stores/navigationStore", () => ({
 }));
 
 vi.mock("@/stores/chatStore", () => ({
-  useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
-    selector(chatStoreState),
+  useChatStore: (selector: (state: typeof chatStoreState) => unknown) => selector(chatStoreState),
 }));
 
 vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
@@ -57,9 +56,7 @@ vi.mock("@/components/shared/ErrorBoundary", () => ({
 }));
 
 vi.mock("@/components/ui/icon-button", () => ({
-  IconButton: ({ children }: { children: ReactNode }) => (
-    <button type="button">{children}</button>
-  ),
+  IconButton: ({ children }: { children: ReactNode }) => <button type="button">{children}</button>,
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({
@@ -73,17 +70,12 @@ vi.mock("@/features/artifacts/CanvasSwitcher", () => ({
 }));
 
 vi.mock("@/features/artifacts/FileDetail", () => ({
-  FileDetail: ({ file }: { file: { name: string } }) => (
-    <div>FileDetail:{file.name}</div>
-  ),
+  FileDetail: ({ file }: { file: { name: string } }) => <div>FileDetail:{file.name}</div>,
 }));
 
-vi.mock(
-  "@/features/rlm-workspace/message-inspector/MessageInspectorPanel",
-  () => ({
-    MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
-  }),
-);
+vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () => ({
+  MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
+}));
 
 vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
   RunWorkbench: () => <div>RunWorkbench</div>,

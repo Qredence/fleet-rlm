@@ -1,12 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  Check,
-  ChevronDown,
-  Diamond,
-  Orbit,
-  Sparkles,
-  Sun,
-} from "lucide-react";
+import { Check, ChevronDown, Diamond, Orbit, Sparkles, Sun } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -107,8 +100,7 @@ interface AgentDropdownProps {
 }
 
 function AgentDropdown({ selectedAgent, onAgentChange }: AgentDropdownProps) {
-  const currentAgent =
-    allAgents.find((agent) => agent.id === selectedAgent) ?? AUTO_AGENT;
+  const currentAgent = allAgents.find((agent) => agent.id === selectedAgent) ?? AUTO_AGENT;
 
   const handleSelect = (agent: Agent) => {
     if (agent.supported) {
@@ -117,8 +109,7 @@ function AgentDropdown({ selectedAgent, onAgentChange }: AgentDropdownProps) {
     }
 
     toast.info("Model-specific routing isn’t available yet", {
-      description:
-        "This build currently uses backend runtime defaults. Select Auto for now.",
+      description: "This build currently uses backend runtime defaults. Select Auto for now.",
     });
   };
 
@@ -139,10 +130,7 @@ function AgentDropdown({ selectedAgent, onAgentChange }: AgentDropdownProps) {
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent
-        align="end"
-        className="w-56 border-border bg-popover"
-      >
+      <DropdownMenuContent align="end" className="w-56 border-border bg-popover">
         {routingAgents.map((agent) => (
           <DropdownMenuItem
             key={agent.id}
@@ -156,25 +144,17 @@ function AgentDropdown({ selectedAgent, onAgentChange }: AgentDropdownProps) {
               <span className="text-muted-foreground">{agent.icon}</span>
               <span className="text-xs font-medium">{agent.name}</span>
               {agent.beta ? (
-                <Badge
-                  variant="secondary"
-                  className="h-4 px-1 text-[9px] font-medium"
-                >
+                <Badge variant="secondary" className="h-4 px-1 text-[9px] font-medium">
                   Beta
                 </Badge>
               ) : null}
               {!agent.supported ? (
-                <Badge
-                  variant="secondary"
-                  className="h-4 px-1 text-[9px] font-medium"
-                >
+                <Badge variant="secondary" className="h-4 px-1 text-[9px] font-medium">
                   Soon
                 </Badge>
               ) : null}
             </div>
-            {selectedAgent === agent.id ? (
-              <Check className="h-3.5 w-3.5 text-primary" />
-            ) : null}
+            {selectedAgent === agent.id ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
           </DropdownMenuItem>
         ))}
 
@@ -195,23 +175,15 @@ function AgentDropdown({ selectedAgent, onAgentChange }: AgentDropdownProps) {
               <span className="text-muted-foreground">{agent.icon}</span>
               <span className="text-xs font-medium">{agent.name}</span>
               {agent.beta ? (
-                <Badge
-                  variant="secondary"
-                  className="h-4 px-1 text-[9px] font-medium"
-                >
+                <Badge variant="secondary" className="h-4 px-1 text-[9px] font-medium">
                   Beta
                 </Badge>
               ) : null}
-              <Badge
-                variant="secondary"
-                className="h-4 px-1 text-[9px] font-medium"
-              >
+              <Badge variant="secondary" className="h-4 px-1 text-[9px] font-medium">
                 Soon
               </Badge>
             </div>
-            {selectedAgent === agent.id ? (
-              <Check className="h-3.5 w-3.5 text-primary" />
-            ) : null}
+            {selectedAgent === agent.id ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

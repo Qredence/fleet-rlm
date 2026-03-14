@@ -1,16 +1,9 @@
-/* eslint-disable react-refresh/only-export-components */
+/* oxlint-disable react-refresh/only-export-components */
 import { Suspense, type ComponentType, type LazyExoticComponent } from "react";
 import type { NavItem } from "@/lib/data/types";
 import { lazyWithRetry, preloadModule } from "@/lib/perf/lazyWithRetry";
 
-type RouteKey =
-  | "login"
-  | "signup"
-  | "logout"
-  | "notFound"
-  | "workspace"
-  | "volumes"
-  | "settings";
+type RouteKey = "login" | "signup" | "logout" | "notFound" | "workspace" | "volumes" | "settings";
 
 type RouteLoader = () => Promise<{ default: ComponentType<unknown> }>;
 
@@ -62,9 +55,7 @@ function RouteFallback() {
   );
 }
 
-function withSuspense(
-  Component: LazyExoticComponent<ComponentType<unknown>>,
-): ComponentType {
+function withSuspense(Component: LazyExoticComponent<ComponentType<unknown>>): ComponentType {
   function SuspendedRoute() {
     return (
       <Suspense fallback={<RouteFallback />}>

@@ -24,8 +24,7 @@ const authority =
   trimOrEmpty(import.meta.env.VITE_ENTRA_AUTHORITY) ||
   "https://login.microsoftonline.com/organizations";
 const scopes = parseCsv(import.meta.env.VITE_ENTRA_SCOPES);
-const redirectPath =
-  trimOrEmpty(import.meta.env.VITE_ENTRA_REDIRECT_PATH) || "/login";
+const redirectPath = trimOrEmpty(import.meta.env.VITE_ENTRA_REDIRECT_PATH) || "/login";
 
 export const entraAuthConfig = {
   clientId,
@@ -79,9 +78,7 @@ async function getMsalClient(): Promise<PublicClientApplication> {
   return initPromise;
 }
 
-async function acquireAccessTokenForAccount(
-  account: AccountInfo,
-): Promise<AuthenticationResult> {
+async function acquireAccessTokenForAccount(account: AccountInfo): Promise<AuthenticationResult> {
   const client = await getMsalClient();
   const request: SilentRequest = {
     account,

@@ -97,11 +97,7 @@ export function FsItem({
         {isExpandable ? (
           <motion.div
             animate={{ rotate: isOpen ? 90 : 0 }}
-            transition={
-              prefersReduced
-                ? { duration: 0.01 }
-                : { duration: 0.15, ease: "easeOut" }
-            }
+            transition={prefersReduced ? { duration: 0.01 } : { duration: 0.15, ease: "easeOut" }}
           >
             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           </motion.div>
@@ -110,12 +106,7 @@ export function FsItem({
         )}
 
         {isVolume ? (
-          <HardDrive
-            className={cn(
-              "w-4 h-4",
-              isOpen ? "text-accent" : "text-muted-foreground",
-            )}
-          />
+          <HardDrive className={cn("w-4 h-4", isOpen ? "text-accent" : "text-muted-foreground")} />
         ) : isFile ? (
           fileIcon(node.name, node.mime)
         ) : isOpen ? (
@@ -125,16 +116,16 @@ export function FsItem({
         )}
 
         <span
-          className={cn("flex-1 text-left min-w-0 truncate text-foreground", isVolume ? "typo-label" : "typo-caption")}
+          className={cn(
+            "flex-1 text-left min-w-0 truncate text-foreground",
+            isVolume ? "typo-label" : "typo-caption",
+          )}
         >
           {isVolume ? `/sandbox/${node.name}` : node.name}
         </span>
 
         {isFile && node.size ? (
-          <span
-            className="text-muted-foreground shrink-0"
-            style={FILE_SIZE_STYLE}
-          >
+          <span className="text-muted-foreground shrink-0" style={FILE_SIZE_STYLE}>
             {formatFileSize(node.size)}
           </span>
         ) : isVolume ? (
@@ -144,9 +135,7 @@ export function FsItem({
         ) : null}
 
         {node.modifiedAt && (
-          <span
-            className="text-muted-foreground shrink-0 hidden md:inline typo-micro"
-          >
+          <span className="text-muted-foreground shrink-0 hidden md:inline typo-micro">
             {formatDate(node.modifiedAt)}
           </span>
         )}
@@ -158,11 +147,7 @@ export function FsItem({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={
-              prefersReduced
-                ? { duration: 0.01 }
-                : { duration: 0.18, ease: "easeOut" }
-            }
+            transition={prefersReduced ? { duration: 0.01 } : { duration: 0.18, ease: "easeOut" }}
             className="overflow-hidden"
           >
             {node.children.map((child) => (

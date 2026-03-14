@@ -10,11 +10,7 @@ interface SendButtonProps {
   isReceiving?: boolean;
 }
 
-function SendButton({
-  disabled,
-  isLoading = false,
-  isReceiving = false,
-}: SendButtonProps) {
+function SendButton({ disabled, isLoading = false, isReceiving = false }: SendButtonProps) {
   return (
     <PromptInputSubmit
       aria-label={isLoading ? "Sending message" : "Submit"}

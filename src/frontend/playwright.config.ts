@@ -19,7 +19,7 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: `bun run dev -- --host 127.0.0.1 --port ${PORT}`,
+    command: `vp dev --host 127.0.0.1 --port ${PORT}`,
     url: BASE_URL,
     timeout: 120_000,
     reuseExistingServer: true,

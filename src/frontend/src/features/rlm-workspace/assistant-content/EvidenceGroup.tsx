@@ -13,20 +13,11 @@ import {
   InlineCitationSource,
   InlineCitationText,
 } from "@/components/ai-elements/inline-citation";
-import {
-  Source,
-  Sources,
-  SourcesContent,
-  SourcesTrigger,
-} from "@/components/ai-elements/sources";
+import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
 import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 
-export function EvidenceGroup({
-  evidence,
-}: {
-  evidence: AssistantContentModel["evidence"];
-}) {
+export function EvidenceGroup({ evidence }: { evidence: AssistantContentModel["evidence"] }) {
   if (!evidence.hasContent) return null;
 
   return (
@@ -56,9 +47,7 @@ export function EvidenceGroup({
                         description={citation.description}
                       />
                       {citation.quote ? (
-                        <InlineCitationQuote>
-                          {citation.quote}
-                        </InlineCitationQuote>
+                        <InlineCitationQuote>{citation.quote}</InlineCitationQuote>
                       ) : null}
                     </div>
                   ))}
@@ -102,9 +91,7 @@ export function EvidenceGroup({
                   filename: attachment.name ?? "unknown",
                   url: attachment.url ?? "",
                   mediaType:
-                    attachment.mimeType ??
-                    attachment.mediaType ??
-                    "application/octet-stream",
+                    attachment.mimeType ?? attachment.mediaType ?? "application/octet-stream",
                 }}
               >
                 <AttachmentPreview />

@@ -70,12 +70,9 @@ function LogoutPage() {
               <CardHeader className="items-center text-center">
                 <BrandMark className="h-3.75 w-8 text-foreground" />
                 <div className="space-y-1">
-                  <CardTitle className="text-foreground typo-h3">
-                    Signing you out
-                  </CardTitle>
+                  <CardTitle className="text-foreground typo-h3">Signing you out</CardTitle>
                   <CardDescription className="typo-caption">
-                    Clearing your local session and closing the current
-                    workspace.
+                    Clearing your local session and closing the current workspace.
                   </CardDescription>
                 </div>
               </CardHeader>
@@ -93,9 +90,7 @@ function LogoutPage() {
                   }
                   className="rounded-full-token h-6 w-6 border-2 border-muted-foreground border-t-foreground"
                 />
-                <p className="text-muted-foreground typo-caption">
-                  Signing you out&hellip;
-                </p>
+                <p className="text-muted-foreground typo-caption">Signing you out&hellip;</p>
               </CardContent>
             </motion.div>
           ) : (
@@ -121,10 +116,7 @@ function LogoutPage() {
                 </div>
               </CardHeader>
               <CardFooter className="flex flex-col items-stretch gap-3">
-                <Button
-                  className="w-full"
-                  onClick={() => navigate("/login", { replace: true })}
-                >
+                <Button className="w-full" onClick={() => navigate("/login", { replace: true })}>
                   <span className="typo-label">Sign In</span>
                   <ArrowRight className="size-4" />
                 </Button>

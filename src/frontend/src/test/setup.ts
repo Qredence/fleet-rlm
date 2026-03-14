@@ -4,7 +4,7 @@
  * Runs once before each test file in the jsdom environment.
  * Keep this file lean — only add setup that is truly global.
  */
-import { beforeEach } from "vitest";
+import { beforeEach } from "vite-plus/test";
 
 // -- Web Storage ----------------------------------------------------------
 // Reset between test files to avoid state leakage.

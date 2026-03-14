@@ -1,12 +1,7 @@
 import { Lightbulb } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 import {
   PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
@@ -41,9 +36,7 @@ function ThinkButton({ enabled, onToggle }: ThinkButtonProps) {
           </Button>
         </TooltipTrigger>
         <TooltipContent side="top">
-          <p className="text-xs">
-            {enabled ? "Disable" : "Enable"} extended thinking
-          </p>
+          <p className="text-xs">{enabled ? "Disable" : "Enable"} extended thinking</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

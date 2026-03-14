@@ -23,8 +23,7 @@ export function ChatPanel() {
 
   // Derive the "section" for AnimatePresence key —
   // only animate when changing top-level sections, not sub-routes
-  const section =
-    location.pathname.split("/").filter(Boolean)[1] || "workspace";
+  const section = location.pathname.split("/").filter(Boolean)[1] || "workspace";
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">

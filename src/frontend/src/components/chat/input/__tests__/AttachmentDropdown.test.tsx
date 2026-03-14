@@ -1,25 +1,17 @@
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
 
 vi.mock("@/components/ui/menubar", () => ({
   Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarTrigger: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
+  MenubarTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
+    <button onClick={onSelect}>{children}</button>
   ),
-  MenubarContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarItem: ({
-    children,
-    onSelect,
-  }: {
-    children: ReactNode;
-    onSelect?: () => void;
-  }) => <button onClick={onSelect}>{children}</button>,
 }));
 
 describe("AttachmentDropdown", () => {
@@ -35,16 +27,12 @@ describe("AttachmentDropdown", () => {
 
     act(() => {
       root.render(
-        <AttachmentDropdown
-          uploadsEnabled={false}
-          onUnsupportedSelect={onUnsupportedSelect}
-        />,
+        <AttachmentDropdown uploadsEnabled={false} onUnsupportedSelect={onUnsupportedSelect} />,
       );
     });
 
     const menuItem = Array.from(container.querySelectorAll("button")).find(
-      (button) =>
-        button.textContent?.includes("Add images, PDFs or CSVs") ?? false,
+      (button) => button.textContent?.includes("Add images, PDFs or CSVs") ?? false,
     );
 
     expect(menuItem?.textContent).toContain("(coming soon)");

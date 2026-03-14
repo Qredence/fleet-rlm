@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RlmWorkspace } from "@/features/rlm-workspace/RlmWorkspace";
@@ -146,9 +146,7 @@ describe("RlmWorkspace runtime warning", () => {
         guidance: [],
         daytona: {
           configured: false,
-          guidance: [
-            "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands.",
-          ],
+          guidance: ["Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."],
         },
       },
     };

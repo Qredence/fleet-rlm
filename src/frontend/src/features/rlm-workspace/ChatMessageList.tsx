@@ -8,10 +8,7 @@ import {
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { AssistantTurnContent } from "@/features/rlm-workspace/assistant-content/AssistantTurnContent";
 import { buildAssistantContentModel } from "@/features/rlm-workspace/assistant-content/buildAssistantContentModel";
-import {
-  fadeUp,
-  fadeUpReduced,
-} from "@/features/rlm-workspace/animation-presets";
+import { fadeUp, fadeUpReduced } from "@/features/rlm-workspace/animation-presets";
 import {
   buildChatDisplayItems,
   buildPendingAssistantTurnId,
@@ -76,55 +73,40 @@ export function ChatMessageList({
   hasHistory,
   historyPanel,
 }: ChatMessageListProps) {
-  const { selectedAssistantTurnId, selectInspectorTurn, isCanvasOpen } =
-    useNavigationStore();
+  const { selectedAssistantTurnId, selectInspectorTurn, isCanvasOpen } = useNavigationStore();
   const prefersReduced = useReducedMotion();
   const preset = prefersReduced ? fadeUpReduced : fadeUp;
   const hasStreamingAssistant = messages.some(
     (message) => message.type === "assistant" && message.streaming,
   );
-  const lastUserIndex = messages.findLastIndex(
-    (message) => message.type === "user",
-  );
-  const lastUserMessageId =
-    lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
+  const lastUserMessageId = lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
   const activeTurnAssistantMessageId =
     lastUserIndex >= 0
-      ? ([...messages.slice(lastUserIndex + 1)]
+      ? (messages
+          .slice(lastUserIndex + 1)
           .reverse()
           .find((message) => message.type === "assistant")?.id ?? null)
       : null;
   const displayItems = buildChatDisplayItems(messages, {
     showPendingAssistantShell: isTyping,
   });
-  const hasVisibleAssistantTurn = displayItems.some(
-    (item) => item.kind === "assistant_turn",
-  );
-  const showTypingShimmer =
-    isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
+  const hasVisibleAssistantTurn = displayItems.some((item) => item.kind === "assistant_turn");
+  const showTypingShimmer = isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
 
   useEffect(() => {
     if (!selectedAssistantTurnId || !lastUserMessageId) return;
     const pendingTurnId = buildPendingAssistantTurnId(lastUserMessageId);
-    if (
-      selectedAssistantTurnId !== pendingTurnId ||
-      !activeTurnAssistantMessageId
-    ) {
+    if (selectedAssistantTurnId !== pendingTurnId || !activeTurnAssistantMessageId) {
       return;
     }
     useNavigationStore.setState({
       selectedAssistantTurnId: activeTurnAssistantMessageId,
     });
-  }, [
-    activeTurnAssistantMessageId,
-    lastUserMessageId,
-    selectedAssistantTurnId,
-  ]);
+  }, [activeTurnAssistantMessageId, lastUserMessageId, selectedAssistantTurnId]);
 
   return (
-    <Conversation
-      className={cn("bg-background", messages.length === 0 && "flex-none")}
-    >
+    <Conversation className={cn("bg-background", messages.length === 0 && "flex-none")}>
       <ConversationContent
         className={cn(
           "mx-auto w-full max-w-175",
@@ -143,9 +125,7 @@ export function ChatMessageList({
           </motion.div>
         ) : null}
 
-        {messages.length === 0 ? (
-          <AnimatePresence>{historyPanel}</AnimatePresence>
-        ) : null}
+        {messages.length === 0 ? <AnimatePresence>{historyPanel}</AnimatePresence> : null}
 
         {messages.length > 0 ? (
           <div className="mt-auto flex flex-col gap-4">
@@ -163,8 +143,7 @@ export function ChatMessageList({
                 return (
                   <motion.div key={displayItem.key} {...preset}>
                     {renderAssistantTurn(displayItem, {
-                      selected:
-                        isCanvasOpen && selectedAssistantTurnId === turnId,
+                      selected: isCanvasOpen && selectedAssistantTurnId === turnId,
                       onOpenTab: (tab) => selectInspectorTurn(turnId, tab),
                     })}
                   </motion.div>

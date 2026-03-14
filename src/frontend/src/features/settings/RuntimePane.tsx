@@ -11,12 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   InputGroup,
@@ -47,14 +42,12 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "DSPY_LM_MODEL",
     label: "LM Model",
-    description:
-      "Planner model identifier (for example: openai/gemini-3.1-pro).",
+    description: "Planner model identifier (for example: openai/gemini-3.1-pro).",
   },
   {
     key: "DSPY_LLM_API_KEY",
     label: "LM API Key",
-    description:
-      "Primary provider key for LM calls. Leave unchanged to keep current value.",
+    description: "Primary provider key for LM calls. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
@@ -71,15 +64,13 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "MODAL_TOKEN_ID",
     label: "Modal Token ID",
-    description:
-      "Optional Modal token ID override. Leave unchanged to keep current value.",
+    description: "Optional Modal token ID override. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
     key: "MODAL_TOKEN_SECRET",
     label: "Modal Token Secret",
-    description:
-      "Optional Modal token secret override. Leave unchanged to keep current value.",
+    description: "Optional Modal token secret override. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
@@ -102,13 +93,9 @@ const RUNTIME_SECRET_KEYS: RuntimeSecretEditableKey[] = [
   "MODAL_TOKEN_SECRET",
 ];
 
-const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(
-  RUNTIME_SECRET_KEYS,
-);
+const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(RUNTIME_SECRET_KEYS);
 
-function isRuntimeSecretKey(
-  key: RuntimeEditableKey,
-): key is RuntimeSecretEditableKey {
+function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditableKey {
   return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
 }
 
@@ -143,10 +130,8 @@ export function RuntimePane() {
 
   const initialValues = settingsQuery.data?.values ?? {};
   const maskedValues = settingsQuery.data?.masked_values ?? initialValues;
-  const [baselineValues, setBaselineValues] =
-    useState<Record<string, string>>(initialValues);
-  const [formValues, setFormValues] =
-    useState<Record<string, string>>(initialValues);
+  const [baselineValues, setBaselineValues] = useState<Record<string, string>>(initialValues);
+  const [formValues, setFormValues] = useState<Record<string, string>>(initialValues);
   const [clearSecretFlags, setClearSecretFlags] = useState<
     Partial<Record<RuntimeSecretEditableKey, boolean>>
   >({});
@@ -158,9 +143,9 @@ export function RuntimePane() {
 
   const secretInputs = useMemo(
     () =>
-      Object.fromEntries(
-        RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""]),
-      ) as Partial<Record<RuntimeSecretEditableKey, string>>,
+      Object.fromEntries(RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""])) as Partial<
+        Record<RuntimeSecretEditableKey, string>
+      >,
     [formValues],
   );
 
@@ -239,10 +224,7 @@ export function RuntimePane() {
         });
         setClearSecretFlags({});
         toast.success("Runtime settings saved", {
-          description:
-            updated.length > 0
-              ? `Updated: ${updated.join(", ")}`
-              : "No keys changed.",
+          description: updated.length > 0 ? `Updated: ${updated.join(", ")}` : "No keys changed.",
         });
       },
       onError: (error) => {
@@ -316,9 +298,7 @@ export function RuntimePane() {
   };
 
   const saveDisabled =
-    !hasUnsavedRuntimeChanges ||
-    saveSettings.isPending ||
-    status?.write_enabled === false;
+    !hasUnsavedRuntimeChanges || saveSettings.isPending || status?.write_enabled === false;
   const runtimeGuidance = status?.guidance ?? ["No guidance available."];
 
   const updateFieldValue = (key: RuntimeEditableKey, value: string) => {
@@ -381,12 +361,10 @@ export function RuntimePane() {
 
       <Card className="gap-0 rounded-xl border-border-subtle/70 shadow-none">
         <CardHeader className="border-b border-border-subtle/70">
-          <CardTitle className="text-sm font-medium">
-            Runtime Configuration
-          </CardTitle>
+          <CardTitle className="text-sm font-medium">Runtime Configuration</CardTitle>
           <CardDescription className="text-sm">
-            Update runtime credentials, model selection, and Modal resource
-            names used by the local environment.
+            Update runtime credentials, model selection, and Modal resource names used by the local
+            environment.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
@@ -407,23 +385,17 @@ export function RuntimePane() {
                         placeholder={field.placeholder}
                         autoComplete="off"
                         aria-label={field.label}
-                        onChange={(event) =>
-                          updateFieldValue(field.key, event.currentTarget.value)
-                        }
+                        onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
                       />
                       <InputGroupAddon align="inline-end">
                         <InputGroupButton
                           type="button"
                           size="sm"
-                          variant={
-                            clearSecretFlags[secretKey] ? "soft" : "outline"
-                          }
+                          variant={clearSecretFlags[secretKey] ? "soft" : "outline"}
                           aria-pressed={clearSecretFlags[secretKey] ?? false}
                           onClick={() => toggleClearSecret(secretKey)}
                         >
-                          {clearSecretFlags[secretKey]
-                            ? "Will clear on save"
-                            : "Clear saved value"}
+                          {clearSecretFlags[secretKey] ? "Will clear on save" : "Clear saved value"}
                         </InputGroupButton>
                       </InputGroupAddon>
                     </InputGroup>
@@ -435,9 +407,7 @@ export function RuntimePane() {
                       placeholder={field.placeholder}
                       autoComplete="off"
                       aria-label={field.label}
-                      onChange={(event) =>
-                        updateFieldValue(field.key, event.currentTarget.value)
-                      }
+                      onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
                       className="max-w-xl"
                     />
                   )}
@@ -445,10 +415,7 @@ export function RuntimePane() {
                   {field.isSecret && secretKey ? (
                     <FieldDescription>
                       Write-only input. Configured value:{" "}
-                      {maskedValues[secretKey]
-                        ? maskedValues[secretKey]
-                        : "not set"}
-                      .
+                      {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
                     </FieldDescription>
                   ) : null}
                 </Field>
@@ -458,8 +425,8 @@ export function RuntimePane() {
         </CardContent>
         <CardFooter className="border-t border-border-subtle/70 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
-            Writes to <code>.env</code> (local only), updates process env, and
-            refreshes the active runtime configuration.
+            Writes to <code>.env</code> (local only), updates process env, and refreshes the active
+            runtime configuration.
           </p>
           <Button
             variant="secondary"
@@ -474,12 +441,9 @@ export function RuntimePane() {
 
       <Card className="mt-4 gap-0 rounded-xl border-border-subtle/70 shadow-none">
         <CardHeader className="border-b border-border-subtle/70">
-          <CardTitle className="text-sm font-medium">
-            Test Credentials + Connection
-          </CardTitle>
+          <CardTitle className="text-sm font-medium">Test Credentials + Connection</CardTitle>
           <CardDescription className="max-w-xl text-sm">
-            Runs preflight credential checks plus live Modal and LM connectivity
-            smoke tests.
+            Runs preflight credential checks plus live Modal and LM connectivity smoke tests.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
@@ -509,39 +473,29 @@ export function RuntimePane() {
               size="lg"
               className="w-full justify-center rounded-lg"
               onClick={handleTestAll}
-              disabled={
-                testModalConnection.isPending || testLmConnection.isPending
-              }
+              disabled={testModalConnection.isPending || testLmConnection.isPending}
             >
               Test All Connections
             </Button>
             {hasUnsavedRuntimeChanges ? (
               <p className="text-xs leading-5 text-muted-foreground">
-                Save runtime settings first so tests run against your latest
-                credentials and provider configuration.
+                Save runtime settings first so tests run against your latest credentials and
+                provider configuration.
               </p>
             ) : null}
           </div>
         </CardContent>
       </Card>
 
-      <SettingsRow
-        label="Modal Smoke"
-        description={`Last result: ${testSummary(modalTest)}`}
-      >
+      <SettingsRow label="Modal Smoke" description={`Last result: ${testSummary(modalTest)}`}>
         <Badge variant={testVariant(modalTest)}>
           {modalTest?.checked_at
-            ? `${testSummary(modalTest)} • ${new Date(
-                modalTest.checked_at,
-              ).toLocaleString()}`
+            ? `${testSummary(modalTest)} • ${new Date(modalTest.checked_at).toLocaleString()}`
             : "Not run"}
         </Badge>
       </SettingsRow>
 
-      <SettingsRow
-        label="LM Smoke"
-        description={`Last result: ${testSummary(lmTest)}`}
-      >
+      <SettingsRow label="LM Smoke" description={`Last result: ${testSummary(lmTest)}`}>
         <Badge variant={testVariant(lmTest)}>
           {lmTest?.checked_at
             ? `${testSummary(lmTest)} • ${new Date(lmTest.checked_at).toLocaleString()}`
@@ -549,35 +503,22 @@ export function RuntimePane() {
         </Badge>
       </SettingsRow>
 
-      <SettingsRow
-        label="Preflight Checks"
-        description="Credential and provider availability."
-      >
+      <SettingsRow label="Preflight Checks" description="Credential and provider availability.">
         <div className="flex flex-wrap justify-end gap-1.5 max-w-[60%]">
           {llmChecks.map(([key, ok]) => (
-            <Badge
-              key={`llm-${key}`}
-              variant={ok ? "success" : "destructive-subtle"}
-            >
+            <Badge key={`llm-${key}`} variant={ok ? "success" : "destructive-subtle"}>
               LM {formatCheckLabel(key)}
             </Badge>
           ))}
           {modalChecks.map(([key, ok]) => (
-            <Badge
-              key={`modal-${key}`}
-              variant={ok ? "success" : "destructive-subtle"}
-            >
+            <Badge key={`modal-${key}`} variant={ok ? "success" : "destructive-subtle"}>
               Modal {formatCheckLabel(key)}
             </Badge>
           ))}
         </div>
       </SettingsRow>
 
-      <SettingsRow
-        label="Guidance"
-        description="Actionable runtime recommendations."
-        noBorder
-      >
+      <SettingsRow label="Guidance" description="Actionable runtime recommendations." noBorder>
         <ul className="flex list-disc flex-col gap-1 pl-5 text-right text-xs text-muted-foreground">
           {runtimeGuidance.map((item) => (
             <li key={item}>{item}</li>
