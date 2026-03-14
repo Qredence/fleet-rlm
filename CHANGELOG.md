@@ -16,6 +16,10 @@ All notable changes to this project are documented in this file.
 - Published a comprehensive documentation refresh covering setup, testing, deployment, runtime settings, APIs, architecture diagrams, ADRs, and frontend module structure.
 - Added MLflow tracing, export, evaluation, and scorer workflows to make offline analysis and DSPy optimization easier.
 - Continued the frontend cleanup/polish pass by removing unused surfaces and improving navigation, conversation history, loading states, and builder/workbench chrome.
+- Unified the experimental Daytona pilot with the main workspace so operators can stay on the shared chat surface while still opening the full run workbench and inspection tools when needed.
+- Routed Daytona pilot chat through the shared runtime pipeline, reducing special-case behavior and making runtime metadata, streaming, and source staging work more consistent across modes.
+- Hardened long-running Daytona sessions by stabilizing workbench stream updates and preserving session state when terminal-backed runs fail or disconnect.
+- Continued workspace polish with modularized chat/input rendering, smoother loading states, and frontend tooling updates for the shared Daytona flow.
 
 ### Added
 
@@ -46,6 +50,14 @@ All notable changes to this project are documented in this file.
   **Outcome:** Runtime APIs respond more predictably and related UI state is safer across reloads and session changes.
 - **Change:** Refreshed docs/architecture guidance to reflect the Daytona pilot, CLI integration, snapshot archival, and historical cross-linking fixes.
   **Outcome:** Project guidance matches the current runtime structure more closely and stale links are reduced.
+- **Change:** Folded the Daytona workbench into `RlmWorkspace`, removed separate Daytona/source setup cards, and refreshed the empty/support states across the shared workspace shell.
+  **Outcome:** Experimental runtime sessions feel like part of the main product instead of a parallel UI while still keeping detailed inspection surfaces close at hand.
+- **Change:** Reworked the Daytona backend around a shared chat agent/runtime path and updated API/runtime schemas accordingly.
+  **Outcome:** Modal and Daytona flows now share more of the same chat/runtime contract, which lowers integration drift and makes the pilot easier to extend.
+- **Change:** Modularized workspace chat/input rendering, refreshed shimmer/loading behavior, and upgraded frontend tooling to Vite 8 with `@xyflow/react`.
+  **Outcome:** The workspace UI is easier to maintain and feels smoother during loading, long trace-heavy sessions, and graph-heavy views.
+- **Change:** Documented the shared chat/workbench flow and added opencode Daytona plugin configuration for contributors.
+  **Outcome:** Day-to-day setup and onboarding are clearer for the current experimental runtime path.
 
 ### Fixed
 
@@ -55,11 +67,19 @@ All notable changes to this project are documented in this file.
   **Outcome:** Citations resolve to the correct targets more reliably and richer workspace components are less brittle when payloads are partial.
 - **Change:** Repaired MLflow metadata merging/trace lookup issues, frontend button and execution-canvas regressions, mobile canvas cleanup leaks, and several documentation formatting/link problems.
   **Outcome:** Analytics traces are more trustworthy, workspace UI regressions are reduced, and project docs are easier to navigate without broken references.
+- **Change:** Preserved Daytona session state when terminal-backed runs fail and tightened stream-state handling in the workbench adapter/runner.
+  **Outcome:** Recovery after runtime hiccups is more predictable, and the workbench is less likely to lose or mis-order run state.
+- **Change:** Hardened MLflow/PostHog config initialization plus follow-up metadata/config typing and release metadata fixes.
+  **Outcome:** Analytics setup is less brittle, and runtime/release metadata stay more consistent across environments.
 
 ### Removed
 
 - **Change:** Removed the legacy mock skill-creation simulation stack, unused taxonomy graph modules, placeholder settings panes, stale feature-chat/artifact components, duplicated Daytona-only helper paths, orphan docs readmes, and outdated audit/code-health snapshots.
   **Outcome:** Smaller frontend/documentation surface area with less dead code, lower maintenance overhead, and fewer competing "canonical" paths to keep in sync.
+
+### Merged Pull Requests
+
+- [#107](https://github.com/Qredence/fleet-rlm/pull/107): Add Daytona source staging and refresh workspace UX.
 
 ## [0.4.95] - 2026-03-05
 
