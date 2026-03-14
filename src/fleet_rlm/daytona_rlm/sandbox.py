@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
-import shlex
+import subprocess
+import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
+try:
+    from daytona import Daytona, DaytonaConfig, SessionExecuteRequest
+except ImportError as exc:  # pragma: no cover - exercised by runtime users
+    Daytona = None  # type: ignore[assignment]
+    DaytonaConfig = None  # type: ignore[assignment]
+    SessionExecuteRequest = None  # type: ignore[assignment]
+    _DAYTONA_IMPORT_ERROR = exc
+else:
+    _DAYTONA_IMPORT_ERROR = None
 from fleet_rlm.document_ingestion import read_document_content
 
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
@@ -18,16 +30,11 @@ from .diagnostics import DaytonaDiagnosticError
 from .driver import DAYTONA_DRIVER_SOURCE
 from .protocol import (
     DriverReady,
+    ExecutionEventFrame,
     ExecutionRequest,
     ExecutionResponse,
     HostCallbackRequest,
     HostCallbackResponse,
-    RunCancelRequest,
-    RunErrorEnvelope,
-    RunEventFrame,
-    RunReady,
-    RunResultEnvelope,
-    RunStartRequest,
     ShutdownAck,
     ShutdownRequest,
     decode_frame,
@@ -36,39 +43,48 @@ from .protocol import (
 from .types import (
     ContextSource,
     DaytonaRunCancelled,
-    DaytonaRunResult,
     PromptHandle,
     PromptManifest,
     PromptSliceRef,
 )
 
 _HOST_CALLBACK_REQUEST_TYPE = "host_callback_request"
+_EXECUTION_EVENT_TYPE = "execute_event"
 _EXECUTION_RESPONSE_TYPE = "execute_response"
 _OUTPUT_ONLY_SUBMIT_SCHEMA = [{"name": "output", "type": "object"}]
-_RUNTIME_ENV_KEYS = (
-    "DAYTONA_API_KEY",
-    "DAYTONA_API_URL",
-    "DAYTONA_TARGET",
-    "DSPY_LM_MODEL",
-    "DSPY_LM_API_BASE",
-    "DSPY_LM_MAX_TOKENS",
-    "DSPY_LLM_API_KEY",
-    "DSPY_LM_API_KEY",
-    "DSPY_DELEGATE_LM_MODEL",
-    "DSPY_DELEGATE_LM_API_BASE",
-    "DSPY_DELEGATE_LM_API_KEY",
-)
+_LOG_WAIT_INTERVAL_S = 0.1
+_REMOTE_REF_RESOLUTION_TIMEOUT_S = 5
 
 
-def _load_daytona_sdk() -> Any:
-    try:
-        from daytona import Daytona, DaytonaConfig, SessionExecuteRequest
-    except ImportError as exc:  # pragma: no cover - exercised by runtime users
+def _require_daytona_sdk() -> tuple[Any, Any, Any]:
+    if (
+        Daytona is None
+        or DaytonaConfig is None
+        or SessionExecuteRequest is None
+        or _DAYTONA_IMPORT_ERROR is not None
+    ):
         raise RuntimeError(
             "Daytona SDK is not available. Install dependencies with `uv sync` "
-            "and configure DAYTONA_API_KEY / DAYTONA_API_URL before using Daytona commands."
-        ) from exc
+            "and configure DAYTONA_API_KEY / DAYTONA_API_URL before using Daytona "
+            "commands. See https://www.daytona.io/docs/en/python-sdk/"
+        ) from _DAYTONA_IMPORT_ERROR
     return Daytona, DaytonaConfig, SessionExecuteRequest
+
+
+@dataclass(slots=True)
+class _SessionLogStreamState:
+    """Mutable state for one long-running Daytona session log stream."""
+
+    session_id: str
+    command_id: str
+    condition: threading.Condition = field(default_factory=threading.Condition)
+    stdout_snapshot: str = ""
+    stderr_snapshot: str = ""
+    frame_buffer: str = ""
+    stdout_offset: int = 0
+    has_async_stream: bool = False
+    stream_error: str | None = None
+    closed: bool = False
 
 
 def _looks_like_commit(ref: str) -> bool:
@@ -92,6 +108,54 @@ def _safe_workspace_name(repo_url: str | None) -> str:
 def _safe_context_slug(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-")
     return cleaned or "context"
+
+
+def _list_remote_refs(repo_url: str) -> set[str]:
+    try:
+        completed = subprocess.run(
+            ["git", "ls-remote", "--heads", "--tags", repo_url],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=_REMOTE_REF_RESOLUTION_TIMEOUT_S,
+        )
+    except Exception:
+        return set()
+
+    if completed.returncode != 0:
+        return set()
+
+    refs: set[str] = set()
+    for line in completed.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        _sha, raw_ref = line.split("\t", 1)
+        normalized = raw_ref.strip()
+        if normalized.startswith("refs/heads/"):
+            refs.add(normalized.removeprefix("refs/heads/"))
+            continue
+        if normalized.startswith("refs/tags/"):
+            refs.add(normalized.removeprefix("refs/tags/").removesuffix("^{}"))
+    return refs
+
+
+def _resolve_clone_ref(repo_url: str, ref: str | None) -> str | None:
+    normalized = str(ref or "").strip() or None
+    if normalized is None or _looks_like_commit(normalized) or "/" not in normalized:
+        return normalized
+
+    remote_refs = _list_remote_refs(repo_url)
+    if not remote_refs:
+        return normalized
+    if normalized in remote_refs:
+        return normalized
+
+    segments = [segment for segment in normalized.split("/") if segment]
+    for end in range(len(segments) - 1, 0, -1):
+        candidate = "/".join(segments[:end])
+        if candidate in remote_refs:
+            return candidate
+    return normalized
 
 
 def _resolve_local_context_path(path: str) -> Path:
@@ -244,24 +308,33 @@ def _stage_context_paths(
             context_root
             / f"{index:02d}-{_safe_context_slug(resolved.stem or resolved.name)}"
         )
-        if resolved.is_dir():
+        try:
+            if resolved.is_dir():
+                staged_sources.append(
+                    _stage_local_directory(
+                        fs=fs,
+                        resolved_path=resolved,
+                        staged_root=staged_root,
+                        source_id=source_id,
+                    )
+                )
+                continue
             staged_sources.append(
-                _stage_local_directory(
+                _stage_local_file(
                     fs=fs,
                     resolved_path=resolved,
                     staged_root=staged_root,
                     source_id=source_id,
                 )
             )
-            continue
-        staged_sources.append(
-            _stage_local_file(
-                fs=fs,
-                resolved_path=resolved,
-                staged_root=staged_root,
-                source_id=source_id,
-            )
-        )
+        except DaytonaDiagnosticError:
+            raise
+        except Exception as exc:
+            raise DaytonaDiagnosticError(
+                f"Failed to stage context path '{resolved}': {exc}",
+                category="context_stage_error",
+                phase="context_stage",
+            ) from exc
 
     manifest_path = context_root / "manifest.json"
     _upload_remote_text(
@@ -277,45 +350,32 @@ def _stage_context_paths(
 
 
 class DaytonaSandboxSession:
-    """A single Daytona sandbox session for one root or child node."""
+    """A single host-loop Daytona workspace session."""
 
     def __init__(
         self,
         *,
         sandbox: Any,
-        session_request_cls: type[Any],
-        resolved_config: ResolvedDaytonaConfig | None = None,
         repo_url: str | None,
         ref: str | None,
-        workspace_path: str | None = None,
-        repo_path: str | None = None,
+        workspace_path: str,
         context_sources: list[ContextSource] | None = None,
     ) -> None:
-        resolved_workspace_path = workspace_path or repo_path
-        if not resolved_workspace_path:
-            raise ValueError("DaytonaSandboxSession requires workspace_path.")
         self.sandbox = sandbox
-        self._session_request_cls = session_request_cls
-        self._resolved_config = resolved_config
         self.repo_url = repo_url or ""
         self.ref = ref
-        self.workspace_path = resolved_workspace_path
-        # Keep repo_path as a compatibility alias while the pilot expands beyond repos.
-        self.repo_path = resolved_workspace_path
+        self.workspace_path = workspace_path
         self.context_sources = list(context_sources or [])
         self._driver_session_id = f"fleet-rlm-{uuid.uuid4().hex}"
         self._driver_command_id: str | None = None
         self._driver_started = False
         self._stdout_offset = 0
         self._frame_buffer = ""
+        self._driver_log_stream: _SessionLogStreamState | None = None
         self._driver_path = str(
-            PurePosixPath(resolved_workspace_path) / ".fleet-rlm" / "driver.py"
+            PurePosixPath(workspace_path) / ".fleet-rlm" / "driver.py"
         )
-        self._runtime_session_id = f"fleet-rlm-runtime-{uuid.uuid4().hex}"
-        self._runtime_command_id: str | None = None
-        self._runtime_started = False
-        self._runtime_stdout_offset = 0
-        self._runtime_frame_buffer = ""
+        self.phase_timings_ms: dict[str, int] = {}
 
     @property
     def sandbox_id(self) -> str | None:
@@ -373,11 +433,12 @@ class DaytonaSandboxSession:
         if self._driver_started:
             return
 
+        started = time.perf_counter()
         try:
             self.write_file(".fleet-rlm/driver.py", DAYTONA_DRIVER_SOURCE)
             self.sandbox.process.create_session(self._driver_session_id)
-            request = self._session_request_cls(
-                command=f"python -u {self._driver_path} {self.repo_path}",
+            request = SessionExecuteRequest(
+                command=f"python -u {self._driver_path} {self.workspace_path}",
                 run_async=True,
                 suppress_input_echo=True,
             )
@@ -390,6 +451,10 @@ class DaytonaSandboxSession:
             self._driver_started = True
             self._stdout_offset = 0
             self._frame_buffer = ""
+            self._driver_log_stream = self._open_log_stream(
+                session_id=self._driver_session_id,
+                command_id=self._driver_command_id,
+            )
             self._read_until(
                 predicate=lambda frame: frame.get("type") == DriverReady().type,
                 timeout=timeout,
@@ -399,11 +464,17 @@ class DaytonaSandboxSession:
             self._driver_started = False
             self._stdout_offset = 0
             self._frame_buffer = ""
+            self._close_log_stream(self._driver_log_stream)
+            self._driver_log_stream = None
             raise DaytonaDiagnosticError(
                 f"Daytona driver handshake failure: {exc}",
                 category="driver_handshake_error",
                 phase="driver_start",
             ) from exc
+        finally:
+            self.phase_timings_ms["driver_start"] = int(
+                (time.perf_counter() - started) * 1000
+            )
 
     def execute_code(
         self,
@@ -412,10 +483,13 @@ class DaytonaSandboxSession:
         callback_handler: Callable[[HostCallbackRequest], HostCallbackResponse],
         timeout: float,
         submit_schema: list[dict[str, Any]] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        progress_handler: Callable[[ExecutionEventFrame], None] | None = None,
     ) -> ExecutionResponse:
         """Execute one code block through the persistent sandbox-side driver."""
 
         self.start_driver(timeout=timeout)
+        execute_started = time.perf_counter()
         request = ExecutionRequest(
             request_id=uuid.uuid4().hex,
             code=code,
@@ -427,18 +501,35 @@ class DaytonaSandboxSession:
             frame = self._read_until(
                 predicate=lambda payload: (
                     payload.get("type")
-                    in {_HOST_CALLBACK_REQUEST_TYPE, _EXECUTION_RESPONSE_TYPE}
+                    in {
+                        _HOST_CALLBACK_REQUEST_TYPE,
+                        _EXECUTION_EVENT_TYPE,
+                        _EXECUTION_RESPONSE_TYPE,
+                    }
                 ),
                 timeout=timeout,
+                cancel_check=cancel_check,
             )
             if frame.get("type") == _HOST_CALLBACK_REQUEST_TYPE:
                 callback_request = HostCallbackRequest.from_dict(frame)
                 callback_response = callback_handler(callback_request)
                 self._send_frame(callback_response.to_dict())
                 continue
+            if frame.get("type") == _EXECUTION_EVENT_TYPE:
+                if (
+                    progress_handler is not None
+                    and frame.get("request_id") == request.request_id
+                ):
+                    progress_handler(ExecutionEventFrame.from_dict(frame))
+                continue
             if frame.get("request_id") != request.request_id:
                 continue
-            return ExecutionResponse.from_dict(frame)
+            response = ExecutionResponse.from_dict(frame)
+            self.phase_timings_ms.setdefault(
+                "first_execute_response",
+                int((time.perf_counter() - execute_started) * 1000),
+            )
+            return response
 
     def close_driver(self, *, timeout: float = 5.0) -> None:
         """Gracefully stop the persistent sandbox-side driver."""
@@ -458,116 +549,23 @@ class DaytonaSandboxSession:
             try:
                 self.sandbox.process.delete_session(self._driver_session_id)
             finally:
+                self._close_log_stream(self._driver_log_stream)
+                self._driver_log_stream = None
                 self._driver_command_id = None
                 self._driver_started = False
                 self._stdout_offset = 0
                 self._frame_buffer = ""
 
-    def start_controller(self, *, timeout: float = 120.0) -> None:
-        """Start the self-orchestrated sandbox runtime once per sandbox."""
+    def reset_for_new_call(self, *, timeout: float = 5.0) -> None:
+        """Reset REPL state while preserving the staged Daytona workspace."""
 
-        if self._runtime_started:
-            return
-
-        runtime_command = self._build_runtime_command()
+        self.close_driver(timeout=timeout)
         try:
-            self.sandbox.process.create_session(self._runtime_session_id)
-            request = self._session_request_cls(
-                command=runtime_command,
-                run_async=True,
-                suppress_input_echo=True,
-            )
-            response = self.sandbox.process.execute_session_command(
-                self._runtime_session_id,
-                request,
-                timeout=int(timeout) if timeout > 0 else None,
-            )
-            self._runtime_command_id = str(response.cmd_id)
-            self._runtime_started = True
-            self._runtime_stdout_offset = 0
-            self._runtime_frame_buffer = ""
-            self._read_until_runtime(
-                predicate=lambda frame: frame.get("type") == RunReady().type,
-                timeout=timeout,
-            )
-        except Exception as exc:
-            self._runtime_command_id = None
-            self._runtime_started = False
-            self._runtime_stdout_offset = 0
-            self._runtime_frame_buffer = ""
-            raise DaytonaDiagnosticError(
-                f"Daytona runtime handshake failure: {exc}",
-                category="driver_handshake_error",
-                phase="driver_start",
-            ) from exc
-
-    def run_rollout(
-        self,
-        *,
-        request: RunStartRequest,
-        timeout: float,
-        event_handler: Callable[[RunEventFrame], None] | None = None,
-        cancel_check: Callable[[], bool] | None = None,
-    ) -> DaytonaRunResult:
-        """Run one self-orchestrated Daytona rollout in this sandbox."""
-
-        self.start_controller(timeout=timeout)
-        self._send_runtime_frame(request.to_dict())
-        cancel_sent = False
-
-        while True:
-            if (
-                cancel_check is not None
-                and cancel_check()
-                and not cancel_sent
-                and self._runtime_started
-            ):
-                self._send_runtime_frame(
-                    RunCancelRequest(request_id=request.request_id).to_dict()
-                )
-                cancel_sent = True
-
-            frame = self._read_until_runtime(
-                predicate=lambda payload: (
-                    payload.get("type")
-                    in {
-                        RunEventFrame(request_id="", kind="").type,
-                        RunResultEnvelope(request_id="", result={}).type,
-                        RunErrorEnvelope(request_id="", error="").type,
-                    }
-                ),
-                timeout=timeout,
-            )
-            frame_type = str(frame.get("type", "") or "")
-            if frame_type == RunEventFrame(request_id="", kind="").type:
-                if event_handler is not None:
-                    event_handler(RunEventFrame.from_dict(frame))
-                continue
-            if frame_type == RunErrorEnvelope(request_id="", error="").type:
-                error = RunErrorEnvelope.from_dict(frame)
-                if error.category == "cancelled":
-                    raise DaytonaRunCancelled(error.error)
-                raise DaytonaDiagnosticError(
-                    error.error,
-                    category=error.category or "runtime_error",
-                    phase="run",
-                )
-            result = RunResultEnvelope.from_dict(frame)
-            return DaytonaRunResult.from_raw(result.result)
-
-    def close_controller(self) -> None:
-        if not self._runtime_started or self._runtime_command_id is None:
-            return
-        try:
-            self.sandbox.process.delete_session(self._runtime_session_id)
-        finally:
-            self._runtime_command_id = None
-            self._runtime_started = False
-            self._runtime_stdout_offset = 0
-            self._runtime_frame_buffer = ""
+            self.run("rm -rf .fleet-rlm/prompts", cwd=self.workspace_path)
+        except Exception:
+            pass
 
     def delete(self) -> None:
-        self.close_controller()
         self.close_driver()
         if hasattr(self.sandbox, "delete"):
             self.sandbox.delete()
@@ -644,34 +642,6 @@ class DaytonaSandboxSession:
             raise RuntimeError("Prompt helper returned an invalid payload.")
         return payload
 
-    def _build_runtime_command(self) -> str:
-        env_values = {
-            "DAYTONA_API_KEY": (
-                self._resolved_config.api_key if self._resolved_config else ""
-            ),
-            "DAYTONA_API_URL": (
-                self._resolved_config.api_url if self._resolved_config else ""
-            ),
-            "DAYTONA_TARGET": (
-                self._resolved_config.target if self._resolved_config else ""
-            )
-            or "",
-        }
-        for key in _RUNTIME_ENV_KEYS:
-            if key not in env_values:
-                env_values[key] = os.environ.get(key, "")
-
-        exports = [
-            f"export {key}={shlex.quote(value)}"
-            for key, value in env_values.items()
-            if value
-        ]
-        exports.append(f"cd {shlex.quote(self.workspace_path)}")
-        exports.append(
-            "uv run --python 3.12 python -m fleet_rlm.daytona_rlm.sandbox_controller"
-        )
-        return " && ".join(exports)
-
     def _send_frame(self, payload: dict[str, Any]) -> None:
         if self._driver_command_id is None:
             raise RuntimeError("Sandbox driver is not running")
@@ -681,92 +651,159 @@ class DaytonaSandboxSession:
             encode_frame(payload) + "\n",
         )
 
-    def _send_runtime_frame(self, payload: dict[str, Any]) -> None:
-        if self._runtime_command_id is None:
-            raise RuntimeError("Sandbox runtime is not running")
-        self.sandbox.process.send_session_command_input(
-            self._runtime_session_id,
-            self._runtime_command_id,
-            encode_frame(payload) + "\n",
-        )
-
     def _read_until(
         self,
         *,
         predicate: Callable[[dict[str, Any]], bool],
         timeout: float,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            if cancel_check is not None and cancel_check():
+                self.close_driver(timeout=1.0)
+                raise DaytonaRunCancelled("Request cancelled.")
             for frame in self._drain_frames():
                 if predicate(frame):
                     return frame
-            time.sleep(0.05)
+            self._wait_for_logs(self._driver_log_stream, deadline=deadline)
 
-        logs = self.sandbox.process.get_session_command_logs(
-            self._driver_session_id,
-            self._driver_command_id,
-        )
-        stderr = str(getattr(logs, "stderr", "") or "").strip()
+        stderr = self._log_stderr(self._driver_log_stream).strip()
         suffix = f" Driver stderr: {stderr}" if stderr else ""
         raise TimeoutError(f"Timed out waiting for sandbox driver response.{suffix}")
 
-    def _read_until_runtime(
-        self,
-        *,
-        predicate: Callable[[dict[str, Any]], bool],
-        timeout: float,
-    ) -> dict[str, Any]:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            for frame in self._drain_runtime_frames():
-                if predicate(frame):
-                    return frame
-            time.sleep(0.05)
-
-        logs = self.sandbox.process.get_session_command_logs(
-            self._runtime_session_id,
-            self._runtime_command_id,
-        )
-        stderr = str(getattr(logs, "stderr", "") or "").strip()
-        suffix = f" Runtime stderr: {stderr}" if stderr else ""
-        raise TimeoutError(f"Timed out waiting for sandbox runtime response.{suffix}")
-
     def _drain_frames(self) -> list[dict[str, Any]]:
-        if self._driver_command_id is None:
+        return self._drain_log_frames(self._driver_log_stream)
+
+    def _open_log_stream(
+        self, *, session_id: str, command_id: str
+    ) -> _SessionLogStreamState:
+        state = _SessionLogStreamState(session_id=session_id, command_id=command_id)
+        stream_logs = getattr(
+            self.sandbox.process, "get_session_command_logs_async", None
+        )
+        if not callable(stream_logs):
+            return state
+
+        state.has_async_stream = True
+
+        def _stream_logs() -> None:
+            try:
+                result = stream_logs(
+                    session_id,
+                    command_id,
+                    lambda chunk: self._append_log_stdout(state, chunk),
+                    lambda chunk: self._append_log_stderr(state, chunk),
+                )
+                if asyncio.iscoroutine(result):
+                    asyncio.run(result)
+            except Exception as exc:
+                with state.condition:
+                    if not state.closed:
+                        state.has_async_stream = False
+                        state.stream_error = str(exc)
+                    state.condition.notify_all()
+
+        threading.Thread(target=_stream_logs, daemon=True).start()
+        return state
+
+    @staticmethod
+    def _close_log_stream(state: _SessionLogStreamState | None) -> None:
+        if state is None:
+            return
+        with state.condition:
+            state.closed = True
+            state.condition.notify_all()
+
+    def _append_log_stdout(
+        self, state: _SessionLogStreamState, chunk: str | bytes | None
+    ) -> None:
+        text = (
+            chunk.decode("utf-8", errors="replace")
+            if isinstance(chunk, bytes)
+            else str(chunk or "")
+        )
+        if not text:
+            return
+        with state.condition:
+            state.stdout_snapshot += text
+            state.frame_buffer += text
+            state.condition.notify_all()
+
+    def _append_log_stderr(
+        self, state: _SessionLogStreamState, chunk: str | bytes | None
+    ) -> None:
+        text = (
+            chunk.decode("utf-8", errors="replace")
+            if isinstance(chunk, bytes)
+            else str(chunk or "")
+        )
+        if not text:
+            return
+        with state.condition:
+            state.stderr_snapshot += text
+            state.condition.notify_all()
+
+    def _wait_for_logs(
+        self, state: _SessionLogStreamState | None, *, deadline: float
+    ) -> None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        if state is None:
+            time.sleep(min(_LOG_WAIT_INTERVAL_S, remaining))
+            return
+        with state.condition:
+            state.condition.wait(timeout=min(_LOG_WAIT_INTERVAL_S, remaining))
+
+    def _log_stderr(self, state: _SessionLogStreamState | None) -> str:
+        if state is None:
+            return ""
+        with state.condition:
+            stderr = state.stderr_snapshot
+        if stderr:
+            return stderr
+        self._refresh_log_snapshot(state)
+        with state.condition:
+            return state.stderr_snapshot
+
+    def _drain_log_frames(
+        self, state: _SessionLogStreamState | None
+    ) -> list[dict[str, Any]]:
+        if state is None:
             return []
+        if not state.has_async_stream:
+            self._refresh_log_snapshot(state)
+        with state.condition:
+            return self._decode_log_frames_locked(state)
+
+    def _refresh_log_snapshot(self, state: _SessionLogStreamState) -> None:
         logs = self.sandbox.process.get_session_command_logs(
-            self._driver_session_id,
-            self._driver_command_id,
+            state.session_id,
+            state.command_id,
         )
         stdout = str(getattr(logs, "stdout", "") or "")
-        new_text = stdout[self._stdout_offset :]
-        self._stdout_offset = len(stdout)
-        self._frame_buffer += new_text
+        stderr = str(getattr(logs, "stderr", "") or "")
+        with state.condition:
+            if len(stdout) >= state.stdout_offset:
+                new_text = stdout[state.stdout_offset :]
+            else:
+                new_text = stdout
+            state.stdout_offset = len(stdout)
+            if new_text:
+                state.stdout_snapshot = stdout
+                state.frame_buffer += new_text
+            else:
+                state.stdout_snapshot = stdout
+            state.stderr_snapshot = stderr
 
+    @staticmethod
+    def _decode_log_frames_locked(
+        state: _SessionLogStreamState,
+    ) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
-        while "\n" in self._frame_buffer:
-            line, self._frame_buffer = self._frame_buffer.split("\n", 1)
-            decoded = decode_frame(line.strip())
-            if decoded is not None:
-                frames.append(decoded)
-        return frames
-
-    def _drain_runtime_frames(self) -> list[dict[str, Any]]:
-        if self._runtime_command_id is None:
-            return []
-        logs = self.sandbox.process.get_session_command_logs(
-            self._runtime_session_id,
-            self._runtime_command_id,
-        )
-        stdout = str(getattr(logs, "stdout", "") or "")
-        new_text = stdout[self._runtime_stdout_offset :]
-        self._runtime_stdout_offset = len(stdout)
-        self._runtime_frame_buffer += new_text
-
-        frames: list[dict[str, Any]] = []
-        while "\n" in self._runtime_frame_buffer:
-            line, self._runtime_frame_buffer = self._runtime_frame_buffer.split("\n", 1)
+        while "\n" in state.frame_buffer:
+            line, state.frame_buffer = state.frame_buffer.split("\n", 1)
             decoded = decode_frame(line.strip())
             if decoded is not None:
                 frames.append(decoded)
@@ -783,17 +820,15 @@ class DaytonaSandboxRuntime:
     """Factory for Daytona sandboxes used by the pilot."""
 
     def __init__(self, *, config: ResolvedDaytonaConfig | None = None) -> None:
-        Daytona, DaytonaConfig, session_request_cls = _load_daytona_sdk()
+        DaytonaClient, DaytonaClientConfig, _ = _require_daytona_sdk()
         resolved = config or resolve_daytona_config()
-        self._resolved_config = resolved
-        self._client = Daytona(
-            DaytonaConfig(
+        self._client = DaytonaClient(
+            DaytonaClientConfig(
                 api_key=resolved.api_key,
                 api_url=resolved.api_url,
                 target=resolved.target,
             )
         )
-        self._session_request_cls = session_request_cls
 
     def _create_sandbox(self) -> Any:
         try:
@@ -803,6 +838,16 @@ class DaytonaSandboxRuntime:
                 f"Daytona sandbox create failure: {exc}",
                 category="sandbox_create_clone_error",
                 phase="sandbox_create",
+            ) from exc
+
+    def _get_sandbox(self, sandbox_id: str) -> Any:
+        try:
+            return self._client.get(sandbox_id)
+        except Exception as exc:
+            raise DaytonaDiagnosticError(
+                f"Daytona sandbox resume failure: {exc}",
+                category="sandbox_resume_error",
+                phase="sandbox_resume",
             ) from exc
 
     def _build_workspace_path(self, sandbox: Any, repo_url: str | None) -> str:
@@ -847,13 +892,13 @@ class DaytonaSandboxRuntime:
                 phase="repo_clone",
             ) from exc
 
-    def create_workspace_session_with_diagnostics(
+    def create_workspace_session(
         self,
         *,
         repo_url: str | None,
         ref: str | None,
         context_paths: list[str] | None = None,
-    ) -> tuple[DaytonaSandboxSession, dict[str, int]]:
+    ) -> DaytonaSandboxSession:
         timings = {"sandbox_create": 0, "repo_clone": 0, "context_stage": 0}
         sandbox: Any | None = None
         try:
@@ -869,12 +914,13 @@ class DaytonaSandboxRuntime:
                     sandbox=sandbox, workspace_path=workspace_path
                 )
 
+            resolved_ref = _resolve_clone_ref(repo_url, ref) if repo_url else ref
             if repo_url:
                 clone_started = time.perf_counter()
                 self._clone_repo(
                     sandbox=sandbox,
                     repo_url=repo_url,
-                    ref=ref,
+                    ref=resolved_ref,
                     workspace_path=workspace_path,
                 )
                 timings["repo_clone"] = int(
@@ -893,14 +939,13 @@ class DaytonaSandboxRuntime:
 
             session = DaytonaSandboxSession(
                 sandbox=sandbox,
-                session_request_cls=self._session_request_cls,
-                resolved_config=self._resolved_config,
                 repo_url=repo_url,
-                ref=ref,
+                ref=resolved_ref,
                 workspace_path=workspace_path,
                 context_sources=context_sources,
             )
-            return session, timings
+            session.phase_timings_ms.update(timings)
+            return session
         except Exception as exc:
             if sandbox is not None and hasattr(sandbox, "delete"):
                 try:
@@ -909,34 +954,25 @@ class DaytonaSandboxRuntime:
                     pass
             raise exc
 
-    def create_repo_session_with_diagnostics(
-        self, *, repo_url: str, ref: str | None
-    ) -> tuple[DaytonaSandboxSession, dict[str, int]]:
-        return self.create_workspace_session_with_diagnostics(
-            repo_url=repo_url,
-            ref=ref,
-            context_paths=None,
-        )
-
-    def create_workspace_session(
+    def resume_workspace_session(
         self,
         *,
+        sandbox_id: str,
         repo_url: str | None,
         ref: str | None,
-        context_paths: list[str] | None = None,
+        workspace_path: str,
+        context_sources: list[ContextSource] | None = None,
     ) -> DaytonaSandboxSession:
-        session, _ = self.create_workspace_session_with_diagnostics(
+        resumed_started = time.perf_counter()
+        sandbox = self._get_sandbox(sandbox_id)
+        session = DaytonaSandboxSession(
+            sandbox=sandbox,
             repo_url=repo_url,
             ref=ref,
-            context_paths=context_paths,
+            workspace_path=workspace_path,
+            context_sources=context_sources,
+        )
+        session.phase_timings_ms["sandbox_resume"] = int(
+            (time.perf_counter() - resumed_started) * 1000
         )
         return session
-
-    def create_repo_session(
-        self, *, repo_url: str, ref: str | None
-    ) -> DaytonaSandboxSession:
-        return self.create_workspace_session(
-            repo_url=repo_url,
-            ref=ref,
-            context_paths=None,
-        )

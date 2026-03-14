@@ -141,13 +141,13 @@ def daytona_rlm(
         50,
         "--max-sandboxes",
         min=1,
-        help="Global sandbox budget across the rollout.",
+        help="Deprecated compatibility flag. Host-loop Daytona runs always use one sandbox per root call.",
     ),
     max_depth: int = typer.Option(
         2,
         "--max-depth",
         min=0,
-        help="Maximum recursive depth for child Daytona subcalls.",
+        help="Deprecated compatibility flag. Host-loop Daytona runs do not spawn child Daytona sandboxes for llm_query.",
     ),
     max_iterations: int = typer.Option(
         50,

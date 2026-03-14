@@ -20,4 +20,4 @@ def test_daytona_smoke_live(require_daytona_runtime) -> None:
     assert result.error_message is None
     assert "cleanup" in result.phase_timings_ms
     assert result.sandbox_id
-    assert result.repo_path
+    assert result.workspace_path

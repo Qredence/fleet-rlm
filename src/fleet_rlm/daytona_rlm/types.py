@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -370,11 +371,74 @@ class RecursiveTaskSpec:
 
 
 @dataclass(slots=True)
+class DaytonaEvidenceRef:
+    """Normalized evidence reference used for recursive child synthesis."""
+
+    kind: str
+    source_id: str | None = None
+    path: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    header: str | None = None
+    preview: str | None = None
+    chunk_index: int | None = None
+    pattern: str | None = None
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "DaytonaEvidenceRef":
+        if not isinstance(raw, dict):
+            raise ValueError("Daytona evidence payload must be a dict.")
+
+        line = _coerce_positive_int(raw.get("line"))
+        start_line = _coerce_positive_int(raw.get("start_line")) or line
+        end_line = _coerce_positive_int(raw.get("end_line")) or start_line
+        if start_line is not None and end_line is not None and end_line < start_line:
+            end_line = start_line
+
+        evidence = cls(
+            kind=_normalize_optional_text(raw.get("kind")) or "manual",
+            source_id=_normalize_optional_text(raw.get("source_id")),
+            path=_normalize_optional_text(raw.get("path")),
+            start_line=start_line,
+            end_line=end_line,
+            header=_normalize_optional_text(raw.get("header")),
+            preview=_normalize_optional_text(raw.get("preview"), limit=240),
+            chunk_index=_coerce_nonnegative_int(raw.get("chunk_index")),
+            pattern=_normalize_optional_text(raw.get("pattern")),
+        )
+        if evidence.source_id is None:
+            evidence.source_id = evidence._derive_source_id()
+        return evidence
+
+    def _derive_source_id(self) -> str | None:
+        stable_parts = [
+            self.kind,
+            self.path or "",
+            str(self.start_line or ""),
+            str(self.end_line or ""),
+            str(self.chunk_index if self.chunk_index is not None else ""),
+            self.header or "",
+            self.pattern or "",
+        ]
+        if not any(stable_parts[1:]):
+            return None
+        digest = hashlib.sha1(
+            "|".join(stable_parts).encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()[:16]
+        return f"evidence-{digest}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class ChildLink:
     """Persisted parent -> child recursive linkage."""
 
     child_id: str | None
     callback_name: str
+    iteration: int | None
     task: RecursiveTaskSpec
     result_preview: str
     status: str
@@ -383,6 +447,7 @@ class ChildLink:
         return {
             "child_id": self.child_id,
             "callback_name": self.callback_name,
+            "iteration": self.iteration,
             "task": self.task.to_dict(),
             "result_preview": self.result_preview,
             "status": self.status,
@@ -396,6 +461,7 @@ class ChildLink:
             child_id=_normalize_optional_text(raw.get("child_id")),
             callback_name=_normalize_optional_text(raw.get("callback_name"))
             or "llm_query",
+            iteration=_coerce_positive_int(raw.get("iteration")),
             task=RecursiveTaskSpec.from_raw(raw.get("task", {})),
             result_preview=_normalize_optional_text(
                 raw.get("result_preview"), limit=280
@@ -414,6 +480,10 @@ class ChildTaskResult:
     text: str
     result_preview: str
     status: str
+    evidence: list[DaytonaEvidenceRef] = field(default_factory=list)
+    confidence: float | None = None
+    follow_up_needed: bool = False
+    run_result: "DaytonaRunResult | None" = None
 
 
 @dataclass(slots=True)
@@ -579,6 +649,7 @@ class RolloutSummary:
     termination_reason: str
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
+    phase_timings_ms: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -597,6 +668,11 @@ class RolloutSummary:
             warnings=[
                 str(item) for item in raw.get("warnings", []) or [] if item is not None
             ],
+            phase_timings_ms={
+                str(key): _coerce_nonnegative_int(value) or 0
+                for key, value in (raw.get("phase_timings_ms", {}) or {}).items()
+                if key is not None
+            },
         )
 
 
@@ -615,6 +691,7 @@ class DaytonaRunResult:
     final_artifact: FinalArtifact | None
     summary: RolloutSummary
     result_path: str | None = None
+    evaluation: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -633,7 +710,248 @@ class DaytonaRunResult:
             ),
             "summary": self.summary.to_dict(),
             "result_path": self.result_path,
+            "evaluation": self.evaluation,
         }
+
+    def to_public_dict(self) -> dict[str, Any]:
+        root = self.nodes.get(self.root_id)
+        prompt_handles = list(root.prompt_handles) if root is not None else []
+        prompt_handles = sorted(
+            prompt_handles,
+            key=lambda handle: (
+                handle.kind or "",
+                handle.label or "",
+                handle.handle_id,
+            ),
+        )
+
+        return {
+            "run_id": self.run_id,
+            "repo": self.repo,
+            "ref": self.ref,
+            "task": _persisted_text_preview(self.task),
+            "daytona_mode": "host_loop_rlm",
+            "root_id": self.root_id,
+            "nodes": {node_id: node.to_dict() for node_id, node in self.nodes.items()},
+            "context_sources": [item.to_dict() for item in self.context_sources],
+            "prompts": [handle.to_dict() for handle in prompt_handles],
+            "iterations": self._public_iterations(root),
+            "callbacks": self._public_callbacks(root),
+            "sources": self._public_sources(root),
+            "attachments": self._public_attachments(),
+            "final_artifact": (
+                self.final_artifact.to_dict()
+                if self.final_artifact is not None
+                else None
+            ),
+            "summary": self.summary.to_dict(),
+            "result_path": self.result_path,
+        }
+
+    def node_evaluation(self, node_id: str) -> dict[str, Any]:
+        nodes = self.evaluation.get("nodes", {})
+        if not isinstance(nodes, dict):
+            return {}
+        payload = nodes.get(node_id, {})
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            str(key): list(value) if isinstance(value, list) else value
+            for key, value in payload.items()
+        }
+
+    def _public_iterations(self, root: "AgentNode | None") -> list[dict[str, Any]]:
+        if root is None:
+            return []
+
+        iterations: list[dict[str, Any]] = []
+        observation_by_iteration = {
+            observation.iteration: observation for observation in root.observations
+        }
+        max_iterations = max(
+            [
+                root.iteration_count,
+                *observation_by_iteration.keys(),
+            ],
+            default=0,
+        )
+        callback_counts = self._callback_counts_by_iteration(root)
+
+        for iteration in range(1, max_iterations + 1):
+            observation = observation_by_iteration.get(iteration)
+            response_preview = (
+                root.response_previews[iteration - 1]
+                if iteration - 1 < len(root.response_previews)
+                else ""
+            )
+            record: dict[str, Any] = {
+                "iteration": iteration,
+                "status": (
+                    "error"
+                    if observation is not None and observation.error
+                    else "completed"
+                ),
+                "reasoning_summary": _normalize_optional_text(
+                    response_preview, limit=1200
+                ),
+                "code": observation.code if observation is not None else "",
+                "stdout": observation.stdout if observation is not None else "",
+                "stderr": observation.stderr if observation is not None else "",
+                "error": observation.error if observation is not None else None,
+                "duration_ms": (
+                    observation.duration_ms if observation is not None else None
+                ),
+                "callback_count": callback_counts.get(
+                    iteration,
+                    observation.callback_count if observation is not None else 0,
+                ),
+            }
+            if (
+                self.final_artifact is not None
+                and iteration == root.iteration_count
+                and self.summary.termination_reason == "completed"
+            ):
+                record["finalized"] = True
+            iterations.append(record)
+
+        return iterations
+
+    def _public_callbacks(self, root: "AgentNode | None") -> list[dict[str, Any]]:
+        if root is None:
+            return []
+        callbacks: list[dict[str, Any]] = []
+        for index, link in enumerate(root.child_links, start=1):
+            callbacks.append(
+                {
+                    "id": f"callback-{index}",
+                    "callback_name": link.callback_name,
+                    "iteration": link.iteration,
+                    "status": link.status,
+                    "task": link.task.task,
+                    "label": link.task.label,
+                    "result_preview": link.result_preview,
+                    "source": link.task.source.to_dict(),
+                }
+            )
+        return callbacks
+
+    def _callback_counts_by_iteration(self, root: "AgentNode | None") -> dict[int, int]:
+        counts: dict[int, int] = {}
+        if root is None:
+            return counts
+        for link in root.child_links:
+            if link.iteration is None:
+                continue
+            counts[link.iteration] = counts.get(link.iteration, 0) + 1
+        return counts
+
+    def _public_sources(self, root: "AgentNode | None") -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for source in self.context_sources:
+            title = Path(source.host_path).name or source.host_path
+            description_parts = [f"Staged at {source.staged_path}"]
+            if source.source_type:
+                description_parts.append(f"type: {source.source_type}")
+            if source.extraction_method:
+                description_parts.append(f"extracted via {source.extraction_method}")
+            if source.file_count > 1:
+                description_parts.append(f"{source.file_count} files")
+            if source.skipped_count:
+                description_parts.append(f"{source.skipped_count} skipped")
+            if source.warnings:
+                description_parts.extend(source.warnings)
+            key = f"context:{source.source_id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append(
+                {
+                    "source_id": source.source_id,
+                    "kind": "file",
+                    "title": title,
+                    "display_url": source.host_path,
+                    "description": "; ".join(
+                        part for part in description_parts if part
+                    ),
+                    "quote": None,
+                    "host_path": source.host_path,
+                    "staged_path": source.staged_path,
+                    "source_type": source.source_type,
+                    "extraction_method": source.extraction_method,
+                }
+            )
+
+        if root is None:
+            return sources
+
+        for link in root.child_links:
+            source = link.task.source
+            key = (
+                f"task:{source.source_id or ''}:{source.path or ''}:"
+                f"{source.start_line or source.line or ''}:{source.end_line or ''}:"
+                f"{source.chunk_index if source.chunk_index is not None else ''}:"
+                f"{source.header or ''}:{source.pattern or ''}"
+            )
+            if key in seen:
+                continue
+            if source.path is None and source.preview is None:
+                continue
+            seen.add(key)
+
+            line_start = source.start_line or source.line
+            line_end = source.end_line or line_start
+            span = (
+                f"lines {line_start}-{line_end}"
+                if line_start is not None and line_end is not None
+                else None
+            )
+            details = [
+                span,
+                f"header: {source.header}" if source.header else None,
+                f"pattern: {source.pattern}" if source.pattern else None,
+            ]
+            title = source.path or source.source_id or link.task.label or link.task.task
+            sources.append(
+                {
+                    "source_id": source.source_id or f"source-{len(sources) + 1}",
+                    "kind": "file",
+                    "title": title,
+                    "display_url": source.path,
+                    "description": "; ".join(
+                        part for part in details if part is not None
+                    )
+                    or None,
+                    "quote": source.preview,
+                    "path": source.path,
+                    "start_line": line_start,
+                    "end_line": line_end,
+                    "chunk_index": source.chunk_index,
+                    "header": source.header,
+                    "pattern": source.pattern,
+                }
+            )
+
+        return sources
+
+    def _public_attachments(self) -> list[dict[str, Any]]:
+        attachments: list[dict[str, Any]] = []
+        for source in self.context_sources:
+            attachments.append(
+                {
+                    "attachment_id": source.source_id,
+                    "name": Path(source.host_path).name or source.host_path,
+                    "kind": source.kind,
+                    "mime_type": source.source_type,
+                    "description": (
+                        f"Host path: {source.host_path}"
+                        if source.staged_path == source.host_path
+                        else f"Host path: {source.host_path}; staged at {source.staged_path}"
+                    ),
+                }
+            )
+        return attachments
 
     @classmethod
     def from_raw(cls, raw: Any) -> "DaytonaRunResult":
@@ -685,6 +1003,9 @@ class DaytonaRunResult:
             ),
             summary=RolloutSummary.from_raw(raw.get("summary", {})),
             result_path=_normalize_optional_text(raw.get("result_path")),
+            evaluation=raw.get("evaluation")
+            if isinstance(raw.get("evaluation"), dict)
+            else {},
         )
 
 
@@ -695,7 +1016,7 @@ class DaytonaSmokeResult:
     repo: str
     ref: str | None
     sandbox_id: str | None
-    repo_path: str = ""
+    workspace_path: str = ""
     persisted_state_value: Any = None
     driver_started: bool = False
     finalization_mode: str = "unknown"

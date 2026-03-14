@@ -184,6 +184,7 @@ class RuntimeStatusResponse(BaseModel):
     active_models: RuntimeActiveModels
     llm: dict[str, Any] = Field(default_factory=dict)
     modal: dict[str, Any] = Field(default_factory=dict)
+    daytona: dict[str, Any] = Field(default_factory=dict)
     tests: RuntimeTestCache
     guidance: list[str] = Field(default_factory=list)
 

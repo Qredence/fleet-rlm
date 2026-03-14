@@ -1,4 +1,4 @@
-"""Guide-native recursive spawn helpers for the experimental Daytona-backed RLM pilot."""
+"""Guide-native semantic and recursive helper adapters for Daytona RLM."""
 
 from __future__ import annotations
 
@@ -13,11 +13,31 @@ if TYPE_CHECKING:
 def llm_query(
     runner: "DaytonaRLMRunner",
     *,
+    task_spec: "RecursiveTaskSpec",
+) -> str:
+    """Run one semantic host-LM query and return plain text."""
+
+    return runner.run_semantic_task(task_spec=task_spec)
+
+
+def llm_query_batched(
+    runner: "DaytonaRLMRunner",
+    *,
+    task_specs: list["RecursiveTaskSpec"],
+) -> list[str]:
+    """Run semantic host-LM queries with bounded concurrency and stable ordering."""
+
+    return runner.run_semantic_tasks_batched(task_specs=task_specs)
+
+
+def rlm_query(
+    runner: "DaytonaRLMRunner",
+    *,
     parent_id: str,
     depth: int,
     task_spec: "RecursiveTaskSpec",
 ) -> "ChildTaskResult":
-    """Run one child query and return the normalized child result."""
+    """Run one true recursive child Daytona query."""
 
     return runner.run_child_task(
         parent_id=parent_id,
@@ -26,14 +46,14 @@ def llm_query(
     )
 
 
-def llm_query_batched(
+def rlm_query_batched(
     runner: "DaytonaRLMRunner",
     *,
     parent_id: str,
     depth: int,
     task_specs: list["RecursiveTaskSpec"],
 ) -> list["ChildTaskResult"]:
-    """Run child queries with bounded concurrency and stable ordering."""
+    """Run recursive child Daytona queries with bounded concurrency."""
 
     if not task_specs:
         return []
@@ -56,37 +76,3 @@ def llm_query_batched(
             results[idx] = future.result()
 
     return [results[idx] for idx in range(len(task_specs))]
-
-
-def rlm_query(
-    runner: "DaytonaRLMRunner",
-    *,
-    parent_id: str,
-    depth: int,
-    task_spec: "RecursiveTaskSpec",
-) -> "ChildTaskResult":
-    """Compatibility alias for the guide-native llm_query helper."""
-
-    return llm_query(
-        runner,
-        parent_id=parent_id,
-        depth=depth,
-        task_spec=task_spec,
-    )
-
-
-def rlm_query_batched(
-    runner: "DaytonaRLMRunner",
-    *,
-    parent_id: str,
-    depth: int,
-    task_specs: list["RecursiveTaskSpec"],
-) -> list["ChildTaskResult"]:
-    """Compatibility alias for the guide-native llm_query_batched helper."""
-
-    return llm_query_batched(
-        runner,
-        parent_id=parent_id,
-        depth=depth,
-        task_specs=task_specs,
-    )

@@ -24,6 +24,10 @@ def ws_test_app(monkeypatch: pytest.MonkeyPatch, fake_agent: FakeChatAgent):
         return fake_agent
 
     monkeypatch.setattr("fleet_rlm.runners.build_react_chat_agent", _fake_build_agent)
+    monkeypatch.setattr(
+        "fleet_rlm.runners.build_daytona_workbench_chat_agent",
+        _fake_build_agent,
+    )
     config = ServerRuntimeConfig(
         app_env="local",
         database_required=False,

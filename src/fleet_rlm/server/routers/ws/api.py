@@ -36,6 +36,7 @@ from .helpers import (
     _sanitize_id,
     _try_send_json,
 )
+from .message_loop import parse_ws_message_or_send_error
 from .session import persist_session_state
 
 router = APIRouter(tags=["websocket"])
@@ -102,14 +103,24 @@ async def chat_streaming(websocket: WebSocket) -> None:
     if runtime is None:
         return
 
-    agent_context = _build_chat_agent_context(runtime)
-
     analytics_distinct_id = (identity.user_claim or "").strip() or None
     try:
         with (
             runtime_distinct_id_context(analytics_distinct_id),
             dspy.context(lm=runtime.planner_lm),
         ):
+            initial_msg = None
+            while initial_msg is None:
+                raw_payload = await websocket.receive_json()
+                initial_msg = await parse_ws_message_or_send_error(
+                    websocket=websocket,
+                    raw_payload=raw_payload,
+                )
+
+            agent_context = _build_chat_agent_context(
+                runtime,
+                runtime_mode=getattr(initial_msg, "runtime_mode", "modal_chat"),
+            )
             async with agent_context as agent:
                 interpreter = getattr(agent, "interpreter", None)
                 _set_interpreter_default_profile(interpreter, runtime.cfg)
@@ -140,7 +151,10 @@ async def chat_streaming(websocket: WebSocket) -> None:
                     interpreter=interpreter,
                     session=session,
                     local_persist=local_persist,
+                    initial_message=initial_msg,
                 )
+    except WebSocketDisconnect:
+        return
     except Exception as exc:
         logger.exception("WebSocket chat startup failed: %s", _sanitize_for_log(exc))
         if await _try_send_json(websocket, _chat_startup_error_payload(exc)):

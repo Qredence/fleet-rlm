@@ -1,23 +1,27 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
+from fleet_rlm.daytona_rlm.diagnostics import DaytonaDiagnosticError
 from fleet_rlm.daytona_rlm.config import ResolvedDaytonaConfig
 from fleet_rlm.daytona_rlm.protocol import (
     DriverReady,
+    ExecutionEventFrame,
     ExecutionRequest,
     ExecutionResponse,
-    RunErrorEnvelope,
-    RunStartRequest,
     ShutdownAck,
     ShutdownRequest,
     decode_frame,
     encode_frame,
 )
-from fleet_rlm.daytona_rlm.sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
-from fleet_rlm.daytona_rlm.types import DaytonaRunCancelled
+from fleet_rlm.daytona_rlm.sandbox import (
+    DaytonaSandboxRuntime,
+    DaytonaSandboxSession,
+    _resolve_clone_ref,
+)
 
 
 class _FakeArtifacts:
@@ -210,6 +214,7 @@ class _FakeProcess:
         self.exec_calls: list[tuple[str, str | None]] = []
         self.created_sessions: list[str] = []
         self.deleted_sessions: list[str] = []
+        self.get_logs_calls = 0
         self.command_counter = 0
         self.driver_by_command: dict[str, _FakeDriverProcess] = {}
 
@@ -239,6 +244,7 @@ class _FakeProcess:
 
     def get_session_command_logs(self, session_id: str, command_id: str):
         del session_id
+        self.get_logs_calls += 1
         driver = self.driver_by_command[command_id]
         return SimpleNamespace(stdout=driver.stdout, stderr="")
 
@@ -268,15 +274,44 @@ def _resolved_config() -> ResolvedDaytonaConfig:
     )
 
 
+def _patch_daytona_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fake_sandbox: _FakeSandbox,
+) -> None:
+    class _FakeDaytonaConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class _FakeDaytona:
+        def __init__(self, config):
+            self.config = config
+
+        def create(self):
+            return fake_sandbox
+
+        def get(self, sandbox_id: str):
+            assert sandbox_id == fake_sandbox.id
+            return fake_sandbox
+
+    monkeypatch.setattr("fleet_rlm.daytona_rlm.sandbox.Daytona", _FakeDaytona)
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox.DaytonaConfig",
+        _FakeDaytonaConfig,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox._DAYTONA_IMPORT_ERROR",
+        None,
+    )
+
+
 def test_daytona_sandbox_session_file_and_process_helpers():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
-        session_request_cls=SimpleNamespace,
-        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
-        repo_path="/workdir/workspace/repo",
+        workspace_path="/workdir/workspace/repo",
     )
 
     write_path = session.write_file("notes.txt", "hello")
@@ -298,11 +333,9 @@ def test_daytona_sandbox_driver_persists_state_and_supports_submit():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
-        session_request_cls=SimpleNamespace,
-        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
-        repo_path="/workdir/workspace/repo",
+        workspace_path="/workdir/workspace/repo",
     )
 
     session.start_driver(timeout=1.0)
@@ -327,11 +360,9 @@ def test_daytona_sandbox_driver_supports_typed_submit_schema():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
-        session_request_cls=SimpleNamespace,
-        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
-        repo_path="/workdir/workspace/repo",
+        workspace_path="/workdir/workspace/repo",
     )
 
     session.start_driver(timeout=1.0)
@@ -359,11 +390,9 @@ def test_daytona_sandbox_driver_returns_structured_errors():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
-        session_request_cls=SimpleNamespace,
-        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
-        repo_path="/workdir/workspace/repo",
+        workspace_path="/workdir/workspace/repo",
     )
 
     session.start_driver(timeout=1.0)
@@ -377,15 +406,98 @@ def test_daytona_sandbox_driver_returns_structured_errors():
     assert "ValueError: boom" in response.error
 
 
+def test_daytona_sandbox_execute_code_forwards_progress_events():
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        workspace_path="/workdir/workspace/repo",
+    )
+    session.start_driver = lambda timeout=1.0: None
+    sent_frames: list[dict[str, object]] = []
+    session._send_frame = lambda payload: sent_frames.append(payload)
+
+    def _read_until(predicate, timeout, cancel_check=None):
+        del predicate, timeout, cancel_check
+        request_id = str(sent_frames[0]["request_id"])
+        if not emitted:
+            return ExecutionEventFrame(
+                request_id=request_id,
+                stream="stdout",
+                text="loading repository\n",
+            ).to_dict()
+        return ExecutionResponse(
+            request_id=request_id,
+            stdout="loading repository\n",
+            duration_ms=1,
+        ).to_dict()
+
+    session._read_until = _read_until
+
+    emitted: list[ExecutionEventFrame] = []
+    response = session.execute_code(
+        code="print('loading repository')",
+        callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
+        timeout=1.0,
+        progress_handler=emitted.append,
+    )
+
+    assert response.stdout == "loading repository\n"
+    assert len(emitted) == 1
+    assert emitted[0].stream == "stdout"
+    assert emitted[0].text == "loading repository\n"
+
+
+def test_daytona_sandbox_prefers_async_log_stream_when_available():
+    sandbox = _FakeSandbox()
+
+    async def _stream_logs(session_id: str, command_id: str, on_stdout, on_stderr):
+        del session_id, on_stderr
+        driver = sandbox.process.driver_by_command[command_id]
+        seen = 0
+        idle_rounds = 0
+        while idle_rounds < 200:
+            current = driver.stdout
+            if len(current) > seen:
+                on_stdout(current[seen:])
+                seen = len(current)
+                idle_rounds = 0
+            else:
+                idle_rounds += 1
+            if driver.closed:
+                break
+            await asyncio.sleep(0.001)
+
+    sandbox.process.get_session_command_logs_async = _stream_logs
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        workspace_path="/workdir/workspace/repo",
+    )
+
+    session.start_driver(timeout=1.0)
+    response = session.execute_code(
+        code='SUBMIT(summary="hello from async logs")',
+        callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
+        timeout=1.0,
+        submit_schema=[{"name": "summary", "type": "str | None"}],
+    )
+    session.close_driver(timeout=1.0)
+
+    assert response.final_artifact is not None
+    assert response.final_artifact["value"] == {"summary": "hello from async logs"}
+    assert sandbox.process.get_logs_calls == 0
+
+
 def test_daytona_sandbox_close_driver_cleans_up_process_session():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
-        session_request_cls=SimpleNamespace,
-        resolved_config=_resolved_config(),
         repo_url="https://github.com/example/repo.git",
         ref="main",
-        repo_path="/workdir/workspace/repo",
+        workspace_path="/workdir/workspace/repo",
     )
 
     session.start_driver(timeout=1.0)
@@ -394,78 +506,12 @@ def test_daytona_sandbox_close_driver_cleans_up_process_session():
     assert sandbox.process.deleted_sessions == [session._driver_session_id]
 
 
-def test_daytona_sandbox_runtime_command_uses_resolved_daytona_config(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
-    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
-    monkeypatch.delenv("DAYTONA_TARGET", raising=False)
-
-    sandbox = _FakeSandbox()
-    session = DaytonaSandboxSession(
-        sandbox=sandbox,
-        session_request_cls=SimpleNamespace,
-        resolved_config=ResolvedDaytonaConfig(
-            api_key="dotenv-key",
-            api_url="https://dotenv.daytona.example",
-            target="eu-west",
-        ),
-        repo_url="https://github.com/example/repo.git",
-        ref="main",
-        repo_path="/workdir/workspace/repo",
-    )
-
-    command = session._build_runtime_command()
-
-    assert "export DAYTONA_API_KEY=dotenv-key" in command
-    assert "export DAYTONA_API_URL=https://dotenv.daytona.example" in command
-    assert "export DAYTONA_TARGET=eu-west" in command
-
-
-def test_daytona_sandbox_run_rollout_maps_cancelled_runtime_errors():
-    sandbox = _FakeSandbox()
-    session = DaytonaSandboxSession(
-        sandbox=sandbox,
-        session_request_cls=SimpleNamespace,
-        resolved_config=_resolved_config(),
-        repo_url="https://github.com/example/repo.git",
-        ref="main",
-        repo_path="/workdir/workspace/repo",
-    )
-    session._runtime_started = True
-    session._runtime_command_id = "cmd-1"
-    session.start_controller = lambda timeout=120.0: None
-    session._send_runtime_frame = lambda payload: None
-    session._read_until_runtime = lambda predicate, timeout: RunErrorEnvelope(
-        request_id="req-1",
-        error="Request cancelled.",
-        category="cancelled",
-    ).to_dict()
-
-    with pytest.raises(DaytonaRunCancelled, match="Request cancelled."):
-        session.run_rollout(
-            request=RunStartRequest(request_id="req-1", payload={}),
-            timeout=1.0,
-        )
-
-
 def test_daytona_runtime_clones_branch(monkeypatch: pytest.MonkeyPatch):
     fake_sandbox = _FakeSandbox()
-
-    class _FakeDaytonaConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class _FakeDaytona:
-        def __init__(self, config):
-            self.config = config
-
-        def create(self):
-            return fake_sandbox
-
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
-        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
+        "fleet_rlm.daytona_rlm.sandbox._list_remote_refs",
+        lambda repo_url: {"main"},
     )
 
     runtime = DaytonaSandboxRuntime(
@@ -474,12 +520,13 @@ def test_daytona_runtime_clones_branch(monkeypatch: pytest.MonkeyPatch):
             api_url="https://api.daytona.example",
         )
     )
-    session = runtime.create_repo_session(
+    session = runtime.create_workspace_session(
         repo_url="https://github.com/example/repo.git",
         ref="main",
+        context_paths=None,
     )
 
-    assert session.repo_path == "/workdir/workspace/repo"
+    assert session.workspace_path == "/workdir/workspace/repo"
     assert fake_sandbox.git.clone_calls == [
         {
             "url": "https://github.com/example/repo.git",
@@ -491,22 +538,7 @@ def test_daytona_runtime_clones_branch(monkeypatch: pytest.MonkeyPatch):
 
 def test_daytona_runtime_clones_commit(monkeypatch: pytest.MonkeyPatch):
     fake_sandbox = _FakeSandbox()
-
-    class _FakeDaytonaConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class _FakeDaytona:
-        def __init__(self, config):
-            self.config = config
-
-        def create(self):
-            return fake_sandbox
-
-    monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
-        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
-    )
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
 
     runtime = DaytonaSandboxRuntime(
         config=ResolvedDaytonaConfig(
@@ -514,9 +546,10 @@ def test_daytona_runtime_clones_commit(monkeypatch: pytest.MonkeyPatch):
             api_url="https://api.daytona.example",
         )
     )
-    runtime.create_repo_session(
+    runtime.create_workspace_session(
         repo_url="https://github.com/example/repo.git",
         ref="abc1234",
+        context_paths=None,
     )
 
     assert fake_sandbox.git.clone_calls == [
@@ -528,24 +561,33 @@ def test_daytona_runtime_clones_commit(monkeypatch: pytest.MonkeyPatch):
     ]
 
 
+def test_resolve_clone_ref_uses_longest_matching_remote_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox._list_remote_refs",
+        lambda repo_url: {"main", "release/2026-03", "feature/foo"},
+    )
+
+    assert (
+        _resolve_clone_ref(
+            "https://github.com/example/repo.git",
+            "release/2026-03/src/frontend",
+        )
+        == "release/2026-03"
+    )
+    assert (
+        _resolve_clone_ref(
+            "https://github.com/example/repo.git",
+            "feature/foo/src/app.ts",
+        )
+        == "feature/foo"
+    )
+
+
 def test_daytona_runtime_reports_bootstrap_timings(monkeypatch: pytest.MonkeyPatch):
     fake_sandbox = _FakeSandbox()
-
-    class _FakeDaytonaConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class _FakeDaytona:
-        def __init__(self, config):
-            self.config = config
-
-        def create(self):
-            return fake_sandbox
-
-    monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
-        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
-    )
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
 
     runtime = DaytonaSandboxRuntime(
         config=ResolvedDaytonaConfig(
@@ -553,36 +595,46 @@ def test_daytona_runtime_reports_bootstrap_timings(monkeypatch: pytest.MonkeyPat
             api_url="https://api.daytona.example",
         )
     )
-    session, timings = runtime.create_repo_session_with_diagnostics(
+    session = runtime.create_workspace_session(
         repo_url="https://github.com/example/repo.git",
         ref="main",
+        context_paths=None,
     )
 
-    assert session.repo_path == "/workdir/workspace/repo"
-    assert set(timings) == {"sandbox_create", "repo_clone", "context_stage"}
-    assert all(isinstance(value, int) for value in timings.values())
+    assert session.workspace_path == "/workdir/workspace/repo"
+    assert set(session.phase_timings_ms) == {
+        "sandbox_create",
+        "repo_clone",
+        "context_stage",
+    }
+    assert all(isinstance(value, int) for value in session.phase_timings_ms.values())
+
+
+def test_daytona_runtime_can_resume_existing_workspace_session(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_sandbox = _FakeSandbox()
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
+
+    runtime = DaytonaSandboxRuntime(config=_resolved_config())
+    session = runtime.resume_workspace_session(
+        sandbox_id="sbx-123",
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        workspace_path="/workdir/workspace/repo",
+        context_sources=[],
+    )
+
+    assert session.sandbox_id == "sbx-123"
+    assert session.workspace_path == "/workdir/workspace/repo"
+    assert "sandbox_resume" in session.phase_timings_ms
 
 
 def test_daytona_runtime_supports_reasoning_only_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ):
     fake_sandbox = _FakeSandbox()
-
-    class _FakeDaytonaConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class _FakeDaytona:
-        def __init__(self, config):
-            self.config = config
-
-        def create(self):
-            return fake_sandbox
-
-    monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
-        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
-    )
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
 
     runtime = DaytonaSandboxRuntime(config=_resolved_config())
     session = runtime.create_workspace_session(
@@ -604,22 +656,7 @@ def test_daytona_runtime_stages_document_context_without_repo(
     fake_sandbox = _FakeSandbox()
     doc_path = tmp_path / "spec.pdf"
     doc_path.write_bytes(b"%PDF-1.7 fake")
-
-    class _FakeDaytonaConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class _FakeDaytona:
-        def __init__(self, config):
-            self.config = config
-
-        def create(self):
-            return fake_sandbox
-
-    monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
-        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
-    )
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
         "fleet_rlm.daytona_rlm.sandbox.read_document_content",
         lambda path: (
@@ -638,7 +675,7 @@ def test_daytona_runtime_stages_document_context_without_repo(
         context_paths=[str(doc_path)],
     )
 
-    assert session.repo_path == "/workdir/workspace/daytona-workspace"
+    assert session.workspace_path == "/workdir/workspace/daytona-workspace"
     assert fake_sandbox.git.clone_calls == []
     assert len(session.context_sources) == 1
     source = session.context_sources[0]
@@ -647,6 +684,58 @@ def test_daytona_runtime_stages_document_context_without_repo(
     assert source.extraction_method == "pypdf"
     assert source.staged_path.endswith("spec.pdf.extracted.txt")
     assert any(path.endswith("manifest.json") for path in fake_sandbox.fs.files)
+
+
+def test_daytona_runtime_surfaces_ocr_required_for_scanned_pdf_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    fake_sandbox = _FakeSandbox()
+    doc_path = tmp_path / "scanned.pdf"
+    doc_path.write_bytes(b"%PDF-1.7 scanned bytes")
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
+
+    def _raise_scanned_pdf(_path):
+        raise ValueError(
+            f"PDF '{doc_path}' appears to be image-only or scanned. OCR is required before analysis."
+        )
+
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox.read_document_content",
+        _raise_scanned_pdf,
+    )
+
+    runtime = DaytonaSandboxRuntime(config=_resolved_config())
+
+    with pytest.raises(
+        DaytonaDiagnosticError,
+        match="OCR is required before analysis",
+    ):
+        runtime.create_workspace_session(
+            repo_url=None,
+            ref=None,
+            context_paths=[str(doc_path)],
+        )
+
+
+def test_daytona_runtime_raises_helpful_error_when_sdk_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr("fleet_rlm.daytona_rlm.sandbox.Daytona", None)
+    monkeypatch.setattr("fleet_rlm.daytona_rlm.sandbox.DaytonaConfig", None)
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox.SessionExecuteRequest",
+        None,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.daytona_rlm.sandbox._DAYTONA_IMPORT_ERROR",
+        ImportError("missing daytona"),
+    )
+
+    with pytest.raises(
+        RuntimeError, match="https://www.daytona.io/docs/en/python-sdk/"
+    ):
+        DaytonaSandboxRuntime(config=_resolved_config())
 
 
 def test_daytona_runtime_stages_directory_context_with_skipped_files(
@@ -661,26 +750,12 @@ def test_daytona_runtime_stages_directory_context_with_skipped_files(
     bad_file = docs_dir / "archive.bin"
     bad_file.write_bytes(b"\x00\x01")
 
-    class _FakeDaytonaConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class _FakeDaytona:
-        def __init__(self, config):
-            self.config = config
-
-        def create(self):
-            return fake_sandbox
-
     def _fake_read_document_content(path):
         if path.suffix == ".bin":
             raise ValueError("unsupported binary file")
         return ("Directory text", {"source_type": "text"})
 
-    monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._load_daytona_sdk",
-        lambda: (_FakeDaytona, _FakeDaytonaConfig, SimpleNamespace),
-    )
+    _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
         "fleet_rlm.daytona_rlm.sandbox.read_document_content",
         _fake_read_document_content,

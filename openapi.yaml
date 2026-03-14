@@ -457,6 +457,10 @@ components:
           additionalProperties: true
           type: object
           title: Modal
+        daytona:
+          additionalProperties: true
+          type: object
+          title: Daytona
         tests:
           $ref: '#/components/schemas/RuntimeTestCache'
         guidance:

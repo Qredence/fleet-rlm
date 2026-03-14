@@ -48,7 +48,7 @@ def run_daytona_smoke(
     error_message: str | None = None
     session: Any | None = None
     sandbox_id: str | None = None
-    repo_path = ""
+    workspace_path = ""
     driver_started = False
     persisted_state_value: Any = None
     finalization_mode = "unknown"
@@ -64,27 +64,20 @@ def run_daytona_smoke(
             )
 
         termination_phase = "sandbox_create"
-        if hasattr(runtime_instance, "create_repo_session_with_diagnostics"):
-            session, bootstrap_timings = (
-                runtime_instance.create_repo_session_with_diagnostics(
-                    repo_url=repo,
-                    ref=ref,
-                )
-            )
-            for phase_name, duration_ms in bootstrap_timings.items():
-                phase_timings_ms[phase_name] = int(duration_ms)
-        else:
-            session = _run_timed(
-                phase_timings_ms,
-                "sandbox_create",
-                lambda: runtime_instance.create_repo_session(
-                    repo_url=repo,
-                    ref=ref,
-                ),
-            )
+        session = _run_timed(
+            phase_timings_ms,
+            "sandbox_create",
+            lambda: runtime_instance.create_workspace_session(
+                repo_url=repo,
+                ref=ref,
+                context_paths=None,
+            ),
+        )
+        for phase_name, duration_ms in getattr(session, "phase_timings_ms", {}).items():
+            phase_timings_ms[phase_name] = int(duration_ms)
 
         sandbox_id = getattr(session, "sandbox_id", None)
-        repo_path = str(getattr(session, "repo_path", "") or "")
+        workspace_path = str(getattr(session, "workspace_path", "") or "")
 
         termination_phase = "driver_start"
         _run_timed(
@@ -191,7 +184,7 @@ def run_daytona_smoke(
         repo=repo,
         ref=ref,
         sandbox_id=sandbox_id,
-        repo_path=repo_path,
+        workspace_path=workspace_path,
         persisted_state_value=persisted_state_value,
         driver_started=driver_started,
         finalization_mode=finalization_mode,

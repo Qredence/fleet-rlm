@@ -213,6 +213,10 @@ export interface components {
       modal?: {
         [key: string]: unknown;
       };
+      /** Daytona */
+      daytona?: {
+        [key: string]: unknown;
+      };
       tests: components["schemas"]["RuntimeTestCache"];
       /** Guidance */
       guidance?: string[];

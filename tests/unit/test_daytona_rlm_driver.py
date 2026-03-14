@@ -328,6 +328,100 @@ def test_daytona_driver_emits_structured_batched_recursive_task_specs(tmp_path: 
         process.wait(timeout=5)
 
 
+def test_daytona_driver_routes_rlm_query_to_recursive_callback_name(tmp_path: Path):
+    process, _repo_path = _start_driver(tmp_path)
+    try:
+        _write_frame(
+            process,
+            ExecutionRequest(
+                request_id="req-rlm-query",
+                code=(
+                    'child = rlm_query({"task": "inspect README", "label": "README child"})\n'
+                    "SUBMIT(child)"
+                ),
+            ).to_dict(),
+        )
+
+        callback_request = _read_frame(process)
+        assert callback_request["type"] == "host_callback_request"
+        assert callback_request["name"] == "rlm_query"
+        assert callback_request["payload"] == {
+            "task": {
+                "task": "inspect README",
+                "label": "README child",
+            }
+        }
+
+        _write_frame(
+            process,
+            HostCallbackResponse(
+                callback_id=str(callback_request["callback_id"]),
+                ok=True,
+                value="recursive child summary",
+            ).to_dict(),
+        )
+        response = ExecutionResponse.from_dict(_read_frame(process))
+        assert response.error is None
+        assert response.final_artifact is not None
+        assert response.final_artifact["value"] == "recursive child summary"
+
+        _shutdown(process)
+    finally:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def test_daytona_driver_routes_rlm_query_batched_to_recursive_callback_name(
+    tmp_path: Path,
+):
+    process, _repo_path = _start_driver(tmp_path)
+    try:
+        _write_frame(
+            process,
+            ExecutionRequest(
+                request_id="req-rlm-query-batched",
+                code=(
+                    "results = rlm_query_batched([\n"
+                    '    {"task": "inspect README"},\n'
+                    '    {"task": "inspect pyproject"},\n'
+                    "])\n"
+                    "SUBMIT(results)"
+                ),
+            ).to_dict(),
+        )
+
+        callback_request = _read_frame(process)
+        assert callback_request["type"] == "host_callback_request"
+        assert callback_request["name"] == "rlm_query_batched"
+        assert callback_request["payload"] == {
+            "tasks": [
+                {"task": "inspect README"},
+                {"task": "inspect pyproject"},
+            ]
+        }
+
+        _write_frame(
+            process,
+            HostCallbackResponse(
+                callback_id=str(callback_request["callback_id"]),
+                ok=True,
+                value=["recursive README", "recursive pyproject"],
+            ).to_dict(),
+        )
+        response = ExecutionResponse.from_dict(_read_frame(process))
+        assert response.error is None
+        assert response.final_artifact is not None
+        assert response.final_artifact["value"] == [
+            "recursive README",
+            "recursive pyproject",
+        ]
+
+        _shutdown(process)
+    finally:
+        process.kill()
+        process.wait(timeout=5)
+
+
 def test_daytona_driver_preserves_helper_state_across_successive_executions(
     tmp_path: Path,
 ):

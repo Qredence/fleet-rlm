@@ -26,6 +26,8 @@ DAYTONA_DRIVER_SOURCE = (
     import uuid
 
     FRAME_PREFIX = "__fleet_rlm_daytona__:"
+    EXECUTE_EVENT_CHAR_LIMIT = 4000
+    EXECUTE_EVENT_CHUNK_SIZE = 400
     REPO_PATH = sys.argv[1]
     FLEET_ROOT = pathlib.Path(REPO_PATH) / ".fleet-rlm"
     PROMPT_ROOT = FLEET_ROOT / "prompts"
@@ -41,6 +43,24 @@ DAYTONA_DRIVER_SOURCE = (
             FRAME_PREFIX + json.dumps(payload, ensure_ascii=False, default=repr) + "\n"
         )
         sys.__stdout__.flush()
+
+
+    def emit_execute_event(
+        request_id: str,
+        stream: str,
+        text: str,
+        *,
+        truncated: bool = False,
+    ) -> None:
+        emit(
+            {
+                "type": "execute_event",
+                "request_id": request_id,
+                "stream": stream,
+                "text": text,
+                "truncated": truncated,
+            }
+        )
 
 
     def parse_input(raw: str) -> dict[str, object]:
@@ -705,6 +725,76 @@ DAYTONA_DRIVER_SOURCE = (
         exec(source, STATE, STATE)
 
 
+    class ProgressCapture(io.TextIOBase):
+        def __init__(self, *, request_id: str, stream: str, mirror: io.StringIO) -> None:
+            self.request_id = request_id
+            self.stream = stream
+            self.mirror = mirror
+            self.sent_chars = 0
+            self.pending = ""
+            self.truncated = False
+
+        def writable(self) -> bool:
+            return True
+
+        def write(self, data: str) -> int:
+            text = str(data or "")
+            if not text:
+                return 0
+            self.mirror.write(text)
+            self.pending += text
+            self._drain_pending()
+            return len(text)
+
+        def flush(self) -> None:
+            self._drain_pending(force=True)
+            self.mirror.flush()
+
+        def _drain_pending(self, *, force: bool = False) -> None:
+            while self.pending:
+                if self.sent_chars >= EXECUTE_EVENT_CHAR_LIMIT:
+                    self._emit_truncation_notice()
+                    self.pending = ""
+                    return
+
+                newline_idx = self.pending.find("\n")
+                if newline_idx != -1 and newline_idx + 1 <= EXECUTE_EVENT_CHUNK_SIZE:
+                    chunk_len = newline_idx + 1
+                elif len(self.pending) >= EXECUTE_EVENT_CHUNK_SIZE:
+                    chunk_len = EXECUTE_EVENT_CHUNK_SIZE
+                elif force:
+                    chunk_len = len(self.pending)
+                else:
+                    return
+
+                chunk = self.pending[:chunk_len]
+                self.pending = self.pending[chunk_len:]
+                remaining = EXECUTE_EVENT_CHAR_LIMIT - self.sent_chars
+                if remaining <= 0:
+                    self._emit_truncation_notice()
+                    self.pending = ""
+                    return
+                emitted = chunk[:remaining]
+                if emitted:
+                    self.sent_chars += len(emitted)
+                    emit_execute_event(self.request_id, self.stream, emitted)
+                if len(chunk) > remaining:
+                    self._emit_truncation_notice()
+                    self.pending = ""
+                    return
+
+        def _emit_truncation_notice(self) -> None:
+            if self.truncated:
+                return
+            emit_execute_event(
+                self.request_id,
+                self.stream,
+                f"[{self.stream} output truncated after {EXECUTE_EVENT_CHAR_LIMIT} chars]",
+                truncated=True,
+            )
+            self.truncated = True
+
+
     def _submit_impl(
         *args: object,
         _finalization_mode: str = "SUBMIT",
@@ -794,11 +884,11 @@ DAYTONA_DRIVER_SOURCE = (
 
 
     def rlm_query(task: object) -> object:
-        return llm_query(task)
+        return request_host_callback("rlm_query", {"task": task})
 
 
     def rlm_query_batched(tasks: list[object]) -> object:
-        return llm_query_batched(tasks)
+        return request_host_callback("rlm_query_batched", {"tasks": tasks})
 
 
     STATE.update(
@@ -841,13 +931,25 @@ DAYTONA_DRIVER_SOURCE = (
         install_submit(message.get("submit_schema"))
         stdout = io.StringIO()
         stderr = io.StringIO()
+        progress_stdout = ProgressCapture(
+            request_id=str(message["request_id"]),
+            stream="stdout",
+            mirror=stdout,
+        )
+        progress_stderr = ProgressCapture(
+            request_id=str(message["request_id"]),
+            stream="stderr",
+            mirror=stderr,
+        )
         error_text: str | None = None
         started = time.perf_counter()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        with contextlib.redirect_stdout(progress_stdout), contextlib.redirect_stderr(progress_stderr):
             try:
                 exec(str(message["code"]), STATE, STATE)
             except Exception:
                 error_text = traceback.format_exc(limit=8)
+        progress_stdout.flush()
+        progress_stderr.flush()
         duration_ms = int((time.perf_counter() - started) * 1000)
         emit(
             {

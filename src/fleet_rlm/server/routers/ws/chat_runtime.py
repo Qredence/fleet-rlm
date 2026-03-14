@@ -126,7 +126,19 @@ async def _prepare_chat_runtime(
     )
 
 
-def _build_chat_agent_context(runtime: _PreparedChatRuntime) -> Any:
+def _build_chat_agent_context(
+    runtime: _PreparedChatRuntime,
+    *,
+    runtime_mode: str = "modal_chat",
+) -> Any:
+    if runtime_mode == "daytona_pilot":
+        return runners.build_daytona_workbench_chat_agent(
+            timeout=runtime.cfg.timeout,
+            max_depth=runtime.cfg.rlm_max_depth,
+            planner_lm=runtime.planner_lm,
+            delegate_lm=runtime.delegate_lm,
+        )
+
     return runners.build_react_chat_agent(
         react_max_iters=runtime.cfg.react_max_iters,
         deep_react_max_iters=runtime.cfg.deep_react_max_iters,

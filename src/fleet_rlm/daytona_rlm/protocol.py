@@ -70,6 +70,29 @@ class ExecutionResponse:
 
 
 @dataclass(slots=True)
+class ExecutionEventFrame:
+    """Incremental execution output emitted while one code block is running."""
+
+    request_id: str
+    stream: str
+    text: str = ""
+    truncated: bool = False
+    type: str = "execute_event"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ExecutionEventFrame":
+        return cls(
+            request_id=str(payload["request_id"]),
+            stream=str(payload.get("stream", "stdout") or "stdout"),
+            text=str(payload.get("text", "") or ""),
+            truncated=bool(payload.get("truncated", False)),
+        )
+
+
+@dataclass(slots=True)
 class HostCallbackRequest:
     """Request emitted by sandbox code that needs a host-side callback."""
 

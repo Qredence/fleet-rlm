@@ -14,7 +14,6 @@ from fleet_rlm.analytics import MlflowTraceRequestContext, new_client_request_id
 from fleet_rlm.db.models import RunStatus
 
 from .chat_runtime import _ChatSessionState, _PreparedChatRuntime
-from .daytona_streaming import run_daytona_streaming_turn
 from .helpers import (
     _error_envelope,
     _get_execution_emitter,
@@ -90,13 +89,18 @@ async def _process_chat_message(
         return session.last_loaded_docs_path
 
     runtime_mode = getattr(msg, "runtime_mode", "modal_chat")
+    execution_mode = getattr(msg, "execution_mode", "auto")
+    if callable(getattr(agent, "set_execution_mode", None)):
+        agent.set_execution_mode(execution_mode)
+
+    repo_url = str(getattr(msg, "repo_url", "") or "").strip() or None
+    repo_ref = str(getattr(msg, "repo_ref", "") or "").strip() or None
+    raw_context_paths = getattr(msg, "context_paths", None) or []
+    context_paths = [
+        str(item).strip() for item in raw_context_paths if str(item).strip()
+    ]
+    agent_stream_kwargs: dict[str, Any] | None = None
     if runtime_mode == "daytona_pilot":
-        repo_url = str(getattr(msg, "repo_url", "") or "").strip() or None
-        repo_ref = str(getattr(msg, "repo_ref", "") or "").strip() or None
-        raw_context_paths = getattr(msg, "context_paths", None) or []
-        context_paths = [
-            str(item).strip() for item in raw_context_paths if str(item).strip()
-        ]
         if repo_ref and not repo_url:
             await _try_send_json(
                 websocket,
@@ -107,23 +111,13 @@ async def _process_chat_message(
             )
             return session.last_loaded_docs_path
 
-        session.cancel_flag["cancelled"] = False
-        await run_daytona_streaming_turn(
-            websocket=websocket,
-            planner_lm=runtime.planner_lm,
-            message=message,
-            repo_url=repo_url,
-            repo_ref=repo_ref,
-            context_paths=context_paths,
-            max_depth=getattr(msg, "max_depth", None),
-            batch_concurrency=getattr(msg, "batch_concurrency", None),
-            cancel_check=lambda: session.cancel_flag["cancelled"],
-        )
-        return session.last_loaded_docs_path
-
-    execution_mode = getattr(msg, "execution_mode", "auto")
-    if callable(getattr(agent, "set_execution_mode", None)):
-        agent.set_execution_mode(execution_mode)
+        agent_stream_kwargs = {
+            "repo_url": repo_url,
+            "repo_ref": repo_ref,
+            "context_paths": context_paths,
+            "max_depth": getattr(msg, "max_depth", None),
+            "batch_concurrency": getattr(msg, "batch_concurrency", None),
+        }
 
     await local_persist(include_volume_save=True, latest_user_message=message)
     session.cancel_flag["cancelled"] = False
@@ -145,6 +139,7 @@ async def _process_chat_message(
         sess_id=sess_id,
         turn_index=turn_index,
         session_record=session.session_record,
+        sandbox_provider="daytona" if runtime_mode == "daytona_pilot" else None,
     )
     trace_context = MlflowTraceRequestContext(
         client_request_id=new_client_request_id(prefix="chat"),
@@ -155,6 +150,7 @@ async def _process_chat_message(
         metadata={
             "fleet_rlm.workspace_id": workspace_id,
             "fleet_rlm.turn_index": str(turn_index),
+            "fleet_rlm.runtime_mode": runtime_mode,
             "fleet_rlm.execution_mode": execution_mode,
         },
     )
@@ -176,6 +172,7 @@ async def _process_chat_message(
         analytics_enabled=getattr(msg, "analytics_enabled", None),
         persist_session_state=local_persist,
         mlflow_trace_context=trace_context,
+        agent_stream_kwargs=agent_stream_kwargs,
     )
 
 
@@ -188,10 +185,12 @@ async def _chat_message_loop(
     interpreter: Any,
     session: _ChatSessionState,
     local_persist: Any,
+    initial_message: Any | None = None,
 ) -> None:
     execution_emitter = _get_execution_emitter(state)
     stream_task: asyncio.Task[str | None] | None = None
     pending_receive_task: asyncio.Task[Any] | None = None
+    pending_message = initial_message
 
     try:
         while True:
@@ -248,16 +247,22 @@ async def _chat_message_loop(
                 )
                 continue
 
-            if pending_receive_task is not None:
+            if pending_message is not None:
+                msg = pending_message
+                pending_message = None
+            elif pending_receive_task is not None:
                 raw_payload = await pending_receive_task
                 pending_receive_task = None
+                msg = await parse_ws_message_or_send_error(
+                    websocket=websocket,
+                    raw_payload=raw_payload,
+                )
             else:
                 raw_payload = await websocket.receive_json()
-
-            msg = await parse_ws_message_or_send_error(
-                websocket=websocket,
-                raw_payload=raw_payload,
-            )
+                msg = await parse_ws_message_or_send_error(
+                    websocket=websocket,
+                    raw_payload=raw_payload,
+                )
             if msg is None:
                 continue
 

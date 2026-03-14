@@ -9,7 +9,8 @@ from fleet_rlm.daytona_rlm.types import PromptHandle, PromptManifest, PromptSlic
 class _FakeSession:
     def __init__(self):
         self.sandbox_id = "sbx-123"
-        self.repo_path = "/workspace/repo"
+        self.workspace_path = "/workspace/repo"
+        self.phase_timings_ms = {"sandbox_create": 2, "repo_clone": 4}
         self.driver_started = False
         self.deleted = False
         self.counter = 0
@@ -148,12 +149,14 @@ class _FakeRuntime:
     def __init__(self):
         self.session = _FakeSession()
 
-    def create_repo_session_with_diagnostics(self, *, repo_url: str, ref: str | None):
-        self.session.repo_url = repo_url
-        self.session.ref = ref
-        return self.session, {"sandbox_create": 2, "repo_clone": 4}
-
-    def create_repo_session(self, *, repo_url: str, ref: str | None):
+    def create_workspace_session(
+        self,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+    ):
+        del context_paths
         self.session.repo_url = repo_url
         self.session.ref = ref
         return self.session
@@ -177,6 +180,7 @@ def test_run_daytona_smoke_validates_driver_persistence():
     assert result.error_message is None
     assert result.phase_timings_ms["sandbox_create"] == 2
     assert result.phase_timings_ms["repo_clone"] == 4
+    assert result.workspace_path == "/workspace/repo"
     assert "cleanup" in result.phase_timings_ms
     assert runtime.session.deleted is True
 
@@ -199,10 +203,14 @@ def test_run_daytona_smoke_reports_config_errors(monkeypatch):
 
 def test_run_daytona_smoke_reports_clone_failures():
     class _BrokenRuntime(_FakeRuntime):
-        def create_repo_session_with_diagnostics(
-            self, *, repo_url: str, ref: str | None
+        def create_workspace_session(
+            self,
+            *,
+            repo_url: str | None,
+            ref: str | None,
+            context_paths: list[str] | None = None,
         ):
-            del repo_url, ref
+            del repo_url, ref, context_paths
             raise DaytonaDiagnosticError(
                 "Daytona repo clone failure: bad ref",
                 category="sandbox_create_clone_error",
