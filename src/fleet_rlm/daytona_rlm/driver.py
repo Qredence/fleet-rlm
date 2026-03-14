@@ -704,10 +704,10 @@ DAYTONA_DRIVER_SOURCE = (
                 "def SUBMIT(output=None, **kwargs):\n"
                 "    if kwargs:\n"
                 "        cleaned = {k: v for k, v in kwargs.items() if v is not None}\n"
-                "        return _submit_impl(_finalization_mode='SUBMIT', **cleaned)\n"
+                "        return _submit_impl(**cleaned)\n"
                 "    if output is not None:\n"
-                "        return _submit_impl(output, _finalization_mode='SUBMIT')\n"
-                "    return _submit_impl(_finalization_mode='SUBMIT')\n"
+                "        return _submit_impl(output)\n"
+                "    return _submit_impl()\n"
             )
         else:
             signature = build_submit_signature(submit_schema)
@@ -717,10 +717,10 @@ DAYTONA_DRIVER_SOURCE = (
                 "    if kwargs:\n"
                 "        provided.update({k: v for k, v in kwargs.items() if v is not None})\n"
                 "    if provided:\n"
-                "        return _submit_impl(_finalization_mode='SUBMIT', **provided)\n"
+                "        return _submit_impl(**provided)\n"
                 "    if 'output' in locals() and output is not None:\n"
-                "        return _submit_impl(output, _finalization_mode='SUBMIT')\n"
-                "    return _submit_impl(_finalization_mode='SUBMIT')\n"
+                "        return _submit_impl(output)\n"
+                "    return _submit_impl()\n"
             )
         exec(source, STATE, STATE)
 
@@ -797,7 +797,6 @@ DAYTONA_DRIVER_SOURCE = (
 
     def _submit_impl(
         *args: object,
-        _finalization_mode: str = "SUBMIT",
         _variable_name: str | None = None,
         **kwargs: object,
     ) -> object:
@@ -807,46 +806,9 @@ DAYTONA_DRIVER_SOURCE = (
             "kind": "markdown",
             "value": value,
             "variable_name": _variable_name,
-            "finalization_mode": _finalization_mode,
+            "finalization_mode": "SUBMIT",
         }
         return value
-
-
-    def FINAL(value: object) -> object:
-        if isinstance(value, dict):
-            return _submit_impl(
-                _finalization_mode="FINAL",
-                **{str(key): item for key, item in value.items()},
-            )
-        if isinstance(value, str):
-            return _submit_impl(
-                _finalization_mode="FINAL",
-                final_markdown=value,
-            )
-        return _submit_impl(value, _finalization_mode="FINAL")
-
-
-    def FINAL_VAR(variable_name: str) -> object:
-        if variable_name not in STATE:
-            raise NameError(f"Variable '{variable_name}' is not defined")
-        value = STATE[variable_name]
-        if isinstance(value, dict):
-            return _submit_impl(
-                _finalization_mode="FINAL_VAR",
-                _variable_name=variable_name,
-                **{str(key): item for key, item in value.items()},
-            )
-        if isinstance(value, str):
-            return _submit_impl(
-                _finalization_mode="FINAL_VAR",
-                _variable_name=variable_name,
-                final_markdown=value,
-            )
-        return _submit_impl(
-            value,
-            _finalization_mode="FINAL_VAR",
-            _variable_name=variable_name,
-        )
 
 
     def request_host_callback(name: str, payload: dict[str, object]) -> object:
@@ -909,8 +871,6 @@ DAYTONA_DRIVER_SOURCE = (
             "rlm_query": rlm_query,
             "rlm_query_batched": rlm_query_batched,
             "_submit_impl": _submit_impl,
-            "FINAL": FINAL,
-            "FINAL_VAR": FINAL_VAR,
         }
     )
     install_submit(None)

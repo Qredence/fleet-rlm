@@ -29,6 +29,8 @@ from .protocol import (
     HostCallbackResponse,
     RunEventFrame,
 )
+from .runner_callbacks import DaytonaHostCallbackDispatcher
+from .runner_events import DaytonaRuntimeEventEmitter
 from .results import persist_result
 from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
 from .system_prompt import build_system_prompt, build_user_prompt
@@ -854,7 +856,22 @@ class _HostLoopDaytonaRuntime:
         self._history_grounding_resolved = False
         self._active_iteration: int | None = None
         self._evaluation: dict[str, Any] = {"nodes": {}}
-        self._register_compatibility_warnings()
+        self._event_emitter = DaytonaRuntimeEventEmitter(
+            emit_runtime_event=self.runner._handle_runtime_event,
+            session=self.session,
+            budget=self.budget,
+            run_id=self.run_id,
+            request_id=self.request_id,
+            started_at=self.started_at,
+            active_iteration_getter=lambda: self._active_iteration,
+        )
+        self._callback_dispatcher = DaytonaHostCallbackDispatcher(
+            runner=self.runner,
+            task=self.task,
+            event_emitter=self._event_emitter,
+            active_iteration_getter=lambda: self._active_iteration,
+            merge_child_result=self._merge_child_result,
+        )
 
     def _node_evaluation(self, node_id: str) -> dict[str, list[dict[str, Any]]]:
         nodes = self._evaluation.setdefault("nodes", {})
@@ -923,14 +940,6 @@ class _HostLoopDaytonaRuntime:
                 "result_preview": child_result.result_preview,
             }
         )
-
-    def _phase_timings_ms(self) -> dict[str, int]:
-        timings = getattr(self.session, "phase_timings_ms", {}) or {}
-        return {
-            str(key): int(value)
-            for key, value in timings.items()
-            if key is not None and value is not None
-        }
 
     def run(self) -> DaytonaRunResult:
         termination_reason = "completed"
@@ -1200,7 +1209,7 @@ class _HostLoopDaytonaRuntime:
             termination_reason=termination_reason,
             error=error_text,
             warnings=list(dict.fromkeys(self.summary_warnings)),
-            phase_timings_ms=self._phase_timings_ms(),
+            phase_timings_ms=self._event_emitter.phase_timings_ms(),
         )
         return DaytonaRunResult(
             run_id=self.run_id,
@@ -1219,189 +1228,7 @@ class _HostLoopDaytonaRuntime:
     def _handle_host_callback(
         self, *, node: AgentNode, request: HostCallbackRequest
     ) -> HostCallbackResponse:
-        registry = self._host_callback_registry()
-        handler = registry.get(request.name)
-        if handler is None:
-            return HostCallbackResponse(
-                callback_id=request.callback_id,
-                ok=False,
-                error=f"Unsupported host callback: {request.name}",
-            )
-        try:
-            value = handler(payload=request.payload, node=node)
-            return HostCallbackResponse(
-                callback_id=request.callback_id,
-                ok=True,
-                value=value,
-            )
-        except DaytonaRunCancelled:
-            raise
-        except Exception as exc:
-            return HostCallbackResponse(
-                callback_id=request.callback_id,
-                ok=False,
-                error=str(exc),
-            )
-
-    def _host_callback_registry(self) -> dict[str, Callable[..., Any]]:
-        registry: dict[str, Callable[..., Any]] = {
-            "llm_query": self._callback_llm_query,
-            "llm_query_batched": self._callback_llm_query_batched,
-            "rlm_query": self._callback_rlm_query,
-            "rlm_query_batched": self._callback_rlm_query_batched,
-        }
-        registry.update(self.runner._host_callbacks)
-        return registry
-
-    def _callback_llm_query(self, *, payload: dict[str, Any], node: AgentNode) -> str:
-        raw_task = payload.get("task")
-        task_spec = self._task_spec_from_payload(raw_task)
-        self._emit_tool_call(
-            node,
-            "llm_query",
-            {"task": task_spec.to_dict()},
-        )
-        result = self.runner.run_semantic_task(task_spec=task_spec)
-        link = ChildLink(
-            child_id=None,
-            callback_name="llm_query",
-            iteration=self._active_iteration,
-            task=task_spec,
-            result_preview=_collapse_preview(result, limit=280),
-            status="completed",
-        )
-        node.child_links.append(link)
-        self._emit_tool_result(
-            node,
-            "llm_query",
-            {"result_preview": link.result_preview},
-            tool_input={"task": task_spec.to_dict()},
-        )
-        return result
-
-    def _callback_llm_query_batched(
-        self, *, payload: dict[str, Any], node: AgentNode
-    ) -> list[str]:
-        raw_tasks = payload.get("tasks")
-        if not isinstance(raw_tasks, list):
-            raise ValueError("llm_query_batched expects a list payload.")
-
-        task_specs = [self._task_spec_from_payload(item) for item in raw_tasks]
-        self._emit_tool_call(
-            node,
-            "llm_query_batched",
-            {"tasks": [item.to_dict() for item in task_specs]},
-        )
-        if not task_specs:
-            self._emit_tool_result(
-                node,
-                "llm_query_batched",
-                {"count": 0},
-                tool_input={"tasks": [item.to_dict() for item in task_specs]},
-            )
-            return []
-
-        values = self.runner.run_semantic_tasks_batched(task_specs=task_specs)
-        for task_spec, value in zip(task_specs, values, strict=False):
-            node.child_links.append(
-                ChildLink(
-                    child_id=None,
-                    callback_name="llm_query_batched",
-                    iteration=self._active_iteration,
-                    task=task_spec,
-                    result_preview=_collapse_preview(value, limit=280),
-                    status="completed",
-                )
-            )
-        self._emit_tool_result(
-            node,
-            "llm_query_batched",
-            {
-                "count": len(values),
-                "result_previews": [
-                    _collapse_preview(value, limit=180) for value in values
-                ],
-            },
-            tool_input={"tasks": [item.to_dict() for item in task_specs]},
-        )
-        return values
-
-    def _callback_rlm_query(self, *, payload: dict[str, Any], node: AgentNode) -> str:
-        task_spec = self._task_spec_from_payload(payload.get("task"))
-        self._emit_tool_call(node, "rlm_query", {"task": task_spec.to_dict()})
-        child_result = self.runner.run_child_task(
-            parent_id=node.node_id,
-            depth=node.depth,
-            task_spec=task_spec,
-            parent_task=self.task,
-        )
-        self._merge_child_result(
-            node=node, child_result=child_result, callback_name="rlm_query"
-        )
-        self._emit_tool_result(
-            node,
-            "rlm_query",
-            {
-                "child_id": child_result.child_id,
-                "result_preview": child_result.result_preview,
-                "status": child_result.status,
-            },
-            tool_input={"task": task_spec.to_dict()},
-        )
-        return child_result.text
-
-    def _callback_rlm_query_batched(
-        self, *, payload: dict[str, Any], node: AgentNode
-    ) -> list[str]:
-        raw_tasks = payload.get("tasks")
-        if not isinstance(raw_tasks, list):
-            raise ValueError("rlm_query_batched expects a list payload.")
-
-        task_specs = [self._task_spec_from_payload(item) for item in raw_tasks]
-        self._emit_tool_call(
-            node,
-            "rlm_query_batched",
-            {"tasks": [item.to_dict() for item in task_specs]},
-        )
-        if not task_specs:
-            self._emit_tool_result(
-                node,
-                "rlm_query_batched",
-                {"count": 0},
-                tool_input={"tasks": [item.to_dict() for item in task_specs]},
-            )
-            return []
-
-        values: list[str] = []
-        child_results = self.runner._spawn_child_tasks_batched(
-            parent_id=node.node_id,
-            depth=node.depth,
-            parent_task=self.task,
-            task_specs=task_specs,
-        )
-        for child_result in child_results:
-            self._merge_child_result(
-                node=node,
-                child_result=child_result,
-                callback_name="rlm_query_batched",
-            )
-            values.append(child_result.text)
-        self._emit_tool_result(
-            node,
-            "rlm_query_batched",
-            {
-                "count": len(values),
-                "result_previews": [
-                    child_result.result_preview for child_result in child_results
-                ],
-            },
-            tool_input={"tasks": [item.to_dict() for item in task_specs]},
-        )
-        return values
-
-    @staticmethod
-    def _task_spec_from_payload(raw_task: Any) -> RecursiveTaskSpec:
-        return RecursiveTaskSpec.from_raw(raw_task)
+        return self._callback_dispatcher.handle(node=node, request=request)
 
     def _merge_child_result(
         self,
@@ -1932,9 +1759,6 @@ class _HostLoopDaytonaRuntime:
         except Exception:
             return str(value)
 
-    def _register_compatibility_warnings(self) -> None:
-        return None
-
     def _assert_not_cancelled(self) -> None:
         if self.runner.cancel_check is not None and self.runner.cancel_check():
             raise DaytonaRunCancelled("Request cancelled.")
@@ -1953,74 +1777,8 @@ class _HostLoopDaytonaRuntime:
             )
         return max(1.0, remaining)
 
-    def _runtime_payload(self, node: AgentNode) -> dict[str, Any]:
-        return {
-            "runtime_mode": "daytona_pilot",
-            "daytona_mode": "host_loop_rlm",
-            "run_id": self.run_id,
-            "depth": node.depth,
-            "max_depth": self.budget.max_depth,
-            "effective_max_iters": self.budget.max_iterations,
-            "sandbox_active": node.sandbox_id is not None,
-            "sandbox_id": node.sandbox_id,
-            "execution_profile": "DAYTONA_PILOT_HOST_LOOP",
-            "phase_timings_ms": self._phase_timings_ms(),
-        }
-
-    def _progress_payload(
-        self,
-        *,
-        iteration: int | None = None,
-        extra_payload: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "elapsed_ms": int((time.monotonic() - self.started_at) * 1000),
-        }
-        if iteration is not None:
-            payload["iteration"] = iteration
-        if extra_payload:
-            payload.update(extra_payload)
-        return payload
-
-    def _node_payload(self, node: AgentNode) -> dict[str, Any]:
-        payload = node.to_dict()
-        payload["prompt_manifest"] = {
-            "handles": [handle.to_dict() for handle in node.prompt_handles]
-        }
-        return payload
-
-    def _emit_frame(
-        self,
-        *,
-        node: AgentNode,
-        kind: str,
-        text: str,
-        phase: str | None = None,
-        extra_payload: dict[str, Any] | None = None,
-    ) -> None:
-        payload = {
-            "runtime_mode": "daytona_pilot",
-            "phase": phase,
-            "status": node.status,
-            "node_id": node.node_id,
-            "node": self._node_payload(node),
-            "runtime": self._runtime_payload(node),
-        }
-        if extra_payload:
-            payload.update(extra_payload)
-        self.runner._handle_runtime_event(
-            RunEventFrame(
-                request_id=self.request_id,
-                kind=kind,
-                text=text,
-                payload={
-                    key: value for key, value in payload.items() if value is not None
-                },
-            )
-        )
-
     def _emit_status(self, node: AgentNode, text: str, *, phase: str) -> None:
-        self._emit_frame(node=node, kind="status", text=text, phase=phase)
+        self._event_emitter.emit_status(node, text, phase=phase)
 
     def _emit_progress_status(
         self,
@@ -2031,46 +1789,27 @@ class _HostLoopDaytonaRuntime:
         iteration: int | None = None,
         extra_payload: dict[str, Any] | None = None,
     ) -> None:
-        self._emit_frame(
-            node=node,
-            kind="status",
-            text=text,
+        self._event_emitter.emit_progress_status(
+            node,
+            text,
             phase=phase,
-            extra_payload=self._progress_payload(
-                iteration=iteration,
-                extra_payload=extra_payload,
-            ),
+            iteration=iteration,
+            extra_payload=extra_payload,
         )
 
     def _emit_warning(self, node: AgentNode, text: str, *, phase: str) -> None:
-        self._emit_frame(
-            node=node,
-            kind="warning",
-            text=text,
-            phase=phase,
-            extra_payload={"warning": text},
-        )
+        self._event_emitter.emit_warning(node, text, phase=phase)
 
     def _emit_error(self, node: AgentNode, text: str, *, phase: str) -> None:
-        self._emit_frame(node=node, kind="error", text=text, phase=phase)
+        self._event_emitter.emit_error(node, text, phase=phase)
 
     def _emit_cancelled(self, node: AgentNode, text: str, *, phase: str) -> None:
-        self._emit_frame(node=node, kind="cancelled", text=text, phase=phase)
+        self._event_emitter.emit_cancelled(node, text, phase=phase)
 
     def _emit_tool_call(
         self, node: AgentNode, callback_name: str, tool_input: dict[str, Any]
     ) -> None:
-        self._emit_frame(
-            node=node,
-            kind="tool_call",
-            text=f"Running host callback `{callback_name}`.",
-            phase="host_callback",
-            extra_payload={
-                "iteration": self._active_iteration,
-                "callback_name": callback_name,
-                "tool_input": tool_input,
-            },
-        )
+        self._event_emitter.emit_tool_call(node, callback_name, tool_input)
 
     def _emit_tool_result(
         self,
@@ -2080,17 +1819,11 @@ class _HostLoopDaytonaRuntime:
         *,
         tool_input: dict[str, Any] | None = None,
     ) -> None:
-        self._emit_frame(
-            node=node,
-            kind="tool_result",
-            text=f"Completed host callback `{callback_name}`.",
-            phase="host_callback",
-            extra_payload={
-                "iteration": self._active_iteration,
-                "callback_name": callback_name,
-                "tool_input": tool_input,
-                "tool_result": value,
-            },
+        self._event_emitter.emit_tool_result(
+            node,
+            callback_name,
+            value,
+            tool_input=tool_input,
         )
 
 

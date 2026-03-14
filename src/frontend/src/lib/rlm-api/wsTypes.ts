@@ -27,8 +27,6 @@ export interface WsMessageRequest {
   repo_url?: string | null;
   repo_ref?: string | null;
   context_paths?: string[] | null;
-  // Legacy Daytona compatibility field; the chat UI no longer exposes this knob.
-  max_depth?: number | null;
   batch_concurrency?: number | null;
   analytics_enabled?: boolean;
   workspace_id?: string;

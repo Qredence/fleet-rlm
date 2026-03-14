@@ -104,25 +104,9 @@ def resolve_daytona_lm_runtime_config(
 
     api_base = values.get("DSPY_LM_API_BASE", "").strip() or None
     small_model = values.get("DSPY_LM_SMALL_MODEL", "").strip()
-    legacy_small_delegate_model = values.get("DSPY_DELEGATE_LM_SMALL_MODEL", "").strip()
-    legacy_delegate_model = values.get("DSPY_DELEGATE_LM_MODEL", "").strip()
-
-    if small_model:
-        delegate_model = small_model
-        delegate_api_key = api_key
-        delegate_api_base = api_base
-    else:
-        delegate_model = legacy_small_delegate_model or legacy_delegate_model or None
-        delegate_api_key = (
-            values.get("DSPY_DELEGATE_LM_API_KEY", "").strip() or api_key
-            if delegate_model
-            else None
-        )
-        delegate_api_base = (
-            values.get("DSPY_DELEGATE_LM_API_BASE", "").strip() or api_base
-            if delegate_model
-            else None
-        )
+    delegate_model = small_model or None
+    delegate_api_key = api_key if delegate_model else None
+    delegate_api_base = api_base if delegate_model else None
 
     return SandboxLmRuntimeConfig(
         model=model,

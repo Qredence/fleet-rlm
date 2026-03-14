@@ -350,14 +350,11 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
     def _build_budget(
         self,
         *,
-        max_depth: int | None,
         batch_concurrency: int | None,
     ) -> RolloutBudget:
         return RolloutBudget(
             max_sandboxes=self.default_budget.max_sandboxes,
-            max_depth=max_depth
-            if max_depth is not None
-            else self.default_budget.max_depth,
+            max_depth=self.default_budget.max_depth,
             max_iterations=self.default_budget.max_iterations,
             global_timeout=self.default_budget.global_timeout,
             result_truncation_limit=self.default_budget.result_truncation_limit,
@@ -429,7 +426,6 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         repo_url: str | None = None,
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
-        max_depth: int | None = None,
         batch_concurrency: int | None = None,
     ):
         _ = trace
@@ -443,9 +439,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
             else (self.repo_ref if repo_url is None else None)
         )
         effective_context_paths = self._effective_context_paths(context_paths)
-        budget = self._build_budget(
-            max_depth=max_depth, batch_concurrency=batch_concurrency
-        )
+        budget = self._build_budget(batch_concurrency=batch_concurrency)
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
         result_box: dict[str, DaytonaRunResult] = {}

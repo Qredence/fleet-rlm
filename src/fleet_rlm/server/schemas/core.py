@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+from pydantic_core import PydanticCustomError
 
 from fleet_rlm import __version__
 
@@ -91,7 +92,6 @@ class WSMessage(BaseModel):
     repo_url: str | None = None
     repo_ref: str | None = None
     context_paths: list[str] | None = None
-    max_depth: int | None = None
     batch_concurrency: int | None = None
     workspace_id: str = "default"
     user_id: str = "anonymous"
@@ -99,6 +99,41 @@ class WSMessage(BaseModel):
     # Command dispatch fields (used when type == "command")
     command: str = ""
     args: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_daytona_message_contract(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict):
+            return raw
+
+        message_type = str(raw.get("type", "message") or "message").strip()
+        runtime_mode = str(
+            raw.get("runtime_mode", "modal_chat") or "modal_chat"
+        ).strip()
+
+        if (
+            message_type == "message"
+            and runtime_mode == "daytona_pilot"
+            and raw.get("max_depth") is not None
+        ):
+            raise PydanticCustomError(
+                "daytona_max_depth_removed",
+                "Daytona websocket requests no longer accept max_depth; use the "
+                "server-configured recursion depth.",
+            )
+
+        if (
+            message_type == "message"
+            and runtime_mode == "daytona_pilot"
+            and str(raw.get("repo_ref", "") or "").strip()
+            and not str(raw.get("repo_url", "") or "").strip()
+        ):
+            raise PydanticCustomError(
+                "daytona_repo_ref_requires_repo",
+                "Daytona repo_ref requires repo_url.",
+            )
+
+        return raw
 
 
 class WSCommandMessage(BaseModel):

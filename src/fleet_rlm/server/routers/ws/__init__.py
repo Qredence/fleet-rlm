@@ -1,8 +1,4 @@
-"""WebSocket router package.
-
-Canonical WS implementation lives under this package; legacy flat
-``ws_*`` modules remain as one-release compatibility shims.
-"""
+"""Canonical WebSocket router package exports."""
 
 from .api import chat_streaming, execution_stream, router
 

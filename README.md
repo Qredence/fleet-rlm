@@ -135,7 +135,7 @@ The experimental `fleet-rlm daytona-rlm` command is a strict Daytona + DSPy RLM 
 - It stays analysis-first: the model-facing helper surface is `run`, `read_file`, `read_file_slice`, `list_files`, `find_files`, `grep_repo`, `chunk_text`, `chunk_file`, `llm_query`, `llm_query_batched`, and `SUBMIT`.
 - Large task, observation, and history payloads are externalized into sandbox-resident prompt objects when they exceed the inline threshold, and the LM sees prompt-manifest metadata plus access instructions by default.
 - The prompt-object helper surface is environment-native too: `store_prompt`, `list_prompts`, and `read_prompt_slice` live inside the persistent Daytona driver and survive across iterations.
-- Legacy aliases remain available for compatibility: `rlm_query`, `rlm_query_batched`, `FINAL`, and `FINAL_VAR`.
+- `rlm_query` and `rlm_query_batched` are the recursive child-Daytona helpers; finalization is `SUBMIT(...)` only.
 - In the Daytona pilot, `find_files` is path/glob discovery and `grep_repo` is structured content search.
 - The repo and corpus helpers remain sandbox-resident capabilities of the persistent Daytona driver rather than host-side callbacks, so the pilot still behaves like a real environment-centric RLM loop over staged source material.
 - Product-specific behavior stays in a thin adapter above the interpreter core: trajectory serialization, evidence/citation shaping, persisted rollout traces, WebSocket event shaping, and cancellation wiring.

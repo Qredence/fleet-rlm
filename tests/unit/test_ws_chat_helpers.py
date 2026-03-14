@@ -268,14 +268,12 @@ def test_ws_message_accepts_daytona_runtime_fields() -> None:
         runtime_mode="daytona_pilot",
         repo_url="https://github.com/qredence/fleet-rlm.git",
         repo_ref="main",
-        max_depth=3,
         batch_concurrency=6,
     )
 
     assert message.runtime_mode == "daytona_pilot"
     assert message.repo_url == "https://github.com/qredence/fleet-rlm.git"
     assert message.repo_ref == "main"
-    assert message.max_depth == 3
     assert message.batch_concurrency == 6
 
 

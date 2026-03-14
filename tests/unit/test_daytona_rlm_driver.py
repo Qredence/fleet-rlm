@@ -158,7 +158,7 @@ def test_daytona_driver_prompt_helpers_persist_across_successive_executions(
             "req-prompt-read",
             "slice_result = read_prompt_slice(stored_handle_id, start_line=2, num_lines=2)\n"
             'summary = {"handle_id": slice_result["handle_id"], "text": slice_result["text"], "start_line": slice_result["start_line"], "end_line": slice_result["end_line"]}\n'
-            'FINAL_VAR("summary")',
+            "SUBMIT(summary)",
         )
         assert second.error is None
         assert second.final_artifact is not None
@@ -199,6 +199,21 @@ def test_daytona_driver_supports_typed_submit_fields(tmp_path: Path):
             "summary": "Readable summary",
             "final_markdown": "## Heading\nMore detail",
         }
+
+        _shutdown(process)
+    finally:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def test_daytona_driver_rejects_removed_final_aliases(tmp_path: Path):
+    process, _repo_path = _start_driver(tmp_path)
+    try:
+        response = _execute(process, "req-final-alias", "FINAL('deprecated')")
+
+        assert response.final_artifact is None
+        assert response.error is not None
+        assert "FINAL" in response.error
 
         _shutdown(process)
     finally:
@@ -440,7 +455,7 @@ def test_daytona_driver_preserves_helper_state_across_successive_executions(
             process,
             "req-2",
             'summary = {"stored_line": stored_line, "chunk_count": len(chunk_text(read_file("README.md"), strategy="size", size=4))}\n'
-            'FINAL_VAR("summary")',
+            "SUBMIT(summary)",
         )
         assert second.error is None
         assert second.final_artifact is not None

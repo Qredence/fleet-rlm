@@ -140,7 +140,6 @@ def test_websocket_routes_daytona_runtime_messages_through_daytona_chat_agent(
                 "repo_url": "https://github.com/qredence/fleet-rlm.git",
                 "repo_ref": "main",
                 "context_paths": ["/Users/zocho/Documents/spec.pdf"],
-                "max_depth": 3,
                 "batch_concurrency": 5,
             }
         )
@@ -159,7 +158,6 @@ def test_websocket_routes_daytona_runtime_messages_through_daytona_chat_agent(
     assert fake_agent.last_stream_kwargs["context_paths"] == [
         "/Users/zocho/Documents/spec.pdf"
     ]
-    assert fake_agent.last_stream_kwargs["max_depth"] == 3
     assert fake_agent.last_stream_kwargs["batch_concurrency"] == 5
     assert final["type"] == "event"
     assert final["data"]["kind"] == "final"
@@ -307,6 +305,27 @@ def test_websocket_rejects_daytona_repo_ref_without_repo_url(
 
     assert error["type"] == "error"
     assert error["code"] == "daytona_repo_ref_requires_repo"
+
+
+def test_websocket_rejects_removed_daytona_max_depth_field(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+                "repo_url": "https://github.com/qredence/fleet-rlm.git",
+                "max_depth": 3,
+            }
+        )
+        error = websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "daytona_max_depth_removed"
 
 
 def test_execution_websocket_requires_session_id_query_param(

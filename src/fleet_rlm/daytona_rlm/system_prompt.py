@@ -38,7 +38,7 @@ def build_system_prompt(*, workspace_path: str, budget: RolloutBudget) -> str:
         "- rlm_query(task: str | dict) -> str\n"
         "- rlm_query_batched(tasks: list[str | dict]) -> list[str]\n"
         "- SUBMIT(summary: str | None = None, final_markdown: str | None = None, output: object = None, **extra_fields)\n"
-        "- Legacy fallbacks still available for compatibility: FINAL(value), FINAL_VAR(variable_name)\n\n"
+        "\n"
         "Rules:\n"
         "1. Always reply with exactly one Python code block.\n"
         "2. Large task, observation, or conversation-history payloads may be externalized as prompt handles instead of being shown inline. When that happens, inspect them with list_prompts() and read_prompt_slice(...).\n"
@@ -53,8 +53,7 @@ def build_system_prompt(*, workspace_path: str, budget: RolloutBudget) -> str:
         "11. Do not finalize with raw file lists, grep hits, chunk arrays, or other discovery variables. The root answer must be a human-readable markdown summary grounded in the analysis.\n"
         "12. When you cite or summarize document evidence, keep track of the file path, line span, chunk, or header that supported the conclusion so downstream UI can surface evidence.\n"
         "13. For large-corpus analyst workflows such as diligence or M&A review, prefer iterative chunking, semantic subcalls, recursive child tasks, and synthesis over trying to load the full corpus into one prompt.\n"
-        "14. Treat FINAL(...) and FINAL_VAR(...) as compatibility fallbacks rather than the primary contract.\n"
-        "15. Finish as soon as you have a grounded synthesized answer.\n"
+        "14. Finish as soon as you have a grounded synthesized answer.\n"
     )
 
 

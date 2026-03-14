@@ -15,7 +15,7 @@ The repository now also includes an experimental Daytona-backed strict-RLM pilot
 - The Daytona pilot now splits cleanly into a guide-native interpreter core and a thin product adapter. The core owns persistent sandbox execution, prompt-object storage, typed `SUBMIT`, and workspace-native helpers. The host runner owns iterative REPL history, finalization validation, host-side `llm_query` / `llm_query_batched` bridging, cancellation wiring, evidence shaping, and UI event shaping.
 - The Daytona pilot helper surface is environment-native: workspace inspection and chunking happen inside the persistent sandbox driver via `read_file_slice`, `grep_repo`, `chunk_text`, and `chunk_file`, long task/observation payloads are externalized there through `store_prompt`, `list_prompts`, and `read_prompt_slice`, and local document ingestion is shared with the rest of the backend through `document_ingestion.py`; host callbacks bridge semantic `llm_query` work back to the planner LM.
 - The Daytona runtime now cancels from the host-loop path: cancelling the root run stops further iterations, tears down the active sandbox session, and persists warning summaries when shutdown is not perfectly clean.
-- In the Web UI integration, `Modal chat` remains the default runtime. `Daytona pilot` is opt-in, task-first, and accepts optional `repo_url`, optional `context_paths`, optional `repo_ref` when a repo is configured, plus optional `batch_concurrency`. `max_depth` remains a compatibility input on the backend but is no longer exposed in the main chat UI. Image-only or scanned PDFs fail with an explicit OCR-required context-stage diagnostic rather than silently degrading.
+- In the Web UI integration, `Modal chat` remains the default runtime. `Daytona pilot` is opt-in, task-first, and accepts optional `repo_url`, optional `context_paths`, optional `repo_ref` when a repo is configured, plus optional `batch_concurrency`. Daytona websocket requests reject request-side `max_depth`, while streamed runtime metadata still includes `runtime.max_depth` as read-only execution state. Image-only or scanned PDFs fail with an explicit OCR-required context-stage diagnostic rather than silently degrading.
 
 ## System Architecture Diagram
 
@@ -212,9 +212,11 @@ The Daytona pilot is a separate experimental runtime and is not part of the prod
 | `config.py` | Explicit native Daytona env resolution and preflight validation |
 | `sandbox.py` | Daytona SDK client bootstrap, stateful workspace sessions, local context staging, and persistent driver execution |
 | `smoke.py` | CLI-first Daytona smoke workflow with phase-aware live diagnostics for sandbox clone + persistent driver validation |
-| `runner.py` | Host-loop DSPy orchestration, stateful session reuse, root synthesis safety checks, and UI event shaping |
-| `spawn.py` | Canonical `llm_query` / `llm_query_batched` helpers with bounded fan-out plus compatibility aliases |
-| `system_prompt.py` | Guide-first Daytona system prompt construction with compatibility alias notes |
+| `runner.py` | Host-loop orchestration facade for recursion, cancellation, retry flow, and session coordination |
+| `runner_callbacks.py` | Structured host-callback dispatch and recursive task payload normalization |
+| `runner_events.py` | Shared public runtime-event emission and payload shaping for Daytona runs |
+| `spawn.py` | Canonical `llm_query` / `llm_query_batched` helpers plus recursive child-Daytona helpers |
+| `system_prompt.py` | Guide-first Daytona system prompt construction for the `SUBMIT(...)`-only contract |
 | `results.py` | Persisted JSON rollout traces under `results/daytona-rlm/` |
 
 Important scope notes:
@@ -224,7 +226,7 @@ Important scope notes:
 - Repo and workspace-analysis helpers are sandbox-native: `read_file_slice`, `grep_repo`, `chunk_text`, and `chunk_file` execute inside that persistent driver and survive across iterations.
 - Prompt objects are sandbox-native too: large task and observation payloads are persisted under the Daytona runtime directory, exposed through prompt-handle metadata, and re-read via `read_prompt_slice` instead of being dragged through every LM turn inline.
 - Within the pilot, `find_files` remains glob/path discovery and `grep_repo` is the structured content-search helper.
-- `llm_query` / `llm_query_batched` are host-side LM callbacks bridged into the sandbox through the framed callback transport. `rlm_query` / `rlm_query_batched` remain compatibility aliases only.
+- `llm_query` / `llm_query_batched` are host-side LM callbacks bridged into the sandbox through the framed callback transport. `rlm_query` / `rlm_query_batched` are the true recursive child-Daytona helpers.
 - Host-loop execution streams `status`, `tool_call`, `tool_result`, `warning`, and terminal frames directly from the active run while the same sandbox session stays alive across iterations.
 - The public pilot CLI additionally exposes `--max-depth` and `--batch-concurrency` as rollout controls.
 - Contributors should run Daytona in this order: set `DAYTONA_API_KEY` + `DAYTONA_API_URL`, run `fleet-rlm daytona-smoke --repo <url>`, inspect any phase-aware diagnostics, then run `fleet-rlm daytona-rlm` only after the smoke path is clean.
@@ -240,7 +242,7 @@ The Daytona pilot now has a dedicated DSPy-native websocket chat agent plus a wo
 | Module | Purpose |
 |--------|---------|
 | `daytona_rlm/chat_agent.py` | `DaytonaWorkbenchChatAgent` - DSPy `Module`/`Signature` wrapper that owns Daytona session history, docs preload state, and host-loop run streaming |
-| `server/schemas/core.py` | Adds Daytona websocket source controls (`runtime_mode`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus Daytona runtime readiness metadata; `max_depth` remains compatibility-only |
+| `server/schemas/core.py` | Adds Daytona websocket source controls (`runtime_mode`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus Daytona runtime readiness metadata; request-side `max_depth` is explicitly rejected for Daytona chat |
 | `server/routers/ws/api.py` / `server/routers/ws/chat_runtime.py` | Select the top-level websocket chat agent from the first message so Daytona sessions do not require Modal startup |
 | `server/routers/ws/chat_connection.py` / `server/routers/ws/streaming.py` | Route Daytona turns through the shared websocket session/streaming lifecycle instead of a one-shot Daytona-only branch |
 | `frontend/src/stores/chatStore.ts` | Persists runtime selection and Daytona source/runtime options in UI state |

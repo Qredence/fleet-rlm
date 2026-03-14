@@ -45,13 +45,7 @@ class _FakeDriverProcess:
         self.closed = False
         self._final_artifact: dict[str, object] | None = None
         self._submit_fields: list[str] = []
-        self.env.update(
-            {
-                "SUBMIT": self._submit,
-                "FINAL": self._final,
-                "FINAL_VAR": self._final_var,
-            }
-        )
+        self.env["SUBMIT"] = self._submit
 
     def _emit(self, payload: dict[str, object]) -> None:
         self.stdout += encode_frame(payload) + "\n"
@@ -59,8 +53,6 @@ class _FakeDriverProcess:
     def _submit_impl(
         self,
         *args: object,
-        finalization_mode: str,
-        variable_name: str | None = None,
         **kwargs: object,
     ) -> object:
         if kwargs:
@@ -85,43 +77,13 @@ class _FakeDriverProcess:
         self._final_artifact = {
             "kind": "markdown",
             "value": value,
-            "variable_name": variable_name,
-            "finalization_mode": finalization_mode,
+            "variable_name": None,
+            "finalization_mode": "SUBMIT",
         }
         return value
 
     def _submit(self, *args: object, **kwargs: object) -> object:
-        return self._submit_impl(*args, finalization_mode="SUBMIT", **kwargs)
-
-    def _final(self, value: object) -> object:
-        if isinstance(value, dict):
-            return self._submit_impl(finalization_mode="FINAL", **value)
-        if isinstance(value, str):
-            return self._submit_impl(
-                finalization_mode="FINAL",
-                final_markdown=value,
-            )
-        return self._submit_impl(value, finalization_mode="FINAL")
-
-    def _final_var(self, variable_name: str) -> object:
-        value = self.env[variable_name]
-        if isinstance(value, dict):
-            return self._submit_impl(
-                finalization_mode="FINAL_VAR",
-                variable_name=variable_name,
-                **value,
-            )
-        if isinstance(value, str):
-            return self._submit_impl(
-                finalization_mode="FINAL_VAR",
-                variable_name=variable_name,
-                final_markdown=value,
-            )
-        return self._submit_impl(
-            value,
-            finalization_mode="FINAL_VAR",
-            variable_name=variable_name,
-        )
+        return self._submit_impl(*args, **kwargs)
 
     def start(self) -> None:
         self.started = True
@@ -384,6 +346,27 @@ def test_daytona_sandbox_driver_supports_typed_submit_schema():
         "final_markdown": "## Heading\nBody",
     }
     assert response.final_artifact["finalization_mode"] == "SUBMIT"
+
+
+def test_daytona_sandbox_driver_rejects_removed_final_aliases():
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        workspace_path="/workdir/workspace/repo",
+    )
+
+    session.start_driver(timeout=1.0)
+    response = session.execute_code(
+        code="FINAL('deprecated')",
+        callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
+        timeout=1.0,
+    )
+
+    assert response.final_artifact is None
+    assert response.error is not None
+    assert "FINAL" in response.error
 
 
 def test_daytona_sandbox_driver_returns_structured_errors():

@@ -66,7 +66,7 @@ def test_resolve_daytona_lm_runtime_config_prefers_dspy_small_model_contract():
     assert config.delegate_api_base == "https://litellm.example"
 
 
-def test_resolve_daytona_lm_runtime_config_preserves_legacy_delegate_contract():
+def test_resolve_daytona_lm_runtime_config_ignores_legacy_delegate_contract():
     config = resolve_daytona_lm_runtime_config(
         {
             "DSPY_LM_MODEL": "openai/gpt-4.1",
@@ -78,9 +78,9 @@ def test_resolve_daytona_lm_runtime_config_preserves_legacy_delegate_contract():
         }
     )
 
-    assert config.delegate_model == "openai/gpt-4.1-nano"
-    assert config.delegate_api_key == "delegate-key"
-    assert config.delegate_api_base == "https://delegate.example"
+    assert config.delegate_model is None
+    assert config.delegate_api_key is None
+    assert config.delegate_api_base is None
 
 
 def test_resolve_daytona_lm_runtime_config_does_not_fallback_to_openai_key():
