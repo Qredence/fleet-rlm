@@ -79,11 +79,11 @@ fleet-rlm init --list
 - The main product runtime remains Modal-backed and ReAct-oriented in this release.
 - The new `fleet-rlm daytona-rlm` command is an isolated experimental runner.
 - The Web UI now exposes an explicit experimental runtime toggle in `RLM Workspace`: `Modal chat` stays the default, while `Daytona pilot` opens a dedicated Daytona workbench on top of the same chat websocket transport.
-- The Daytona Web UI path is repo-clone-only for now: it requires a repository URL, accepts an optional ref, and surfaces `max_depth` / `batch_concurrency` controls.
+- The Daytona Web UI path is task-first and corpus-oriented: repository URL and local context paths are optional compatibility controls, while the workbench is designed for grounded Q&A over staged diligence materials, code, or reasoning-only runs.
 - The Daytona pilot still does not replace the default Web UI runtime, the MCP server, or the existing terminal chat.
 - Daytona setup for the pilot uses `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`. `DAYTONA_API_BASE_URL` is treated as a misconfiguration.
 - `fleet-rlm daytona-smoke` now reports phase-aware diagnostics for `config`, `sandbox_create`, `repo_clone`, `driver_start`, `exec_step_1`, `exec_step_2`, and `cleanup`.
-- The Daytona pilot is analysis-first in this release: it supports repo clone inputs, environment-native repo helpers, sandbox-self-orchestrated recursive subcalls, and environment-backed finalization, but not repo-editing workflows.
+- The Daytona pilot is analysis-first in this release: it supports optional repo clone inputs, staged local document/directory corpora, host-bridged semantic callbacks, typed `SUBMIT`, prompt-object externalization, and environment-backed finalization, but not repo-editing workflows. Image-only or scanned PDFs must be OCR'd before analysis.
 - Frontend identity/bootstrap is `GET /api/v1/auth/me`.
 - Runtime model updates from Settings are hot-applied in-process (`/api/v1/runtime/settings`) and reflected on `/api/v1/runtime/status`.
 - Secret inputs in Runtime Settings are write-only.
@@ -123,27 +123,26 @@ uv run fleet web
 
 ## Experimental Daytona Pilot
 
-The experimental `fleet-rlm daytona-rlm` command is a narrow, repo-centric strict-RLM pilot inspired by Daytona's recursive-language-model guide and the RLM paper.
+The experimental `fleet-rlm daytona-rlm` command is a strict Daytona + DSPy RLM pilot for grounded analysis over large corpora, inspired by Daytona's DSPy RLM guide and the RLM paper.
 
 - Use this order for the Daytona path:
   1. Set `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`.
   2. Run `fleet-rlm daytona-smoke --repo <url> [--ref <branch-or-sha>]`.
-  3. Only then run `fleet-rlm daytona-rlm --repo <url> --task <text> ...`.
+  3. Only then run `fleet-rlm daytona-rlm [--repo <url>] [--context-path <path> ...] --task <text> ...`.
 - The pilot resolves Daytona configuration explicitly from `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`.
-- It clones a repository into a fresh Daytona sandbox per root or child node.
-- Its interpreter core now follows the Daytona DSPy guide more closely: persistent sandbox-side Python execution, sandbox-local LM boot, canonical `llm_query(...)` / `llm_query_batched(...)`, and canonical `SUBMIT(...)`.
-- Recursive `llm_query(...)` and `llm_query_batched(...)` calls are self-orchestrated inside the Daytona sandbox runtime and spawn fresh Daytona child sandboxes that run the same node entrypoint.
+- Each root Daytona call uses one active sandbox workspace with a persistent driver, while Python REPL state is reset between root calls even when the workspace session is reused across chat turns.
+- Its interpreter core follows the Daytona DSPy guide closely: persistent sandbox-side Python execution, workspace-native inspection helpers, canonical host-bridged `llm_query(...)` / `llm_query_batched(...)`, and typed `SUBMIT(...)`.
 - It stays analysis-first: the model-facing helper surface is `run`, `read_file`, `read_file_slice`, `list_files`, `find_files`, `grep_repo`, `chunk_text`, `chunk_file`, `llm_query`, `llm_query_batched`, and `SUBMIT`.
-- Large task and observation payloads are now externalized into sandbox-resident prompt objects when they exceed the inline threshold, and the LM sees prompt-manifest metadata plus access instructions by default.
+- Large task, observation, and history payloads are externalized into sandbox-resident prompt objects when they exceed the inline threshold, and the LM sees prompt-manifest metadata plus access instructions by default.
 - The prompt-object helper surface is environment-native too: `store_prompt`, `list_prompts`, and `read_prompt_slice` live inside the persistent Daytona driver and survive across iterations.
 - Legacy aliases remain available for compatibility: `rlm_query`, `rlm_query_batched`, `FINAL`, and `FINAL_VAR`.
 - In the Daytona pilot, `find_files` is path/glob discovery and `grep_repo` is structured content search.
-- The new repo helpers remain sandbox-resident capabilities of the persistent Daytona driver rather than host-side callbacks, so the pilot still behaves like a real environment-centric RLM loop.
-- Product-specific behavior stays in a thin adapter above the interpreter core: typed recursive provenance, `child_links`, root-only synthesis safety validation, persisted rollout traces, WebSocket event shaping, and cancellation wiring.
-- Daytona cancellation is now tree-wide: cancelling a root run marks the run as cancelling immediately, best-effort stops reachable descendant sandboxes, and returns a cancelled result with warning summaries if some descendants do not terminate cleanly.
+- The repo and corpus helpers remain sandbox-resident capabilities of the persistent Daytona driver rather than host-side callbacks, so the pilot still behaves like a real environment-centric RLM loop over staged source material.
+- Product-specific behavior stays in a thin adapter above the interpreter core: trajectory serialization, evidence/citation shaping, persisted rollout traces, WebSocket event shaping, and cancellation wiring.
+- Daytona cancellation is root-run scoped: cancelling a run stops further iterations, tears down the active sandbox session, and returns a cancelled result with warning summaries if shutdown is not perfectly clean.
 - The smoke command returns structured diagnostics including `termination_phase`, `error_category`, phase timings, and an `error_message` when a live Daytona step fails.
-- It persists a local JSON artifact under `results/daytona-rlm/` with the agent tree, iteration code, bounded prompt/response previews, execution observations, child links, finalization mode, and rollout summary.
-- It intentionally does not replace the current Modal/WebSocket product runtime yet. It is materially closer to strict-RLM prompt handling now, but still stops short of full Algorithm 1 parity because product-wide session/history assembly remains host-managed and prompt externalization is still Daytona-specific.
+- It persists a local JSON artifact under `results/daytona-rlm/` with the internal node graph plus a public analyst-oriented payload: iterations, semantic callbacks, prompt handles, evidence sources, attachments, final typed output, and rollout summary.
+- It intentionally does not replace the current Modal/WebSocket product runtime yet. It is materially closer to strict-RLM prompt handling now, but still keeps product-wide session/history assembly host-managed.
 
 ## Experimental Daytona Workbench
 
@@ -155,15 +154,15 @@ The experimental `fleet-rlm daytona-rlm` command is a narrow, repo-centric stric
 Important constraints:
 
 - `Modal chat` remains the default and keeps the existing `execution_mode` behavior.
-- `Daytona pilot` requires `repo_url`, optionally accepts `repo_ref`, and can pass `max_depth` plus `batch_concurrency`.
+- `Daytona pilot` is task-first and can optionally accept `repo_url`, `repo_ref`, and `context_paths`; `batch_concurrency` remains the main Daytona tuning knob exposed in the UI path.
 - The Daytona UI path calls the real `src/fleet_rlm/daytona_rlm/` runner directly; it does not shell out to the CLI.
 - Daytona streaming in the UI reuses the existing chat event contract with `status`, `tool_call`, `tool_result`, `final`, `error`, and `cancelled` events rendered from the pilot's environment-backed `FinalArtifact`.
-- Recursive child node phases, warnings, prompt-manifest summaries, and cancellation state now stream live into the workbench; the final `run_result` still hydrates the completed tree, but normal descendant visibility no longer waits for terminal hydration.
-- When `runtime_mode="daytona_pilot"`, the workspace body switches from the generic chat transcript to a dedicated Daytona workbench with:
-  - a top runtime/task panel,
-  - a tree-first recursive run tree,
-  - a live selected-node timeline of phases, warnings, and events,
-  - side panels for prompt objects, selected node details, and the final artifact.
+- Daytona final payloads now hydrate a shared analyst-oriented `run_result` contract with ordered `iterations`, `callbacks`, `prompts`, `sources`, `attachments`, and the final typed output plus rollout summary.
+- When `runtime_mode="daytona_pilot"`, the main chat surface stays visible while the right-hand panel switches to a dedicated Daytona analyst workbench with:
+  - a runtime/task summary,
+  - `Iterations`, `Evidence`, `Callbacks`, `Prompts`, and `Final` tabs,
+  - staged-corpus metadata and cited excerpts for follow-up diligence questions,
+  - live callback and warning activity as the host loop runs.
 
 ## Architecture Overview
 
