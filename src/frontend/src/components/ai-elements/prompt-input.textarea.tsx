@@ -3,6 +3,7 @@ import type {
   ClipboardEventHandler,
   ComponentProps,
   KeyboardEventHandler,
+  CompositionEvent,
 } from "react";
 import { useCallback, useState } from "react";
 
@@ -18,6 +19,9 @@ export type PromptInputTextareaProps = ComponentProps<typeof InputGroupTextarea>
 export const PromptInputTextarea = ({
   onChange,
   onKeyDown,
+  onPaste: userOnPaste,
+  onCompositionEnd: userOnCompositionEnd,
+  onCompositionStart: userOnCompositionStart,
   className,
   placeholder = "What would you like to know?",
   ...props
@@ -71,6 +75,12 @@ export const PromptInputTextarea = ({
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = useCallback(
     (event) => {
+      userOnPaste?.(event);
+
+      if (event.defaultPrevented) {
+        return;
+      }
+
       const items = event.clipboardData?.items;
 
       if (!items) {
@@ -93,11 +103,23 @@ export const PromptInputTextarea = ({
         attachments.add(files);
       }
     },
-    [attachments],
+    [attachments, userOnPaste],
   );
 
-  const handleCompositionEnd = useCallback(() => setIsComposing(false), []);
-  const handleCompositionStart = useCallback(() => setIsComposing(true), []);
+  const handleCompositionEnd = useCallback(
+    (event: CompositionEvent<HTMLTextAreaElement>) => {
+      userOnCompositionEnd?.(event);
+      setIsComposing(false);
+    },
+    [userOnCompositionEnd],
+  );
+  const handleCompositionStart = useCallback(
+    (event: CompositionEvent<HTMLTextAreaElement>) => {
+      userOnCompositionStart?.(event);
+      setIsComposing(true);
+    },
+    [userOnCompositionStart],
+  );
 
   const controlledProps = controller
     ? {
@@ -113,6 +135,7 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
+      {...props}
       className={cn(
         "field-sizing-content min-h-12 w-full max-h-48 border-0 bg-transparent px-2 pb-2.5 pt-3.5",
         "prompt-composer-textarea outline-none ring-0 focus-visible:ring-0 focus-visible:outline-none",
@@ -124,7 +147,6 @@ export const PromptInputTextarea = ({
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       placeholder={placeholder}
-      {...props}
       {...controlledProps}
     />
   );
