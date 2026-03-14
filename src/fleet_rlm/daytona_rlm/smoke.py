@@ -60,7 +60,7 @@ def run_daytona_smoke(
             runtime_instance = _run_timed(
                 phase_timings_ms,
                 "config",
-                lambda: DaytonaSandboxRuntime(),
+                DaytonaSandboxRuntime,
             )
 
         termination_phase = "sandbox_create"
