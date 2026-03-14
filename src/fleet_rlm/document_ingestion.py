@@ -137,7 +137,7 @@ def read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
             )
 
     try:
-        return path.read_text(), {
+        return path.read_text(encoding="utf-8"), {
             "source_type": "text",
             "extraction_method": "read_text",
         }
