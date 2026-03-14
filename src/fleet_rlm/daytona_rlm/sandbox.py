@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
@@ -562,8 +563,12 @@ class DaytonaSandboxSession:
         self.close_driver(timeout=timeout)
         try:
             self.run("rm -rf .fleet-rlm/prompts", cwd=self.workspace_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Best-effort cleanup: failures to remove prompt cache are non-fatal.
+            logging.debug(
+                "Failed to remove .fleet-rlm/prompts during Daytona sandbox reset: %s",
+                exc,
+            )
 
     def delete(self) -> None:
         self.close_driver()
