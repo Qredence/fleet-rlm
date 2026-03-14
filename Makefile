@@ -68,9 +68,7 @@ format:
 
 typecheck:
 	uv run ty check src \
-		--exclude "src/fleet_rlm/_scaffold/**" \
-		--exclude "src/fleet_rlm/analytics/**" \
-		--exclude "src/fleet_rlm/daytona_rlm/**"
+		--exclude "src/fleet_rlm/_scaffold/**"
 
 metadata-check:
 	uv run python scripts/check_release_hygiene.py
