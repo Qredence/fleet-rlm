@@ -10,10 +10,12 @@ import subprocess
 import threading
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 try:
     from daytona import Daytona, DaytonaConfig, SessionExecuteRequest
@@ -94,8 +96,7 @@ def _looks_like_commit(ref: str) -> bool:
 
 def _safe_repo_name(repo_url: str) -> str:
     tail = repo_url.rstrip("/").rsplit("/", 1)[-1]
-    if tail.endswith(".git"):
-        tail = tail[:-4]
+    tail = tail.removesuffix(".git")
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", tail).strip("-")
     return cleaned or "repo"
 
@@ -120,7 +121,7 @@ def _list_remote_refs(repo_url: str) -> set[str]:
             text=True,
             timeout=_REMOTE_REF_RESOLUTION_TIMEOUT_S,
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return set()
 
     if completed.returncode != 0:
@@ -958,15 +959,11 @@ class DaytonaSandboxRuntime:
             )
             session.phase_timings_ms.update(timings)
             return session
-        except Exception as exc:
+        except Exception:
             if sandbox is not None and hasattr(sandbox, "delete"):
-                try:
+                with suppress(Exception):
                     sandbox.delete()
-                except Exception:
-                    # Best-effort cleanup: ignore sandbox deletion failures so we
-                    # can re-raise and surface the original exception instead.
-                    pass
-            raise exc
+            raise
 
     def resume_workspace_session(
         self,

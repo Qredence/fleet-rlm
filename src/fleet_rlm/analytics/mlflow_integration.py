@@ -11,7 +11,8 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 from urllib.parse import urlsplit, urlunsplit
 
 import dspy
@@ -184,7 +185,7 @@ def _mlflow_string_literal(value: str) -> str:
     return value.replace("'", "''")
 
 
-def _existing_trace_callback() -> "FleetMlflowTraceCallback | None":
+def _existing_trace_callback() -> FleetMlflowTraceCallback | None:
     callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
     for callback in callbacks:
         if isinstance(callback, FleetMlflowTraceCallback):
@@ -211,7 +212,7 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         # tracking endpoint after an auth-forbidden failure until auth changes.
         if (
             _INIT_ATTEMPTED
-            and _INIT_IDENTITY == identity
+            and identity == _INIT_IDENTITY
             and (_INITIALIZED or _LAST_INIT_WAS_AUTH_FAILURE)
         ):
             return _INITIALIZED
@@ -563,7 +564,7 @@ def resolve_trace_by_client_request_id(
     *,
     config: MlflowConfig | None = None,
     max_results: int = 5000,
-) -> "Trace | None":
+) -> Trace | None:
     """Resolve the most recent trace for a given client request id."""
     mlflow = _import_mlflow()
     if mlflow is None:
@@ -614,7 +615,7 @@ def resolve_trace(
     trace_id: str | None = None,
     client_request_id: str | None = None,
     config: MlflowConfig | None = None,
-) -> "Trace | None":
+) -> Trace | None:
     """Resolve a trace by explicit trace id or fallback client request id."""
     mlflow = _import_mlflow()
     if mlflow is None:
@@ -703,7 +704,7 @@ def _parse_trace_metadata_field(
         return text
 
 
-def _trace_assessment_dicts(trace: "Trace") -> list[dict[str, Any]]:
+def _trace_assessment_dicts(trace: Trace) -> list[dict[str, Any]]:
     assessments = []
     try:
         raw = trace.search_assessments()
@@ -721,7 +722,7 @@ def _trace_assessment_dicts(trace: "Trace") -> list[dict[str, Any]]:
     return assessments
 
 
-def trace_to_dataset_row(trace: "Trace") -> dict[str, Any]:
+def trace_to_dataset_row(trace: Trace) -> dict[str, Any]:
     """Convert an MLflow trace into an evaluation/export dataset row."""
     payload = trace.to_dict()
     info = payload.get("info", {}) if isinstance(payload, dict) else {}

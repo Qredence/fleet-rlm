@@ -11,9 +11,9 @@ if TYPE_CHECKING:
 
 
 def llm_query(
-    runner: "DaytonaRLMRunner",
+    runner: DaytonaRLMRunner,
     *,
-    task_spec: "RecursiveTaskSpec",
+    task_spec: RecursiveTaskSpec,
 ) -> str:
     """Run one semantic host-LM query and return plain text."""
 
@@ -21,9 +21,9 @@ def llm_query(
 
 
 def llm_query_batched(
-    runner: "DaytonaRLMRunner",
+    runner: DaytonaRLMRunner,
     *,
-    task_specs: list["RecursiveTaskSpec"],
+    task_specs: list[RecursiveTaskSpec],
 ) -> list[str]:
     """Run semantic host-LM queries with bounded concurrency and stable ordering."""
 
@@ -31,12 +31,12 @@ def llm_query_batched(
 
 
 def rlm_query(
-    runner: "DaytonaRLMRunner",
+    runner: DaytonaRLMRunner,
     *,
     parent_id: str,
     depth: int,
-    task_spec: "RecursiveTaskSpec",
-) -> "ChildTaskResult":
+    task_spec: RecursiveTaskSpec,
+) -> ChildTaskResult:
     """Run one true recursive child Daytona query."""
 
     return runner.run_child_task(
@@ -47,12 +47,12 @@ def rlm_query(
 
 
 def rlm_query_batched(
-    runner: "DaytonaRLMRunner",
+    runner: DaytonaRLMRunner,
     *,
     parent_id: str,
     depth: int,
-    task_specs: list["RecursiveTaskSpec"],
-) -> list["ChildTaskResult"]:
+    task_specs: list[RecursiveTaskSpec],
+) -> list[ChildTaskResult]:
     """Run recursive child Daytona queries with bounded concurrency."""
 
     if not task_specs:

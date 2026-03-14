@@ -25,7 +25,7 @@ class RolloutBudget:
     batch_concurrency: int = 4
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "RolloutBudget":
+    def from_raw(cls, raw: Any) -> RolloutBudget:
         if not isinstance(raw, dict):
             return cls()
         return cls(
@@ -56,7 +56,7 @@ class SandboxLmRuntimeConfig:
         return asdict(self)
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "SandboxLmRuntimeConfig":
+    def from_raw(cls, raw: Any) -> SandboxLmRuntimeConfig:
         if not isinstance(raw, dict):
             raise ValueError("Sandbox LM config must be a dict.")
         model = _normalize_optional_text(raw.get("model"))
@@ -130,7 +130,7 @@ class PromptHandle:
     preview: str | None = None
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "PromptHandle":
+    def from_raw(cls, raw: Any) -> PromptHandle:
         if not isinstance(raw, dict):
             raise ValueError("Prompt handle payload must be a dict.")
         handle_id = _normalize_optional_text(raw.get("handle_id"))
@@ -165,7 +165,7 @@ class PromptSliceRef:
     preview: str | None = None
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "PromptSliceRef":
+    def from_raw(cls, raw: Any) -> PromptSliceRef:
         if not isinstance(raw, dict):
             raise ValueError("Prompt slice payload must be a dict.")
         handle_id = _normalize_optional_text(raw.get("handle_id"))
@@ -193,7 +193,7 @@ class PromptManifest:
     handles: list[PromptHandle] = field(default_factory=list)
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "PromptManifest":
+    def from_raw(cls, raw: Any) -> PromptManifest:
         if not isinstance(raw, dict):
             return cls()
         handles_raw = raw.get("handles", [])
@@ -226,7 +226,7 @@ class ContextSource:
     warnings: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "ContextSource":
+    def from_raw(cls, raw: Any) -> ContextSource:
         if not isinstance(raw, dict):
             raise ValueError("Context source payload must be a dict.")
         source_id = _normalize_optional_text(raw.get("source_id"))
@@ -278,7 +278,7 @@ class TaskSourceProvenance:
     preview: str | None = None
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "TaskSourceProvenance":
+    def from_raw(cls, raw: Any) -> TaskSourceProvenance:
         if not isinstance(raw, dict):
             return cls(kind="manual")
 
@@ -345,7 +345,7 @@ class RecursiveTaskSpec:
     )
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "RecursiveTaskSpec":
+    def from_raw(cls, raw: Any) -> RecursiveTaskSpec:
         if isinstance(raw, str):
             task = _normalize_optional_text(raw)
             if task is None:
@@ -385,7 +385,7 @@ class DaytonaEvidenceRef:
     pattern: str | None = None
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "DaytonaEvidenceRef":
+    def from_raw(cls, raw: Any) -> DaytonaEvidenceRef:
         if not isinstance(raw, dict):
             raise ValueError("Daytona evidence payload must be a dict.")
 
@@ -454,7 +454,7 @@ class ChildLink:
         }
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "ChildLink":
+    def from_raw(cls, raw: Any) -> ChildLink:
         if not isinstance(raw, dict):
             raise ValueError("Child link payload must be a dict.")
         return cls(
@@ -483,7 +483,7 @@ class ChildTaskResult:
     evidence: list[DaytonaEvidenceRef] = field(default_factory=list)
     confidence: float | None = None
     follow_up_needed: bool = False
-    run_result: "DaytonaRunResult | None" = None
+    run_result: DaytonaRunResult | None = None
 
 
 @dataclass(slots=True)
@@ -499,7 +499,7 @@ class FinalArtifact:
         return asdict(self)
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "FinalArtifact":
+    def from_raw(cls, raw: Any) -> FinalArtifact:
         if not isinstance(raw, dict):
             raise ValueError("Final artifact payload must be a dict.")
         return cls(
@@ -528,7 +528,7 @@ class ExecutionObservation:
         return asdict(self)
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "ExecutionObservation":
+    def from_raw(cls, raw: Any) -> ExecutionObservation:
         if not isinstance(raw, dict):
             raise ValueError("Execution observation payload must be a dict.")
         return cls(
@@ -581,7 +581,7 @@ class AgentNode:
         return payload
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "AgentNode":
+    def from_raw(cls, raw: Any) -> AgentNode:
         if not isinstance(raw, dict):
             raise ValueError("Agent node payload must be a dict.")
         return cls(
@@ -655,7 +655,7 @@ class RolloutSummary:
         return asdict(self)
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "RolloutSummary":
+    def from_raw(cls, raw: Any) -> RolloutSummary:
         if not isinstance(raw, dict):
             raise ValueError("Rollout summary payload must be a dict.")
         return cls(
@@ -760,7 +760,7 @@ class DaytonaRunResult:
             for key, value in payload.items()
         }
 
-    def _public_iterations(self, root: "AgentNode | None") -> list[dict[str, Any]]:
+    def _public_iterations(self, root: AgentNode | None) -> list[dict[str, Any]]:
         if root is None:
             return []
 
@@ -816,7 +816,7 @@ class DaytonaRunResult:
 
         return iterations
 
-    def _public_callbacks(self, root: "AgentNode | None") -> list[dict[str, Any]]:
+    def _public_callbacks(self, root: AgentNode | None) -> list[dict[str, Any]]:
         if root is None:
             return []
         callbacks: list[dict[str, Any]] = []
@@ -835,7 +835,7 @@ class DaytonaRunResult:
             )
         return callbacks
 
-    def _callback_counts_by_iteration(self, root: "AgentNode | None") -> dict[int, int]:
+    def _callback_counts_by_iteration(self, root: AgentNode | None) -> dict[int, int]:
         counts: dict[int, int] = {}
         if root is None:
             return counts
@@ -845,7 +845,7 @@ class DaytonaRunResult:
             counts[link.iteration] = counts.get(link.iteration, 0) + 1
         return counts
 
-    def _public_sources(self, root: "AgentNode | None") -> list[dict[str, Any]]:
+    def _public_sources(self, root: AgentNode | None) -> list[dict[str, Any]]:
         sources: list[dict[str, Any]] = []
         seen: set[str] = set()
 
@@ -936,25 +936,23 @@ class DaytonaRunResult:
         return sources
 
     def _public_attachments(self) -> list[dict[str, Any]]:
-        attachments: list[dict[str, Any]] = []
-        for source in self.context_sources:
-            attachments.append(
-                {
-                    "attachment_id": source.source_id,
-                    "name": Path(source.host_path).name or source.host_path,
-                    "kind": source.kind,
-                    "mime_type": source.source_type,
-                    "description": (
-                        f"Host path: {source.host_path}"
-                        if source.staged_path == source.host_path
-                        else f"Host path: {source.host_path}; staged at {source.staged_path}"
-                    ),
-                }
-            )
-        return attachments
+        return [
+            {
+                "attachment_id": source.source_id,
+                "name": Path(source.host_path).name or source.host_path,
+                "kind": source.kind,
+                "mime_type": source.source_type,
+                "description": (
+                    f"Host path: {source.host_path}"
+                    if source.staged_path == source.host_path
+                    else f"Host path: {source.host_path}; staged at {source.staged_path}"
+                ),
+            }
+            for source in self.context_sources
+        ]
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "DaytonaRunResult":
+    def from_raw(cls, raw: Any) -> DaytonaRunResult:
         if not isinstance(raw, dict):
             raise ValueError("Daytona run result payload must be a dict.")
         budget_raw = raw.get("budget")

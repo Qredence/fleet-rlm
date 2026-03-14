@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Annotated, Any
@@ -321,10 +322,8 @@ async def test_modal_connection(
     finally:
         latency_ms = int((time.perf_counter() - started) * 1000)
         if sandbox is not None:
-            try:
+            with suppress(Exception):
                 await sandbox.terminate.aio()
-            except Exception:
-                pass
 
     if not ok and not error:
         error = "Modal connectivity test failed."
