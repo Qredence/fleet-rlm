@@ -544,8 +544,15 @@ class DaytonaSandboxSession:
                 predicate=lambda frame: frame.get("type") == ShutdownAck().type,
                 timeout=timeout,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Best-effort graceful shutdown: failures to send or receive shutdown
+            # messages are non-fatal because we always perform forced cleanup
+            # in the finally block below.
+            logging.debug(
+                "Error during Daytona sandbox driver shutdown; proceeding with "
+                "forced cleanup: %s",
+                exc,
+            )
         finally:
             try:
                 self.sandbox.process.delete_session(self._driver_session_id)
