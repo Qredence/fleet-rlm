@@ -190,7 +190,7 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
         if index_path.exists():
             return FileResponse(index_path)
 
-        return {"error": "UI build not found. Run 'bun run build' in src/frontend."}
+        return {"error": "UI build not found. Run 'pnpm run build' in src/frontend."}
 
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:

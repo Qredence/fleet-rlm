@@ -111,12 +111,7 @@ export default defineConfig({
           "@typescript-eslint/triple-slash-reference": "error",
           "react-hooks/rules-of-hooks": "error",
           "react-hooks/exhaustive-deps": "warn",
-          "react/only-export-components": [
-            "warn",
-            {
-              allowConstantExport: true,
-            },
-          ],
+          "react/only-export-components": "off",
         },
         env: {
           es2020: true,
