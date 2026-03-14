@@ -956,6 +956,8 @@ class DaytonaSandboxRuntime:
                 try:
                     sandbox.delete()
                 except Exception:
+                    # Best-effort cleanup: ignore sandbox deletion failures so we
+                    # can re-raise and surface the original exception instead.
                     pass
             raise exc
 
