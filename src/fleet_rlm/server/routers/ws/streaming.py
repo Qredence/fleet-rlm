@@ -192,7 +192,14 @@ async def _emit_stream_event(
         # when persistence or completion hooks stall.
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
             raise WebSocketDisconnect(code=1001)
-        await persist_session_state(include_volume_save=True)
+        try:
+            await persist_session_state(include_volume_save=True)
+        except Exception:
+            # Log and continue to ensure the run is still marked as completed/failed.
+            logger.exception(
+                "Failed to persist session state after %s event; completing run anyway",
+                event.kind,
+            )
         status = RunStatus.CANCELLED if event.kind == "cancelled" else RunStatus.FAILED
         error_json = (
             {"error": event.text, "kind": event.kind} if event.kind == "error" else None
