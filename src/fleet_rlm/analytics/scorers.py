@@ -94,9 +94,9 @@ def reasoning_quality_scorer(model: str) -> Any:
         for key in secret_keys:
             # Match patterns like "key": "value" or 'key': 'value'
             pattern = rf'("{key}"\s*:\s*")[^"]*("|$)'
-            text = re.sub(pattern, rf'\1***\2', text, flags=re.IGNORECASE)
+            text = re.sub(pattern, r"\1***\2", text, flags=re.IGNORECASE)
             pattern_single = rf"('{key}'\s*:\s*')[^']*('|$)"
-            text = re.sub(pattern_single, rf"\1***\2", text, flags=re.IGNORECASE)
+            text = re.sub(pattern_single, r"\1***\2", text, flags=re.IGNORECASE)
 
         if len(text) > max_len:
             return text[: max_len - 12] + " [TRUNCATED]"
@@ -133,7 +133,9 @@ def reasoning_quality_scorer(model: str) -> Any:
         # Cap the total reasoning text length to avoid sending excessively large payloads.
         max_reasoning_len = 4000
         if len(reasoning_text) > max_reasoning_len:
-            reasoning_text = reasoning_text[: max_reasoning_len - 28] + "\n[TRACE TRUNCATED]"
+            reasoning_text = (
+                reasoning_text[: max_reasoning_len - 28] + "\n[TRACE TRUNCATED]"
+            )
 
         prompt = f"""
             Evaluate the reasoning quality of an AI agent based on its execution trace.
