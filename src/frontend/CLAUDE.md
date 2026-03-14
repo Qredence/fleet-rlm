@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-This is a React + Vite frontend managed by `bun`.
+This is a React + Vite frontend managed by `pnpm` and the Vite+ (`vp`) toolchain.
 
-- **Install**: `bun install`
-- **Dev Server**: `bun run dev`
-- **Lint**: `bun run lint`
-- **Type Check**: `bun run type-check`
-- **Unit Tests**: `bun run test:unit` (or `bun run test:watch` for interactive mode). To run a single test: `bun run test:unit <filename>`
-- **E2E Tests**: `bun run test:e2e` (uses Playwright). To run a single E2E test: `bun run test:e2e <filename>`
-- **Full QA Check**: `bun run check` (runs types, lint, unit tests, build, and e2e)
-- **API Types Sync**: `bun run api:sync` (syncs OpenAPI spec from backend and generates TS types)
+- **Install**: `vp install`
+- **Dev Server**: `vp dev`
+- **Lint**: `vp lint`
+- **Type Check**: `vp run type-check`
+- **Unit Tests**: `vp test` (interactive watch mode by default) or `vp run test:unit` (single pass). To run a single test: `vp test <filename>`
+- **E2E Tests**: `vp run test:e2e` (uses Playwright). To run a single E2E test: `vp run test:e2e <filename>`
+- **Full QA Check**: `vp check` (runs types, lint, format) followed by `vp test`
+- **API Types Sync**: `vp run api:sync` (syncs OpenAPI spec from backend and generates TS types)
 
 _Note: The FastAPI backend must be running for full functionality. Start it from the root `fleet-rlm` repo with `uv run fleet-rlm serve-api --port 8000`._
 

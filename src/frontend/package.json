@@ -128,15 +128,15 @@
     "tailwindcss": "4.2.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "8.56.1",
-    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-    "vite-plus": "latest",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.11",
+    "vite-plus": "^0.1.11",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.11"
   },
   "packageManager": "pnpm@9.12.0",
   "pnpm": {
     "overrides": {
-      "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-      "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+      "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.11",
+      "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.11"
     }
   },
   "trustedDependencies": [

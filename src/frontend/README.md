@@ -1,17 +1,19 @@
 # frontend
 
-Frontend for qredence Fleet, built with React + Vite.
+Frontend for qredence Fleet, built with React + Vite+ toolchain.
+
+Pre-requisite: Install the Vite+ CLI (`vp`) from https://viteplus.dev/guide/#install-vp
 
 ## Install
 
 ```bash
-bun install
+vp install
 ```
 
 ## Run
 
 ```bash
-bun run dev
+vp dev
 ```
 
 ## FastAPI Backend Integration (fleet-rlm)
