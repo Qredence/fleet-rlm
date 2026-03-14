@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .runner import DaytonaRLMRunner
-    from .types import ChildTaskResult
+    from .types import ChildTaskResult, RecursiveTaskSpec
 
 
 def llm_query(

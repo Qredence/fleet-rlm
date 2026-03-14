@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 _CLIENT_LOCK = Lock()
 _TRACE_ID_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
+_INIT_ATTEMPTED = False
+_LAST_INIT_WAS_AUTH_FAILURE = False
 _INITIALIZED = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
 _TRACE_IDS_BY_CLIENT_REQUEST_ID: dict[str, str] = {}
@@ -200,14 +202,23 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     resolved = config or MlflowConfig.from_env()
     identity = _mlflow_identity(resolved)
 
+    global _INIT_ATTEMPTED, _LAST_INIT_WAS_AUTH_FAILURE
     global _INIT_IDENTITY, _INITIALIZED, _ACTIVE_CONFIG
     with _CLIENT_LOCK:
         _ACTIVE_CONFIG = resolved
 
-        if _INIT_IDENTITY == identity and _INITIALIZED:
+        # Preserve idempotency after success, and avoid hammering the same
+        # tracking endpoint after an auth-forbidden failure until auth changes.
+        if (
+            _INIT_ATTEMPTED
+            and _INIT_IDENTITY == identity
+            and (_INITIALIZED or _LAST_INIT_WAS_AUTH_FAILURE)
+        ):
             return _INITIALIZED
 
         if not resolved.enabled:
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = False
             _INITIALIZED = False
             _INIT_IDENTITY = identity
             return False
@@ -215,6 +226,8 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         mlflow = _import_mlflow()
         if mlflow is None:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = False
             _INITIALIZED = False
             _INIT_IDENTITY = identity
             return False
@@ -237,10 +250,14 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
                 dspy.configure(callbacks=[*callbacks, FleetMlflowTraceCallback()])
 
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = False
             _INITIALIZED = True
             _INIT_IDENTITY = identity
             return True
         except Exception as exc:
+            _INIT_ATTEMPTED = True
+            _LAST_INIT_WAS_AUTH_FAILURE = _is_auth_forbidden_failure(exc)
             _log_mlflow_initialization_failure(
                 exc,
                 tracking_uri=resolved.tracking_uri,
