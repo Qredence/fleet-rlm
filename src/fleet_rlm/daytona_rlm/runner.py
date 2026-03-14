@@ -1930,8 +1930,6 @@ class _HostLoopDaytonaRuntime:
         if isinstance(value, str):
             return value
         try:
-            import json
-
             return json.dumps(value, indent=2, ensure_ascii=False)
         except Exception:
             return str(value)
