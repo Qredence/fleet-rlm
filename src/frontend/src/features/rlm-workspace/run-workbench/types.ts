@@ -1,3 +1,4 @@
+import type { ChatAttachmentItem, ChatSourceItem } from "@/lib/data/types";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
 export type RunStatus =
@@ -9,7 +10,12 @@ export type RunStatus =
   | "error"
   | "cancelled";
 
-export type DetailTab = "timeline" | "prompts" | "node" | "final";
+export type DetailTab =
+  | "iterations"
+  | "evidence"
+  | "callbacks"
+  | "prompts"
+  | "final";
 
 export interface PromptHandleSummary {
   handleId: string;
@@ -19,29 +25,6 @@ export interface PromptHandleSummary {
   charCount?: number;
   lineCount?: number;
   preview?: string;
-}
-
-export interface TaskSourceSummary {
-  kind?: string;
-  sourceId?: string;
-  path?: string;
-  startLine?: number;
-  endLine?: number;
-  preview?: string;
-}
-
-export interface RecursiveTaskSummary {
-  task: string;
-  label?: string;
-  source?: TaskSourceSummary;
-}
-
-export interface ChildLinkSummary {
-  childId?: string | null;
-  callbackName: string;
-  status: string;
-  resultPreview: string;
-  task: RecursiveTaskSummary;
 }
 
 export interface ArtifactSummary {
@@ -64,38 +47,56 @@ export interface ContextSourceSummary {
   warnings?: string[];
 }
 
-export interface RunNode {
-  nodeId: string;
-  parentId?: string | null;
-  depth: number;
-  task: string;
-  status: string;
-  sandboxId?: string;
-  workspacePath?: string;
-  iterationCount?: number;
+export interface IterationSummary {
+  id: string;
+  iteration: number;
+  status: "pending" | "running" | "completed" | "error";
+  phase?: string;
+  summary: string;
+  reasoningSummary?: string;
+  code?: string;
+  stdout?: string;
+  stderr?: string;
   error?: string | null;
-  warnings?: string[];
-  promptHandles: PromptHandleSummary[];
-  childIds: string[];
-  childLinks: ChildLinkSummary[];
-  finalArtifact?: ArtifactSummary | null;
+  durationMs?: number;
+  callbackCount?: number;
+  finalized?: boolean;
 }
 
-export interface TimelineEntry {
+export interface CallbackSourceSummary {
+  kind?: string;
+  sourceId?: string;
+  path?: string;
+  startLine?: number;
+  endLine?: number;
+  chunkIndex?: number;
+  header?: string;
+  pattern?: string;
+  preview?: string;
+}
+
+export interface CallbackSummary {
+  id: string;
+  callbackName: string;
+  iteration?: number;
+  status: string;
+  task: string;
+  label?: string;
+  resultPreview?: string;
+  source?: CallbackSourceSummary;
+}
+
+export interface ActivityEntry {
   id: string;
   kind: string;
   text: string;
   timestamp?: string;
-  nodeId?: string;
-  parentId?: string | null;
-  depth?: number;
-  sandboxId?: string;
+  iteration?: number;
   phase?: string;
   status?: string;
-  promptHandleCount?: number;
-  artifactPreview?: string;
+  durationMs?: number;
+  callbackCount?: number;
   warning?: string;
-  rawPayload?: Record<string, unknown>;
 }
 
 export interface RunSummary {
@@ -114,14 +115,17 @@ export interface RunWorkbenchState {
   daytonaMode?: string;
   task?: string;
   contextSources: ContextSourceSummary[];
-  rootId?: string;
-  errorMessage?: string | null;
-  nodes: Record<string, RunNode>;
-  nodeOrder: string[];
-  timeline: TimelineEntry[];
-  selectedNodeId?: string | null;
+  iterations: IterationSummary[];
+  callbacks: CallbackSummary[];
+  promptHandles: PromptHandleSummary[];
+  sources: ChatSourceItem[];
+  attachments: ChatAttachmentItem[];
+  activity: ActivityEntry[];
+  selectedIterationId?: string | null;
+  selectedCallbackId?: string | null;
   selectedTab: DetailTab;
   finalArtifact?: ArtifactSummary | null;
   summary?: RunSummary;
+  errorMessage?: string | null;
   lastFrame?: WsServerMessage | null;
 }

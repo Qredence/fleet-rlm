@@ -55,12 +55,21 @@ function hasMeaningfulGraph(steps: ExecutionStep[]) {
 
   const lanes = new Set(
     steps
-      .map((step) => step.lane_key ?? `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`)
+      .map(
+        (step) =>
+          step.lane_key ??
+          `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`,
+      )
       .filter(Boolean),
   );
   if (lanes.size > 1) return true;
 
-  if (steps.some((step) => step.actor_kind === "delegate" || step.actor_kind === "sub_agent")) {
+  if (
+    steps.some(
+      (step) =>
+        step.actor_kind === "delegate" || step.actor_kind === "sub_agent",
+    )
+  ) {
     return true;
   }
 
@@ -108,26 +117,29 @@ export function MessageInspectorPanel() {
   const turnArtifactsByMessageId = useChatStore(
     (state) => state.turnArtifactsByMessageId,
   );
-  const {
-    selectedAssistantTurnId,
-    activeInspectorTab,
-    setInspectorTab,
-  } = useNavigationStore();
+  const { selectedAssistantTurnId, activeInspectorTab, setInspectorTab } =
+    useNavigationStore();
 
   const hasAssistantTurns = useMemo(
     () => messages.some((m) => m.type === "assistant"),
-    [messages]
+    [messages],
   );
 
-  const selectedTurn = useMemo(
-    () => {
-      if (!selectedAssistantTurnId) return null;
-      return buildChatDisplayItems(messages, {
+  const selectedTurn = useMemo(() => {
+    if (!selectedAssistantTurnId) return null;
+    return (
+      buildChatDisplayItems(messages, {
         showPendingAssistantShell: isStreaming,
-      }).find((item) => item.kind === "assistant_turn" && item.turnId === selectedAssistantTurnId) ?? null;
-    },
-    [isStreaming, messages, selectedAssistantTurnId],
-  ) as Extract<ReturnType<typeof buildChatDisplayItems>[number], { kind: "assistant_turn" }> | null;
+      }).find(
+        (item) =>
+          item.kind === "assistant_turn" &&
+          item.turnId === selectedAssistantTurnId,
+      ) ?? null
+    );
+  }, [isStreaming, messages, selectedAssistantTurnId]) as Extract<
+    ReturnType<typeof buildChatDisplayItems>[number],
+    { kind: "assistant_turn" }
+  > | null;
 
   const model = useMemo(
     () => (selectedTurn ? buildAssistantContentModel(selectedTurn) : null),
@@ -135,8 +147,9 @@ export function MessageInspectorPanel() {
   );
 
   const graphSteps = useMemo(
-    () => selectedTurn ? turnArtifactsByMessageId[selectedTurn.turnId] ?? [] : [],
-    [selectedTurn, turnArtifactsByMessageId]
+    () =>
+      selectedTurn ? (turnArtifactsByMessageId[selectedTurn.turnId] ?? []) : [],
+    [selectedTurn, turnArtifactsByMessageId],
   );
 
   const showGraph = useMemo(() => hasMeaningfulGraph(graphSteps), [graphSteps]);
@@ -189,32 +202,47 @@ export function MessageInspectorPanel() {
                     : "Selected assistant turn"}
                 </CardTitle>
               </div>
-              <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
+              <Badge
+                variant={turnStatus.variant}
+                className={inspectorStyles.badge.status}
+              >
                 {turnStatus.label}
               </Badge>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
               {model.summary.trajectoryCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                <Badge
+                  variant="secondary"
+                  className={inspectorStyles.badge.meta}
+                >
                   {model.summary.trajectoryCount} trajector
                   {model.summary.trajectoryCount === 1 ? "y" : "ies"}
                 </Badge>
               ) : null}
               {model.summary.toolSessionCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                <Badge
+                  variant="secondary"
+                  className={inspectorStyles.badge.meta}
+                >
                   {model.summary.toolSessionCount} tool session
                   {model.summary.toolSessionCount === 1 ? "" : "s"}
                 </Badge>
               ) : null}
               {model.summary.sourceCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                <Badge
+                  variant="secondary"
+                  className={inspectorStyles.badge.meta}
+                >
                   {model.summary.sourceCount} source
                   {model.summary.sourceCount === 1 ? "" : "s"}
                 </Badge>
               ) : null}
               {model.summary.attachmentCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                <Badge
+                  variant="secondary"
+                  className={inspectorStyles.badge.meta}
+                >
                   {model.summary.attachmentCount} attachment
                   {model.summary.attachmentCount === 1 ? "" : "s"}
                 </Badge>
@@ -249,7 +277,9 @@ export function MessageInspectorPanel() {
         {model.execution.hasContent ? (
           <ExecutionInspectorTab model={model} />
         ) : null}
-        {model.evidence.hasContent ? <EvidenceInspectorTab model={model} /> : null}
+        {model.evidence.hasContent ? (
+          <EvidenceInspectorTab model={model} />
+        ) : null}
         {showGraph ? <GraphInspectorTab steps={graphSteps} /> : null}
       </Tabs>
     </div>

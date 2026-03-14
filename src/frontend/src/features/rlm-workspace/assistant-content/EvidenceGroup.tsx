@@ -1,6 +1,24 @@
-import { Attachment, AttachmentInfo, AttachmentPreview, Attachments } from "@/components/ai-elements/attachments";
-import { InlineCitation, InlineCitationCard, InlineCitationCardBody, InlineCitationCardTrigger, InlineCitationQuote, InlineCitationSource, InlineCitationText } from "@/components/ai-elements/inline-citation";
-import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
+import {
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
+} from "@/components/ai-elements/attachments";
+import {
+  InlineCitation,
+  InlineCitationCard,
+  InlineCitationCardBody,
+  InlineCitationCardTrigger,
+  InlineCitationQuote,
+  InlineCitationSource,
+  InlineCitationText,
+} from "@/components/ai-elements/inline-citation";
+import {
+  Source,
+  Sources,
+  SourcesContent,
+  SourcesTrigger,
+} from "@/components/ai-elements/sources";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
 import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 
@@ -13,9 +31,7 @@ export function EvidenceGroup({
 
   return (
     <section className="space-y-3" data-slot="assistant-evidence">
-      <div className={inspectorStyles.heading.section}>
-        Evidence
-      </div>
+      <div className={inspectorStyles.heading.section}>Evidence</div>
 
       {evidence.citations.length > 0 ? (
         <div data-slot="evidence-citations">
@@ -40,7 +56,9 @@ export function EvidenceGroup({
                         description={citation.description}
                       />
                       {citation.quote ? (
-                        <InlineCitationQuote>{citation.quote}</InlineCitationQuote>
+                        <InlineCitationQuote>
+                          {citation.quote}
+                        </InlineCitationQuote>
                       ) : null}
                     </div>
                   ))}

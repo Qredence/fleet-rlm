@@ -10,18 +10,12 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils/cn";
 import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
-import { SourceSetupCard } from "@/features/rlm-workspace/SourceSetupCard";
 import { ConversationHistory } from "@/components/shared/ConversationHistory";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
-import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
-import {
-  detectRepoContext,
-  normalizeRepoUrl,
-  resolveRepoContext,
-} from "@/lib/utils/repoContext";
-import { parseContextPaths } from "@/lib/utils/sourceContext";
 import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
+import { detectRepoContext } from "@/lib/utils/repoContext";
+import { detectContextPaths } from "@/lib/utils/sourceContext";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -64,67 +58,15 @@ export function RlmWorkspace() {
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
-  const sourceRepoUrl = useChatStore((state) => state.sourceRepoUrl);
-  const setSourceRepoUrl = useChatStore((state) => state.setSourceRepoUrl);
-  const sourceRepoRef = useChatStore((state) => state.sourceRepoRef);
-  const setSourceRepoRef = useChatStore((state) => state.setSourceRepoRef);
-  const sourceContextPaths = useChatStore((state) => state.sourceContextPaths);
-  const setSourceContextPaths = useChatStore(
-    (state) => state.setSourceContextPaths,
-  );
-  const sourceMaxDepth = useChatStore((state) => state.sourceMaxDepth);
-  const setSourceMaxDepth = useChatStore((state) => state.setSourceMaxDepth);
-  const sourceBatchConcurrency = useChatStore(
-    (state) => state.sourceBatchConcurrency,
-  );
-  const setSourceBatchConcurrency = useChatStore(
-    (state) => state.setSourceBatchConcurrency,
-  );
-  const activeRunStatus = useRunWorkbenchStore((state) => state.status);
-  const activeRunRepoUrl = useRunWorkbenchStore(
-    (state) => state.repoUrl,
-  );
-  const activeRunContextSources = useRunWorkbenchStore(
-    (state) => state.contextSources,
-  );
-  const detectedRepoCtx =
-    runtimeMode === "daytona_pilot"
-      ? detectRepoContext(inputValue)
-      : null;
-  const normalizedManualRepoUrl =
-    runtimeMode === "daytona_pilot"
-      ? normalizeRepoUrl(sourceRepoUrl)
-      : null;
-  const hasManualRepoOverride =
-    runtimeMode === "daytona_pilot" && sourceRepoUrl.trim().length > 0;
-  const hasInvalidManualRepoOverride =
-    hasManualRepoOverride && normalizedManualRepoUrl == null;
-  const resolvedRepoCtx =
-    runtimeMode === "daytona_pilot"
-      ? resolveRepoContext({
-          manualRepoUrl: sourceRepoUrl,
-          promptText: inputValue,
-        })
-      : null;
-  const parsedContextPaths =
-    runtimeMode === "daytona_pilot"
-      ? parseContextPaths(sourceContextPaths)
-      : [];
-  const canSubmitRun =
-    runtimeMode !== "daytona_pilot" || !hasInvalidManualRepoOverride;
-  const showActiveRunContext =
-    runtimeMode === "daytona_pilot" &&
-    (activeRunStatus === "bootstrapping" ||
-      activeRunStatus === "running" ||
-      activeRunStatus === "cancelling");
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
     (attachments: AttachedFile[]) => {
-      const effectiveRepoUrl =
-        runtimeMode === "daytona_pilot"
-          ? resolvedRepoCtx?.repoUrl
-          : undefined;
+      const inferredRepoContext =
+        runtimeMode === "daytona_pilot" ? detectRepoContext(inputValue) : null;
+      const inferredContextPaths =
+        runtimeMode === "daytona_pilot" ? detectContextPaths(inputValue) : [];
+
       if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
         telemetry.capture("chat_session_started", {
           prompt_length: inputValue.length,
@@ -133,19 +75,18 @@ export function RlmWorkspace() {
       originalHandleSubmit({
         executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
         runtimeMode,
-        repoUrl: effectiveRepoUrl,
+        repoUrl:
+          runtimeMode === "daytona_pilot"
+            ? inferredRepoContext?.repoUrl
+            : undefined,
         repoRef:
-          runtimeMode === "daytona_pilot" && effectiveRepoUrl
-            ? sourceRepoRef
+          runtimeMode === "daytona_pilot"
+            ? (inferredRepoContext?.repoRefCandidate ??
+              inferredRepoContext?.repoRef)
             : undefined,
         contextPaths:
-          runtimeMode === "daytona_pilot"
-            ? parsedContextPaths
-            : undefined,
-        maxDepth: runtimeMode === "daytona_pilot" ? sourceMaxDepth : undefined,
-        batchConcurrency:
-          runtimeMode === "daytona_pilot"
-            ? sourceBatchConcurrency
+          runtimeMode === "daytona_pilot" && inferredContextPaths.length > 0
+            ? inferredContextPaths
             : undefined,
         attachments: attachments.map((attachment) => ({
           id: attachment.id,
@@ -163,11 +104,6 @@ export function RlmWorkspace() {
       originalHandleSubmit,
       executionMode,
       runtimeMode,
-      resolvedRepoCtx,
-      sourceRepoRef,
-      parsedContextPaths,
-      sourceMaxDepth,
-      sourceBatchConcurrency,
     ],
   );
 
@@ -271,15 +207,30 @@ export function RlmWorkspace() {
   }, [navigate]);
 
   const runtimeGuidance = runtimeStatus.data?.guidance ?? [];
+  const daytonaStatus = runtimeStatus.data?.daytona as
+    | {
+        configured?: boolean;
+        guidance?: string[];
+      }
+    | undefined;
+  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance)
+    ? daytonaStatus.guidance
+    : [];
+  const warningGuidance =
+    runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
   const showRuntimeWarning =
     backendEnabled &&
     runtimeStatus.data != null &&
-    runtimeStatus.data.ready === false &&
-    runtimeGuidance.length > 0;
+    (runtimeMode === "daytona_pilot"
+      ? daytonaStatus?.configured === false && daytonaGuidance.length > 0
+      : runtimeStatus.data.ready === false && runtimeGuidance.length > 0);
+  const runtimeWarningTitle =
+    runtimeMode === "daytona_pilot"
+      ? "Daytona setup required"
+      : "Runtime warning";
   const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;
-  const showSourceSetup = runtimeMode === "daytona_pilot";
 
   const composer = (
     <ChatInput
@@ -300,7 +251,6 @@ export function RlmWorkspace() {
       onRuntimeModeChange={setRuntimeMode}
       executionMode={executionMode}
       onExecutionModeChange={setExecutionMode}
-      canSubmit={canSubmitRun}
       className="w-full"
     />
   );
@@ -341,7 +291,7 @@ export function RlmWorkspace() {
       <div
         className={cn(
           "sticky bottom-0 z-10 shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 md:px-6",
-          hasMessages || showRuntimeWarning || showSourceSetup ? "pt-5" : "pt-2",
+          hasMessages || showRuntimeWarning ? "pt-5" : "pt-2",
         )}
       >
         <div className="mx-auto w-full max-w-200">
@@ -349,10 +299,10 @@ export function RlmWorkspace() {
             {showRuntimeWarning ? (
               <Alert className="border-accent/25 bg-accent/5 text-foreground">
                 <TriangleAlert className="size-4" />
-                <AlertTitle>Runtime warning</AlertTitle>
+                <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                 <AlertDescription>
-                  <div className="space-y-3">
-                    <p>{runtimeGuidance[0]}</p>
+                  <div className="flex flex-col gap-3">
+                    <p>{warningGuidance[0]}</p>
                     <Button
                       variant="outline"
                       size="sm"
@@ -364,28 +314,6 @@ export function RlmWorkspace() {
                   </div>
                 </AlertDescription>
               </Alert>
-            ) : null}
-            {showSourceSetup ? (
-              <div className="mx-auto w-full max-w-175">
-                <SourceSetupCard
-                  manualRepoUrl={sourceRepoUrl}
-                  onManualRepoUrlChange={setSourceRepoUrl}
-                  contextPaths={sourceContextPaths}
-                  onContextPathsChange={setSourceContextPaths}
-                  repoRef={sourceRepoRef}
-                  onRepoRefChange={setSourceRepoRef}
-                  maxDepth={sourceMaxDepth}
-                  onMaxDepthChange={setSourceMaxDepth}
-                  batchConcurrency={sourceBatchConcurrency}
-                  onBatchConcurrencyChange={setSourceBatchConcurrency}
-                  detectedRepoContext={detectedRepoCtx}
-                  resolvedRepoContext={resolvedRepoCtx}
-                  hasInvalidManualOverride={hasInvalidManualRepoOverride}
-                  activeRunRepoUrl={activeRunRepoUrl}
-                  activeRunContextSources={activeRunContextSources}
-                  isActiveRunContextVisible={showActiveRunContext}
-                />
-              </div>
             ) : null}
             <div className="mx-auto w-full max-w-175 rounded-2xl ring-1 ring-border/30">
               {composer}

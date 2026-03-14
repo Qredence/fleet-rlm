@@ -11,22 +11,18 @@ type SummaryPill = {
 function summaryPills(summary: AssistantContentModel["summary"]) {
   const pills: SummaryPill[] = [];
   if (summary.trajectoryCount > 0) {
-    pills.push(
-      {
-        key: "trajectory",
-        label: `${summary.trajectoryCount} trajector${summary.trajectoryCount === 1 ? "y" : "ies"}`,
-        tab: "trajectory",
-      },
-    );
+    pills.push({
+      key: "trajectory",
+      label: `${summary.trajectoryCount} trajector${summary.trajectoryCount === 1 ? "y" : "ies"}`,
+      tab: "trajectory",
+    });
   }
   if (summary.toolSessionCount > 0) {
-    pills.push(
-      {
-        key: "execution-sessions",
-        label: `${summary.toolSessionCount} tool session${summary.toolSessionCount === 1 ? "" : "s"}`,
-        tab: "execution",
-      },
-    );
+    pills.push({
+      key: "execution-sessions",
+      label: `${summary.toolSessionCount} tool session${summary.toolSessionCount === 1 ? "" : "s"}`,
+      tab: "execution",
+    });
   }
   if (summary.sourceCount > 0) {
     pills.push({
@@ -36,13 +32,11 @@ function summaryPills(summary: AssistantContentModel["summary"]) {
     });
   }
   if (summary.attachmentCount > 0) {
-    pills.push(
-      {
-        key: "evidence-attachments",
-        label: `${summary.attachmentCount} attachment${summary.attachmentCount === 1 ? "" : "s"}`,
-        tab: "evidence",
-      },
-    );
+    pills.push({
+      key: "evidence-attachments",
+      label: `${summary.attachmentCount} attachment${summary.attachmentCount === 1 ? "" : "s"}`,
+      tab: "evidence",
+    });
   }
   if (summary.sandboxActive) {
     pills.push({

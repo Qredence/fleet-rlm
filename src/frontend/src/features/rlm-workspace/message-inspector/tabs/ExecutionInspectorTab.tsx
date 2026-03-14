@@ -16,10 +16,21 @@ import {
 } from "@/components/ui/accordion";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
 import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
-import { sectionGroups, executionSectionState, statusTone } from "../utils/inspector-utils";
-import { renderBadges, renderExecutionSectionDetails } from "../components/inspector-components";
+import {
+  sectionGroups,
+  executionSectionState,
+  statusTone,
+} from "../utils/inspector-utils";
+import {
+  renderBadges,
+  renderExecutionSectionDetails,
+} from "../components/inspector-components";
 
-export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({ model }: { model: AssistantContentModel }) {
+export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
+  model,
+}: {
+  model: AssistantContentModel;
+}) {
   const groups = sectionGroups(model.execution.sections);
   return (
     <TabsContent value="execution" className="min-h-0 flex-1">
@@ -31,7 +42,10 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({ model
                 <div className={inspectorStyles.heading.section}>
                   {group.label}
                 </div>
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                <Badge
+                  variant="secondary"
+                  className={inspectorStyles.badge.meta}
+                >
                   {group.sections.length}
                 </Badge>
               </div>
@@ -48,7 +62,9 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({ model
                         <Accordion
                           type="single"
                           collapsible
-                          defaultValue={section.defaultOpen ? "details" : undefined}
+                          defaultValue={
+                            section.defaultOpen ? "details" : undefined
+                          }
                         >
                           <AccordionItem value="details" className="border-b-0">
                             <AccordionTrigger className="py-0 hover:no-underline">
@@ -58,7 +74,9 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({ model
                                     <CardTitle className="text-sm font-medium text-foreground">
                                       {section.label}
                                     </CardTitle>
-                                    <CardDescription>{section.summary}</CardDescription>
+                                    <CardDescription>
+                                      {section.summary}
+                                    </CardDescription>
                                   </div>
                                   <Badge
                                     variant={tone.variant}

@@ -1,4 +1,11 @@
+import {
+  FileQuestion,
+  MessagesSquare,
+  SearchSlash,
+  TriangleAlert,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Card,
   CardContent,
@@ -6,18 +13,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils/cn";
-import { buildSourceStateLabel } from "@/lib/utils/sourceContext";
 import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import type {
   ArtifactSummary,
+  CallbackSummary,
   ContextSourceSummary,
+  IterationSummary,
   PromptHandleSummary,
-  RunNode,
-  TimelineEntry,
 } from "@/features/rlm-workspace/run-workbench/types";
 
 function stringifyValue(value: unknown): string {
@@ -30,102 +44,103 @@ function stringifyValue(value: unknown): string {
   }
 }
 
-function nodeStatusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
-  if (status === "completed") return "default";
-  if (status === "error") return "destructive";
-  if (status === "cancel_failed") return "destructive";
-  if (status === "cancelling") return "outline";
-  if (status === "cancelled") return "secondary";
-  return "outline";
-}
-
-function runStatusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
-  if (status === "completed") return "default";
-  if (status === "error") return "destructive";
-  if (status === "cancelling") return "outline";
-  if (status === "cancelled") return "secondary";
-  if (status === "bootstrapping") return "secondary";
-  return "outline";
-}
-
-function buildTreeOrder(
-  nodes: Record<string, RunNode>,
-  rootId?: string,
-): string[] {
-  const childMap = new Map<string | null, string[]>();
-  for (const node of Object.values(nodes)) {
-    const parentKey = node.parentId ?? null;
-    const bucket = childMap.get(parentKey) ?? [];
-    bucket.push(node.nodeId);
-    childMap.set(parentKey, bucket);
+function preferredArtifactText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
   }
 
-  for (const bucket of childMap.values()) {
-    bucket.sort((left, right) => {
-      const a = nodes[left];
-      const b = nodes[right];
-      if (!a || !b) return left.localeCompare(right);
-      if (a.depth !== b.depth) return a.depth - b.depth;
-      return left.localeCompare(right);
-    });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
   }
 
-  const order: string[] = [];
-  const visit = (nodeId: string) => {
-    order.push(nodeId);
-    for (const childId of childMap.get(nodeId) ?? []) {
-      visit(childId);
-    }
-  };
-
-  if (rootId && nodes[rootId]) {
-    visit(rootId);
-  }
-
-  for (const nodeId of Object.keys(nodes).sort()) {
-    if (!order.includes(nodeId) && (nodes[nodeId]?.parentId == null || !nodes[nodes[nodeId]!.parentId!])) {
-      visit(nodeId);
+  const record = value as Record<string, unknown>;
+  for (const key of [
+    "final_markdown",
+    "summary",
+    "text",
+    "content",
+    "message",
+  ]) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
     }
   }
 
-  return order;
+  const nestedValue = record.value;
+  if (nestedValue !== value) {
+    return preferredArtifactText(nestedValue);
+  }
+
+  return null;
 }
 
-function PromptHandleList({
-  handles,
+function EmptyPanel({
+  title,
+  description,
+  icon: Icon = FileQuestion,
 }: {
-  handles: PromptHandleSummary[];
+  title: string;
+  description: string;
+  icon?: typeof FileQuestion;
 }) {
+  return (
+    <Empty>
+      <EmptyMedia variant="icon">
+        <Icon />
+      </EmptyMedia>
+      <EmptyContent>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyContent>
+    </Empty>
+  );
+}
+
+function PromptHandleList({ handles }: { handles: PromptHandleSummary[] }) {
   if (handles.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No prompt objects have been surfaced for this node yet.
-      </p>
+      <EmptyPanel
+        title="No prompt objects yet"
+        description="Large task, observation, and history payloads will appear here once they are externalized."
+        icon={MessagesSquare}
+      />
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {handles.map((handle) => (
-        <div
+        <Card
           key={handle.handleId}
-          className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3"
+          className="border-border-subtle/80 bg-muted/15"
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-foreground">
-              {handle.label ?? handle.handleId}
-            </span>
-            {handle.kind ? <Badge variant="outline">{handle.kind}</Badge> : null}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            {handle.path ? <span>{handle.path}</span> : null}
-            {handle.charCount != null ? <span>{handle.charCount} chars</span> : null}
-            {handle.lineCount != null ? <span>{handle.lineCount} lines</span> : null}
-          </div>
-          {handle.preview ? (
-            <p className="mt-2 text-sm text-muted-foreground">{handle.preview}</p>
-          ) : null}
-        </div>
+          <CardHeader className="gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle className="text-sm">
+                {handle.label ?? handle.handleId}
+              </CardTitle>
+              {handle.kind ? (
+                <Badge variant="outline">{handle.kind}</Badge>
+              ) : null}
+            </div>
+            <CardDescription>
+              {handle.path || "Sandbox prompt object"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
+            <div className="flex flex-wrap gap-3">
+              {handle.charCount != null ? (
+                <span>{handle.charCount} chars</span>
+              ) : null}
+              {handle.lineCount != null ? (
+                <span>{handle.lineCount} lines</span>
+              ) : null}
+            </div>
+            {handle.preview ? <p>{handle.preview}</p> : null}
+          </CardContent>
+        </Card>
       ))}
     </div>
   );
@@ -134,16 +149,22 @@ function PromptHandleList({
 function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
   if (!artifact) {
     return (
-      <p className="text-sm text-muted-foreground">
-        The final artifact has not been produced yet.
-      </p>
+      <EmptyPanel
+        title="No final output yet"
+        description="The final typed DSPy output will appear here when the run completes."
+        icon={SearchSlash}
+      />
     );
   }
 
+  const renderedArtifactText = preferredArtifactText(artifact.value);
+
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
-        {artifact.kind ? <Badge variant="outline">{artifact.kind}</Badge> : null}
+        {artifact.kind ? (
+          <Badge variant="outline">{artifact.kind}</Badge>
+        ) : null}
         {artifact.finalizationMode ? (
           <Badge variant="secondary">{artifact.finalizationMode}</Badge>
         ) : null}
@@ -152,83 +173,35 @@ function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
         ) : null}
       </div>
       {artifact.textPreview ? (
-        <div className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3">
-          <p className="text-sm text-foreground">{artifact.textPreview}</p>
-        </div>
+        <Card className="border-border-subtle/80 bg-muted/15">
+          <CardContent className="pt-4 text-sm text-foreground">
+            {artifact.textPreview}
+          </CardContent>
+        </Card>
       ) : null}
-      <pre className="max-h-96 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/20 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
-        {stringifyValue(artifact.value)}
+      <pre className="max-h-96 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+        {renderedArtifactText ?? stringifyValue(artifact.value)}
       </pre>
     </div>
   );
 }
 
-function SourceList({
-  repoUrl,
-  repoRef,
-  contextSources,
-}: {
-  repoUrl?: string;
-  repoRef?: string | null;
-  contextSources: ContextSourceSummary[];
-}) {
-  if (!repoUrl && contextSources.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">No external sources</p>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {repoUrl ? (
-        <div className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Repo</Badge>
-            {repoRef ? <Badge variant="outline">Ref {repoRef}</Badge> : null}
-          </div>
-          <p className="mt-2 text-sm font-medium text-foreground break-all">
-            {repoUrl}
-          </p>
-        </div>
-      ) : null}
-
-      {contextSources.map((source) => (
-        <div
-          key={source.sourceId}
-          className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">
-              {source.kind === "directory" ? "Directory" : "Local context"}
-            </Badge>
-            {source.fileCount != null ? (
-              <Badge variant="outline">{source.fileCount} files</Badge>
-            ) : null}
-            {source.skippedCount ? (
-              <Badge variant="outline">{source.skippedCount} skipped</Badge>
-            ) : null}
-          </div>
-          <p className="mt-2 text-sm font-medium text-foreground break-all">
-            {source.hostPath}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            {source.sourceType ? <span>{source.sourceType}</span> : null}
-            {source.extractionMethod ? <span>{source.extractionMethod}</span> : null}
-            {source.stagedPath ? <span>{source.stagedPath}</span> : null}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+function statusBadgeVariant(
+  status: string,
+): "default" | "secondary" | "outline" | "destructive" {
+  if (status === "completed") return "default";
+  if (status === "error") return "destructive";
+  if (status === "running") return "secondary";
+  return "outline";
 }
 
-function TimelineRow({
-  entry,
-  isSelected,
+function IterationRow({
+  iteration,
+  selected,
   onSelect,
 }: {
-  entry: TimelineEntry;
-  isSelected: boolean;
+  iteration: IterationSummary;
+  selected: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -237,374 +210,620 @@ function TimelineRow({
       onClick={onSelect}
       className={cn(
         "w-full rounded-xl border px-3 py-3 text-left transition-colors",
-        isSelected
+        selected
           ? "border-accent bg-accent/10"
-          : "border-border-subtle/80 bg-muted/15 hover:bg-muted/35",
+          : "border-border-subtle/80 bg-muted/15 hover:bg-muted/30",
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">{entry.kind}</Badge>
-        {entry.phase ? <Badge variant="secondary">{entry.phase}</Badge> : null}
-        {entry.status ? <Badge variant="outline">{entry.status}</Badge> : null}
-        {entry.depth != null ? (
-          <Badge variant="outline">depth {entry.depth}</Badge>
+        <Badge variant="outline">iter {iteration.iteration}</Badge>
+        <Badge variant={statusBadgeVariant(iteration.status)}>
+          {iteration.status}
+        </Badge>
+        {iteration.phase ? (
+          <Badge variant="secondary">{iteration.phase}</Badge>
         ) : null}
       </div>
-      <p className="mt-2 text-sm text-foreground">{entry.text}</p>
+      <p className="mt-2 text-sm text-foreground">{iteration.summary}</p>
       <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-        {entry.nodeId ? <span>node {entry.nodeId.slice(0, 8)}</span> : null}
-        {entry.sandboxId ? <span>sandbox {entry.sandboxId.slice(0, 8)}</span> : null}
-        {entry.promptHandleCount != null ? (
-          <span>{entry.promptHandleCount} prompt objects</span>
+        {iteration.durationMs != null ? (
+          <span>{iteration.durationMs}ms</span>
         ) : null}
-        {entry.timestamp ? <span>{entry.timestamp}</span> : null}
+        {iteration.callbackCount != null ? (
+          <span>{iteration.callbackCount} callbacks</span>
+        ) : null}
+        {iteration.finalized ? <span>finalized</span> : null}
       </div>
-      {entry.artifactPreview ? (
-        <p className="mt-2 text-xs text-muted-foreground">{entry.artifactPreview}</p>
-      ) : null}
-      {entry.warning ? (
-        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{entry.warning}</p>
+    </button>
+  );
+}
+
+function IterationDetail({
+  iteration,
+}: {
+  iteration?: IterationSummary | null;
+}) {
+  if (!iteration) {
+    return (
+      <EmptyPanel
+        title="No iteration selected"
+        description="Select an iteration to inspect its prompt-response summary and execution output."
+        icon={SearchSlash}
+      />
+    );
+  }
+
+  return (
+    <Card className="border-border-subtle/80 bg-card/80">
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle className="text-sm">
+            Iteration {iteration.iteration}
+          </CardTitle>
+          <Badge variant={statusBadgeVariant(iteration.status)}>
+            {iteration.status}
+          </Badge>
+          {iteration.phase ? (
+            <Badge variant="outline">{iteration.phase}</Badge>
+          ) : null}
+        </div>
+        <CardDescription>{iteration.summary}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {iteration.reasoningSummary ? (
+          <section className="flex flex-col gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Planner summary
+            </div>
+            <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-foreground">
+              {iteration.reasoningSummary}
+            </div>
+          </section>
+        ) : null}
+        {iteration.code ? (
+          <section className="flex flex-col gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Executed code
+            </div>
+            <pre className="max-h-64 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+              {iteration.code}
+            </pre>
+          </section>
+        ) : null}
+        {iteration.stdout ? (
+          <section className="flex flex-col gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              STDOUT
+            </div>
+            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+              {iteration.stdout}
+            </pre>
+          </section>
+        ) : null}
+        {iteration.stderr ? (
+          <section className="flex flex-col gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              STDERR
+            </div>
+            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+              {iteration.stderr}
+            </pre>
+          </section>
+        ) : null}
+        {iteration.error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Iteration error</AlertTitle>
+            <AlertDescription>{iteration.error}</AlertDescription>
+          </Alert>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CallbackRow({
+  callback,
+  selected,
+  onSelect,
+}: {
+  callback: CallbackSummary;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "w-full rounded-xl border px-3 py-3 text-left transition-colors",
+        selected
+          ? "border-accent bg-accent/10"
+          : "border-border-subtle/80 bg-muted/15 hover:bg-muted/30",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">{callback.callbackName}</Badge>
+        <Badge variant={statusBadgeVariant(callback.status)}>
+          {callback.status}
+        </Badge>
+        {callback.iteration != null ? (
+          <Badge variant="secondary">iter {callback.iteration}</Badge>
+        ) : null}
+      </div>
+      <p className="mt-2 text-sm text-foreground">
+        {callback.label ?? callback.task}
+      </p>
+      {callback.resultPreview ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {callback.resultPreview}
+        </p>
       ) : null}
     </button>
+  );
+}
+
+function CallbackDetail({ callback }: { callback?: CallbackSummary | null }) {
+  if (!callback) {
+    return (
+      <EmptyPanel
+        title="No callback selected"
+        description="Select a semantic subcall to inspect its task, provenance, and result preview."
+        icon={SearchSlash}
+      />
+    );
+  }
+
+  return (
+    <Card className="border-border-subtle/80 bg-card/80">
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle className="text-sm">{callback.callbackName}</CardTitle>
+          <Badge variant={statusBadgeVariant(callback.status)}>
+            {callback.status}
+          </Badge>
+          {callback.iteration != null ? (
+            <Badge variant="outline">iter {callback.iteration}</Badge>
+          ) : null}
+        </div>
+        <CardDescription>{callback.label ?? callback.task}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <section className="flex flex-col gap-2">
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Task
+          </div>
+          <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-foreground">
+            {callback.task}
+          </div>
+        </section>
+        {callback.source ? (
+          <section className="flex flex-col gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Evidence provenance
+            </div>
+            <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-muted-foreground">
+              {callback.source.path ? <div>{callback.source.path}</div> : null}
+              {callback.source.startLine != null ? (
+                <div>
+                  lines {callback.source.startLine}
+                  {callback.source.endLine != null &&
+                  callback.source.endLine !== callback.source.startLine
+                    ? `-${callback.source.endLine}`
+                    : ""}
+                </div>
+              ) : null}
+              {callback.source.header ? (
+                <div>header: {callback.source.header}</div>
+              ) : null}
+              {callback.source.pattern ? (
+                <div>pattern: {callback.source.pattern}</div>
+              ) : null}
+              {callback.source.preview ? (
+                <p className="mt-2 text-foreground">
+                  {callback.source.preview}
+                </p>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+        {callback.resultPreview ? (
+          <section className="flex flex-col gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Result preview
+            </div>
+            <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-foreground">
+              {callback.resultPreview}
+            </div>
+          </section>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ContextSourceCard({ source }: { source: ContextSourceSummary }) {
+  return (
+    <Card className="border-border-subtle/80 bg-muted/15">
+      <CardHeader className="gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle className="text-sm">{source.hostPath}</CardTitle>
+          <Badge variant="outline">{source.kind}</Badge>
+          {source.sourceType ? (
+            <Badge variant="secondary">{source.sourceType}</Badge>
+          ) : null}
+        </div>
+        <CardDescription>
+          {source.stagedPath
+            ? `Staged at ${source.stagedPath}`
+            : "Pending staging"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
+        <div className="flex flex-wrap gap-3">
+          {source.fileCount != null ? (
+            <span>{source.fileCount} files</span>
+          ) : null}
+          {source.skippedCount != null ? (
+            <span>{source.skippedCount} skipped</span>
+          ) : null}
+          {source.extractionMethod ? (
+            <span>{source.extractionMethod}</span>
+          ) : null}
+        </div>
+        {source.warnings?.length ? (
+          <ul className="flex list-disc flex-col gap-1 pl-5">
+            {source.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
 export function RunWorkbench() {
   const {
     status,
-    runId,
+    task,
     repoUrl,
     repoRef,
-    daytonaMode,
-    task,
     contextSources,
-    rootId,
-    nodes,
-    timeline,
-    selectedNodeId,
-    selectNode,
+    iterations,
+    callbacks,
+    promptHandles,
+    sources,
+    attachments,
+    activity,
+    selectedIterationId,
+    selectedCallbackId,
     selectedTab,
     selectTab,
+    selectIteration,
+    selectCallback,
     finalArtifact,
     summary,
     errorMessage,
   } = useRunWorkbenchStore();
 
-  const treeOrder = buildTreeOrder(nodes, rootId);
-  const firstTreeNodeId = treeOrder[0];
-  const selectedNode =
-    (selectedNodeId ? nodes[selectedNodeId] : undefined) ??
-    (rootId ? nodes[rootId] : undefined) ??
-    (firstTreeNodeId ? nodes[firstTreeNodeId] : undefined);
-  const sourceStateLabel = buildSourceStateLabel({
-    hasRepo: Boolean(repoUrl),
-    hasContext: contextSources.length > 0,
-  });
+  const selectedIteration =
+    iterations.find((item) => item.id === selectedIterationId) ??
+    iterations.at(-1) ??
+    null;
+  const selectedCallback =
+    callbacks.find((item) => item.id === selectedCallbackId) ??
+    callbacks.at(-1) ??
+    null;
+  const warningCount = summary?.warnings?.length ?? 0;
 
   return (
     <div
-      className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden"
+      className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-hidden"
       data-testid="run-workbench"
     >
-      <Card className="shrink-0">
-        <CardHeader className="gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <CardTitle className="text-base">Run Workbench</CardTitle>
-            <Badge variant={runStatusVariant(status)}>{status}</Badge>
-            <Badge variant="secondary">{sourceStateLabel}</Badge>
-            {daytonaMode ? <Badge variant="outline">{daytonaMode}</Badge> : null}
-            {summary?.terminationReason ? (
-              <Badge variant="outline">{summary.terminationReason}</Badge>
-            ) : null}
-          </div>
-          <CardDescription>
-            Live recursive workspace details, grounded in metadata and previews.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              External sources
-            </p>
-            <div className="pt-1">
-              <SourceList
-                repoUrl={repoUrl}
-                repoRef={repoRef}
-                contextSources={contextSources}
-              />
-            </div>
-            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-              <span>{Object.keys(nodes).length} nodes</span>
-              {summary?.durationMs != null ? <span>{summary.durationMs} ms</span> : null}
-            </div>
-          </div>
-          <Separator />
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Task
-            </p>
-            <p className="text-sm text-foreground">
-              {task ?? "Send a task to begin."}
-            </p>
-            {runId ? (
-              <p className="text-xs text-muted-foreground break-all">{runId}</p>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
-
       {errorMessage ? (
-        <div className="shrink-0 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {errorMessage}
-        </div>
+        <Alert
+          variant="destructive"
+          className="shrink-0 border-destructive/30 bg-destructive/5"
+        >
+          <AlertTitle>Run error</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
-      {summary?.warnings?.length ? (
-        <div className="shrink-0 rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
-          <p className="font-medium">Cancellation warnings</p>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            {summary.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        </div>
+      {warningCount > 0 ? (
+        <Alert className="shrink-0 border-accent/25 bg-accent/5 text-foreground">
+          <TriangleAlert className="size-4" />
+          <AlertTitle>Analysis warnings</AlertTitle>
+          <AlertDescription>
+            <ul className="mt-2 list-disc pl-5">
+              {(summary?.warnings ?? []).map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
-      <Card
-        className="flex min-h-0 flex-[0.95] flex-col"
-        data-testid="run-tree"
-      >
+      <Card className="shrink-0 border-border-subtle/80 bg-card/80">
         <CardHeader className="gap-2">
-          <CardTitle className="text-base">Run tree</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">Daytona analyst workspace</Badge>
+            <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
+            {summary?.terminationReason ? (
+              <Badge variant="secondary">{summary.terminationReason}</Badge>
+            ) : null}
+          </div>
+          <CardTitle className="text-sm leading-6">
+            {task ?? "Corpus-grounded analysis"}
+          </CardTitle>
           <CardDescription>
-            Recursive nodes, child links, and status transitions.
+            {repoUrl ? repoUrl : "No repository configured"}
+            {repoRef ? ` @ ${repoRef}` : ""}
           </CardDescription>
         </CardHeader>
-        <CardContent className="min-h-0 flex-1 pb-4">
-          <ScrollArea className="h-full pr-2">
-            <div className="space-y-2">
-              {treeOrder.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Start a run to see the recursive node tree.
-                </p>
-              ) : (
-                treeOrder.map((nodeId) => {
-                  const node = nodes[nodeId];
-                  if (!node) return null;
-                  return (
-                    <button
-                      key={node.nodeId}
-                      type="button"
-                      onClick={() => selectNode(node.nodeId)}
-                      className={cn(
-                        "w-full rounded-xl border px-3 py-3 text-left transition-colors",
-                        selectedNode?.nodeId === node.nodeId
-                          ? "border-accent bg-accent/10"
-                          : "border-border-subtle/80 bg-muted/15 hover:bg-muted/35",
-                      )}
-                      style={{ marginLeft: `${node.depth * 10}px` }}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium text-foreground">
-                          {node.task}
-                        </span>
-                        <Badge variant={nodeStatusVariant(node.status)}>
-                          {node.status}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                        <span>depth {node.depth}</span>
-                        <span>{node.childLinks.length} child links</span>
-                        {node.promptHandles.length > 0 ? (
-                          <span>{node.promptHandles.length} prompts</span>
-                        ) : null}
-                        {node.warnings?.length ? (
-                          <span>{node.warnings.length} warnings</span>
-                        ) : null}
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </ScrollArea>
+        <CardContent className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <span>{iterations.length} iterations</span>
+          <span>{callbacks.length} callbacks</span>
+          <span>{promptHandles.length} prompt objects</span>
+          <span>{sources.length + attachments.length} evidence items</span>
+          {summary?.durationMs != null ? (
+            <span>{summary.durationMs}ms</span>
+          ) : null}
         </CardContent>
       </Card>
 
-      <Card
-        className="flex min-h-0 flex-[1.15] flex-col"
-        data-testid="detail-tabs"
-      >
-        <CardHeader className="gap-2">
-          <CardTitle className="text-base">Details</CardTitle>
-          <CardDescription>
-            Timeline, selected node context, prompt objects, and the final artifact.
-          </CardDescription>
-        </CardHeader>
+      <Card className="flex min-h-0 flex-1 flex-col" data-testid="detail-tabs">
         <CardContent className="min-h-0 flex-1 pb-4">
           <Tabs
-            className="flex h-full min-h-0 flex-col"
+            className="flex h-full min-h-0 flex-col gap-3"
             value={selectedTab}
             onValueChange={(value) =>
-              selectTab(value as "timeline" | "node" | "prompts" | "final")
+              selectTab(
+                value as
+                  | "iterations"
+                  | "evidence"
+                  | "callbacks"
+                  | "prompts"
+                  | "final",
+              )
             }
           >
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="timeline">Timeline</TabsTrigger>
-              <TabsTrigger value="node">Node</TabsTrigger>
-              <TabsTrigger value="prompts">Prompts</TabsTrigger>
-              <TabsTrigger value="final">Final</TabsTrigger>
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl border border-border-subtle/70 bg-card/70 p-1 sm:grid-cols-5">
+              <TabsTrigger
+                value="iterations"
+                className="px-3 py-2 text-xs sm:text-sm"
+              >
+                Iterations
+              </TabsTrigger>
+              <TabsTrigger
+                value="evidence"
+                className="px-3 py-2 text-xs sm:text-sm"
+              >
+                Evidence
+              </TabsTrigger>
+              <TabsTrigger
+                value="callbacks"
+                className="px-3 py-2 text-xs sm:text-sm"
+              >
+                Callbacks
+              </TabsTrigger>
+              <TabsTrigger
+                value="prompts"
+                className="px-3 py-2 text-xs sm:text-sm"
+              >
+                Prompts
+              </TabsTrigger>
+              <TabsTrigger
+                value="final"
+                className="px-3 py-2 text-xs sm:text-sm"
+              >
+                Final
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="timeline" className="min-h-0 flex-1">
+            <TabsContent value="iterations" className="min-h-0 flex-1">
               <ScrollArea className="h-full pr-2">
-                <div className="space-y-3">
-                  {timeline.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Timeline events will appear here during the run.
-                    </p>
+                <div className="flex flex-col gap-4">
+                  {iterations.length > 0 ? (
+                    <>
+                      <div className="flex flex-col gap-3">
+                        {iterations.map((iteration) => (
+                          <IterationRow
+                            key={iteration.id}
+                            iteration={iteration}
+                            selected={selectedIteration?.id === iteration.id}
+                            onSelect={() => selectIteration(iteration.id)}
+                          />
+                        ))}
+                      </div>
+                      <IterationDetail iteration={selectedIteration} />
+                    </>
+                  ) : activity.length > 0 ? (
+                    <div className="flex flex-col gap-3">
+                      {activity.map((entry) => (
+                        <Card
+                          key={entry.id}
+                          className="border-border-subtle/80 bg-muted/15"
+                        >
+                          <CardContent className="flex flex-col gap-2 pt-4">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="outline">{entry.kind}</Badge>
+                              {entry.iteration != null ? (
+                                <Badge variant="secondary">
+                                  iter {entry.iteration}
+                                </Badge>
+                              ) : null}
+                              {entry.phase ? (
+                                <Badge variant="outline">{entry.phase}</Badge>
+                              ) : null}
+                            </div>
+                            <p className="text-sm text-foreground">
+                              {entry.text}
+                            </p>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : status === "bootstrapping" || status === "running" ? (
+                    <div className="flex flex-col gap-3">
+                      <Skeleton className="h-20 w-full rounded-xl" />
+                      <Skeleton className="h-28 w-full rounded-xl" />
+                      <Skeleton className="h-16 w-full rounded-xl" />
+                    </div>
                   ) : (
-                    timeline.map((entry) => (
-                      <TimelineRow
-                        key={entry.id}
-                        entry={entry}
-                        isSelected={
-                          selectedNode?.nodeId != null &&
-                          entry.nodeId === selectedNode.nodeId
-                        }
-                        onSelect={() => {
-                          if (entry.nodeId) selectNode(entry.nodeId);
-                        }}
-                      />
-                    ))
+                    <EmptyPanel
+                      title="No iterations yet"
+                      description="Iteration summaries will appear here once the Daytona host loop starts producing observations."
+                      icon={SearchSlash}
+                    />
                   )}
                 </div>
               </ScrollArea>
             </TabsContent>
 
-            <TabsContent value="node" className="min-h-0 flex-1">
+            <TabsContent value="evidence" className="min-h-0 flex-1">
               <ScrollArea className="h-full pr-2">
-                {selectedNode ? (
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-semibold text-foreground">
-                          {selectedNode.task}
-                        </h3>
-                        <Badge variant={nodeStatusVariant(selectedNode.status)}>
-                          {selectedNode.status}
-                        </Badge>
+                <div className="flex flex-col gap-4">
+                  {contextSources.length > 0 ? (
+                    <section className="flex flex-col gap-3">
+                      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Staged corpus
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                        <span>node {selectedNode.nodeId}</span>
-                        {selectedNode.parentId ? (
-                          <span>parent {selectedNode.parentId}</span>
-                        ) : null}
-                        <span>depth {selectedNode.depth}</span>
-                        {selectedNode.sandboxId ? (
-                          <span>sandbox {selectedNode.sandboxId}</span>
-                        ) : null}
+                      {contextSources.map((source) => (
+                        <ContextSourceCard
+                          key={source.sourceId}
+                          source={source}
+                        />
+                      ))}
+                    </section>
+                  ) : null}
+
+                  {sources.length > 0 ? (
+                    <section className="flex flex-col gap-3">
+                      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Referenced sources
                       </div>
-                    </div>
-
-                    {selectedNode.workspacePath ? (
-                      <>
-                        <Separator />
-                        <div>
-                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            Workspace
-                          </p>
-                          <p className="mt-2 text-sm text-foreground break-all">
-                            {selectedNode.workspacePath}
-                          </p>
-                        </div>
-                      </>
-                    ) : null}
-
-                    {selectedNode.warnings?.length ? (
-                      <>
-                        <Separator />
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            Warnings
-                          </p>
-                          <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3">
-                            <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900 dark:text-amber-100">
-                              {selectedNode.warnings.map((warning) => (
-                                <li key={warning}>{warning}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
-
-                    {selectedNode.childLinks.length > 0 ? (
-                      <>
-                        <Separator />
-                        <div className="space-y-3">
-                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            Child links
-                          </p>
-                          {selectedNode.childLinks.map(
-                            (
-                              link: RunNode["childLinks"][number],
-                              index: number,
-                            ) => (
-                              <div
-                                key={`${link.callbackName}-${index}-${link.childId ?? "none"}`}
-                                className="rounded-xl border border-border-subtle/80 bg-muted/20 p-3"
-                              >
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge variant="outline">{link.callbackName}</Badge>
-                                  <Badge variant="secondary">{link.status}</Badge>
-                                </div>
-                                <p className="mt-2 text-sm text-foreground">
-                                  {link.task.label ?? link.task.task}
-                                </p>
-                                {link.task.source?.path ? (
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {link.task.source.path}
-                                    {link.task.source.startLine != null
-                                      ? `:${link.task.source.startLine}`
-                                      : ""}
-                                    {link.task.source.endLine != null &&
-                                    link.task.source.endLine !==
-                                      link.task.source.startLine
-                                      ? `-${link.task.source.endLine}`
-                                      : ""}
+                      {sources.map((source) => (
+                        <Card
+                          key={source.sourceId}
+                          className="border-border-subtle/80 bg-muted/15"
+                        >
+                          <CardHeader className="gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <CardTitle className="text-sm">
+                                {source.title}
+                              </CardTitle>
+                              <Badge variant="secondary" className="capitalize">
+                                {source.kind}
+                              </Badge>
+                            </div>
+                            <CardDescription>
+                              {source.displayUrl ??
+                                source.url ??
+                                "Local evidence"}
+                            </CardDescription>
+                          </CardHeader>
+                          {(source.description || source.quote) && (
+                            <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
+                              {source.description ? (
+                                <p>{source.description}</p>
+                              ) : null}
+                              {source.quote ? (
+                                <>
+                                  <Separator />
+                                  <p className="text-foreground">
+                                    {source.quote}
                                   </p>
-                                ) : null}
-                                {link.resultPreview ? (
-                                  <p className="mt-2 text-xs text-muted-foreground">
-                                    {link.resultPreview}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ),
+                                </>
+                              ) : null}
+                            </CardContent>
                           )}
-                        </div>
-                      </>
-                    ) : null}
+                        </Card>
+                      ))}
+                    </section>
+                  ) : null}
 
-                    {selectedNode.finalArtifact ? (
-                      <>
-                        <Separator />
-                        <ArtifactPanel artifact={selectedNode.finalArtifact} />
-                      </>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Select a node to inspect its details.
-                  </p>
-                )}
+                  {attachments.length > 0 ? (
+                    <section className="flex flex-col gap-3">
+                      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Attachments
+                      </div>
+                      {attachments.map((attachment) => (
+                        <Card
+                          key={attachment.attachmentId}
+                          className="border-border-subtle/80 bg-muted/15"
+                        >
+                          <CardHeader className="gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <CardTitle className="text-sm">
+                                {attachment.name}
+                              </CardTitle>
+                              {attachment.kind ? (
+                                <Badge variant="outline">
+                                  {attachment.kind}
+                                </Badge>
+                              ) : null}
+                              {attachment.mimeType || attachment.mediaType ? (
+                                <Badge variant="secondary">
+                                  {attachment.mimeType ?? attachment.mediaType}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <CardDescription>
+                              {attachment.description ??
+                                "Staged workspace material"}
+                            </CardDescription>
+                          </CardHeader>
+                        </Card>
+                      ))}
+                    </section>
+                  ) : null}
+
+                  {contextSources.length === 0 &&
+                  sources.length === 0 &&
+                  attachments.length === 0 ? (
+                    <EmptyPanel
+                      title="No evidence surfaced yet"
+                      description="Evidence-backed files, excerpts, and staged corpus items will appear here once the run grounds its answer."
+                      icon={SearchSlash}
+                    />
+                  ) : null}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="callbacks" className="min-h-0 flex-1">
+              <ScrollArea className="h-full pr-2">
+                <div className="flex flex-col gap-4">
+                  {callbacks.length > 0 ? (
+                    <>
+                      <div className="flex flex-col gap-3">
+                        {callbacks.map((callback) => (
+                          <CallbackRow
+                            key={callback.id}
+                            callback={callback}
+                            selected={selectedCallback?.id === callback.id}
+                            onSelect={() => selectCallback(callback.id)}
+                          />
+                        ))}
+                      </div>
+                      <CallbackDetail callback={selectedCallback} />
+                    </>
+                  ) : (
+                    <EmptyPanel
+                      title="No semantic callbacks yet"
+                      description="`llm_query(...)` and `llm_query_batched(...)` activity will appear here when the run delegates semantic work."
+                      icon={MessagesSquare}
+                    />
+                  )}
+                </div>
               </ScrollArea>
             </TabsContent>
 
             <TabsContent value="prompts" className="min-h-0 flex-1">
               <ScrollArea className="h-full pr-2">
-                <PromptHandleList handles={selectedNode?.promptHandles ?? []} />
+                <PromptHandleList handles={promptHandles} />
               </ScrollArea>
             </TabsContent>
 

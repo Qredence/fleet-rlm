@@ -26,8 +26,6 @@ export function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {
   if (pills.length === 0) return null;
 
   return (
-    <div className={inspectorStyles.runtime.inline}>
-      {pills.join(" · ")}
-    </div>
+    <div className={inspectorStyles.runtime.inline}>{pills.join(" · ")}</div>
   );
 }

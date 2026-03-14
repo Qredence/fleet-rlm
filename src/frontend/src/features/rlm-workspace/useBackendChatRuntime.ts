@@ -7,7 +7,6 @@ import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/features/rlm-workspace/backendArtifactEventAdapter";
 import { buildChatDisplayItems } from "@/features/rlm-workspace/chatDisplayItems";
-import { parseContextPaths } from "@/lib/utils/sourceContext";
 import type {
   ChatRuntime,
   ChatSubmitOptions,
@@ -113,9 +112,6 @@ export function useBackendChatRuntime(): ChatRuntime {
     isStreaming,
     sessionId,
     runtimeMode,
-    sourceRepoUrl,
-    sourceRepoRef,
-    sourceContextPaths,
     streamMessage,
     stopStreaming,
     resetSession,
@@ -217,10 +213,9 @@ export function useBackendChatRuntime(): ChatRuntime {
       if (resolvedRuntimeMode === "daytona_pilot") {
         useRunWorkbenchStore.getState().beginRun({
           task: text,
-          repoUrl: options?.repoUrl ?? sourceRepoUrl,
-          repoRef: options?.repoRef ?? sourceRepoRef,
-          contextPaths:
-            options?.contextPaths ?? parseContextPaths(sourceContextPaths),
+          repoUrl: options?.repoUrl,
+          repoRef: options?.repoRef,
+          contextPaths: options?.contextPaths,
         });
       }
       setPhase("understanding");
@@ -247,7 +242,6 @@ export function useBackendChatRuntime(): ChatRuntime {
             repoUrl: options?.repoUrl,
             repoRef: options?.repoRef,
             contextPaths: options?.contextPaths,
-            maxDepth: options?.maxDepth,
             batchConcurrency: options?.batchConcurrency,
           },
         );
@@ -294,9 +288,6 @@ export function useBackendChatRuntime(): ChatRuntime {
       resetRunWorkbench,
       streamMessage,
       runtimeMode,
-      sourceContextPaths,
-      sourceRepoRef,
-      sourceRepoUrl,
       setCreationPhase,
       addMessage,
       setMessages,

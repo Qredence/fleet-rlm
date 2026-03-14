@@ -187,10 +187,7 @@ describe("buildAssistantContentModel", () => {
             details: ["Observation · Found entrypoint"],
           },
         ]),
-        makeReasoningPart(
-          "Observation · Found entrypoint",
-          "final_reasoning",
-        ),
+        makeReasoningPart("Observation · Found entrypoint", "final_reasoning"),
       ]),
     });
 

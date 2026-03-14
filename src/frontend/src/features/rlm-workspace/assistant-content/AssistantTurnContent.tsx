@@ -5,9 +5,7 @@ import { AssistantAnswerBlock } from "@/features/rlm-workspace/assistant-content
 import { AssistantSummaryBar } from "@/features/rlm-workspace/assistant-content/AssistantSummaryBar";
 import { TrajectoryTimeline } from "@/features/rlm-workspace/assistant-content/TrajectoryTimeline";
 import { ExecutionHighlightsGroup } from "@/features/rlm-workspace/assistant-content/ExecutionHighlightsGroup";
-import {
-  EvidencePreview,
-} from "@/features/rlm-workspace/assistant-content/AssistantPreviewSections";
+import { EvidencePreview } from "@/features/rlm-workspace/assistant-content/AssistantPreviewSections";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
 import type { InspectorTab } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";

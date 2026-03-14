@@ -207,8 +207,11 @@ function parseSources(
 
       const canonicalUrl = normalizeUrl(rec.canonical_url ?? rec.canonicalUrl);
       const displayUrl = normalizeUrl(rec.display_url ?? rec.displayUrl);
+      const fileDisplayUrl =
+        asOptionalText(rec.display_url ?? rec.displayUrl) ??
+        asOptionalText(rec.host_path ?? rec.hostPath) ??
+        asOptionalText(rec.path);
       const url = normalizeUrl(rec.url) ?? displayUrl ?? canonicalUrl;
-      if (!url && !canonicalUrl) continue;
 
       const sourceId =
         asOptionalText(rec.source_id) ??
@@ -224,6 +227,7 @@ function parseSources(
           ? kindRaw
           : "other";
       const title = asOptionalText(rec.title) ?? "Source";
+      if (!url && !canonicalUrl && !fileDisplayUrl && !title) continue;
 
       const source: ChatSourceItem = {
         sourceId,
@@ -231,12 +235,16 @@ function parseSources(
         title,
         url: url ?? undefined,
         canonicalUrl: canonicalUrl ?? url ?? undefined,
-        displayUrl: displayUrl ?? url ?? undefined,
+        displayUrl: displayUrl ?? fileDisplayUrl ?? url ?? undefined,
         description: asOptionalText(rec.description),
         quote: asOptionalText(rec.quote),
       };
 
-      const dedupeKey = source.canonicalUrl ?? source.url ?? source.sourceId;
+      const dedupeKey =
+        source.canonicalUrl ??
+        source.url ??
+        source.displayUrl ??
+        source.sourceId;
       sources.set(dedupeKey, source);
     }
   }

@@ -23,27 +23,26 @@ interface RunWorkbenchStore extends RunWorkbenchState {
   }) => void;
   failRun: (errorMessage: string) => void;
   applyFrame: (frame: WsServerMessage) => void;
-  selectNode: (nodeId: string | null) => void;
+  selectIteration: (iterationId: string | null) => void;
+  selectCallback: (callbackId: string | null) => void;
   selectTab: (tab: DetailTab) => void;
 }
 
-export const useRunWorkbenchStore = create<RunWorkbenchStore>(
-  (set, get) => ({
-    ...createInitialRunWorkbenchState(),
-    reset: () => set(createInitialRunWorkbenchState()),
-    beginRun: (input) =>
-      set((state) => startRunWorkbenchRun(state, input)),
-    failRun: (errorMessage) =>
-      set((state) => failRunWorkbenchRun(state, errorMessage)),
-    applyFrame: (frame) =>
-      set((state) => {
-        if (!shouldApplyRunFrame(state, frame)) return state;
-        return applyFrameToRunWorkbenchState(state, frame);
-      }),
-    selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
-    selectTab: (tab) => {
-      if (get().selectedTab === tab) return;
-      set({ selectedTab: tab });
-    },
-  }),
-);
+export const useRunWorkbenchStore = create<RunWorkbenchStore>((set, get) => ({
+  ...createInitialRunWorkbenchState(),
+  reset: () => set(createInitialRunWorkbenchState()),
+  beginRun: (input) => set((state) => startRunWorkbenchRun(state, input)),
+  failRun: (errorMessage) =>
+    set((state) => failRunWorkbenchRun(state, errorMessage)),
+  applyFrame: (frame) =>
+    set((state) => {
+      if (!shouldApplyRunFrame(state, frame)) return state;
+      return applyFrameToRunWorkbenchState(state, frame);
+    }),
+  selectIteration: (iterationId) => set({ selectedIterationId: iterationId }),
+  selectCallback: (callbackId) => set({ selectedCallbackId: callbackId }),
+  selectTab: (tab) => {
+    if (get().selectedTab === tab) return;
+    set({ selectedTab: tab });
+  },
+}));

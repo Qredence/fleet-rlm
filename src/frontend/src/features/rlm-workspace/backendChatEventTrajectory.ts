@@ -229,7 +229,9 @@ function summarizeTrajectoryValue(value: unknown): string | undefined {
   }
 }
 
-export function trajectoryStepDetails(step: NormalizedTrajectoryStep): string[] {
+export function trajectoryStepDetails(
+  step: NormalizedTrajectoryStep,
+): string[] {
   const details: string[] = [];
   if (step.toolName) {
     details.push(`Tool · ${step.toolName}`);

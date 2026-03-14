@@ -171,6 +171,48 @@ function completeAssistant(
   ];
 }
 
+function preferredFinalArtifactText(value: unknown): string | undefined {
+  const direct = asOptionalText(value);
+  if (direct) return direct;
+
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  for (const key of [
+    "final_markdown",
+    "summary",
+    "text",
+    "content",
+    "message",
+  ]) {
+    const candidate = asOptionalText(record[key]);
+    if (candidate) return candidate;
+  }
+
+  const nestedValue = record.value;
+  if (nestedValue !== value) {
+    return preferredFinalArtifactText(nestedValue);
+  }
+
+  return undefined;
+}
+
+function resolveFinalAssistantText(
+  text: string,
+  payload?: Record<string, unknown>,
+): string {
+  const runResult = asRecord(payload?.run_result ?? payload?.runResult);
+  const preferred =
+    preferredFinalArtifactText(
+      payload?.final_artifact ?? payload?.finalArtifact,
+    ) ??
+    preferredFinalArtifactText(
+      runResult?.final_artifact ?? runResult?.finalArtifact,
+    );
+
+  return preferred ?? text;
+}
+
 function readGuardrailWarnings(
   payload: Record<string, unknown> | undefined,
 ): string[] {
@@ -773,7 +815,10 @@ function applyEvent(
       };
     }
     case "final": {
-      let next = completeAssistant(messages, text);
+      let next = completeAssistant(
+        messages,
+        resolveFinalAssistantText(text, payload),
+      );
       next = finishReasoning(next);
       next = finalizeTraceParts(next);
       next = appendFinalTrajectoryThoughts(next, payload);

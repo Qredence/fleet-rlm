@@ -14,6 +14,8 @@ describe("repoContext", () => {
       ),
     ).toEqual({
       repoUrl: "https://github.com/qredence/fleet-rlm",
+      repoRef: undefined,
+      repoRefCandidate: undefined,
       source: "prompt_url",
       matchedText: "https://github.com/qredence/fleet-rlm",
     });
@@ -26,8 +28,39 @@ describe("repoContext", () => {
       ),
     ).toEqual({
       repoUrl: "https://github.com/qredence/fleet-rlm",
+      repoRef: "main",
+      repoRefCandidate: "main/src",
       source: "prompt_mention",
       matchedText: "@https://github.com/qredence/fleet-rlm/tree/main/src",
+    });
+  });
+
+  it("keeps the full tree/blob ref tail available for backend disambiguation", () => {
+    expect(
+      detectRepoContext(
+        "Analyze https://github.com/qredence/fleet-rlm/tree/release/2026-03/src/frontend for the tracing flow.",
+      ),
+    ).toEqual({
+      repoUrl: "https://github.com/qredence/fleet-rlm",
+      repoRef: "release",
+      repoRefCandidate: "release/2026-03/src/frontend",
+      source: "prompt_url",
+      matchedText:
+        "https://github.com/qredence/fleet-rlm/tree/release/2026-03/src/frontend",
+    });
+  });
+
+  it("detects an explicit branch hint when the prompt uses a bare repo URL", () => {
+    expect(
+      detectRepoContext(
+        "Analyze https://github.com/qredence/fleet-rlm on branch release/2026-03.",
+      ),
+    ).toEqual({
+      repoUrl: "https://github.com/qredence/fleet-rlm",
+      repoRef: "release/2026-03",
+      repoRefCandidate: undefined,
+      source: "prompt_url",
+      matchedText: "https://github.com/qredence/fleet-rlm",
     });
   });
 
@@ -60,9 +93,24 @@ describe("repoContext", () => {
     ).toBeNull();
   });
 
-  it("normalizes manual repo URLs for supported hosts", () => {
+  it("preserves detected repo refs when no manual override is present", () => {
     expect(
-      normalizeRepoUrl("https://github.com/qredence/fleet-rlm.git"),
-    ).toBe("https://github.com/qredence/fleet-rlm");
+      resolveRepoContext({
+        manualRepoUrl: "",
+        promptText:
+          "Analyze https://github.com/qredence/fleet-rlm/tree/release/2026-03/src/frontend",
+      }),
+    ).toMatchObject({
+      repoUrl: "https://github.com/qredence/fleet-rlm",
+      repoRef: "release",
+      repoRefCandidate: "release/2026-03/src/frontend",
+      source: "prompt_url",
+    });
+  });
+
+  it("normalizes manual repo URLs for supported hosts", () => {
+    expect(normalizeRepoUrl("https://github.com/qredence/fleet-rlm.git")).toBe(
+      "https://github.com/qredence/fleet-rlm",
+    );
   });
 });

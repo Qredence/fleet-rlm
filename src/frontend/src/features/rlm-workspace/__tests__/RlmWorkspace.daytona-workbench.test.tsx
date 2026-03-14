@@ -6,32 +6,6 @@ import { RlmWorkspace } from "@/features/rlm-workspace/RlmWorkspace";
 const chatStoreState = {
   runtimeMode: "daytona_pilot" as const,
   setRuntimeMode: vi.fn(),
-  sourceRepoUrl: "",
-  setSourceRepoUrl: vi.fn(),
-  sourceRepoRef: "main",
-  setSourceRepoRef: vi.fn(),
-  sourceContextPaths: "",
-  setSourceContextPaths: vi.fn(),
-  sourceMaxDepth: 2,
-  setSourceMaxDepth: vi.fn(),
-  sourceBatchConcurrency: 4,
-  setSourceBatchConcurrency: vi.fn(),
-};
-
-interface MockRunWorkbenchState {
-  status: "idle" | "running";
-  repoUrl: string | undefined;
-  contextSources: Array<{ sourceId: string; kind: string; hostPath: string }>;
-}
-
-const runWorkbenchState: MockRunWorkbenchState = {
-  status: "idle" as "idle" | "running",
-  repoUrl: undefined as string | undefined,
-  contextSources: [] as Array<{
-    sourceId: string;
-    kind: string;
-    hostPath: string;
-  }>,
 };
 
 const backendRuntimeState = {
@@ -47,6 +21,8 @@ const backendRuntimeState = {
   resolveClarification: vi.fn(),
   loadConversation: vi.fn(),
 };
+
+let capturedOnSend: ((attachments: never[]) => void) | null = null;
 
 vi.mock("@/features/rlm-workspace/useBackendChatRuntime", () => ({
   useBackendChatRuntime: () => backendRuntimeState,
@@ -102,8 +78,7 @@ vi.mock("@/stores/chatStore", () => ({
 }));
 
 vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
-  useRunWorkbenchStore: (selector: (state: MockRunWorkbenchState) => unknown) =>
-    selector(runWorkbenchState),
+  useRunWorkbenchStore: vi.fn(),
 }));
 
 vi.mock("@/features/rlm-workspace/ChatMessageList", () => ({
@@ -121,28 +96,24 @@ vi.mock("@/components/chat/ChatInput", () => ({
     value: string;
     canSubmit?: boolean;
     onSend: (attachments: never[]) => void;
-  }) => (
-    <div data-testid="chat-input">
-      <span>{value}</span>
-      <button type="button" disabled={!canSubmit} onClick={() => onSend([])}>
-        Send
-      </button>
-    </div>
-  ),
+  }) => {
+    capturedOnSend = onSend;
+    return (
+      <div data-testid="chat-input">
+        <span>{value}</span>
+        <button type="button" disabled={!canSubmit} onClick={() => onSend([])}>
+          Send
+        </button>
+      </div>
+    );
+  },
 }));
 
 describe("RlmWorkspace run workbench mode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    capturedOnSend = null;
     chatStoreState.runtimeMode = "daytona_pilot";
-    chatStoreState.sourceRepoUrl = "";
-    chatStoreState.sourceRepoRef = "main";
-    chatStoreState.sourceContextPaths = "";
-    chatStoreState.sourceMaxDepth = 2;
-    chatStoreState.sourceBatchConcurrency = 4;
-    runWorkbenchState.status = "idle";
-    runWorkbenchState.repoUrl = undefined;
-    runWorkbenchState.contextSources = [];
     backendRuntimeState.messages = [
       { id: "m1", type: "assistant", content: "existing chat row" },
     ];
@@ -156,31 +127,37 @@ describe("RlmWorkspace run workbench mode", () => {
     const html = renderToStaticMarkup(<RlmWorkspace />);
 
     expect(html).toContain("ChatMessageList");
-    expect(html).toContain("Source setup");
-    expect(html).toContain("Edit source setup");
-    expect(html).toContain("Repo");
-    expect(html).toContain("Repo ready");
+    expect(html).toContain(
+      "Analyze https://github.com/qredence/fleet-rlm and summarize the tracing flow.",
+    );
+    expect(html).not.toContain("Source setup");
+    expect(html).not.toContain("Edit source setup");
   });
 
-  it("keeps the active run source mix visible while the runtime is running", () => {
-    backendRuntimeState.inputValue = "";
-    runWorkbenchState.status = "running";
-    runWorkbenchState.repoUrl = "https://github.com/qredence/fleet-rlm";
-    runWorkbenchState.contextSources = [
-      {
-        sourceId: "ctx-1",
-        kind: "directory",
-        hostPath: "/Users/zocho/Documents/specs",
-      },
-    ];
-
+  it("still renders the chat composer without Daytona setup gating", () => {
     const html = renderToStaticMarkup(<RlmWorkspace />);
 
-    expect(html).toContain("Active run context");
-    expect(html).toContain(
-      "The active run is using the current source mix shown above.",
+    expect(html).toContain("Send");
+    expect(html).not.toContain("Repository URL");
+    expect(html).not.toContain("Context paths");
+  });
+
+  it("infers Daytona repo and local context from the prompt on submit", () => {
+    backendRuntimeState.inputValue =
+      "Analyze https://github.com/qredence/fleet-rlm/tree/main with /Users/zocho/Documents/spec.pdf.";
+
+    renderToStaticMarkup(<RlmWorkspace />);
+    expect(capturedOnSend).not.toBeNull();
+
+    capturedOnSend?.([]);
+
+    expect(backendRuntimeState.handleSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeMode: "daytona_pilot",
+        repoUrl: "https://github.com/qredence/fleet-rlm",
+        repoRef: "main",
+        contextPaths: ["/Users/zocho/Documents/spec.pdf"],
+      }),
     );
-    expect(html).toContain("https://github.com/qredence/fleet-rlm");
-    expect(html).toContain("1 local path");
   });
 });

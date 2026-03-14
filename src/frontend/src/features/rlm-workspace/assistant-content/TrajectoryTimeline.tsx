@@ -1,5 +1,14 @@
-import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtHeader, ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import { Streamdown } from "@/components/ui/streamdown";
 import { mapTaskStatus } from "@/lib/utils/ai-elements-state";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
@@ -21,7 +30,12 @@ function CompactTrajectory({
 
   return (
     <div className="space-y-2" data-slot="trajectory-compact">
-      <Reasoning isStreaming={false} autoClose={false} defaultOpen className="w-full">
+      <Reasoning
+        isStreaming={false}
+        autoClose={false}
+        defaultOpen
+        className="w-full"
+      >
         <ReasoningTrigger
           getThinkingMessage={() => (
             <span className="font-medium text-foreground">Planning</span>
@@ -43,20 +57,21 @@ export function TrajectoryTimeline({
 }: {
   trajectory: AssistantContentModel["trajectory"];
 }) {
-  if (!trajectory.hasContent || trajectory.displayMode === "hidden") return null;
+  if (!trajectory.hasContent || trajectory.displayMode === "hidden")
+    return null;
 
   const compactSummary =
     trajectory.items.length === 1 ? trajectory.items[0]?.body : undefined;
   const compactBadges = [
     ...(trajectory.overview?.runtimeBadges ?? []),
-    ...(trajectory.items.length === 1 ? trajectory.items[0]?.runtimeBadges ?? [] : []),
+    ...(trajectory.items.length === 1
+      ? (trajectory.items[0]?.runtimeBadges ?? [])
+      : []),
   ];
 
   return (
     <section className="space-y-3" data-slot="assistant-trajectory">
-      <div className={inspectorStyles.heading.section}>
-        Reasoning
-      </div>
+      <div className={inspectorStyles.heading.section}>Reasoning</div>
 
       {trajectory.displayMode === "compact" ? (
         <CompactTrajectory

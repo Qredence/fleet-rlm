@@ -1,7 +1,4 @@
-import type {
-  ChatRenderPart,
-  ChatRenderToolState,
-} from "@/lib/data/types";
+import type { ChatRenderPart, ChatRenderToolState } from "@/lib/data/types";
 import type {
   AssistantTurnDisplayItem,
   ToolSessionItem,
@@ -152,29 +149,34 @@ function directExecutionDefaultOpen(part: DirectExecutionPart) {
 
 function buildExecutionSections(
   item: AssistantTurnDisplayItem,
-  supplementalParts: Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }>[],
+  supplementalParts: Exclude<
+    ChatRenderPart,
+    { kind: "reasoning" | "chain_of_thought" }
+  >[],
 ) {
-  const sections: ExecutionSection[] = item.attachedToolSessions.map((session) => {
-    const latestItem = session.items[session.items.length - 1];
-    const latestState = latestItem
-      ? toolSessionStateForItem(latestItem)
-      : ("running" as const);
-    const runtimeBadges = uniqueStrings(
-      session.items.flatMap((sessionItem) =>
-        getRuntimeBadgeStrings(sessionItem.runtimeContext),
-      ),
-    );
+  const sections: ExecutionSection[] = item.attachedToolSessions.map(
+    (session) => {
+      const latestItem = session.items[session.items.length - 1];
+      const latestState = latestItem
+        ? toolSessionStateForItem(latestItem)
+        : ("running" as const);
+      const runtimeBadges = uniqueStrings(
+        session.items.flatMap((sessionItem) =>
+          getRuntimeBadgeStrings(sessionItem.runtimeContext),
+        ),
+      );
 
-    return {
-      id: session.key,
-      kind: "tool_session",
-      label: toolSessionHeaderLabel(session.items),
-      summary: summarizeToolSession(session),
-      defaultOpen: shouldOpenToolRow(latestState),
-      runtimeBadges,
-      session,
-    };
-  });
+      return {
+        id: session.key,
+        kind: "tool_session",
+        label: toolSessionHeaderLabel(session.items),
+        summary: summarizeToolSession(session),
+        defaultOpen: shouldOpenToolRow(latestState),
+        runtimeBadges,
+        session,
+      };
+    },
+  );
 
   const directExecutionParts = supplementalParts.filter(
     (part): part is DirectExecutionPart =>
@@ -240,7 +242,8 @@ function executionSectionState(
   if ("errorText" in section.part && section.part.errorText) return "failed";
   if (
     "state" in section.part &&
-    (section.part.state === "running" || section.part.state === "input-streaming")
+    (section.part.state === "running" ||
+      section.part.state === "input-streaming")
   ) {
     return "running";
   }
@@ -330,8 +333,7 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
         candidates.push({
           id: section.id,
           label: name,
-          summary:
-            status === "failed" ? `${name} failed` : `Completed ${name}`,
+          summary: status === "failed" ? `${name} failed` : `Completed ${name}`,
           status,
           runtimeBadges,
           groupKey: normalizeToolKey(name),
@@ -344,8 +346,7 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
         candidates.push({
           id: section.id,
           label: name,
-          summary:
-            status === "failed" ? `${name} failed` : `Completed ${name}`,
+          summary: status === "failed" ? `${name} failed` : `Completed ${name}`,
           status,
           runtimeBadges,
           groupKey: normalizeToolKey(name),
@@ -402,11 +403,16 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
 }
 
 function buildEvidence(
-  supplementalParts: Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }>[],
+  supplementalParts: Exclude<
+    ChatRenderPart,
+    { kind: "reasoning" | "chain_of_thought" }
+  >[],
 ) {
   const citations = supplementalParts
     .filter(
-      (part): part is Extract<ChatRenderPart, { kind: "inline_citation_group" }> =>
+      (
+        part,
+      ): part is Extract<ChatRenderPart, { kind: "inline_citation_group" }> =>
         part.kind === "inline_citation_group",
     )
     .flatMap((part) => part.citations);
@@ -438,15 +444,22 @@ export function buildAssistantContentModel(
   item: AssistantTurnDisplayItem,
 ): AssistantContentModel {
   const answerText = item.message?.content ?? "";
-  const { overview, items: trajectoryItems, hasCot } =
-    buildAssistantTrajectoryModel(item);
+  const {
+    overview,
+    items: trajectoryItems,
+    hasCot,
+  } = buildAssistantTrajectoryModel(item);
 
   const supplementalParts = [
     ...item.attachedTraceParts.map((tracePart) => tracePart.part),
     ...(item.message?.renderParts ?? []),
   ].filter(
-    (part): part is Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }> =>
-      part.kind !== "reasoning" && part.kind !== "chain_of_thought",
+    (
+      part,
+    ): part is Exclude<
+      ChatRenderPart,
+      { kind: "reasoning" | "chain_of_thought" }
+    > => part.kind !== "reasoning" && part.kind !== "chain_of_thought",
   );
   const evidence = buildEvidence(supplementalParts);
   const { sections, directExecutionParts } = buildExecutionSections(
@@ -455,10 +468,13 @@ export function buildAssistantContentModel(
   );
   const executionHighlights = buildExecutionHighlights(sections);
 
-  const trajectoryCount = trajectoryItems.length > 0 ? trajectoryItems.length : overview ? 1 : 0;
+  const trajectoryCount =
+    trajectoryItems.length > 0 ? trajectoryItems.length : overview ? 1 : 0;
   const runtimeBadges = uniqueStrings([
     ...(overview?.runtimeBadges ?? []),
-    ...trajectoryItems.flatMap((trajectoryItem) => trajectoryItem.runtimeBadges),
+    ...trajectoryItems.flatMap(
+      (trajectoryItem) => trajectoryItem.runtimeBadges,
+    ),
     ...sections.flatMap((section) => section.runtimeBadges),
   ]);
   const sandboxActive =

@@ -49,11 +49,6 @@ function resetStore() {
     sessionId: "mock-session-id",
     error: null,
     runtimeMode: "modal_chat",
-    sourceRepoUrl: "",
-    sourceRepoRef: "",
-    sourceContextPaths: "",
-    sourceMaxDepth: 2,
-    sourceBatchConcurrency: 4,
     streamController: null,
   });
 }
@@ -71,23 +66,14 @@ describe("useChatStore — state management", () => {
 
   // ── initial state ──────────────────────────────────────────────────────────
   it("starts with empty messages, not streaming, and a session id", () => {
-    const {
-      messages,
-      isStreaming,
-      sessionId,
-      error,
-      runtimeMode,
-      sourceMaxDepth,
-      sourceBatchConcurrency,
-    } = useChatStore.getState();
+    const { messages, isStreaming, sessionId, error, runtimeMode } =
+      useChatStore.getState();
     expect(messages).toEqual([]);
     expect(isStreaming).toBe(false);
     expect(typeof sessionId).toBe("string");
     expect(sessionId.length).toBeGreaterThan(0);
     expect(error).toBeNull();
     expect(runtimeMode).toBe("modal_chat");
-    expect(sourceMaxDepth).toBe(2);
-    expect(sourceBatchConcurrency).toBe(4);
   });
 
   // ── setSessionId ───────────────────────────────────────────────────────────
@@ -266,11 +252,9 @@ describe("useChatStore — streamMessage", () => {
   it("passes execution mode overrides to the websocket payload", async () => {
     vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
 
-    await useChatStore
-      .getState()
-      .streamMessage("test", undefined, undefined, {
-        executionMode: "tools_only",
-      });
+    await useChatStore.getState().streamMessage("test", undefined, undefined, {
+      executionMode: "tools_only",
+    });
 
     const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
     expect(payload).toMatchObject({
@@ -279,18 +263,36 @@ describe("useChatStore — streamMessage", () => {
     });
   });
 
-  it("sends Daytona runtime payload fields without execution mode", async () => {
+  it("keeps default Daytona websocket payloads free of repo setup fields", async () => {
     vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
-    useChatStore.setState({
-      runtimeMode: "daytona_pilot",
-      sourceRepoUrl: "https://github.com/qredence/fleet-rlm.git",
-      sourceRepoRef: "main",
-      sourceContextPaths: "/Users/zocho/Documents/spec.pdf\n/workspace/docs",
-      sourceMaxDepth: 3,
-      sourceBatchConcurrency: 6,
-    });
+    useChatStore.setState({ runtimeMode: "daytona_pilot" });
 
     await useChatStore.getState().streamMessage("trace the repo");
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      runtime_mode: "daytona_pilot",
+    });
+    expect(payload).not.toHaveProperty("execution_mode");
+    expect(payload).not.toHaveProperty("repo_url");
+    expect(payload).not.toHaveProperty("repo_ref");
+    expect(payload).not.toHaveProperty("context_paths");
+    expect(payload).not.toHaveProperty("max_depth");
+    expect(payload).not.toHaveProperty("batch_concurrency");
+  });
+
+  it("still forwards explicit Daytona source fields and batch concurrency when passed as stream options", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+    useChatStore.setState({ runtimeMode: "daytona_pilot" });
+
+    await useChatStore
+      .getState()
+      .streamMessage("trace the repo", undefined, undefined, {
+        repoUrl: "https://github.com/qredence/fleet-rlm.git",
+        repoRef: "main",
+        contextPaths: ["/Users/zocho/Documents/spec.pdf", "/workspace/docs"],
+        batchConcurrency: 6,
+      });
 
     const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
     expect(payload).toMatchObject({
@@ -298,10 +300,9 @@ describe("useChatStore — streamMessage", () => {
       repo_url: "https://github.com/qredence/fleet-rlm.git",
       repo_ref: "main",
       context_paths: ["/Users/zocho/Documents/spec.pdf", "/workspace/docs"],
-      max_depth: 3,
       batch_concurrency: 6,
     });
-    expect(payload).not.toHaveProperty("execution_mode");
+    expect(payload).not.toHaveProperty("max_depth");
   });
 
   it("uses trace override=false to disable websocket trace mode", async () => {

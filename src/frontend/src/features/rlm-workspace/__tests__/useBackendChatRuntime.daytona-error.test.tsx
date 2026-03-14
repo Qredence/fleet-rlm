@@ -33,9 +33,6 @@ const mockChatStoreState = {
   isStreaming: false,
   sessionId: "session-123",
   runtimeMode: "daytona_pilot" as const,
-  sourceRepoUrl: "",
-  sourceRepoRef: "main",
-  sourceContextPaths: "",
   streamMessage: vi.fn(),
   stopStreaming: vi.fn(),
   resetSession: vi.fn(),
@@ -111,9 +108,6 @@ function resetState() {
   mockChatStoreState.isStreaming = false;
   mockChatStoreState.sessionId = "session-123";
   mockChatStoreState.runtimeMode = "daytona_pilot";
-  mockChatStoreState.sourceRepoUrl = "";
-  mockChatStoreState.sourceRepoRef = "main";
-  mockChatStoreState.sourceContextPaths = "";
   mockChatStoreState.streamMessage.mockReset();
   mockChatStoreState.stopStreaming.mockReset();
   mockChatStoreState.resetSession.mockReset();

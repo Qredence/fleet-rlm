@@ -297,9 +297,9 @@ describe("MessageInspectorPanel", () => {
 
     expect(tabs).toEqual(["Trajectory", "Execution", "Evidence", "Graph"]);
     expect(container.textContent).toContain("Relationships");
-    expect(container.querySelector('[data-testid="artifact-graph"]')?.textContent).toContain(
-      "3 steps",
-    );
+    expect(
+      container.querySelector('[data-testid="artifact-graph"]')?.textContent,
+    ).toContain("3 steps");
 
     act(() => {
       root.unmount();

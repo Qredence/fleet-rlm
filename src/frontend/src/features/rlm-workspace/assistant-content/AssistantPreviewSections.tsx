@@ -1,10 +1,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
 import type { InspectorTab } from "@/lib/data/types";
-import type {
-  AssistantContentModel,
-} from "@/features/rlm-workspace/assistant-content/types";
-import { inspectorStyles, inspectorPreviewButtonClass } from "@/features/rlm-workspace/shared/inspector-styles";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import {
+  inspectorStyles,
+  inspectorPreviewButtonClass,
+} from "@/features/rlm-workspace/shared/inspector-styles";
 import { statusTone } from "@/features/rlm-workspace/message-inspector/utils/inspector-utils";
 
 function summarizeText(value: string, maxLength = 140) {
@@ -25,7 +26,11 @@ function EvidencePreviewButton({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={inspectorPreviewButtonClass()} onClick={onClick}>
+    <button
+      type="button"
+      className={inspectorPreviewButtonClass()}
+      onClick={onClick}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1">
           <div className="text-sm font-medium leading-5 text-foreground">
@@ -72,7 +77,10 @@ export function TrajectoryPreview({
         : [];
 
   return (
-    <section className={inspectorStyles.stack.section} data-slot="assistant-trajectory-preview">
+    <section
+      className={inspectorStyles.stack.section}
+      data-slot="assistant-trajectory-preview"
+    >
       <div className={inspectorStyles.heading.section}>Trajectory</div>
       <div className={inspectorStyles.stack.compact}>
         {items.map((item) => {
@@ -98,7 +106,10 @@ export function TrajectoryPreview({
                     </div>
                   ) : null}
                 </div>
-                <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
+                <Badge
+                  variant={tone.variant}
+                  className={inspectorStyles.badge.status}
+                >
                   {tone.label}
                 </Badge>
               </div>
@@ -133,7 +144,10 @@ export function ExecutionPreview({
   if (!model.execution.hasContent) return null;
 
   return (
-    <section className={inspectorStyles.stack.section} data-slot="assistant-execution-preview">
+    <section
+      className={inspectorStyles.stack.section}
+      data-slot="assistant-execution-preview"
+    >
       <div className={inspectorStyles.heading.section}>Execution</div>
       <div className={inspectorStyles.stack.compact}>
         {model.execution.sections.slice(0, 2).map((section) => {
@@ -206,14 +220,19 @@ export function EvidencePreview({
   ].slice(0, 2);
 
   return (
-    <section className={inspectorStyles.stack.section} data-slot="assistant-evidence-preview">
+    <section
+      className={inspectorStyles.stack.section}
+      data-slot="assistant-evidence-preview"
+    >
       <div className={inspectorStyles.heading.section}>Evidence</div>
       <div className={inspectorStyles.stack.compact}>
         {items.map((item) => (
           <EvidencePreviewButton
             key={item.key}
             label={item.label}
-            description={item.description ? summarizeText(item.description) : undefined}
+            description={
+              item.description ? summarizeText(item.description) : undefined
+            }
             iconLabel={item.badge}
             onClick={() => onOpenTab("evidence")}
           />

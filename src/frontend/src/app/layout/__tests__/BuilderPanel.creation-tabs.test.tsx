@@ -9,6 +9,22 @@ const chatStoreState = {
   runtimeMode: "modal_chat" as "modal_chat" | "daytona_pilot",
 };
 
+const runWorkbenchStoreState = {
+  status: "completed",
+  repoUrl: "https://github.com/qredence/fleet-rlm",
+  contextSources: [
+    {
+      sourceId: "ctx-1",
+      kind: "directory",
+      hostPath: "/Users/zocho/Documents/specs",
+    },
+  ],
+  daytonaMode: "host_loop_rlm",
+  summary: {
+    terminationReason: "completed",
+  },
+};
+
 vi.mock("@/stores/navigationStore", () => ({
   useNavigationStore: () => ({
     activeNav: "workspace",
@@ -22,6 +38,10 @@ vi.mock("@/stores/navigationStore", () => ({
 vi.mock("@/stores/chatStore", () => ({
   useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
     selector(chatStoreState),
+}));
+
+vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
+  useRunWorkbenchStore: () => runWorkbenchStoreState,
 }));
 
 vi.mock("@/hooks/useAppNavigate", () => ({
@@ -58,9 +78,12 @@ vi.mock("@/features/artifacts/FileDetail", () => ({
   ),
 }));
 
-vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () => ({
-  MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
-}));
+vi.mock(
+  "@/features/rlm-workspace/message-inspector/MessageInspectorPanel",
+  () => ({
+    MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
+  }),
+);
 
 vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
   RunWorkbench: () => <div>RunWorkbench</div>,
@@ -86,6 +109,7 @@ describe("BuilderPanel workspace inspector", () => {
     expect(html).toContain("Workspace");
     expect(html).toContain("Message Inspector");
     expect(html).toContain("MessageInspectorPanel");
+    expect(html).not.toContain("Support rail");
     expect(html).not.toContain("CanvasSwitcher");
     expect(html).not.toContain("ArtifactCanvas");
   });
@@ -101,7 +125,10 @@ describe("BuilderPanel workspace inspector", () => {
 
     expect(html).toContain("Workspace");
     expect(html).toContain("Run Workbench");
+    expect(html).toContain("completed");
+    expect(html).toContain("Host-loop REPL");
     expect(html).toContain("RunWorkbench");
+    expect(html).not.toContain("Support rail");
     expect(html).not.toContain("MessageInspectorPanel");
   });
 });

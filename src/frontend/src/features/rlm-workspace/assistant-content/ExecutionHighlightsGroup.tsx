@@ -1,9 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import type { InspectorTab } from "@/lib/data/types";
-import type {
-  AssistantContentModel,
-} from "@/features/rlm-workspace/assistant-content/types";
-import { inspectorStyles, inspectorPreviewButtonClass } from "@/features/rlm-workspace/shared/inspector-styles";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import {
+  inspectorStyles,
+  inspectorPreviewButtonClass,
+} from "@/features/rlm-workspace/shared/inspector-styles";
 import { statusTone } from "@/features/rlm-workspace/message-inspector/utils/inspector-utils";
 
 export function ExecutionHighlightsGroup({
@@ -17,9 +18,7 @@ export function ExecutionHighlightsGroup({
 
   return (
     <section className="space-y-2.5" data-slot="assistant-execution-highlights">
-      <div className={inspectorStyles.heading.section}>
-        Execution
-      </div>
+      <div className={inspectorStyles.heading.section}>Execution</div>
       <div className={inspectorStyles.stack.compact}>
         {execution.highlights.map((highlight) => {
           const tone = statusTone(highlight.status);
@@ -41,11 +40,17 @@ export function ExecutionHighlightsGroup({
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {highlight.count && highlight.count > 1 ? (
-                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                    <Badge
+                      variant="outline"
+                      className={inspectorStyles.badge.meta}
+                    >
                       {highlight.count}x
                     </Badge>
                   ) : null}
-                  <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
+                  <Badge
+                    variant={tone.variant}
+                    className={inspectorStyles.badge.status}
+                  >
                     {tone.label}
                   </Badge>
                 </div>

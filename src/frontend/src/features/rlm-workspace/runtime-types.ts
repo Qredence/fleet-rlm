@@ -17,7 +17,6 @@ export interface ChatSubmitOptions {
   repoUrl?: string;
   repoRef?: string;
   contextPaths?: string[];
-  maxDepth?: number;
   batchConcurrency?: number;
   attachments?: ChatSubmitAttachment[];
 }

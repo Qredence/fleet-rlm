@@ -1,17 +1,15 @@
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
   ExecutionSection,
   ToolSessionItem,
 } from "@/features/rlm-workspace/assistant-content/types";
-import { inspectorStyles, inspectorInsetClass } from "@/features/rlm-workspace/shared/inspector-styles";
+import {
+  inspectorStyles,
+  inspectorInsetClass,
+} from "@/features/rlm-workspace/shared/inspector-styles";
 import {
   runtimeContextStrings,
   statusTone,
@@ -21,7 +19,12 @@ import {
 
 export function renderBadges(
   values: string[],
-  variant: "outline" | "secondary" | "warning" | "success" | "accent" = "outline",
+  variant:
+    | "outline"
+    | "secondary"
+    | "warning"
+    | "success"
+    | "accent" = "outline",
 ) {
   if (values.length === 0) return null;
   return (
@@ -74,17 +77,21 @@ export function DetailBlock({
   if (!value) return null;
   return (
     <div className="space-y-1.5">
-      <div className={inspectorStyles.heading.detail}>
-        {label}
-      </div>
-      <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
+      <div className={inspectorStyles.heading.detail}>{label}</div>
+      <div
+        className={inspectorInsetClass(tone === "error" ? "error" : "strong")}
+      >
         <Streamdown content={value} streaming={false} />
       </div>
     </div>
   );
 }
 
-export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSessionItem[] }) {
+export function ToolSessionDetails({
+  sessionItems,
+}: {
+  sessionItems: ToolSessionItem[];
+}) {
   return (
     <div className={inspectorStyles.stack.cards}>
       {sessionItems.map((item) => {
@@ -98,9 +105,7 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
               ? item.part.output
               : "";
         const inputValue =
-          item.part.kind === "tool"
-            ? stringifyValue(item.part.input)
-            : "";
+          item.part.kind === "tool" ? stringifyValue(item.part.input) : "";
         const codeValue = item.part.kind === "sandbox" ? item.part.code : "";
 
         return (
@@ -114,7 +119,10 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
                       : `${item.eventKind.replace("_", " ")}: ${item.toolName ?? "tool"}`}
                   </CardTitle>
                 </div>
-                <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
+                <Badge
+                  variant={tone.variant}
+                  className={inspectorStyles.badge.status}
+                >
                   {tone.label}
                 </Badge>
               </div>
@@ -125,7 +133,13 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
               <DetailBlock
                 label="Output"
                 value={outputValue}
-                tone={item.part.kind !== "sandbox" ? "default" : item.part.errorText ? "error" : "default"}
+                tone={
+                  item.part.kind !== "sandbox"
+                    ? "default"
+                    : item.part.errorText
+                      ? "error"
+                      : "default"
+                }
               />
               <DetailBlock
                 label="Error"
@@ -153,11 +167,10 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       return (
         <div className={inspectorStyles.stack.compact}>
           {section.part.items.map((item) => (
-            <div
-              key={item.id}
-              className={inspectorInsetClass("strong")}
-            >
-              <div className="text-sm font-medium text-foreground">{item.label}</div>
+            <div key={item.id} className={inspectorInsetClass("strong")}>
+              <div className="text-sm font-medium text-foreground">
+                {item.label}
+              </div>
               {item.description ? (
                 <div className="mt-1 text-sm text-muted-foreground">
                   {item.description}
@@ -171,10 +184,7 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       return (
         <div className={inspectorStyles.stack.compact}>
           {(section.part.items ?? []).map((item) => (
-            <div
-              key={item.id}
-              className={inspectorInsetClass("strong")}
-            >
+            <div key={item.id} className={inspectorInsetClass("strong")}>
               <div className="text-sm text-foreground">{item.text}</div>
             </div>
           ))}
@@ -183,13 +193,20 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
     case "tool":
       return (
         <div className={inspectorStyles.stack.cards}>
-          <DetailBlock label="Input" value={stringifyValue(section.part.input)} />
+          <DetailBlock
+            label="Input"
+            value={stringifyValue(section.part.input)}
+          />
           <DetailBlock
             label="Output"
             value={stringifyValue(section.part.output)}
             tone={section.part.errorText ? "error" : "default"}
           />
-          <DetailBlock label="Error" value={section.part.errorText} tone="error" />
+          <DetailBlock
+            label="Error"
+            value={section.part.errorText}
+            tone="error"
+          />
           {renderBadges(runtimeContextStrings(section.part.runtimeContext))}
         </div>
       );
@@ -202,7 +219,11 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
             value={section.part.output}
             tone={section.part.errorText ? "error" : "default"}
           />
-          <DetailBlock label="Error" value={section.part.errorText} tone="error" />
+          <DetailBlock
+            label="Error"
+            value={section.part.errorText}
+            tone="error"
+          />
           {renderBadges(runtimeContextStrings(section.part.runtimeContext))}
         </div>
       );
@@ -210,16 +231,16 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       return (
         <div className={inspectorStyles.stack.compact}>
           {section.part.variables.map((variable) => (
-            <div
-              key={variable.name}
-              className={inspectorInsetClass("strong")}
-            >
+            <div key={variable.name} className={inspectorInsetClass("strong")}>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-foreground">
                   {variable.name}
                 </span>
                 {variable.required ? (
-                  <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                  <Badge
+                    variant="secondary"
+                    className={inspectorStyles.badge.meta}
+                  >
                     required
                   </Badge>
                 ) : null}

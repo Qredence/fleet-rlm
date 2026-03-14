@@ -19,12 +19,15 @@ import {
 } from "@/features/artifacts/CanvasSwitcher";
 import { FileDetail } from "@/features/artifacts/FileDetail";
 import { RunWorkbench } from "@/features/rlm-workspace/run-workbench/RunWorkbench";
+import { formatDaytonaModeLabel } from "@/features/rlm-workspace/run-workbench/daytonaMode";
+import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
 import {
   isRlmCoreEnabled,
   isSectionSupported,
   UNSUPPORTED_SECTION_REASON,
 } from "@/lib/rlm-api";
+import { buildSourceStateLabel } from "@/lib/utils/sourceContext";
 
 function UnsupportedState({
   sectionLabel,
@@ -54,9 +57,7 @@ function EmptyCanvas() {
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
         <PanelRight className="h-6 w-6 text-muted-foreground" />
       </div>
-      <p className="mb-1 text-foreground typo-label">
-        No active panel
-      </p>
+      <p className="mb-1 text-foreground typo-label">No active panel</p>
       <p className="text-muted-foreground typo-caption">
         Open a file in Volumes or select an assistant response to inspect it.
       </p>
@@ -86,9 +87,21 @@ function getHeaderLabel(mode: CanvasMode): string {
   }
 }
 
+function runStatusVariant(
+  status: string,
+): "default" | "secondary" | "outline" | "destructive" {
+  if (status === "completed") return "default";
+  if (status === "error") return "destructive";
+  if (status === "cancelling") return "outline";
+  if (status === "cancelled") return "secondary";
+  if (status === "bootstrapping") return "secondary";
+  return "outline";
+}
+
 export function BuilderPanel() {
   const { activeNav, closeCanvas, selectedFileNode } = useNavigationStore();
   const runtimeMode = useChatStore((state) => state.runtimeMode);
+  const runWorkbenchState = useRunWorkbenchStore();
   const { navigateTo } = useAppNavigate();
   const isMobile = useIsMobile();
 
@@ -103,18 +116,31 @@ export function BuilderPanel() {
   const showFileDetail =
     activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
 
+  const sourceStateLabel = buildSourceStateLabel({
+    hasRepo: Boolean(runWorkbenchState.repoUrl),
+    hasContext: runWorkbenchState.contextSources.length > 0,
+  });
+  const daytonaModeLabel = formatDaytonaModeLabel(
+    runWorkbenchState.daytonaMode,
+  );
+  const terminationReason = runWorkbenchState.summary?.terminationReason;
+
   const PANEL_INFO = {
     runWorkbench: {
       title: "Run Workbench",
-      description: "Inspect recursive run state, child nodes, and final results.",
+      description:
+        "Inspect Daytona iterations, evidence, semantic callbacks, prompt handles, and final output.",
     },
     messageInspector: {
       title: "Message Inspector",
-      description: "Inspect trajectory, execution, evidence, and graph context.",
-    }
+      description:
+        "Inspect trajectory, execution, evidence, and graph context.",
+    },
   };
 
-  const currentPanelInfo = showRunWorkbench ? PANEL_INFO.runWorkbench : PANEL_INFO.messageInspector;
+  const currentPanelInfo = showRunWorkbench
+    ? PANEL_INFO.runWorkbench
+    : PANEL_INFO.messageInspector;
 
   const canvasMode: CanvasMode = showInspector
     ? "creation"
@@ -152,17 +178,34 @@ export function BuilderPanel() {
           <div className="min-w-0">
             {showInspector ? (
               <>
+                <div className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Workspace
+                </div>
+
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                    Workspace
+                  <div className="min-w-0 truncate text-sm font-medium text-foreground">
+                    {currentPanelInfo.title}
                   </div>
-                  <Badge variant="outline" className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground border-border-subtle/80 bg-background/80">
-                    Support rail
-                  </Badge>
+
+                  {showRunWorkbench ? (
+                    <>
+                      <Badge
+                        variant={runStatusVariant(runWorkbenchState.status)}
+                      >
+                        {runWorkbenchState.status}
+                      </Badge>
+                      <Badge variant="secondary">{sourceStateLabel}</Badge>
+                      {daytonaModeLabel ? (
+                        <Badge variant="outline">{daytonaModeLabel}</Badge>
+                      ) : null}
+                      {terminationReason &&
+                      terminationReason !== runWorkbenchState.status ? (
+                        <Badge variant="outline">{terminationReason}</Badge>
+                      ) : null}
+                    </>
+                  ) : null}
                 </div>
-                <div className="truncate text-sm font-medium text-foreground">
-                  {currentPanelInfo.title}
-                </div>
+
                 <p className="truncate text-xs text-muted-foreground">
                   {currentPanelInfo.description}
                 </p>
@@ -215,11 +258,7 @@ export function BuilderPanel() {
           <ErrorBoundary
             name={showRunWorkbench ? "Run Workbench" : "Message Inspector"}
           >
-            {showRunWorkbench ? (
-              <RunWorkbench />
-            ) : (
-              <MessageInspectorPanel />
-            )}
+            {showRunWorkbench ? <RunWorkbench /> : <MessageInspectorPanel />}
           </ErrorBoundary>
         ) : showFileDetail && selectedFileNode ? (
           <ErrorBoundary name="File Detail">

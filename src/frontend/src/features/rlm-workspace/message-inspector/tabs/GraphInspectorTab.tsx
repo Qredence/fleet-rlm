@@ -18,7 +18,11 @@ import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-style
 import { stringifyValue } from "../utils/inspector-utils";
 import { DetailBlock } from "../components/inspector-components";
 
-export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { steps: ExecutionStep[] }) {
+export const GraphInspectorTab = memo(function GraphInspectorTab({
+  steps,
+}: {
+  steps: ExecutionStep[];
+}) {
   const [activeStepId, setActiveStepId] = useState<string | undefined>(
     steps[steps.length - 1]?.id,
   );
@@ -32,16 +36,23 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { st
     });
   }, [steps]);
 
-  const selectedStep = steps.find((step) => step.id === activeStepId) ?? steps[steps.length - 1];
+  const selectedStep =
+    steps.find((step) => step.id === activeStepId) ?? steps[steps.length - 1];
   const laneCount = new Set(
     steps
-      .map((step) => step.lane_key ?? `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`)
+      .map(
+        (step) =>
+          step.lane_key ??
+          `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`,
+      )
       .filter(Boolean),
   ).size;
   const branchingParents = new Set(
     steps
       .map((step) => step.parent_id)
-      .filter((parentId, index, all) => parentId && all.indexOf(parentId) !== index),
+      .filter(
+        (parentId, index, all) => parentId && all.indexOf(parentId) !== index,
+      ),
   ).size;
 
   return (
@@ -84,7 +95,8 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { st
                 </CardTitle>
               </div>
               <CardDescription>
-                Parent-child lineage, actor lanes, and delegated branches for this turn.
+                Parent-child lineage, actor lanes, and delegated branches for
+                this turn.
               </CardDescription>
             </CardHeader>
             <CardContent className={inspectorStyles.card.content}>
@@ -112,22 +124,37 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({ steps }: { st
                   {summarizeArtifactStep(selectedStep)}
                 </div>
                 <div className={inspectorStyles.badge.row}>
-                  <Badge variant="secondary" className={cn(inspectorStyles.badge.meta, "capitalize")}>
+                  <Badge
+                    variant="secondary"
+                    className={cn(inspectorStyles.badge.meta, "capitalize")}
+                  >
                     {selectedStep.type}
                   </Badge>
                   {selectedStep.actor_kind ? (
-                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                    <Badge
+                      variant="outline"
+                      className={inspectorStyles.badge.meta}
+                    >
                       {selectedStep.actor_kind.replace(/_/g, " ")}
                     </Badge>
                   ) : null}
                   {selectedStep.actor_id ? (
-                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                    <Badge
+                      variant="outline"
+                      className={inspectorStyles.badge.meta}
+                    >
                       {selectedStep.actor_id}
                     </Badge>
                   ) : null}
                 </div>
-                <DetailBlock label="Input" value={stringifyValue(selectedStep.input)} />
-                <DetailBlock label="Output" value={stringifyValue(selectedStep.output)} />
+                <DetailBlock
+                  label="Input"
+                  value={stringifyValue(selectedStep.input)}
+                />
+                <DetailBlock
+                  label="Output"
+                  value={stringifyValue(selectedStep.output)}
+                />
               </CardContent>
             </Card>
           ) : null}

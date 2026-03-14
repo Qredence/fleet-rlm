@@ -429,7 +429,9 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     const html = renderChatMessageList(messages);
 
     const answerIndex = html.indexOf("Architecture extracted.");
-    const trajectoryPreviewIndex = html.indexOf('data-slot="assistant-trajectory"');
+    const trajectoryPreviewIndex = html.indexOf(
+      'data-slot="assistant-trajectory"',
+    );
     const thought0Index = html.indexOf("List the repository first.");
     const thought1Index = html.indexOf("Read deeper implementation docs.");
     const synthesisIndex = html.indexOf(
@@ -653,23 +655,33 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     const evidencePreview = container.querySelector(
       '[data-slot="assistant-evidence-preview"] button',
     );
-    const turnCard = container.querySelector('[data-slot="assistant-turn-content"]');
+    const turnCard = container.querySelector(
+      '[data-slot="assistant-turn-content"]',
+    );
 
-    expect(container.querySelector('[data-slot="assistant-summary-bar"]')).toBeNull();
+    expect(
+      container.querySelector('[data-slot="assistant-summary-bar"]'),
+    ).toBeNull();
     expect(trajectorySection).not.toBeNull();
     expect(executionPreview).not.toBeNull();
     expect(evidencePreview).not.toBeNull();
     expect(turnCard).not.toBeNull();
 
     act(() => {
-      executionPreview?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      executionPreview?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
-    expect(useNavigationStore.getState().selectedAssistantTurnId).toBe("assistant-1");
+    expect(useNavigationStore.getState().selectedAssistantTurnId).toBe(
+      "assistant-1",
+    );
     expect(useNavigationStore.getState().activeInspectorTab).toBe("execution");
     expect(useNavigationStore.getState().isCanvasOpen).toBe(true);
 
     act(() => {
-      evidencePreview?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      evidencePreview?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
     expect(useNavigationStore.getState().activeInspectorTab).toBe("evidence");
 
@@ -700,7 +712,9 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "Inspecting recursive RLM output." }],
+            parts: [
+              { type: "text", text: "Inspecting host-loop Daytona output." },
+            ],
             isStreaming: false,
             runtimeContext: {
               depth: 1,
@@ -723,7 +737,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "status_note",
-            text: "Child sandbox attached",
+            text: "Host-loop session attached",
             tone: "success",
             runtimeContext: {
               depth: 1,
@@ -901,9 +915,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html).toContain("Tool: read_buffer");
 
     const callIndex = html.indexOf("Calling tool: read_buffer");
-    const reasoningIndex = html.indexOf(
-      'data-slot="assistant-trajectory"',
-    );
+    const reasoningIndex = html.indexOf('data-slot="assistant-trajectory"');
     const resultIndex = html.indexOf("Tool: read_buffer");
 
     expect(callIndex).toBeGreaterThanOrEqual(0);

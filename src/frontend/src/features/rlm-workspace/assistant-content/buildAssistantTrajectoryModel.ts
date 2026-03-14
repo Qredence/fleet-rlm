@@ -201,20 +201,21 @@ function buildTrajectoryItems(
   trajectoryParts: ReturnType<typeof buildAssistantTurnTrajectoryParts>,
   mergedReasoning: MergedReasoningPart[],
 ) {
-  const cotItems: OrderedTrajectoryItem[] = trajectoryParts.flatMap(({ part }) =>
-    part.steps.map((step, order) => ({
-      originalOrder: order,
-      item: {
-        id: step.id,
-        index: step.index,
-        title: trajectoryTitle(step.index ?? order, step.label),
-        body: trajectoryBody(step.details),
-        details: step.details,
-        status: mapTrajectoryStatus(step.status),
-        runtimeBadges: getRuntimeBadgeStrings(part.runtimeContext),
-        source: "cot" as const,
-      },
-    })),
+  const cotItems: OrderedTrajectoryItem[] = trajectoryParts.flatMap(
+    ({ part }) =>
+      part.steps.map((step, order) => ({
+        originalOrder: order,
+        item: {
+          id: step.id,
+          index: step.index,
+          title: trajectoryTitle(step.index ?? order, step.label),
+          body: trajectoryBody(step.details),
+          details: step.details,
+          status: mapTrajectoryStatus(step.status),
+          runtimeBadges: getRuntimeBadgeStrings(part.runtimeContext),
+          source: "cot" as const,
+        },
+      })),
   );
 
   cotItems.sort((left, right) => {
@@ -262,18 +263,20 @@ function buildTrajectoryItems(
           ({ item }) => item.index == null || !existingIndexes.has(item.index),
         );
 
-  const combined = [...cotItems, ...fallbackThoughtItems].sort((left, right) => {
-    const leftIndex =
-      typeof left.item.index === "number"
-        ? left.item.index
-        : Number.POSITIVE_INFINITY;
-    const rightIndex =
-      typeof right.item.index === "number"
-        ? right.item.index
-        : Number.POSITIVE_INFINITY;
-    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-    return left.originalOrder - right.originalOrder;
-  });
+  const combined = [...cotItems, ...fallbackThoughtItems].sort(
+    (left, right) => {
+      const leftIndex =
+        typeof left.item.index === "number"
+          ? left.item.index
+          : Number.POSITIVE_INFINITY;
+      const rightIndex =
+        typeof right.item.index === "number"
+          ? right.item.index
+          : Number.POSITIVE_INFINITY;
+      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+      return left.originalOrder - right.originalOrder;
+    },
+  );
 
   const trajectoryItems: TrajectoryItem[] = combined.map(({ item }) => item);
 
@@ -308,7 +311,9 @@ function buildTrajectoryItems(
 export function buildAssistantTrajectoryModel(
   item: AssistantTurnDisplayItem,
 ): AssistantTrajectoryModel {
-  const reasoningParts = mergeReasoningParts(buildAssistantTurnReasoningParts(item));
+  const reasoningParts = mergeReasoningParts(
+    buildAssistantTurnReasoningParts(item),
+  );
   const overview = buildOverviewReasoning(reasoningParts);
   const { items, hasCot } = buildTrajectoryItems(
     buildAssistantTurnTrajectoryParts(item),
