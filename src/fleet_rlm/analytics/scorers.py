@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 from mlflow.entities import AssessmentSource, Feedback
@@ -48,9 +49,17 @@ def build_rlm_scorers(model: str | None = None) -> list[Any]:
         ToolCallEfficiency(model=judge_model),
         # Evaluates if the agent's answer was grounded in the tool output (prevents hallucination)
         RetrievalGroundedness(model=judge_model),
-        # Custom reasoning judge
-        reasoning_quality_scorer(judge_model),
     ]
+
+    # The reasoning-quality judge may expose trace inputs (including tool I/O, URLs,
+    # or user data) to an external LLM. Require explicit opt-in to enable it.
+    enable_reasoning_judge = os.environ.get(
+        "FLEET_RLM_ENABLE_REASONING_JUDGE", ""
+    ).lower() in {"1", "true", "yes", "on"}
+    if enable_reasoning_judge:
+        # Custom reasoning judge
+        scorers.append(reasoning_quality_scorer(judge_model))
+
     return scorers
 
 
@@ -60,6 +69,44 @@ def reasoning_quality_scorer(model: str) -> Any:
     the internal Chain of Thought (Thoughts/Actions).
     """
 
+    # Simple redaction and truncation utilities to reduce the risk of leaking
+    # secrets or large payloads from span.inputs into the judge prompt.
+    def _redact_and_truncate_value(value: Any, max_len: int = 2000) -> str:
+        # Convert to a reasonably stable string form, preferring JSON when possible.
+        try:
+            text = json.dumps(value, default=str, ensure_ascii=False)
+        except TypeError:
+            text = str(value)
+
+        # Redact common secret-bearing fields in JSON-like content.
+        # This is a best-effort heuristic and does not guarantee full removal,
+        # but it significantly reduces obvious secret leakage.
+        secret_keys = [
+            "api_key",
+            "apikey",
+            "token",
+            "access_token",
+            "refresh_token",
+            "authorization",
+            "password",
+            "secret",
+        ]
+        for key in secret_keys:
+            # Match patterns like "key": "value" or 'key': 'value'
+            pattern = rf'("{key}"\s*:\s*")[^"]*("|$)'
+            text = re.sub(pattern, rf'\1***\2', text, flags=re.IGNORECASE)
+            pattern_single = rf"('{key}'\s*:\s*')[^']*('|$)"
+            text = re.sub(pattern_single, rf"\1***\2", text, flags=re.IGNORECASE)
+
+        if len(text) > max_len:
+            return text[: max_len - 12] + " [TRUNCATED]"
+        return text
+
+    def _safe_span_inputs(span: Any) -> str:
+        # Guard against attributes not being present or being very large/complex.
+        inputs = getattr(span, "inputs", "")
+        return _redact_and_truncate_value(inputs)
+
     @scorer(name="reasoning_quality")
     def judge(trace: Any) -> Feedback:
         import litellm
@@ -67,15 +114,26 @@ def reasoning_quality_scorer(model: str) -> Any:
         # Extract the thoughts/events from the trace
         # We look for spans that contain reasoning or tool calls
         spans = trace.search_spans()
-        reasoning_text = ""
-        for span in spans:
-            if span.name.lower().startswith("thought") or span.name.lower().startswith(
-                "llm"
-            ):
-                reasoning_text += f"\nStep {span.name}: {span.inputs}"
 
-        if not reasoning_text:
+        reasoning_chunks: list[str] = []
+        max_spans = 20
+        for span in spans:
+            if len(reasoning_chunks) >= max_spans:
+                break
+            name = str(getattr(span, "name", "")).lower()
+            if name.startswith("thought") or name.startswith("llm"):
+                safe_inputs = _safe_span_inputs(span)
+                reasoning_chunks.append(f"Step {span.name}: {safe_inputs}")
+
+        if not reasoning_chunks:
             reasoning_text = "No explicit reasoning steps found in trace."
+        else:
+            reasoning_text = "\n".join(reasoning_chunks)
+
+        # Cap the total reasoning text length to avoid sending excessively large payloads.
+        max_reasoning_len = 4000
+        if len(reasoning_text) > max_reasoning_len:
+            reasoning_text = reasoning_text[: max_reasoning_len - 28] + "\n[TRACE TRUNCATED]"
 
         prompt = f"""
             Evaluate the reasoning quality of an AI agent based on its execution trace.
