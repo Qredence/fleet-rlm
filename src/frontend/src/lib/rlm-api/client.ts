@@ -79,7 +79,7 @@ async function requestJson<T>(
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...options?.headers,
       },
-      body: options?.body && options?.method !== "GET" ? JSON.stringify(options.body) : undefined,
+      body: options?.body && method !== "GET" ? JSON.stringify(options.body) : undefined,
     });
 
     if (!response.ok) {
