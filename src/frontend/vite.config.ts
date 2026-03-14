@@ -2,11 +2,6 @@ import { defineConfig } from "vite-plus";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 
-const hasModuleSideEffects = (id: string, external: boolean) => {
-  if (external) return true;
-  return id.endsWith(".css") || id.includes("/src/main.tsx") || id.includes("/src/styles/");
-};
-
 export default defineConfig({
   lint: {
     plugins: ["oxc", "typescript", "unicorn", "react"],
@@ -213,52 +208,5 @@ export default defineConfig({
     target: "esnext",
     minify: "oxc",
     cssMinify: "lightningcss",
-    rolldownOptions: {
-      treeshake: {
-        moduleSideEffects: hasModuleSideEffects,
-      },
-      output: {
-        codeSplitting: {
-          groups: [
-            {
-              name: "vendor-ui",
-              test: /[/\\]node_modules[/\\](?:@radix-ui|lucide-react|motion|cmdk|embla-carousel-react|next-themes|react-resizable-panels|sonner|vaul)[/\\]/,
-            },
-            {
-              name: "vendor-editor",
-              test: /[/\\]node_modules[/\\](?:@codemirror|@lezer|codemirror|crelt|style-mod|w3c-keyname|@marijn\/find-cluster-break)[/\\]/,
-            },
-            {
-              name: "vendor-state",
-              test: /[/\\]node_modules[/\\](?:zustand|@tanstack\/react-query|react-router|nanoid|zod)[/\\]/,
-            },
-            {
-              name: "vendor-auth",
-              test: /[/\\]node_modules[/\\](?:@azure\/msal-browser|@azure\/msal-common)[/\\]/,
-            },
-            {
-              name: "vendor-analytics",
-              test: /[/\\]node_modules[/\\](?:posthog-js|@posthog)[/\\]/,
-            },
-            {
-              name: "vendor-flow",
-              test: /[/\\]node_modules[/\\](?:@xyflow\/react|@dagrejs\/dagre)[/\\]/,
-            },
-            {
-              name: "vendor-cytoscape",
-              test: /[/\\]node_modules[/\\](?:cytoscape|cytoscape-cose-bilkent)[/\\]/,
-            },
-            {
-              name: "vendor-rive",
-              test: /[/\\]node_modules[/\\](?:@rive-app)[/\\]/,
-            },
-            {
-              name: "vendor-ai",
-              test: /[/\\]node_modules[/\\](?:ai|@ai-sdk|agentation)[/\\]/,
-            },
-          ],
-        },
-      },
-    },
   },
 });
