@@ -1169,7 +1169,6 @@ class _HostLoopDaytonaRuntime:
             self._emit_cancelled(root, error_text, phase="cancelled")
         except TimeoutError as exc:
             self._active_iteration = None
-            termination_reason = "timeout"
             error_text = str(exc)
             root.status = "error"
             root.error = error_text
