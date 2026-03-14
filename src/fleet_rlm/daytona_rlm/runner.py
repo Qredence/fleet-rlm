@@ -1183,7 +1183,6 @@ class _HostLoopDaytonaRuntime:
             raise
         except Exception as exc:
             self._active_iteration = None
-            termination_reason = "error"
             error_text = str(exc)
             root.status = "error"
             root.error = error_text
