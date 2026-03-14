@@ -112,10 +112,32 @@ async def chat_streaming(websocket: WebSocket) -> None:
             initial_msg = None
             while initial_msg is None:
                 raw_payload = await websocket.receive_json()
-                initial_msg = await parse_ws_message_or_send_error(
+                candidate = await parse_ws_message_or_send_error(
                     websocket=websocket,
                     raw_payload=raw_payload,
                 )
+                if candidate is None:
+                    # Validation or schema error already reported to client.
+                    continue
+
+                msg_type = getattr(candidate, "type", None)
+                if msg_type != "message":
+                    # The first successfully-validated payload must be a chat
+                    # "message" so that runtime selection is driven by a user
+                    # message, not a command/cancel envelope.
+                    await _try_send_json(
+                        websocket,
+                        _error_envelope(
+                            code="invalid_initial_message_type",
+                            message=(
+                                "First WebSocket payload must be a 'message' "
+                                f"to start chat; got '{msg_type}'."
+                            ),
+                        ),
+                    )
+                    continue
+
+                initial_msg = candidate
 
             agent_context = _build_chat_agent_context(
                 runtime,
