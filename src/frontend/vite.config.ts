@@ -1,6 +1,10 @@
 import { defineConfig } from "vite-plus";
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react-swc";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   lint: {
@@ -129,7 +133,7 @@ export default defineConfig({
     ],
     alias: {
       // Alias @ to the src directory
-      "@": `${import.meta.dirname}/src`,
+      "@": path.resolve(__dirname, "src"),
     },
   },
 
