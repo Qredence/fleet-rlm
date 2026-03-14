@@ -6,23 +6,23 @@ This repository hosts the frontend app for the fleet-rlm ecosystem.
 
 ## Tooling
 
-- Runtime/package manager: `bun`
-- Install deps: `bun install`
-- Dev server: `bun run dev`
-- Build: `bun run build`
-- Type check: `bun run type-check`
-- Lint: `bun run lint`
-- Robustness lint gate: `bun run lint:robustness`
-- Unit tests: `bun run test:unit`
-- E2E smoke tests: `bun run test:e2e`
-- Full quality gate: `bun run check`
+- Runtime/package manager: `pnpm` and the Vite+ (`vp`) toolchain
+- Install deps: `vp install`
+- Dev server: `vp dev`
+- Build: `vp build`
+- Type check: `vp run type-check`
+- Lint: `vp lint`
+- Robustness lint gate: `vp run lint:robustness`
+- Unit tests: `vp run test:unit`
+- E2E smoke tests: `vp run test:e2e`
+- Full quality gate: `vp check`
 
 ## shadcn & AI Elements
 
 - `components.json` is the source of truth for shadcn and AI Elements registry wiring.
 - Keep `components.json.aliases.utils` pointed at `@/lib/utils/cn`; do not reintroduce `src/components/ui/utils.ts`.
-- The `@/* -> ./src/*` alias must live in `src/frontend/tsconfig.json` so `bunx --bun shadcn@latest info --json` resolves real frontend paths.
-- Before refreshing registry-backed components, run `bunx --bun shadcn@latest info --json` and confirm `importAlias` is `@` and `resolvedPaths.utils` points to `src/lib/utils/cn`.
+- The `@/* -> ./src/*` alias must live in `src/frontend/tsconfig.json` so `pnpm dlx shadcn@latest info --json` resolves real frontend paths.
+- Before refreshing registry-backed components, run `pnpm dlx shadcn@latest info --json` and confirm `importAlias` is `@` and `resolvedPaths.utils` points to `src/lib/utils/cn`.
 - Official AI Elements primitives live under `src/components/ai-elements/*`. Refresh them through shadcn/registry workflow instead of forking custom lookalikes.
 - `src/components/chat/ChatInput.tsx` is a thin product wrapper around the official AI Elements `prompt-input` primitives. Keep execution-mode/settings affordances local, but do not recreate `src/components/chat/prompt-input/*`.
 
@@ -39,10 +39,10 @@ Core backend integration targets `fleet-rlm` at:
 
 ### OpenAPI Sync Workflow
 
-- Sync spec snapshot: `bun run api:sync-spec`
-- Generate TS types: `bun run api:types`
-- Full sync: `bun run api:sync`
-- Drift check (must be clean): `bun run api:check`
+- Sync spec snapshot: `vp run api:sync-spec`
+- Generate TS types: `vp run api:types`
+- Full sync: `vp run api:sync`
+- Drift check (must be clean): `vp run api:check`
 
 Generated file policy:
 
@@ -114,23 +114,23 @@ Generated file policy:
 
 ## Validation Expectations
 
-Before finishing backend-integration changes, run: 0. `bun install`
+Before finishing backend-integration changes, run: 0. `vp install`
 
-1. `bun run api:sync`
-2. `bun run api:check`
-3. `bun run type-check`
-4. `bun run lint:robustness`
-5. `bun run test:unit`
-6. `bun run build`
-7. `bun run test:e2e`
-8. `bun run check`
+1. `vp run api:sync`
+2. `vp run api:check`
+3. `vp run type-check`
+4. `vp run lint:robustness`
+5. `vp run test:unit`
+6. `vp build`
+7. `vp run test:e2e`
+8. `vp check`
 
 Focused validation for chat/composer and cleanup work:
 
-1. `bun run type-check`
-2. `bun run build`
-3. `bun run test:unit -- src/app/layout/__tests__/BuilderPanel.creation-tabs.test.tsx src/app/layout/__tests__/BuilderPanel.file-detail.test.tsx src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/AttachmentDropdown.test.tsx src/components/chat/input/__tests__/ExecutionModeDropdown.test.tsx src/components/chat/input/__tests__/SettingsDropdown.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.runtime-warning.test.tsx src/features/rlm-workspace/__tests__/chatDisplayItems.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/message-inspector/__tests__/MessageInspectorPanel.test.tsx src/hooks/__tests__/useAppNavigate.test.ts src/stores/__tests__/chatHistoryStore.test.ts src/stores/__tests__/navigationStore.test.ts`
-4. `bunx --bun shadcn@latest info --json`
+1. `vp run type-check`
+2. `vp build`
+3. `vp test src/app/layout/__tests__/BuilderPanel.creation-tabs.test.tsx src/app/layout/__tests__/BuilderPanel.file-detail.test.tsx src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/AttachmentDropdown.test.tsx src/components/chat/input/__tests__/ExecutionModeDropdown.test.tsx src/components/chat/input/__tests__/SettingsDropdown.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.runtime-warning.test.tsx src/features/rlm-workspace/__tests__/chatDisplayItems.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/message-inspector/__tests__/MessageInspectorPanel.test.tsx src/hooks/__tests__/useAppNavigate.test.ts src/stores/__tests__/chatHistoryStore.test.ts src/stores/__tests__/navigationStore.test.ts`
+4. `pnpm dlx shadcn@latest info --json`
 
 ## Dependency Policy
 
