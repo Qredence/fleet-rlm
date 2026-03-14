@@ -62,7 +62,7 @@ def reasoning_quality_scorer(model: str) -> Any:
 
     @scorer(name="reasoning_quality")
     def judge(trace: Any) -> Feedback:
-        import openai
+        import litellm
 
         # Extract the thoughts/events from the trace
         # We look for spans that contain reasoning or tool calls
@@ -95,18 +95,25 @@ def reasoning_quality_scorer(model: str) -> Any:
             }}
         """
 
-        # Initialize an OpenAI client. If litellm proxy is set via OPENAI_API_BASE,
-        # it will route through there automatically.
-        client = openai.OpenAI()
+        # Resolve credentials from the project's standard env vars so this scorer
+        # works with any LiteLLM-routed provider (not just OPENAI_API_KEY).
+        api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get(
+            "DSPY_LM_API_KEY"
+        )
+        api_base = os.environ.get("DSPY_LM_API_BASE") or None
 
         try:
-            # Parse the model string. MLflow typically uses 'openai:/model_name'
-            model_name = model.split(":/")[-1] if ":/" in model else model
+            # Strip the DSPy-style "provider:/" prefix (e.g. "openai:/") so the
+            # remaining string is a plain LiteLLM model identifier like
+            # "gemini/gemini-3.1-pro-preview" or "gpt-4o".
+            lm_model = model.split(":/")[-1] if ":/" in model else model
 
-            response = client.chat.completions.create(
-                model=model_name,
+            response = litellm.completion(
+                model=lm_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
+                api_key=api_key,
+                api_base=api_base,
             )
 
             # Use raw access instead of message.content to handle potential errors
