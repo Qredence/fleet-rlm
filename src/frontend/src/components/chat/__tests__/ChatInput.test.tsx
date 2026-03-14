@@ -10,14 +10,20 @@ vi.mock("@/hooks/useAppNavigate", () => ({
 }));
 
 describe("ChatInput", () => {
+  const baseProps = {
+    onChange: () => {},
+    onSend: () => {},
+    runtimeMode: "modal_chat" as const,
+    onRuntimeModeChange: () => {},
+    executionMode: "auto" as const,
+    onExecutionModeChange: () => {},
+  };
+
   it("disables submit when the composer is empty", () => {
     const html = renderToStaticMarkup(
       <ChatInput
         value="   "
-        onChange={() => {}}
-        onSend={() => {}}
-        executionMode="auto"
-        onExecutionModeChange={() => {}}
+        {...baseProps}
       />,
     );
 
@@ -30,17 +36,29 @@ describe("ChatInput", () => {
     const html = renderToStaticMarkup(
       <ChatInput
         value="hello"
-        onChange={() => {}}
-        onSend={() => {}}
-        executionMode="auto"
         isLoading
         isReceiving
-        onExecutionModeChange={() => {}}
+        {...baseProps}
       />,
     );
 
     expect(html).toContain('aria-label="Sending message"');
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain("animate-spin");
+  });
+
+  it("keeps the composer generic even in Daytona mode", () => {
+    const html = renderToStaticMarkup(
+      <ChatInput
+        value="summarize this repo"
+        {...baseProps}
+        runtimeMode="daytona_pilot"
+      />,
+    );
+
+    expect(html).not.toContain("Experimental Daytona runtime");
+    expect(html).not.toContain('aria-label="Daytona repository URL"');
+    expect(html).not.toContain("Tools only");
+    expect(html).toContain("Daytona");
   });
 });

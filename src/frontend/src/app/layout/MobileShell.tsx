@@ -22,6 +22,14 @@ function MobileShell() {
       open: () => setIsCanvasOpen(true),
       close: () => setIsCanvasOpen(false),
     });
+
+    // Cleanup handlers on unmount to prevent memory leaks/stale closures
+    return () => {
+      registerCanvasHandlers({
+        open: () => {},
+        close: () => {},
+      });
+    };
   }, [registerCanvasHandlers, setIsCanvasOpen]);
 
   return (

@@ -18,7 +18,6 @@ import {
 import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { typo } from "@/lib/config/typo";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   Dialog,
@@ -168,7 +167,7 @@ function IntegrationCard({
       {/* Text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-foreground" style={typo.label}>
+          <span className="text-foreground typo-label">
             {integration.name}
           </span>
           {integration.connected && (
@@ -177,11 +176,11 @@ function IntegrationCard({
             </Badge>
           )}
         </div>
-        <p className="text-muted-foreground mt-0.5" style={typo.helper}>
+        <p className="text-muted-foreground mt-0.5 typo-helper">
           {integration.description}
         </p>
         {integration.status && (
-          <p className="text-accent mt-1" style={typo.helper}>
+          <p className="text-accent mt-1 typo-helper">
             {integration.status}
           </p>
         )}
@@ -196,12 +195,12 @@ function IntegrationCard({
         {integration.connected ? (
           <>
             <Unplug className="size-3.5" />
-            <span style={typo.label}>Disconnect</span>
+            <span className="typo-label">Disconnect</span>
           </>
         ) : (
           <>
             <ExternalLink className="size-3.5" />
-            <span style={typo.label}>Connect</span>
+            <span className="typo-label">Connect</span>
           </>
         )}
       </Button>
@@ -263,17 +262,17 @@ function IntegrationsBody() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground" style={typo.h3}>
+        <h2 className="text-foreground typo-h3">
           Integrations
         </h2>
-        <p className="text-muted-foreground mt-1" style={typo.caption}>
+        <p className="text-muted-foreground mt-1 typo-caption">
           {connectedCount} of {integrations.length} integrations active
         </p>
       </div>
 
       {grouped.map((group) => (
         <div key={group.key}>
-          <span className="text-muted-foreground" style={typo.label}>
+          <span className="text-muted-foreground typo-label">
             {group.label}
           </span>
           <div className="mt-2 space-y-2">
@@ -320,7 +319,7 @@ export function IntegrationsDialog({
             </div>
             <div className="flex items-center justify-between px-4 pb-2 shrink-0">
               <Drawer.Title>
-                <span className="text-foreground" style={typo.h3}>
+                <span className="text-foreground typo-h3">
                   Integrations
                 </span>
               </Drawer.Title>

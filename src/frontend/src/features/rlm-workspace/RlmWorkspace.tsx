@@ -4,15 +4,18 @@ import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useChatHistoryStore } from "@/stores/chatHistoryStore";
+import { useChatStore } from "@/stores/chatStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils/cn";
 import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
-import { ConversationHistory } from "@/features/rlm-workspace/ConversationHistory";
+import { ConversationHistory } from "@/components/shared/ConversationHistory";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
 import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
+import { detectRepoContext } from "@/lib/utils/repoContext";
+import { detectContextPaths } from "@/lib/utils/sourceContext";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -52,19 +55,39 @@ export function RlmWorkspace() {
     resolveClarification,
     loadConversation,
   } = chatRuntime;
-
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
+  const runtimeMode = useChatStore((state) => state.runtimeMode);
+  const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
     (attachments: AttachedFile[]) => {
+      const inferredRepoContext =
+        runtimeMode === "daytona_pilot" ? detectRepoContext(inputValue) : null;
+      const inferredContextPaths =
+        runtimeMode === "daytona_pilot" ? detectContextPaths(inputValue) : [];
+
       if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
         telemetry.capture("chat_session_started", {
           prompt_length: inputValue.length,
         });
       }
       originalHandleSubmit({
-        executionMode,
+        executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
+        runtimeMode,
+        repoUrl:
+          runtimeMode === "daytona_pilot"
+            ? inferredRepoContext?.repoUrl
+            : undefined,
+        repoRef:
+          runtimeMode === "daytona_pilot"
+            ? (inferredRepoContext?.repoRefCandidate ??
+              inferredRepoContext?.repoRef)
+            : undefined,
+        contextPaths:
+          runtimeMode === "daytona_pilot" && inferredContextPaths.length > 0
+            ? inferredContextPaths
+            : undefined,
         attachments: attachments.map((attachment) => ({
           id: attachment.id,
           name: attachment.file.name,
@@ -80,6 +103,7 @@ export function RlmWorkspace() {
       telemetry,
       originalHandleSubmit,
       executionMode,
+      runtimeMode,
     ],
   );
 
@@ -183,14 +207,53 @@ export function RlmWorkspace() {
   }, [navigate]);
 
   const runtimeGuidance = runtimeStatus.data?.guidance ?? [];
+  const daytonaStatus = runtimeStatus.data?.daytona as
+    | {
+        configured?: boolean;
+        guidance?: string[];
+      }
+    | undefined;
+  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance)
+    ? daytonaStatus.guidance
+    : [];
+  const warningGuidance =
+    runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
   const showRuntimeWarning =
     backendEnabled &&
     runtimeStatus.data != null &&
-    runtimeStatus.data.ready === false &&
-    runtimeGuidance.length > 0;
+    (runtimeMode === "daytona_pilot"
+      ? daytonaStatus?.configured === false && daytonaGuidance.length > 0
+      : runtimeStatus.data.ready === false && runtimeGuidance.length > 0);
+  const runtimeWarningTitle =
+    runtimeMode === "daytona_pilot"
+      ? "Daytona setup required"
+      : "Runtime warning";
   const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;
+
+  const composer = (
+    <ChatInput
+      value={inputValue}
+      onChange={setInputValue}
+      onSend={handleSubmit}
+      attachmentsEnabled={false}
+      placeholder={
+        !backendEnabled
+          ? "Configure FastAPI backend to start chatting…"
+          : phase === "idle"
+            ? "Ask anything…"
+            : "Ask a follow-up…"
+      }
+      isLoading={composerDisabled}
+      isReceiving={isReceivingResponse}
+      runtimeMode={runtimeMode}
+      onRuntimeModeChange={setRuntimeMode}
+      executionMode={executionMode}
+      onExecutionModeChange={setExecutionMode}
+      className="w-full"
+    />
+  );
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
@@ -236,10 +299,10 @@ export function RlmWorkspace() {
             {showRuntimeWarning ? (
               <Alert className="border-accent/25 bg-accent/5 text-foreground">
                 <TriangleAlert className="size-4" />
-                <AlertTitle>Runtime warning</AlertTitle>
+                <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                 <AlertDescription>
-                  <div className="space-y-3">
-                    <p>{runtimeGuidance[0]}</p>
+                  <div className="flex flex-col gap-3">
+                    <p>{warningGuidance[0]}</p>
                     <Button
                       variant="outline"
                       size="sm"
@@ -252,24 +315,9 @@ export function RlmWorkspace() {
                 </AlertDescription>
               </Alert>
             ) : null}
-            <ChatInput
-              value={inputValue}
-              onChange={setInputValue}
-              onSend={handleSubmit}
-              attachmentsEnabled={false}
-              placeholder={
-                !backendEnabled
-                  ? "Configure FastAPI backend to start chatting\u2026"
-                  : phase === "idle"
-                    ? "Ask anything\u2026"
-                    : "Ask a follow-up\u2026"
-              }
-              isLoading={composerDisabled}
-              isReceiving={isReceivingResponse}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
-              className="mx-auto w-full max-w-175"
-            />
+            <div className="mx-auto w-full max-w-175 rounded-2xl ring-1 ring-border/30">
+              {composer}
+            </div>
           </div>
         </div>
       </div>

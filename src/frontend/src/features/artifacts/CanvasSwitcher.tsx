@@ -8,7 +8,6 @@
  */
 import { useState, useMemo, type ReactNode } from "react";
 import { HardDrive, Brain, FileText, Check, Layers } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -18,7 +17,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import { PanelHeaderChip } from "@/features/artifacts/PanelHeaderChip";
+import { PanelHeaderChip } from "@/features/artifacts/components/PanelHeaderChip";
 import type { Skill } from "@/lib/data/types";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -117,7 +116,7 @@ function SwitcherRow({
       <span className="shrink-0 flex items-center justify-center w-5 h-5">
         {icon}
       </span>
-      <span className="flex-1 truncate" style={typo.label}>
+      <span className="flex-1 truncate typo-label">
         {label}
       </span>
       {trailing}
@@ -189,7 +188,7 @@ export function CanvasSwitcher({
           <div className="p-2">
             {/* ── Canvas Views ──────────────────────────────────── */}
             <div className="px-2 py-1.5">
-              <span className="text-muted-foreground" style={typo.micro}>
+              <span className="text-muted-foreground typo-micro">
                 CANVAS VIEWS
               </span>
             </div>
@@ -211,7 +210,7 @@ export function CanvasSwitcher({
 
                 {/* ── Recent Skills ──────────────────────────────── */}
                 <div className="px-2 py-1.5">
-                  <span className="text-muted-foreground" style={typo.micro}>
+                  <span className="text-muted-foreground typo-micro">
                     RECENT SKILLS
                   </span>
                 </div>
@@ -228,8 +227,7 @@ export function CanvasSwitcher({
                     trailing={
                       <Badge
                         variant="secondary"
-                        className="rounded-full shrink-0"
-                        style={typo.helper}
+                        className="rounded-full shrink-0 typo-helper"
                       >
                         {skill.domain}
                       </Badge>
@@ -248,7 +246,7 @@ export function CanvasSwitcher({
               <>
                 <Separator className="my-2 bg-border-subtle" />
                 <div className="px-2 py-1.5">
-                  <span className="text-muted-foreground" style={typo.micro}>
+                  <span className="text-muted-foreground typo-micro">
                     CURRENT SKILL
                   </span>
                 </div>
@@ -260,8 +258,7 @@ export function CanvasSwitcher({
                   trailing={
                     <Badge
                       variant="secondary"
-                      className="rounded-full shrink-0"
-                      style={typo.mono}
+                      className="rounded-full shrink-0 typo-mono"
                     >
                       v{selectedSkill.version}
                     </Badge>

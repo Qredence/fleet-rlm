@@ -1,8 +1,18 @@
-import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtHeader, ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import { Streamdown } from "@/components/ui/streamdown";
 import { mapTaskStatus } from "@/lib/utils/ai-elements-state";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 
 function CompactTrajectory({
   overviewText,
@@ -20,7 +30,12 @@ function CompactTrajectory({
 
   return (
     <div className="space-y-2" data-slot="trajectory-compact">
-      <Reasoning isStreaming={false} autoClose={false} defaultOpen className="w-full">
+      <Reasoning
+        isStreaming={false}
+        autoClose={false}
+        defaultOpen
+        className="w-full"
+      >
         <ReasoningTrigger
           getThinkingMessage={() => (
             <span className="font-medium text-foreground">Planning</span>
@@ -29,7 +44,7 @@ function CompactTrajectory({
         <ReasoningContent>{content}</ReasoningContent>
       </Reasoning>
       {hasBadges ? (
-        <div className="text-[10px] leading-relaxed text-muted-foreground">
+        <div className={inspectorStyles.runtime.inline}>
           {runtimeBadges.join(" · ")}
         </div>
       ) : null}
@@ -42,20 +57,21 @@ export function TrajectoryTimeline({
 }: {
   trajectory: AssistantContentModel["trajectory"];
 }) {
-  if (!trajectory.hasContent || trajectory.displayMode === "hidden") return null;
+  if (!trajectory.hasContent || trajectory.displayMode === "hidden")
+    return null;
 
   const compactSummary =
     trajectory.items.length === 1 ? trajectory.items[0]?.body : undefined;
   const compactBadges = [
     ...(trajectory.overview?.runtimeBadges ?? []),
-    ...(trajectory.items.length === 1 ? trajectory.items[0]?.runtimeBadges ?? [] : []),
+    ...(trajectory.items.length === 1
+      ? (trajectory.items[0]?.runtimeBadges ?? [])
+      : []),
   ];
 
   return (
     <section className="space-y-3" data-slot="assistant-trajectory">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-        Reasoning
-      </div>
+      <div className={inspectorStyles.heading.section}>Reasoning</div>
 
       {trajectory.displayMode === "compact" ? (
         <CompactTrajectory
@@ -85,7 +101,7 @@ export function TrajectoryTimeline({
               </Reasoning>
               <div className="mt-2">
                 {trajectory.overview.runtimeBadges.length ? (
-                  <div className="text-[10px] leading-relaxed text-muted-foreground">
+                  <div className={inspectorStyles.runtime.inline}>
                     {trajectory.overview.runtimeBadges.join(" · ")}
                   </div>
                 ) : null}
@@ -124,7 +140,7 @@ export function TrajectoryTimeline({
                         </div>
                       ) : null}
                       {item.runtimeBadges.length ? (
-                        <div className="text-[10px] leading-relaxed text-muted-foreground">
+                        <div className={inspectorStyles.runtime.inline}>
                           {item.runtimeBadges.join(" · ")}
                         </div>
                       ) : null}

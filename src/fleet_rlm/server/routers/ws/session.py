@@ -2,16 +2,17 @@
 
 import json
 import logging
+import uuid
 from typing import Any
 
 from dspy.primitives.code_interpreter import FinalOutput
 
-from fleet_rlm import runners
 from fleet_rlm.core.interpreter import ExecutionProfile
 from fleet_rlm.db import FleetRepository
 from fleet_rlm.db.types import IdentityUpsertResult
 
 from ...deps import ServerState
+from .contracts import ChatAgentProtocol
 from .helpers import _sanitize_id
 from .lifecycle import PersistenceRequiredError
 from .session_store import (
@@ -38,9 +39,12 @@ def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
 # ── Volume I/O ─────────────────────────────────────────────────────────
 
 
-async def _volume_load_manifest(agent: "runners.RLMReActChatAgent", path: str) -> dict:
+async def _volume_load_manifest(agent: ChatAgentProtocol, path: str) -> dict:
     """Best-effort manifest load from Modal volume; returns empty dict if absent."""
-    result = await agent.interpreter.aexecute(
+    interpreter = agent.interpreter
+    if interpreter is None:
+        return {}
+    result = await interpreter.aexecute(
         "text = load_from_volume(path)\nSUBMIT(text=text)",
         variables={"path": path},
         execution_profile=ExecutionProfile.MAINTENANCE,
@@ -59,11 +63,16 @@ async def _volume_load_manifest(agent: "runners.RLMReActChatAgent", path: str) -
 
 
 async def _volume_save_manifest(
-    agent: "runners.RLMReActChatAgent", path: str, manifest: dict
+    agent: ChatAgentProtocol,
+    path: str,
+    manifest: dict,
 ) -> str | None:
     """Best-effort manifest save to Modal volume."""
+    interpreter = agent.interpreter
+    if interpreter is None:
+        return None
     payload = json.dumps(manifest, ensure_ascii=False, default=str)
-    result = await agent.interpreter.aexecute(
+    result = await interpreter.aexecute(
         "saved_path = save_to_volume(path, payload)\nSUBMIT(saved_path=saved_path)",
         variables={"path": path, "payload": payload},
         execution_profile=ExecutionProfile.MAINTENANCE,
@@ -77,15 +86,10 @@ async def _volume_save_manifest(
     return saved_path or None
 
 
-# ── Session state persistence ──────────────────────────────────────────
-
-import uuid  # noqa: E402
-
-
 async def persist_session_state(
     *,
     state: ServerState,
-    agent: "runners.RLMReActChatAgent",
+    agent: ChatAgentProtocol,
     session_record: dict[str, Any] | None,
     active_manifest_path: str | None,
     active_run_db_id: uuid.UUID | None,

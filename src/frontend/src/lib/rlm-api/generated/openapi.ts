@@ -98,7 +98,7 @@ export interface components {
       ok?: boolean;
       /**
        * Version
-       * @default 0.4.95
+       * @default 0.4.97
        */
       version?: string;
     };
@@ -211,6 +211,10 @@ export interface components {
       };
       /** Modal */
       modal?: {
+        [key: string]: unknown;
+      };
+      /** Daytona */
+      daytona?: {
         [key: string]: unknown;
       };
       tests: components["schemas"]["RuntimeTestCache"];

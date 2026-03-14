@@ -195,9 +195,7 @@ describe("applyWsFrameToMessages", () => {
       expect(cot.steps[0]?.label).toContain("Inspect entrypoint");
       expect(cot.steps[0]?.status).toBe("active");
       expect(cot.steps[0]?.details).toContain("Tool · read_file");
-      expect(cot.steps[0]?.details).toContain(
-        "Observation · Found entrypoint",
-      );
+      expect(cot.steps[0]?.details).toContain("Observation · Found entrypoint");
     }
   });
 
@@ -283,9 +281,7 @@ describe("applyWsFrameToMessages", () => {
       expect(cot.steps[1]?.index).toBe(1);
       expect(cot.steps[0]?.details).toContain("Input · path=src");
       expect(cot.steps[0]?.details).toContain("Observation · a.py, b.py");
-      expect(cot.steps[1]?.details).toContain(
-        "Input · path=., pattern=**/*",
-      );
+      expect(cot.steps[1]?.details).toContain("Input · path=., pattern=**/*");
       expect(cot.steps[1]?.details).toContain("Observation · count=2");
     }
   });
@@ -552,7 +548,10 @@ describe("applyWsFrameToMessages", () => {
       }),
     ).messages;
 
-    const reasoningRows = traceRows(messages, (part) => part.kind === "reasoning");
+    const reasoningRows = traceRows(
+      messages,
+      (part) => part.kind === "reasoning",
+    );
     const toolRows = traceRows(messages, (part) => part.kind === "tool");
 
     expect(reasoningRows).toHaveLength(1);
@@ -770,6 +769,29 @@ describe("applyWsFrameToMessages", () => {
         "The evidence lines up with the cited sources.",
       );
     }
+  });
+
+  it("prefers final_artifact markdown over raw final event JSON text", () => {
+    const result = applyWsFrameToMessages(
+      [],
+      makeEvent(
+        "final",
+        '{ "final_markdown": "Hello there, it is great to meet you!" }',
+        {
+          final_artifact: {
+            kind: "markdown",
+            value: {
+              final_markdown: "Hello there, it is great to meet you!",
+            },
+          },
+        },
+      ),
+    );
+
+    const assistant = result.messages.find(
+      (message) => message.type === "assistant",
+    );
+    expect(assistant?.content).toBe("Hello there, it is great to meet you!");
   });
 
   it("maps hitl_request and hitl_resolved events to interactive hitl messages", () => {

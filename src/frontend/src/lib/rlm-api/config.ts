@@ -26,16 +26,9 @@ function deriveWsUrl(apiUrl: string, path: string): string {
   }
 }
 
-const baseUrl = trimOrEmpty(
-  import.meta.env.VITE_FLEET_API_URL as string | undefined,
-);
-const explicitWsUrl = trimOrEmpty(
-  import.meta.env.VITE_FLEET_WS_URL as string | undefined,
-);
-const mockMode = parseBool(
-  import.meta.env.VITE_MOCK_MODE as string | undefined,
-  false,
-);
+const baseUrl = trimOrEmpty(import.meta.env.VITE_FLEET_API_URL);
+const explicitWsUrl = trimOrEmpty(import.meta.env.VITE_FLEET_WS_URL);
+const mockMode = parseBool(import.meta.env.VITE_MOCK_MODE, false);
 
 function getActiveWsUrl(path: string) {
   if (explicitWsUrl) {
@@ -71,16 +64,10 @@ export const rlmApiConfig = {
   mockMode,
   timeoutMs: 30_000,
   workspaceId:
-    trimOrEmpty(
-      import.meta.env.VITE_FLEET_WORKSPACE_ID as string | undefined,
-    ) || "default",
+    trimOrEmpty(import.meta.env.VITE_FLEET_WORKSPACE_ID) || "default",
   userId:
-    trimOrEmpty(import.meta.env.VITE_FLEET_USER_ID as string | undefined) ||
-    "fleetwebapp-user",
-  trace: parseBool(
-    import.meta.env.VITE_FLEET_TRACE as string | undefined,
-    true,
-  ),
+    trimOrEmpty(import.meta.env.VITE_FLEET_USER_ID) || "fleetwebapp-user",
+  trace: parseBool(import.meta.env.VITE_FLEET_TRACE, true),
 } as const;
 
 /**

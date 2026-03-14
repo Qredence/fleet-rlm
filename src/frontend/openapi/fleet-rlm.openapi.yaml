@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.4.95
+  version: 0.4.97
 paths:
   /health:
     get:
@@ -286,7 +286,7 @@ components:
         version:
           type: string
           title: Version
-          default: 0.4.95
+          default: 0.4.97
       type: object
       title: HealthResponse
     ReadyResponse:
@@ -457,6 +457,10 @@ components:
           additionalProperties: true
           type: object
           title: Modal
+        daytona:
+          additionalProperties: true
+          type: object
+          title: Daytona
         tests:
           $ref: '#/components/schemas/RuntimeTestCache'
         guidance:

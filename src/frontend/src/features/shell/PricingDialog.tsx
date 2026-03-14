@@ -8,7 +8,6 @@ import { Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { typo } from "@/lib/config/typo";
 import { useAuth, type PlanTier } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -106,7 +105,7 @@ function PlanCard({
       )}
     >
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-foreground" style={typo.h4}>
+        <span className="text-foreground typo-h4">
           {plan.name}
         </span>
         {isCurrent && <Badge variant="accent">Current</Badge>}
@@ -116,17 +115,17 @@ function PlanCard({
       </div>
 
       <div className="flex items-baseline gap-0.5 mb-2">
-        <span className="text-foreground" style={typo.h2}>
+        <span className="text-foreground typo-h2">
           {plan.price}
         </span>
         {plan.period && (
-          <span className="text-muted-foreground" style={typo.caption}>
+          <span className="text-muted-foreground typo-caption">
             {plan.period}
           </span>
         )}
       </div>
 
-      <p className="text-muted-foreground mb-4" style={typo.caption}>
+      <p className="text-muted-foreground mb-4 typo-caption">
         {plan.description}
       </p>
 
@@ -137,7 +136,7 @@ function PlanCard({
               className="size-4 text-accent shrink-0 mt-0.5"
               strokeWidth={2}
             />
-            <span className="text-foreground" style={typo.caption}>
+            <span className="text-foreground typo-caption">
               {f}
             </span>
           </li>
@@ -152,7 +151,7 @@ function PlanCard({
         disabled={isCurrent}
         onClick={onSelect}
       >
-        <span style={typo.label}>
+        <span className="typo-label">
           {isCurrent
             ? "Current Plan"
             : plan.key === "enterprise"
@@ -222,10 +221,10 @@ function PricingBody({ onClose }: { onClose: () => void }) {
   return (
     <div className="space-y-5">
       <div className="text-center">
-        <h2 className="text-foreground" style={typo.h3}>
+        <h2 className="text-foreground typo-h3">
           Choose Your Plan
         </h2>
-        <p className="text-muted-foreground mt-1" style={typo.caption}>
+        <p className="text-muted-foreground mt-1 typo-caption">
           Scale your skill management as your team grows
         </p>
       </div>
@@ -270,7 +269,7 @@ export function PricingDialog({ open, onOpenChange }: PricingDialogProps) {
             </div>
             <div className="flex items-center justify-between px-4 pb-2 shrink-0">
               <Drawer.Title>
-                <span className="text-foreground" style={typo.h3}>
+                <span className="text-foreground typo-h3">
                   Pricing
                 </span>
               </Drawer.Title>

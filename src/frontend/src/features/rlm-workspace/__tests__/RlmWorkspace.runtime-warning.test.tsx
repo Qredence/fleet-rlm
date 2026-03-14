@@ -3,11 +3,29 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { RlmWorkspace } from "@/features/rlm-workspace/RlmWorkspace";
 
-let runtimeStatusMock: { data?: { ready: boolean; guidance?: string[] } } = {
+let runtimeStatusMock: {
+  data?: {
+    ready: boolean;
+    guidance?: string[];
+    daytona?: {
+      configured?: boolean;
+      guidance?: string[];
+    };
+  };
+} = {
   data: {
     ready: false,
     guidance: ["Run Runtime tests from Settings -> Runtime."],
+    daytona: {
+      configured: false,
+      guidance: [],
+    },
   },
+};
+
+const chatStoreMockState = {
+  runtimeMode: "modal_chat" as "modal_chat" | "daytona_pilot",
+  setRuntimeMode: vi.fn(),
 };
 
 vi.mock("@posthog/react", () => ({
@@ -44,6 +62,11 @@ vi.mock("@/stores/chatHistoryStore", () => ({
   }),
 }));
 
+vi.mock("@/stores/chatStore", () => ({
+  useChatStore: (selector: (state: typeof chatStoreMockState) => unknown) =>
+    selector(chatStoreMockState),
+}));
+
 vi.mock("@/features/rlm-workspace/useBackendChatRuntime", () => ({
   useBackendChatRuntime: () => ({
     messages: [],
@@ -64,13 +87,14 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
 
 vi.mock("@/lib/rlm-api", () => ({
   isRlmCoreEnabled: () => true,
+  createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
 vi.mock("@/features/rlm-workspace/ChatMessageList", () => ({
   ChatMessageList: () => <div>ChatMessageList</div>,
 }));
 
-vi.mock("@/features/rlm-workspace/ConversationHistory", () => ({
+vi.mock("@/components/shared/ConversationHistory", () => ({
   ConversationHistory: () => <div>ConversationHistory</div>,
 }));
 
@@ -80,10 +104,16 @@ vi.mock("@/components/chat/ChatInput", () => ({
 
 describe("RlmWorkspace runtime warning", () => {
   beforeEach(() => {
+    chatStoreMockState.runtimeMode = "modal_chat";
+    chatStoreMockState.setRuntimeMode.mockReset();
     runtimeStatusMock = {
       data: {
         ready: false,
         guidance: ["Run Runtime tests from Settings -> Runtime."],
+        daytona: {
+          configured: false,
+          guidance: [],
+        },
       },
     };
   });
@@ -97,8 +127,35 @@ describe("RlmWorkspace runtime warning", () => {
   });
 
   it("omits warning banner when runtime status is healthy", () => {
-    runtimeStatusMock = { data: { ready: true, guidance: [] } };
+    runtimeStatusMock = {
+      data: {
+        ready: true,
+        guidance: [],
+        daytona: { configured: true, guidance: [] },
+      },
+    };
     const html = renderToStaticMarkup(<RlmWorkspace />);
     expect(html).not.toContain("Runtime warning:");
+  });
+
+  it("renders Daytona guidance when Daytona mode is selected", () => {
+    chatStoreMockState.runtimeMode = "daytona_pilot";
+    runtimeStatusMock = {
+      data: {
+        ready: true,
+        guidance: [],
+        daytona: {
+          configured: false,
+          guidance: [
+            "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands.",
+          ],
+        },
+      },
+    };
+
+    const html = renderToStaticMarkup(<RlmWorkspace />);
+
+    expect(html).toContain("Daytona setup required");
+    expect(html).toContain("Missing DAYTONA_API_KEY");
   });
 });

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Annotated, Any
@@ -13,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
+from fleet_rlm.daytona_rlm import DaytonaConfigError, resolve_daytona_config
 from fleet_rlm.server.runtime_settings import (
     RUNTIME_SETTINGS_ALLOWLIST,
     RUNTIME_SETTINGS_KEYS,
@@ -169,6 +171,40 @@ def _lm_preflight() -> tuple[dict[str, bool], list[str]]:
     return checks, guidance
 
 
+def _daytona_preflight() -> tuple[dict[str, bool], list[str]]:
+    api_key = (os.environ.get("DAYTONA_API_KEY") or "").strip()
+    api_url = (os.environ.get("DAYTONA_API_URL") or "").strip()
+    target = (os.environ.get("DAYTONA_TARGET") or "").strip()
+    legacy_api_base = (os.environ.get("DAYTONA_API_BASE_URL") or "").strip()
+
+    checks = {
+        "api_key_set": bool(api_key),
+        "api_url_set": bool(api_url),
+        "target_set": bool(target),
+        "legacy_api_base_url_set": bool(legacy_api_base),
+        "configured": False,
+    }
+
+    guidance: list[str] = []
+    try:
+        resolve_daytona_config()
+        checks["configured"] = True
+    except DaytonaConfigError as exc:
+        guidance.append(str(exc))
+
+    if legacy_api_base:
+        guidance.append(
+            "DAYTONA_API_BASE_URL is not supported here. Use DAYTONA_API_URL instead."
+        )
+
+    deduped_guidance: list[str] = []
+    for item in guidance:
+        if item not in deduped_guidance:
+            deduped_guidance.append(item)
+
+    return checks, deduped_guidance
+
+
 @router.get("/settings", response_model=RuntimeSettingsSnapshot)
 async def get_runtime_settings(state: ServerStateDep) -> JSONResponse:
     snapshot = get_settings_snapshot(
@@ -286,10 +322,8 @@ async def test_modal_connection(
     finally:
         latency_ms = int((time.perf_counter() - started) * 1000)
         if sandbox is not None:
-            try:
+            with suppress(Exception):
                 await sandbox.terminate.aio()
-            except Exception:
-                pass
 
     if not ok and not error:
         error = "Modal connectivity test failed."
@@ -393,6 +427,7 @@ async def get_runtime_status(state: ServerStateDep) -> JSONResponse:
     modal_checks, modal_guidance = _modal_preflight(
         secret_name=state.config.secret_name
     )
+    daytona_checks, daytona_guidance = _daytona_preflight()
 
     cached_modal = state.runtime_test_results.get("modal")
     cached_lm = state.runtime_test_results.get("lm")
@@ -443,6 +478,10 @@ async def get_runtime_status(state: ServerStateDep) -> JSONResponse:
                 **modal_checks,
                 "secret_name": state.config.secret_name,
                 "configured_volume": state.config.volume_name or "",
+            },
+            daytona={
+                **daytona_checks,
+                "guidance": daytona_guidance,
             },
             tests=RuntimeTestCache(modal=modal_test, lm=lm_test),
             guidance=guidance,

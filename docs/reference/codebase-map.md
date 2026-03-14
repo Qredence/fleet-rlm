@@ -9,7 +9,6 @@ Use this alongside:
 
 - [Source Layout](source-layout.md) for a shorter package inventory
 - [Frontend ↔ Backend Integration](frontend-backend-integration.md) for the web contract
-- [Code Health Complexity Heatmap](code-health-complexity-heatmap.md) for method-level refactor pressure
 
 ## Reading Guide
 

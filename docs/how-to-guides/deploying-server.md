@@ -490,7 +490,7 @@ CORS_ALLOWED_ORIGINS=*
 
 ### Server Won't Start: Auth Configuration
 
-```
+```text
 ValueError: AUTH_REQUIRED must be true when APP_ENV is staging/production
 ```
 
@@ -498,7 +498,7 @@ Set `AUTH_REQUIRED=true` or verify `AUTH_MODE=entra` (auto-enables auth).
 
 ### Server Won't Start: Database Configuration
 
-```
+```text
 ValueError: DATABASE_URL is required when database_required=true
 ```
 
@@ -506,7 +506,7 @@ Set `DATABASE_URL` for Neon PostgreSQL, or set `DATABASE_REQUIRED=false` (not re
 
 ### Server Won't Start: Entra Configuration
 
-```
+```text
 ValueError: ENTRA_JWKS_URL is required when AUTH_MODE=entra
 ```
 

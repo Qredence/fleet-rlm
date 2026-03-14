@@ -13,6 +13,7 @@ import type {
 } from "@/features/rlm-workspace/runtime-types";
 import { useArtifactStore } from "@/stores/artifactStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import {
   sendCommandOverWs,
   rlmApiConfig,
@@ -102,10 +103,7 @@ function revertOptimisticHitlResolution(
 }
 
 export function useBackendChatRuntime(): ChatRuntime {
-  const {
-    setCreationPhase,
-    sessionId: navSessionId,
-  } = useNavigationStore();
+  const { setCreationPhase, sessionId: navSessionId } = useNavigationStore();
   const clearArtifactSteps = useArtifactStore((state) => state.clear);
 
   const {
@@ -113,6 +111,7 @@ export function useBackendChatRuntime(): ChatRuntime {
     turnArtifactsByMessageId,
     isStreaming,
     sessionId,
+    runtimeMode,
     streamMessage,
     stopStreaming,
     resetSession,
@@ -128,6 +127,7 @@ export function useBackendChatRuntime(): ChatRuntime {
   const [inputValue, setInputValue] = useState("");
   const [phase, setPhase] = useState<CreationPhase>("idle");
   const [isTyping, setIsTyping] = useState(false);
+  const resetRunWorkbench = useRunWorkbenchStore((state) => state.reset);
 
   const isFirstMount = useRef(true);
 
@@ -140,9 +140,11 @@ export function useBackendChatRuntime(): ChatRuntime {
     setIsTyping(false);
     clearArtifactSteps();
     clearTurnArtifacts();
+    resetRunWorkbench();
   }, [
     clearArtifactSteps,
     clearTurnArtifacts,
+    resetRunWorkbench,
     resetSession,
     setCreationPhase,
     stopStreaming,
@@ -171,6 +173,8 @@ export function useBackendChatRuntime(): ChatRuntime {
     (frame: WsServerMessage) => {
       // Any backend frame means the server started responding.
       setIsTyping(false);
+
+      useRunWorkbenchStore.getState().applyFrame(frame);
 
       applyWsFrameToArtifacts(frame);
 
@@ -205,17 +209,28 @@ export function useBackendChatRuntime(): ChatRuntime {
 
       setInputValue("");
       addMessage(toUserMessage(text));
+      const resolvedRuntimeMode = options?.runtimeMode ?? runtimeMode;
+      if (resolvedRuntimeMode === "daytona_pilot") {
+        useRunWorkbenchStore.getState().beginRun({
+          task: text,
+          repoUrl: options?.repoUrl,
+          repoRef: options?.repoRef,
+          contextPaths: options?.contextPaths,
+        });
+      }
       setPhase("understanding");
       setCreationPhase("understanding");
       setIsTyping(true);
       clearArtifactSteps();
 
       let terminalSeen = false;
+      let receivedFrame = false;
 
       try {
         await streamMessage(
           text,
           (frame) => {
+            receivedFrame = true;
             if (isTerminalFrame(frame)) terminalSeen = true;
             onFrame(frame);
           },
@@ -223,22 +238,34 @@ export function useBackendChatRuntime(): ChatRuntime {
           {
             traceEnabled: true,
             executionMode: options?.executionMode,
+            runtimeMode: options?.runtimeMode,
+            repoUrl: options?.repoUrl,
+            repoRef: options?.repoRef,
+            contextPaths: options?.contextPaths,
+            batchConcurrency: options?.batchConcurrency,
           },
         );
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown streaming error";
         if (!terminalSeen) {
+          if (resolvedRuntimeMode === "daytona_pilot") {
+            useRunWorkbenchStore.getState().failRun(message);
+          } else if (!receivedFrame) {
+            resetRunWorkbench();
+          }
           applyWsFrameToArtifacts({ type: "error", message });
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: createLocalMessageId("sys"),
-              type: "system",
-              content: `Backend error: ${message}`,
-              phase: 1,
-            },
-          ]);
+          if (resolvedRuntimeMode !== "daytona_pilot") {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: createLocalMessageId("sys"),
+                type: "system",
+                content: `Backend error: ${message}`,
+                phase: 1,
+              },
+            ]);
+          }
           setPhase("idle");
           setCreationPhase("idle");
         }
@@ -258,7 +285,9 @@ export function useBackendChatRuntime(): ChatRuntime {
       isStreaming,
       onFrame,
       queryClient,
+      resetRunWorkbench,
       streamMessage,
+      runtimeMode,
       setCreationPhase,
       addMessage,
       setMessages,
@@ -322,9 +351,11 @@ export function useBackendChatRuntime(): ChatRuntime {
       setPhase(conversation.phase);
       setCreationPhase(conversation.phase);
       setIsTyping(false);
+      resetRunWorkbench();
     },
     [
       clearArtifactSteps,
+      resetRunWorkbench,
       setCreationPhase,
       setMessages,
       setTurnArtifactsByMessageId,

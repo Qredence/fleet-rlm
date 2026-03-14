@@ -8,6 +8,7 @@ import {
 } from "@/components/chat/input/AttachmentChip";
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
 import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
+import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown";
 import { SendButton } from "@/components/chat/input/SendButton";
 import { SettingsDropdown } from "@/components/chat/input/SettingsDropdown";
 import {
@@ -18,7 +19,7 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
-import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 
 interface ChatInputProps {
   value: string;
@@ -27,8 +28,11 @@ interface ChatInputProps {
   isLoading?: boolean;
   isReceiving?: boolean;
   attachmentsEnabled?: boolean;
+  runtimeMode: WsRuntimeMode;
+  onRuntimeModeChange: (mode: WsRuntimeMode) => void;
   executionMode: WsExecutionMode;
   onExecutionModeChange: (mode: WsExecutionMode) => void;
+  canSubmit?: boolean;
   placeholder?: string;
   className?: string;
 }
@@ -56,13 +60,17 @@ function ChatInput({
   isLoading = false,
   isReceiving = false,
   attachmentsEnabled = true,
+  runtimeMode,
+  onRuntimeModeChange,
   executionMode,
   onExecutionModeChange,
+  canSubmit = true,
   placeholder = "Ask anything…",
   className,
 }: ChatInputProps) {
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const hasContent = value.trim().length > 0;
+  const canSubmitMessage = hasContent && canSubmit;
 
   useEffect(
     () => () => {
@@ -71,16 +79,17 @@ function ChatInput({
     [attachments],
   );
 
-  const handleFilesSelected = useCallback((files: File[]) => {
-    const newAttachments: AttachedFile[] = files.map((file) => ({
-      id: createAttachmentId(),
-      file,
-      previewUrl: file.type.startsWith("image/")
-        ? URL.createObjectURL(file)
-        : undefined,
-    }));
-
-    setAttachments((prev) => [...prev, ...newAttachments]);
+  const handleFilesSelected = useCallback((files: File[] | FileList) => {
+    if (files.length > 0) {
+      const newAttachments: AttachedFile[] = Array.from(files).map((file) => ({
+        id: createAttachmentId(),
+        file,
+        previewUrl: file.type.startsWith("image/")
+          ? URL.createObjectURL(file)
+          : undefined,
+      }));
+      setAttachments((prev) => [...prev, ...newAttachments]);
+    }
   }, []);
 
   const handleRemoveAttachment = useCallback((id: string) => {
@@ -92,11 +101,12 @@ function ChatInput({
   }, []);
 
   const handleSubmit = useCallback(() => {
+    if (!canSubmitMessage) return;
     const currentAttachments = [...attachments];
     currentAttachments.forEach(revokeAttachmentPreview);
     setAttachments([]);
     onSend(currentAttachments);
-  }, [attachments, onSend]);
+  }, [attachments, canSubmitMessage, onSend]);
 
   const handleUnsupportedAttachmentSelect = useCallback(() => {
     toast.info("File upload is not available yet", {
@@ -105,15 +115,10 @@ function ChatInput({
     });
   }, []);
 
-  return (
-    <PromptInput
-      className={className}
-      onSubmit={async () => {
-        handleSubmit();
-      }}
-    >
-      {attachments.length > 0 ? (
-        <PromptInputHeader className="px-1 pb-1 pt-1">
+  const headerContent =
+    attachments.length > 0 ? (
+      <PromptInputHeader className="flex flex-col gap-3 px-1 pb-1 pt-1">
+        <div className="flex flex-wrap gap-2">
           {attachments.map((attachment) => (
             <AttachmentChip
               key={attachment.id}
@@ -121,44 +126,56 @@ function ChatInput({
               onRemove={handleRemoveAttachment}
             />
           ))}
-        </PromptInputHeader>
-      ) : null}
+        </div>
+      </PromptInputHeader>
+    ) : null;
 
-      <PromptInputBody>
-        <PromptInputTextarea
-          aria-label="Message"
-          className="min-h-12 px-2 pb-2.5 pt-3.5"
-          disabled={isLoading}
-          onChange={(event) => onChange(event.currentTarget.value)}
-          placeholder={placeholder}
-          value={value}
-        />
-      </PromptInputBody>
+  return (
+    <div className={className}>
+      <PromptInput
+        onSubmit={async () => {
+          handleSubmit();
+        }}
+      >
+        {headerContent}
 
-      <PromptInputFooter className="px-1 pb-1 pt-0">
-        <PromptInputTools>
-          <AttachmentDropdown
-            onFilesSelected={handleFilesSelected}
-            uploadsEnabled={attachmentsEnabled}
-            onUnsupportedSelect={handleUnsupportedAttachmentSelect}
+        <PromptInputBody>
+          <PromptInputTextarea
+            aria-label="Message"
+            className="min-h-10 px-2 pb-2 pt-3"
+            disabled={isLoading}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            placeholder={placeholder}
+            value={value}
           />
-          <SettingsDropdown />
-        </PromptInputTools>
+        </PromptInputBody>
 
-        <div className="flex items-center gap-1">
-          <ExecutionModeDropdown
-            value={executionMode}
-            onChange={onExecutionModeChange}
-          />
+        <PromptInputFooter className="px-1 pb-1 pt-0">
+          <PromptInputTools>
+            <AttachmentDropdown
+              uploadsEnabled={attachmentsEnabled}
+              onFilesSelected={handleFilesSelected}
+              onUnsupportedSelect={handleUnsupportedAttachmentSelect}
+            />
+            <SettingsDropdown />
+            <ExecutionModeDropdown
+              value={executionMode}
+              onChange={onExecutionModeChange}
+            />
+            <RuntimeModeDropdown
+              value={runtimeMode}
+              onChange={onRuntimeModeChange}
+            />
+          </PromptInputTools>
 
           <SendButton
-            disabled={isLoading || !hasContent}
+            disabled={isLoading || !canSubmitMessage}
             isLoading={isLoading}
             isReceiving={isReceiving}
           />
-        </div>
-      </PromptInputFooter>
-    </PromptInput>
+        </PromptInputFooter>
+      </PromptInput>
+    </div>
   );
 }
 

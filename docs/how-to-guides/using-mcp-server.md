@@ -14,7 +14,7 @@ By default, the MCP server runs with `stdio` transport for local tool integratio
 
 ## Command Options
 
-```
+```text
 Usage: fleet-rlm serve-mcp [OPTIONS]
 
 Run optional FastMCP server surface (requires `--extra mcp`).

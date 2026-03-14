@@ -1,22 +1,31 @@
 import { defineConfig } from "vite";
-import path from "path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react-swc";
+
+const hasModuleSideEffects = (id: string, external: boolean) => {
+  if (external) return true;
+  return (
+    id.endsWith(".css") ||
+    id.includes("/src/main.tsx") ||
+    id.includes("/src/styles/")
+  );
+};
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    // Prevent duplicate React instances — react-router (and other deps)
-    // must use the exact same React that the host provides.
+    // Prevent duplicate package instances in the client bundle.
     dedupe: [
       "react",
       "react-dom",
       "react/jsx-runtime",
       "react/jsx-dev-runtime",
+      "react-router",
+      "shiki",
     ],
     alias: {
       // Alias @ to the src directory
-      "@": path.resolve(__dirname, "./src"),
+      "@": `${import.meta.dirname}/src`,
     },
   },
 
@@ -32,6 +41,16 @@ export default defineConfig({
         ws: true,
       },
     },
+    warmup: {
+      clientFiles: [
+        "src/app/App.tsx",
+        "src/app/routes.ts",
+        "src/app/layout/RootLayout.tsx",
+        "src/features/rlm-workspace/RlmWorkspace.tsx",
+        "src/features/rlm-workspace/ChatMessageList.tsx",
+        "src/components/chat/ChatInput.tsx",
+      ],
+    },
   },
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
@@ -39,11 +58,16 @@ export default defineConfig({
 
   // Force Vite to pre-bundle CodeMirror packages and their transitive deps
   optimizeDeps: {
-    holdUntilCrawlEnd: false,
     include: [
       "react",
       "react-dom",
       "react-router",
+      "shiki",
+      "streamdown",
+      "@streamdown/cjk",
+      "@streamdown/code",
+      "@streamdown/math",
+      "@streamdown/mermaid",
       "@codemirror/state",
       "@codemirror/view",
       "@codemirror/commands",
@@ -62,19 +86,53 @@ export default defineConfig({
   },
 
   build: {
+    target: "esnext",
     minify: "oxc",
-    rollupOptions: {
+    cssMinify: "lightningcss",
+    rolldownOptions: {
+      treeshake: {
+        moduleSideEffects: hasModuleSideEffects,
+      },
       output: {
-        manualChunks: {
-          "vendor-ui": [
-            "@radix-ui/react-accordion",
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-dropdown-menu",
-            "lucide-react",
-            "motion",
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor-ui",
+              test: /[/\\]node_modules[/\\](?:@radix-ui|lucide-react|motion|cmdk|embla-carousel-react|next-themes|react-resizable-panels|sonner|vaul)[/\\]/,
+            },
+            {
+              name: "vendor-editor",
+              test: /[/\\]node_modules[/\\](?:@codemirror|@lezer|codemirror|crelt|style-mod|w3c-keyname|@marijn\/find-cluster-break)[/\\]/,
+            },
+            {
+              name: "vendor-state",
+              test: /[/\\]node_modules[/\\](?:zustand|@tanstack\/react-query|react-router|nanoid|zod)[/\\]/,
+            },
+            {
+              name: "vendor-auth",
+              test: /[/\\]node_modules[/\\](?:@azure\/msal-browser|@azure\/msal-common)[/\\]/,
+            },
+            {
+              name: "vendor-analytics",
+              test: /[/\\]node_modules[/\\](?:posthog-js|@posthog)[/\\]/,
+            },
+            {
+              name: "vendor-flow",
+              test: /[/\\]node_modules[/\\](?:@xyflow\/react|@dagrejs\/dagre)[/\\]/,
+            },
+            {
+              name: "vendor-cytoscape",
+              test: /[/\\]node_modules[/\\](?:cytoscape|cytoscape-cose-bilkent)[/\\]/,
+            },
+            {
+              name: "vendor-rive",
+              test: /[/\\]node_modules[/\\](?:@rive-app)[/\\]/,
+            },
+            {
+              name: "vendor-ai",
+              test: /[/\\]node_modules[/\\](?:ai|@ai-sdk|agentation)[/\\]/,
+            },
           ],
-          "vendor-editor": ["codemirror"],
-          "vendor-state": ["zustand", "@tanstack/react-query", "react-router"],
         },
       },
     },

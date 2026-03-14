@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { ChevronDown, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
 import { Streamdown } from "@/components/ui/streamdown";
 
@@ -123,14 +122,13 @@ function Reasoning({
           aria-hidden="true"
         />
         <span
-          className={cn(isThinking ? "text-accent" : "text-muted-foreground")}
-          style={typo.caption}
+          className={cn(isThinking ? "text-accent" : "text-muted-foreground", "typo-caption")}
         >
           {summaryLabel}
         </span>
         {isThinking && <ThinkingDots reduced={prefersReduced} />}
         {displayDuration && !isThinking && (
-          <span className="text-muted-foreground" style={typo.helper}>
+          <span className="text-muted-foreground typo-helper">
             for {displayDuration}
           </span>
         )}
@@ -162,8 +160,7 @@ function Reasoning({
               {parts.map((part, i) => (
                 <div
                   key={i}
-                  className="text-muted-foreground"
-                  style={typo.caption}
+                  className="text-muted-foreground typo-caption"
                 >
                   <Streamdown
                     content={part.text}

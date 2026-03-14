@@ -13,7 +13,12 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fleet_rlm.analytics import MlflowTraceRequestContext, new_client_request_id
 from fleet_rlm.db.models import RunStatus
 
+from ...deps import ServerState
+from ...execution import ExecutionEventEmitter
+from ...schemas import WSMessage
+
 from .chat_runtime import _ChatSessionState, _PreparedChatRuntime
+from .contracts import ChatAgentProtocol, LocalPersistFn
 from .helpers import (
     _error_envelope,
     _get_execution_emitter,
@@ -29,6 +34,7 @@ from .message_loop import (
     resolve_session_identity,
     switch_session_if_needed,
 )
+from .runtime_options import normalize_daytona_chat_request
 from .streaming import run_streaming_turn
 from .turn import handle_command_with_persist, initialize_turn_lifecycle
 
@@ -49,7 +55,7 @@ def _cancelled_event_payload(message: str = "Request cancelled.") -> dict[str, A
     }
 
 
-async def _cancel_task(task: asyncio.Task[Any] | None) -> None:
+async def _cancel_task(task: asyncio.Task[object] | None) -> None:
     """Cancel an in-flight task and swallow expected shutdown exceptions."""
     if task is None or task.done():
         return
@@ -69,16 +75,16 @@ async def _cancel_task(task: asyncio.Task[Any] | None) -> None:
 async def _process_chat_message(
     *,
     websocket: WebSocket,
-    msg: Any,
-    agent: Any,
-    interpreter: Any,
+    msg: WSMessage,
+    agent: ChatAgentProtocol,
+    interpreter: object | None,
     session: _ChatSessionState,
-    local_persist: Any,
+    local_persist: LocalPersistFn,
     runtime: _PreparedChatRuntime,
     workspace_id: str,
     user_id: str,
     sess_id: str,
-    execution_emitter: Any,
+    execution_emitter: ExecutionEventEmitter,
 ) -> str | None:
     """Process one ``message`` payload and return the loaded docs path."""
     message = str(msg.content or "").strip()
@@ -88,9 +94,10 @@ async def _process_chat_message(
         )
         return session.last_loaded_docs_path
 
-    execution_mode = getattr(msg, "execution_mode", "auto")
-    if callable(getattr(agent, "set_execution_mode", None)):
-        agent.set_execution_mode(execution_mode)
+    runtime_mode = msg.runtime_mode
+    execution_mode = msg.execution_mode
+    agent.set_execution_mode(execution_mode)
+    daytona_request = normalize_daytona_chat_request(msg)
 
     await local_persist(include_volume_save=True, latest_user_message=message)
     session.cancel_flag["cancelled"] = False
@@ -112,6 +119,7 @@ async def _process_chat_message(
         sess_id=sess_id,
         turn_index=turn_index,
         session_record=session.session_record,
+        sandbox_provider="daytona" if daytona_request is not None else None,
     )
     trace_context = MlflowTraceRequestContext(
         client_request_id=new_client_request_id(prefix="chat"),
@@ -122,6 +130,7 @@ async def _process_chat_message(
         metadata={
             "fleet_rlm.workspace_id": workspace_id,
             "fleet_rlm.turn_index": str(turn_index),
+            "fleet_rlm.runtime_mode": runtime_mode,
             "fleet_rlm.execution_mode": execution_mode,
         },
     )
@@ -143,22 +152,25 @@ async def _process_chat_message(
         analytics_enabled=getattr(msg, "analytics_enabled", None),
         persist_session_state=local_persist,
         mlflow_trace_context=trace_context,
+        daytona_request=daytona_request,
     )
 
 
 async def _chat_message_loop(
     *,
     websocket: WebSocket,
-    state: Any,
+    state: ServerState,
     runtime: _PreparedChatRuntime,
-    agent: Any,
-    interpreter: Any,
+    agent: ChatAgentProtocol,
+    interpreter: object | None,
     session: _ChatSessionState,
-    local_persist: Any,
+    local_persist: LocalPersistFn,
+    initial_message: WSMessage | None = None,
 ) -> None:
     execution_emitter = _get_execution_emitter(state)
     stream_task: asyncio.Task[str | None] | None = None
-    pending_receive_task: asyncio.Task[Any] | None = None
+    pending_receive_task: asyncio.Task[object] | None = None
+    pending_message = initial_message
 
     try:
         while True:
@@ -215,16 +227,22 @@ async def _chat_message_loop(
                 )
                 continue
 
-            if pending_receive_task is not None:
+            if pending_message is not None:
+                msg = pending_message
+                pending_message = None
+            elif pending_receive_task is not None:
                 raw_payload = await pending_receive_task
                 pending_receive_task = None
+                msg = await parse_ws_message_or_send_error(
+                    websocket=websocket,
+                    raw_payload=raw_payload,
+                )
             else:
                 raw_payload = await websocket.receive_json()
-
-            msg = await parse_ws_message_or_send_error(
-                websocket=websocket,
-                raw_payload=raw_payload,
-            )
+                msg = await parse_ws_message_or_send_error(
+                    websocket=websocket,
+                    raw_payload=raw_payload,
+                )
             if msg is None:
                 continue
 

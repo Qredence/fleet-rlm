@@ -87,6 +87,247 @@ def test_websocket_accepts_query_auth_in_dev_mode(ws_client, fake_agent: FakeCha
         assert data["data"]["text"] == "ok"
 
 
+def test_websocket_routes_daytona_runtime_messages_through_daytona_chat_agent(
+    ws_client,
+    fake_agent: FakeChatAgent,
+    websocket_auth_headers,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "fleet_rlm.runners.build_react_chat_agent",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("Modal chat agent should not bootstrap for Daytona turns")
+        ),
+    )
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="status",
+                text="Bootstrapping Daytona workbench",
+                payload={
+                    "runtime": {
+                        "depth": 0,
+                        "max_depth": 3,
+                        "execution_profile": "DAYTONA_PILOT",
+                        "sandbox_active": True,
+                        "effective_max_iters": 50,
+                        "runtime_mode": "daytona_pilot",
+                        "sandbox_id": "sbx-1234567890",
+                    }
+                },
+                timestamp=ts(1.0),
+            ),
+            StreamEvent(
+                kind="final",
+                text="Daytona done",
+                payload={
+                    "history_turns": 1,
+                    "runtime_mode": "daytona_pilot",
+                },
+                timestamp=ts(2.0),
+            ),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+                "repo_url": "https://github.com/qredence/fleet-rlm.git",
+                "repo_ref": "main",
+                "context_paths": ["/Users/zocho/Documents/spec.pdf"],
+                "batch_concurrency": 5,
+            }
+        )
+
+        status = websocket.receive_json()
+        final = websocket.receive_json()
+
+    assert status["type"] == "event"
+    assert status["data"]["kind"] == "status"
+    assert status["data"]["payload"]["runtime"]["runtime_mode"] == "daytona_pilot"
+    assert (
+        fake_agent.last_stream_kwargs["repo_url"]
+        == "https://github.com/qredence/fleet-rlm.git"
+    )
+    assert fake_agent.last_stream_kwargs["repo_ref"] == "main"
+    assert fake_agent.last_stream_kwargs["context_paths"] == [
+        "/Users/zocho/Documents/spec.pdf"
+    ]
+    assert fake_agent.last_stream_kwargs["batch_concurrency"] == 5
+    assert final["type"] == "event"
+    assert final["data"]["kind"] == "final"
+    assert final["data"]["text"] == "Daytona done"
+
+
+def test_websocket_routes_daytona_repo_only_messages_to_daytona_chat_agent(
+    ws_client,
+    fake_agent: FakeChatAgent,
+    websocket_auth_headers,
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="Repo only",
+                payload={
+                    "runtime_mode": "daytona_pilot",
+                    "history_turns": 1,
+                },
+                timestamp=ts(1.0),
+            ),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+                "repo_url": "https://github.com/qredence/fleet-rlm.git",
+            }
+        )
+        event = websocket.receive_json()
+
+    assert event["type"] == "event"
+    assert event["data"]["text"] == "Repo only"
+    assert (
+        fake_agent.last_stream_kwargs["repo_url"]
+        == "https://github.com/qredence/fleet-rlm.git"
+    )
+    assert fake_agent.last_stream_kwargs["context_paths"] == []
+
+
+def test_websocket_routes_daytona_local_context_only_messages_to_daytona_chat_agent(
+    ws_client,
+    fake_agent: FakeChatAgent,
+    websocket_auth_headers,
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="Local context only",
+                payload={
+                    "runtime_mode": "daytona_pilot",
+                    "history_turns": 1,
+                },
+                timestamp=ts(1.0),
+            ),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "review these docs",
+                "runtime_mode": "daytona_pilot",
+                "context_paths": [
+                    "/Users/zocho/Documents/spec.pdf",
+                    "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+                ],
+            }
+        )
+        event = websocket.receive_json()
+
+    assert event["type"] == "event"
+    assert event["data"]["text"] == "Local context only"
+    assert fake_agent.last_stream_kwargs["repo_url"] is None
+    assert fake_agent.last_stream_kwargs["context_paths"] == [
+        "/Users/zocho/Documents/spec.pdf",
+        "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+    ]
+
+
+def test_websocket_accepts_daytona_reasoning_only_requests(
+    ws_client,
+    fake_agent: FakeChatAgent,
+    websocket_auth_headers,
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="Reasoning only",
+                payload={
+                    "runtime_mode": "daytona_pilot",
+                    "history_turns": 1,
+                },
+                timestamp=ts(1.0),
+            ),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "think through this architecture",
+                "runtime_mode": "daytona_pilot",
+            }
+        )
+        event = websocket.receive_json()
+
+    assert event["type"] == "event"
+    assert event["data"]["kind"] == "final"
+    assert fake_agent.last_stream_kwargs["repo_url"] is None
+    assert fake_agent.last_stream_kwargs["repo_ref"] is None
+    assert fake_agent.last_stream_kwargs["context_paths"] == []
+
+
+def test_websocket_rejects_daytona_repo_ref_without_repo_url(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+                "repo_ref": "main",
+            }
+        )
+        error = websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "daytona_repo_ref_requires_repo"
+
+
+def test_websocket_rejects_removed_daytona_max_depth_field(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+                "repo_url": "https://github.com/qredence/fleet-rlm.git",
+                "max_depth": 3,
+            }
+        )
+        error = websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "daytona_max_depth_removed"
+
+
 def test_execution_websocket_requires_session_id_query_param(
     ws_client, websocket_auth_headers
 ):
@@ -462,6 +703,7 @@ def test_websocket_reports_agent_startup_modal_auth_error(
     with ws_client.websocket_connect(
         "/api/v1/ws/chat", headers=websocket_auth_headers
     ) as websocket:
+        websocket.send_json({"type": "message", "content": "hello"})
         data = websocket.receive_json()
 
     assert data["type"] == "error"

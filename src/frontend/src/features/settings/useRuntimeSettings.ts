@@ -16,6 +16,9 @@ export const RUNTIME_EDITABLE_KEYS = [
   "DSPY_LLM_API_KEY",
   "DSPY_LM_API_BASE",
   "DSPY_LM_MAX_TOKENS",
+  "DAYTONA_API_KEY",
+  "DAYTONA_API_URL",
+  "DAYTONA_TARGET",
   "MODAL_TOKEN_ID",
   "MODAL_TOKEN_SECRET",
   "SECRET_NAME",
@@ -25,6 +28,7 @@ export const RUNTIME_EDITABLE_KEYS = [
 export type RuntimeEditableKey = (typeof RUNTIME_EDITABLE_KEYS)[number];
 export const RUNTIME_SECRET_EDITABLE_KEYS = [
   "DSPY_LLM_API_KEY",
+  "DAYTONA_API_KEY",
   "MODAL_TOKEN_ID",
   "MODAL_TOKEN_SECRET",
 ] as const;

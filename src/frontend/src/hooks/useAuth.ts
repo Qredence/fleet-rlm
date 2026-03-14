@@ -1,3 +1,3 @@
-export { AuthProvider } from "@/hooks/AuthProvider";
-export { useAuth } from "@/hooks/auth-context";
-export type { PlanTier, UserProfile } from "@/hooks/auth-types";
+export { AuthProvider } from "@/lib/auth/AuthProvider";
+export { useAuth } from "@/lib/auth/auth-context";
+export type { PlanTier, UserProfile } from "@/lib/auth/types";

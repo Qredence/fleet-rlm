@@ -244,122 +244,32 @@ export const OpenInTrigger = ({ children, ...props }: OpenInTriggerProps) => (
   </DropdownMenuTrigger>
 );
 
-export type OpenInChatGPTProps = ComponentProps<typeof DropdownMenuItem>;
+export type OpenInProviderProps = ComponentProps<typeof DropdownMenuItem> & {
+  provider: keyof typeof providers;
+};
 
-export const OpenInChatGPT = (props: OpenInChatGPTProps) => {
+export const OpenInProviderItem = ({ provider, ...props }: OpenInProviderProps) => {
   const { query } = useOpenInContext();
+  const providerData = providers[provider];
   return (
     <DropdownMenuItem asChild {...props}>
       <a
         className="flex items-center gap-2"
-        href={providers.chatgpt.createUrl(query)}
+        href={providerData.createUrl(query)}
         rel="noopener"
         target="_blank"
       >
-        <span className="shrink-0">{providers.chatgpt.icon}</span>
-        <span className="flex-1">{providers.chatgpt.title}</span>
+        <span className="shrink-0">{providerData.icon}</span>
+        <span className="flex-1">{providerData.title}</span>
         <ExternalLinkIcon className="size-4 shrink-0" />
       </a>
     </DropdownMenuItem>
   );
 };
 
-export type OpenInClaudeProps = ComponentProps<typeof DropdownMenuItem>;
-
-export const OpenInClaude = (props: OpenInClaudeProps) => {
-  const { query } = useOpenInContext();
-  return (
-    <DropdownMenuItem asChild {...props}>
-      <a
-        className="flex items-center gap-2"
-        href={providers.claude.createUrl(query)}
-        rel="noopener"
-        target="_blank"
-      >
-        <span className="shrink-0">{providers.claude.icon}</span>
-        <span className="flex-1">{providers.claude.title}</span>
-        <ExternalLinkIcon className="size-4 shrink-0" />
-      </a>
-    </DropdownMenuItem>
-  );
-};
-
-export type OpenInT3Props = ComponentProps<typeof DropdownMenuItem>;
-
-export const OpenInT3 = (props: OpenInT3Props) => {
-  const { query } = useOpenInContext();
-  return (
-    <DropdownMenuItem asChild {...props}>
-      <a
-        className="flex items-center gap-2"
-        href={providers.t3.createUrl(query)}
-        rel="noopener"
-        target="_blank"
-      >
-        <span className="shrink-0">{providers.t3.icon}</span>
-        <span className="flex-1">{providers.t3.title}</span>
-        <ExternalLinkIcon className="size-4 shrink-0" />
-      </a>
-    </DropdownMenuItem>
-  );
-};
-
-export type OpenInSciraProps = ComponentProps<typeof DropdownMenuItem>;
-
-export const OpenInScira = (props: OpenInSciraProps) => {
-  const { query } = useOpenInContext();
-  return (
-    <DropdownMenuItem asChild {...props}>
-      <a
-        className="flex items-center gap-2"
-        href={providers.scira.createUrl(query)}
-        rel="noopener"
-        target="_blank"
-      >
-        <span className="shrink-0">{providers.scira.icon}</span>
-        <span className="flex-1">{providers.scira.title}</span>
-        <ExternalLinkIcon className="size-4 shrink-0" />
-      </a>
-    </DropdownMenuItem>
-  );
-};
-
-export type OpenInv0Props = ComponentProps<typeof DropdownMenuItem>;
-
-export const OpenInv0 = (props: OpenInv0Props) => {
-  const { query } = useOpenInContext();
-  return (
-    <DropdownMenuItem asChild {...props}>
-      <a
-        className="flex items-center gap-2"
-        href={providers.v0.createUrl(query)}
-        rel="noopener"
-        target="_blank"
-      >
-        <span className="shrink-0">{providers.v0.icon}</span>
-        <span className="flex-1">{providers.v0.title}</span>
-        <ExternalLinkIcon className="size-4 shrink-0" />
-      </a>
-    </DropdownMenuItem>
-  );
-};
-
-export type OpenInCursorProps = ComponentProps<typeof DropdownMenuItem>;
-
-export const OpenInCursor = (props: OpenInCursorProps) => {
-  const { query } = useOpenInContext();
-  return (
-    <DropdownMenuItem asChild {...props}>
-      <a
-        className="flex items-center gap-2"
-        href={providers.cursor.createUrl(query)}
-        rel="noopener"
-        target="_blank"
-      >
-        <span className="shrink-0">{providers.cursor.icon}</span>
-        <span className="flex-1">{providers.cursor.title}</span>
-        <ExternalLinkIcon className="size-4 shrink-0" />
-      </a>
-    </DropdownMenuItem>
-  );
-};
+export const OpenInChatGPT = (props: Omit<OpenInProviderProps, "provider">) => <OpenInProviderItem provider="chatgpt" {...props} />;
+export const OpenInClaude = (props: Omit<OpenInProviderProps, "provider">) => <OpenInProviderItem provider="claude" {...props} />;
+export const OpenInT3 = (props: Omit<OpenInProviderProps, "provider">) => <OpenInProviderItem provider="t3" {...props} />;
+export const OpenInScira = (props: Omit<OpenInProviderProps, "provider">) => <OpenInProviderItem provider="scira" {...props} />;
+export const OpenInv0 = (props: Omit<OpenInProviderProps, "provider">) => <OpenInProviderItem provider="v0" {...props} />;
+export const OpenInCursor = (props: Omit<OpenInProviderProps, "provider">) => <OpenInProviderItem provider="cursor" {...props} />;

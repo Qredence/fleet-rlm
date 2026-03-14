@@ -98,7 +98,9 @@ During a terminal chat session, use these slash commands for additional function
 
 ```bash
 $ fleet --docs-path README.md --trace-mode compact
+```
 
+```text
 > What is the main architecture of this project?
 
 [trace: loading README.md into context...]

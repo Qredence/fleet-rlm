@@ -204,10 +204,7 @@ def build_runtime_module(
     if definition is None:
         raise ValueError(f"Unknown runtime module: {name}")
 
-    wrapper_class = cast(
-        type[_RuntimeSignatureModule],
-        RUNTIME_MODULE_CLASSES[definition.class_name],
-    )
+    wrapper_class = RUNTIME_MODULE_CLASSES[definition.class_name]
     return wrapper_class(
         interpreter=interpreter,
         max_iterations=max_iterations,

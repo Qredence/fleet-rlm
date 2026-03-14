@@ -55,7 +55,7 @@ export const Terminal = ({
     <TerminalContext.Provider value={contextValue}>
       <div
         className={cn(
-          "flex flex-col overflow-hidden rounded-lg border bg-zinc-950 text-zinc-100",
+          "flex flex-col overflow-hidden rounded-lg border bg-card text-foreground",
           className
         )}
         {...props}
@@ -89,7 +89,7 @@ export const TerminalHeader = ({
 }: TerminalHeaderProps) => (
   <div
     className={cn(
-      "flex items-center justify-between border-zinc-800 border-b px-4 py-2",
+      "flex items-center justify-between border-border-subtle border-b px-4 py-2",
       className
     )}
     {...props}
@@ -106,7 +106,7 @@ export const TerminalTitle = ({
   ...props
 }: TerminalTitleProps) => (
   <div
-    className={cn("flex items-center gap-2 text-sm text-zinc-400", className)}
+    className={cn("flex items-center gap-2 text-sm text-muted-foreground", className)}
     {...props}
   >
     <TerminalIcon className="size-4" />
@@ -129,7 +129,7 @@ export const TerminalStatus = ({
 
   return (
     <div
-      className={cn("flex items-center gap-2 text-xs text-zinc-400", className)}
+      className={cn("flex items-center gap-2 text-xs text-muted-foreground", className)}
       {...props}
     >
       {children ?? <Shimmer className="w-16">Loading...</Shimmer>}
@@ -195,7 +195,7 @@ export const TerminalCopyButton = ({
   return (
     <Button
       className={cn(
-        "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+        "size-7 shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground",
         className
       )}
       onClick={copyToClipboard}
@@ -224,7 +224,7 @@ export const TerminalClearButton = ({
   return (
     <Button
       className={cn(
-        "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+        "size-7 shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground",
         className
       )}
       onClick={onClear}
@@ -267,7 +267,7 @@ export const TerminalContent = ({
         <pre className="whitespace-pre-wrap break-words">
           <Ansi>{output}</Ansi>
           {isStreaming && (
-            <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-zinc-100" />
+            <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-foreground" />
           )}
         </pre>
       )}

@@ -4,10 +4,15 @@ import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from typing import Any, cast
 
 import jwt
 import pytest
 from fastapi.testclient import TestClient
+
+
+def _server_state(local_client: TestClient) -> Any:
+    return cast(Any, local_client.app).state.server_state
 
 
 def _staging_bearer_headers() -> dict[str, str]:
@@ -96,7 +101,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
         "SECRET_NAME",
         "VOLUME_NAME",
     }
-    state = local_client.app.state.server_state
+    state = _server_state(local_client)
     assert state.config.agent_model == "openai/gpt-4o-mini"
     assert state.config.agent_delegate_model == "openai/gpt-4.1-mini"
     assert state.config.agent_delegate_small_model == "openai/gpt-4.1-nano"
@@ -114,7 +119,7 @@ def test_runtime_settings_patch_writes_to_configured_env_path(
     tmp_path: Path,
 ) -> None:
     env_path = tmp_path / ".env"
-    local_client.app.state.server_state.config.env_path = env_path
+    _server_state(local_client).config.env_path = env_path
 
     response = local_client.patch(
         "/api/v1/runtime/settings",
@@ -144,7 +149,7 @@ def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
         + "\n",
         encoding="utf-8",
     )
-    local_client.app.state.server_state.config.env_path = env_path
+    _server_state(local_client).config.env_path = env_path
 
     response = local_client.patch(
         "/api/v1/runtime/settings",
@@ -318,11 +323,12 @@ def test_runtime_status_uses_cached_results(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    local_client.app.state.server_state.config.agent_model = None
-    local_client.app.state.server_state.config.agent_delegate_model = None
-    local_client.app.state.server_state.config.agent_delegate_small_model = None
+    state = _server_state(local_client)
+    state.config.agent_model = None
+    state.config.agent_delegate_model = None
+    state.config.agent_delegate_small_model = None
 
-    local_client.app.state.server_state.runtime_test_results = {
+    state.runtime_test_results = {
         "modal": {
             "kind": "modal",
             "ok": True,
@@ -353,6 +359,8 @@ def test_runtime_status_uses_cached_results(
     monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-test")
     monkeypatch.setenv("MODAL_TOKEN_ID", "token-id")
     monkeypatch.setenv("MODAL_TOKEN_SECRET", "token-secret")
+    monkeypatch.setenv("DAYTONA_API_KEY", "daytona-test-key")
+    monkeypatch.setenv("DAYTONA_API_URL", "https://daytona.example.com")
 
     response = local_client.get("/api/v1/runtime/status")
     assert response.status_code == 200
@@ -364,13 +372,14 @@ def test_runtime_status_uses_cached_results(
     assert payload["active_models"]["planner"] == "openai/gpt-4o-mini"
     assert payload["active_models"]["delegate"] == "openai/gpt-4.1-mini"
     assert payload["active_models"]["delegate_small"] == "openai/gpt-4.1-nano"
+    assert payload["daytona"]["configured"] is True
 
 
 def test_runtime_volume_tree_maps_backend_errors_to_502(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    local_client.app.state.server_state.config.volume_name = "test-volume"
+    _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.volume_ops.list_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
@@ -386,7 +395,7 @@ def test_runtime_volume_file_maps_not_found_errors_to_404(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    local_client.app.state.server_state.config.volume_name = "test-volume"
+    _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
@@ -402,7 +411,7 @@ def test_runtime_volume_file_maps_directory_errors_to_400(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    local_client.app.state.server_state.config.volume_name = "test-volume"
+    _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
@@ -421,7 +430,7 @@ def test_runtime_volume_file_maps_unknown_errors_to_502(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    local_client.app.state.server_state.config.volume_name = "test-volume"
+    _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),

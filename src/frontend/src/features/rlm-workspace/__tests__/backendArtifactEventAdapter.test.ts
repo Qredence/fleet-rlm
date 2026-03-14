@@ -213,7 +213,12 @@ describe("applyWsFrameToArtifacts", () => {
 
   it("starts a new llm step when later reasoning resumes after tool activity", () => {
     applyWsFrameToArtifacts(
-      makeEvent("reasoning_step", "First thought", undefined, "2026-03-01T12:00:01Z"),
+      makeEvent(
+        "reasoning_step",
+        "First thought",
+        undefined,
+        "2026-03-01T12:00:01Z",
+      ),
     );
     applyWsFrameToArtifacts(
       makeEvent(
@@ -224,11 +229,20 @@ describe("applyWsFrameToArtifacts", () => {
       ),
     );
     applyWsFrameToArtifacts(
-      makeEvent("reasoning_step", "Second thought", undefined, "2026-03-01T12:00:03Z"),
+      makeEvent(
+        "reasoning_step",
+        "Second thought",
+        undefined,
+        "2026-03-01T12:00:03Z",
+      ),
     );
 
     const state = useArtifactStore.getState();
-    expect(state.steps.map((step) => step.type)).toEqual(["llm", "tool", "llm"]);
+    expect(state.steps.map((step) => step.type)).toEqual([
+      "llm",
+      "tool",
+      "llm",
+    ]);
     expect(state.steps.map((step) => step.label)).toEqual([
       "Reasoning",
       "Tool: grep",

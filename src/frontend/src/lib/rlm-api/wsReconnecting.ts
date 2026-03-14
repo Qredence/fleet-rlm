@@ -19,6 +19,7 @@ interface RetryState {
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_INITIAL_BACKOFF = 1000;
 const DEFAULT_MAX_BACKOFF = 30000;
+const DEFAULT_FIRST_FRAME_TIMEOUT = 15000;
 
 function calculateBackoff(
   attempt: number,
@@ -64,6 +65,7 @@ export async function createReconnectingWs(
     maxRetries = DEFAULT_MAX_RETRIES,
     initialBackoff = DEFAULT_INITIAL_BACKOFF,
     maxBackoff = DEFAULT_MAX_BACKOFF,
+    firstFrameTimeoutMs = DEFAULT_FIRST_FRAME_TIMEOUT,
     terminalEventKinds = ["final", "cancelled"],
     abortMode = "close",
     abortTimeoutMs = 1500,
@@ -91,6 +93,8 @@ export async function createReconnectingWs(
       let settled = false;
       let completed = false;
       let abortTimer: ReturnType<typeof setTimeout> | null = null;
+      let firstFrameTimer: ReturnType<typeof setTimeout> | null = null;
+      let firstFrameSeen = false;
 
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
@@ -107,6 +111,10 @@ export async function createReconnectingWs(
         if (abortTimer) {
           clearTimeout(abortTimer);
           abortTimer = null;
+        }
+        if (firstFrameTimer) {
+          clearTimeout(firstFrameTimer);
+          firstFrameTimer = null;
         }
         fn();
       };
@@ -153,6 +161,26 @@ export async function createReconnectingWs(
         updateStatus("connected");
         if (message) {
           socket.send(JSON.stringify(message));
+          if (firstFrameTimeoutMs > 0) {
+            firstFrameTimer = setTimeout(() => {
+              if (settled || completed || retryState.aborted || firstFrameSeen) {
+                return;
+              }
+              const waitSeconds = Math.ceil(firstFrameTimeoutMs / 1000);
+              const secondsLabel =
+                waitSeconds === 1 ? "second" : "seconds";
+              completed = true;
+              safeClose();
+              updateStatus("disconnected");
+              finish(() =>
+                reject(
+                  createWsError(
+                    `No response arrived from the server within ${waitSeconds} ${secondsLabel}. Try again or check the backend logs.`,
+                  ),
+                ),
+              );
+            }, firstFrameTimeoutMs);
+          }
         }
       });
 
@@ -164,6 +192,12 @@ export async function createReconnectingWs(
           >;
           const frame = parseWsServerFrame(parsed);
           if (!frame) return;
+
+          firstFrameSeen = true;
+          if (firstFrameTimer) {
+            clearTimeout(firstFrameTimer);
+            firstFrameTimer = null;
+          }
 
           onFrame(frame);
 

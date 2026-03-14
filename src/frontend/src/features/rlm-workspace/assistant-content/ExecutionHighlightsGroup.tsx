@@ -1,34 +1,11 @@
 import { Badge } from "@/components/ui/badge";
 import type { InspectorTab } from "@/lib/data/types";
-import type {
-  AssistantContentModel,
-  ExecutionHighlight,
-} from "@/features/rlm-workspace/assistant-content/types";
-import { cn } from "@/lib/utils/cn";
-
-function statusTone(
-  status: ExecutionHighlight["status"],
-): {
-  label: string;
-  variant: "secondary" | "warning" | "success" | "destructive-subtle";
-} {
-  switch (status) {
-    case "pending":
-      return { label: "Pending", variant: "secondary" };
-    case "running":
-      return { label: "Running", variant: "warning" };
-    case "failed":
-      return { label: "Failed", variant: "destructive-subtle" };
-    default:
-      return { label: "Completed", variant: "success" };
-  }
-}
-
-function highlightButtonClasses() {
-  return cn(
-    "w-full rounded-2xl border border-border-subtle/80 bg-muted/18 px-3.5 py-3 text-left transition-colors hover:border-border-strong hover:bg-muted/28",
-  );
-}
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import {
+  inspectorStyles,
+  inspectorPreviewButtonClass,
+} from "@/features/rlm-workspace/shared/inspector-styles";
+import { statusTone } from "@/features/rlm-workspace/message-inspector/utils/inspector-utils";
 
 export function ExecutionHighlightsGroup({
   execution,
@@ -41,17 +18,15 @@ export function ExecutionHighlightsGroup({
 
   return (
     <section className="space-y-2.5" data-slot="assistant-execution-highlights">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-        Execution
-      </div>
-      <div className="space-y-2">
+      <div className={inspectorStyles.heading.section}>Execution</div>
+      <div className={inspectorStyles.stack.compact}>
         {execution.highlights.map((highlight) => {
           const tone = statusTone(highlight.status);
           return (
             <button
               key={highlight.id}
               type="button"
-              className={highlightButtonClasses()}
+              className={inspectorPreviewButtonClass()}
               onClick={() => onOpenTab?.("execution")}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -65,22 +40,28 @@ export function ExecutionHighlightsGroup({
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {highlight.count && highlight.count > 1 ? (
-                    <Badge variant="outline" className="rounded-full text-[10px]">
+                    <Badge
+                      variant="outline"
+                      className={inspectorStyles.badge.meta}
+                    >
                       {highlight.count}x
                     </Badge>
                   ) : null}
-                  <Badge variant={tone.variant} className="rounded-full">
+                  <Badge
+                    variant={tone.variant}
+                    className={inspectorStyles.badge.status}
+                  >
                     {tone.label}
                   </Badge>
                 </div>
               </div>
               {highlight.runtimeBadges.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className={inspectorStyles.badge.row}>
                   {highlight.runtimeBadges.slice(0, 3).map((badge) => (
                     <Badge
                       key={`${highlight.id}-${badge}`}
                       variant="outline"
-                      className="rounded-full text-[10px]"
+                      className={inspectorStyles.badge.meta}
                     >
                       {badge}
                     </Badge>

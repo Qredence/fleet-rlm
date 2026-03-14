@@ -4,31 +4,37 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastapi import WebSocket
 
 from fleet_rlm import runners
 from fleet_rlm.core.interpreter import ExecutionProfile
+from fleet_rlm.db import FleetRepository
+from fleet_rlm.db.types import IdentityUpsertResult
 
+from ...config import ServerRuntimeConfig
+from ...deps import ServerState
 from ...auth import AuthError, resolve_admitted_identity
+from ...auth import NormalizedIdentity
+from .contracts import ChatAgentProtocol
 from .helpers import (
     _close_websocket_safely,
     _error_envelope,
     _sanitize_id,
     _try_send_json,
 )
-from .lifecycle import _classify_stream_failure
+from .lifecycle import ExecutionLifecycleManager, _classify_stream_failure
 
 
 @dataclass(slots=True)
 class _PreparedChatRuntime:
-    cfg: Any
-    planner_lm: Any
-    delegate_lm: Any
-    repository: Any
+    cfg: ServerRuntimeConfig
+    planner_lm: object
+    delegate_lm: object | None
+    repository: FleetRepository | None
     persistence_required: bool
-    identity_rows: Any
+    identity_rows: IdentityUpsertResult | None
 
 
 @dataclass(slots=True)
@@ -40,26 +46,34 @@ class _ChatSessionState:
     active_manifest_path: str | None = None
     session_record: dict[str, Any] | None = None
     active_run_db_id: uuid.UUID | None = None
-    lifecycle: Any | None = None
+    lifecycle: ExecutionLifecycleManager | None = None
     last_loaded_docs_path: str | None = None
 
 
-def _set_interpreter_default_profile(interpreter: Any, cfg: Any) -> None:
+def _set_interpreter_default_profile(
+    interpreter: object | None, cfg: ServerRuntimeConfig
+) -> None:
     if interpreter is None:
         return
     try:
-        interpreter.default_execution_profile = ExecutionProfile(
-            cfg.ws_default_execution_profile
+        setattr(
+            interpreter,
+            "default_execution_profile",
+            ExecutionProfile(cfg.ws_default_execution_profile),
         )
     except ValueError:
-        interpreter.default_execution_profile = ExecutionProfile.ROOT_INTERLOCUTOR
+        setattr(
+            interpreter,
+            "default_execution_profile",
+            ExecutionProfile.ROOT_INTERLOCUTOR,
+        )
 
 
 async def _prepare_chat_runtime(
     *,
     websocket: WebSocket,
-    state: Any,
-    identity: Any,
+    state: ServerState,
+    identity: NormalizedIdentity,
 ) -> _PreparedChatRuntime | None:
     cfg = state.config
     planner_lm = state.planner_lm
@@ -126,30 +140,48 @@ async def _prepare_chat_runtime(
     )
 
 
-def _build_chat_agent_context(runtime: _PreparedChatRuntime) -> Any:
-    return runners.build_react_chat_agent(
-        react_max_iters=runtime.cfg.react_max_iters,
-        deep_react_max_iters=runtime.cfg.deep_react_max_iters,
-        enable_adaptive_iters=runtime.cfg.enable_adaptive_iters,
-        rlm_max_iterations=runtime.cfg.rlm_max_iterations,
-        rlm_max_llm_calls=runtime.cfg.rlm_max_llm_calls,
-        max_depth=runtime.cfg.rlm_max_depth,
-        timeout=runtime.cfg.timeout,
-        secret_name=runtime.cfg.secret_name,
-        volume_name=runtime.cfg.volume_name,
-        interpreter_async_execute=runtime.cfg.interpreter_async_execute,
-        guardrail_mode=runtime.cfg.agent_guardrail_mode,
-        max_output_chars=runtime.cfg.agent_max_output_chars,
-        min_substantive_chars=runtime.cfg.agent_min_substantive_chars,
-        planner_lm=runtime.planner_lm,
-        delegate_lm=runtime.delegate_lm,
-        delegate_max_calls_per_turn=runtime.cfg.delegate_max_calls_per_turn,
-        delegate_result_truncation_chars=runtime.cfg.delegate_result_truncation_chars,
+def _build_chat_agent_context(
+    runtime: _PreparedChatRuntime,
+    *,
+    runtime_mode: str = "modal_chat",
+) -> ChatAgentProtocol:
+    if runtime_mode == "daytona_pilot":
+        return cast(
+            ChatAgentProtocol,
+            runners.build_daytona_workbench_chat_agent(
+                timeout=runtime.cfg.timeout,
+                max_depth=runtime.cfg.rlm_max_depth,
+                planner_lm=runtime.planner_lm,
+                delegate_lm=runtime.delegate_lm,
+            ),
+        )
+
+    return cast(
+        ChatAgentProtocol,
+        runners.build_react_chat_agent(
+            react_max_iters=runtime.cfg.react_max_iters,
+            deep_react_max_iters=runtime.cfg.deep_react_max_iters,
+            enable_adaptive_iters=runtime.cfg.enable_adaptive_iters,
+            rlm_max_iterations=runtime.cfg.rlm_max_iterations,
+            rlm_max_llm_calls=runtime.cfg.rlm_max_llm_calls,
+            max_depth=runtime.cfg.rlm_max_depth,
+            timeout=runtime.cfg.timeout,
+            secret_name=runtime.cfg.secret_name,
+            volume_name=runtime.cfg.volume_name,
+            interpreter_async_execute=runtime.cfg.interpreter_async_execute,
+            guardrail_mode=runtime.cfg.agent_guardrail_mode,
+            max_output_chars=runtime.cfg.agent_max_output_chars,
+            min_substantive_chars=runtime.cfg.agent_min_substantive_chars,
+            planner_lm=runtime.planner_lm,
+            delegate_lm=runtime.delegate_lm,
+            delegate_max_calls_per_turn=runtime.cfg.delegate_max_calls_per_turn,
+            delegate_result_truncation_chars=runtime.cfg.delegate_result_truncation_chars,
+        ),
     )
 
 
 def _new_chat_session_state(
-    runtime: _PreparedChatRuntime, identity: Any
+    runtime: _PreparedChatRuntime, identity: NormalizedIdentity
 ) -> _ChatSessionState:
     return _ChatSessionState(
         canonical_workspace_id=_sanitize_id(
@@ -162,7 +194,7 @@ def _new_chat_session_state(
     )
 
 
-def _chat_startup_error_payload(exc: Exception) -> dict[str, Any]:
+def _chat_startup_error_payload(exc: Exception) -> dict[str, object]:
     """Build a stable websocket error envelope for startup failures."""
     error_code = _classify_stream_failure(exc)
     lowered = str(exc).lower()

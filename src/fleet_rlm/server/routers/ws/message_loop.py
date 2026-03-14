@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import WebSocket
@@ -11,22 +10,31 @@ from pydantic import ValidationError
 
 from ...deps import ServerState, session_key
 from ...schemas import WSMessage
-from .helpers import _try_send_json
+from .contracts import ChatAgentProtocol, LocalPersistFn
+from .helpers import _error_envelope, _try_send_json
 from .session import _manifest_path, _volume_load_manifest
 
 
 async def parse_ws_message_or_send_error(
     *,
     websocket: WebSocket,
-    raw_payload: Any,
+    raw_payload: object,
 ) -> WSMessage | None:
     """Parse a websocket payload into WSMessage, sending error envelopes on failure."""
-    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    payload: dict[str, Any]
+    if isinstance(raw_payload, dict):
+        payload = {
+            str(key): value
+            for key, value in raw_payload.items()
+            if isinstance(key, str)
+        }
+    else:
+        payload = {}
     try:
-        return WSMessage(**payload)
+        return WSMessage.model_validate(payload)
     except ValidationError as exc:
         raw_type = str(payload.get("type", "")).strip()
-        if raw_type:
+        if raw_type and raw_type not in {"message", "cancel", "command"}:
             await _try_send_json(
                 websocket,
                 {
@@ -35,9 +43,35 @@ async def parse_ws_message_or_send_error(
                 },
             )
             return None
+        errors = exc.errors()
+        error_types = {str(error.get("type", "")) for error in errors}
+        if "daytona_repo_ref_requires_repo" in error_types:
+            await _try_send_json(
+                websocket,
+                _error_envelope(
+                    code="daytona_repo_ref_requires_repo",
+                    message="Daytona repo_ref requires repo_url.",
+                ),
+            )
+            return None
+        if "daytona_max_depth_removed" in error_types:
+            await _try_send_json(
+                websocket,
+                _error_envelope(
+                    code="daytona_max_depth_removed",
+                    message=(
+                        "Daytona websocket requests no longer accept max_depth; "
+                        "use the server-configured recursion depth."
+                    ),
+                ),
+            )
+            return None
+        message = "; ".join(
+            error.get("msg", "Invalid websocket payload") for error in errors
+        )
         await _try_send_json(
             websocket,
-            {"type": "error", "message": f"Invalid payload: {exc}"},
+            {"type": "error", "message": f"Invalid payload: {message}"},
         )
         return None
 
@@ -56,15 +90,15 @@ def resolve_session_identity(
 async def switch_session_if_needed(
     *,
     state: ServerState,
-    agent: Any,
-    interpreter: Any,
+    agent: ChatAgentProtocol,
+    interpreter: object | None,
     workspace_id: str,
     user_id: str,
     sess_id: str,
     active_key: str | None,
     session_record: dict[str, Any] | None,
     last_loaded_docs_path: str | None,
-    local_persist: Callable[..., Awaitable[None]],
+    local_persist: LocalPersistFn,
 ) -> tuple[str, str, dict[str, Any], str | None]:
     """Switch and restore session state when session identity changed."""
     key = session_key(workspace_id, user_id, sess_id)

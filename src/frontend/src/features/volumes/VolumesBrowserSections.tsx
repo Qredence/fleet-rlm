@@ -11,7 +11,6 @@ import {
   FolderOpen,
   HardDrive,
 } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import type { FsNode } from "@/lib/data/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +24,11 @@ function getTreeIndentStyle(depth: number) {
 }
 
 const FILE_SIZE_STYLE = {
-  ...typo.micro,
+  fontSize: "var(--font-text-3xs-size)",
+  fontWeight: "var(--font-text-3xs-weight)",
+  fontFamily: "var(--font-sans)",
+  lineHeight: "var(--font-text-3xs-line-height)",
+  letterSpacing: "var(--font-text-3xs-tracking)",
   fontVariantNumeric: "tabular-nums",
 } as const;
 
@@ -122,8 +125,7 @@ export function FsItem({
         )}
 
         <span
-          className="flex-1 text-left min-w-0 truncate text-foreground"
-          style={isVolume ? typo.label : typo.caption}
+          className={cn("flex-1 text-left min-w-0 truncate text-foreground", isVolume ? "typo-label" : "typo-caption")}
         >
           {isVolume ? `/sandbox/${node.name}` : node.name}
         </span>
@@ -137,14 +139,13 @@ export function FsItem({
           </span>
         ) : isVolume ? (
           <Badge variant="secondary" className="rounded-full shrink-0">
-            <span style={typo.micro}>{countFiles(node)} files</span>
+            <span className="typo-micro">{countFiles(node)} files</span>
           </Badge>
         ) : null}
 
         {node.modifiedAt && (
           <span
-            className="text-muted-foreground shrink-0 hidden md:inline"
-            style={typo.micro}
+            className="text-muted-foreground shrink-0 hidden md:inline typo-micro"
           >
             {formatDate(node.modifiedAt)}
           </span>

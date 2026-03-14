@@ -58,6 +58,7 @@ async def initialize_turn_lifecycle(
     sess_id: str,
     turn_index: int,
     session_record: dict[str, Any] | None,
+    sandbox_provider: str | None = None,
 ) -> tuple[ExecutionLifecycleManager, ExecutionStepBuilder, str, Any]:
     """Create step builder and lifecycle manager for a single message turn."""
     run_id = f"{workspace_id}:{user_id}:{sess_id}:{turn_index}"
@@ -89,7 +90,9 @@ async def initialize_turn_lifecycle(
                     status=RunStatus.RUNNING,
                     model_provider=model_provider,
                     model_name=model_name,
-                    sandbox_provider=resolve_sandbox_provider(cfg.sandbox_provider),
+                    sandbox_provider=resolve_sandbox_provider(
+                        sandbox_provider or cfg.sandbox_provider
+                    ),
                 )
             )
             active_run_db_id = run_row.id

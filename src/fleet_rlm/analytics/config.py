@@ -26,7 +26,7 @@ class PostHogConfig(BaseModel):
     redact_sensitive: bool = Field(default=True)
 
     @classmethod
-    def from_env(cls) -> "PostHogConfig":
+    def from_env(cls) -> PostHogConfig:
         """Load analytics configuration from environment variables."""
         api_key = (
             os.getenv("POSTHOG_API_KEY") or ""
@@ -55,7 +55,12 @@ class PostHogConfig(BaseModel):
 
 
 class MlflowConfig(BaseModel):
-    """MLflow tracing/evaluation configuration."""
+    """MLflow tracing/evaluation configuration.
+
+    MLflow-native auth environment variables such as ``MLFLOW_TRACKING_TOKEN`` and
+    ``MLFLOW_TRACKING_USERNAME`` / ``MLFLOW_TRACKING_PASSWORD`` are consumed
+    directly by the MLflow client and intentionally not duplicated here.
+    """
 
     enabled: bool = Field(default=True)
     tracking_uri: str = Field(default="http://127.0.0.1:5000")
@@ -67,7 +72,7 @@ class MlflowConfig(BaseModel):
     dspy_log_evals: bool = Field(default=False)
 
     @classmethod
-    def from_env(cls) -> "MlflowConfig":
+    def from_env(cls) -> MlflowConfig:
         """Load MLflow configuration from environment variables."""
         tracking_uri = (
             os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5000"

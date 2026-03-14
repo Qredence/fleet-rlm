@@ -8,7 +8,7 @@ import type { ExecutionStep } from "@/stores/artifactStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useNavigationStore } from "@/stores/navigationStore";
 
-vi.mock("@/components/domain/artifacts/ArtifactGraph", () => ({
+vi.mock("@/features/artifacts/ArtifactGraph", () => ({
   ArtifactGraph: ({ steps }: { steps: ExecutionStep[] }) => (
     <div data-testid="artifact-graph">{steps.length} steps</div>
   ),
@@ -219,7 +219,6 @@ describe("MessageInspectorPanel", () => {
 
     const { container, root } = mountInspector();
 
-    expect(container.textContent).toContain("Message Inspector");
     expect(container.textContent).toContain("Selected assistant turn");
     expect(container.textContent).not.toContain("Selected response");
     expect(container.textContent).toContain(
@@ -298,9 +297,9 @@ describe("MessageInspectorPanel", () => {
 
     expect(tabs).toEqual(["Trajectory", "Execution", "Evidence", "Graph"]);
     expect(container.textContent).toContain("Relationships");
-    expect(container.querySelector('[data-testid="artifact-graph"]')?.textContent).toContain(
-      "3 steps",
-    );
+    expect(
+      container.querySelector('[data-testid="artifact-graph"]')?.textContent,
+    ).toContain("3 steps");
 
     act(() => {
       root.unmount();

@@ -20,7 +20,10 @@ type AttachableTracePart = Exclude<
 >;
 
 type ReasoningTracePart = Extract<ChatRenderPart, { kind: "reasoning" }>;
-type TrajectoryTracePart = Extract<ChatRenderPart, { kind: "chain_of_thought" }>;
+type TrajectoryTracePart = Extract<
+  ChatRenderPart,
+  { kind: "chain_of_thought" }
+>;
 
 export interface AssistantTurnReasoningItem {
   key: string;
@@ -71,7 +74,9 @@ export interface AssistantTurnDisplayItem {
   isPendingShell: boolean;
   reasoningItems: AssistantTurnReasoningItem[];
   trajectoryItems: AssistantTurnTrajectoryItem[];
-  attachedToolSessions: Array<Extract<TraceDisplayItem, { kind: "tool_session" }>>;
+  attachedToolSessions: Array<
+    Extract<TraceDisplayItem, { kind: "tool_session" }>
+  >;
   attachedTraceParts: AssistantTurnTracePartItem[];
 }
 
@@ -358,7 +363,10 @@ function attachPendingTraceItems(
   const remainingPending: TraceDisplayItem[] = [];
 
   for (const pendingItem of pending) {
-    if (pendingItem.kind === "assistant_turn" && isReasoningOnlyAssistantTurn(pendingItem)) {
+    if (
+      pendingItem.kind === "assistant_turn" &&
+      isReasoningOnlyAssistantTurn(pendingItem)
+    ) {
       targetTurn.reasoningItems.push(...pendingItem.reasoningItems);
       targetTurn.trajectoryItems.push(...pendingItem.trajectoryItems);
       continue;
@@ -423,10 +431,14 @@ export function buildChatDisplayItems(
         );
         if (trailingSummaryReasoning.length > 0) {
           lastItem.reasoningItems.push(
-            ...trailingSummaryReasoning.flatMap((pendingItem) => pendingItem.reasoningItems),
+            ...trailingSummaryReasoning.flatMap(
+              (pendingItem) => pendingItem.reasoningItems,
+            ),
           );
           lastItem.trajectoryItems.push(
-            ...trailingSummaryReasoning.flatMap((pendingItem) => pendingItem.trajectoryItems),
+            ...trailingSummaryReasoning.flatMap(
+              (pendingItem) => pendingItem.trajectoryItems,
+            ),
           );
           const nonSummaryPending = remainingPending.filter(
             (pendingItem) => !isSummaryReasoningOnlyAssistantTurn(pendingItem),

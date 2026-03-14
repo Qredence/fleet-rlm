@@ -9,13 +9,18 @@ import {
 import type { ChatMessage } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { telemetryClient } from "@/lib/telemetry/client";
-import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { QueryClient } from "@tanstack/react-query";
 import type { ExecutionStep } from "@/stores/artifactStore";
 
 interface StreamMessageOptions {
   traceEnabled?: boolean;
   executionMode?: WsExecutionMode;
+  runtimeMode?: WsRuntimeMode;
+  repoUrl?: string;
+  repoRef?: string;
+  contextPaths?: string[];
+  batchConcurrency?: number;
 }
 
 interface ChatStore {
@@ -25,10 +30,12 @@ interface ChatStore {
   isStreaming: boolean;
   sessionId: string;
   error: string | null;
+  runtimeMode: WsRuntimeMode;
 
   // Actions
   setSessionId: (id: string) => void;
   resetSession: () => void;
+  setRuntimeMode: (mode: WsRuntimeMode) => void;
   setMessages: (
     messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
   ) => void;
@@ -61,6 +68,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   isStreaming: false,
   sessionId: createBackendSessionId(),
   error: null,
+  runtimeMode: "modal_chat",
   streamController: null,
 
   setSessionId: (id) => set({ sessionId: id }),
@@ -72,6 +80,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       isStreaming: false,
       error: null,
     }),
+  setRuntimeMode: (runtimeMode) => set({ runtimeMode }),
 
   setMessages: (updater) =>
     set((state) => ({
@@ -118,7 +127,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     queryClient?: QueryClient,
     options?: StreamMessageOptions,
   ) => {
-    const { sessionId, isStreaming } = get();
+    const { sessionId, isStreaming, runtimeMode } = get();
 
     if (isStreaming || !text.trim()) return;
 
@@ -131,18 +140,38 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     });
 
     const traceEnabled = options?.traceEnabled ?? true;
+    const resolvedRuntimeMode = options?.runtimeMode ?? runtimeMode;
 
     const payload: WsMessageRequest = {
       type: "message",
       content: text,
       trace: traceEnabled,
-      execution_mode: options?.executionMode ?? "auto",
+      runtime_mode: resolvedRuntimeMode,
       analytics_enabled: telemetryClient.isAnonymousTelemetryEnabled(),
       workspace_id: rlmApiConfig.workspaceId,
       user_id: rlmApiConfig.userId,
       session_id: sessionId,
       trace_mode: traceEnabled ? "compact" : "off",
     };
+    if (resolvedRuntimeMode === "modal_chat") {
+      payload.execution_mode = options?.executionMode ?? "auto";
+    } else {
+      if (options?.repoUrl !== undefined) {
+        payload.repo_url = options.repoUrl || null;
+      }
+      if (options?.repoRef !== undefined) {
+        const repoUrl = options.repoUrl ?? null;
+        payload.repo_ref =
+          repoUrl && options.repoRef.trim() ? options.repoRef : null;
+      }
+      if (options?.contextPaths !== undefined) {
+        payload.context_paths =
+          options.contextPaths.length > 0 ? options.contextPaths : null;
+      }
+      if (options?.batchConcurrency !== undefined) {
+        payload.batch_concurrency = options.batchConcurrency;
+      }
+    }
 
     try {
       await streamChatOverWs(payload, {

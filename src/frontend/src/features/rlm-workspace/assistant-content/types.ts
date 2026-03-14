@@ -114,8 +114,13 @@ export interface AssistantContentModel {
     runtimeBadges: string[];
   };
   complexity: "simple" | "medium" | "complex";
-  supplementalParts: Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }>[];
-  attachedToolSessions: Array<Extract<TraceDisplayItem, { kind: "tool_session" }>>;
+  supplementalParts: Exclude<
+    ChatRenderPart,
+    { kind: "reasoning" | "chain_of_thought" }
+  >[];
+  attachedToolSessions: Array<
+    Extract<TraceDisplayItem, { kind: "tool_session" }>
+  >;
   attachedTraceParts: AssistantTurnTracePartItem[];
   directExecutionParts: DirectExecutionPart[];
 }

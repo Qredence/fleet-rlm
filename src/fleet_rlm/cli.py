@@ -1,4 +1,4 @@
-"""Command-line interface for DSPy RLM with Modal.
+"""Command-line interface for fleet-rlm runtimes.
 
 This module provides a Typer-based CLI for running RLM workflows
 and diagnostics. Commands are organized by use case:
@@ -8,6 +8,8 @@ Core commands:
     - serve-api: Optional FastAPI server surface
     - serve-mcp: Optional FastMCP server surface
     - init: Bootstrap Claude Code scaffold assets
+    - daytona-smoke: Native Daytona runtime smoke validation
+    - daytona-rlm: Experimental Daytona-backed strict-RLM pilot
 
 Usage:
     # Use Hydra syntax for configuration overrides
@@ -34,7 +36,7 @@ from .terminal.chat import TerminalChatOptions, run_terminal_chat
 _CONFIG: AppConfig | None = None
 DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 
-app = typer.Typer(help="Run DSPy RLM demos backed by a Modal sandbox.")
+app = typer.Typer(help="Run fleet-rlm demos and experimental runtimes.")
 
 
 def _resolve_server_volume_name(config: AppConfig) -> str | None:
@@ -111,6 +113,142 @@ def chat(
             trace_mode=resolved_trace_mode,  # type: ignore[arg-type]
         ),
     )
+
+
+@app.command("daytona-rlm")
+def daytona_rlm(
+    repo: str | None = typer.Option(
+        None,
+        "--repo",
+        help="Optional repository URL to clone into the Daytona sandbox.",
+    ),
+    context_path: list[Path] = typer.Option(
+        [],
+        "--context-path",
+        help="Optional local file or directory path to stage into the Daytona workspace. Repeat for multiple paths.",
+    ),
+    task: str = typer.Option(
+        ...,
+        "--task",
+        help="Task for the experimental Daytona-backed RLM pilot.",
+    ),
+    ref: str | None = typer.Option(
+        None,
+        "--ref",
+        help="Optional branch or commit SHA to checkout after clone.",
+    ),
+    max_sandboxes: int = typer.Option(
+        50,
+        "--max-sandboxes",
+        min=1,
+        help="Deprecated compatibility flag. Host-loop Daytona runs always use one sandbox per root call.",
+    ),
+    max_depth: int = typer.Option(
+        2,
+        "--max-depth",
+        min=0,
+        help="Deprecated compatibility flag. Host-loop Daytona runs do not spawn child Daytona sandboxes for llm_query.",
+    ),
+    max_iterations: int = typer.Option(
+        50,
+        "--max-iterations",
+        min=1,
+        help="Maximum number of root/child iterations per node.",
+    ),
+    global_timeout: int = typer.Option(
+        3600,
+        "--global-timeout",
+        min=1,
+        help="Global timeout for the entire rollout in seconds.",
+    ),
+    result_truncation_limit: int = typer.Option(
+        10000,
+        "--result-truncation-limit",
+        min=1,
+        help="Maximum child-result size before truncation.",
+    ),
+    batch_concurrency: int = typer.Option(
+        4,
+        "--batch-concurrency",
+        min=1,
+        help="Maximum concurrent child Daytona subcalls in rlm_query_batched.",
+    ),
+    output_dir: Path = typer.Option(
+        Path("results/daytona-rlm"),
+        "--output-dir",
+        help="Directory for persisted rollout JSON artifacts.",
+    ),
+) -> None:
+    """Run the experimental Daytona-backed strict-RLM pilot."""
+    try:
+        from .daytona_rlm import RolloutBudget, run_daytona_rlm_pilot
+
+        if ref and not repo:
+            raise ValueError("--ref requires --repo.")
+
+        budget = RolloutBudget(
+            max_sandboxes=max_sandboxes,
+            max_depth=max_depth,
+            max_iterations=max_iterations,
+            global_timeout=global_timeout,
+            result_truncation_limit=result_truncation_limit,
+            batch_concurrency=batch_concurrency,
+        )
+        result = run_daytona_rlm_pilot(
+            repo=repo,
+            ref=ref,
+            context_paths=[str(path) for path in context_path],
+            task=task,
+            budget=budget,
+            output_dir=output_dir,
+        )
+    except Exception as exc:
+        _handle_error(exc)
+        return
+
+    typer.echo(f"run_id: {result.run_id}")
+    if result.result_path:
+        typer.echo(f"result_path: {result.result_path}")
+    if result.final_artifact is not None:
+        typer.echo(
+            json.dumps(
+                result.final_artifact.to_dict(),
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+
+
+@app.command("daytona-smoke")
+def daytona_smoke(
+    repo: str = typer.Option(
+        ...,
+        "--repo",
+        help="Repository URL to clone into the Daytona sandbox.",
+    ),
+    ref: str | None = typer.Option(
+        None,
+        "--ref",
+        help="Optional branch or commit SHA to checkout after clone.",
+    ),
+) -> None:
+    """Run a native Daytona smoke validation without invoking an LM."""
+    try:
+        from .daytona_rlm import run_daytona_smoke
+
+        result = run_daytona_smoke(
+            repo=repo,
+            ref=ref,
+        )
+    except Exception as exc:
+        _handle_error(exc)
+        return
+
+    payload = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+    if result.error_category is not None:
+        typer.echo(payload, err=True)
+        raise typer.Exit(code=1)
+    typer.echo(payload)
 
 
 def _initialize_config(overrides: list[str] | None = None) -> AppConfig:

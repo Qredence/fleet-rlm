@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { ArtifactCanvas } from "@/components/domain/artifacts/ArtifactCanvas";
+import { ArtifactCanvas } from "@/features/artifacts/ArtifactCanvas";
 import { useArtifactStore } from "@/stores/artifactStore";
 
 describe("ArtifactCanvas tab visibility", () => {
