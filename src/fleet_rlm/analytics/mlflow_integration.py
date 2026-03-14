@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 _CLIENT_LOCK = Lock()
 _TRACE_ID_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
-_INIT_ATTEMPTED = False
 _LAST_INIT_WAS_AUTH_FAILURE = False
 _INITIALIZED = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
@@ -202,21 +201,19 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     resolved = config or MlflowConfig.from_env()
     identity = _mlflow_identity(resolved)
 
-    global _INIT_ATTEMPTED, _INIT_IDENTITY, _INITIALIZED, _ACTIVE_CONFIG
+    global _INIT_IDENTITY, _INITIALIZED, _ACTIVE_CONFIG
     global _LAST_INIT_WAS_AUTH_FAILURE
     with _CLIENT_LOCK:
         _ACTIVE_CONFIG = resolved
 
         if (
-            _INIT_ATTEMPTED
-            and _INIT_IDENTITY == identity
+            _INIT_IDENTITY == identity
             and (_INITIALIZED or _LAST_INIT_WAS_AUTH_FAILURE)
         ):
             return _INITIALIZED
 
         if not resolved.enabled:
             _INITIALIZED = False
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False
@@ -225,7 +222,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         if mlflow is None:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
             _INITIALIZED = False
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False
@@ -249,7 +245,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 dspy.configure(callbacks=[*callbacks, FleetMlflowTraceCallback()])
 
             _INITIALIZED = True
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return True
@@ -259,7 +254,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 tracking_uri=resolved.tracking_uri,
             )
             _INITIALIZED = False
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = _is_auth_forbidden_failure(exc)
             _INIT_IDENTITY = identity
             return False
