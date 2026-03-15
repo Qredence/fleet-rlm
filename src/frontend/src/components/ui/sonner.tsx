@@ -9,8 +9,7 @@ import { Toaster as Sonner, type ToasterProps } from "sonner";
  */
 function Toaster(props: ToasterProps) {
   const isDark =
-    typeof document !== "undefined" &&
-    document.documentElement.dataset.theme === "dark";
+    typeof document !== "undefined" && document.documentElement.dataset.theme === "dark";
 
   return (
     <Sonner

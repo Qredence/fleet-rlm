@@ -8,14 +8,10 @@ const LONG_OUTPUT_TEXT =
   TAIL_FRAGMENT;
 const PANEL_LABEL_PATTERN = /(?:message inspector|side panel)/i;
 
-test("execution canvas keeps lanes readable and payloads untruncated", async ({
-  page,
-}) => {
+test("execution canvas keeps lanes readable and payloads untruncated", async ({ page }) => {
   await page.goto("/");
   await page.waitForURL(/\/app\/workspace$/);
-  await expect(
-    page.getByRole("button", { name: PANEL_LABEL_PATTERN }).first(),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: PANEL_LABEL_PATTERN }).first()).toBeVisible();
 
   const closeSidePanelButton = page.getByRole("button", {
     name: new RegExp(`^Close ${PANEL_LABEL_PATTERN.source}$`, "i"),
@@ -90,9 +86,7 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
           ];
 
           const chatStoreModule = await import("/src/stores/chatStore.ts");
-          const navigationStoreModule = await import(
-            "/src/stores/navigationStore.ts"
-          );
+          const navigationStoreModule = await import("/src/stores/navigationStore.ts");
 
           chatStoreModule.useChatStore.setState({
             messages: [
@@ -169,8 +163,7 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
       );
       break;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error ?? "");
+      const message = error instanceof Error ? error.message : String(error ?? "");
       const isRetryable = message.includes("Execution context was destroyed");
       const isLastAttempt = attempt === 2;
       if (!isRetryable || isLastAttempt) {
@@ -183,9 +176,7 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({
 
   await page.getByRole("tab", { name: "Graph", exact: true }).click();
   await expect(page.getByText("Root RLM", { exact: false }).first()).toBeVisible();
-  await expect(
-    page.getByText("Sub-agent", { exact: false }).first(),
-  ).toBeVisible();
+  await expect(page.getByText("Sub-agent", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("Delegate", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("2.0s", { exact: true }).first()).toBeVisible();
   await expect(

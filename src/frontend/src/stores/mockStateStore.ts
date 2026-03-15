@@ -64,9 +64,7 @@ interface MockState {
   addMemoryEntry: (entry: MemoryEntry) => void;
   updateMemoryEntry: (
     id: string,
-    patch: Partial<
-      Pick<MemoryEntry, "content" | "tags" | "pinned" | "relevance">
-    >,
+    patch: Partial<Pick<MemoryEntry, "content" | "tags" | "pinned" | "relevance">>,
   ) => void;
   removeMemoryEntry: (id: string) => void;
   bulkUpdateMemoryPinned: (ids: string[], pinned: boolean) => void;
@@ -97,9 +95,7 @@ export const useMockStateStore = create<MockState>((set) => ({
     if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       memoryEntries: state.memoryEntries.map((e) =>
-        e.id === id
-          ? { ...e, ...patch, updatedAt: new Date().toISOString() }
-          : e,
+        e.id === id ? { ...e, ...patch, updatedAt: new Date().toISOString() } : e,
       ),
     }));
   },
@@ -115,9 +111,7 @@ export const useMockStateStore = create<MockState>((set) => ({
     if (!rlmApiConfig.mockMode) return;
     set((state) => ({
       memoryEntries: state.memoryEntries.map((e) =>
-        ids.includes(e.id)
-          ? { ...e, pinned, updatedAt: new Date().toISOString() }
-          : e,
+        ids.includes(e.id) ? { ...e, pinned, updatedAt: new Date().toISOString() } : e,
       ),
     }));
   },

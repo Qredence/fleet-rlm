@@ -8,17 +8,12 @@
  */
 import { useState, useMemo, type ReactNode } from "react";
 import { HardDrive, Brain, FileText, Check, Layers } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@/components/ui/popover";
-import { PanelHeaderChip } from "@/features/artifacts/PanelHeaderChip";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { PanelHeaderChip } from "@/features/artifacts/components/PanelHeaderChip";
 import type { Skill } from "@/lib/data/types";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -64,9 +59,7 @@ const CANVAS_VIEWS: CanvasViewItem[] = [
   {
     id: "volumes-browser",
     label: "Volume Browser",
-    icon: (
-      <HardDrive className="size-4 text-muted-foreground" aria-hidden="true" />
-    ),
+    icon: <HardDrive className="size-4 text-muted-foreground" aria-hidden="true" />,
   },
   {
     id: "code-artifact",
@@ -108,22 +101,14 @@ function SwitcherRow({
         "flex items-center gap-3 w-full px-3 py-2 rounded-lg",
         "transition-colors duration-100",
         "text-left",
-        active
-          ? "bg-accent/8 text-foreground"
-          : "text-foreground hover:bg-muted/60",
+        active ? "bg-accent/8 text-foreground" : "text-foreground hover:bg-muted/60",
         disabled && "opacity-40 cursor-not-allowed",
       )}
     >
-      <span className="shrink-0 flex items-center justify-center w-5 h-5">
-        {icon}
-      </span>
-      <span className="flex-1 truncate" style={typo.label}>
-        {label}
-      </span>
+      <span className="shrink-0 flex items-center justify-center w-5 h-5">{icon}</span>
+      <span className="flex-1 truncate typo-label">{label}</span>
       {trailing}
-      {active && (
-        <Check className="size-4 text-accent shrink-0" aria-hidden="true" />
-      )}
+      {active && <Check className="size-4 text-accent shrink-0" aria-hidden="true" />}
     </button>
   );
 }
@@ -146,10 +131,7 @@ export function CanvasSwitcher({
   const recentSkills = useMemo(() => {
     return skills
       .filter((s) => s.id !== selectedSkill?.id)
-      .sort(
-        (a, b) =>
-          new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime(),
-      )
+      .sort((a, b) => new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime())
       .slice(0, MAX_RECENT_SKILLS);
   }, [skills, selectedSkill?.id]);
 
@@ -180,18 +162,13 @@ export function CanvasSwitcher({
       <PopoverContent
         align="start"
         sideOffset={8}
-        className={cn(
-          "w-72 p-0 rounded-card border-subtle",
-          "shadow-md overflow-hidden",
-        )}
+        className={cn("w-72 p-0 rounded-card border-subtle", "shadow-md overflow-hidden")}
       >
         <ScrollArea className="max-h-80">
           <div className="p-2">
             {/* ── Canvas Views ──────────────────────────────────── */}
             <div className="px-2 py-1.5">
-              <span className="text-muted-foreground" style={typo.micro}>
-                CANVAS VIEWS
-              </span>
+              <span className="text-muted-foreground typo-micro">CANVAS VIEWS</span>
             </div>
             {CANVAS_VIEWS.map((view) => (
               <SwitcherRow
@@ -211,32 +188,19 @@ export function CanvasSwitcher({
 
                 {/* ── Recent Skills ──────────────────────────────── */}
                 <div className="px-2 py-1.5">
-                  <span className="text-muted-foreground" style={typo.micro}>
-                    RECENT SKILLS
-                  </span>
+                  <span className="text-muted-foreground typo-micro">RECENT SKILLS</span>
                 </div>
                 {recentSkills.map((skill) => (
                   <SwitcherRow
                     key={skill.id}
-                    icon={
-                      <Layers
-                        className="size-4 text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                    }
+                    icon={<Layers className="size-4 text-muted-foreground" aria-hidden="true" />}
                     label={skill.displayName}
                     trailing={
-                      <Badge
-                        variant="secondary"
-                        className="rounded-full shrink-0"
-                        style={typo.helper}
-                      >
+                      <Badge variant="secondary" className="rounded-full shrink-0 typo-helper">
                         {skill.domain}
                       </Badge>
                     }
-                    active={
-                      canvasMode === "detail" && selectedSkill?.id === skill.id
-                    }
+                    active={canvasMode === "detail" && selectedSkill?.id === skill.id}
                     onClick={() => handleSelectSkill(skill.id)}
                   />
                 ))}
@@ -248,21 +212,13 @@ export function CanvasSwitcher({
               <>
                 <Separator className="my-2 bg-border-subtle" />
                 <div className="px-2 py-1.5">
-                  <span className="text-muted-foreground" style={typo.micro}>
-                    CURRENT SKILL
-                  </span>
+                  <span className="text-muted-foreground typo-micro">CURRENT SKILL</span>
                 </div>
                 <SwitcherRow
-                  icon={
-                    <Layers className="size-4 text-accent" aria-hidden="true" />
-                  }
+                  icon={<Layers className="size-4 text-accent" aria-hidden="true" />}
                   label={selectedSkill.displayName}
                   trailing={
-                    <Badge
-                      variant="secondary"
-                      className="rounded-full shrink-0"
-                      style={typo.mono}
-                    >
+                    <Badge variant="secondary" className="rounded-full shrink-0 typo-mono">
                       v{selectedSkill.version}
                     </Badge>
                   }

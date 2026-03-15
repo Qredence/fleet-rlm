@@ -16,6 +16,9 @@ export const RUNTIME_EDITABLE_KEYS = [
   "DSPY_LLM_API_KEY",
   "DSPY_LM_API_BASE",
   "DSPY_LM_MAX_TOKENS",
+  "DAYTONA_API_KEY",
+  "DAYTONA_API_URL",
+  "DAYTONA_TARGET",
   "MODAL_TOKEN_ID",
   "MODAL_TOKEN_SECRET",
   "SECRET_NAME",
@@ -25,11 +28,11 @@ export const RUNTIME_EDITABLE_KEYS = [
 export type RuntimeEditableKey = (typeof RUNTIME_EDITABLE_KEYS)[number];
 export const RUNTIME_SECRET_EDITABLE_KEYS = [
   "DSPY_LLM_API_KEY",
+  "DAYTONA_API_KEY",
   "MODAL_TOKEN_ID",
   "MODAL_TOKEN_SECRET",
 ] as const;
-export type RuntimeSecretEditableKey =
-  (typeof RUNTIME_SECRET_EDITABLE_KEYS)[number];
+export type RuntimeSecretEditableKey = (typeof RUNTIME_SECRET_EDITABLE_KEYS)[number];
 
 export const RUNTIME_LM_EDITABLE_KEYS = [
   "DSPY_LM_MODEL",
@@ -41,12 +44,9 @@ export const RUNTIME_LM_EDITABLE_KEYS = [
 
 export type RuntimeLmEditableKey = (typeof RUNTIME_LM_EDITABLE_KEYS)[number];
 export const RUNTIME_LM_SECRET_EDITABLE_KEYS = ["DSPY_LLM_API_KEY"] as const;
-export type RuntimeLmSecretEditableKey =
-  (typeof RUNTIME_LM_SECRET_EDITABLE_KEYS)[number];
+export type RuntimeLmSecretEditableKey = (typeof RUNTIME_LM_SECRET_EDITABLE_KEYS)[number];
 
-export interface RuntimeUpdateComputationOptions<
-  SecretKey extends RuntimeSecretEditableKey,
-> {
+export interface RuntimeUpdateComputationOptions<SecretKey extends RuntimeSecretEditableKey> {
   secretInputs?: Partial<Record<SecretKey, string>>;
   clearedSecrets?: Iterable<SecretKey>;
 }
@@ -122,10 +122,7 @@ export function computeLmRuntimeUpdates(
   return updates;
 }
 
-export function useRuntimeStatus(options?: {
-  enabled?: boolean;
-  refetchIntervalMs?: number;
-}) {
+export function useRuntimeStatus(options?: { enabled?: boolean; refetchIntervalMs?: number }) {
   return useQuery({
     queryKey: runtimeKeys.status(),
     queryFn: ({ signal }) => runtimeEndpoints.status(signal),
@@ -147,8 +144,7 @@ export function useRuntimeSettings() {
   const statusQuery = useRuntimeStatus();
 
   const saveSettings = useMutation({
-    mutationFn: (updates: Record<string, string>) =>
-      runtimeEndpoints.patchSettings({ updates }),
+    mutationFn: (updates: Record<string, string>) => runtimeEndpoints.patchSettings({ updates }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: runtimeKeys.settings() }),

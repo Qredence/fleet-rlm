@@ -11,7 +11,7 @@ For utilities, use `src/fleet_rlm/utils/regex.py` for regex helpers.
 - `make test-fast`: quick default suite (`not live_llm and not benchmark`).
 - `make quality-gate`: lint, format check, type check, tests, docs/metadata, frontend checks.
 - `make release-check`: full pre-release validation (`clean`, quality, security, build, wheel frontend sync check, twine check).
-- Frontend (when touched): `cd src/frontend && bun install --frozen-lockfile && bun run build`.
+- Frontend (when touched): `cd src/frontend && pnpm install --frozen-lockfile && pnpm run build`.
 
 ## Coding Style & Naming Conventions
 Use Python 3.10+ with 4-space indentation, explicit type hints, and clear docstrings for non-trivial modules/functions. Enforce style with Ruff and `ty`:
@@ -28,6 +28,7 @@ Naming conventions: modules/functions/tests use `snake_case`; classes use `Pasca
 - Keep `src/fleet_rlm/server/routers/ws/api.py` router-oriented. Chat runtime/bootstrap helpers belong in `server/routers/ws/chat_runtime.py`; the websocket message loop belongs in `server/routers/ws/chat_connection.py`.
 - Keep `src/fleet_rlm/server/execution/step_builder.py` focused on sequencing/orchestration. Pure actor/lane extraction and stream-event mapping helpers belong in `step_builder_extractors.py` and `step_builder_mapping.py`.
 - Keep DSPy signatures centralized in `src/fleet_rlm/react/signatures.py`, and prefer reusable runtime modules/factories over ad hoc `dspy.RLM(...)` creation scattered across callers.
+- Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
 - Keep the canonical runtime module registry in `src/fleet_rlm/react/rlm_runtime_modules.py`; `runtime_factory.py` should be a thin cache/assembly layer rather than a second source of truth.
 - Avoid new compatibility shims for internal imports; prefer moving call sites to canonical modules and deleting the shim once in-repo usage reaches zero.
 

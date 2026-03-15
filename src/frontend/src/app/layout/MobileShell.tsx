@@ -14,20 +14,25 @@ import { BuilderPanel } from "@/app/layout/BuilderPanel";
 import { MobileTabBar } from "@/features/shell/MobileTabBar";
 
 function MobileShell() {
-  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
-    useNavigationStore();
+  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
 
   useEffect(() => {
     registerCanvasHandlers({
       open: () => setIsCanvasOpen(true),
       close: () => setIsCanvasOpen(false),
     });
+
+    // Cleanup handlers on unmount to prevent memory leaks/stale closures
+    return () => {
+      registerCanvasHandlers({
+        open: () => {},
+        close: () => {},
+      });
+    };
   }, [registerCanvasHandlers, setIsCanvasOpen]);
 
   return (
-    <div
-      className="flex h-dvh flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)]"
-    >
+    <div className="flex h-dvh flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)]">
       {/* iOS 26 glass header: logo + action icons only */}
       <TopHeader />
 
@@ -40,19 +45,14 @@ function MobileShell() {
       <Drawer.Root open={isCanvasOpen} onOpenChange={setIsCanvasOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-40" />
-          <Drawer.Content
-            className="surface-glass-sheet fixed bottom-0 left-0 right-0 z-50 flex max-h-[92dvh] flex-col"
-          >
+          <Drawer.Content className="surface-glass-sheet fixed bottom-0 left-0 right-0 z-50 flex max-h-[92dvh] flex-col">
             <Drawer.Title className="sr-only">Builder Panel</Drawer.Title>
             <Drawer.Description className="sr-only">
               Workspace detail and artifact view
             </Drawer.Description>
             {/* iOS 26 grab handle */}
             <div className="flex items-center justify-center py-2.5 shrink-0">
-              <div
-                className="surface-glass-handle h-1.25 w-9 rounded-full"
-                aria-hidden="true"
-              />
+              <div className="surface-glass-handle h-1.25 w-9 rounded-full" aria-hidden="true" />
             </div>
             <div className="flex-1 min-h-0 overflow-hidden">
               <BuilderPanel />

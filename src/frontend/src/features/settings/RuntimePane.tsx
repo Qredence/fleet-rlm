@@ -3,8 +3,23 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { SettingsRow } from "@/components/shared/SettingsRow";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import { SettingsRow } from "@/features/settings/components/SettingsRow";
 import {
   computeRuntimeUpdates,
   useRuntimeSettings,
@@ -12,6 +27,7 @@ import {
   type RuntimeSecretEditableKey,
 } from "@/features/settings/useRuntimeSettings";
 import { shouldHydrateRuntimeForm } from "@/features/settings/runtimePaneHydration";
+import { errorMessage } from "@/features/settings/settingsErrors";
 import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
 
 type RuntimeField = {
@@ -26,14 +42,12 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "DSPY_LM_MODEL",
     label: "LM Model",
-    description:
-      "Planner model identifier (for example: openai/gemini-3.1-pro).",
+    description: "Planner model identifier (for example: openai/gemini-3.1-pro).",
   },
   {
     key: "DSPY_LLM_API_KEY",
     label: "LM API Key",
-    description:
-      "Primary provider key for LM calls. Leave unchanged to keep current value.",
+    description: "Primary provider key for LM calls. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
@@ -50,15 +64,13 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "MODAL_TOKEN_ID",
     label: "Modal Token ID",
-    description:
-      "Optional Modal token ID override. Leave unchanged to keep current value.",
+    description: "Optional Modal token ID override. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
     key: "MODAL_TOKEN_SECRET",
     label: "Modal Token Secret",
-    description:
-      "Optional Modal token secret override. Leave unchanged to keep current value.",
+    description: "Optional Modal token secret override. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
@@ -81,13 +93,9 @@ const RUNTIME_SECRET_KEYS: RuntimeSecretEditableKey[] = [
   "MODAL_TOKEN_SECRET",
 ];
 
-const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(
-  RUNTIME_SECRET_KEYS,
-);
+const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(RUNTIME_SECRET_KEYS);
 
-function isRuntimeSecretKey(
-  key: RuntimeEditableKey,
-): key is RuntimeSecretEditableKey {
+function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditableKey {
   return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
 }
 
@@ -110,11 +118,6 @@ function testVariant(test: RuntimeConnectivityTestResponse | null | undefined) {
   return test.ok ? ("success" as const) : ("destructive-subtle" as const);
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Unexpected error";
-}
-
 export function RuntimePane() {
   const {
     settingsQuery,
@@ -127,10 +130,8 @@ export function RuntimePane() {
 
   const initialValues = settingsQuery.data?.values ?? {};
   const maskedValues = settingsQuery.data?.masked_values ?? initialValues;
-  const [baselineValues, setBaselineValues] =
-    useState<Record<string, string>>(initialValues);
-  const [formValues, setFormValues] =
-    useState<Record<string, string>>(initialValues);
+  const [baselineValues, setBaselineValues] = useState<Record<string, string>>(initialValues);
+  const [formValues, setFormValues] = useState<Record<string, string>>(initialValues);
   const [clearSecretFlags, setClearSecretFlags] = useState<
     Partial<Record<RuntimeSecretEditableKey, boolean>>
   >({});
@@ -142,9 +143,9 @@ export function RuntimePane() {
 
   const secretInputs = useMemo(
     () =>
-      Object.fromEntries(
-        RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""]),
-      ) as Partial<Record<RuntimeSecretEditableKey, string>>,
+      Object.fromEntries(RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""])) as Partial<
+        Record<RuntimeSecretEditableKey, string>
+      >,
     [formValues],
   );
 
@@ -223,10 +224,7 @@ export function RuntimePane() {
         });
         setClearSecretFlags({});
         toast.success("Runtime settings saved", {
-          description:
-            updated.length > 0
-              ? `Updated: ${updated.join(", ")}`
-              : "No keys changed.",
+          description: updated.length > 0 ? `Updated: ${updated.join(", ")}` : "No keys changed.",
         });
       },
       onError: (error) => {
@@ -300,9 +298,29 @@ export function RuntimePane() {
   };
 
   const saveDisabled =
-    !hasUnsavedRuntimeChanges ||
-    saveSettings.isPending ||
-    status?.write_enabled === false;
+    !hasUnsavedRuntimeChanges || saveSettings.isPending || status?.write_enabled === false;
+  const runtimeGuidance = status?.guidance ?? ["No guidance available."];
+
+  const updateFieldValue = (key: RuntimeEditableKey, value: string) => {
+    setFormValues((prev) => ({ ...prev, [key]: value }));
+    if (isRuntimeSecretKey(key)) {
+      setClearSecretFlags((prev) => ({
+        ...prev,
+        [key]: false,
+      }));
+    }
+  };
+
+  const toggleClearSecret = (secretKey: RuntimeSecretEditableKey) => {
+    const nextClear = !(clearSecretFlags[secretKey] ?? false);
+    setClearSecretFlags((prev) => ({
+      ...prev,
+      [secretKey]: nextClear,
+    }));
+    if (nextClear) {
+      setFormValues((prev) => ({ ...prev, [secretKey]: "" }));
+    }
+  };
 
   return (
     <div>
@@ -325,7 +343,7 @@ export function RuntimePane() {
         label="Active Models"
         description="Resolved runtime model identifiers currently used for planner/delegate execution."
       >
-        <div className="text-xs text-muted-foreground text-right">
+        <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
           <div>Planner: {activeModels?.planner || "not set"}</div>
           <div>Delegate: {activeModels?.delegate || "not set"}</div>
           <div>Delegate small: {activeModels?.delegate_small || "not set"}</div>
@@ -341,118 +359,104 @@ export function RuntimePane() {
         </SettingsRow>
       )}
 
-      <div className="border-b border-border-subtle/70 py-3">
-        <span className="text-sm text-muted-foreground font-medium">
-          Runtime Configuration
-        </span>
-      </div>
-
-      {RUNTIME_FIELDS.map((field) => {
-        const secretKey = isRuntimeSecretKey(field.key) ? field.key : null;
-        return (
-          <SettingsRow
-            key={field.key}
-            label={field.label}
-            description={field.description}
+      <Card className="gap-0 rounded-xl border-border-subtle/70 shadow-none">
+        <CardHeader className="border-b border-border-subtle/70">
+          <CardTitle className="text-sm font-medium">Runtime Configuration</CardTitle>
+          <CardDescription className="text-sm">
+            Update runtime credentials, model selection, and Modal resource names used by the local
+            environment.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <FieldGroup className="gap-5">
+            {RUNTIME_FIELDS.map((field) => {
+              const secretKey = isRuntimeSecretKey(field.key) ? field.key : null;
+              const inputId = `runtime-${field.key.toLowerCase()}`;
+              const inputValue = formValues[field.key] ?? "";
+              return (
+                <Field key={field.key}>
+                  <FieldLabel htmlFor={inputId}>{field.label}</FieldLabel>
+                  {field.isSecret && secretKey ? (
+                    <InputGroup className="max-w-xl">
+                      <InputGroupInput
+                        id={inputId}
+                        type="password"
+                        value={inputValue}
+                        placeholder={field.placeholder}
+                        autoComplete="off"
+                        aria-label={field.label}
+                        onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
+                      />
+                      <InputGroupAddon align="inline-end">
+                        <InputGroupButton
+                          type="button"
+                          size="sm"
+                          variant={clearSecretFlags[secretKey] ? "soft" : "outline"}
+                          aria-pressed={clearSecretFlags[secretKey] ?? false}
+                          onClick={() => toggleClearSecret(secretKey)}
+                        >
+                          {clearSecretFlags[secretKey] ? "Will clear on save" : "Clear saved value"}
+                        </InputGroupButton>
+                      </InputGroupAddon>
+                    </InputGroup>
+                  ) : (
+                    <Input
+                      id={inputId}
+                      type="text"
+                      value={inputValue}
+                      placeholder={field.placeholder}
+                      autoComplete="off"
+                      aria-label={field.label}
+                      onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
+                      className="max-w-xl"
+                    />
+                  )}
+                  <FieldDescription>{field.description}</FieldDescription>
+                  {field.isSecret && secretKey ? (
+                    <FieldDescription>
+                      Write-only input. Configured value:{" "}
+                      {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
+                    </FieldDescription>
+                  ) : null}
+                </Field>
+              );
+            })}
+          </FieldGroup>
+        </CardContent>
+        <CardFooter className="border-t border-border-subtle/70 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            Writes to <code>.env</code> (local only), updates process env, and refreshes the active
+            runtime configuration.
+          </p>
+          <Button
+            variant="secondary"
+            className="rounded-lg"
+            onClick={handleSave}
+            disabled={saveDisabled}
           >
-            <div className="flex flex-col items-start gap-2">
-              <Input
-                type={field.isSecret ? "password" : "text"}
-                value={formValues[field.key] ?? ""}
-                placeholder={field.placeholder}
-                autoComplete="off"
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setFormValues((prev) => ({ ...prev, [field.key]: value }));
-                  if (field.isSecret && secretKey) {
-                    setClearSecretFlags((prev) => ({
-                      ...prev,
-                      [secretKey]: false,
-                    }));
-                  }
-                }}
-                className="w-[260px] max-w-[50vw]"
-              />
-              {field.isSecret && secretKey && (
-                <>
-                  <p className="text-xs text-muted-foreground">
-                    Write-only input. Configured value:{" "}
-                    {maskedValues[secretKey]
-                      ? maskedValues[secretKey]
-                      : "not set"}
-                    .
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={clearSecretFlags[secretKey] ? "soft" : "outline"}
-                    className="rounded-lg"
-                    onClick={() => {
-                      const nextClear = !(clearSecretFlags[secretKey] ?? false);
-                      setClearSecretFlags((prev) => ({
-                        ...prev,
-                        [secretKey]: nextClear,
-                      }));
-                      if (nextClear) {
-                        setFormValues((prev) => ({ ...prev, [secretKey]: "" }));
-                      }
-                    }}
-                  >
-                    {clearSecretFlags[secretKey]
-                      ? "Will clear on save"
-                      : "Clear saved value"}
-                  </Button>
-                </>
-              )}
-            </div>
-          </SettingsRow>
-        );
-      })}
+            {saveSettings.isPending ? "Saving…" : "Save settings"}
+          </Button>
+        </CardFooter>
+      </Card>
 
-      <SettingsRow
-        label="Save Runtime Settings"
-        description="Writes to .env (local only), updates process env, and refreshes in-memory runtime."
-      >
-        <Button
-          variant="fill"
-          className="rounded-lg"
-          onClick={handleSave}
-          disabled={saveDisabled}
-        >
-          {saveSettings.isPending ? "Saving…" : "Save settings"}
-        </Button>
-      </SettingsRow>
-
-      <div className="border-b border-border-subtle/70 py-4">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)] lg:items-start lg:gap-6">
-          <div className="min-w-0">
-            <span
-              data-slot="settings-row-label"
-              className="text-sm font-medium leading-5 text-foreground"
-            >
-              Test Credentials + Connection
-            </span>
-            <p
-              data-slot="settings-row-description"
-              className="mt-0.5 max-w-xl text-xs leading-4 text-muted-foreground"
-            >
-              Runs preflight credential checks plus live Modal + LM connectivity
-              smoke tests.
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-xl border border-border-subtle/70 bg-muted/15 p-4">
+      <Card className="mt-4 gap-0 rounded-xl border-border-subtle/70 shadow-none">
+        <CardHeader className="border-b border-border-subtle/70">
+          <CardTitle className="text-sm font-medium">Test Credentials + Connection</CardTitle>
+          <CardDescription className="max-w-xl text-sm">
+            Runs preflight credential checks plus live Modal and LM connectivity smoke tests.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <div className="flex flex-col gap-3">
             <div className="grid gap-2.5 sm:grid-cols-2">
               <Button
-                variant="soft"
+                variant="secondary"
                 size="lg"
                 className="w-full justify-center rounded-lg"
                 onClick={handleTestModal}
                 disabled={testModalConnection.isPending}
               >
-                {testModalConnection.isPending
-                  ? "Testing Modal…"
-                  : "Test Modal Connection"}
+                {testModalConnection.isPending ? "Testing Modal…" : "Test Modal"}
               </Button>
               <Button
                 variant="outline"
@@ -461,50 +465,37 @@ export function RuntimePane() {
                 onClick={handleTestLm}
                 disabled={testLmConnection.isPending}
               >
-                {testLmConnection.isPending
-                  ? "Testing LM…"
-                  : "Test LM Connection"}
-              </Button>
-              <Button
-                variant="fill"
-                size="lg"
-                className="w-full justify-center rounded-lg sm:col-span-2"
-                onClick={handleTestAll}
-                disabled={
-                  testModalConnection.isPending || testLmConnection.isPending
-                }
-              >
-                Test Credentials + Connection
+                {testLmConnection.isPending ? "Testing LM…" : "Test LM"}
               </Button>
             </div>
-
+            <Button
+              variant="secondary"
+              size="lg"
+              className="w-full justify-center rounded-lg"
+              onClick={handleTestAll}
+              disabled={testModalConnection.isPending || testLmConnection.isPending}
+            >
+              Test All Connections
+            </Button>
             {hasUnsavedRuntimeChanges ? (
-              <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                Save runtime settings first so tests run against your latest
-                credentials and provider configuration.
+              <p className="text-xs leading-5 text-muted-foreground">
+                Save runtime settings first so tests run against your latest credentials and
+                provider configuration.
               </p>
             ) : null}
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      <SettingsRow
-        label="Modal Smoke"
-        description={`Last result: ${testSummary(modalTest)}`}
-      >
+      <SettingsRow label="Modal Smoke" description={`Last result: ${testSummary(modalTest)}`}>
         <Badge variant={testVariant(modalTest)}>
           {modalTest?.checked_at
-            ? `${testSummary(modalTest)} • ${new Date(
-                modalTest.checked_at,
-              ).toLocaleString()}`
+            ? `${testSummary(modalTest)} • ${new Date(modalTest.checked_at).toLocaleString()}`
             : "Not run"}
         </Badge>
       </SettingsRow>
 
-      <SettingsRow
-        label="LM Smoke"
-        description={`Last result: ${testSummary(lmTest)}`}
-      >
+      <SettingsRow label="LM Smoke" description={`Last result: ${testSummary(lmTest)}`}>
         <Badge variant={testVariant(lmTest)}>
           {lmTest?.checked_at
             ? `${testSummary(lmTest)} • ${new Date(lmTest.checked_at).toLocaleString()}`
@@ -512,37 +503,24 @@ export function RuntimePane() {
         </Badge>
       </SettingsRow>
 
-      <SettingsRow
-        label="Preflight Checks"
-        description="Credential and provider availability."
-      >
-        <div className="flex flex-wrap justify-end gap-1.5">
+      <SettingsRow label="Preflight Checks" description="Credential and provider availability.">
+        <div className="flex flex-wrap justify-end gap-1.5 max-w-[60%]">
           {llmChecks.map(([key, ok]) => (
-            <Badge
-              key={`llm-${key}`}
-              variant={ok ? "success" : "destructive-subtle"}
-            >
-              LM {formatCheckLabel(key)}: {ok ? "configured" : "missing"}
+            <Badge key={`llm-${key}`} variant={ok ? "success" : "destructive-subtle"}>
+              LM {formatCheckLabel(key)}
             </Badge>
           ))}
           {modalChecks.map(([key, ok]) => (
-            <Badge
-              key={`modal-${key}`}
-              variant={ok ? "success" : "destructive-subtle"}
-            >
-              Modal {formatCheckLabel(key)}: {ok ? "configured" : "missing"}
+            <Badge key={`modal-${key}`} variant={ok ? "success" : "destructive-subtle"}>
+              Modal {formatCheckLabel(key)}
             </Badge>
           ))}
         </div>
       </SettingsRow>
 
-      <SettingsRow
-        label="Guidance"
-        description="Actionable runtime recommendations."
-        noBorder
-      >
-        <ul className="list-disc pl-5 space-y-1 text-xs text-muted-foreground text-right">
-          {(status?.guidance ?? ["No guidance available."]).map((item) => (
+      <SettingsRow label="Guidance" description="Actionable runtime recommendations." noBorder>
+        <ul className="flex list-disc flex-col gap-1 pl-5 text-right text-xs text-muted-foreground">
+          {runtimeGuidance.map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>

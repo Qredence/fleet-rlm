@@ -11,8 +11,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 export function asText(value: unknown): string {
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (!value) return "";
 
   if (typeof value === "object" && !Array.isArray(value)) {
@@ -41,6 +40,31 @@ function firstLine(value: string, max = 160): string {
   return line?.trim() ?? "";
 }
 
+function joinFragments(values: unknown[]): string {
+  const merged = values.map((value) => asText(value)).join("");
+  return compact(merged.replace(/\s+/g, " "));
+}
+
+function summarizeStructuredOutput(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    return value.length === 0
+      ? "Output list is empty"
+      : `Output list with ${value.length} item${value.length === 1 ? "" : "s"}`;
+  }
+
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).filter(Boolean);
+    if (keys.length === 0) return "Structured output";
+
+    const preview = keys.slice(0, 3).join(", ");
+    const extra = keys.length - 3;
+    return extra > 0 ? `Output fields: ${preview} +${extra} more` : `Output fields: ${preview}`;
+  }
+
+  const text = compact(asText(value), 120);
+  return text ? `Output: ${text}` : undefined;
+}
+
 function summarizeToolStep(step: ExecutionStep): string | undefined {
   const inputRecord = asRecord(step.input);
   const outputRecord = asRecord(step.output);
@@ -52,13 +76,9 @@ function summarizeToolStep(step: ExecutionStep): string | undefined {
   const parsedOutput = parseArtifactPayload(step.output);
   if (parsedOutput.kind === "tool") {
     const name = parsedOutput.data.tool_name || toolName || "tool";
-    const outputText = compact(
-      asText(parsedOutput.data.tool_output ?? parsedOutput.data.result),
-    );
+    const outputText = compact(asText(parsedOutput.data.tool_output ?? parsedOutput.data.result));
     if (outputText) return `${name}: ${outputText}`;
-    const argText = compact(
-      asText(parsedOutput.data.tool_input ?? parsedOutput.data.tool_args),
-    );
+    const argText = compact(asText(parsedOutput.data.tool_input ?? parsedOutput.data.tool_args));
     if (argText) return `${name}(${argText})`;
     return `Tool ${name} executed`;
   }
@@ -90,8 +110,7 @@ function summarizeTrajectoryLike(step: ExecutionStep): string | undefined {
       : "step_data" in parsed.data
         ? parsed.data.step_data
         : parsed.data;
-  const thought =
-    typeof data.thought === "string" ? compact(data.thought, 100) : undefined;
+  const thought = typeof data.thought === "string" ? compact(data.thought, 100) : undefined;
   const action =
     typeof data.tool_name === "string"
       ? `Action: ${data.tool_name}`
@@ -99,11 +118,7 @@ function summarizeTrajectoryLike(step: ExecutionStep): string | undefined {
         ? `Action: ${compact(data.label, 60)}`
         : undefined;
   const observation = compact(asText(data.output), 100);
-  return [
-    thought && `Thought: ${thought}`,
-    action,
-    observation && `Obs: ${observation}`,
-  ]
+  return [thought && `Thought: ${thought}`, action, observation && `Obs: ${observation}`]
     .filter(Boolean)
     .join(" · ");
 }
@@ -119,12 +134,12 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
   if (step.type === "llm") {
     const output = asRecord(step.output);
     if (Array.isArray(output?.reasoning) && output.reasoning.length > 0) {
-      const latest = asText(output.reasoning[output.reasoning.length - 1]);
-      return `Reasoning: ${compact(latest, 110)}`;
+      const combined = joinFragments(output.reasoning);
+      return combined ? `Reasoning: ${combined}` : step.label;
     }
     if (Array.isArray(output?.status) && output.status.length > 0) {
-      const latest = asText(output.status[output.status.length - 1]);
-      return `Status: ${compact(latest, 110)}`;
+      const combined = joinFragments(output.status);
+      return combined ? `Status: ${combined}` : step.label;
     }
     // Unpack the {streaming, text} envelope emitted by the backend LLM step
     if (typeof output?.text === "string" && output.text.trim()) {
@@ -136,10 +151,7 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
     const payload = out?.payload;
     const parsedPayload = parseArtifactPayload(payload);
     if (parsedPayload.kind === "error") {
-      const record =
-        "error" in parsedPayload.data
-          ? parsedPayload.data.error
-          : parsedPayload.data;
+      const record = "error" in parsedPayload.data ? parsedPayload.data.error : parsedPayload.data;
       const msg =
         (typeof record.message === "string" && record.message) ||
         (typeof record.traceback === "string" && record.traceback) ||
@@ -148,17 +160,16 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
     }
     const text = typeof out?.text === "string" ? out.text : "";
     if (text.trim()) return compact(text, 120);
-    if (payload != null) return `Structured output (${typeof payload})`;
+    if (payload != null) {
+      return summarizeStructuredOutput(payload) || "Structured output";
+    }
   }
 
   // Generic fallback for plain objects
   const genericRecord = asRecord(step.output);
   if (genericRecord) {
     const textCandidate =
-      genericRecord.text ??
-      genericRecord.output ??
-      genericRecord.result ??
-      genericRecord.message;
+      genericRecord.text ?? genericRecord.output ?? genericRecord.result ?? genericRecord.message;
     if (typeof textCandidate === "string" && textCandidate.trim()) {
       return compact(textCandidate, 120);
     }
@@ -170,8 +181,7 @@ export function summarizeArtifactStep(step: ExecutionStep): string {
     try {
       const parsed = JSON.parse(step.output);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const textCandidate =
-          parsed.text ?? parsed.output ?? parsed.result ?? parsed.message;
+        const textCandidate = parsed.text ?? parsed.output ?? parsed.result ?? parsed.message;
         if (typeof textCandidate === "string" && textCandidate.trim()) {
           return compact(textCandidate, 120);
         }
@@ -216,9 +226,7 @@ function looksLikeMarkdown(value: string): boolean {
   );
 }
 
-export function buildArtifactPreviewModel(
-  step: ExecutionStep | undefined,
-): ArtifactPreviewModel {
+export function buildArtifactPreviewModel(step: ExecutionStep | undefined): ArtifactPreviewModel {
   if (!step) return { kind: "empty" };
 
   const outputRecord = asRecord(step.output);
@@ -228,28 +236,20 @@ export function buildArtifactPreviewModel(
     "";
   const payload =
     outputRecord?.payload ??
-    (outputRecord && parseFinalOutputEnvelope(outputRecord)
-      ? outputRecord
-      : undefined);
+    (outputRecord && parseFinalOutputEnvelope(outputRecord) ? outputRecord : undefined);
 
   if (/error|failed|exception/i.test(step.label)) {
-    const parsedErr = parseArtifactPayload(
-      payload ?? step.output ?? step.input,
-    );
+    const parsedErr = parseArtifactPayload(payload ?? step.output ?? step.input);
     if (parsedErr.kind === "error") {
-      const record =
-        "error" in parsedErr.data ? parsedErr.data.error : parsedErr.data;
-      const message =
-        (typeof record.message === "string" && record.message) ||
-        "Execution failed";
+      const record = "error" in parsedErr.data ? parsedErr.data.error : parsedErr.data;
+      const message = (typeof record.message === "string" && record.message) || "Execution failed";
       const details =
         (typeof record.traceback === "string" && record.traceback) ||
         (typeof record.stack === "string" && record.stack) ||
         undefined;
       return { kind: "error", message, details };
     }
-    if (text.trim())
-      return { kind: "error", message: firstLine(text), details: text };
+    if (text.trim()) return { kind: "error", message: firstLine(text), details: text };
   }
 
   const parsedPayload = parseArtifactPayload(payload);
@@ -296,9 +296,7 @@ export function buildArtifactPreviewModel(
   }
 
   if (text.trim()) {
-    return looksLikeMarkdown(text)
-      ? { kind: "markdown", text }
-      : { kind: "text", text };
+    return looksLikeMarkdown(text) ? { kind: "markdown", text } : { kind: "text", text };
   }
 
   if (step.output != null) return { kind: "json", value: step.output };

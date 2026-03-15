@@ -9,14 +9,9 @@ import {
   MenubarMenu,
   MenubarTrigger,
 } from "@/components/ui/menubar";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
-import type { SettingsSection } from "@/features/settings/types";
 import {
   PROMPT_INPUT_ICON_BUTTON_CLASSNAME,
   PROMPT_INPUT_ICON_BUTTON_VARIANT,
@@ -25,23 +20,19 @@ import {
 } from "./composerActionStyles";
 
 interface OpenSettingsEventDetail {
-  section?: SettingsSection;
+  section?: string;
 }
 
 function SettingsDropdown() {
   const { navigate } = useAppNavigate();
 
   const handleOpenSettings = () => {
-    const openSettingsEvent = new CustomEvent<OpenSettingsEventDetail>(
-      "open-settings",
-      {
-        detail: { section: "runtime" },
-        cancelable: true,
-      },
-    );
+    const openSettingsEvent = new CustomEvent<OpenSettingsEventDetail>("open-settings", {
+      detail: { section: "runtime" },
+      cancelable: true,
+    });
 
-    const wasHandledByDialog =
-      document.dispatchEvent(openSettingsEvent) === false;
+    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
 
     if (!wasHandledByDialog) {
       navigate("/settings?section=runtime");
@@ -71,10 +62,7 @@ function SettingsDropdown() {
           </TooltipContent>
         </Tooltip>
 
-        <MenubarContent
-          align="start"
-          className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-64")}
-        >
+        <MenubarContent align="start" className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-64")}>
           <MenubarLabel className="prompt-composer-menu-label px-3 py-2 uppercase tracking-[0.12em]">
             Runtime settings
           </MenubarLabel>
@@ -84,9 +72,7 @@ function SettingsDropdown() {
           >
             <Settings className="h-4 w-4" />
             <div className="min-w-0">
-              <div className="font-medium text-(--color-text)">
-                Open runtime settings
-              </div>
+              <div className="font-medium text-(--color-text)">Open runtime settings</div>
               <div className="mt-0.5 text-[11px] leading-4 text-(--color-text-secondary)">
                 Adjust model, execution, and session controls.
               </div>

@@ -59,15 +59,11 @@ function asOptionalNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function parseCitations(
-  payload?: Record<string, unknown>,
-): ChatInlineCitation[] {
+function parseCitations(payload?: Record<string, unknown>): ChatInlineCitation[] {
   const raw = payload?.citations;
   if (!Array.isArray(raw) || raw.length === 0) return [];
 
-  const rawAnchors = Array.isArray(payload?.citation_anchors)
-    ? payload.citation_anchors
-    : [];
+  const rawAnchors = Array.isArray(payload?.citation_anchors) ? payload.citation_anchors : [];
   const anchorsById = new Map<
     string,
     {
@@ -88,10 +84,8 @@ function parseCitations(
   for (const anchorItem of rawAnchors) {
     const anchor = asRecord(anchorItem);
     if (!anchor) continue;
-    const anchorId =
-      asOptionalText(anchor.anchor_id) ?? asOptionalText(anchor.anchorId);
-    const sourceId =
-      asOptionalText(anchor.source_id) ?? asOptionalText(anchor.sourceId);
+    const anchorId = asOptionalText(anchor.anchor_id) ?? asOptionalText(anchor.anchorId);
+    const sourceId = asOptionalText(anchor.source_id) ?? asOptionalText(anchor.sourceId);
     const number =
       asOptionalText(anchor.number) ??
       (() => {
@@ -117,35 +111,20 @@ function parseCitations(
       if (!url) return null;
 
       const title =
-        asOptionalText(rec.title ?? rec.source_title) ??
-        asOptionalText(rec.source) ??
-        "Source";
+        asOptionalText(rec.title ?? rec.source_title) ?? asOptionalText(rec.source) ?? "Source";
       const numericNumber = asOptionalNumber(rec.number);
-      const sourceId =
-        asOptionalText(rec.source_id) ??
-        asOptionalText(rec.sourceId) ??
-        undefined;
-      const anchorId =
-        asOptionalText(rec.anchor_id) ??
-        asOptionalText(rec.anchorId) ??
-        undefined;
+      const sourceId = asOptionalText(rec.source_id) ?? asOptionalText(rec.sourceId) ?? undefined;
+      const anchorId = asOptionalText(rec.anchor_id) ?? asOptionalText(rec.anchorId) ?? undefined;
       const anchorFromId = anchorId ? anchorsById.get(anchorId) : undefined;
       const rawNumberText =
-        asOptionalText(rec.number) ??
-        (numericNumber != null ? String(numericNumber) : undefined);
+        asOptionalText(rec.number) ?? (numericNumber != null ? String(numericNumber) : undefined);
       const anchorFromSource = sourceId
-        ? anchorsBySourceAndNumber.get(
-            `${sourceId}|${rawNumberText ?? String(index + 1)}`,
-          )
+        ? anchorsBySourceAndNumber.get(`${sourceId}|${rawNumberText ?? String(index + 1)}`)
         : undefined;
       const anchorData = anchorFromId ?? anchorFromSource;
-      const finalNumber =
-        anchorData?.number ?? rawNumberText ?? String(index + 1);
-      const startChar =
-        asOptionalNumber(rec.start_char ?? rec.startChar) ??
-        anchorData?.startChar;
-      const endChar =
-        asOptionalNumber(rec.end_char ?? rec.endChar) ?? anchorData?.endChar;
+      const finalNumber = anchorData?.number ?? rawNumberText ?? String(index + 1);
+      const startChar = asOptionalNumber(rec.start_char ?? rec.startChar) ?? anchorData?.startChar;
+      const endChar = asOptionalNumber(rec.end_char ?? rec.endChar) ?? anchorData?.endChar;
 
       return {
         number: finalNumber,
@@ -207,8 +186,11 @@ function parseSources(
 
       const canonicalUrl = normalizeUrl(rec.canonical_url ?? rec.canonicalUrl);
       const displayUrl = normalizeUrl(rec.display_url ?? rec.displayUrl);
+      const fileDisplayUrl =
+        asOptionalText(rec.display_url ?? rec.displayUrl) ??
+        asOptionalText(rec.host_path ?? rec.hostPath) ??
+        asOptionalText(rec.path);
       const url = normalizeUrl(rec.url) ?? displayUrl ?? canonicalUrl;
-      if (!url && !canonicalUrl) continue;
 
       const sourceId =
         asOptionalText(rec.source_id) ??
@@ -224,6 +206,7 @@ function parseSources(
           ? kindRaw
           : "other";
       const title = asOptionalText(rec.title) ?? "Source";
+      if (!url && !canonicalUrl && !fileDisplayUrl && !title) continue;
 
       const source: ChatSourceItem = {
         sourceId,
@@ -231,12 +214,12 @@ function parseSources(
         title,
         url: url ?? undefined,
         canonicalUrl: canonicalUrl ?? url ?? undefined,
-        displayUrl: displayUrl ?? url ?? undefined,
+        displayUrl: displayUrl ?? fileDisplayUrl ?? url ?? undefined,
         description: asOptionalText(rec.description),
         quote: asOptionalText(rec.quote),
       };
 
-      const dedupeKey = source.canonicalUrl ?? source.url ?? source.sourceId;
+      const dedupeKey = source.canonicalUrl ?? source.url ?? source.displayUrl ?? source.sourceId;
       sources.set(dedupeKey, source);
     }
   }
@@ -261,9 +244,7 @@ function parseSources(
   return [...sources.values()].slice(0, MAX_SOURCES);
 }
 
-function parseAttachments(
-  payload?: Record<string, unknown>,
-): ChatAttachmentItem[] {
+function parseAttachments(payload?: Record<string, unknown>): ChatAttachmentItem[] {
   const raw = payload?.attachments;
   if (!Array.isArray(raw) || raw.length === 0) return [];
 
@@ -278,8 +259,7 @@ function parseAttachments(
         asOptionalText(rec.attachmentId) ??
         asOptionalText(rec.id) ??
         nextId("attachment");
-      const name =
-        asOptionalText(rec.name) ?? asOptionalText(rec.title) ?? "Attachment";
+      const name = asOptionalText(rec.name) ?? asOptionalText(rec.title) ?? "Attachment";
 
       return {
         attachmentId,
@@ -303,9 +283,7 @@ function parseAttachments(
   return [...deduped.values()].slice(0, MAX_ATTACHMENTS);
 }
 
-function parseFinalReferences(
-  payload?: Record<string, unknown>,
-): FinalReferenceBundle {
+function parseFinalReferences(payload?: Record<string, unknown>): FinalReferenceBundle {
   const citations = parseCitations(payload);
   return {
     citations,
@@ -314,10 +292,7 @@ function parseFinalReferences(
   };
 }
 
-function upsertAssistantRenderPart(
-  messages: ChatMessage[],
-  part: ChatRenderPart,
-): ChatMessage[] {
+function upsertAssistantRenderPart(messages: ChatMessage[], part: ChatRenderPart): ChatMessage[] {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (!msg || msg.type !== "assistant") continue;

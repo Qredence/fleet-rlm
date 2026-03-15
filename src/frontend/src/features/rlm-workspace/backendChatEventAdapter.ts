@@ -1,14 +1,20 @@
-import type {
-  ChatMessage,
-  ChatQueueItem,
-  ChatRenderPart,
-  ChatTraceStep,
-  RuntimeContext,
-} from "@/lib/data/types";
+import type { ChatMessage, ChatQueueItem, ChatRenderPart, ChatTraceStep } from "@/lib/data/types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
 import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";
+import {
+  asOptionalNumber,
+  asOptionalText,
+  asRecord,
+  parseRuntimeContext,
+} from "@/features/rlm-workspace/backendChatEventPayload";
 import { attachFinalReferences } from "@/features/rlm-workspace/backendChatEventReferences";
+import {
+  normalizeTrajectorySteps,
+  normalizeTrajectoryStepsFromFinalPayload,
+  trajectoryStepDetails,
+  type NormalizedTrajectoryStep,
+} from "@/features/rlm-workspace/backendChatEventTrajectory";
 import {
   appendToolLikePart,
   inferStatusTone,
@@ -19,61 +25,6 @@ interface ApplyFrameResult {
   messages: ChatMessage[];
   terminal: boolean;
   errored: boolean;
-}
-
-interface NormalizedTrajectoryStep {
-  index: number;
-  thought?: string;
-  action?: string;
-  toolName?: string;
-  toolInput?: unknown;
-  toolOutput?: unknown;
-  label: string;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return undefined;
-  return value as Record<string, unknown>;
-}
-
-function asOptionalText(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function asOptionalNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return undefined;
-}
-
-function parseRuntimeContext(
-  payload?: Record<string, unknown>,
-): RuntimeContext | undefined {
-  const raw = asRecord(payload?.runtime) ?? payload;
-  if (!raw) return undefined;
-  const depth = asOptionalNumber(raw.depth);
-  const maxDepth = asOptionalNumber(raw.max_depth);
-  const executionProfile = asOptionalText(raw.execution_profile);
-  if (depth == null || maxDepth == null || !executionProfile) return undefined;
-  const volumeName = asOptionalText(raw.volume_name);
-  const executionMode = asOptionalText(raw.execution_mode);
-  const sandboxId = asOptionalText(raw.sandbox_id);
-  return {
-    depth,
-    maxDepth,
-    executionProfile,
-    sandboxActive: raw.sandbox_active === true,
-    effectiveMaxIters: asOptionalNumber(raw.effective_max_iters) ?? 10,
-    ...(volumeName ? { volumeName } : {}),
-    ...(executionMode ? { executionMode } : {}),
-    ...(sandboxId ? { sandboxId } : {}),
-  };
 }
 
 function nextId(prefix: string): string {
@@ -127,10 +78,7 @@ function ensureStreamingAssistant(messages: ChatMessage[]): ChatMessage[] {
   ];
 }
 
-function appendAssistantToken(
-  messages: ChatMessage[],
-  token: string,
-): ChatMessage[] {
+function appendAssistantToken(messages: ChatMessage[], token: string): ChatMessage[] {
   if (!token) return messages;
   const withAssistant = ensureStreamingAssistant(messages);
   const idx = latestStreamingAssistantIndex(withAssistant);
@@ -183,10 +131,7 @@ function finishReasoning(messages: ChatMessage[]): ChatMessage[] {
   return updated ? next : messages;
 }
 
-function completeAssistant(
-  messages: ChatMessage[],
-  text: string,
-): ChatMessage[] {
+function completeAssistant(messages: ChatMessage[], text: string): ChatMessage[] {
   const idx = latestStreamingAssistantIndex(messages);
 
   if (idx >= 0) {
@@ -215,14 +160,39 @@ function completeAssistant(
   ];
 }
 
-function readGuardrailWarnings(
-  payload: Record<string, unknown> | undefined,
-): string[] {
+function preferredFinalArtifactText(value: unknown): string | undefined {
+  const direct = asOptionalText(value);
+  if (direct) return direct;
+
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  for (const key of ["final_markdown", "summary", "text", "content", "message"]) {
+    const candidate = asOptionalText(record[key]);
+    if (candidate) return candidate;
+  }
+
+  const nestedValue = record.value;
+  if (nestedValue !== value) {
+    return preferredFinalArtifactText(nestedValue);
+  }
+
+  return undefined;
+}
+
+function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
+  const runResult = asRecord(payload?.run_result ?? payload?.runResult);
+  const preferred =
+    preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact) ??
+    preferredFinalArtifactText(runResult?.final_artifact ?? runResult?.finalArtifact);
+
+  return preferred ?? text;
+}
+
+function readGuardrailWarnings(payload: Record<string, unknown> | undefined): string[] {
   const raw = payload?.guardrail_warnings;
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
+  return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
 function appendTracePart(
@@ -360,240 +330,6 @@ function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
   return copy;
 }
 
-function trajectoryStepData(
-  payload?: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  const raw = payload?.step_data;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  return raw as Record<string, unknown>;
-}
-
-function normalizeOptionalUnknown(value: unknown): unknown | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
-  }
-  return value;
-}
-
-function parseTrajectoryStepIndex(
-  payload?: Record<string, unknown>,
-  stepData?: Record<string, unknown>,
-): number {
-  return (
-    asOptionalNumber(payload?.step_index) ??
-    asOptionalNumber(stepData?.index) ??
-    0
-  );
-}
-
-function normalizeTrajectoryStep(
-  raw: Record<string, unknown>,
-  index: number,
-  fallbackText?: string,
-): NormalizedTrajectoryStep {
-  const action = asOptionalText(raw.action);
-  const toolName = asOptionalText(raw.tool_name ?? raw.toolName);
-  const thought = asOptionalText(raw.thought) ?? asOptionalText(fallbackText);
-  const toolInput = normalizeOptionalUnknown(
-    raw.tool_args ?? raw.input ?? raw.tool_input ?? raw.toolInput,
-  );
-  const toolOutput = normalizeOptionalUnknown(
-    raw.output ?? raw.observation ?? raw.tool_output ?? raw.toolOutput,
-  );
-  const label =
-    action ||
-    (toolName ? `Tool: ${toolName}` : undefined) ||
-    (thought ? `Step ${index + 1}` : undefined) ||
-    `Step ${index + 1}`;
-
-  return {
-    index,
-    thought,
-    action,
-    toolName,
-    toolInput,
-    toolOutput,
-    label,
-  };
-}
-
-function extractIndexedTrajectorySteps(
-  payload?: Record<string, unknown>,
-): Map<number, Record<string, unknown>> {
-  const stepsByIndex = new Map<number, Record<string, unknown>>();
-  if (!payload) return stepsByIndex;
-
-  const pattern =
-    /^(thought|tool_name|tool_args|tool_input|input|observation|tool_output|output|action)_(\d+)$/;
-  for (const [key, value] of Object.entries(payload)) {
-    const match = key.match(pattern);
-    if (!match) continue;
-    const field = match[1];
-    if (!field) continue;
-    const index = Number(match[2]);
-    if (!Number.isFinite(index)) continue;
-    const current = stepsByIndex.get(index) ?? {};
-    current[field] = value;
-    stepsByIndex.set(index, current);
-  }
-  return stepsByIndex;
-}
-
-function normalizeTrajectorySteps(
-  text: string,
-  payload?: Record<string, unknown>,
-): NormalizedTrajectoryStep[] {
-  const stepsByIndex = extractIndexedTrajectorySteps(payload);
-  const stepData = trajectoryStepData(payload);
-
-  if (stepData) {
-    const index = parseTrajectoryStepIndex(payload, stepData);
-    const merged = {
-      ...(stepsByIndex.get(index) ?? {}),
-      ...stepData,
-    };
-    stepsByIndex.set(index, merged);
-  }
-
-  // Fallback for payloads that expose trajectory fields directly without index.
-  if (!stepData && stepsByIndex.size === 0 && payload) {
-    const inlineStep: Record<string, unknown> = {};
-    for (const field of [
-      "thought",
-      "action",
-      "tool_name",
-      "tool_args",
-      "tool_input",
-      "input",
-      "observation",
-      "tool_output",
-      "output",
-    ]) {
-      if (payload[field] !== undefined) {
-        inlineStep[field] = payload[field];
-      }
-    }
-    if (Object.keys(inlineStep).length > 0) {
-      const index = parseTrajectoryStepIndex(payload);
-      stepsByIndex.set(index, inlineStep);
-    }
-  }
-
-  const sorted = [...stepsByIndex.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([index, raw], position) =>
-      normalizeTrajectoryStep(raw, index, position === 0 ? text : undefined),
-    );
-
-  if (sorted.length > 0) {
-    return sorted;
-  }
-
-  const fallback = text.trim();
-  if (!fallback) return [];
-  const fallbackIndex = parseTrajectoryStepIndex(payload, stepData);
-  return [
-    {
-      index: fallbackIndex,
-      thought: fallback,
-      label: `Step ${fallbackIndex + 1}`,
-    },
-  ];
-}
-
-function normalizeTrajectoryStepsFromFinalPayload(
-  payload?: Record<string, unknown>,
-): NormalizedTrajectoryStep[] {
-  if (!payload) return [];
-
-  const rawTrajectory = payload.trajectory;
-  if (Array.isArray(rawTrajectory)) {
-    return rawTrajectory
-      .map((entry, idx) => {
-        const record = asRecord(entry);
-        if (!record) return null;
-        const index = asOptionalNumber(record.index) ?? idx;
-        return normalizeTrajectoryStep(record, index);
-      })
-      .filter((step): step is NormalizedTrajectoryStep => step != null);
-  }
-
-  const trajectoryRecord = asRecord(rawTrajectory);
-  if (trajectoryRecord) {
-    return normalizeTrajectorySteps("", trajectoryRecord);
-  }
-
-  return normalizeTrajectorySteps("", payload);
-}
-
-function truncateTrajectoryDetail(value: string, maxLength = 96) {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 3)}...`;
-}
-
-function summarizeTrajectoryValue(value: unknown): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string") {
-    const trimmed = value.replace(/\s+/g, " ").trim();
-    return trimmed ? truncateTrajectoryDetail(trimmed) : undefined;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    const rendered = value
-      .map((entry) => summarizeTrajectoryValue(entry))
-      .filter((entry): entry is string => Boolean(entry));
-    if (rendered.length === 0) return undefined;
-    const preview = rendered.slice(0, 3).join(", ");
-    return rendered.length > 3
-      ? `${truncateTrajectoryDetail(preview)} (+${rendered.length - 3} more)`
-      : truncateTrajectoryDetail(preview);
-  }
-
-  const record = asRecord(value);
-  if (record) {
-    const entries = Object.entries(record)
-      .map(([key, entryValue]) => {
-        const rendered = summarizeTrajectoryValue(entryValue);
-        return rendered ? `${key}=${rendered}` : null;
-      })
-      .filter((entry): entry is string => entry != null);
-    if (entries.length > 0) {
-      const preview = entries.slice(0, 3).join(", ");
-      return entries.length > 3
-        ? `${truncateTrajectoryDetail(preview)} (+${entries.length - 3} more)`
-        : truncateTrajectoryDetail(preview);
-    }
-  }
-
-  try {
-    return truncateTrajectoryDetail(JSON.stringify(value));
-  } catch {
-    return truncateTrajectoryDetail(String(value));
-  }
-}
-
-function trajectoryStepDetails(step: NormalizedTrajectoryStep): string[] {
-  const details: string[] = [];
-  if (step.toolName) {
-    details.push(`Tool · ${step.toolName}`);
-  }
-  if (step.toolInput !== undefined) {
-    details.push(
-      `Input · ${summarizeTrajectoryValue(step.toolInput) ?? "Available"}`,
-    );
-  }
-  if (step.toolOutput !== undefined) {
-    details.push(
-      `Observation · ${summarizeTrajectoryValue(step.toolOutput) ?? "Available"}`,
-    );
-  }
-  return details;
-}
-
 function upsertChainOfThought(
   messages: ChatMessage[],
   step: NormalizedTrajectoryStep,
@@ -606,10 +342,7 @@ function upsertChainOfThought(
     details: trajectoryStepDetails(step),
   };
 
-  const idx = latestTraceIndex(
-    messages,
-    (part) => part.kind === "chain_of_thought",
-  );
+  const idx = latestTraceIndex(messages, (part) => part.kind === "chain_of_thought");
   if (idx < 0) {
     return appendTracePart(
       messages,
@@ -630,21 +363,14 @@ function upsertChainOfThought(
     if (part.kind !== "chain_of_thought") return part;
     const withoutCurrent = part.steps.filter((s) => s.index !== step.index);
     const sortedSteps = [...withoutCurrent, traceStep].sort((left, right) => {
-      const leftIndex =
-        typeof left.index === "number" ? left.index : Number.POSITIVE_INFINITY;
-      const rightIndex =
-        typeof right.index === "number"
-          ? right.index
-          : Number.POSITIVE_INFINITY;
+      const leftIndex = typeof left.index === "number" ? left.index : Number.POSITIVE_INFINITY;
+      const rightIndex = typeof right.index === "number" ? right.index : Number.POSITIVE_INFINITY;
       if (leftIndex !== rightIndex) return leftIndex - rightIndex;
       return left.id.localeCompare(right.id);
     });
     const updatedSteps = sortedSteps.map((candidate) => ({
       ...candidate,
-      status:
-        candidate.index === step.index
-          ? ("active" as const)
-          : ("complete" as const),
+      status: candidate.index === step.index ? ("active" as const) : ("complete" as const),
     }));
     return { ...part, steps: updatedSteps };
   });
@@ -694,13 +420,7 @@ function appendFinalTrajectoryThoughts(
 
   return steps.reduce<ChatMessage[]>((acc, step) => {
     if (!step.thought) return acc;
-    return appendReasoningEvent(
-      acc,
-      step.thought,
-      "summary",
-      payload,
-      `thought_${step.index}`,
-    );
+    return appendReasoningEvent(acc, step.thought, "summary", payload, `thought_${step.index}`);
   }, messages);
 }
 
@@ -722,9 +442,7 @@ function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
             items: part.items.map((it) => ({ ...it, completed: true })),
           };
         case "task":
-          return part.status === "in_progress"
-            ? { ...part, status: "completed" as const }
-            : part;
+          return part.status === "in_progress" ? { ...part, status: "completed" as const } : part;
         default:
           return part;
       }
@@ -740,12 +458,7 @@ function resolveHitlByMessageId(
 ): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (
-      changed ||
-      msg.id !== messageId ||
-      msg.type !== "hitl" ||
-      !msg.hitlData
-    ) {
+    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
       return msg;
     }
     changed = true;
@@ -761,18 +474,10 @@ function resolveHitlByMessageId(
   return changed ? next : messages;
 }
 
-function rollbackHitlByMessageId(
-  messages: ChatMessage[],
-  messageId: string,
-): ChatMessage[] {
+function rollbackHitlByMessageId(messages: ChatMessage[], messageId: string): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (
-      changed ||
-      msg.id !== messageId ||
-      msg.type !== "hitl" ||
-      !msg.hitlData
-    ) {
+    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
       return msg;
     }
     changed = true;
@@ -819,38 +524,21 @@ function applyEvent(
     }
     case "status": {
       return {
-        messages: appendStatusTrace(
-          messages,
-          text,
-          inferStatusTone(text, payload),
-          payload,
-        ),
+        messages: appendStatusTrace(messages, text, inferStatusTone(text, payload), payload),
         terminal: false,
         errored: false,
       };
     }
     case "tool_call": {
       return {
-        messages: appendToolLikePart(
-          messages,
-          "tool_call",
-          text,
-          payload,
-          appendTracePart,
-        ),
+        messages: appendToolLikePart(messages, "tool_call", text, payload, appendTracePart),
         terminal: false,
         errored: false,
       };
     }
     case "tool_result": {
       return {
-        messages: appendToolLikePart(
-          messages,
-          "tool_result",
-          text,
-          payload,
-          appendTracePart,
-        ),
+        messages: appendToolLikePart(messages, "tool_result", text, payload, appendTracePart),
         terminal: false,
         errored: false,
       };
@@ -907,13 +595,9 @@ function applyEvent(
     }
     case "hitl_request": {
       const hitlPayload = asRecord(payload?.hitl ?? payload);
-      const question =
-        asOptionalText(hitlPayload?.question) ||
-        text.trim() ||
-        "Approval needed";
+      const question = asOptionalText(hitlPayload?.question) || text.trim() || "Approval needed";
       const messageId =
-        asOptionalText(hitlPayload?.message_id ?? hitlPayload?.messageId) ??
-        nextId("hitl");
+        asOptionalText(hitlPayload?.message_id ?? hitlPayload?.messageId) ?? nextId("hitl");
       const rawActions = hitlPayload?.actions;
       const actions = Array.isArray(rawActions)
         ? rawActions
@@ -925,16 +609,11 @@ function applyEvent(
               const variant = asOptionalText(rec.variant);
               return {
                 label,
-                variant:
-                  variant === "primary" || variant === "secondary"
-                    ? variant
-                    : "secondary",
+                variant: variant === "primary" || variant === "secondary" ? variant : "secondary",
               } as const;
             })
             .filter(
-              (
-                value,
-              ): value is { label: string; variant: "primary" | "secondary" } =>
+              (value): value is { label: string; variant: "primary" | "secondary" } =>
                 value != null,
             )
         : [];
@@ -964,13 +643,9 @@ function applyEvent(
       };
     }
     case "hitl_resolved": {
-      const messageId = asOptionalText(
-        payload?.message_id ?? payload?.messageId,
-      );
+      const messageId = asOptionalText(payload?.message_id ?? payload?.messageId);
       const resolution =
-        asOptionalText(payload?.resolution) ??
-        asOptionalText(payload?.label) ??
-        text.trim();
+        asOptionalText(payload?.resolution) ?? asOptionalText(payload?.label) ?? text.trim();
       if (!resolution) return { messages, terminal: false, errored: false };
 
       if (messageId) {
@@ -983,12 +658,7 @@ function applyEvent(
 
       let updated = false;
       const next = messages.map((msg) => {
-        if (
-          updated ||
-          msg.type !== "hitl" ||
-          !msg.hitlData ||
-          msg.hitlData.resolved
-        ) {
+        if (updated || msg.type !== "hitl" || !msg.hitlData || msg.hitlData.resolved) {
           return msg;
         }
         updated = true;
@@ -1007,9 +677,7 @@ function applyEvent(
       const command = asOptionalText(payload?.command);
       const result = asRecord(payload?.result);
       const messageId = asOptionalText(result?.message_id ?? result?.messageId);
-      const resolution =
-        asOptionalText(result?.resolution) ??
-        asOptionalText(result?.action_label);
+      const resolution = asOptionalText(result?.resolution) ?? asOptionalText(result?.action_label);
       let next = messages;
       if (command === "resolve_hitl" && messageId && resolution) {
         next = resolveHitlByMessageId(next, messageId, resolution);
@@ -1051,33 +719,22 @@ function applyEvent(
       };
     }
     case "final": {
-      let next = completeAssistant(messages, text);
+      let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
       next = finishReasoning(next);
       next = finalizeTraceParts(next);
       next = appendFinalTrajectoryThoughts(next, payload);
 
       const finalReasoning =
-        typeof payload?.final_reasoning === "string"
-          ? payload.final_reasoning.trim()
-          : "";
+        typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
       if (finalReasoning) {
-        next = appendReasoningEvent(
-          next,
-          finalReasoning,
-          "summary",
-          payload,
-          "final_reasoning",
-        );
+        next = appendReasoningEvent(next, finalReasoning, "summary", payload, "final_reasoning");
       }
 
       next = attachFinalReferences(next, payload);
 
       const warnings = readGuardrailWarnings(payload);
       if (warnings.length > 0) {
-        next = appendSystem(
-          next,
-          `Guardrail warnings:\n- ${warnings.join("\n- ")}`,
-        );
+        next = appendSystem(next, `Guardrail warnings:\n- ${warnings.join("\n- ")}`);
       }
 
       return { messages: next, terminal: true, errored: false };
@@ -1091,10 +748,7 @@ function applyEvent(
     case "error": {
       let next = finishReasoning(messages);
       next = finalizeTraceParts(next);
-      next = appendSystem(
-        next,
-        `Backend error: ${text || "Unknown server error."}`,
-      );
+      next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
       return { messages: next, terminal: true, errored: true };
     }
     default: {
@@ -1109,9 +763,7 @@ export function applyWsFrameToMessages(
   queryClient?: QueryClient,
 ): ApplyFrameResult {
   if (frame.type === "error") {
-    const next = finalizeTraceParts(
-      appendSystem(messages, `Backend error: ${frame.message}`),
-    );
+    const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
     return { messages: finishReasoning(next), terminal: true, errored: true };
   }
   return applyEvent(messages, frame, queryClient);

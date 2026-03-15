@@ -1,6 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import { telemetryClient } from "@/lib/telemetry/client";
@@ -79,32 +78,21 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
         >
           {/* Icon */}
           <div className="flex items-center justify-center w-12 h-12 rounded-lg bg-destructive/10 mb-4">
-            <AlertTriangle
-              className="size-6 text-destructive"
-              aria-hidden="true"
-            />
+            <AlertTriangle className="size-6 text-destructive" aria-hidden="true" />
           </div>
 
           {/* Title */}
-          <h2 className="text-foreground mb-1" style={typo.label}>
-            {label} encountered an error
-          </h2>
+          <h2 className="text-foreground mb-1 typo-label">{label} encountered an error</h2>
 
           {/* Description */}
-          <p
-            className="text-muted-foreground mb-6 max-w-sm"
-            style={typo.caption}
-          >
-            Something went wrong while rendering this view. You can try
-            reloading it, or switch to a different tab.
+          <p className="text-muted-foreground mb-6 max-w-sm typo-caption">
+            Something went wrong while rendering this view. You can try reloading it, or switch to a
+            different tab.
           </p>
 
           {/* Error detail (dev only) */}
           {this.state.error && (
-            <pre
-              className="mb-6 px-4 py-3 rounded-lg bg-muted max-w-md w-full overflow-x-auto text-left text-muted-foreground"
-              style={typo.mono}
-            >
+            <pre className="mb-6 px-4 py-3 rounded-lg bg-muted max-w-md w-full overflow-x-auto text-left text-muted-foreground typo-mono">
               {this.state.error.message}
             </pre>
           )}

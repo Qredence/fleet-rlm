@@ -8,7 +8,6 @@
 import { useNavigate, Link } from "react-router";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import { typo } from "@/lib/config/typo";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { isEntraAuthConfigured, loginWithEntra } from "@/lib/auth/entra";
 import { Button } from "@/components/ui/button";
@@ -55,43 +54,32 @@ function LoginPage() {
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
-              <h1 className="text-foreground" style={typo.h3}>
-                Sign in to Fleet RLM
-              </h1>
-              <p className="text-muted-foreground mt-1" style={typo.caption}>
+              <h1 className="text-foreground typo-h3">Sign in to Fleet RLM</h1>
+              <p className="text-muted-foreground mt-1 typo-caption">
                 Continue with Microsoft Entra to open your RLM workspace
               </p>
             </div>
           </div>
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={loading || !authConfigured}
-          >
+          <Button type="submit" className="w-full" disabled={loading || !authConfigured}>
             {loading ? (
               <>
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                <span style={typo.label}>Opening Microsoft sign-in...</span>
+                <span className="typo-label">Opening Microsoft sign-in...</span>
               </>
             ) : (
-              <span style={typo.label}>Continue with Microsoft</span>
+              <span className="typo-label">Continue with Microsoft</span>
             )}
           </Button>
-          {error ? (
-            <p className="text-center text-destructive" style={typo.helper}>
-              {error}
-            </p>
-          ) : null}
+          {error ? <p className="text-center text-destructive typo-helper">{error}</p> : null}
           <div className="text-center">
             <Link
               to="/signup"
-              className="text-muted-foreground transition-colors hover:text-foreground"
-              style={typo.caption}
+              className="text-muted-foreground transition-colors hover:text-foreground typo-caption"
             >
               Need access? Contact your workspace administrator
             </Link>
           </div>
-          <p className="text-center text-muted-foreground" style={typo.helper}>
+          <p className="text-center text-muted-foreground typo-helper">
             {authConfigured
               ? "The same access token is reused for API and WebSocket runtime sessions."
               : "Set the Entra client id, requested scopes, and optional authority override to enable Microsoft sign-in."}

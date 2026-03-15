@@ -3,43 +3,14 @@ import type {
   ChatMessage,
   ChatRenderPart,
   ChatRenderToolState,
-  RuntimeContext,
 } from "@/lib/data/types";
-
-function asOptionalText(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function asOptionalNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return undefined;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function stringifyUnknown(value: unknown): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
+import {
+  asOptionalNumber,
+  asOptionalText,
+  asRecord,
+  parseRuntimeContext,
+  stringifyUnknown,
+} from "@/features/rlm-workspace/backendChatEventPayload";
 
 function hasExplicitErrorValue(record: Record<string, unknown>): boolean {
   for (const key of ["error", "error_text", "errorText", "stderr"]) {
@@ -60,17 +31,11 @@ function payloadLooksErrored(payload?: Record<string, unknown>): boolean {
   const directStatus = asOptionalText(payload.status)?.toLowerCase();
   if (
     directStatus &&
-    ["error", "failed", "failure", "rejected", "cancelled"].includes(
-      directStatus,
-    )
+    ["error", "failed", "failure", "rejected", "cancelled"].includes(directStatus)
   ) {
     return true;
   }
-  if (
-    payload.success === false ||
-    payload.ok === false ||
-    payload.failed === true
-  ) {
+  if (payload.success === false || payload.ok === false || payload.failed === true) {
     return true;
   }
 
@@ -83,17 +48,10 @@ function payloadLooksErrored(payload?: Record<string, unknown>): boolean {
   for (const candidate of objectCandidates) {
     if (!candidate) continue;
     const status = asOptionalText(candidate.status)?.toLowerCase();
-    if (
-      status &&
-      ["error", "failed", "failure", "rejected", "cancelled"].includes(status)
-    ) {
+    if (status && ["error", "failed", "failure", "rejected", "cancelled"].includes(status)) {
       return true;
     }
-    if (
-      candidate.success === false ||
-      candidate.ok === false ||
-      candidate.failed === true
-    ) {
+    if (candidate.success === false || candidate.ok === false || candidate.failed === true) {
       return true;
     }
     if (hasExplicitErrorValue(candidate)) {
@@ -106,30 +64,6 @@ function payloadLooksErrored(payload?: Record<string, unknown>): boolean {
   }
 
   return false;
-}
-
-function parseRuntimeContext(
-  payload?: Record<string, unknown>,
-): RuntimeContext | undefined {
-  const raw = asRecord(payload?.runtime) ?? payload;
-  if (!raw) return undefined;
-  const depth = asOptionalNumber(raw.depth);
-  const maxDepth = asOptionalNumber(raw.max_depth);
-  const executionProfile = asOptionalText(raw.execution_profile);
-  if (depth == null || maxDepth == null || !executionProfile) return undefined;
-  const volumeName = asOptionalText(raw.volume_name);
-  const executionMode = asOptionalText(raw.execution_mode);
-  const sandboxId = asOptionalText(raw.sandbox_id);
-  return {
-    depth,
-    maxDepth,
-    executionProfile,
-    sandboxActive: raw.sandbox_active === true,
-    effectiveMaxIters: asOptionalNumber(raw.effective_max_iters) ?? 10,
-    ...(volumeName ? { volumeName } : {}),
-    ...(executionMode ? { executionMode } : {}),
-    ...(sandboxId ? { sandboxId } : {}),
-  };
 }
 
 export function inferToolState(
@@ -159,9 +93,7 @@ export function inferStatusTone(
   return "neutral";
 }
 
-function parseEnvVariablesFromPayload(
-  payload?: Record<string, unknown>,
-): ChatEnvVarItem[] | null {
+function parseEnvVariablesFromPayload(payload?: Record<string, unknown>): ChatEnvVarItem[] | null {
   if (!payload) return null;
 
   const objectCandidates: unknown[] = [
@@ -172,19 +104,13 @@ function parseEnvVariablesFromPayload(
   ];
 
   for (const candidate of objectCandidates) {
-    if (
-      !candidate ||
-      typeof candidate !== "object" ||
-      Array.isArray(candidate)
-    ) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
       continue;
     }
     const entries = Object.entries(candidate as Record<string, unknown>).filter(
       ([k, v]) =>
         /^[A-Z0-9_]+$/.test(k) &&
-        (typeof v === "string" ||
-          typeof v === "number" ||
-          typeof v === "boolean"),
+        (typeof v === "string" || typeof v === "number" || typeof v === "boolean"),
     );
     if (entries.length === 0) continue;
     return entries.slice(0, 50).map(([name, value]) => ({
@@ -221,15 +147,11 @@ function isSandboxPayload(payload?: Record<string, unknown>): boolean {
   if (!payload) return false;
   const step = payload.step;
   if (step && typeof step === "object" && !Array.isArray(step)) {
-    const stepType = String(
-      (step as Record<string, unknown>).type ?? "",
-    ).toLowerCase();
+    const stepType = String((step as Record<string, unknown>).type ?? "").toLowerCase();
     if (stepType === "repl") return true;
   }
   const toolName = String(payload.tool_name ?? "").toLowerCase();
-  return ["python", "repl", "shell", "exec", "interpreter"].some((s) =>
-    toolName.includes(s),
-  );
+  return ["python", "repl", "shell", "exec", "interpreter"].some((s) => toolName.includes(s));
 }
 
 function sandboxFromPayload(
@@ -238,9 +160,7 @@ function sandboxFromPayload(
   payload?: Record<string, unknown>,
 ): ChatRenderPart {
   const step =
-    payload?.step &&
-    typeof payload.step === "object" &&
-    !Array.isArray(payload.step)
+    payload?.step && typeof payload.step === "object" && !Array.isArray(payload.step)
       ? (payload.step as Record<string, unknown>)
       : undefined;
   const code =
@@ -262,8 +182,7 @@ function sandboxFromPayload(
     stepIndex,
     code,
     output,
-    errorText:
-      state === "output-error" ? (stringifyUnknown(output) ?? text) : undefined,
+    errorText: state === "output-error" ? (stringifyUnknown(output) ?? text) : undefined,
     language: "text",
     ...(runtimeContext ? { runtimeContext } : {}),
   };

@@ -4,18 +4,9 @@
  * Mirrors the current product shell: RLM Workspace, Volumes, and Settings.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
-import {
-  Search,
-  Zap,
-  HardDrive,
-  Plus,
-  Moon,
-  Sun,
-  Settings,
-} from "lucide-react";
+import { Search, Zap, HardDrive, Plus, Moon, Sun, Settings } from "lucide-react";
 import { Command } from "cmdk";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { typo } from "@/lib/config/typo";
 import type { NavItem } from "@/lib/data/types";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -92,11 +83,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   return (
     <div className="fixed inset-0 z-100">
-      <div
-        className="surface-glass-overlay absolute inset-0"
-        onClick={close}
-        aria-hidden="true"
-      />
+      <div className="surface-glass-overlay absolute inset-0" onClick={close} aria-hidden="true" />
 
       <div
         className="absolute inset-0 flex items-start justify-center pt-[min(20vh,120px)] px-4"
@@ -114,43 +101,26 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             }}
           >
             <div className="flex items-center gap-2 px-4 border-b border-border-subtle focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/50">
-              <Search
-                className="size-4 text-muted-foreground shrink-0"
-                aria-hidden="true"
-              />
+              <Search className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
               <Command.Input
                 value={search}
                 onValueChange={setSearch}
                 placeholder="Search pages and actions..."
-                className="flex-1 h-12 bg-transparent text-foreground placeholder:text-muted-foreground border-0 focus-visible:outline-none"
-                style={typo.label}
+                className="flex-1 h-12 bg-transparent text-foreground placeholder:text-muted-foreground border-0 focus-visible:outline-none typo-label"
                 autoFocus
               />
-              <kbd
-                className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                style={typo.micro}
-              >
+              <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                 ESC
               </kbd>
             </div>
 
             <Command.List className="max-h-90 overflow-y-auto overscroll-contain p-2">
-              <Command.Empty
-                className="py-8 text-center text-muted-foreground"
-                style={typo.caption}
-              >
+              <Command.Empty className="py-8 text-center text-muted-foreground typo-caption">
                 No results found.
               </Command.Empty>
 
               <Command.Group
-                heading={
-                  <span
-                    className="text-muted-foreground px-2 pb-1"
-                    style={typo.micro}
-                  >
-                    Pages
-                  </span>
-                }
+                heading={<span className="text-muted-foreground px-2 pb-1 typo-micro">Pages</span>}
               >
                 {pages.map((page) => {
                   const Icon = page.icon;
@@ -164,11 +134,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                         "text-foreground data-[selected=true]:bg-muted",
                       )}
                     >
-                      <Icon
-                        className="size-4 text-muted-foreground shrink-0"
-                        aria-hidden="true"
-                      />
-                      <span style={typo.label}>{page.label}</span>
+                      <Icon className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                      <span className="typo-label">{page.label}</span>
                     </Command.Item>
                   );
                 })}
@@ -176,12 +143,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
               <Command.Group
                 heading={
-                  <span
-                    className="text-muted-foreground px-2 pb-1"
-                    style={typo.micro}
-                  >
-                    Actions
-                  </span>
+                  <span className="text-muted-foreground px-2 pb-1 typo-micro">Actions</span>
                 }
               >
                 <Command.Item
@@ -200,11 +162,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
-                  <Plus
-                    className="size-4 text-muted-foreground shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span style={typo.label}>New Session</span>
+                  <Plus className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                  <span className="typo-label">New Session</span>
                 </Command.Item>
 
                 <Command.Item
@@ -224,19 +183,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   )}
                 >
                   {isDark ? (
-                    <Sun
-                      className="size-4 text-muted-foreground shrink-0"
-                      aria-hidden="true"
-                    />
+                    <Sun className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
                   ) : (
-                    <Moon
-                      className="size-4 text-muted-foreground shrink-0"
-                      aria-hidden="true"
-                    />
+                    <Moon className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
                   )}
-                  <span style={typo.label}>
-                    Switch to {isDark ? "Light" : "Dark"} Mode
-                  </span>
+                  <span className="typo-label">Switch to {isDark ? "Light" : "Dark"} Mode</span>
                 </Command.Item>
 
                 <Command.Item
@@ -254,40 +205,24 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
-                  <Settings
-                    className="size-4 text-muted-foreground shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span style={typo.label}>Open Settings</span>
+                  <Settings className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                  <span className="typo-label">Open Settings</span>
                 </Command.Item>
               </Command.Group>
             </Command.List>
 
             <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border-subtle">
-              <span className="text-muted-foreground" style={typo.micro}>
-                Navigate with
-              </span>
+              <span className="text-muted-foreground typo-micro">Navigate with</span>
               <div className="flex items-center gap-1">
-                <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                  style={typo.micro}
-                >
+                <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                   &uarr;
                 </kbd>
-                <kbd
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                  style={typo.micro}
-                >
+                <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                   &darr;
                 </kbd>
               </div>
-              <span className="text-muted-foreground" style={typo.micro}>
-                to select
-              </span>
-              <kbd
-                className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground"
-                style={typo.micro}
-              >
+              <span className="text-muted-foreground typo-micro">to select</span>
+              <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                 &crarr;
               </kbd>
             </div>

@@ -20,12 +20,7 @@
  */
 
 // ── @codemirror/state ───────────────────────────────────────────────
-export {
-  EditorState,
-  StateEffect,
-  StateField,
-  Compartment,
-} from "@codemirror/state";
+export { EditorState, StateEffect, StateField, Compartment } from "@codemirror/state";
 
 // ── @codemirror/view ────────────────────────────────────────────────
 export {
@@ -39,12 +34,7 @@ export {
 } from "@codemirror/view";
 
 // ── @codemirror/commands ────────────────────────────────────────────
-export {
-  defaultKeymap,
-  indentWithTab,
-  history,
-  historyKeymap,
-} from "@codemirror/commands";
+export { defaultKeymap, indentWithTab, history, historyKeymap } from "@codemirror/commands";
 
 // ── @codemirror/lang-python ─────────────────────────────────────────
 export { python } from "@codemirror/lang-python";

@@ -1,17 +1,15 @@
 export type WsTraceMode = "compact" | "verbose" | "off";
 
 export type WsExecutionMode = "auto" | "rlm_only" | "tools_only";
+export type WsRuntimeMode = "modal_chat" | "daytona_pilot";
 
-export type WsConnectionStatus =
-  | "connecting"
-  | "connected"
-  | "disconnected"
-  | "reconnecting";
+export type WsConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting";
 
 export interface WsConnectionOptions {
   maxRetries?: number; // default 5
   initialBackoff?: number; // default 1000ms
   maxBackoff?: number; // default 30000ms
+  firstFrameTimeoutMs?: number; // default 15000ms for request/response streams
 }
 
 export interface WsMessageRequest {
@@ -21,6 +19,11 @@ export interface WsMessageRequest {
   trace?: boolean;
   trace_mode?: WsTraceMode;
   execution_mode?: WsExecutionMode;
+  runtime_mode?: WsRuntimeMode;
+  repo_url?: string | null;
+  repo_ref?: string | null;
+  context_paths?: string[] | null;
+  batch_concurrency?: number | null;
   analytics_enabled?: boolean;
   workspace_id?: string;
   user_id?: string;
@@ -40,15 +43,13 @@ export interface WsCommandRequest {
   session_id?: string;
 }
 
-export type WsClientMessage =
-  | WsMessageRequest
-  | WsCancelRequest
-  | WsCommandRequest;
+export type WsClientMessage = WsMessageRequest | WsCancelRequest | WsCommandRequest;
 
 export type WsEventKind =
   | "assistant_token"
   | "reasoning_step"
   | "status"
+  | "warning"
   | "tool_call"
   | "tool_result"
   | "trajectory_step"
@@ -81,6 +82,8 @@ export interface WsRuntimeContext {
   effective_max_iters: number;
   volume_name?: string;
   execution_mode?: string;
+  runtime_mode?: string;
+  daytona_mode?: string;
   sandbox_id?: string;
 }
 

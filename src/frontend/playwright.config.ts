@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 4173;
+const PORT = 4174;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
@@ -19,7 +19,7 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: `bun run dev -- --host 127.0.0.1 --port ${PORT}`,
+    command: `vp dev --host 127.0.0.1 --port ${PORT}`,
     url: BASE_URL,
     timeout: 120_000,
     reuseExistingServer: true,

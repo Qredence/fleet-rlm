@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -18,10 +18,13 @@ from fleet_rlm.analytics import (
 )
 from fleet_rlm.analytics.trace_context import runtime_telemetry_enabled_context
 from fleet_rlm.db.models import RunStatus
+from fleet_rlm.models import StreamEvent
 from ...execution import ExecutionStepBuilder
+from .contracts import ChatAgentProtocol, LocalPersistFn
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json
 from .lifecycle import ExecutionLifecycleManager, _classify_stream_failure
 from .repl_hook import ReplHookBridge
+from .runtime_options import DaytonaChatRequestOptions
 
 logger = logging.getLogger(__name__)
 
@@ -29,18 +32,19 @@ logger = logging.getLogger(__name__)
 async def run_streaming_turn(
     *,
     websocket: WebSocket,
-    agent: Any,
+    agent: ChatAgentProtocol,
     message: str,
     docs_path: str | None,
     trace: bool,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
-    interpreter: Any,
+    interpreter: object | None,
     last_loaded_docs_path: str | None,
     analytics_enabled: bool | None,
-    persist_session_state: Callable[..., Awaitable[None]],
+    persist_session_state: LocalPersistFn,
     mlflow_trace_context: MlflowTraceRequestContext | None = None,
+    daytona_request: DaytonaChatRequestOptions | None = None,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
 
@@ -72,6 +76,7 @@ async def run_streaming_turn(
                 step_builder=step_builder,
                 analytics_enabled=analytics_enabled,
                 persist_session_state=persist_session_state,
+                daytona_request=daytona_request,
             )
         else:
             with mlflow_request_context(mlflow_trace_context):
@@ -86,6 +91,7 @@ async def run_streaming_turn(
                     step_builder=step_builder,
                     analytics_enabled=analytics_enabled,
                     persist_session_state=persist_session_state,
+                    daytona_request=daytona_request,
                 )
     except WebSocketDisconnect:
         raise
@@ -105,7 +111,7 @@ async def run_streaming_turn(
 async def _stream_agent_events(
     *,
     websocket: WebSocket,
-    agent: Any,
+    agent: ChatAgentProtocol,
     message: str,
     docs_path: str | None,
     trace: bool,
@@ -113,15 +119,30 @@ async def _stream_agent_events(
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     analytics_enabled: bool | None,
-    persist_session_state: Callable[..., Awaitable[None]],
+    persist_session_state: LocalPersistFn,
+    daytona_request: DaytonaChatRequestOptions | None = None,
 ) -> None:
     with runtime_telemetry_enabled_context(analytics_enabled):
-        async for event in agent.aiter_chat_turn_stream(
-            message=message,
-            trace=trace,
-            cancel_check=cancel_check,
-            docs_path=docs_path,
-        ):
+        if daytona_request is None:
+            event_stream = agent.aiter_chat_turn_stream(
+                message=message,
+                trace=trace,
+                cancel_check=cancel_check,
+                docs_path=docs_path,
+            )
+        else:
+            event_stream = agent.aiter_chat_turn_stream(
+                message=message,
+                trace=trace,
+                cancel_check=cancel_check,
+                docs_path=docs_path,
+                repo_url=daytona_request.repo_url,
+                repo_ref=daytona_request.repo_ref,
+                context_paths=daytona_request.context_paths,
+                batch_concurrency=daytona_request.batch_concurrency,
+            )
+
+        async for event in event_stream:
             await _emit_stream_event(
                 websocket=websocket,
                 lifecycle=lifecycle,
@@ -140,8 +161,8 @@ async def _emit_stream_event(
     websocket: WebSocket,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
-    event: Any,
-    persist_session_state: Callable[..., Awaitable[None]],
+    event: StreamEvent,
+    persist_session_state: LocalPersistFn,
 ) -> None:
     lifecycle.raise_if_persistence_error()
     payload = event.payload
@@ -182,13 +203,24 @@ async def _emit_stream_event(
         return
 
     if event.kind in {"cancelled", "error"}:
+        # Surface terminal Daytona/chat failures to the client before any
+        # slower lifecycle bookkeeping so the UI does not sit in a spinner
+        # when persistence or completion hooks stall.
+        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+            raise WebSocketDisconnect(code=1001)
+        try:
+            await persist_session_state(include_volume_save=True)
+        except Exception:
+            # Log and continue to ensure the run is still marked as completed/failed.
+            logger.exception(
+                "Failed to persist session state after %s event; completing run anyway",
+                event.kind,
+            )
         status = RunStatus.CANCELLED if event.kind == "cancelled" else RunStatus.FAILED
         error_json = (
             {"error": event.text, "kind": event.kind} if event.kind == "error" else None
         )
         await lifecycle.complete_run(status, step=step, error_json=error_json)
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
 
 
 async def _handle_stream_error(

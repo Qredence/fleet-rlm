@@ -5,29 +5,22 @@ import { AssistantAnswerBlock } from "@/features/rlm-workspace/assistant-content
 import { AssistantSummaryBar } from "@/features/rlm-workspace/assistant-content/AssistantSummaryBar";
 import { TrajectoryTimeline } from "@/features/rlm-workspace/assistant-content/TrajectoryTimeline";
 import { ExecutionHighlightsGroup } from "@/features/rlm-workspace/assistant-content/ExecutionHighlightsGroup";
-import {
-  EvidencePreview,
-} from "@/features/rlm-workspace/assistant-content/AssistantPreviewSections";
+import { EvidencePreview } from "@/features/rlm-workspace/assistant-content/AssistantPreviewSections";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
 import type { InspectorTab } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
 
 function visibleSections(model: AssistantContentModel) {
   return [
-    model.answer.hasContent || model.answer.showStreamingShell
-      ? "answer"
-      : null,
+    model.answer.hasContent || model.answer.showStreamingShell ? "answer" : null,
     model.summary.show ? "summary" : null,
-    model.trajectory.hasContent ? "trajectory" : null,
     model.execution.hasChatHighlights ? "execution" : null,
+    model.trajectory.hasContent ? "trajectory" : null,
     model.evidence.hasContent ? "evidence" : null,
   ].filter(Boolean);
 }
 
-function isInteractiveTarget(
-  target: EventTarget | null,
-  container?: HTMLElement | null,
-) {
+function isInteractiveTarget(target: EventTarget | null, container?: HTMLElement | null) {
   if (!(target instanceof HTMLElement)) return false;
   const interactiveAncestor = target.closest(
     "a,button,input,textarea,select,summary,[role='button'],[data-no-inspector-open='true']",
@@ -48,9 +41,7 @@ export function AssistantTurnContent({
   if (sections.length === 0) return null;
 
   const hasRichSections =
-    model.trajectory.hasContent ||
-    model.execution.hasChatHighlights ||
-    model.evidence.hasContent;
+    model.trajectory.hasContent || model.execution.hasChatHighlights || model.evidence.hasContent;
 
   const handleOpenTrajectory = () => {
     onOpenTab?.("trajectory");
@@ -98,10 +89,7 @@ export function AssistantTurnContent({
                 {model.answer.hasContent || model.answer.showStreamingShell ? (
                   <Separator className="bg-border-subtle/70" />
                 ) : null}
-                <AssistantSummaryBar
-                  summary={model.summary}
-                  onOpenTab={onOpenTab}
-                />
+                <AssistantSummaryBar summary={model.summary} onOpenTab={onOpenTab} />
               </>
             ) : null}
 
@@ -113,20 +101,17 @@ export function AssistantTurnContent({
                   <Separator className="bg-border-subtle/70" />
                 ) : null}
                 <div className="space-y-3">
-                  {model.trajectory.hasContent ? (
-                    <TrajectoryTimeline trajectory={model.trajectory} />
-                  ) : null}
                   {model.execution.hasChatHighlights ? (
                     <ExecutionHighlightsGroup
                       execution={model.execution}
                       onOpenTab={(tab) => onOpenTab?.(tab)}
                     />
                   ) : null}
+                  {model.trajectory.hasContent ? (
+                    <TrajectoryTimeline trajectory={model.trajectory} />
+                  ) : null}
                   {model.evidence.hasContent ? (
-                    <EvidencePreview
-                      model={model}
-                      onOpenTab={(tab) => onOpenTab?.(tab)}
-                    />
+                    <EvidencePreview model={model} onOpenTab={(tab) => onOpenTab?.(tab)} />
                   ) : null}
                 </div>
               </>

@@ -269,7 +269,7 @@ The status endpoint returns:
 
 If you see an error about `modal.py` shadowing the Modal package:
 
-```
+```text
 RuntimeError: Found ./modal.py which shadows the 'modal' package.
 Rename/delete it and restart your shell or kernel.
 ```
@@ -280,7 +280,7 @@ Rename/delete it and restart your shell or kernel.
 
 If Modal credentials are missing:
 
-```
+```text
 Modal credentials missing. Configure MODAL_TOKEN_ID/MODAL_TOKEN_SECRET or run `modal setup`.
 ```
 

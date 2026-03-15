@@ -1,8 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const CURRENT_VERSIONED_KEY = "hax-fleet:chat-history:v2";
-const VERSIONED_KEY = "hax-fleet:chat-history:v1";
-const LEGACY_KEY = "hax-fleet:chat-history";
+const STORAGE_KEY = "hax-fleet:chat-history:v2";
 
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -25,9 +23,9 @@ function createMemoryStorage(): Storage {
   };
 }
 
-const legacyConversation = {
+const conversationFixture = {
   id: "conv-1",
-  title: "Legacy conversation",
+  title: "Stored conversation",
   messages: [
     {
       id: "msg-1",
@@ -52,28 +50,20 @@ describe("useChatHistoryStore", () => {
     });
   });
 
-  it("hydrates conversations from the previous raw versioned array format", async () => {
-    localStorage.setItem(VERSIONED_KEY, JSON.stringify([legacyConversation]));
+  it("hydrates conversations from the current persisted key", async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: { conversations: [conversationFixture] },
+        version: 2,
+      }),
+    );
 
     const { useChatHistoryStore } = await import("@/stores/chatHistoryStore");
 
     await useChatHistoryStore.persist.rehydrate();
 
-    expect(useChatHistoryStore.getState().conversations).toEqual([
-      legacyConversation,
-    ]);
-  });
-
-  it("hydrates conversations from the unversioned legacy key", async () => {
-    localStorage.setItem(LEGACY_KEY, JSON.stringify([legacyConversation]));
-
-    const { useChatHistoryStore } = await import("@/stores/chatHistoryStore");
-
-    await useChatHistoryStore.persist.rehydrate();
-
-    expect(useChatHistoryStore.getState().conversations).toEqual([
-      legacyConversation,
-    ]);
+    expect(useChatHistoryStore.getState().conversations).toEqual([conversationFixture]);
   });
 
   it("persists turn-scoped artifacts with saved conversations", async () => {
@@ -108,9 +98,7 @@ describe("useChatHistoryStore", () => {
     );
 
     const loaded = useChatHistoryStore.getState().loadConversation(conversationId);
-    const persisted = JSON.parse(
-      localStorage.getItem(CURRENT_VERSIONED_KEY) ?? "null",
-    ) as {
+    const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as {
       state?: {
         conversations?: Array<{
           turnArtifactsByMessageId?: Record<string, unknown[]>;
@@ -128,9 +116,7 @@ describe("useChatHistoryStore", () => {
         },
       ],
     });
-    expect(
-      persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId,
-    ).toEqual({
+    expect(persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId).toEqual({
       "assistant-1": [
         {
           id: "step-1",

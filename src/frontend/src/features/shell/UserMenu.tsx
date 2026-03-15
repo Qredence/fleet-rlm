@@ -7,15 +7,7 @@
  * When logged out: shows a "Sign In" button.
  */
 import { useState, useEffect, useRef } from "react";
-import {
-  Settings,
-  CreditCard,
-  Blocks,
-  LogOut,
-  ChevronDown,
-  LogIn,
-} from "lucide-react";
-import { typo } from "@/lib/config/typo";
+import { Settings, CreditCard, Blocks, LogOut, ChevronDown, LogIn } from "lucide-react";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -48,9 +40,9 @@ export function UserMenu() {
   const isMobile = useIsMobile();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialSection, setSettingsInitialSection] = useState<
-    SettingsSection | undefined
-  >(undefined);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>(
+    undefined,
+  );
   const [pricingOpen, setPricingOpen] = useState(false);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -65,8 +57,7 @@ export function UserMenu() {
       customEvent.preventDefault();
     }
     document.addEventListener("open-settings", handleOpenSettings);
-    return () =>
-      document.removeEventListener("open-settings", handleOpenSettings);
+    return () => document.removeEventListener("open-settings", handleOpenSettings);
   }, []);
 
   /* ── Logged-out state ──────────────────────────────────────────── */
@@ -80,7 +71,7 @@ export function UserMenu() {
           onClick={() => setLoginOpen(true)}
         >
           <LogIn className="size-4" />
-          <span style={typo.label}>Sign In</span>
+          <span className="typo-label">Sign In</span>
         </Button>
 
         <LoginDialog
@@ -118,9 +109,7 @@ export function UserMenu() {
                 {user.initials}
               </AvatarFallback>
             </Avatar>
-            {!isMobile && (
-              <ChevronDown className="size-3 text-muted-foreground" />
-            )}
+            {!isMobile && <ChevronDown className="size-3 text-muted-foreground" />}
           </button>
         </DropdownMenuTrigger>
 
@@ -134,16 +123,8 @@ export function UserMenu() {
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <span
-                  className="text-foreground block truncate"
-                  style={typo.label}
-                >
-                  {user.name}
-                </span>
-                <span
-                  className="text-muted-foreground block truncate"
-                  style={typo.helper}
-                >
+                <span className="text-foreground block truncate typo-label">{user.name}</span>
+                <span className="text-muted-foreground block truncate typo-helper">
                   {user.email}
                 </span>
               </div>
@@ -165,22 +146,16 @@ export function UserMenu() {
                 setSettingsInitialSection(undefined);
                 setSettingsOpen(true);
               }}
-              style={typo.label}
+              className="typo-label"
             >
               <Settings className="size-4" />
               Settings
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setPricingOpen(true)}
-              style={typo.label}
-            >
+            <DropdownMenuItem onClick={() => setPricingOpen(true)} className="typo-label">
               <CreditCard className="size-4" />
               Pricing Plan
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setIntegrationsOpen(true)}
-              style={typo.label}
-            >
+            <DropdownMenuItem onClick={() => setIntegrationsOpen(true)} className="typo-label">
               <Blocks className="size-4" />
               Integrations
             </DropdownMenuItem>
@@ -193,7 +168,7 @@ export function UserMenu() {
               logout();
             }}
             variant="destructive"
-            style={typo.label}
+            className="typo-label"
           >
             <LogOut className="size-4" />
             Sign Out
@@ -208,10 +183,7 @@ export function UserMenu() {
         initialSection={settingsInitialSection}
       />
       <PricingDialog open={pricingOpen} onOpenChange={setPricingOpen} />
-      <IntegrationsDialog
-        open={integrationsOpen}
-        onOpenChange={setIntegrationsOpen}
-      />
+      <IntegrationsDialog open={integrationsOpen} onOpenChange={setIntegrationsOpen} />
     </>
   );
 }

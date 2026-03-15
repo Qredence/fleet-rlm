@@ -25,8 +25,7 @@ import { cn } from "@/lib/utils/cn";
 const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
 
 function DesktopShell() {
-  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
-    useNavigationStore();
+  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
 
   /* ── Panel animation state ─────────────────────────────────── */
   const builderPanelRef = useRef<ImperativePanelHandle>(null);
@@ -65,9 +64,7 @@ function DesktopShell() {
         <PanelResizeHandle
           className={cn(
             "relative transition-colors",
-            isCanvasOpen
-              ? "w-px bg-border-subtle hover:bg-accent"
-              : "w-0 pointer-events-none",
+            isCanvasOpen ? "w-px bg-border-subtle hover:bg-accent" : "w-0 pointer-events-none",
           )}
           onDragging={setIsResizing}
           disabled={!isCanvasOpen}

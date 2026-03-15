@@ -109,15 +109,9 @@ export function useFilesystem(): UseFilesystemReturn {
       }
 
       try {
-        const url = new URL(
-          "/api/v1/runtime/volume/tree",
-          window.location.origin,
-        );
+        const url = new URL("/api/v1/runtime/volume/tree", window.location.origin);
         url.searchParams.set("max_depth", "4");
-        const resp = await rlmApiClient.get<VolumeTreeResponse>(
-          url.pathname + url.search,
-          signal,
-        );
+        const resp = await rlmApiClient.get<VolumeTreeResponse>(url.pathname + url.search, signal);
         return {
           volumes: resp.nodes.map(toFsNode),
           dataSource: "api",

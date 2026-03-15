@@ -15,30 +15,30 @@ def main() -> int:
 
     print("Building frontend UI...")
 
-    # Check if bun is available
-    if shutil.which("bun") is None:
+    # Check if pnpm is available
+    if shutil.which("pnpm") is None:
         print(
-            "Error: 'bun' command not found. Please install bun (https://bun.sh).",
+            "Error: 'pnpm' command not found. Please install pnpm (https://pnpm.io).",
             file=sys.stderr,
         )
         return 1
 
-    # Run bun install
-    print("Running 'bun install --frozen-lockfile'...")
+    # Run pnpm install
+    print("Running 'pnpm install --frozen-lockfile'...")
     try:
         subprocess.run(
-            ["bun", "install", "--frozen-lockfile"], cwd=frontend_dir, check=True
+            ["pnpm", "install", "--frozen-lockfile"], cwd=frontend_dir, check=True
         )
     except subprocess.CalledProcessError as e:
-        print(f"Error running 'bun install': {e}", file=sys.stderr)
+        print(f"Error running 'pnpm install': {e}", file=sys.stderr)
         return 1
 
-    # Run bun run build
-    print("Running 'bun run build'...")
+    # Run pnpm run build
+    print("Running 'pnpm run build'...")
     try:
-        subprocess.run(["bun", "run", "build"], cwd=frontend_dir, check=True)
+        subprocess.run(["pnpm", "run", "build"], cwd=frontend_dir, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Error running 'bun run build': {e}", file=sys.stderr)
+        print(f"Error running 'pnpm run build': {e}", file=sys.stderr)
         return 1
 
     source_dist = frontend_dir / "dist"

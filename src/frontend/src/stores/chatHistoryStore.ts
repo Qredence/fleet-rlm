@@ -7,11 +7,7 @@
  * Uses Zustand persist middleware for automatic localStorage sync.
  */
 import { create } from "zustand";
-import {
-  persist,
-  type PersistStorage,
-  type StorageValue,
-} from "zustand/middleware";
+import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
 import type { ExecutionStep } from "@/stores/artifactStore";
@@ -44,9 +40,7 @@ interface ChatHistoryState {
 // ── Constants ────────────────────────────────────────────────────────
 
 const STORAGE_VERSION = 2;
-const STORAGE_KEY = "hax-fleet:chat-history";
-const VERSIONED_KEY = `${STORAGE_KEY}:v${STORAGE_VERSION}`;
-const LEGACY_VERSIONED_KEYS = [`${STORAGE_KEY}:v1`];
+const STORAGE_KEY = "hax-fleet:chat-history:v2";
 const MAX_CONVERSATIONS = 50;
 type ChatHistoryPersistedState = Pick<ChatHistoryState, "conversations">;
 
@@ -76,17 +70,7 @@ function toConversationArray(value: unknown): Conversation[] | null {
   return Array.isArray(value) ? (value as Conversation[]) : null;
 }
 
-function toPersistedChatHistory(
-  value: unknown,
-): StorageValue<ChatHistoryPersistedState> | null {
-  const directConversations = toConversationArray(value);
-  if (directConversations) {
-    return {
-      state: { conversations: directConversations },
-      version: STORAGE_VERSION,
-    };
-  }
-
+function toPersistedChatHistory(value: unknown): StorageValue<ChatHistoryPersistedState> | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -109,35 +93,13 @@ function toPersistedChatHistory(
 
   return {
     state: { conversations },
-    version:
-      typeof maybePersisted.version === "number"
-        ? maybePersisted.version
-        : STORAGE_VERSION,
+    version: typeof maybePersisted.version === "number" ? maybePersisted.version : STORAGE_VERSION,
   };
 }
 
 const chatHistoryStorage: PersistStorage<ChatHistoryPersistedState> = {
   getItem: (name) => {
-    for (const key of [name, ...LEGACY_VERSIONED_KEYS]) {
-      const storedValue = toPersistedChatHistory(
-        parseStoredJson(localStorage.getItem(key)),
-      );
-      if (storedValue) {
-        return storedValue;
-      }
-    }
-
-    const legacyValue = toConversationArray(
-      parseStoredJson(localStorage.getItem(STORAGE_KEY)),
-    );
-    if (!legacyValue) {
-      return null;
-    }
-
-    return {
-      state: { conversations: legacyValue },
-      version: STORAGE_VERSION,
-    };
+    return toPersistedChatHistory(parseStoredJson(localStorage.getItem(name)));
   },
   setItem: (name, value) => {
     localStorage.setItem(name, JSON.stringify(value));
@@ -154,12 +116,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
     (set, get) => ({
       conversations: [],
 
-      saveConversation: (
-        messages,
-        phase,
-        conversationId,
-        turnArtifactsByMessageId,
-      ) => {
+      saveConversation: (messages, phase, conversationId, turnArtifactsByMessageId) => {
         const now = new Date().toISOString();
 
         // Don't save empty conversations
@@ -172,9 +129,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
           let updated: Conversation[];
 
           if (conversationId) {
-            const idx = state.conversations.findIndex(
-              (c) => c.id === conversationId,
-            );
+            const idx = state.conversations.findIndex((c) => c.id === conversationId);
             if (idx >= 0) {
               const existing = state.conversations[idx];
               if (!existing) return state;
@@ -186,10 +141,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
                 title,
                 updatedAt: now,
               };
-              updated = [
-                updatedConv,
-                ...state.conversations.filter((_, i) => i !== idx),
-              ];
+              updated = [updatedConv, ...state.conversations.filter((_, i) => i !== idx)];
             } else {
               const newConv: Conversation = {
                 id: conversationId,
@@ -238,7 +190,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
       },
     }),
     {
-      name: VERSIONED_KEY,
+      name: STORAGE_KEY,
       version: STORAGE_VERSION,
       storage: chatHistoryStorage,
       partialize: (state) => ({ conversations: state.conversations }),
@@ -248,5 +200,4 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
 
 // ── Selector hooks ───────────────────────────────────────────────────
 
-export const useConversations = () =>
-  useChatHistoryStore((s) => s.conversations);
+export const useConversations = () => useChatHistoryStore((s) => s.conversations);

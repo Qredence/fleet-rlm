@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RuntimePane } from "@/features/settings/RuntimePane";
@@ -76,10 +76,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
     },
     testAllConnections: vi.fn(),
   }),
-  computeRuntimeUpdates: (
-    current: Record<string, string>,
-    baseline: Record<string, string>,
-  ) => {
+  computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of Object.keys(current)) {
       if ((current[key] ?? "") !== (baseline[key] ?? "")) {
@@ -107,18 +104,17 @@ describe("RuntimePane", () => {
     expect(html).toContain("sk-...yz");
     expect(html).toContain("Write-only input. Configured value");
     expect(html).toContain("Clear saved value");
+    expect(html).toContain("Runtime Configuration");
+    expect(html).toContain('data-slot="field-group"');
+    expect(html).toContain('data-slot="input-group"');
+    expect(html).toContain('data-slot="card"');
     expect(html).toContain("Modal Smoke");
     expect(html).toContain("Preflight failed");
     expect(html).toContain("LM Smoke");
     expect(html).toContain("Pass");
     expect(html).toContain("Test Credentials + Connection");
-    expect(html).toContain(
-      "rounded-xl border border-border-subtle/70 bg-muted/15 p-4",
-    );
-    expect(html).toContain("sm:col-span-2");
-    expect(html).toContain('data-variant="soft"');
     expect(html).toContain('data-variant="outline"');
-    expect(html).toContain('data-variant="fill"');
-    expect(html).toContain("w-full justify-center rounded-lg sm:col-span-2");
+    expect(html).toContain('data-variant="secondary"');
+    expect(html).toContain("w-full justify-center rounded-lg");
   });
 });

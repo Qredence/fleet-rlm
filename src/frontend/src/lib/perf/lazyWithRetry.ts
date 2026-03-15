@@ -4,10 +4,7 @@ type ModuleLoader<T extends ComponentType<unknown>> = () => Promise<{
   default: T;
 }>;
 
-const modulePromises = new Map<
-  string,
-  Promise<{ default: ComponentType<unknown> }>
->();
+const modulePromises = new Map<string, Promise<{ default: ComponentType<unknown> }>>();
 
 function isChunkLoadError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;

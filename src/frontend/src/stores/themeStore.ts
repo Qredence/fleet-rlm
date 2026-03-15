@@ -2,11 +2,7 @@
  * Theme store — dark mode toggle with localStorage persistence.
  */
 import { create } from "zustand";
-import {
-  persist,
-  type PersistStorage,
-  type StorageValue,
-} from "zustand/middleware";
+import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import { telemetryClient } from "@/lib/telemetry/client";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -17,7 +13,6 @@ interface ThemeState {
   setDark: (dark: boolean) => void;
 }
 
-const LEGACY_THEME_KEY = "theme";
 const THEME_STORAGE_KEY = "theme-storage";
 const THEME_STORAGE_VERSION = 1;
 type ThemePersistedState = Pick<ThemeState, "isDark">;
@@ -37,9 +32,7 @@ function parseStoredJson(raw: string | null): unknown {
   }
 }
 
-function toPersistedTheme(
-  value: unknown,
-): StorageValue<ThemePersistedState> | null {
+function toPersistedTheme(value: unknown): StorageValue<ThemePersistedState> | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -61,30 +54,13 @@ function toPersistedTheme(
   return {
     state: { isDark },
     version:
-      typeof maybePersisted.version === "number"
-        ? maybePersisted.version
-        : THEME_STORAGE_VERSION,
+      typeof maybePersisted.version === "number" ? maybePersisted.version : THEME_STORAGE_VERSION,
   };
 }
 
 const themeStorage: PersistStorage<ThemePersistedState> = {
   getItem: (name) => {
-    const currentValue = toPersistedTheme(
-      parseStoredJson(localStorage.getItem(name)),
-    );
-    if (currentValue) {
-      return currentValue;
-    }
-
-    const legacyTheme = localStorage.getItem(LEGACY_THEME_KEY);
-    if (legacyTheme !== "dark" && legacyTheme !== "light") {
-      return null;
-    }
-
-    return {
-      state: { isDark: legacyTheme === "dark" },
-      version: THEME_STORAGE_VERSION,
-    };
+    return toPersistedTheme(parseStoredJson(localStorage.getItem(name)));
   },
   setItem: (name, value) => {
     localStorage.setItem(name, JSON.stringify(value));
@@ -113,10 +89,7 @@ export const useThemeStore = create<ThemeState>()(
           previous_theme: next ? "light" : "dark",
         });
 
-        setTimeout(
-          () => document.documentElement.classList.remove("theme-transition"),
-          300,
-        );
+        setTimeout(() => document.documentElement.classList.remove("theme-transition"), 300);
       },
 
       setDark: (dark) => {

@@ -11,7 +11,6 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
 import { LogOut, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { typo } from "@/lib/config/typo";
 import { springs, fades } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,12 +70,9 @@ function LogoutPage() {
               <CardHeader className="items-center text-center">
                 <BrandMark className="h-3.75 w-8 text-foreground" />
                 <div className="space-y-1">
-                  <CardTitle className="text-foreground" style={typo.h3}>
-                    Signing you out
-                  </CardTitle>
-                  <CardDescription style={typo.caption}>
-                    Clearing your local session and closing the current
-                    workspace.
+                  <CardTitle className="text-foreground typo-h3">Signing you out</CardTitle>
+                  <CardDescription className="typo-caption">
+                    Clearing your local session and closing the current workspace.
                   </CardDescription>
                 </div>
               </CardHeader>
@@ -94,9 +90,7 @@ function LogoutPage() {
                   }
                   className="rounded-full-token h-6 w-6 border-2 border-muted-foreground border-t-foreground"
                 />
-                <p className="text-muted-foreground" style={typo.caption}>
-                  Signing you out&hellip;
-                </p>
+                <p className="text-muted-foreground typo-caption">Signing you out&hellip;</p>
               </CardContent>
             </motion.div>
           ) : (
@@ -113,26 +107,22 @@ function LogoutPage() {
                   <LogOut className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-foreground" style={typo.h3}>
+                  <CardTitle className="text-foreground typo-h3">
                     You&rsquo;ve been signed out
                   </CardTitle>
-                  <CardDescription style={typo.caption}>
+                  <CardDescription className="typo-caption">
                     Your session has ended. Sign in again to continue.
                   </CardDescription>
                 </div>
               </CardHeader>
               <CardFooter className="flex flex-col items-stretch gap-3">
-                <Button
-                  className="w-full"
-                  onClick={() => navigate("/login", { replace: true })}
-                >
-                  <span style={typo.label}>Sign In</span>
+                <Button className="w-full" onClick={() => navigate("/login", { replace: true })}>
+                  <span className="typo-label">Sign In</span>
                   <ArrowRight className="size-4" />
                 </Button>
                 <Link
                   to="/login"
-                  className="inline-flex items-center justify-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                  style={typo.caption}
+                  className="inline-flex items-center justify-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground typo-caption"
                 >
                   Return to Microsoft sign-in
                 </Link>

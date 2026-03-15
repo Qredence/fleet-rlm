@@ -1,9 +1,6 @@
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { createWsError } from "@/lib/rlm-api/wsFrameParser";
-import {
-  createBackendSessionId,
-  createReconnectingWs,
-} from "@/lib/rlm-api/wsReconnecting";
+import { createBackendSessionId, createReconnectingWs } from "@/lib/rlm-api/wsReconnecting";
 import type {
   WsCommandRequest,
   StreamWsOptions,
@@ -14,6 +11,7 @@ import type {
   WsEventKind,
   WsEventPayload,
   WsMessageRequest,
+  WsRuntimeMode,
   WsServerError,
   WsServerEvent,
   WsServerMessage,
@@ -22,6 +20,7 @@ import type {
 
 export type {
   WsTraceMode,
+  WsRuntimeMode,
   WsConnectionStatus,
   WsConnectionOptions,
   WsMessageRequest,

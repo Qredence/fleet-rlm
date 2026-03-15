@@ -19,12 +19,9 @@ interface RetryState {
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_INITIAL_BACKOFF = 1000;
 const DEFAULT_MAX_BACKOFF = 30000;
+const DEFAULT_FIRST_FRAME_TIMEOUT = 15000;
 
-function calculateBackoff(
-  attempt: number,
-  initialBackoff: number,
-  maxBackoff: number,
-): number {
+function calculateBackoff(attempt: number, initialBackoff: number, maxBackoff: number): number {
   const backoff = initialBackoff * Math.pow(2, attempt);
   return Math.min(backoff, maxBackoff);
 }
@@ -64,6 +61,7 @@ export async function createReconnectingWs(
     maxRetries = DEFAULT_MAX_RETRIES,
     initialBackoff = DEFAULT_INITIAL_BACKOFF,
     maxBackoff = DEFAULT_MAX_BACKOFF,
+    firstFrameTimeoutMs = DEFAULT_FIRST_FRAME_TIMEOUT,
     terminalEventKinds = ["final", "cancelled"],
     abortMode = "close",
     abortTimeoutMs = 1500,
@@ -91,6 +89,8 @@ export async function createReconnectingWs(
       let settled = false;
       let completed = false;
       let abortTimer: ReturnType<typeof setTimeout> | null = null;
+      let firstFrameTimer: ReturnType<typeof setTimeout> | null = null;
+      let firstFrameSeen = false;
 
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
@@ -108,14 +108,15 @@ export async function createReconnectingWs(
           clearTimeout(abortTimer);
           abortTimer = null;
         }
+        if (firstFrameTimer) {
+          clearTimeout(firstFrameTimer);
+          firstFrameTimer = null;
+        }
         fn();
       };
 
       const safeClose = () => {
-        if (
-          socket.readyState === WebSocket.OPEN ||
-          socket.readyState === WebSocket.CONNECTING
-        ) {
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
           socket.close();
         }
       };
@@ -153,17 +154,39 @@ export async function createReconnectingWs(
         updateStatus("connected");
         if (message) {
           socket.send(JSON.stringify(message));
+          if (firstFrameTimeoutMs > 0) {
+            firstFrameTimer = setTimeout(() => {
+              if (settled || completed || retryState.aborted || firstFrameSeen) {
+                return;
+              }
+              const waitSeconds = Math.ceil(firstFrameTimeoutMs / 1000);
+              const secondsLabel = waitSeconds === 1 ? "second" : "seconds";
+              completed = true;
+              safeClose();
+              updateStatus("disconnected");
+              finish(() =>
+                reject(
+                  createWsError(
+                    `No response arrived from the server within ${waitSeconds} ${secondsLabel}. Try again or check the backend logs.`,
+                  ),
+                ),
+              );
+            }, firstFrameTimeoutMs);
+          }
         }
       });
 
       socket.addEventListener("message", (event) => {
         try {
-          const parsed = JSON.parse(String(event.data)) as Record<
-            string,
-            unknown
-          >;
+          const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
           const frame = parseWsServerFrame(parsed);
           if (!frame) return;
+
+          firstFrameSeen = true;
+          if (firstFrameTimer) {
+            clearTimeout(firstFrameTimer);
+            firstFrameTimer = null;
+          }
 
           onFrame(frame);
 
@@ -185,9 +208,7 @@ export async function createReconnectingWs(
             completed = true;
             safeClose();
             updateStatus("disconnected");
-            finish(() =>
-              reject(createWsError(frame.data.text || "Server stream error")),
-            );
+            finish(() => reject(createWsError(frame.data.text || "Server stream error")));
           }
         } catch {
           // Ignore malformed frames to avoid taking down the stream.
@@ -211,21 +232,13 @@ export async function createReconnectingWs(
         if (retryState.attempt >= maxRetries) {
           updateStatus("disconnected");
           finish(() =>
-            reject(
-              createWsError(
-                `WebSocket connection failed after ${maxRetries} retries`,
-              ),
-            ),
+            reject(createWsError(`WebSocket connection failed after ${maxRetries} retries`)),
           );
           return;
         }
 
         retryState.attempt += 1;
-        const backoffMs = calculateBackoff(
-          retryState.attempt - 1,
-          initialBackoff,
-          maxBackoff,
-        );
+        const backoffMs = calculateBackoff(retryState.attempt - 1, initialBackoff, maxBackoff);
 
         const shouldContinue = await sleep(backoffMs, signal);
         if (!shouldContinue || retryState.aborted) {

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { toast } from "sonner";
 
-import { SettingsRow } from "@/components/shared/SettingsRow";
+import { SettingsRow } from "@/features/settings/components/SettingsRow";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils/cn";
 import { RuntimePane } from "@/features/settings/RuntimePane";
-import { SettingsToggleRow } from "@/features/settings/SettingsToggleRow";
+import { SettingsToggleRow } from "@/features/settings/components/SettingsToggleRow";
+import { errorMessage } from "@/features/settings/settingsErrors";
 import type { SettingsSection } from "@/features/settings/types";
 import {
   computeLmRuntimeUpdates,
@@ -21,16 +22,7 @@ interface GroupedSettingsPaneProps {
   section?: SettingsSection;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Unexpected error";
-}
-
-export function GroupedSettingsPane({
-  isDark,
-  onToggleTheme,
-  section,
-}: GroupedSettingsPaneProps) {
+export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedSettingsPaneProps) {
   const { settingsQuery, statusQuery, saveSettings } = useRuntimeSettings();
 
   const [telemetryEnabled, setTelemetryEnabled] = useState(true);
@@ -44,8 +36,7 @@ export function GroupedSettingsPane({
   const [baselineApiBase, setBaselineApiBase] = useState("");
   const [baselineLmModel, setBaselineLmModel] = useState("");
   const [baselineDelegateLmModel, setBaselineDelegateLmModel] = useState("");
-  const [baselineDelegateLmSmallModel, setBaselineDelegateLmSmallModel] =
-    useState("");
+  const [baselineDelegateLmSmallModel, setBaselineDelegateLmSmallModel] = useState("");
 
   useEffect(() => {
     setTelemetryEnabled(telemetryClient.isAnonymousTelemetryEnabled());
@@ -106,10 +97,7 @@ export function GroupedSettingsPane({
     lmModel,
   ]);
 
-  const dirtyKeys = useMemo(
-    () => Object.keys(runtimeUpdates),
-    [runtimeUpdates],
-  );
+  const dirtyKeys = useMemo(() => Object.keys(runtimeUpdates), [runtimeUpdates]);
   const status = statusQuery.data;
   const writeEnabled = status?.write_enabled !== false;
 
@@ -126,10 +114,7 @@ export function GroupedSettingsPane({
       onSuccess: (result) => {
         const updated = result.updated ?? [];
         toast.success("LM integration settings saved", {
-          description:
-            updated.length > 0
-              ? `Updated: ${updated.join(", ")}`
-              : "No keys changed.",
+          description: updated.length > 0 ? `Updated: ${updated.join(", ")}` : "No keys changed.",
         });
       },
       onError: (error) => {
@@ -140,11 +125,9 @@ export function GroupedSettingsPane({
     });
   };
 
-  const saveDisabled =
-    dirtyKeys.length === 0 || saveSettings.isPending || !writeEnabled;
+  const saveDisabled = dirtyKeys.length === 0 || saveSettings.isPending || !writeEnabled;
   const showAllSections = section == null;
-  const showSection = (key: SettingsSection) =>
-    showAllSections || section === key;
+  const showSection = (key: SettingsSection) => showAllSections || section === key;
 
   return (
     <div>
@@ -152,9 +135,7 @@ export function GroupedSettingsPane({
         <>
           {showAllSections && (
             <div className="py-3 border-b border-border-subtle">
-              <span className="text-sm text-muted-foreground font-medium">
-                Appearance
-              </span>
+              <span className="text-sm text-muted-foreground font-medium">Appearance</span>
             </div>
           )}
 
@@ -166,6 +147,7 @@ export function GroupedSettingsPane({
             <div className="flex items-center gap-1 bg-secondary rounded-lg p-0.5">
               <Button
                 variant="ghost"
+                aria-pressed={!isDark}
                 className={cn(
                   "gap-1.5 px-3 py-1.5 h-auto rounded-md",
                   !isDark && "bg-background shadow-sm",
@@ -182,6 +164,7 @@ export function GroupedSettingsPane({
               </Button>
               <Button
                 variant="ghost"
+                aria-pressed={isDark}
                 className={cn(
                   "gap-1.5 px-3 py-1.5 h-auto rounded-md",
                   isDark && "bg-background shadow-sm",
@@ -205,9 +188,7 @@ export function GroupedSettingsPane({
         <>
           {showAllSections && (
             <div className="py-3 border-b border-border-subtle">
-              <span className="text-sm text-muted-foreground font-medium">
-                Telemetry
-              </span>
+              <span className="text-sm text-muted-foreground font-medium">Telemetry</span>
             </div>
           )}
 
@@ -223,11 +204,7 @@ export function GroupedSettingsPane({
                 scope: "anonymous_only_web",
                 source: "grouped_settings",
               });
-              toast.success(
-                val
-                  ? "Anonymous telemetry enabled"
-                  : "Anonymous telemetry disabled",
-              );
+              toast.success(val ? "Anonymous telemetry enabled" : "Anonymous telemetry disabled");
             }}
           />
 
@@ -236,9 +213,7 @@ export function GroupedSettingsPane({
             description="No account/billing/profile settings are exposed here in v0.4.8. This surface is intentionally limited to functional runtime and privacy controls."
             noBorder={section === "telemetry"}
           >
-            <span className="text-xs text-muted-foreground">
-              Anonymous-only
-            </span>
+            <span className="text-xs text-muted-foreground">Anonymous-only</span>
           </SettingsRow>
         </>
       )}
@@ -247,9 +222,7 @@ export function GroupedSettingsPane({
         <>
           {showAllSections && (
             <div className="py-3 border-b border-border-subtle">
-              <span className="text-sm text-muted-foreground font-medium">
-                LiteLLM Integration
-              </span>
+              <span className="text-sm text-muted-foreground font-medium">LiteLLM Integration</span>
             </div>
           )}
 
@@ -276,6 +249,7 @@ export function GroupedSettingsPane({
               value={lmModel}
               placeholder=""
               autoComplete="off"
+              aria-label="Planner LM model"
               onChange={(event) => setLmModel(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -290,6 +264,7 @@ export function GroupedSettingsPane({
               value={delegateLmModel}
               placeholder=""
               autoComplete="off"
+              aria-label="Delegate LM model"
               onChange={(event) => setDelegateLmModel(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -304,6 +279,7 @@ export function GroupedSettingsPane({
               value={delegateLmSmallModel}
               placeholder=""
               autoComplete="off"
+              aria-label="Delegate small LM model"
               onChange={(event) => setDelegateLmSmallModel(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -318,6 +294,7 @@ export function GroupedSettingsPane({
               value={apiBase}
               placeholder=""
               autoComplete="off"
+              aria-label="Custom API endpoint"
               onChange={(event) => setApiBase(event.target.value)}
               className="w-[260px] max-w-[50vw]"
             />
@@ -332,6 +309,7 @@ export function GroupedSettingsPane({
               value={apiKeyInput}
               placeholder=""
               autoComplete="off"
+              aria-label="API key"
               onChange={(event) => {
                 setApiKeyInput(event.target.value);
                 setClearApiKeyOnSave(false);
@@ -340,13 +318,13 @@ export function GroupedSettingsPane({
             />
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
-                Write-only input. Configured value:{" "}
-                {maskedApiKey ? maskedApiKey : "not set"}.
+                Write-only input. Configured value: {maskedApiKey ? maskedApiKey : "not set"}.
               </span>
               <Button
                 type="button"
                 size="sm"
                 variant={clearApiKeyOnSave ? "secondary" : "outline"}
+                aria-pressed={clearApiKeyOnSave}
                 className="rounded-lg"
                 onClick={() => {
                   const nextClear = !clearApiKeyOnSave;

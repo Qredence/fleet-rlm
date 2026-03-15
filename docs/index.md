@@ -41,6 +41,7 @@ Then open `http://localhost:8000`.
 - [Module Map](reference/module-map.md)
 - [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)
+- [Historical Snapshots](historical/index.md)
 
 ### Contribute
 

@@ -8,15 +8,9 @@ import { Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { typo } from "@/lib/config/typo";
 import { useAuth, type PlanTier } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
@@ -42,12 +36,7 @@ const plans: PlanDef[] = [
     price: "$0",
     period: "/month",
     description: "For individuals exploring skill creation",
-    features: [
-      "5 skills per month",
-      "Basic validation",
-      "Community support",
-      "Single user",
-    ],
+    features: ["5 skills per month", "Basic validation", "Community support", "Single user"],
   },
   {
     key: "pro",
@@ -106,58 +95,35 @@ function PlanCard({
       )}
     >
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-foreground" style={typo.h4}>
-          {plan.name}
-        </span>
+        <span className="text-foreground typo-h4">{plan.name}</span>
         {isCurrent && <Badge variant="accent">Current</Badge>}
-        {plan.highlighted && !isCurrent && (
-          <Badge variant="secondary">Popular</Badge>
-        )}
+        {plan.highlighted && !isCurrent && <Badge variant="secondary">Popular</Badge>}
       </div>
 
       <div className="flex items-baseline gap-0.5 mb-2">
-        <span className="text-foreground" style={typo.h2}>
-          {plan.price}
-        </span>
-        {plan.period && (
-          <span className="text-muted-foreground" style={typo.caption}>
-            {plan.period}
-          </span>
-        )}
+        <span className="text-foreground typo-h2">{plan.price}</span>
+        {plan.period && <span className="text-muted-foreground typo-caption">{plan.period}</span>}
       </div>
 
-      <p className="text-muted-foreground mb-4" style={typo.caption}>
-        {plan.description}
-      </p>
+      <p className="text-muted-foreground mb-4 typo-caption">{plan.description}</p>
 
       <ul className="space-y-2 mb-5 flex-1">
         {plan.features.map((f) => (
           <li key={f} className="flex items-start gap-2">
-            <Check
-              className="size-4 text-accent shrink-0 mt-0.5"
-              strokeWidth={2}
-            />
-            <span className="text-foreground" style={typo.caption}>
-              {f}
-            </span>
+            <Check className="size-4 text-accent shrink-0 mt-0.5" strokeWidth={2} />
+            <span className="text-foreground typo-caption">{f}</span>
           </li>
         ))}
       </ul>
 
       <Button
-        variant={
-          isCurrent ? "outline" : plan.highlighted ? "default" : "secondary"
-        }
+        variant={isCurrent ? "outline" : plan.highlighted ? "default" : "secondary"}
         className="w-full"
         disabled={isCurrent}
         onClick={onSelect}
       >
-        <span style={typo.label}>
-          {isCurrent
-            ? "Current Plan"
-            : plan.key === "enterprise"
-              ? "Contact Sales"
-              : "Upgrade"}
+        <span className="typo-label">
+          {isCurrent ? "Current Plan" : plan.key === "enterprise" ? "Contact Sales" : "Upgrade"}
         </span>
       </Button>
     </div>
@@ -186,8 +152,7 @@ function PricingBody({ onClose }: { onClose: () => void }) {
 
     const previousPlan = currentPlan;
     const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-    const previousLabel =
-      previousPlan.charAt(0).toUpperCase() + previousPlan.slice(1);
+    const previousLabel = previousPlan.charAt(0).toUpperCase() + previousPlan.slice(1);
     const isUpgrade = previousPlan === "free" && tier === "pro";
     const isDowngrade = previousPlan === "pro" && tier === "free";
 
@@ -222,10 +187,8 @@ function PricingBody({ onClose }: { onClose: () => void }) {
   return (
     <div className="space-y-5">
       <div className="text-center">
-        <h2 className="text-foreground" style={typo.h3}>
-          Choose Your Plan
-        </h2>
-        <p className="text-muted-foreground mt-1" style={typo.caption}>
+        <h2 className="text-foreground typo-h3">Choose Your Plan</h2>
+        <p className="text-muted-foreground mt-1 typo-caption">
           Scale your skill management as your team grows
         </p>
       </div>
@@ -259,20 +222,13 @@ export function PricingDialog({ open, onOpenChange }: PricingDialogProps) {
       <Drawer.Root open={open} onOpenChange={onOpenChange}>
         <Drawer.Portal>
           <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-50" />
-          <Drawer.Content
-            className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-[95dvh] flex-col outline-none"
-          >
+          <Drawer.Content className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-[95dvh] flex-col outline-none">
             <div className="flex items-center justify-center py-2 shrink-0">
-              <div
-                className="surface-glass-handle h-[5px] w-9 rounded-full"
-                aria-hidden="true"
-              />
+              <div className="surface-glass-handle h-[5px] w-9 rounded-full" aria-hidden="true" />
             </div>
             <div className="flex items-center justify-between px-4 pb-2 shrink-0">
               <Drawer.Title>
-                <span className="text-foreground" style={typo.h3}>
-                  Pricing
-                </span>
+                <span className="text-foreground typo-h3">Pricing</span>
               </Drawer.Title>
               <IconButton
                 onClick={() => onOpenChange(false)}

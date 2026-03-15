@@ -1,8 +1,4 @@
-import type {
-  ChatMessage,
-  ChatRenderPart,
-  RuntimeContext,
-} from "@/lib/data/types";
+import type { ChatMessage, ChatRenderPart, RuntimeContext } from "@/lib/data/types";
 
 type ToolSessionEventKind = "tool_call" | "tool_result" | "status";
 
@@ -84,9 +80,7 @@ export type ChatDisplayItem =
   | AssistantTurnDisplayItem
   | TraceDisplayItem;
 
-function isToolSessionTracePart(
-  part: ChatRenderPart,
-): part is GroupableTracePart {
+function isToolSessionTracePart(part: ChatRenderPart): part is GroupableTracePart {
   return (
     part.kind === "tool" ||
     part.kind === "sandbox" ||
@@ -99,14 +93,10 @@ function canStartToolSession(part: GroupableTracePart) {
   return part.kind !== "status_note";
 }
 
-function toolSessionEventKindForPart(
-  part: GroupableTracePart,
-): ToolSessionEventKind {
+function toolSessionEventKindForPart(part: GroupableTracePart): ToolSessionEventKind {
   if (part.kind === "status_note") return "status";
   if (part.kind === "environment_variables") return "tool_result";
-  return part.state === "running" || part.state === "input-streaming"
-    ? "tool_call"
-    : "tool_result";
+  return part.state === "running" || part.state === "input-streaming" ? "tool_call" : "tool_result";
 }
 
 function toolSessionToolName(part: GroupableTracePart): string | undefined {
@@ -117,24 +107,14 @@ function toolSessionToolName(part: GroupableTracePart): string | undefined {
 }
 
 function toolSessionStepIndex(part: GroupableTracePart): number | undefined {
-  if (
-    part.kind === "tool" ||
-    part.kind === "sandbox" ||
-    part.kind === "status_note"
-  ) {
+  if (part.kind === "tool" || part.kind === "sandbox" || part.kind === "status_note") {
     return part.stepIndex;
   }
   return undefined;
 }
 
-function toolSessionRuntimeContext(
-  part: GroupableTracePart,
-): RuntimeContext | undefined {
-  if (
-    part.kind === "tool" ||
-    part.kind === "sandbox" ||
-    part.kind === "status_note"
-  ) {
+function toolSessionRuntimeContext(part: GroupableTracePart): RuntimeContext | undefined {
+  if (part.kind === "tool" || part.kind === "sandbox" || part.kind === "status_note") {
     return part.runtimeContext;
   }
   return undefined;
@@ -144,10 +124,7 @@ function normalizeToolSessionName(name?: string) {
   return name?.trim().toLowerCase();
 }
 
-function toolSessionItemsCompatible(
-  active: ToolSessionItem,
-  candidate: ToolSessionItem,
-) {
+function toolSessionItemsCompatible(active: ToolSessionItem, candidate: ToolSessionItem) {
   if (active.traceSource !== candidate.traceSource) return false;
   if (active.stepIndex != null && candidate.stepIndex != null) {
     return active.stepIndex === candidate.stepIndex;
@@ -158,10 +135,7 @@ function toolSessionItemsCompatible(
   return false;
 }
 
-function shouldAppendToActiveSession(
-  activeSession: ToolSessionItem[],
-  candidate: ToolSessionItem,
-) {
+function shouldAppendToActiveSession(activeSession: ToolSessionItem[], candidate: ToolSessionItem) {
   const first = activeSession[0];
   if (!first || !toolSessionItemsCompatible(first, candidate)) return false;
   if (candidate.eventKind === "tool_call") return false;
@@ -184,19 +158,13 @@ function buildToolSessionItem(
   };
 }
 
-function isReasoningTracePart(
-  part: ChatRenderPart,
-): part is ReasoningTracePart {
+function isReasoningTracePart(part: ChatRenderPart): part is ReasoningTracePart {
   return part.kind === "reasoning";
 }
 
-function isAttachableTracePart(
-  part: ChatRenderPart,
-): part is AttachableTracePart {
+function isAttachableTracePart(part: ChatRenderPart): part is AttachableTracePart {
   return (
-    part.kind !== "reasoning" &&
-    part.kind !== "chain_of_thought" &&
-    part.kind !== "confirmation"
+    part.kind !== "reasoning" && part.kind !== "chain_of_thought" && part.kind !== "confirmation"
   );
 }
 
@@ -330,12 +298,8 @@ function isSummaryReasoningOnlyAssistantTurn(
     item.attachedToolSessions.length === 0 &&
     item.attachedTraceParts.length === 0 &&
     (item.reasoningItems.length > 0 || item.trajectoryItems.length > 0) &&
-    item.reasoningItems.every(
-      (reasoningItem) => reasoningItem.message.traceSource === "summary",
-    ) &&
-    item.trajectoryItems.every(
-      (trajectoryItem) => trajectoryItem.message.traceSource === "summary",
-    )
+    item.reasoningItems.every((reasoningItem) => reasoningItem.message.traceSource === "summary") &&
+    item.trajectoryItems.every((trajectoryItem) => trajectoryItem.message.traceSource === "summary")
   );
 }
 
@@ -376,9 +340,7 @@ function attachPendingTraceItems(
     );
     if (attachableParts.length > 0) {
       targetTurn.attachedTraceParts.push(...attachableParts);
-      const remainingParts = pendingItem.renderParts.filter(
-        (part) => !isAttachableTracePart(part),
-      );
+      const remainingParts = pendingItem.renderParts.filter((part) => !isAttachableTracePart(part));
       if (remainingParts.length > 0) {
         remainingPending.push({
           ...pendingItem,
@@ -411,15 +373,13 @@ export function buildChatDisplayItems(
   const flushPendingTraceMessages = (targetTurn?: AssistantTurnDisplayItem) => {
     if (pendingTraceMessages.length === 0) return false;
     const pending = buildTraceDisplayItems(pendingTraceMessages).items;
-    const remainingPending = targetTurn
-      ? attachPendingTraceItems(pending, targetTurn)
-      : pending;
+    const remainingPending = targetTurn ? attachPendingTraceItems(pending, targetTurn) : pending;
 
     if (!targetTurn) {
       const lastItem = items[items.length - 1];
       if (lastItem?.kind === "assistant_turn" && lastItem.message) {
-        const trailingSummaryReasoning = remainingPending.filter(
-          (pendingItem) => isSummaryReasoningOnlyAssistantTurn(pendingItem),
+        const trailingSummaryReasoning = remainingPending.filter((pendingItem) =>
+          isSummaryReasoningOnlyAssistantTurn(pendingItem),
         );
         if (trailingSummaryReasoning.length > 0) {
           lastItem.reasoningItems.push(
@@ -445,11 +405,7 @@ export function buildChatDisplayItems(
 
   const finalizeCurrentTurn = () => {
     if (pendingTraceMessages.length === 0) {
-      if (
-        showPendingAssistantShell &&
-        currentTurnUserMessageId &&
-        !activeAssistantTurn
-      ) {
+      if (showPendingAssistantShell && currentTurnUserMessageId && !activeAssistantTurn) {
         const pendingTurn = createAssistantTurn(
           buildPendingAssistantTurnId(currentTurnUserMessageId),
           buildPendingAssistantTurnId(currentTurnUserMessageId),
@@ -500,12 +456,11 @@ export function buildChatDisplayItems(
     }
 
     if (message.type === "assistant") {
-      const assistantTurn: AssistantTurnDisplayItem =
-        activeAssistantTurn?.isPendingShell
-          ? activeAssistantTurn
-          : createAssistantTurn(message.id, message.id, {
-              message,
-            });
+      const assistantTurn: AssistantTurnDisplayItem = activeAssistantTurn?.isPendingShell
+        ? activeAssistantTurn
+        : createAssistantTurn(message.id, message.id, {
+            message,
+          });
       flushPendingTraceMessages(assistantTurn);
       assistantTurn.key = message.id;
       assistantTurn.turnId = message.id;

@@ -19,18 +19,12 @@ function parseCsv(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-const clientId = trimOrEmpty(
-  import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined,
-);
+const clientId = trimOrEmpty(import.meta.env.VITE_ENTRA_CLIENT_ID);
 const authority =
-  trimOrEmpty(import.meta.env.VITE_ENTRA_AUTHORITY as string | undefined) ||
+  trimOrEmpty(import.meta.env.VITE_ENTRA_AUTHORITY) ||
   "https://login.microsoftonline.com/organizations";
-const scopes = parseCsv(
-  import.meta.env.VITE_ENTRA_SCOPES as string | undefined,
-);
-const redirectPath =
-  trimOrEmpty(import.meta.env.VITE_ENTRA_REDIRECT_PATH as string | undefined) ||
-  "/login";
+const scopes = parseCsv(import.meta.env.VITE_ENTRA_SCOPES);
+const redirectPath = trimOrEmpty(import.meta.env.VITE_ENTRA_REDIRECT_PATH) || "/login";
 
 export const entraAuthConfig = {
   clientId,
@@ -84,9 +78,7 @@ async function getMsalClient(): Promise<PublicClientApplication> {
   return initPromise;
 }
 
-async function acquireAccessTokenForAccount(
-  account: AccountInfo,
-): Promise<AuthenticationResult> {
+async function acquireAccessTokenForAccount(account: AccountInfo): Promise<AuthenticationResult> {
   const client = await getMsalClient();
   const request: SilentRequest = {
     account,

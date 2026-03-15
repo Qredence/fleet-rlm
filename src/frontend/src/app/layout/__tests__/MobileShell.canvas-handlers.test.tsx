@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { MobileShell } from "@/app/layout/MobileShell";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -14,9 +14,7 @@ vi.mock("vaul", () => ({
       <div data-testid="drawer-content">{children}</div>
     ),
     Title: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    Description: ({ children }: { children: React.ReactNode }) => (
-      <div>{children}</div>
-    ),
+    Description: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   },
 }));
 

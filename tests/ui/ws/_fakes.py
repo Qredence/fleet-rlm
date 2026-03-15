@@ -62,6 +62,8 @@ class FakeChatAgent:
         self._events: list[StreamEvent] = []
         self._loaded_docs: list[str] = []
         self._session_state: dict[str, Any] = {}
+        self.execution_mode = "auto"
+        self.last_stream_kwargs: dict[str, Any] = {}
         self.interpreter = FakeInterpreter()
         self._live_event_callback = None
 
@@ -80,16 +82,39 @@ class FakeChatAgent:
         return False
 
     def iter_chat_turn_stream(
-        self, message: str, trace: bool = True, cancel_check=None, *, docs_path=None
+        self,
+        message: str,
+        trace: bool = True,
+        cancel_check=None,
+        *,
+        docs_path=None,
+        **kwargs,
     ):
-        _ = (message, trace, cancel_check, docs_path)
+        self.last_stream_kwargs = {
+            "message": message,
+            "trace": trace,
+            "docs_path": docs_path,
+            **kwargs,
+        }
+        _ = cancel_check
         for event in self._events:
             yield event
 
     async def aiter_chat_turn_stream(
-        self, message: str, trace: bool = True, cancel_check=None, *, docs_path=None
+        self,
+        message: str,
+        trace: bool = True,
+        cancel_check=None,
+        *,
+        docs_path=None,
+        **kwargs,
     ):
-        _ = (message, trace, cancel_check, docs_path)
+        self.last_stream_kwargs = {
+            "message": message,
+            "trace": trace,
+            "docs_path": docs_path,
+            **kwargs,
+        }
         for event in self._events:
             if cancel_check is not None and cancel_check():
                 yield StreamEvent(kind="cancelled", text="[cancelled]", timestamp=ts())
@@ -105,6 +130,9 @@ class FakeChatAgent:
     def load_document(self, path: str, alias: str = "active") -> None:
         _ = alias
         self._loaded_docs.append(path)
+
+    def set_execution_mode(self, execution_mode: str) -> None:
+        self.execution_mode = execution_mode
 
     def set_events(self, events: list[StreamEvent]) -> None:
         self._events = events
@@ -127,6 +155,8 @@ class FakeChatAgent:
         self._events = []
         self._loaded_docs = []
         self._session_state = {}
+        self.execution_mode = "auto"
+        self.last_stream_kwargs = {}
         self.history = SimpleNamespace(messages=[])
         self.interpreter._volume_store.clear()
         self.interpreter.execution_event_callback = None

@@ -1,3 +1,4 @@
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import type { RuntimeContext } from "@/lib/data/types";
 
 export function getRuntimeBadgeStrings(ctx?: RuntimeContext): string[] {
@@ -5,6 +6,9 @@ export function getRuntimeBadgeStrings(ctx?: RuntimeContext): string[] {
 
   const pills: string[] = [];
   if (ctx.depth > 0) pills.push(`depth ${ctx.depth}/${ctx.maxDepth}`);
+  if (ctx.runtimeMode && ctx.runtimeMode !== "modal_chat") {
+    pills.push(`runtime ${ctx.runtimeMode}`);
+  }
   if (ctx.executionMode && ctx.executionMode !== "react") {
     pills.push(`mode ${ctx.executionMode}`);
   }
@@ -21,9 +25,5 @@ export function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {
   const pills = getRuntimeBadgeStrings(ctx);
   if (pills.length === 0) return null;
 
-  return (
-    <div className="text-[10px] leading-relaxed text-muted-foreground">
-      {pills.join(" · ")}
-    </div>
-  );
+  return <div className={inspectorStyles.runtime.inline}>{pills.join(" · ")}</div>;
 }

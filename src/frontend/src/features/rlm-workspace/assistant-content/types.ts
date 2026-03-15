@@ -14,13 +14,7 @@ import type {
 type DirectExecutionPart = Extract<
   ChatRenderPart,
   {
-    kind:
-      | "task"
-      | "queue"
-      | "tool"
-      | "sandbox"
-      | "environment_variables"
-      | "status_note";
+    kind: "task" | "queue" | "tool" | "sandbox" | "environment_variables" | "status_note";
   }
 >;
 

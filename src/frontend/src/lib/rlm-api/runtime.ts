@@ -12,10 +12,7 @@ export interface RuntimeSettingsPatchInput {
 
 export const runtimeEndpoints = {
   settings(signal?: AbortSignal) {
-    return rlmApiClient.get<RuntimeSettingsSnapshot>(
-      "/api/v1/runtime/settings",
-      signal,
-    );
+    return rlmApiClient.get<RuntimeSettingsSnapshot>("/api/v1/runtime/settings", signal);
   },
 
   patchSettings(input: RuntimeSettingsPatchInput, signal?: AbortSignal) {
@@ -43,9 +40,6 @@ export const runtimeEndpoints = {
   },
 
   status(signal?: AbortSignal) {
-    return rlmApiClient.get<RuntimeStatusResponse>(
-      "/api/v1/runtime/status",
-      signal,
-    );
+    return rlmApiClient.get<RuntimeStatusResponse>("/api/v1/runtime/status", signal);
   },
 };

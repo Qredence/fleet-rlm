@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 type MockResponseBody = Record<string, unknown>;
 
@@ -36,10 +36,8 @@ describe("authEndpoints", () => {
     await authEndpoints.me();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/auth/me",
-    );
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("GET");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/auth/me");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit)?.method).toBe("GET");
   });
 
   it("clears local auth without calling the backend", async () => {

@@ -51,9 +51,9 @@ import {
   EnvironmentVariableValue,
 } from "@/components/ai-elements/environment-variables";
 import type { ChatRenderToolState } from "@/lib/data/types";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
 import { mapToolState } from "@/lib/utils/ai-elements-state";
+import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/runtimeBadges";
 import type {
   AssistantContentModel,
@@ -62,8 +62,11 @@ import type {
 } from "@/features/rlm-workspace/assistant-content/types";
 
 const MONO_BASE_STYLE = {
-  ...typo.labelRegular,
+  fontSize: "var(--font-text-sm-size)",
+  fontWeight: "var(--font-text-sm-weight)",
   fontFamily: "var(--font-mono)",
+  lineHeight: "var(--font-text-sm-line-height)",
+  letterSpacing: "var(--font-text-sm-tracking)",
 } as const;
 
 const MONO_BASE_MEDIUM_STYLE = {
@@ -143,34 +146,27 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
         <RuntimeContextBadge ctx={item.runtimeContext} />
         {item.part.errorText || item.part.output ? (
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Output
-            </div>
+            <div className={inspectorStyles.heading.detail}>Output</div>
             <div
               className={cn(
                 "rounded-md border px-2.5 py-2 text-foreground",
                 item.part.errorText
                   ? "border-destructive/25 bg-destructive/5 text-destructive"
                   : "border-border-subtle/80 bg-muted/15",
+                "typo-label-regular",
               )}
-              style={typo.labelRegular}
             >
               {item.part.errorText ? (
                 item.part.errorText
               ) : (
-                <Streamdown
-                  content={item.part.output ?? ""}
-                  streaming={false}
-                />
+                <Streamdown content={item.part.output ?? ""} streaming={false} />
               )}
             </div>
           </div>
         ) : null}
         {item.part.code ? (
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Code
-            </div>
+            <div className={inspectorStyles.heading.detail}>Code</div>
             <pre
               className="overflow-x-auto rounded-md border-subtle/80 bg-muted/20 px-2.5 py-2 text-foreground"
               style={MONO_BASE_STYLE}
@@ -199,9 +195,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 {variable.name}
               </span>
               {variable.required ? (
-                <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                  required
-                </span>
+                <span className={inspectorStyles.heading.detail}>required</span>
               ) : null}
             </div>
             <span className="text-muted-foreground" style={MONO_BASE_STYLE}>
@@ -219,21 +213,15 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
 function renderExecutionSection(section: ExecutionSection) {
   if (section.kind === "tool_session") {
     const latestItem = section.session.items[section.session.items.length - 1];
-    const latestState = latestItem
-      ? toolSessionStateForItem(latestItem)
-      : ("running" as const);
+    const latestState = latestItem ? toolSessionStateForItem(latestItem) : ("running" as const);
 
     return (
       <Tool key={section.id} defaultOpen={section.defaultOpen}>
-        <ToolHeader
-          type="tool-default"
-          state={mapToolState(latestState)}
-          title={section.label}
-        />
+        <ToolHeader type="tool-default" state={mapToolState(latestState)} title={section.label} />
         <ToolContent className="space-y-3">
           <div className="text-xs text-muted-foreground">{section.summary}</div>
           {section.runtimeBadges.length ? (
-            <div className="text-[10px] leading-relaxed text-muted-foreground">
+            <div className={inspectorStyles.runtime.inline}>
               {section.runtimeBadges.join(" · ")}
             </div>
           ) : null}
@@ -244,7 +232,7 @@ function renderExecutionSection(section: ExecutionSection) {
               data-slot="execution-tool-session-item"
             >
               <div className="space-y-2 py-0.5">
-                <div className="text-foreground" style={typo.labelRegular}>
+                <div className="text-foreground typo-label-regular">
                   {toolSessionLine(sessionItem)}
                 </div>
                 {renderToolSessionItemDetails(sessionItem)}
@@ -263,18 +251,14 @@ function renderExecutionSection(section: ExecutionSection) {
           <TaskTrigger title={section.label} />
           <TaskContent>
             <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                {section.summary}
-              </div>
+              <div className="text-xs text-muted-foreground">{section.summary}</div>
               {section.part.items?.length ? (
                 <div className="space-y-1">
                   {section.part.items.map((item) => (
                     <TaskItem key={item.id}>
                       <span>{item.text}</span>
                       {item.file ? (
-                        <TaskItemFile className="ml-2">
-                          {item.file.name}
-                        </TaskItemFile>
+                        <TaskItemFile className="ml-2">{item.file.name}</TaskItemFile>
                       ) : null}
                     </TaskItem>
                   ))}
@@ -291,23 +275,16 @@ function renderExecutionSection(section: ExecutionSection) {
         <Queue key={section.id}>
           <QueueSection defaultOpen>
             <QueueSectionTrigger>
-              <QueueSectionLabel
-                label={section.label}
-                count={section.part.items.length}
-              />
+              <QueueSectionLabel label={section.label} count={section.part.items.length} />
             </QueueSectionTrigger>
             <QueueSectionContent>
               <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">
-                  {section.summary}
-                </div>
+                <div className="text-xs text-muted-foreground">{section.summary}</div>
                 <QueueList>
                   {section.part.items.map((item) => (
                     <QueueItem key={item.id}>
                       <QueueItemIndicator completed={item.completed} />
-                      <QueueItemContent completed={item.completed}>
-                        {item.label}
-                      </QueueItemContent>
+                      <QueueItemContent completed={item.completed}>{item.label}</QueueItemContent>
                       {item.description ? (
                         <QueueItemDescription completed={item.completed}>
                           {item.description}
@@ -332,13 +309,9 @@ function renderExecutionSection(section: ExecutionSection) {
           />
           <ToolContent>
             <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                {section.summary}
-              </div>
+              <div className="text-xs text-muted-foreground">{section.summary}</div>
               <RuntimeContextBadge ctx={section.part.runtimeContext} />
-              {section.part.input != null ? (
-                <ToolInput input={section.part.input} />
-              ) : null}
+              {section.part.input != null ? <ToolInput input={section.part.input} /> : null}
               <ToolOutput
                 errorText={section.part.errorText}
                 output={
@@ -361,15 +334,10 @@ function renderExecutionSection(section: ExecutionSection) {
       const output = section.part.output ?? "";
       return (
         <Sandbox key={section.id} defaultOpen={section.defaultOpen}>
-          <SandboxHeader
-            title={section.label}
-            state={mapToolState(section.part.state)}
-          />
+          <SandboxHeader title={section.label} state={mapToolState(section.part.state)} />
           <SandboxContent>
             <div className="space-y-2 px-2.5 py-1.5">
-              <div className="text-xs text-muted-foreground">
-                {section.summary}
-              </div>
+              <div className="text-xs text-muted-foreground">{section.summary}</div>
               <RuntimeContextBadge ctx={section.part.runtimeContext} />
             </div>
             <SandboxTabs defaultValue="output">
@@ -381,18 +349,13 @@ function renderExecutionSection(section: ExecutionSection) {
               </SandboxTabsBar>
               <SandboxTabContent value="output">
                 {section.part.errorText ? (
-                  <div
-                    className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive"
-                    style={typo.labelRegular}
-                  >
+                  <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive typo-label-regular">
                     {section.part.errorText}
                   </div>
                 ) : output ? (
                   <Streamdown content={output} streaming={false} />
                 ) : (
-                  <div className="text-muted-foreground" style={typo.labelRegular}>
-                    No output yet
-                  </div>
+                  <div className="text-muted-foreground typo-label-regular">No output yet</div>
                 )}
               </SandboxTabContent>
               <SandboxTabContent value="code">
@@ -404,9 +367,7 @@ function renderExecutionSection(section: ExecutionSection) {
                     <code>{code}</code>
                   </pre>
                 ) : (
-                  <div className="text-muted-foreground" style={typo.labelRegular}>
-                    No code captured
-                  </div>
+                  <div className="text-muted-foreground typo-label-regular">No code captured</div>
                 )}
               </SandboxTabContent>
             </SandboxTabs>
@@ -418,15 +379,11 @@ function renderExecutionSection(section: ExecutionSection) {
       return (
         <EnvironmentVariables key={section.id} defaultShowValues={false}>
           <EnvironmentVariablesHeader>
-            <EnvironmentVariablesTitle>
-              {section.label}
-            </EnvironmentVariablesTitle>
+            <EnvironmentVariablesTitle>{section.label}</EnvironmentVariablesTitle>
             <EnvironmentVariablesToggle />
           </EnvironmentVariablesHeader>
           <EnvironmentVariablesContent>
-            <div className="mb-2 text-xs text-muted-foreground">
-              {section.summary}
-            </div>
+            <div className="mb-2 text-xs text-muted-foreground">{section.summary}</div>
             {section.part.variables.map((variable, idx) => (
               <EnvironmentVariable
                 key={`${variable.name}-${idx}`}
@@ -437,15 +394,11 @@ function renderExecutionSection(section: ExecutionSection) {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <EnvironmentVariableName />
-                      {variable.required ? (
-                        <EnvironmentVariableRequired />
-                      ) : null}
+                      {variable.required ? <EnvironmentVariableRequired /> : null}
                     </div>
                     <EnvironmentVariableValue />
                   </div>
-                  <EnvironmentVariableCopyButton
-                    aria-label={`Copy ${variable.name}`}
-                  />
+                  <EnvironmentVariableCopyButton aria-label={`Copy ${variable.name}`} />
                 </EnvironmentVariableGroup>
               </EnvironmentVariable>
             ))}
@@ -459,17 +412,15 @@ function renderExecutionSection(section: ExecutionSection) {
           variant={section.part.tone === "error" ? "destructive" : "default"}
           className={cn(
             "px-3 py-2.5",
-            section.part.tone === "warning" &&
-              "border-accent/25 bg-accent/5 text-foreground",
-            section.part.tone === "success" &&
-              "border-primary/25 bg-primary/5 text-foreground",
+            section.part.tone === "warning" && "border-accent/25 bg-accent/5 text-foreground",
+            section.part.tone === "success" && "border-primary/25 bg-primary/5 text-foreground",
             (!section.part.tone || section.part.tone === "neutral") &&
               "border-border-subtle/80 bg-muted/20 text-muted-foreground",
           )}
         >
           <AlertDescription>
             <div className="space-y-1">
-              <div style={typo.labelRegular}>{section.summary}</div>
+              <div className="typo-label-regular">{section.summary}</div>
               <RuntimeContextBadge ctx={section.part.runtimeContext} />
             </div>
           </AlertDescription>
@@ -487,9 +438,7 @@ export function ExecutionDetailsGroup({
 
   return (
     <section className="space-y-3" data-slot="assistant-execution">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-        Execution
-      </div>
+      <div className={inspectorStyles.heading.section}>Execution</div>
       <div className="space-y-3">
         {execution.sections.map((section) => (
           <div key={section.id} data-slot={`execution-section-${section.kind}`}>

@@ -1,7 +1,7 @@
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
 import type { ChatMessage } from "@/lib/data/types";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -350,9 +350,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
           {
             kind: "reasoning",
             label: "final_reasoning",
-            parts: [
-              { type: "text", text: "This is the concise final rationale." },
-            ],
+            parts: [{ type: "text", text: "This is the concise final rationale." }],
             isStreaming: false,
           },
         ],
@@ -432,9 +430,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     const trajectoryPreviewIndex = html.indexOf('data-slot="assistant-trajectory"');
     const thought0Index = html.indexOf("List the repository first.");
     const thought1Index = html.indexOf("Read deeper implementation docs.");
-    const synthesisIndex = html.indexOf(
-      "This supports the final architecture summary.",
-    );
+    const synthesisIndex = html.indexOf("This supports the final architecture summary.");
 
     expect(answerIndex).toBeGreaterThanOrEqual(0);
     expect(trajectoryPreviewIndex).toBeGreaterThan(answerIndex);
@@ -536,13 +532,11 @@ describe("ChatMessageList (AI Elements render parts)", () => {
 
     const answerIndex = html.indexOf('data-slot="assistant-answer"');
     const trajectoryIndex = html.indexOf('data-slot="assistant-trajectory"');
-    const executionIndex = html.indexOf(
-      'data-slot="assistant-execution-highlights"',
-    );
+    const executionIndex = html.indexOf('data-slot="assistant-execution-highlights"');
 
     expect(answerIndex).toBeGreaterThanOrEqual(0);
-    expect(trajectoryIndex).toBeGreaterThan(answerIndex);
-    expect(executionIndex).toBeGreaterThan(trajectoryIndex);
+    expect(executionIndex).toBeGreaterThan(answerIndex);
+    expect(trajectoryIndex).toBeGreaterThan(executionIndex);
     expect(html).toContain("Read buffer");
     expect(html).toContain("Read buffer ×2");
     expect(html).toContain("I checked the buffer.");
@@ -558,9 +552,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [
-              { type: "text", text: "Thinking without a final answer yet." },
-            ],
+            parts: [{ type: "text", text: "Thinking without a final answer yet." }],
             isStreaming: false,
           },
         ],
@@ -644,9 +636,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
 
     const { container, root } = mountChatMessageList(messages);
 
-    const trajectorySection = container.querySelector(
-      '[data-slot="assistant-trajectory"]',
-    );
+    const trajectorySection = container.querySelector('[data-slot="assistant-trajectory"]');
     const executionPreview = container.querySelector(
       '[data-slot="assistant-execution-highlights"] button',
     );
@@ -673,14 +663,10 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     });
     expect(useNavigationStore.getState().activeInspectorTab).toBe("evidence");
 
-    const refreshedTurnCard = container.querySelector(
-      '[data-slot="assistant-turn-content"]',
-    );
+    const refreshedTurnCard = container.querySelector('[data-slot="assistant-turn-content"]');
 
     act(() => {
-      refreshedTurnCard?.dispatchEvent(
-        new MouseEvent("click", { bubbles: true }),
-      );
+      refreshedTurnCard?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(useNavigationStore.getState().activeInspectorTab).toBe("trajectory");
     expect(refreshedTurnCard?.className).toContain("border-accent/20");
@@ -700,7 +686,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "Inspecting recursive RLM output." }],
+            parts: [{ type: "text", text: "Inspecting host-loop Daytona output." }],
             isStreaming: false,
             runtimeContext: {
               depth: 1,
@@ -723,7 +709,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "status_note",
-            text: "Child sandbox attached",
+            text: "Host-loop session attached",
             tone: "success",
             runtimeContext: {
               depth: 1,
@@ -901,9 +887,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html).toContain("Tool: read_buffer");
 
     const callIndex = html.indexOf("Calling tool: read_buffer");
-    const reasoningIndex = html.indexOf(
-      'data-slot="assistant-trajectory"',
-    );
+    const reasoningIndex = html.indexOf('data-slot="assistant-trajectory"');
     const resultIndex = html.indexOf("Tool: read_buffer");
 
     expect(callIndex).toBeGreaterThanOrEqual(0);
@@ -1140,9 +1124,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
     expect(html).toContain("Saved memory");
 
     // Verify the order: trajectory preview -> tool call -> tool result -> task in_progress -> task completed
-    const reasoningTriggerIndex = html.indexOf(
-      'data-slot="assistant-trajectory"',
-    );
+    const reasoningTriggerIndex = html.indexOf('data-slot="assistant-trajectory"');
     const loadDocumentIndex = html.indexOf("load_document");
     const buildIndex = html.indexOf("build_index");
     const executingPlannerIndex = html.indexOf("Executing planner");
@@ -1174,7 +1156,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       />,
     );
 
-    expect(html).toContain("Loading");
+    expect(html).toContain("Generating code...");
     expect(html).toContain("Agentic Fleet Session");
   });
 
@@ -1269,7 +1251,7 @@ describe("ChatMessageList (AI Elements render parts)", () => {
       />,
     );
 
-    expect(html).toContain("Loading");
+    expect(html).toContain("Generating code...");
     expect(html).toContain('data-slot="assistant-turn-content"');
   });
 

@@ -6,6 +6,7 @@ from typing import AsyncIterator
 import pytest
 import pytest_asyncio
 
+from fleet_rlm.daytona_rlm.config import resolve_daytona_config
 from fleet_rlm.db import DatabaseManager, FleetRepository
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -44,22 +45,34 @@ def _live_llm_enabled() -> bool:
     return os.environ.get("RLM_LIVE_TESTS", "0") == "1"
 
 
+def _live_daytona_enabled() -> bool:
+    """Explicit gate for live Daytona integration tests."""
+    return os.environ.get("DAYTONA_LIVE_TESTS", "0") == "1"
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
     """Skip tests marked live_llm unless explicitly enabled."""
-    if _live_llm_enabled():
-        return
-
-    skip_live = pytest.mark.skip(
-        reason=(
-            "live_llm test skipped by default. "
-            "Set RLM_LIVE_TESTS=1 to include live Modal + LM integration tests."
-        )
-    )
     for item in items:
-        if "live_llm" in item.keywords:
-            item.add_marker(skip_live)
+        if "live_llm" in item.keywords and not _live_llm_enabled():
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=(
+                        "live_llm test skipped by default. "
+                        "Set RLM_LIVE_TESTS=1 to include live Modal + LM integration tests."
+                    )
+                )
+            )
+        if "live_daytona" in item.keywords and not _live_daytona_enabled():
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=(
+                        "live_daytona test skipped by default. "
+                        "Set DAYTONA_LIVE_TESTS=1 to include live Daytona validation tests."
+                    )
+                )
+            )
 
 
 @pytest.fixture
@@ -71,6 +84,12 @@ def require_litellm() -> None:
         pytest.skip("DSPy LM not configured")
     if not check_litellm_secret():
         pytest.skip("LITELLM secret not configured")
+
+
+@pytest.fixture
+def require_daytona_runtime() -> None:
+    """Validate that native Daytona env names are configured for live tests."""
+    _ = resolve_daytona_config()
 
 
 @pytest_asyncio.fixture

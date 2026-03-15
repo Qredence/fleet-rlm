@@ -4,7 +4,7 @@
  * The `streamChatOverWs` function is mocked at the module level so that these
  * tests run completely offline without any WebSocket infrastructure.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 // ── module mocks ──────────────────────────────────────────────────────────────
 // Mock the entire rlm-api module before the store is imported so that the
@@ -48,6 +48,7 @@ function resetStore() {
     isStreaming: false,
     sessionId: "mock-session-id",
     error: null,
+    runtimeMode: "modal_chat",
     streamController: null,
   });
 }
@@ -65,12 +66,13 @@ describe("useChatStore — state management", () => {
 
   // ── initial state ──────────────────────────────────────────────────────────
   it("starts with empty messages, not streaming, and a session id", () => {
-    const { messages, isStreaming, sessionId, error } = useChatStore.getState();
+    const { messages, isStreaming, sessionId, error, runtimeMode } = useChatStore.getState();
     expect(messages).toEqual([]);
     expect(isStreaming).toBe(false);
     expect(typeof sessionId).toBe("string");
     expect(sessionId.length).toBeGreaterThan(0);
     expect(error).toBeNull();
+    expect(runtimeMode).toBe("modal_chat");
   });
 
   // ── setSessionId ───────────────────────────────────────────────────────────
@@ -126,9 +128,7 @@ describe("useChatStore — state management", () => {
 
   // ── setMessages ────────────────────────────────────────────────────────────
   it("setMessages accepts a direct array", () => {
-    const msgs = [
-      { id: "m1", type: "user" as const, content: "hi", phase: 1 as const },
-    ];
+    const msgs = [{ id: "m1", type: "user" as const, content: "hi", phase: 1 as const }];
     useChatStore.getState().setMessages(msgs);
     expect(useChatStore.getState().messages).toEqual(msgs);
   });
@@ -237,6 +237,7 @@ describe("useChatStore — streamMessage", () => {
       content: "test",
       trace: true,
       trace_mode: "compact",
+      runtime_mode: "modal_chat",
       execution_mode: "auto",
       analytics_enabled: true,
       session_id: "sess-abc",
@@ -248,16 +249,55 @@ describe("useChatStore — streamMessage", () => {
   it("passes execution mode overrides to the websocket payload", async () => {
     vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
 
-    await useChatStore
-      .getState()
-      .streamMessage("test", undefined, undefined, {
-        executionMode: "tools_only",
-      });
+    await useChatStore.getState().streamMessage("test", undefined, undefined, {
+      executionMode: "tools_only",
+    });
 
     const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
     expect(payload).toMatchObject({
+      runtime_mode: "modal_chat",
       execution_mode: "tools_only",
     });
+  });
+
+  it("keeps default Daytona websocket payloads free of repo setup fields", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+    useChatStore.setState({ runtimeMode: "daytona_pilot" });
+
+    await useChatStore.getState().streamMessage("trace the repo");
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      runtime_mode: "daytona_pilot",
+    });
+    expect(payload).not.toHaveProperty("execution_mode");
+    expect(payload).not.toHaveProperty("repo_url");
+    expect(payload).not.toHaveProperty("repo_ref");
+    expect(payload).not.toHaveProperty("context_paths");
+    expect(payload).not.toHaveProperty("max_depth");
+    expect(payload).not.toHaveProperty("batch_concurrency");
+  });
+
+  it("still forwards explicit Daytona source fields and batch concurrency when passed as stream options", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+    useChatStore.setState({ runtimeMode: "daytona_pilot" });
+
+    await useChatStore.getState().streamMessage("trace the repo", undefined, undefined, {
+      repoUrl: "https://github.com/qredence/fleet-rlm.git",
+      repoRef: "main",
+      contextPaths: ["/Users/zocho/Documents/spec.pdf", "/workspace/docs"],
+      batchConcurrency: 6,
+    });
+
+    const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(payload).toMatchObject({
+      runtime_mode: "daytona_pilot",
+      repo_url: "https://github.com/qredence/fleet-rlm.git",
+      repo_ref: "main",
+      context_paths: ["/Users/zocho/Documents/spec.pdf", "/workspace/docs"],
+      batch_concurrency: 6,
+    });
+    expect(payload).not.toHaveProperty("max_depth");
   });
 
   it("uses trace override=false to disable websocket trace mode", async () => {
@@ -309,9 +349,7 @@ describe("useChatStore — streamMessage", () => {
     const err = new Error("Stream failed");
     vi.mocked(streamChatOverWs).mockRejectedValue(err);
 
-    await expect(
-      useChatStore.getState().streamMessage("hello"),
-    ).rejects.toThrow("Stream failed");
+    await expect(useChatStore.getState().streamMessage("hello")).rejects.toThrow("Stream failed");
 
     expect(useChatStore.getState().error).toBe("Stream failed");
     expect(useChatStore.getState().isStreaming).toBe(false);

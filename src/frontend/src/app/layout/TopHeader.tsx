@@ -6,13 +6,10 @@ import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { UserMenu } from "@/features/shell/UserMenu";
 import { BrandMark } from "@/components/shared/BrandMark";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { NavTab } from "@/features/shell/NavTab";
+import { NavTab } from "@/components/shared/NavTab";
 import { cn } from "@/lib/utils/cn";
 import { preloadNavRoute } from "@/lib/perf/routePreload";
 import { isSectionSupported } from "@/lib/rlm-api";
@@ -40,21 +37,44 @@ export function TopHeader() {
   const { activeNav, isCanvasOpen, toggleCanvas, newSession } = useNavigationStore();
   const { navigateTo, navigate } = useAppNavigate();
   const isMobile = useIsMobile();
-  const panelLabel =
-    activeNav === "workspace" ? "message inspector" : "side panel";
+  const panelLabel = activeNav === "workspace" ? "message inspector" : "side panel";
+
+  const handleNewSession = () => {
+    newSession();
+    navigate("/app/workspace");
+  };
+
+  const SidePanelToggle = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <IconButton
+            onClick={toggleCanvas}
+            isActive={isCanvasOpen}
+            aria-label={isCanvasOpen ? `Close ${panelLabel}` : `Open ${panelLabel}`}
+            className={isMobile ? "touch-target" : "h-8 w-8 rounded-lg hover:bg-background/80"}
+          >
+            <PanelRight className={isMobile ? "size-6" : "size-5"} />
+          </IconButton>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        {isCanvasOpen ? `Close ${panelLabel}` : `Open ${panelLabel}`}
+      </TooltipContent>
+    </Tooltip>
+  );
 
   return (
     <header
       className={cn(
-        "flex items-center justify-between shrink-0",
-        !isMobile && "border-b border-border-subtle bg-background",
+        "flex shrink-0 items-center justify-between gap-4",
+        !isMobile && "border-b border-border-subtle/80 bg-background/95",
       )}
       style={
         isMobile
           ? {
               paddingBlock: "var(--header-padding-block-mobile)",
-              paddingLeft:
-                "max(var(--header-padding-inline-mobile), var(--safe-area-inset-left))",
+              paddingLeft: "max(var(--header-padding-inline-mobile), var(--safe-area-inset-left))",
               paddingRight:
                 "max(var(--header-padding-inline-mobile), var(--safe-area-inset-right))",
               backgroundColor: "var(--glass-nav-bg)",
@@ -76,7 +96,7 @@ export function TopHeader() {
       {/* ── Navigation tabs (desktop only) ─────────────────────── */}
       {!isMobile && (
         <LayoutGroup id="headerNav">
-          <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+          <nav className="flex items-center gap-1 overflow-x-auto rounded-xl border border-border-subtle/70 bg-muted/35 p-1 no-scrollbar">
             {navItems.map((item) => {
               const isActive = activeNav === item.key;
               const isSupported = isSectionSupported(item.key);
@@ -105,53 +125,44 @@ export function TopHeader() {
       )}
 
       {/* ── Action buttons ────────────────────────────────────── */}
-      <div
-        className={cn(
-          "flex items-center shrink-0",
-          isMobile ? "gap-1" : "gap-2",
-        )}
-      >
-        {/* New Session */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <IconButton
-                onClick={() => {
-                  newSession();
-                  navigate("/app/workspace");
-                }}
-                aria-label="New Session"
-                className={isMobile ? "touch-target" : undefined}
-              >
-                <SquarePen className="size-5" />
-              </IconButton>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">New Session</TooltipContent>
-        </Tooltip>
+      <div className={cn("flex items-center shrink-0", isMobile ? "gap-1" : "gap-2.5")}>
+        {isMobile ? (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <IconButton
+                    onClick={handleNewSession}
+                    aria-label="New Session"
+                    className="touch-target"
+                  >
+                    <SquarePen className="size-5" />
+                  </IconButton>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">New Session</TooltipContent>
+            </Tooltip>
 
-        {/* Side Panel */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <IconButton
-                onClick={toggleCanvas}
-                isActive={isCanvasOpen}
-                aria-label={
-                  isCanvasOpen
-                    ? `Close ${panelLabel}`
-                    : `Open ${panelLabel}`
-                }
-                className={isMobile ? "touch-target" : undefined}
-              >
-                <PanelRight className="size-6" />
-              </IconButton>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {isCanvasOpen ? `Close ${panelLabel}` : `Open ${panelLabel}`}
-          </TooltipContent>
-        </Tooltip>
+            {SidePanelToggle}
+          </>
+        ) : (
+          <div className="flex items-center gap-1 rounded-xl border border-border-subtle/70 bg-muted/35 p-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg px-3 text-xs font-medium text-foreground hover:bg-background/80"
+              onClick={handleNewSession}
+            >
+              <SquarePen className="size-4" />
+              <span>New Session</span>
+            </Button>
+
+            <div className="h-5 w-px bg-border-subtle/80" aria-hidden="true" />
+
+            {SidePanelToggle}
+          </div>
+        )}
 
         {/* User Menu (replaces standalone Settings gear icon) */}
         <UserMenu />

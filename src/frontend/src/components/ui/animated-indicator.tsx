@@ -6,10 +6,7 @@ interface AnimatedIndicatorProps {
   className?: string;
 }
 
-export function AnimatedIndicator({
-  layoutId,
-  className = "",
-}: AnimatedIndicatorProps) {
+export function AnimatedIndicator({ layoutId, className = "" }: AnimatedIndicatorProps) {
   const spring = useSpring("indicator");
 
   return (

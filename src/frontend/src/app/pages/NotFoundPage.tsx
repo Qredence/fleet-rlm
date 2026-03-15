@@ -10,7 +10,6 @@
 import { useNavigate, Link } from "react-router";
 import { FileQuestion, ArrowLeft, Home } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { typo } from "@/lib/config/typo";
 import { springs } from "@/lib/config/motion-config";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/shared/BrandMark";
@@ -32,15 +31,11 @@ export function NotFoundPage() {
           <FileQuestion className="w-7 h-7 text-muted-foreground" />
         </div>
         <div>
-          <p className="text-muted-foreground mb-2" style={typo.display}>
-            404
-          </p>
-          <h1 className="text-foreground mb-2" style={typo.h3}>
-            Page not found
-          </h1>
-          <p className="text-muted-foreground" style={typo.caption}>
-            The page you&rsquo;re looking for doesn&rsquo;t exist or has been
-            moved. Check the URL or head back home.
+          <p className="text-muted-foreground mb-2 typo-display">404</p>
+          <h1 className="text-foreground mb-2 typo-h3">Page not found</h1>
+          <p className="text-muted-foreground typo-caption">
+            The page you&rsquo;re looking for doesn&rsquo;t exist or has been moved. Check the URL
+            or head back home.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
@@ -50,21 +45,16 @@ export function NotFoundPage() {
             onClick={() => navigate("/", { replace: true })}
           >
             <Home className="size-4" />
-            <span style={typo.label}>Back to Home</span>
+            <span className="typo-label">Back to Home</span>
           </Button>
-          <Button
-            variant="secondary"
-            className="w-full sm:flex-1"
-            onClick={() => navigate(-1)}
-          >
+          <Button variant="secondary" className="w-full sm:flex-1" onClick={() => navigate(-1)}>
             <ArrowLeft className="size-4" />
-            <span style={typo.label}>Go Back</span>
+            <span className="typo-label">Go Back</span>
           </Button>
         </div>
         <Link
           to="/login"
-          className="text-muted-foreground transition-colors hover:text-foreground"
-          style={typo.helper}
+          className="text-muted-foreground transition-colors hover:text-foreground typo-helper"
         >
           Need help? Contact support
         </Link>

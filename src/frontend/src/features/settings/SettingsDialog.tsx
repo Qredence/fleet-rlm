@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Drawer } from "vaul";
 import { X } from "lucide-react";
 import {
@@ -8,13 +8,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -27,23 +21,16 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { SettingsPaneContent } from "@/features/settings/SettingsPaneContent";
+import { GroupedSettingsPane } from "@/features/settings/GroupedSettingsPane";
 import {
+  sectionDescriptions,
   settingsSections,
   type SettingsSection,
 } from "@/features/settings/types";
 import { useThemeStore } from "@/stores/themeStore";
-import { typo } from "@/lib/config/typo";
 import { cn } from "@/lib/utils/cn";
-
-const sectionDescriptions: Record<SettingsSection, string> = {
-  appearance: "Control theme and interface appearance.",
-  telemetry: "Configure anonymous telemetry preferences.",
-  litellm:
-    "Manage LiteLLM-compatible runtime model and provider integration settings.",
-  runtime: "Configure runtime credentials and run Modal/LM connection tests.",
-};
 
 interface SettingsDialogProps {
   open: boolean;
@@ -51,11 +38,8 @@ interface SettingsDialogProps {
   initialSection?: SettingsSection;
 }
 
-function resolveInitialSection(
-  section: SettingsSection | undefined,
-): SettingsSection {
-  return section &&
-    settingsSections.some((candidate) => candidate.key === section)
+function resolveInitialSection(section: SettingsSection | undefined): SettingsSection {
+  return section && settingsSections.some((candidate) => candidate.key === section)
     ? section
     : "appearance";
 }
@@ -71,10 +55,7 @@ function SectionContent({
   activeSection: SettingsSection;
   isMobile: boolean;
 }) {
-  const activeMeta = useMemo(
-    () => settingsSections.find((section) => section.key === activeSection),
-    [activeSection],
-  );
+  const activeMeta = settingsSections.find((section) => section.key === activeSection);
 
   return (
     <div
@@ -86,9 +67,7 @@ function SectionContent({
       <div className="shrink-0 border-b border-border-subtle/70">
         <div className={isMobile ? "px-4 pt-3 pb-3" : "px-6 pt-5 pb-3"}>
           {isMobile ? (
-            <span className="text-foreground" style={typo.h4}>
-              {activeMeta?.label}
-            </span>
+            <span className="text-foreground typo-h4">{activeMeta?.label}</span>
           ) : (
             <Breadcrumb>
               <BreadcrumbList>
@@ -102,15 +81,13 @@ function SectionContent({
               </BreadcrumbList>
             </Breadcrumb>
           )}
-          <p className="mt-1 text-sm text-muted-foreground">
-            {sectionDescriptions[activeSection]}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{sectionDescriptions[activeSection]}</p>
         </div>
       </div>
 
       <ScrollArea className="flex-1">
         <div className={isMobile ? "px-4 pb-4" : "px-6 pb-6"}>
-          <SettingsPaneContent
+          <GroupedSettingsPane
             isDark={isDark}
             onToggleTheme={onToggleTheme}
             section={activeSection}
@@ -128,26 +105,38 @@ function MobileSectionNav({
   activeSection: SettingsSection;
   onSelectSection: (section: SettingsSection) => void;
 }) {
+  const handleValueChange = (value: string) => {
+    if (value && settingsSections.some((section) => section.key === value)) {
+      onSelectSection(value as SettingsSection);
+    }
+  };
+
   return (
     <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-4 py-2">
-      <div className="flex w-max items-center gap-2">
+      <ToggleGroup
+        type="single"
+        value={activeSection}
+        onValueChange={handleValueChange}
+        variant="outline"
+        size="sm"
+        aria-label="Settings sections"
+        className="w-max"
+      >
         {settingsSections.map((section) => {
           const Icon = section.icon;
-          const isActive = section.key === activeSection;
           return (
-            <Button
+            <ToggleGroupItem
               key={section.key}
-              variant={isActive ? "secondary" : "ghost"}
-              size="sm"
-              className="touch-target rounded-full"
-              onClick={() => onSelectSection(section.key)}
+              value={section.key}
+              aria-label={section.label}
+              className="touch-target min-w-max px-3"
             >
-              <Icon className="size-4" />
+              <Icon aria-hidden="true" />
               {section.label}
-            </Button>
+            </ToggleGroupItem>
           );
         })}
-      </div>
+      </ToggleGroup>
     </div>
   );
 }
@@ -159,11 +148,7 @@ function MobileSectionNav({
  * `open` / `onOpenChange` are required props; `initialSection` optionally
  * focuses a specific settings section when opening.
  */
-export function SettingsDialog({
-  open,
-  onOpenChange,
-  initialSection,
-}: SettingsDialogProps) {
+export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsDialogProps) {
   const { isDark, toggle: toggleTheme } = useThemeStore();
   const isMobile = useIsMobile();
   const [activeSection, setActiveSection] = useState<SettingsSection>(() =>
@@ -182,23 +167,16 @@ export function SettingsDialog({
       <Drawer.Root open={open} onOpenChange={onOpenChange}>
         <Drawer.Portal>
           <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-50" />
-          <Drawer.Content
-            className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-(--settings-dialog-height-mobile) flex-col outline-none"
-          >
+          <Drawer.Content className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-(--settings-dialog-height-mobile) flex-col outline-none">
             {/* iOS 26 grab handle */}
             <div className="flex items-center justify-center py-2 shrink-0">
-              <div
-                className="surface-glass-handle h-1.25 w-9 rounded-full"
-                aria-hidden="true"
-              />
+              <div className="surface-glass-handle h-1.25 w-9 rounded-full" aria-hidden="true" />
             </div>
 
             {/* Sheet header with close button */}
             <div className="flex items-center justify-between px-4 pb-3 shrink-0">
               <Drawer.Title>
-                <span className="text-foreground" style={typo.h3}>
-                  Settings
-                </span>
+                <span className="text-foreground typo-h3">Settings</span>
               </Drawer.Title>
               <IconButton
                 onClick={() => onOpenChange(false)}
@@ -212,10 +190,7 @@ export function SettingsDialog({
               Configure Skill Fleet preferences and appearance
             </Drawer.Description>
 
-            <MobileSectionNav
-              activeSection={activeSection}
-              onSelectSection={setActiveSection}
-            />
+            <MobileSectionNav activeSection={activeSection} onSelectSection={setActiveSection} />
 
             <div className="flex-1 min-h-0">
               <SectionContent
@@ -248,21 +223,17 @@ export function SettingsDialog({
               <SidebarGroup>
                 <SidebarGroupContent>
                   <div className="px-3 pt-4 pb-2">
-                    <h2 className="text-foreground" style={typo.h4}>
-                      Settings
-                    </h2>
+                    <h2 className="text-foreground typo-h4">Settings</h2>
                   </div>
                   <SidebarMenu>
                     {settingsSections.map((section) => {
                       const Icon = section.icon;
                       return (
                         <SidebarMenuItem key={section.key}>
-                          <SidebarMenuButton
-                            asChild
-                            isActive={section.key === activeSection}
-                          >
+                          <SidebarMenuButton asChild isActive={section.key === activeSection}>
                             <button
                               type="button"
+                              aria-current={section.key === activeSection ? "true" : undefined}
                               onClick={() => setActiveSection(section.key)}
                             >
                               <Icon />
@@ -278,9 +249,7 @@ export function SettingsDialog({
             </SidebarContent>
           </Sidebar>
 
-          <main
-            className="flex min-h-0 h-(--settings-dialog-height-desktop) flex-1 flex-col overflow-hidden"
-          >
+          <main className="flex min-h-0 h-(--settings-dialog-height-desktop) flex-1 flex-col overflow-hidden">
             <SectionContent
               isDark={isDark}
               onToggleTheme={toggleTheme}

@@ -47,14 +47,7 @@ export {
 } from "./reasoning";
 
 // Task components
-export {
-  Task,
-  TaskTrigger,
-  TaskContent,
-  TaskItem,
-  TaskItemFile,
-  type TaskProps,
-} from "./task";
+export { Task, TaskTrigger, TaskContent, TaskItem, TaskItemFile, type TaskProps } from "./task";
 
 // Tool components
 export {

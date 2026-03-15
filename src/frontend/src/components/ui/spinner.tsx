@@ -21,12 +21,12 @@ const Spinner = React.forwardRef<HTMLDivElement, SpinnerProps>(
         className={cn(
           "animate-spin rounded-full border-2 border-muted border-t-primary",
           sizeClasses[size],
-          className
+          className,
         )}
         {...props}
       />
     );
-  }
+  },
 );
 Spinner.displayName = "Spinner";
 

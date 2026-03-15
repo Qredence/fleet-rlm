@@ -29,13 +29,8 @@
 
 import type { ReactNode } from "react";
 import { Check, ChevronRight } from "lucide-react";
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils/cn";
-import { typo } from "@/lib/config/typo";
 
 // ── Queue (root) ────────────────────────────────────────────────────
 
@@ -60,19 +55,12 @@ interface QueueSectionProps {
   className?: string;
 }
 
-function QueueSection({
-  children,
-  defaultOpen = true,
-  className,
-}: QueueSectionProps) {
+function QueueSection({ children, defaultOpen = true, className }: QueueSectionProps) {
   return (
     <Collapsible defaultOpen={defaultOpen}>
       <div
         data-slot="queue-section"
-        className={cn(
-          "rounded-xl border-subtle/80 bg-card/70 overflow-hidden",
-          className,
-        )}
+        className={cn("rounded-xl border-subtle/80 bg-card/70 overflow-hidden", className)}
       >
         {children}
       </div>
@@ -87,10 +75,7 @@ interface QueueSectionTriggerProps {
   className?: string;
 }
 
-function QueueSectionTrigger({
-  children,
-  className,
-}: QueueSectionTriggerProps) {
+function QueueSectionTrigger({ children, className }: QueueSectionTriggerProps) {
   return (
     <CollapsibleTrigger asChild>
       <button
@@ -122,24 +107,11 @@ interface QueueSectionLabelProps {
   className?: string;
 }
 
-function QueueSectionLabel({
-  label,
-  count,
-  className,
-}: QueueSectionLabelProps) {
+function QueueSectionLabel({ label, count, className }: QueueSectionLabelProps) {
   return (
-    <span
-      data-slot="queue-section-label"
-      className={cn("flex items-center gap-2", className)}
-    >
-      <span className="text-foreground" style={typo.label}>
-        {label}
-      </span>
-      {count != null && (
-        <span className="text-muted-foreground" style={typo.helper}>
-          {count}
-        </span>
-      )}
+    <span data-slot="queue-section-label" className={cn("flex items-center gap-2", className)}>
+      <span className="text-foreground typo-label">{label}</span>
+      {count != null && <span className="text-muted-foreground typo-helper">{count}</span>}
     </span>
   );
 }
@@ -151,10 +123,7 @@ interface QueueSectionContentProps {
   className?: string;
 }
 
-function QueueSectionContent({
-  children,
-  className,
-}: QueueSectionContentProps) {
+function QueueSectionContent({ children, className }: QueueSectionContentProps) {
   return (
     <CollapsibleContent>
       <div
@@ -197,10 +166,7 @@ function QueueItem({ children, className }: QueueItemProps) {
   return (
     <li
       data-slot="queue-item"
-      className={cn(
-        "flex flex-wrap items-start gap-2.5 px-3 py-2.5",
-        className,
-      )}
+      className={cn("flex flex-wrap items-start gap-2.5 px-3 py-2.5", className)}
     >
       {children}
     </li>
@@ -214,10 +180,7 @@ interface QueueItemIndicatorProps {
   className?: string;
 }
 
-function QueueItemIndicator({
-  completed = false,
-  className,
-}: QueueItemIndicatorProps) {
+function QueueItemIndicator({ completed = false, className }: QueueItemIndicatorProps) {
   return (
     <div
       data-slot="queue-item-indicator"
@@ -228,11 +191,7 @@ function QueueItemIndicator({
       )}
     >
       {completed && (
-        <Check
-          className="size-2.5 text-muted-foreground"
-          strokeWidth={3}
-          aria-hidden="true"
-        />
+        <Check className="size-2.5 text-muted-foreground" strokeWidth={3} aria-hidden="true" />
       )}
     </div>
   );
@@ -246,11 +205,7 @@ interface QueueItemContentProps {
   className?: string;
 }
 
-function QueueItemContent({
-  children,
-  completed,
-  className,
-}: QueueItemContentProps) {
+function QueueItemContent({ children, completed, className }: QueueItemContentProps) {
   return (
     <span
       data-slot="queue-item-content"
@@ -258,8 +213,8 @@ function QueueItemContent({
         "flex-1 min-w-0",
         completed ? "text-foreground" : "text-foreground",
         className,
+        "typo-label",
       )}
-      style={typo.label}
     >
       {children}
     </span>
@@ -274,11 +229,7 @@ interface QueueItemDescriptionProps {
   className?: string;
 }
 
-function QueueItemDescription({
-  children,
-  completed,
-  className,
-}: QueueItemDescriptionProps) {
+function QueueItemDescription({ children, completed, className }: QueueItemDescriptionProps) {
   return (
     <span
       data-slot="queue-item-description"
@@ -286,8 +237,8 @@ function QueueItemDescription({
         "w-full pl-6",
         completed ? "text-muted-foreground" : "text-muted-foreground/70",
         className,
+        "typo-caption",
       )}
-      style={typo.caption}
     >
       {children}
     </span>
