@@ -1,13 +1,7 @@
 import { memo } from "react";
 import { TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Accordion,
@@ -37,28 +31,18 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
             <section className={inspectorStyles.stack.section}>
               <div className={inspectorStyles.heading.section}>Citations</div>
               {evidence.citations.map((citation, index) => (
-                <Card
-                  key={`${citation.url}-${index}`}
-                  className={inspectorStyles.card.root}
-                >
+                <Card key={`${citation.url}-${index}`} className={inspectorStyles.card.root}>
                   <CardHeader className={inspectorStyles.card.header}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="space-y-1">
                         <CardTitle className="text-sm font-medium text-foreground">
-                          <ExternalAnchor href={citation.url}>
-                            {citation.title}
-                          </ExternalAnchor>
+                          <ExternalAnchor href={citation.url}>{citation.title}</ExternalAnchor>
                         </CardTitle>
                         {citation.description ? (
-                          <CardDescription>
-                            {citation.description}
-                          </CardDescription>
+                          <CardDescription>{citation.description}</CardDescription>
                         ) : null}
                       </div>
-                      <Badge
-                        variant="accent"
-                        className={inspectorStyles.badge.status}
-                      >
+                      <Badge variant="accent" className={inspectorStyles.badge.status}>
                         #{citation.number ?? index + 1}
                       </Badge>
                     </div>
@@ -69,9 +53,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                         <AccordionItem value="quote">
                           <AccordionTrigger>Show excerpt</AccordionTrigger>
                           <AccordionContent>
-                            <div
-                              className={cn(inspectorInsetClass(), "text-sm")}
-                            >
+                            <div className={cn(inspectorInsetClass(), "text-sm")}>
                               {citation.quote}
                             </div>
                           </AccordionContent>
@@ -88,34 +70,23 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
             <section className={inspectorStyles.stack.section}>
               <div className={inspectorStyles.heading.section}>Sources</div>
               {evidence.sources.map((source) => (
-                <Card
-                  key={source.sourceId}
-                  className={inspectorStyles.card.root}
-                >
+                <Card key={source.sourceId} className={inspectorStyles.card.root}>
                   <CardHeader className={inspectorStyles.card.header}>
                     <div className="space-y-2">
                       <CardTitle className="text-sm font-medium text-foreground">
-                        <ExternalAnchor
-                          href={source.url ?? source.canonicalUrl}
-                        >
+                        <ExternalAnchor href={source.url ?? source.canonicalUrl}>
                           {source.title}
                         </ExternalAnchor>
                       </CardTitle>
                       <div className={inspectorStyles.badge.row}>
                         <Badge
                           variant="secondary"
-                          className={cn(
-                            inspectorStyles.badge.status,
-                            "capitalize",
-                          )}
+                          className={cn(inspectorStyles.badge.status, "capitalize")}
                         >
                           {source.kind}
                         </Badge>
                         {source.displayUrl ? (
-                          <Badge
-                            variant="outline"
-                            className={inspectorStyles.badge.meta}
-                          >
+                          <Badge variant="outline" className={inspectorStyles.badge.meta}>
                             {source.displayUrl}
                           </Badge>
                         ) : null}
@@ -126,28 +97,16 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                     <CardContent className={inspectorStyles.card.content}>
                       <Accordion type="single" collapsible>
                         <AccordionItem value="snippet">
-                          <AccordionTrigger>
-                            Show supporting snippet
-                          </AccordionTrigger>
+                          <AccordionTrigger>Show supporting snippet</AccordionTrigger>
                           <AccordionContent>
                             <div className={inspectorStyles.stack.compact}>
                               {source.description ? (
-                                <div
-                                  className={cn(
-                                    inspectorInsetClass(),
-                                    "text-sm",
-                                  )}
-                                >
+                                <div className={cn(inspectorInsetClass(), "text-sm")}>
                                   {source.description}
                                 </div>
                               ) : null}
                               {source.quote ? (
-                                <div
-                                  className={cn(
-                                    inspectorInsetClass(),
-                                    "text-sm",
-                                  )}
-                                >
+                                <div className={cn(inspectorInsetClass(), "text-sm")}>
                                   {source.quote}
                                 </div>
                               ) : null}
@@ -166,40 +125,27 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
             <section className={inspectorStyles.stack.section}>
               <div className={inspectorStyles.heading.section}>Attachments</div>
               {evidence.attachments.map((attachment) => (
-                <Card
-                  key={attachment.attachmentId}
-                  className={inspectorStyles.card.root}
-                >
+                <Card key={attachment.attachmentId} className={inspectorStyles.card.root}>
                   <CardHeader className={inspectorStyles.card.header}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="space-y-1">
                         <CardTitle className="text-sm font-medium text-foreground">
-                          <ExternalAnchor
-                            href={attachment.url ?? attachment.previewUrl}
-                          >
+                          <ExternalAnchor href={attachment.url ?? attachment.previewUrl}>
                             {attachment.name}
                           </ExternalAnchor>
                         </CardTitle>
                         {attachment.description ? (
-                          <CardDescription>
-                            {attachment.description}
-                          </CardDescription>
+                          <CardDescription>{attachment.description}</CardDescription>
                         ) : null}
                       </div>
                       <div className={inspectorStyles.badge.row}>
                         {attachment.mimeType || attachment.mediaType ? (
-                          <Badge
-                            variant="secondary"
-                            className={inspectorStyles.badge.meta}
-                          >
+                          <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                             {attachment.mimeType ?? attachment.mediaType}
                           </Badge>
                         ) : null}
                         {attachment.sizeBytes != null ? (
-                          <Badge
-                            variant="outline"
-                            className={inspectorStyles.badge.meta}
-                          >
+                          <Badge variant="outline" className={inspectorStyles.badge.meta}>
                             {attachment.sizeBytes} bytes
                           </Badge>
                         ) : null}
@@ -214,12 +160,9 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
           {!evidence.hasContent ? (
             <Card className={inspectorStyles.card.root}>
               <CardHeader className={inspectorStyles.card.header}>
-                <CardTitle className="text-sm font-medium">
-                  No evidence attached
-                </CardTitle>
+                <CardTitle className="text-sm font-medium">No evidence attached</CardTitle>
                 <CardDescription>
-                  This response does not include explicit citations, sources, or
-                  attachments.
+                  This response does not include explicit citations, sources, or attachments.
                 </CardDescription>
               </CardHeader>
             </Card>

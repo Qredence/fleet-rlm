@@ -29,13 +29,9 @@ interface UseCodeMirrorOptions {
   readOnly?: boolean;
 }
 
-export function useCodeMirror({
-  value,
-  onChange,
-  readOnly = false,
-}: UseCodeMirrorOptions) {
+export function useCodeMirror({ value, onChange, readOnly = false }: UseCodeMirrorOptions) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // oxlint-disable-next-line @typescript-eslint/no-explicit-any
   const viewRef = useRef<any>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -55,7 +51,7 @@ export function useCodeMirror({
     if (!containerRef.current) return;
 
     let destroyed = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any
     let editorView: any = null;
 
     (async () => {
@@ -82,19 +78,14 @@ export function useCodeMirror({
           CM.bracketMatching(),
           CM.indentOnInput(),
           CM.history(),
-          CM.keymap.of(
-            [
-              ...CM.defaultKeymap,
-              ...CM.historyKeymap,
-              CM.indentWithTab,
-            ] as unknown as Parameters<typeof CM.keymap.of>[0],
-          ),
+          CM.keymap.of([
+            ...CM.defaultKeymap,
+            ...CM.historyKeymap,
+            CM.indentWithTab,
+          ] as unknown as Parameters<typeof CM.keymap.of>[0]),
           CM.EditorView.lineWrapping,
           CM.EditorView.updateListener.of(
-            (update: {
-              docChanged: boolean;
-              state: { doc: { toString(): string } };
-            }) => {
+            (update: { docChanged: boolean; state: { doc: { toString(): string } } }) => {
               if (update.docChanged && !isExternalUpdate.current) {
                 const newValue = update.state.doc.toString();
                 onChangeRef.current?.(newValue);

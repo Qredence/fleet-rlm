@@ -10,12 +10,7 @@ export type RunStatus =
   | "error"
   | "cancelled";
 
-export type DetailTab =
-  | "iterations"
-  | "evidence"
-  | "callbacks"
-  | "prompts"
-  | "final";
+export type DetailTab = "iterations" | "evidence" | "callbacks" | "prompts" | "final";
 
 export interface PromptHandleSummary {
   handleId: string;

@@ -54,19 +54,13 @@ function LoginPage() {
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
-              <h1 className="text-foreground typo-h3">
-                Sign in to Fleet RLM
-              </h1>
+              <h1 className="text-foreground typo-h3">Sign in to Fleet RLM</h1>
               <p className="text-muted-foreground mt-1 typo-caption">
                 Continue with Microsoft Entra to open your RLM workspace
               </p>
             </div>
           </div>
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={loading || !authConfigured}
-          >
+          <Button type="submit" className="w-full" disabled={loading || !authConfigured}>
             {loading ? (
               <>
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
@@ -76,11 +70,7 @@ function LoginPage() {
               <span className="typo-label">Continue with Microsoft</span>
             )}
           </Button>
-          {error ? (
-            <p className="text-center text-destructive typo-helper">
-              {error}
-            </p>
-          ) : null}
+          {error ? <p className="text-center text-destructive typo-helper">{error}</p> : null}
           <div className="text-center">
             <Link
               to="/signup"

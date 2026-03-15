@@ -21,11 +21,7 @@ const DEFAULT_INITIAL_BACKOFF = 1000;
 const DEFAULT_MAX_BACKOFF = 30000;
 const DEFAULT_FIRST_FRAME_TIMEOUT = 15000;
 
-function calculateBackoff(
-  attempt: number,
-  initialBackoff: number,
-  maxBackoff: number,
-): number {
+function calculateBackoff(attempt: number, initialBackoff: number, maxBackoff: number): number {
   const backoff = initialBackoff * Math.pow(2, attempt);
   return Math.min(backoff, maxBackoff);
 }
@@ -120,10 +116,7 @@ export async function createReconnectingWs(
       };
 
       const safeClose = () => {
-        if (
-          socket.readyState === WebSocket.OPEN ||
-          socket.readyState === WebSocket.CONNECTING
-        ) {
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
           socket.close();
         }
       };
@@ -167,8 +160,7 @@ export async function createReconnectingWs(
                 return;
               }
               const waitSeconds = Math.ceil(firstFrameTimeoutMs / 1000);
-              const secondsLabel =
-                waitSeconds === 1 ? "second" : "seconds";
+              const secondsLabel = waitSeconds === 1 ? "second" : "seconds";
               completed = true;
               safeClose();
               updateStatus("disconnected");
@@ -186,10 +178,7 @@ export async function createReconnectingWs(
 
       socket.addEventListener("message", (event) => {
         try {
-          const parsed = JSON.parse(String(event.data)) as Record<
-            string,
-            unknown
-          >;
+          const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
           const frame = parseWsServerFrame(parsed);
           if (!frame) return;
 
@@ -219,9 +208,7 @@ export async function createReconnectingWs(
             completed = true;
             safeClose();
             updateStatus("disconnected");
-            finish(() =>
-              reject(createWsError(frame.data.text || "Server stream error")),
-            );
+            finish(() => reject(createWsError(frame.data.text || "Server stream error")));
           }
         } catch {
           // Ignore malformed frames to avoid taking down the stream.
@@ -245,21 +232,13 @@ export async function createReconnectingWs(
         if (retryState.attempt >= maxRetries) {
           updateStatus("disconnected");
           finish(() =>
-            reject(
-              createWsError(
-                `WebSocket connection failed after ${maxRetries} retries`,
-              ),
-            ),
+            reject(createWsError(`WebSocket connection failed after ${maxRetries} retries`)),
           );
           return;
         }
 
         retryState.attempt += 1;
-        const backoffMs = calculateBackoff(
-          retryState.attempt - 1,
-          initialBackoff,
-          maxBackoff,
-        );
+        const backoffMs = calculateBackoff(retryState.attempt - 1, initialBackoff, maxBackoff);
 
         const shouldContinue = await sleep(backoffMs, signal);
         if (!shouldContinue || retryState.aborted) {

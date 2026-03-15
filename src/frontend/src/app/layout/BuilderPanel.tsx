@@ -6,44 +6,25 @@ import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { IconButton } from "@/components/ui/icon-button";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 import { Badge } from "@/components/ui/badge";
-import {
-  CanvasSwitcher,
-  type CanvasMode,
-} from "@/features/artifacts/CanvasSwitcher";
+import { CanvasSwitcher, type CanvasMode } from "@/features/artifacts/CanvasSwitcher";
 import { FileDetail } from "@/features/artifacts/FileDetail";
 import { RunWorkbench } from "@/features/rlm-workspace/run-workbench/RunWorkbench";
 import { formatDaytonaModeLabel } from "@/features/rlm-workspace/run-workbench/daytonaMode";
 import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
-import {
-  isRlmCoreEnabled,
-  isSectionSupported,
-  UNSUPPORTED_SECTION_REASON,
-} from "@/lib/rlm-api";
+import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
 import { buildSourceStateLabel } from "@/lib/utils/sourceContext";
 
-function UnsupportedState({
-  sectionLabel,
-  reason,
-}: {
-  sectionLabel: string;
-  reason?: string;
-}) {
+function UnsupportedState({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
         <PanelRight className="h-6 w-6 text-muted-foreground" />
       </div>
-      <p className="mb-1 text-foreground typo-label">
-        {sectionLabel} unavailable
-      </p>
+      <p className="mb-1 text-foreground typo-label">{sectionLabel} unavailable</p>
       <p className="text-muted-foreground typo-caption">
         {reason || "This functionality is currently disabled or unsupported."}
       </p>
@@ -87,9 +68,7 @@ function getHeaderLabel(mode: CanvasMode): string {
   }
 }
 
-function runStatusVariant(
-  status: string,
-): "default" | "secondary" | "outline" | "destructive" {
+function runStatusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
   if (status === "completed") return "default";
   if (status === "error") return "destructive";
   if (status === "cancelling") return "outline";
@@ -108,21 +87,16 @@ export function BuilderPanel() {
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
   const showRunWorkbench =
-    activeNav === "workspace" &&
-    !isUnsupportedNav &&
-    runtimeMode === "daytona_pilot";
+    activeNav === "workspace" && !isUnsupportedNav && runtimeMode === "daytona_pilot";
 
   const showInspector = activeNav === "workspace" && !isUnsupportedNav;
-  const showFileDetail =
-    activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
+  const showFileDetail = activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
 
   const sourceStateLabel = buildSourceStateLabel({
     hasRepo: Boolean(runWorkbenchState.repoUrl),
     hasContext: runWorkbenchState.contextSources.length > 0,
   });
-  const daytonaModeLabel = formatDaytonaModeLabel(
-    runWorkbenchState.daytonaMode,
-  );
+  const daytonaModeLabel = formatDaytonaModeLabel(runWorkbenchState.daytonaMode);
   const terminationReason = runWorkbenchState.summary?.terminationReason;
 
   const PANEL_INFO = {
@@ -133,14 +107,11 @@ export function BuilderPanel() {
     },
     messageInspector: {
       title: "Message Inspector",
-      description:
-        "Inspect trajectory, execution, evidence, and graph context.",
+      description: "Inspect trajectory, execution, evidence, and graph context.",
     },
   };
 
-  const currentPanelInfo = showRunWorkbench
-    ? PANEL_INFO.runWorkbench
-    : PANEL_INFO.messageInspector;
+  const currentPanelInfo = showRunWorkbench ? PANEL_INFO.runWorkbench : PANEL_INFO.messageInspector;
 
   const canvasMode: CanvasMode = showInspector
     ? "creation"
@@ -189,17 +160,14 @@ export function BuilderPanel() {
 
                   {showRunWorkbench ? (
                     <>
-                      <Badge
-                        variant={runStatusVariant(runWorkbenchState.status)}
-                      >
+                      <Badge variant={runStatusVariant(runWorkbenchState.status)}>
                         {runWorkbenchState.status}
                       </Badge>
                       <Badge variant="secondary">{sourceStateLabel}</Badge>
                       {daytonaModeLabel ? (
                         <Badge variant="outline">{daytonaModeLabel}</Badge>
                       ) : null}
-                      {terminationReason &&
-                      terminationReason !== runWorkbenchState.status ? (
+                      {terminationReason && terminationReason !== runWorkbenchState.status ? (
                         <Badge variant="outline">{terminationReason}</Badge>
                       ) : null}
                     </>
@@ -255,9 +223,7 @@ export function BuilderPanel() {
             />
           </ErrorBoundary>
         ) : showInspector ? (
-          <ErrorBoundary
-            name={showRunWorkbench ? "Run Workbench" : "Message Inspector"}
-          >
+          <ErrorBoundary name={showRunWorkbench ? "Run Workbench" : "Message Inspector"}>
             {showRunWorkbench ? <RunWorkbench /> : <MessageInspectorPanel />}
           </ErrorBoundary>
         ) : showFileDetail && selectedFileNode ? (

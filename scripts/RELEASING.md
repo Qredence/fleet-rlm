@@ -69,8 +69,8 @@ If the frontend app is present in your checkout, run its gate too:
 # from repo root
 if [ -f src/frontend/package.json ]; then
   cd src/frontend
-  bun install --frozen-lockfile
-  bun run check
+  pnpm install --frozen-lockfile
+  pnpm run check
   cd ..
 fi
 ```
@@ -95,7 +95,7 @@ uvx twine check dist/*
 ```
 
 `uv build` now runs frontend bundling automatically when `src/frontend` exists.
-In repository checkouts, ensure `bun` is installed for release builds.
+In repository checkouts, ensure `pnpm` is installed for release builds.
 
 Expected outputs:
 

@@ -141,38 +141,43 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up Bun
+      - name: Install pnpm
         if: steps.frontend.outputs.enabled == 'true'
-        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
+        uses: pnpm/action-setup@v3
         with:
-          bun-version: "1.2.10"
+          version: 9.12.0
 
-      - name: Cache Bun packages
+      - name: Set up Node.js
         if: steps.frontend.outputs.enabled == 'true'
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/setup-node@v4
         with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('src/frontend/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: 'src/frontend/pnpm-lock.yaml'
+
+      - name: Install Vite+ CLI
+        if: steps.frontend.outputs.enabled == 'true'
+        run: npm install -g vite-plus@0.1.11
 
       - name: Frontend install
         if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
-          bun install --frozen-lockfile
+          vp install
 
       - name: Install Playwright browser
         if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
-          bunx playwright install --with-deps chromium
+          pnpm dlx playwright install --with-deps chromium
 
       - name: Frontend quality gate
         if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
-          bun run check
+          ./node_modules/.bin/vp check
+          ./node_modules/.bin/vp test
+          ./node_modules/.bin/vp build
 
       - name: Frontend check skipped
         if: steps.frontend.outputs.enabled != 'true'

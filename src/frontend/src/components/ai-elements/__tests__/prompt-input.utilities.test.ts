@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   capFilesToCapacity,
@@ -6,19 +6,13 @@ import {
   filterFilesBySize,
 } from "@/components/ai-elements/prompt-input.utilities";
 
-const createFile = (
-  name: string,
-  type: string,
-  size = 4,
-) => new File([new Uint8Array(size)], name, { type });
+const createFile = (name: string, type: string, size = 4) =>
+  new File([new Uint8Array(size)], name, { type });
 
 describe("prompt-input utilities", () => {
   it("filters files by accepted mime patterns", () => {
     const onError = vi.fn();
-    const files = [
-      createFile("photo.png", "image/png"),
-      createFile("notes.txt", "text/plain"),
-    ];
+    const files = [createFile("photo.png", "image/png"), createFile("notes.txt", "text/plain")];
 
     const accepted = filterAcceptedFiles(files, "image/*", onError);
 

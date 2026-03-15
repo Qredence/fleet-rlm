@@ -7,11 +7,7 @@
 /* ── React Flow Minimal Skin ─────────────────────────────────────── */
 .artifact-graph-flow .react-flow__controls {
   border: 1px solid var(--border-subtle);
-  background: color-mix(
-    in srgb,
-    var(--color-surface-elevated) 92%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-surface-elevated) 92%, transparent);
   border-radius: 8px;
   box-shadow: none;
 }
@@ -23,20 +19,12 @@
 }
 
 .artifact-graph-flow .react-flow__controls-button:hover {
-  background: color-mix(
-    in srgb,
-    var(--color-background-primary-soft) 42%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-background-primary-soft) 42%, transparent);
   color: var(--color-text);
 }
 
 .artifact-graph-flow .react-flow__minimap {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: color-mix(
-    in srgb,
-    var(--color-surface-elevated) 90%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-surface-elevated) 90%, transparent);
 }

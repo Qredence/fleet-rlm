@@ -39,10 +39,8 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 // ── File icon resolver ──────────────────────────────────────────────
 
 function getFileIcon(name: string) {
-  if (name.endsWith(".md"))
-    return <FileText className="w-5 h-5 text-chart-2" />;
-  if (name.endsWith(".py"))
-    return <FileCode className="w-5 h-5 text-chart-1" />;
+  if (name.endsWith(".md")) return <FileText className="w-5 h-5 text-chart-2" />;
+  if (name.endsWith(".py")) return <FileCode className="w-5 h-5 text-chart-1" />;
   if (name.endsWith(".yaml") || name.endsWith(".yml"))
     return <FileCog className="w-5 h-5 text-chart-4" />;
   if (name.endsWith(".json") || name.endsWith(".jsonl"))
@@ -93,18 +91,11 @@ function isTextFile(name: string, mime?: string): boolean {
     ".html",
     ".css",
   ];
-  return (
-    textExts.some((ext) => name.endsWith(ext)) ||
-    (mime?.startsWith("text/") ?? false)
-  );
+  return textExts.some((ext) => name.endsWith(ext)) || (mime?.startsWith("text/") ?? false);
 }
 
 function isMarkdownFile(name: string, mime?: string): boolean {
-  return (
-    name.endsWith(".md") ||
-    name.endsWith(".markdown") ||
-    mime === "text/markdown"
-  );
+  return name.endsWith(".md") || name.endsWith(".markdown") || mime === "text/markdown";
 }
 
 function getMimeLabel(name: string, mime?: string): string {
@@ -242,15 +233,10 @@ function MetadataRow({
   return (
     <div className="flex items-center gap-3 py-2">
       <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-      <span
-        className="text-muted-foreground shrink-0"
-        style={METADATA_LABEL_STYLE}
-      >
+      <span className="text-muted-foreground shrink-0" style={METADATA_LABEL_STYLE}>
         {label}
       </span>
-      <span className="text-foreground truncate typo-caption">
-        {value}
-      </span>
+      <span className="text-foreground truncate typo-caption">{value}</span>
     </div>
   );
 }
@@ -304,14 +290,10 @@ export function FileDetail({ file, className }: FileDetailProps) {
             {getFileIcon(file.name)}
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-foreground truncate typo-h4">
-              {file.name}
-            </h3>
+            <h3 className="text-foreground truncate typo-h4">{file.name}</h3>
             <div className="flex items-center gap-2 mt-1">
               <Badge variant="secondary" className="rounded-full">
-                <span className="typo-micro">
-                  {getMimeLabel(file.name, file.mime)}
-                </span>
+                <span className="typo-micro">{getMimeLabel(file.name, file.mime)}</span>
               </Badge>
               {file.skillId && (
                 <Badge variant="accent" className="rounded-full">
@@ -325,11 +307,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
         {/* Path + actions */}
         <div className="flex items-center gap-2 mb-4 p-2.5 rounded-lg bg-muted/50 border-subtle">
           <HardDrive className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <code
-            className="text-foreground flex-1 min-w-0 truncate typo-mono"
-          >
-            {file.path}
-          </code>
+          <code className="text-foreground flex-1 min-w-0 truncate typo-mono">{file.path}</code>
           <Button
             variant="ghost"
             className={cn("h-7 w-7 p-0 shrink-0", isMobile && "touch-target")}
@@ -343,23 +321,11 @@ export function FileDetail({ file, className }: FileDetailProps) {
         {/* Metadata */}
         <Card className="border-border-subtle mb-4">
           <CardContent className="px-4 py-1">
-            <MetadataRow
-              icon={Weight}
-              label="Size"
-              value={formatFileSize(file.size)}
-            />
+            <MetadataRow icon={Weight} label="Size" value={formatFileSize(file.size)} />
             <Separator className="border-border-subtle" />
-            <MetadataRow
-              icon={Clock}
-              label="Modified"
-              value={formatDate(file.modifiedAt)}
-            />
+            <MetadataRow icon={Clock} label="Modified" value={formatDate(file.modifiedAt)} />
             <Separator className="border-border-subtle" />
-            <MetadataRow
-              icon={FileText}
-              label="Type"
-              value={getMimeLabel(file.name, file.mime)}
-            />
+            <MetadataRow icon={FileText} label="Type" value={getMimeLabel(file.name, file.mime)} />
           </CardContent>
         </Card>
 
@@ -367,9 +333,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
         {isText ? (
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-muted-foreground typo-label">
-                Content Preview
-              </span>
+              <span className="text-muted-foreground typo-label">Content Preview</span>
               {resolvedContent && (
                 <Button
                   variant="ghost"
@@ -377,9 +341,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
                   onClick={handleCopyContent}
                 >
                   <Copy className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-muted-foreground typo-helper">
-                    Copy
-                  </span>
+                  <span className="text-muted-foreground typo-helper">Copy</span>
                 </Button>
               )}
             </div>
@@ -391,9 +353,7 @@ export function FileDetail({ file, className }: FileDetailProps) {
               {!mock && isContentLoading && (
                 <div className="p-6 flex flex-col items-center gap-2 text-center">
                   <Loader2 className="w-5 h-5 text-muted-foreground animate-spin motion-reduce:animate-none" />
-                  <p className="text-muted-foreground typo-caption">
-                    Loading file content...
-                  </p>
+                  <p className="text-muted-foreground typo-caption">Loading file content...</p>
                 </div>
               )}
 
@@ -401,12 +361,8 @@ export function FileDetail({ file, className }: FileDetailProps) {
               {!mock && contentError && !isContentLoading && (
                 <div className="p-4 flex flex-col items-center gap-2 text-center">
                   <ExternalLink className="w-5 h-5 text-destructive" />
-                  <p className="text-muted-foreground typo-caption">
-                    Failed to load file content.
-                  </p>
-                  <p className="text-muted-foreground typo-helper">
-                    {contentError.message}
-                  </p>
+                  <p className="text-muted-foreground typo-caption">Failed to load file content.</p>
+                  <p className="text-muted-foreground typo-helper">{contentError.message}</p>
                 </div>
               )}
 
@@ -445,21 +401,14 @@ export function FileDetail({ file, className }: FileDetailProps) {
               <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
                 {getFileIcon(file.name)}
               </div>
-              <p className="text-foreground typo-label">
-                Binary file
-              </p>
-              <p
-                className="text-muted-foreground max-w-75 typo-caption"
-              >
-                This file cannot be previewed in the browser. Download it or
-                open it with an external tool.
+              <p className="text-foreground typo-label">Binary file</p>
+              <p className="text-muted-foreground max-w-75 typo-caption">
+                This file cannot be previewed in the browser. Download it or open it with an
+                external tool.
               </p>
               <Button
                 variant="secondary"
-                className={cn(
-                  "gap-2 rounded-button mt-2",
-                  isMobile && "touch-target",
-                )}
+                className={cn("gap-2 rounded-button mt-2", isMobile && "touch-target")}
               >
                 <ExternalLink className="w-4 h-4" />
                 <span className="typo-label">Open externally</span>

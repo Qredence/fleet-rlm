@@ -19,12 +19,7 @@ import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
@@ -47,8 +42,7 @@ const initialIntegrations: Integration[] = [
   {
     id: "github",
     name: "GitHub",
-    description:
-      "Sync skills with repositories, trigger CI/CD pipelines on skill publish.",
+    description: "Sync skills with repositories, trigger CI/CD pipelines on skill publish.",
     icon: Github,
     category: "mcp",
     connected: true,
@@ -57,8 +51,7 @@ const initialIntegrations: Integration[] = [
   {
     id: "slack",
     name: "Slack",
-    description:
-      "Receive skill creation notifications and HITL review requests in channels.",
+    description: "Receive skill creation notifications and HITL review requests in channels.",
     icon: MessageSquare,
     category: "communication",
     connected: true,
@@ -67,8 +60,7 @@ const initialIntegrations: Integration[] = [
   {
     id: "jira",
     name: "Jira",
-    description:
-      "Create issues from validation failures and link skills to epics.",
+    description: "Create issues from validation failures and link skills to epics.",
     icon: Blocks,
     category: "devops",
     connected: false,
@@ -76,8 +68,7 @@ const initialIntegrations: Integration[] = [
   {
     id: "linear",
     name: "Linear",
-    description:
-      "Sync skill creation tasks and track progress in Linear projects.",
+    description: "Sync skill creation tasks and track progress in Linear projects.",
     icon: Blocks,
     category: "devops",
     connected: false,
@@ -94,8 +85,7 @@ const initialIntegrations: Integration[] = [
   {
     id: "figma",
     name: "Figma",
-    description:
-      "Import design specifications and UI patterns as skill inputs.",
+    description: "Import design specifications and UI patterns as skill inputs.",
     icon: Figma,
     category: "design",
     connected: false,
@@ -103,8 +93,7 @@ const initialIntegrations: Integration[] = [
   {
     id: "confluence",
     name: "Confluence",
-    description:
-      "Publish validated skills as Confluence pages for team documentation.",
+    description: "Publish validated skills as Confluence pages for team documentation.",
     icon: Blocks,
     category: "mcp",
     connected: false,
@@ -112,8 +101,7 @@ const initialIntegrations: Integration[] = [
   {
     id: "custom-mcp",
     name: "Custom MCP Server",
-    description:
-      "Connect any MCP-compatible server for custom tool integrations.",
+    description: "Connect any MCP-compatible server for custom tool integrations.",
     icon: PlugZap,
     category: "mcp",
     connected: false,
@@ -167,23 +155,15 @@ function IntegrationCard({
       {/* Text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-foreground typo-label">
-            {integration.name}
-          </span>
+          <span className="text-foreground typo-label">{integration.name}</span>
           {integration.connected && (
             <Badge variant="success" className="shrink-0">
               Connected
             </Badge>
           )}
         </div>
-        <p className="text-muted-foreground mt-0.5 typo-helper">
-          {integration.description}
-        </p>
-        {integration.status && (
-          <p className="text-accent mt-1 typo-helper">
-            {integration.status}
-          </p>
-        )}
+        <p className="text-muted-foreground mt-0.5 typo-helper">{integration.description}</p>
+        {integration.status && <p className="text-accent mt-1 typo-helper">{integration.status}</p>}
       </div>
 
       {/* Action */}
@@ -262,9 +242,7 @@ function IntegrationsBody() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground typo-h3">
-          Integrations
-        </h2>
+        <h2 className="text-foreground typo-h3">Integrations</h2>
         <p className="text-muted-foreground mt-1 typo-caption">
           {connectedCount} of {integrations.length} integrations active
         </p>
@@ -272,9 +250,7 @@ function IntegrationsBody() {
 
       {grouped.map((group) => (
         <div key={group.key}>
-          <span className="text-muted-foreground typo-label">
-            {group.label}
-          </span>
+          <span className="text-muted-foreground typo-label">{group.label}</span>
           <div className="mt-2 space-y-2">
             {group.items.map((intg) => (
               <IntegrationCard
@@ -297,10 +273,7 @@ interface IntegrationsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function IntegrationsDialog({
-  open,
-  onOpenChange,
-}: IntegrationsDialogProps) {
+export function IntegrationsDialog({ open, onOpenChange }: IntegrationsDialogProps) {
   const isMobile = useIsMobile();
 
   if (isMobile) {
@@ -308,20 +281,13 @@ export function IntegrationsDialog({
       <Drawer.Root open={open} onOpenChange={onOpenChange}>
         <Drawer.Portal>
           <Drawer.Overlay className="surface-glass-overlay fixed inset-0 z-50" />
-          <Drawer.Content
-            className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-[95dvh] flex-col outline-none"
-          >
+          <Drawer.Content className="surface-glass-sheet fixed inset-x-0 bottom-0 z-50 flex h-[95dvh] flex-col outline-none">
             <div className="flex items-center justify-center py-2 shrink-0">
-              <div
-                className="surface-glass-handle h-[5px] w-9 rounded-full"
-                aria-hidden="true"
-              />
+              <div className="surface-glass-handle h-[5px] w-9 rounded-full" aria-hidden="true" />
             </div>
             <div className="flex items-center justify-between px-4 pb-2 shrink-0">
               <Drawer.Title>
-                <span className="text-foreground typo-h3">
-                  Integrations
-                </span>
+                <span className="text-foreground typo-h3">Integrations</span>
               </Drawer.Title>
               <IconButton
                 onClick={() => onOpenChange(false)}

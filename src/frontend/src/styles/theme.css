@@ -157,48 +157,20 @@
   --color-background-info-soft: #e5f3ff;
   --color-background-info-soft-hover: #cce6ff;
   --color-background-info-soft-active: #cce6ff;
-  --color-background-info-soft-alpha: color-mix(
-    in oklab,
-    #0285ff 13%,
-    transparent
-  );
-  --color-background-info-soft-alpha-hover: color-mix(
-    in oklab,
-    #0285ff 25%,
-    transparent
-  );
-  --color-background-info-soft-alpha-active: color-mix(
-    in oklab,
-    #0285ff 25%,
-    transparent
-  );
+  --color-background-info-soft-alpha: color-mix(in oklab, #0285ff 13%, transparent);
+  --color-background-info-soft-alpha-hover: color-mix(in oklab, #0285ff 25%, transparent);
+  --color-background-info-soft-alpha-active: color-mix(in oklab, #0285ff 25%, transparent);
   --color-background-info-surface: color-mix(in oklab, #0285ff 4%, transparent);
   --color-border-info-surface: color-mix(in oklab, #0285ff 4%, transparent);
   --color-background-info-solid: #0285ff;
   --color-background-info-solid-hover: #0169cc;
   --color-background-info-solid-active: #0169cc;
-  --color-background-info-outline-hover: color-mix(
-    in oklab,
-    #0285ff 4%,
-    transparent
-  );
-  --color-background-info-outline-active: color-mix(
-    in oklab,
-    #0285ff 4%,
-    transparent
-  );
+  --color-background-info-outline-hover: color-mix(in oklab, #0285ff 4%, transparent);
+  --color-background-info-outline-active: color-mix(in oklab, #0285ff 4%, transparent);
   --color-border-info-outline: #0169cc;
   --color-border-info-outline-hover: #0169cc;
-  --color-background-info-ghost-hover: color-mix(
-    in oklab,
-    #0285ff 13%,
-    transparent
-  );
-  --color-background-info-ghost-active: color-mix(
-    in oklab,
-    #0285ff 13%,
-    transparent
-  );
+  --color-background-info-ghost-hover: color-mix(in oklab, #0285ff 13%, transparent);
+  --color-background-info-ghost-active: color-mix(in oklab, #0285ff 13%, transparent);
 
   --color-text-warning: #923b0f;
   --color-text-warning-soft: #923b0f;
@@ -211,52 +183,20 @@
   --color-background-warning-soft: #ffe7d9;
   --color-background-warning-soft-hover: #ffcfb4;
   --color-background-warning-soft-active: #ffcfb4;
-  --color-background-warning-soft-alpha: color-mix(
-    in oklab,
-    #fb6a22 16%,
-    transparent
-  );
-  --color-background-warning-soft-alpha-hover: color-mix(
-    in oklab,
-    #fb6a22 33%,
-    transparent
-  );
-  --color-background-warning-soft-alpha-active: color-mix(
-    in oklab,
-    #fb6a22 33%,
-    transparent
-  );
-  --color-background-warning-surface: color-mix(
-    in oklab,
-    #fb6a22 7%,
-    transparent
-  );
+  --color-background-warning-soft-alpha: color-mix(in oklab, #fb6a22 16%, transparent);
+  --color-background-warning-soft-alpha-hover: color-mix(in oklab, #fb6a22 33%, transparent);
+  --color-background-warning-soft-alpha-active: color-mix(in oklab, #fb6a22 33%, transparent);
+  --color-background-warning-surface: color-mix(in oklab, #fb6a22 7%, transparent);
   --color-border-warning-surface: color-mix(in oklab, #fb6a22 7%, transparent);
   --color-background-warning-solid: #e25507;
   --color-background-warning-solid-hover: #b9480d;
   --color-background-warning-solid-active: #b9480d;
-  --color-background-warning-outline-hover: color-mix(
-    in oklab,
-    #fb6a22 7%,
-    transparent
-  );
-  --color-background-warning-outline-active: color-mix(
-    in oklab,
-    #fb6a22 7%,
-    transparent
-  );
+  --color-background-warning-outline-hover: color-mix(in oklab, #fb6a22 7%, transparent);
+  --color-background-warning-outline-active: color-mix(in oklab, #fb6a22 7%, transparent);
   --color-border-warning-outline: #e25507;
   --color-border-warning-outline-hover: #e25507;
-  --color-background-warning-ghost-hover: color-mix(
-    in oklab,
-    #fb6a22 16%,
-    transparent
-  );
-  --color-background-warning-ghost-active: color-mix(
-    in oklab,
-    #fb6a22 16%,
-    transparent
-  );
+  --color-background-warning-ghost-hover: color-mix(in oklab, #fb6a22 16%, transparent);
+  --color-background-warning-ghost-active: color-mix(in oklab, #fb6a22 16%, transparent);
 
   --color-text-caution: #916f00;
   --color-text-caution-soft: #6e5400;
@@ -270,52 +210,20 @@
   --color-background-caution-soft: #fff6d9;
   --color-background-caution-soft-hover: #ffeeb8;
   --color-background-caution-soft-active: #ffeeb8;
-  --color-background-caution-soft-alpha: color-mix(
-    in oklab,
-    #ffc300 15%,
-    transparent
-  );
-  --color-background-caution-soft-alpha-hover: color-mix(
-    in oklab,
-    #ffc300 27%,
-    transparent
-  );
-  --color-background-caution-soft-alpha-active: color-mix(
-    in oklab,
-    #ffc300 27%,
-    transparent
-  );
-  --color-background-caution-surface: color-mix(
-    in oklab,
-    #ffc300 8%,
-    transparent
-  );
+  --color-background-caution-soft-alpha: color-mix(in oklab, #ffc300 15%, transparent);
+  --color-background-caution-soft-alpha-hover: color-mix(in oklab, #ffc300 27%, transparent);
+  --color-background-caution-soft-alpha-active: color-mix(in oklab, #ffc300 27%, transparent);
+  --color-background-caution-surface: color-mix(in oklab, #ffc300 8%, transparent);
   --color-border-caution-surface: color-mix(in oklab, #ffc300 8%, transparent);
   --color-background-caution-solid: #ba8e00;
   --color-background-caution-solid-hover: #916f00;
   --color-background-caution-solid-active: #916f00;
-  --color-background-caution-outline-hover: color-mix(
-    in oklab,
-    #ffc300 8%,
-    transparent
-  );
-  --color-background-caution-outline-active: color-mix(
-    in oklab,
-    #ffc300 8%,
-    transparent
-  );
+  --color-background-caution-outline-hover: color-mix(in oklab, #ffc300 8%, transparent);
+  --color-background-caution-outline-active: color-mix(in oklab, #ffc300 8%, transparent);
   --color-border-caution-outline: #916f00;
   --color-border-caution-outline-hover: #916f00;
-  --color-background-caution-ghost-hover: color-mix(
-    in oklab,
-    #ffc300 15%,
-    transparent
-  );
-  --color-background-caution-ghost-active: color-mix(
-    in oklab,
-    #ffc300 15%,
-    transparent
-  );
+  --color-background-caution-ghost-hover: color-mix(in oklab, #ffc300 15%, transparent);
+  --color-background-caution-ghost-active: color-mix(in oklab, #ffc300 15%, transparent);
 
   --color-text-danger: #911e1b;
   --color-text-danger-soft: #ba2623;
@@ -328,52 +236,20 @@
   --color-background-danger-soft: #ffd9d9;
   --color-background-danger-soft-hover: #ffc6c5;
   --color-background-danger-soft-active: #ffc6c5;
-  --color-background-danger-soft-alpha: color-mix(
-    in oklab,
-    #fa423e 16%,
-    transparent
-  );
-  --color-background-danger-soft-alpha-hover: color-mix(
-    in oklab,
-    #fa423e 30%,
-    transparent
-  );
-  --color-background-danger-soft-alpha-active: color-mix(
-    in oklab,
-    #fa423e 30%,
-    transparent
-  );
-  --color-background-danger-surface: color-mix(
-    in oklab,
-    #fa423e 8%,
-    transparent
-  );
+  --color-background-danger-soft-alpha: color-mix(in oklab, #fa423e 16%, transparent);
+  --color-background-danger-soft-alpha-hover: color-mix(in oklab, #fa423e 30%, transparent);
+  --color-background-danger-soft-alpha-active: color-mix(in oklab, #fa423e 30%, transparent);
+  --color-background-danger-surface: color-mix(in oklab, #fa423e 8%, transparent);
   --color-border-danger-surface: color-mix(in oklab, #fa423e 8%, transparent);
   --color-background-danger-solid: #e02e2a;
   --color-background-danger-solid-hover: #ba2623;
   --color-background-danger-solid-active: #ba2623;
-  --color-background-danger-outline-hover: color-mix(
-    in oklab,
-    #fa423e 8%,
-    transparent
-  );
-  --color-background-danger-outline-active: color-mix(
-    in oklab,
-    #fa423e 8%,
-    transparent
-  );
+  --color-background-danger-outline-hover: color-mix(in oklab, #fa423e 8%, transparent);
+  --color-background-danger-outline-active: color-mix(in oklab, #fa423e 8%, transparent);
   --color-border-danger-outline: #e02e2a;
   --color-border-danger-outline-hover: #e02e2a;
-  --color-background-danger-ghost-hover: color-mix(
-    in oklab,
-    #fa423e 16%,
-    transparent
-  );
-  --color-background-danger-ghost-active: color-mix(
-    in oklab,
-    #fa423e 16%,
-    transparent
-  );
+  --color-background-danger-ghost-hover: color-mix(in oklab, #fa423e 16%, transparent);
+  --color-background-danger-ghost-active: color-mix(in oklab, #fa423e 16%, transparent);
 
   --color-text-success: #00692a;
   --color-text-success-soft: #008635;
@@ -386,52 +262,20 @@
   --color-background-success-soft: #d9f4e4;
   --color-background-success-soft-hover: #b8ebcc;
   --color-background-success-soft-active: #b8ebcc;
-  --color-background-success-soft-alpha: color-mix(
-    in oklab,
-    #04b84c 15%,
-    transparent
-  );
-  --color-background-success-soft-alpha-hover: color-mix(
-    in oklab,
-    #04b84c 29%,
-    transparent
-  );
-  --color-background-success-soft-alpha-active: color-mix(
-    in oklab,
-    #04b84c 29%,
-    transparent
-  );
-  --color-background-success-surface: color-mix(
-    in oklab,
-    #04b84c 8%,
-    transparent
-  );
+  --color-background-success-soft-alpha: color-mix(in oklab, #04b84c 15%, transparent);
+  --color-background-success-soft-alpha-hover: color-mix(in oklab, #04b84c 29%, transparent);
+  --color-background-success-soft-alpha-active: color-mix(in oklab, #04b84c 29%, transparent);
+  --color-background-success-surface: color-mix(in oklab, #04b84c 8%, transparent);
   --color-border-success-surface: color-mix(in oklab, #04b84c 8%, transparent);
   --color-background-success-solid: #00a240;
   --color-background-success-solid-hover: #00a240;
   --color-background-success-solid-active: #00a240;
-  --color-background-success-outline-hover: color-mix(
-    in oklab,
-    #04b84c 8%,
-    transparent
-  );
-  --color-background-success-outline-active: color-mix(
-    in oklab,
-    #04b84c 8%,
-    transparent
-  );
+  --color-background-success-outline-hover: color-mix(in oklab, #04b84c 8%, transparent);
+  --color-background-success-outline-active: color-mix(in oklab, #04b84c 8%, transparent);
   --color-border-success-outline: #00a240;
   --color-border-success-outline-hover: #00a240;
-  --color-background-success-ghost-hover: color-mix(
-    in oklab,
-    #04b84c 15%,
-    transparent
-  );
-  --color-background-success-ghost-active: color-mix(
-    in oklab,
-    #04b84c 15%,
-    transparent
-  );
+  --color-background-success-ghost-hover: color-mix(in oklab, #04b84c 15%, transparent);
+  --color-background-success-ghost-active: color-mix(in oklab, #04b84c 15%, transparent);
 
   --color-text-discovery: #532d8d;
   --color-text-discovery-soft: #6b3ab4;
@@ -444,65 +288,28 @@
   --color-background-discovery-soft: #efe5fe;
   --color-background-discovery-soft-hover: #e0cefd;
   --color-background-discovery-soft-active: #e0cefd;
-  --color-background-discovery-soft-alpha: color-mix(
-    in oklab,
-    #924ff7 15%,
-    transparent
-  );
-  --color-background-discovery-soft-alpha-hover: color-mix(
-    in oklab,
-    #924ff7 28%,
-    transparent
-  );
-  --color-background-discovery-soft-alpha-active: color-mix(
-    in oklab,
-    #924ff7 28%,
-    transparent
-  );
-  --color-background-discovery-surface: color-mix(
-    in oklab,
-    #924ff7 6%,
-    transparent
-  );
-  --color-border-discovery-surface: color-mix(
-    in oklab,
-    #924ff7 6%,
-    transparent
-  );
+  --color-background-discovery-soft-alpha: color-mix(in oklab, #924ff7 15%, transparent);
+  --color-background-discovery-soft-alpha-hover: color-mix(in oklab, #924ff7 28%, transparent);
+  --color-background-discovery-soft-alpha-active: color-mix(in oklab, #924ff7 28%, transparent);
+  --color-background-discovery-surface: color-mix(in oklab, #924ff7 6%, transparent);
+  --color-border-discovery-surface: color-mix(in oklab, #924ff7 6%, transparent);
   --color-background-discovery-solid: #924ff7;
   --color-background-discovery-solid-hover: #8046d9;
   --color-background-discovery-solid-active: #8046d9;
-  --color-background-discovery-outline-hover: color-mix(
-    in oklab,
-    #924ff7 6%,
-    transparent
-  );
-  --color-background-discovery-outline-active: color-mix(
-    in oklab,
-    #924ff7 6%,
-    transparent
-  );
+  --color-background-discovery-outline-hover: color-mix(in oklab, #924ff7 6%, transparent);
+  --color-background-discovery-outline-active: color-mix(in oklab, #924ff7 6%, transparent);
   --color-border-discovery-outline: #8046d9;
   --color-border-discovery-outline-hover: #8046d9;
-  --color-background-discovery-ghost-hover: color-mix(
-    in oklab,
-    #924ff7 15%,
-    transparent
-  );
-  --color-background-discovery-ghost-active: color-mix(
-    in oklab,
-    #924ff7 15%,
-    transparent
-  );
+  --color-background-discovery-ghost-hover: color-mix(in oklab, #924ff7 15%, transparent);
+  --color-background-discovery-ghost-active: color-mix(in oklab, #924ff7 15%, transparent);
 
   /* ── OpenAI Apps SDK canonical tokens: typography ────────────────── */
   --font-sans:
-    ui-sans-serif, -apple-system, system-ui, "Segoe UI", "Noto Sans",
-    "Helvetica", "Arial", "Apple Color Emoji", "Segoe UI Emoji",
-    "Segoe UI Symbol", sans-serif;
+    ui-sans-serif, -apple-system, system-ui, "Segoe UI", "Noto Sans", "Helvetica", "Arial",
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
   --font-mono:
-    ui-monospace, "SFMono-Regular", "SF Mono", "Menlo", "Monaco", "Consolas",
-    "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
+    ui-monospace, "SFMono-Regular", "SF Mono", "Menlo", "Monaco", "Consolas", "Liberation Mono",
+    "DejaVu Sans Mono", "Courier New", monospace;
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
@@ -746,16 +553,8 @@
   --trace-tool: var(--color-background-discovery-solid);
   --trace-memory: var(--color-background-success-solid);
   --trace-output: var(--color-background-info-solid);
-  --trace-edge: color-mix(
-    in oklab,
-    var(--color-background-info-solid) 56%,
-    transparent
-  );
-  --trace-edge-secondary: color-mix(
-    in oklab,
-    var(--color-text-secondary) 48%,
-    transparent
-  );
+  --trace-edge: color-mix(in oklab, var(--color-background-info-solid) 56%, transparent);
+  --trace-edge-secondary: color-mix(in oklab, var(--color-text-secondary) 48%, transparent);
   /* The background color for sidebars, navigation menus, and other persistent elements. */
   --sidebar: var(--color-surface-secondary);
   /* The default color for text or elements that appear on top of sidebars, navigation menus, and other persistent elements. */
@@ -777,8 +576,7 @@
   --toggle-active: rgba(48, 209, 88, 1);
   --toggle-inactive: rgba(120, 120, 128, 0.32);
   --toggle-knob: rgba(255, 255, 255, 1);
-  --toggle-knob-shadow:
-    0 3px 8px rgba(0, 0, 0, 0.25), 0 1px 1px rgba(0, 0, 0, 0.15);
+  --toggle-knob-shadow: 0 3px 8px rgba(0, 0, 0, 0.25), 0 1px 1px rgba(0, 0, 0, 0.15);
   --toggle-glass-highlight: rgba(255, 255, 255, 0.8);
   --toggle-glass-rim: rgba(255, 255, 255, 0.5);
   --toggle-glass-depth: rgba(0, 0, 0, 0.1);
@@ -798,17 +596,9 @@
 
   /* ── iOS 26 Liquid Glass Material System ──────────────────────── */
   --glass-tab-bg: color-mix(in oklab, var(--color-surface) 72%, transparent);
-  --glass-tab-border: color-mix(
-    in oklab,
-    var(--color-surface) 50%,
-    transparent
-  );
+  --glass-tab-border: color-mix(in oklab, var(--color-surface) 50%, transparent);
   --glass-tab-shadow: var(--shadow-300);
-  --glass-tab-highlight: color-mix(
-    in oklab,
-    var(--color-surface) 90%,
-    transparent
-  );
+  --glass-tab-highlight: color-mix(in oklab, var(--color-surface) 90%, transparent);
   --glass-tab-blur: 24px;
   --glass-tab-bar-height: 56px;
   --glass-tab-bar-radius: 28px;
@@ -817,11 +607,7 @@
   --glass-nav-border: var(--color-border-disabled);
   --glass-nav-blur: 20px;
   --glass-sheet-bg: color-mix(in oklab, var(--color-surface) 88%, transparent);
-  --glass-sheet-border: color-mix(
-    in oklab,
-    var(--color-surface) 60%,
-    transparent
-  );
+  --glass-sheet-border: color-mix(in oklab, var(--color-surface) 60%, transparent);
   --glass-sheet-blur: 40px;
   --glass-sheet-handle: color-mix(in oklab, var(--color-text) 18%, transparent);
   --glass-overlay: rgba(0, 0, 0, 0.25);

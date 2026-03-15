@@ -1,13 +1,7 @@
 import { useEffect, useState, memo } from "react";
 import { TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -23,9 +17,7 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
 }: {
   steps: ExecutionStep[];
 }) {
-  const [activeStepId, setActiveStepId] = useState<string | undefined>(
-    steps[steps.length - 1]?.id,
-  );
+  const [activeStepId, setActiveStepId] = useState<string | undefined>(steps[steps.length - 1]?.id);
 
   useEffect(() => {
     setActiveStepId((current) => {
@@ -36,23 +28,16 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
     });
   }, [steps]);
 
-  const selectedStep =
-    steps.find((step) => step.id === activeStepId) ?? steps[steps.length - 1];
+  const selectedStep = steps.find((step) => step.id === activeStepId) ?? steps[steps.length - 1];
   const laneCount = new Set(
     steps
-      .map(
-        (step) =>
-          step.lane_key ??
-          `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`,
-      )
+      .map((step) => step.lane_key ?? `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`)
       .filter(Boolean),
   ).size;
   const branchingParents = new Set(
     steps
       .map((step) => step.parent_id)
-      .filter(
-        (parentId, index, all) => parentId && all.indexOf(parentId) !== index,
-      ),
+      .filter((parentId, index, all) => parentId && all.indexOf(parentId) !== index),
   ).size;
 
   return (
@@ -71,9 +56,7 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
             <Card className={inspectorStyles.card.root}>
               <CardHeader className={inspectorStyles.card.header}>
                 <CardDescription>Execution lanes</CardDescription>
-                <CardTitle className="text-xl font-semibold text-foreground">
-                  {laneCount}
-                </CardTitle>
+                <CardTitle className="text-xl font-semibold text-foreground">{laneCount}</CardTitle>
               </CardHeader>
             </Card>
             <Card className={inspectorStyles.card.root}>
@@ -90,13 +73,10 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
             <CardHeader className={inspectorStyles.card.header}>
               <div className="flex items-center gap-2">
                 <GitBranch className="size-4 text-accent" />
-                <CardTitle className="text-sm font-medium text-foreground">
-                  Relationships
-                </CardTitle>
+                <CardTitle className="text-sm font-medium text-foreground">Relationships</CardTitle>
               </div>
               <CardDescription>
-                Parent-child lineage, actor lanes, and delegated branches for
-                this turn.
+                Parent-child lineage, actor lanes, and delegated branches for this turn.
               </CardDescription>
             </CardHeader>
             <CardContent className={inspectorStyles.card.content}>
@@ -114,15 +94,11 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
           {selectedStep ? (
             <Card className={inspectorStyles.card.root}>
               <CardHeader className={inspectorStyles.card.header}>
-                <CardTitle className="text-sm font-medium text-foreground">
-                  Selected node
-                </CardTitle>
+                <CardTitle className="text-sm font-medium text-foreground">Selected node</CardTitle>
                 <CardDescription>{selectedStep.label}</CardDescription>
               </CardHeader>
               <CardContent className={inspectorStyles.card.contentStack}>
-                <div className="text-sm text-foreground">
-                  {summarizeArtifactStep(selectedStep)}
-                </div>
+                <div className="text-sm text-foreground">{summarizeArtifactStep(selectedStep)}</div>
                 <div className={inspectorStyles.badge.row}>
                   <Badge
                     variant="secondary"
@@ -131,30 +107,18 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
                     {selectedStep.type}
                   </Badge>
                   {selectedStep.actor_kind ? (
-                    <Badge
-                      variant="outline"
-                      className={inspectorStyles.badge.meta}
-                    >
+                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
                       {selectedStep.actor_kind.replace(/_/g, " ")}
                     </Badge>
                   ) : null}
                   {selectedStep.actor_id ? (
-                    <Badge
-                      variant="outline"
-                      className={inspectorStyles.badge.meta}
-                    >
+                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
                       {selectedStep.actor_id}
                     </Badge>
                   ) : null}
                 </div>
-                <DetailBlock
-                  label="Input"
-                  value={stringifyValue(selectedStep.input)}
-                />
-                <DetailBlock
-                  label="Output"
-                  value={stringifyValue(selectedStep.output)}
-                />
+                <DetailBlock label="Input" value={stringifyValue(selectedStep.input)} />
+                <DetailBlock label="Output" value={stringifyValue(selectedStep.output)} />
               </CardContent>
             </Card>
           ) : null}

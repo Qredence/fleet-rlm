@@ -159,10 +159,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
               {item.part.errorText ? (
                 item.part.errorText
               ) : (
-                <Streamdown
-                  content={item.part.output ?? ""}
-                  streaming={false}
-                />
+                <Streamdown content={item.part.output ?? ""} streaming={false} />
               )}
             </div>
           </div>
@@ -216,17 +213,11 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
 function renderExecutionSection(section: ExecutionSection) {
   if (section.kind === "tool_session") {
     const latestItem = section.session.items[section.session.items.length - 1];
-    const latestState = latestItem
-      ? toolSessionStateForItem(latestItem)
-      : ("running" as const);
+    const latestState = latestItem ? toolSessionStateForItem(latestItem) : ("running" as const);
 
     return (
       <Tool key={section.id} defaultOpen={section.defaultOpen}>
-        <ToolHeader
-          type="tool-default"
-          state={mapToolState(latestState)}
-          title={section.label}
-        />
+        <ToolHeader type="tool-default" state={mapToolState(latestState)} title={section.label} />
         <ToolContent className="space-y-3">
           <div className="text-xs text-muted-foreground">{section.summary}</div>
           {section.runtimeBadges.length ? (
@@ -260,18 +251,14 @@ function renderExecutionSection(section: ExecutionSection) {
           <TaskTrigger title={section.label} />
           <TaskContent>
             <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                {section.summary}
-              </div>
+              <div className="text-xs text-muted-foreground">{section.summary}</div>
               {section.part.items?.length ? (
                 <div className="space-y-1">
                   {section.part.items.map((item) => (
                     <TaskItem key={item.id}>
                       <span>{item.text}</span>
                       {item.file ? (
-                        <TaskItemFile className="ml-2">
-                          {item.file.name}
-                        </TaskItemFile>
+                        <TaskItemFile className="ml-2">{item.file.name}</TaskItemFile>
                       ) : null}
                     </TaskItem>
                   ))}
@@ -288,23 +275,16 @@ function renderExecutionSection(section: ExecutionSection) {
         <Queue key={section.id}>
           <QueueSection defaultOpen>
             <QueueSectionTrigger>
-              <QueueSectionLabel
-                label={section.label}
-                count={section.part.items.length}
-              />
+              <QueueSectionLabel label={section.label} count={section.part.items.length} />
             </QueueSectionTrigger>
             <QueueSectionContent>
               <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">
-                  {section.summary}
-                </div>
+                <div className="text-xs text-muted-foreground">{section.summary}</div>
                 <QueueList>
                   {section.part.items.map((item) => (
                     <QueueItem key={item.id}>
                       <QueueItemIndicator completed={item.completed} />
-                      <QueueItemContent completed={item.completed}>
-                        {item.label}
-                      </QueueItemContent>
+                      <QueueItemContent completed={item.completed}>{item.label}</QueueItemContent>
                       {item.description ? (
                         <QueueItemDescription completed={item.completed}>
                           {item.description}
@@ -329,13 +309,9 @@ function renderExecutionSection(section: ExecutionSection) {
           />
           <ToolContent>
             <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                {section.summary}
-              </div>
+              <div className="text-xs text-muted-foreground">{section.summary}</div>
               <RuntimeContextBadge ctx={section.part.runtimeContext} />
-              {section.part.input != null ? (
-                <ToolInput input={section.part.input} />
-              ) : null}
+              {section.part.input != null ? <ToolInput input={section.part.input} /> : null}
               <ToolOutput
                 errorText={section.part.errorText}
                 output={
@@ -358,15 +334,10 @@ function renderExecutionSection(section: ExecutionSection) {
       const output = section.part.output ?? "";
       return (
         <Sandbox key={section.id} defaultOpen={section.defaultOpen}>
-          <SandboxHeader
-            title={section.label}
-            state={mapToolState(section.part.state)}
-          />
+          <SandboxHeader title={section.label} state={mapToolState(section.part.state)} />
           <SandboxContent>
             <div className="space-y-2 px-2.5 py-1.5">
-              <div className="text-xs text-muted-foreground">
-                {section.summary}
-              </div>
+              <div className="text-xs text-muted-foreground">{section.summary}</div>
               <RuntimeContextBadge ctx={section.part.runtimeContext} />
             </div>
             <SandboxTabs defaultValue="output">
@@ -384,9 +355,7 @@ function renderExecutionSection(section: ExecutionSection) {
                 ) : output ? (
                   <Streamdown content={output} streaming={false} />
                 ) : (
-                  <div className="text-muted-foreground typo-label-regular">
-                    No output yet
-                  </div>
+                  <div className="text-muted-foreground typo-label-regular">No output yet</div>
                 )}
               </SandboxTabContent>
               <SandboxTabContent value="code">
@@ -398,9 +367,7 @@ function renderExecutionSection(section: ExecutionSection) {
                     <code>{code}</code>
                   </pre>
                 ) : (
-                  <div className="text-muted-foreground typo-label-regular">
-                    No code captured
-                  </div>
+                  <div className="text-muted-foreground typo-label-regular">No code captured</div>
                 )}
               </SandboxTabContent>
             </SandboxTabs>
@@ -412,15 +379,11 @@ function renderExecutionSection(section: ExecutionSection) {
       return (
         <EnvironmentVariables key={section.id} defaultShowValues={false}>
           <EnvironmentVariablesHeader>
-            <EnvironmentVariablesTitle>
-              {section.label}
-            </EnvironmentVariablesTitle>
+            <EnvironmentVariablesTitle>{section.label}</EnvironmentVariablesTitle>
             <EnvironmentVariablesToggle />
           </EnvironmentVariablesHeader>
           <EnvironmentVariablesContent>
-            <div className="mb-2 text-xs text-muted-foreground">
-              {section.summary}
-            </div>
+            <div className="mb-2 text-xs text-muted-foreground">{section.summary}</div>
             {section.part.variables.map((variable, idx) => (
               <EnvironmentVariable
                 key={`${variable.name}-${idx}`}
@@ -431,15 +394,11 @@ function renderExecutionSection(section: ExecutionSection) {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <EnvironmentVariableName />
-                      {variable.required ? (
-                        <EnvironmentVariableRequired />
-                      ) : null}
+                      {variable.required ? <EnvironmentVariableRequired /> : null}
                     </div>
                     <EnvironmentVariableValue />
                   </div>
-                  <EnvironmentVariableCopyButton
-                    aria-label={`Copy ${variable.name}`}
-                  />
+                  <EnvironmentVariableCopyButton aria-label={`Copy ${variable.name}`} />
                 </EnvironmentVariableGroup>
               </EnvironmentVariable>
             ))}
@@ -453,10 +412,8 @@ function renderExecutionSection(section: ExecutionSection) {
           variant={section.part.tone === "error" ? "destructive" : "default"}
           className={cn(
             "px-3 py-2.5",
-            section.part.tone === "warning" &&
-              "border-accent/25 bg-accent/5 text-foreground",
-            section.part.tone === "success" &&
-              "border-primary/25 bg-primary/5 text-foreground",
+            section.part.tone === "warning" && "border-accent/25 bg-accent/5 text-foreground",
+            section.part.tone === "success" && "border-primary/25 bg-primary/5 text-foreground",
             (!section.part.tone || section.part.tone === "neutral") &&
               "border-border-subtle/80 bg-muted/20 text-muted-foreground",
           )}

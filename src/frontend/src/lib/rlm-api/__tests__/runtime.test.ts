@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 type MockResponseBody = Record<string, unknown>;
 
@@ -38,10 +38,8 @@ describe("runtimeEndpoints", () => {
     await runtimeEndpoints.settings();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/runtime/settings",
-    );
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("GET");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/settings");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit)?.method).toBe("GET");
   });
 
   it("patches runtime settings updates using PATCH", async () => {
@@ -60,9 +58,7 @@ describe("runtimeEndpoints", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/runtime/settings",
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/settings");
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("PATCH");
     expect(String(init.body)).toContain("DSPY_LM_MODEL");
@@ -87,8 +83,6 @@ describe("runtimeEndpoints", () => {
     await runtimeEndpoints.status();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/runtime/status",
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/status");
   });
 });

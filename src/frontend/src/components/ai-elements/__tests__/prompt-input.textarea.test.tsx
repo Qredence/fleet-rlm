@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { PromptInputTextarea } from "@/components/ai-elements/prompt-input";
 import {
@@ -264,10 +264,7 @@ describe("PromptInputTextarea", () => {
     expect(textarea.value).toBe("Provider controlled value");
 
     act(() => {
-      const setValue = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
 
       setValue?.call(textarea, "Updated text");
       textarea.dispatchEvent(new Event("input", { bubbles: true }));

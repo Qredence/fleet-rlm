@@ -39,7 +39,7 @@ function RouteSync() {
     } else if (prevSection === "volumes") {
       selectFile(null);
     }
-  }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [location.pathname]); // oxlint-disable-line react-hooks/exhaustive-deps
   // ↑ Intentionally omit context deps — we only want to run on URL change,
   //   not when context values change (which would create update loops).
 

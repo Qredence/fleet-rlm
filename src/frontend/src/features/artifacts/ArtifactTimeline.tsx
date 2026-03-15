@@ -21,9 +21,7 @@ const ICONS: Record<ArtifactStepType, typeof Brain> = {
   output: FileOutput,
 };
 
-function mapStatus(
-  step: ExecutionStep,
-): "pending" | "active" | "complete" | "error" {
+function mapStatus(step: ExecutionStep): "pending" | "active" | "complete" | "error" {
   const label = step.label?.toLowerCase() ?? "";
   if (label.includes("error") || label.includes("failed")) return "error";
   // If the step has output, treat as complete
@@ -82,11 +80,7 @@ function formatSummary(step: ExecutionStep): string {
   return summary;
 }
 
-export function ArtifactTimeline({
-  steps,
-  activeStepId,
-  onSelectStep,
-}: ArtifactTimelineProps) {
+export function ArtifactTimeline({ steps, activeStepId, onSelectStep }: ArtifactTimelineProps) {
   const ordered = [...steps].sort((a, b) => {
     const aSeq = a.sequence;
     const bSeq = b.sequence;
@@ -104,8 +98,7 @@ export function ArtifactTimeline({
   }
 
   const firstTimestamp = ordered[0]?.timestamp ?? 0;
-  const lastTimestamp =
-    ordered[ordered.length - 1]?.timestamp ?? firstTimestamp;
+  const lastTimestamp = ordered[ordered.length - 1]?.timestamp ?? firstTimestamp;
   const toolCount = ordered.filter((step) => step.type === "tool").length;
   const activeStep = ordered.find((step) => step.id === activeStepId);
   const durationLabel = formatElapsedLabel(lastTimestamp - firstTimestamp);
@@ -120,9 +113,7 @@ export function ArtifactTimeline({
                 Execution timeline
               </p>
               {activeStep ? (
-                <p className="mt-1 text-sm font-medium text-foreground">
-                  {activeStep.label}
-                </p>
+                <p className="mt-1 text-sm font-medium text-foreground">{activeStep.label}</p>
               ) : null}
             </div>
 
@@ -138,18 +129,14 @@ export function ArtifactTimeline({
               <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                 Steps
               </span>
-              <span className="text-sm font-semibold text-foreground">
-                {ordered.length}
-              </span>
+              <span className="text-sm font-semibold text-foreground">{ordered.length}</span>
             </span>
 
             <span className="inline-flex items-center gap-2 rounded-full border border-border-subtle/70 bg-background/75 px-3 py-1.5">
               <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                 Tools
               </span>
-              <span className="text-sm font-semibold text-foreground">
-                {toolCount}
-              </span>
+              <span className="text-sm font-semibold text-foreground">{toolCount}</span>
             </span>
 
             <span className="inline-flex items-center gap-2 rounded-full border border-border-subtle/70 bg-background/75 px-3 py-1.5">
@@ -166,9 +153,7 @@ export function ArtifactTimeline({
                 <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                   Focused
                 </span>
-                <span className="truncate text-sm text-foreground">
-                  {activeStep.label}
-                </span>
+                <span className="truncate text-sm text-foreground">{activeStep.label}</span>
               </span>
             ) : null}
           </div>
@@ -186,9 +171,7 @@ export function ArtifactTimeline({
             const actorLabel = formatActorLabel(step);
             const toolBadge = extractToolBadgeFromStep(step);
             const elapsedLabel =
-              index === 0
-                ? "Start"
-                : formatRunOffset(step.timestamp - firstTimestamp);
+              index === 0 ? "Start" : formatRunOffset(step.timestamp - firstTimestamp);
             const status = mapStatus(step);
             const statusTone =
               status === "error"
@@ -198,17 +181,11 @@ export function ArtifactTimeline({
             const hasConnector = index < ordered.length - 1;
             const chips = [
               actorLabel,
-              toolBadge.toolName && step.type !== "tool"
-                ? toolBadge.toolName
-                : null,
+              toolBadge.toolName && step.type !== "tool" ? toolBadge.toolName : null,
             ].filter((value): value is string => Boolean(value));
 
             return (
-              <div
-                key={step.id}
-                className="relative"
-                style={{ paddingInlineStart: "2.8rem" }}
-              >
+              <div key={step.id} className="relative" style={{ paddingInlineStart: "2.8rem" }}>
                 {hasConnector ? (
                   <div className="absolute left-[0.95rem] top-10 bottom-[-0.75rem] w-px bg-linear-to-b from-border-strong/50 via-border-subtle/40 to-transparent" />
                 ) : null}
@@ -227,11 +204,7 @@ export function ArtifactTimeline({
                       backgroundColor: `color-mix(in srgb, ${meta.color} 18%, transparent)`,
                     }}
                   >
-                    <Icon
-                      className="size-3.5"
-                      style={{ color: meta.color }}
-                      aria-hidden
-                    />
+                    <Icon className="size-3.5" style={{ color: meta.color }} aria-hidden />
                   </div>
                 </div>
 

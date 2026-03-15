@@ -1,13 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { GroupedSettingsPane } from "@/features/settings/GroupedSettingsPane";
 
 vi.mock("@/features/settings/useRuntimeSettings", () => ({
-  computeRuntimeUpdates: (
-    current: Record<string, string>,
-    baseline: Record<string, string>,
-  ) => {
+  computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of [
       "DSPY_LM_MODEL",
@@ -27,10 +24,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
     }
     return updates;
   },
-  computeLmRuntimeUpdates: (
-    current: Record<string, string>,
-    baseline: Record<string, string>,
-  ) => {
+  computeLmRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of [
       "DSPY_LM_MODEL",
@@ -130,11 +124,7 @@ describe("GroupedSettingsPane", () => {
 
   it("renders telemetry-only content when section is telemetry", () => {
     const html = renderToStaticMarkup(
-      <GroupedSettingsPane
-        isDark={false}
-        onToggleTheme={vi.fn()}
-        section="telemetry"
-      />,
+      <GroupedSettingsPane isDark={false} onToggleTheme={vi.fn()} section="telemetry" />,
     );
 
     expect(html).toContain("Anonymous telemetry");
@@ -146,11 +136,7 @@ describe("GroupedSettingsPane", () => {
 
   it("renders runtime-only content when section is runtime", () => {
     const html = renderToStaticMarkup(
-      <GroupedSettingsPane
-        isDark={false}
-        onToggleTheme={vi.fn()}
-        section="runtime"
-      />,
+      <GroupedSettingsPane isDark={false} onToggleTheme={vi.fn()} section="runtime" />,
     );
 
     expect(html).toContain("Runtime Status");

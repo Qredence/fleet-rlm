@@ -11,11 +11,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { IconButton } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 
 import { GroupedSettingsPane } from "@/features/settings/GroupedSettingsPane";
@@ -34,14 +30,12 @@ export function SettingsPage() {
 
   const sectionFromQuery = searchParams.get("section");
   const selectedSection =
-    sectionFromQuery &&
-    settingsSections.some((section) => section.key === sectionFromQuery)
+    sectionFromQuery && settingsSections.some((section) => section.key === sectionFromQuery)
       ? (sectionFromQuery as SettingsSection)
       : undefined;
 
   const sectionTitle =
-    settingsSections.find((section) => section.key === selectedSection)
-      ?.label ?? "Settings";
+    settingsSections.find((section) => section.key === selectedSection)?.label ?? "Settings";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -65,9 +59,7 @@ export function SettingsPage() {
           </TooltipTrigger>
           <TooltipContent side="bottom">Go back</TooltipContent>
         </Tooltip>
-        <h1 className="text-foreground typo-h3">
-          Settings
-        </h1>
+        <h1 className="text-foreground typo-h3">Settings</h1>
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">
@@ -77,9 +69,7 @@ export function SettingsPage() {
             isMobile ? "px-4 py-3" : "px-6 py-4",
           )}
         >
-          <span className="text-foreground typo-h4">
-            {sectionTitle}
-          </span>
+          <span className="text-foreground typo-h4">{sectionTitle}</span>
           <p className="mt-1 text-sm text-muted-foreground">
             {selectedSection
               ? sectionDescriptions[selectedSection]

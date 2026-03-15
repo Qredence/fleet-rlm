@@ -10,11 +10,7 @@ import {
   logoutWithEntra,
 } from "@/lib/auth/entra";
 import { authEndpoints } from "@/lib/rlm-api/auth";
-import type {
-  AuthContextValue,
-  PlanTier,
-  UserProfile,
-} from "@/lib/auth/types";
+import type { AuthContextValue, PlanTier, UserProfile } from "@/lib/auth/types";
 
 interface AuthProviderProps {
   children: ReactNode;

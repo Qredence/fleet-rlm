@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const STORAGE_KEY = "hax-fleet:chat-history:v2";
 
@@ -63,9 +63,7 @@ describe("useChatHistoryStore", () => {
 
     await useChatHistoryStore.persist.rehydrate();
 
-    expect(useChatHistoryStore.getState().conversations).toEqual([
-      conversationFixture,
-    ]);
+    expect(useChatHistoryStore.getState().conversations).toEqual([conversationFixture]);
   });
 
   it("persists turn-scoped artifacts with saved conversations", async () => {
@@ -100,9 +98,7 @@ describe("useChatHistoryStore", () => {
     );
 
     const loaded = useChatHistoryStore.getState().loadConversation(conversationId);
-    const persisted = JSON.parse(
-      localStorage.getItem(STORAGE_KEY) ?? "null",
-    ) as {
+    const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as {
       state?: {
         conversations?: Array<{
           turnArtifactsByMessageId?: Record<string, unknown[]>;
@@ -120,9 +116,7 @@ describe("useChatHistoryStore", () => {
         },
       ],
     });
-    expect(
-      persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId,
-    ).toEqual({
+    expect(persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId).toEqual({
       "assistant-1": [
         {
           id: "step-1",

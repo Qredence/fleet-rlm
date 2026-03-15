@@ -16,10 +16,7 @@ const InputGroup = React.forwardRef<HTMLDivElement, InputGroupProps>(
       <div
         ref={ref}
         data-slot="input-group"
-        className={cn(
-          "flex items-center rounded-md border bg-background",
-          className,
-        )}
+        className={cn("flex items-center rounded-md border bg-background", className)}
         {...props}
       />
     );
@@ -31,8 +28,7 @@ InputGroup.displayName = "InputGroup";
 // InputGroupInput
 // ============================================================================
 
-interface InputGroupInputProps
-  extends React.InputHTMLAttributes<HTMLInputElement> {}
+interface InputGroupInputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
 
 const InputGroupInput = React.forwardRef<HTMLInputElement, InputGroupInputProps>(
   ({ className, ...props }, ref) => {
@@ -55,33 +51,30 @@ InputGroupInput.displayName = "InputGroupInput";
 // InputGroupTextarea
 // ============================================================================
 
-interface InputGroupTextareaProps
-  extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
+interface InputGroupTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
 
-const InputGroupTextarea = React.forwardRef<
-  HTMLTextAreaElement,
-  InputGroupTextareaProps
->(({ className, ...props }, ref) => {
-  return (
-    <textarea
-      ref={ref}
-      data-slot="input-group-textarea"
-      className={cn(
-        "min-h-16 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground",
-        className,
-      )}
-      {...props}
-    />
-  );
-});
+const InputGroupTextarea = React.forwardRef<HTMLTextAreaElement, InputGroupTextareaProps>(
+  ({ className, ...props }, ref) => {
+    return (
+      <textarea
+        ref={ref}
+        data-slot="input-group-textarea"
+        className={cn(
+          "min-h-16 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
 InputGroupTextarea.displayName = "InputGroupTextarea";
 
 // ============================================================================
 // InputGroupAddon
 // ============================================================================
 
-interface InputGroupAddonProps
-  extends React.HTMLAttributes<HTMLDivElement> {
+interface InputGroupAddonProps extends React.HTMLAttributes<HTMLDivElement> {
   align?: "block-start" | "block-end" | "inline-start" | "inline-end";
 }
 
@@ -111,8 +104,7 @@ InputGroupAddon.displayName = "InputGroupAddon";
 // InputGroupText
 // ============================================================================
 
-interface InputGroupTextProps
-  extends React.HTMLAttributes<HTMLSpanElement> {}
+interface InputGroupTextProps extends React.HTMLAttributes<HTMLSpanElement> {}
 
 const InputGroupText = React.forwardRef<HTMLSpanElement, InputGroupTextProps>(
   ({ className, ...props }, ref) => {
@@ -120,10 +112,7 @@ const InputGroupText = React.forwardRef<HTMLSpanElement, InputGroupTextProps>(
       <span
         ref={ref}
         data-slot="input-group-text"
-        className={cn(
-          "px-3 py-2 text-sm text-muted-foreground",
-          className,
-        )}
+        className={cn("px-3 py-2 text-sm text-muted-foreground", className)}
         {...props}
       />
     );
@@ -138,30 +127,28 @@ InputGroupText.displayName = "InputGroupText";
 type InputGroupButtonVariantProps = VariantProps<typeof buttonVariants>;
 
 interface InputGroupButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    InputGroupButtonVariantProps {
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>, InputGroupButtonVariantProps {
   asChild?: boolean;
 }
 
-const InputGroupButton = React.forwardRef<
-  HTMLButtonElement,
-  InputGroupButtonProps
->(({ className, variant = "ghost", size = "icon-sm", ...props }, ref) => {
-  return (
-    <button
-      ref={ref}
-      data-slot="input-group-button"
-      data-variant={variant}
-      data-size={size}
-      className={cn(
-        buttonVariants({ variant, size }),
-        "shrink-0 rounded-none first:rounded-l-md last:rounded-r-md",
-        className,
-      )}
-      {...props}
-    />
-  );
-});
+const InputGroupButton = React.forwardRef<HTMLButtonElement, InputGroupButtonProps>(
+  ({ className, variant = "ghost", size = "icon-sm", ...props }, ref) => {
+    return (
+      <button
+        ref={ref}
+        data-slot="input-group-button"
+        data-variant={variant}
+        data-size={size}
+        className={cn(
+          buttonVariants({ variant, size }),
+          "shrink-0 rounded-none first:rounded-l-md last:rounded-r-md",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
 InputGroupButton.displayName = "InputGroupButton";
 
 // ============================================================================

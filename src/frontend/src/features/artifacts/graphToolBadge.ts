@@ -51,9 +51,7 @@ export function extractToolBadgeFromStep(step: ExecutionStep): {
 } {
   if (step.type !== "tool" && step.type !== "repl") return {};
 
-  const fromPayload =
-    toolNameFromPayloadValue(step.input) ??
-    toolNameFromPayloadValue(step.output);
+  const fromPayload = toolNameFromPayloadValue(step.input) ?? toolNameFromPayloadValue(step.output);
   if (fromPayload) {
     return { toolName: fromPayload, toolNameSource: "payload" };
   }

@@ -34,23 +34,15 @@ export function ExecutionHighlightsGroup({
                   <div className="text-sm font-medium leading-5 text-foreground">
                     {highlight.label}
                   </div>
-                  <div className="text-sm leading-5 text-muted-foreground">
-                    {highlight.summary}
-                  </div>
+                  <div className="text-sm leading-5 text-muted-foreground">{highlight.summary}</div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {highlight.count && highlight.count > 1 ? (
-                    <Badge
-                      variant="outline"
-                      className={inspectorStyles.badge.meta}
-                    >
+                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
                       {highlight.count}x
                     </Badge>
                   ) : null}
-                  <Badge
-                    variant={tone.variant}
-                    className={inspectorStyles.badge.status}
-                  >
+                  <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
                     {tone.label}
                   </Badge>
                 </div>

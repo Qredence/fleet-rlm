@@ -7,11 +7,7 @@
  * Uses Zustand persist middleware for automatic localStorage sync.
  */
 import { create } from "zustand";
-import {
-  persist,
-  type PersistStorage,
-  type StorageValue,
-} from "zustand/middleware";
+import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
 import type { ExecutionStep } from "@/stores/artifactStore";
@@ -74,9 +70,7 @@ function toConversationArray(value: unknown): Conversation[] | null {
   return Array.isArray(value) ? (value as Conversation[]) : null;
 }
 
-function toPersistedChatHistory(
-  value: unknown,
-): StorageValue<ChatHistoryPersistedState> | null {
+function toPersistedChatHistory(value: unknown): StorageValue<ChatHistoryPersistedState> | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -99,10 +93,7 @@ function toPersistedChatHistory(
 
   return {
     state: { conversations },
-    version:
-      typeof maybePersisted.version === "number"
-        ? maybePersisted.version
-        : STORAGE_VERSION,
+    version: typeof maybePersisted.version === "number" ? maybePersisted.version : STORAGE_VERSION,
   };
 }
 
@@ -125,12 +116,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
     (set, get) => ({
       conversations: [],
 
-      saveConversation: (
-        messages,
-        phase,
-        conversationId,
-        turnArtifactsByMessageId,
-      ) => {
+      saveConversation: (messages, phase, conversationId, turnArtifactsByMessageId) => {
         const now = new Date().toISOString();
 
         // Don't save empty conversations
@@ -143,9 +129,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
           let updated: Conversation[];
 
           if (conversationId) {
-            const idx = state.conversations.findIndex(
-              (c) => c.id === conversationId,
-            );
+            const idx = state.conversations.findIndex((c) => c.id === conversationId);
             if (idx >= 0) {
               const existing = state.conversations[idx];
               if (!existing) return state;
@@ -157,10 +141,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
                 title,
                 updatedAt: now,
               };
-              updated = [
-                updatedConv,
-                ...state.conversations.filter((_, i) => i !== idx),
-              ];
+              updated = [updatedConv, ...state.conversations.filter((_, i) => i !== idx)];
             } else {
               const newConv: Conversation = {
                 id: conversationId,
@@ -219,5 +200,4 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
 
 // ── Selector hooks ───────────────────────────────────────────────────
 
-export const useConversations = () =>
-  useChatHistoryStore((s) => s.conversations);
+export const useConversations = () => useChatHistoryStore((s) => s.conversations);

@@ -1,11 +1,7 @@
 import { create } from "zustand";
 
 export type ArtifactStepType = "llm" | "repl" | "tool" | "memory" | "output";
-export type ArtifactActorKind =
-  | "root_rlm"
-  | "sub_agent"
-  | "delegate"
-  | "unknown";
+export type ArtifactActorKind = "root_rlm" | "sub_agent" | "delegate" | "unknown";
 
 export interface ExecutionStep {
   id: string;
@@ -87,8 +83,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       const existingSequence = idx >= 0 ? next[idx]?.sequence : undefined;
       const normalizedStep: ExecutionStep = {
         ...step,
-        sequence:
-          step.sequence ?? existingSequence ?? nextSequence(state.steps),
+        sequence: step.sequence ?? existingSequence ?? nextSequence(state.steps),
       };
 
       if (idx >= 0) {

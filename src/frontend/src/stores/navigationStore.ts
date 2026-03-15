@@ -123,8 +123,7 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   activeInspectorTab: "trajectory",
   openInspector: (turnId, tab) => {
     set((state) => ({
-      selectedAssistantTurnId:
-        turnId === undefined ? state.selectedAssistantTurnId : turnId,
+      selectedAssistantTurnId: turnId === undefined ? state.selectedAssistantTurnId : turnId,
       activeInspectorTab: tab ?? state.activeInspectorTab,
     }));
     canvasHandlers.open();
@@ -200,16 +199,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 export const useActiveNav = () => useNavigationStore((s) => s.activeNav);
 export const useIsCanvasOpen = () => useNavigationStore((s) => s.isCanvasOpen);
 export const useSessionId = () => useNavigationStore((s) => s.sessionId);
-export const useCreationPhase = () =>
-  useNavigationStore((s) => s.creationPhase);
-export const useActiveFeatures = () =>
-  useNavigationStore((s) => s.activeFeatures);
+export const useCreationPhase = () => useNavigationStore((s) => s.creationPhase);
+export const useActiveFeatures = () => useNavigationStore((s) => s.activeFeatures);
 export const usePromptMode = () => useNavigationStore((s) => s.promptMode);
-export const useSelectedPromptSkills = () =>
-  useNavigationStore((s) => s.selectedPromptSkills);
-export const useSelectedFileNode = () =>
-  useNavigationStore((s) => s.selectedFileNode);
+export const useSelectedPromptSkills = () => useNavigationStore((s) => s.selectedPromptSkills);
+export const useSelectedFileNode = () => useNavigationStore((s) => s.selectedFileNode);
 export const useSelectedAssistantTurnId = () =>
   useNavigationStore((s) => s.selectedAssistantTurnId);
-export const useActiveInspectorTab = () =>
-  useNavigationStore((s) => s.activeInspectorTab);
+export const useActiveInspectorTab = () => useNavigationStore((s) => s.activeInspectorTab);

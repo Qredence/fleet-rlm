@@ -67,9 +67,7 @@ function SignupPage() {
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
-              <h1 className="text-foreground typo-h3">
-                Create your account
-              </h1>
+              <h1 className="text-foreground typo-h3">Create your account</h1>
               <p className="text-muted-foreground mt-1 typo-caption">
                 Get started with Skill Fleet
               </p>
@@ -145,9 +143,7 @@ function SignupPage() {
           <Button
             type="submit"
             className="w-full"
-            disabled={
-              loading || !email || !name || !password || !confirmPassword
-            }
+            disabled={loading || !email || !name || !password || !confirmPassword}
           >
             {loading ? (
               <>
@@ -160,9 +156,7 @@ function SignupPage() {
           </Button>
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-border-subtle" />
-            <span className="text-muted-foreground typo-helper">
-              or
-            </span>
+            <span className="text-muted-foreground typo-helper">or</span>
             <div className="flex-1 h-px bg-border-subtle" />
           </div>
           <div className="text-center">

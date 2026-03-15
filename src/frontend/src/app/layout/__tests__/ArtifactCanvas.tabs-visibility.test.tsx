@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { ArtifactCanvas } from "@/features/artifacts/ArtifactCanvas";
 import { useArtifactStore } from "@/stores/artifactStore";

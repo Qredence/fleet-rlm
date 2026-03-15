@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RuntimePane } from "@/features/settings/RuntimePane";
@@ -76,10 +76,7 @@ vi.mock("@/features/settings/useRuntimeSettings", () => ({
     },
     testAllConnections: vi.fn(),
   }),
-  computeRuntimeUpdates: (
-    current: Record<string, string>,
-    baseline: Record<string, string>,
-  ) => {
+  computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of Object.keys(current)) {
       if ((current[key] ?? "") !== (baseline[key] ?? "")) {

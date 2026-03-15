@@ -19,11 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils/cn";
 import { FsItem } from "@/features/volumes/VolumesBrowserSections";
-import {
-  collectExpandableIds,
-  countFiles,
-  filterFs,
-} from "@/lib/volumes/browser";
+import { collectExpandableIds, countFiles, filterFs } from "@/lib/volumes/browser";
 
 export function VolumesBrowser() {
   const { openCanvas, selectFile } = useNavigationStore();
@@ -68,10 +64,7 @@ export function VolumesBrowser() {
 
   // ── Filtered data ─────────────────────────────────────────────────
 
-  const filteredFs = useMemo(
-    () => filterFs(filesystem, fsSearch),
-    [filesystem, fsSearch],
-  );
+  const filteredFs = useMemo(() => filterFs(filesystem, fsSearch), [filesystem, fsSearch]);
 
   // ── Stats ─────────────────────────────────────────────────────────
 
@@ -90,9 +83,7 @@ export function VolumesBrowser() {
     <div className={cn(isMobile && "px-4")}>
       {/* Expand / collapse + refresh */}
       <div className="flex items-center justify-between mb-3">
-        <div
-          className="flex items-center gap-1 text-muted-foreground typo-helper"
-        >
+        <div className="flex items-center gap-1 text-muted-foreground typo-helper">
           <HardDrive className="w-3.5 h-3.5" />
           <span>Modal Volume</span>
         </div>
@@ -104,9 +95,7 @@ export function VolumesBrowser() {
             onClick={() => refetch()}
             aria-label="Refresh volume tree"
           >
-            <RefreshCw
-              className={cn("w-3.5 h-3.5", isLoading && "animate-spin")}
-            />
+            <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
           </Button>
           <Button
             variant="link"
@@ -152,9 +141,7 @@ export function VolumesBrowser() {
       {/* Desktop header */}
       {!isMobile && (
         <div className="pt-4 md:pt-6 pb-4 border-b border-border-subtle shrink-0 max-w-200 w-full mx-auto px-6">
-          <h2 className="mb-1 text-balance text-foreground typo-h3">
-            Volume Browser
-          </h2>
+          <h2 className="mb-1 text-balance text-foreground typo-h3">Volume Browser</h2>
           {headerChildren}
         </div>
       )}
@@ -164,9 +151,7 @@ export function VolumesBrowser() {
         {/* Mobile header */}
         {isMobile && (
           <div className="px-4 pt-2 pb-4 w-full">
-            <h2 className="font-app text-foreground text-balance typo-h2 mb-3">
-              Volume Browser
-            </h2>
+            <h2 className="font-app text-foreground text-balance typo-h2 mb-3">Volume Browser</h2>
             {headerChildren}
           </div>
         )}
@@ -184,9 +169,7 @@ export function VolumesBrowser() {
           ) : null}
 
           {isLoading && filesystem.length === 0 ? (
-            <div
-              className="flex items-center justify-center py-12 text-muted-foreground typo-label"
-            >
+            <div className="flex items-center justify-center py-12 text-muted-foreground typo-label">
               Loading volume tree…
             </div>
           ) : (
@@ -210,8 +193,7 @@ export function VolumesBrowser() {
       <div className="px-4 md:px-6 py-3 border-t border-border-subtle shrink-0">
         <span className="text-muted-foreground typo-helper">
           {fsStats.volumes} volumes · {fsStats.totalFiles} files
-          {filesystemDataSource !== "mock" &&
-            filesystemDataSource !== "fallback" && <> · Live</>}
+          {filesystemDataSource !== "mock" && filesystemDataSource !== "fallback" && <> · Live</>}
         </span>
       </div>
     </div>

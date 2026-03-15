@@ -36,8 +36,7 @@ export function ArtifactCanvas({
   const activeStepId = useArtifactStore((state) => state.activeStepId);
   const setActiveStepId = useArtifactStore((state) => state.setActiveStepId);
   const isControlled = controlledActiveTab !== undefined;
-  const [internalActiveTab, setInternalActiveTab] =
-    useState<ArtifactTab>("graph");
+  const [internalActiveTab, setInternalActiveTab] = useState<ArtifactTab>("graph");
   const [hasUserSelectedTab, setHasUserSelectedTab] = useState(false);
   const [graphVisited, setGraphVisited] = useState(false);
   const activeTab = controlledActiveTab ?? internalActiveTab;
@@ -71,9 +70,7 @@ export function ArtifactCanvas({
       toolCount: typeCounts.tool,
       replCount: typeCounts.repl,
       outputCount: typeCounts.output,
-      durationLabel: formatDuration(
-        first && last ? last.timestamp - first.timestamp : undefined,
-      ),
+      durationLabel: formatDuration(first && last ? last.timestamp - first.timestamp : undefined),
     };
   }, [steps]);
 
@@ -119,7 +116,10 @@ export function ArtifactCanvas({
         {showTabs ? (
           <TabsList
             className="h-8 max-w-full shrink-0 self-start overflow-x-auto rounded-md border border-border-subtle/70 bg-muted/45 p-0.5"
-            style={{ height: "var(--touch-target-min-height)", minHeight: "var(--touch-target-min-height)" }}
+            style={{
+              height: "var(--touch-target-min-height)",
+              minHeight: "var(--touch-target-min-height)",
+            }}
           >
             <TabsTrigger
               value="graph"

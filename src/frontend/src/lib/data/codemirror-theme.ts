@@ -13,7 +13,7 @@
  */
 
 // ── Types ───────────────────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any
 type CMBarrel = any;
 
 // ── Editor chrome theme factory ─────────────────────────────────────
@@ -46,14 +46,11 @@ export function createEditorTheme(CM: CMBarrel) {
         outline: "none",
       },
       ".cm-selectionBackground, ::selection": {
-        backgroundColor:
-          "color-mix(in srgb, var(--color-background-info-solid) 20%, transparent)",
+        backgroundColor: "color-mix(in srgb, var(--color-background-info-solid) 20%, transparent)",
       },
-      "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground":
-        {
-          backgroundColor:
-            "color-mix(in srgb, var(--color-background-info-solid) 25%, transparent)",
-        },
+      "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
+        backgroundColor: "color-mix(in srgb, var(--color-background-info-solid) 25%, transparent)",
+      },
       ".cm-activeLine": {
         backgroundColor:
           "color-mix(in srgb, var(--color-background-primary-soft) 40%, transparent)",
@@ -100,8 +97,7 @@ export function createEditorTheme(CM: CMBarrel) {
         fontFamily: "var(--font-mono)",
       },
       ".cm-matchingBracket": {
-        backgroundColor:
-          "color-mix(in srgb, var(--color-background-info-solid) 20%, transparent)",
+        backgroundColor: "color-mix(in srgb, var(--color-background-info-solid) 20%, transparent)",
         outline:
           "1px solid color-mix(in srgb, var(--color-background-info-solid) 40%, transparent)",
       },
@@ -110,12 +106,10 @@ export function createEditorTheme(CM: CMBarrel) {
       },
       ".cm-searchMatch": {
         backgroundColor: "color-mix(in srgb, var(--chart-5) 30%, transparent)",
-        outline:
-          "1px solid color-mix(in srgb, var(--chart-5) 50%, transparent)",
+        outline: "1px solid color-mix(in srgb, var(--chart-5) 50%, transparent)",
       },
       ".cm-searchMatch.cm-searchMatch-selected": {
-        backgroundColor:
-          "color-mix(in srgb, var(--color-background-info-solid) 30%, transparent)",
+        backgroundColor: "color-mix(in srgb, var(--color-background-info-solid) 30%, transparent)",
       },
     },
     { dark: false },

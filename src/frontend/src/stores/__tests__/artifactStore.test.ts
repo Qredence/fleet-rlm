@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { useArtifactStore } from "@/stores/artifactStore";
 
 describe("artifactStore sequence ordering", () => {
@@ -84,10 +84,6 @@ describe("artifactStore sequence ordering", () => {
     ]);
 
     const steps = useArtifactStore.getState().steps;
-    expect(steps.map((step) => step.id)).toEqual([
-      "step-a",
-      "step-b",
-      "step-c",
-    ]);
+    expect(steps.map((step) => step.id)).toEqual(["step-a", "step-b", "step-c"]);
   });
 });

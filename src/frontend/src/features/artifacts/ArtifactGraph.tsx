@@ -11,14 +11,8 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import type { ArtifactActorKind, ExecutionStep } from "@/stores/artifactStore";
-import {
-  NODE_WIDTH,
-  STEP_TYPE_META,
-} from "@/features/artifacts/GraphStepNode.constants";
-import {
-  GraphStepNode,
-  type GraphStepNodeData,
-} from "@/features/artifacts/GraphStepNode";
+import { NODE_WIDTH, STEP_TYPE_META } from "@/features/artifacts/GraphStepNode.constants";
+import { GraphStepNode, type GraphStepNodeData } from "@/features/artifacts/GraphStepNode";
 import { extractToolBadgeFromStep } from "@/features/artifacts/graphToolBadge";
 import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 
@@ -89,10 +83,7 @@ function inferStatus(step: ExecutionStep): "streaming" | "complete" | "error" {
   if (asRecord(output?.error) || asRecord(input?.error)) return "error";
   if (output?.ok === false || input?.ok === false) return "error";
   if (output?.status === "error" || input?.status === "error") return "error";
-  if (
-    typeof output?.message === "string" &&
-    /error|failed|exception/i.test(output.message)
-  ) {
+  if (typeof output?.message === "string" && /error|failed|exception/i.test(output.message)) {
     return "error";
   }
   if (step.type === "output") {
@@ -123,9 +114,7 @@ function laneLabel(kind: ArtifactActorKind, depth?: number): string {
     return typeof depth === "number" ? `Delegate (depth ${depth})` : "Delegate";
   }
   if (kind === "sub_agent") {
-    return typeof depth === "number"
-      ? `Sub-agent (depth ${depth})`
-      : "Sub-agent";
+    return typeof depth === "number" ? `Sub-agent (depth ${depth})` : "Sub-agent";
   }
   return typeof depth === "number" ? `Unknown (depth ${depth})` : "Unknown";
 }
@@ -138,15 +127,11 @@ function deriveLane(step: ExecutionStep): LaneMeta {
     depth = 0;
   }
   const actorId =
-    typeof step.actor_id === "string" && step.actor_id.trim()
-      ? step.actor_id.trim()
-      : undefined;
+    typeof step.actor_id === "string" && step.actor_id.trim() ? step.actor_id.trim() : undefined;
 
   const key =
     (typeof step.lane_key === "string" && step.lane_key.trim()) ||
-    (actorId
-      ? `${actorKind}:${actorId}`
-      : `${actorKind}:depth-${depth ?? "na"}`);
+    (actorId ? `${actorKind}:${actorId}` : `${actorKind}:depth-${depth ?? "na"}`);
 
   const label = actorId
     ? `${laneLabel(actorKind, depth)} · ${actorId}`
@@ -198,17 +183,13 @@ export function ArtifactGraph({
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerReady, setContainerReady] = useState(
-    () =>
-      isVisible &&
-      (typeof ResizeObserver === "undefined" || isJsDomEnvironment()),
+    () => isVisible && (typeof ResizeObserver === "undefined" || isJsDomEnvironment()),
   );
 
   const { nodes, edges } = useMemo(() => {
     const ordered = sortStepsChronologically(steps);
     const lanes = buildLanes(ordered);
-    const laneIndexByKey = new Map(
-      lanes.map((lane, index) => [lane.key, index]),
-    );
+    const laneIndexByKey = new Map(lanes.map((lane, index) => [lane.key, index]));
 
     const graphNodes: Node<GraphStepNodeData>[] = [];
     const graphEdges: Edge[] = [];
@@ -274,9 +255,7 @@ export function ArtifactGraph({
       const source = nodeIdByStepId.get(previous.id);
       const target = nodeIdByStepId.get(current.id);
       if (!source || !target || source === target) continue;
-      const elapsedLabel = formatElapsedLabel(
-        current.timestamp - previous.timestamp,
-      );
+      const elapsedLabel = formatElapsedLabel(current.timestamp - previous.timestamp);
       graphEdges.push({
         id: `chrono-${source}-${target}`,
         source,

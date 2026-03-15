@@ -131,41 +131,25 @@
   --color-text-info: #66b5ff;
   --color-text-info-soft: #339cff;
   --color-text-info-surface: #339cff;
-  --color-background-info-surface: color-mix(
-    in oklab,
-    #0285ff 13%,
-    transparent
-  );
+  --color-background-info-surface: color-mix(in oklab, #0285ff 13%, transparent);
   --color-border-info-surface: color-mix(in oklab, #0285ff 13%, transparent);
 
   --color-text-warning: #e25507;
   --color-text-warning-soft: #fb6a22;
   --color-text-warning-surface: #fb6a22;
-  --color-background-warning-surface: color-mix(
-    in oklab,
-    #fb6a22 16%,
-    transparent
-  );
+  --color-background-warning-surface: color-mix(in oklab, #fb6a22 16%, transparent);
   --color-border-warning-surface: color-mix(in oklab, #fb6a22 16%, transparent);
 
   --color-text-caution: #e0ac00;
   --color-text-caution-soft: #ffc300;
   --color-text-caution-surface: #ffc300;
-  --color-background-caution-surface: color-mix(
-    in oklab,
-    #ffc300 15%,
-    transparent
-  );
+  --color-background-caution-surface: color-mix(in oklab, #ffc300 15%, transparent);
   --color-border-caution-surface: color-mix(in oklab, #ffc300 15%, transparent);
 
   --color-text-danger: #e02e2a;
   --color-text-danger-soft: #fa423e;
   --color-text-danger-surface: #fa423e;
-  --color-background-danger-surface: color-mix(
-    in oklab,
-    #fa423e 16%,
-    transparent
-  );
+  --color-background-danger-surface: color-mix(in oklab, #fa423e 16%, transparent);
   --color-border-danger-surface: color-mix(in oklab, #fa423e 16%, transparent);
 
   --color-text-success: #04b84c;
@@ -176,11 +160,7 @@
   --color-background-success-solid-active: #008635;
   --color-border-success-outline: #008635;
   --color-border-success-outline-hover: #008635;
-  --color-background-success-surface: color-mix(
-    in oklab,
-    #04b84c 15%,
-    transparent
-  );
+  --color-background-success-surface: color-mix(in oklab, #04b84c 15%, transparent);
   --color-border-success-surface: color-mix(in oklab, #04b84c 15%, transparent);
 
   --color-text-discovery: #8046d9;
@@ -188,16 +168,8 @@
   --color-text-discovery-surface: #be95fa;
   --color-text-discovery-outline: #924ff7;
   --color-text-discovery-outline-hover: #924ff7;
-  --color-background-discovery-surface: color-mix(
-    in oklab,
-    #924ff7 15%,
-    transparent
-  );
-  --color-border-discovery-surface: color-mix(
-    in oklab,
-    #924ff7 15%,
-    transparent
-  );
+  --color-background-discovery-surface: color-mix(in oklab, #924ff7 15%, transparent);
+  --color-border-discovery-surface: color-mix(in oklab, #924ff7 15%, transparent);
 
   --shadow-hairline: 0 0 0 1px #ffffff1a;
   --shadow-100: 0 1px 2px -1px rgb(0 0 0 / 0.2);
@@ -217,26 +189,17 @@
   --toggle-active: rgba(48, 209, 88, 1);
   --toggle-inactive: rgba(120, 120, 128, 0.32);
   --toggle-knob: rgba(255, 255, 255, 1);
-  --toggle-knob-shadow:
-    0 3px 8px rgba(0, 0, 0, 0.25), 0 1px 1px rgba(0, 0, 0, 0.15);
+  --toggle-knob-shadow: 0 3px 8px rgba(0, 0, 0, 0.25), 0 1px 1px rgba(0, 0, 0, 0.15);
   --toggle-glass-highlight: rgba(255, 255, 255, 0.8);
   --toggle-glass-rim: rgba(255, 255, 255, 0.5);
   --toggle-glass-depth: rgba(0, 0, 0, 0.1);
 
   /* iOS 26 Liquid Glass — dark mode */
-  --glass-tab-bg: color-mix(
-    in oklab,
-    var(--color-surface-secondary) 72%,
-    transparent
-  );
+  --glass-tab-bg: color-mix(in oklab, var(--color-surface-secondary) 72%, transparent);
   --glass-tab-border: var(--color-border-disabled);
   --glass-tab-shadow: var(--shadow-300);
   --glass-tab-highlight: color-mix(in oklab, var(--color-text) 6%, transparent);
-  --glass-nav-bg: color-mix(
-    in oklab,
-    var(--color-surface-secondary) 80%,
-    transparent
-  );
+  --glass-nav-bg: color-mix(in oklab, var(--color-surface-secondary) 80%, transparent);
   --glass-nav-border: var(--color-border-disabled);
   --glass-sheet-bg: color-mix(in oklab, var(--color-surface) 88%, transparent);
   --glass-sheet-border: var(--color-border);

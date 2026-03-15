@@ -35,8 +35,7 @@ export function RlmWorkspace() {
   const isMobile = useIsMobile();
   const { navigate } = useAppNavigate();
   const telemetry = useTelemetry();
-  const { scrollRef, contentRef, isAtBottom, scrollToBottom } =
-    useStickToBottom();
+  const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
@@ -75,14 +74,10 @@ export function RlmWorkspace() {
       originalHandleSubmit({
         executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
         runtimeMode,
-        repoUrl:
-          runtimeMode === "daytona_pilot"
-            ? inferredRepoContext?.repoUrl
-            : undefined,
+        repoUrl: runtimeMode === "daytona_pilot" ? inferredRepoContext?.repoUrl : undefined,
         repoRef:
           runtimeMode === "daytona_pilot"
-            ? (inferredRepoContext?.repoRefCandidate ??
-              inferredRepoContext?.repoRef)
+            ? (inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef)
             : undefined,
         contextPaths:
           runtimeMode === "daytona_pilot" && inferredContextPaths.length > 0
@@ -172,14 +167,7 @@ export function RlmWorkspace() {
       loadConversation(conv);
       setShowHistory(false);
     },
-    [
-      loadConv,
-      loadConversation,
-      messages,
-      phase,
-      saveConversation,
-      turnArtifactsByMessageId,
-    ],
+    [loadConv, loadConversation, messages, phase, saveConversation, turnArtifactsByMessageId],
   );
 
   const handleToggleHistory = useCallback(() => {
@@ -191,16 +179,12 @@ export function RlmWorkspace() {
   }, []);
 
   const handleOpenRuntimeSettings = useCallback(() => {
-    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>(
-      "open-settings",
-      {
-        detail: { section: "runtime" },
-        cancelable: true,
-      },
-    );
+    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>("open-settings", {
+      detail: { section: "runtime" },
+      cancelable: true,
+    });
 
-    const wasHandledByDialog =
-      document.dispatchEvent(openSettingsEvent) === false;
+    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigate("/settings?section=runtime");
     }
@@ -213,11 +197,8 @@ export function RlmWorkspace() {
         guidance?: string[];
       }
     | undefined;
-  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance)
-    ? daytonaStatus.guidance
-    : [];
-  const warningGuidance =
-    runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
+  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance) ? daytonaStatus.guidance : [];
+  const warningGuidance = runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
   const showRuntimeWarning =
     backendEnabled &&
     runtimeStatus.data != null &&
@@ -225,9 +206,7 @@ export function RlmWorkspace() {
       ? daytonaStatus?.configured === false && daytonaGuidance.length > 0
       : runtimeStatus.data.ready === false && runtimeGuidance.length > 0);
   const runtimeWarningTitle =
-    runtimeMode === "daytona_pilot"
-      ? "Daytona setup required"
-      : "Runtime warning";
+    runtimeMode === "daytona_pilot" ? "Daytona setup required" : "Runtime warning";
   const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;

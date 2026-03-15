@@ -31,17 +31,11 @@ function payloadLooksErrored(payload?: Record<string, unknown>): boolean {
   const directStatus = asOptionalText(payload.status)?.toLowerCase();
   if (
     directStatus &&
-    ["error", "failed", "failure", "rejected", "cancelled"].includes(
-      directStatus,
-    )
+    ["error", "failed", "failure", "rejected", "cancelled"].includes(directStatus)
   ) {
     return true;
   }
-  if (
-    payload.success === false ||
-    payload.ok === false ||
-    payload.failed === true
-  ) {
+  if (payload.success === false || payload.ok === false || payload.failed === true) {
     return true;
   }
 
@@ -54,17 +48,10 @@ function payloadLooksErrored(payload?: Record<string, unknown>): boolean {
   for (const candidate of objectCandidates) {
     if (!candidate) continue;
     const status = asOptionalText(candidate.status)?.toLowerCase();
-    if (
-      status &&
-      ["error", "failed", "failure", "rejected", "cancelled"].includes(status)
-    ) {
+    if (status && ["error", "failed", "failure", "rejected", "cancelled"].includes(status)) {
       return true;
     }
-    if (
-      candidate.success === false ||
-      candidate.ok === false ||
-      candidate.failed === true
-    ) {
+    if (candidate.success === false || candidate.ok === false || candidate.failed === true) {
       return true;
     }
     if (hasExplicitErrorValue(candidate)) {
@@ -106,9 +93,7 @@ export function inferStatusTone(
   return "neutral";
 }
 
-function parseEnvVariablesFromPayload(
-  payload?: Record<string, unknown>,
-): ChatEnvVarItem[] | null {
+function parseEnvVariablesFromPayload(payload?: Record<string, unknown>): ChatEnvVarItem[] | null {
   if (!payload) return null;
 
   const objectCandidates: unknown[] = [
@@ -119,19 +104,13 @@ function parseEnvVariablesFromPayload(
   ];
 
   for (const candidate of objectCandidates) {
-    if (
-      !candidate ||
-      typeof candidate !== "object" ||
-      Array.isArray(candidate)
-    ) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
       continue;
     }
     const entries = Object.entries(candidate as Record<string, unknown>).filter(
       ([k, v]) =>
         /^[A-Z0-9_]+$/.test(k) &&
-        (typeof v === "string" ||
-          typeof v === "number" ||
-          typeof v === "boolean"),
+        (typeof v === "string" || typeof v === "number" || typeof v === "boolean"),
     );
     if (entries.length === 0) continue;
     return entries.slice(0, 50).map(([name, value]) => ({
@@ -168,15 +147,11 @@ function isSandboxPayload(payload?: Record<string, unknown>): boolean {
   if (!payload) return false;
   const step = payload.step;
   if (step && typeof step === "object" && !Array.isArray(step)) {
-    const stepType = String(
-      (step as Record<string, unknown>).type ?? "",
-    ).toLowerCase();
+    const stepType = String((step as Record<string, unknown>).type ?? "").toLowerCase();
     if (stepType === "repl") return true;
   }
   const toolName = String(payload.tool_name ?? "").toLowerCase();
-  return ["python", "repl", "shell", "exec", "interpreter"].some((s) =>
-    toolName.includes(s),
-  );
+  return ["python", "repl", "shell", "exec", "interpreter"].some((s) => toolName.includes(s));
 }
 
 function sandboxFromPayload(
@@ -185,9 +160,7 @@ function sandboxFromPayload(
   payload?: Record<string, unknown>,
 ): ChatRenderPart {
   const step =
-    payload?.step &&
-    typeof payload.step === "object" &&
-    !Array.isArray(payload.step)
+    payload?.step && typeof payload.step === "object" && !Array.isArray(payload.step)
       ? (payload.step as Record<string, unknown>)
       : undefined;
   const code =
@@ -209,8 +182,7 @@ function sandboxFromPayload(
     stepIndex,
     code,
     output,
-    errorText:
-      state === "output-error" ? (stringifyUnknown(output) ?? text) : undefined,
+    errorText: state === "output-error" ? (stringifyUnknown(output) ?? text) : undefined,
     language: "text",
     ...(runtimeContext ? { runtimeContext } : {}),
   };

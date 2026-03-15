@@ -34,7 +34,7 @@ fleet web
 
 Open `http://localhost:8000` in your browser.
 
-`fleet web` is the primary interactive interface. The published package already includes the built frontend assets, so end users do not need `bun` or a separate frontend toolchain.
+`fleet web` is the primary interactive interface. The published package already includes the built frontend assets, so end users do not need `pnpm` or a separate frontend toolchain.
 
 ## What You Get
 
@@ -98,7 +98,7 @@ uv run fleet web
 uv run fastapi dev
 ```
 
-For release/packaging workflows, `uv build` now runs frontend build sync automatically (requires `bun` in repo checkouts that include `src/frontend`).
+For release/packaging workflows, `uv build` now runs frontend build sync automatically (requires `pnpm` in repo checkouts that include `src/frontend`).
 
 Use full contributor setup and quality gates in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

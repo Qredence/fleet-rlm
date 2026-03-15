@@ -33,8 +33,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
               case "text":
                 return (
                   <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
-                    {model.text ||
-                      "No preview output was captured for this run."}
+                    {model.text || "No preview output was captured for this run."}
                   </pre>
                 );
               case "error":
@@ -61,9 +60,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                         Tool Result
                       </p>
                       {model.toolName && (
-                        <p className="text-sm text-foreground mt-1">
-                          {model.toolName}
-                        </p>
+                        <p className="text-sm text-foreground mt-1">{model.toolName}</p>
                       )}
                     </div>
                     {model.input && (
@@ -96,9 +93,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                     </p>
                     {model.thought && (
                       <div>
-                        <p className="text-xs font-semibold text-foreground/80">
-                          Thought
-                        </p>
+                        <p className="text-xs font-semibold text-foreground/80">Thought</p>
                         <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
                           {model.thought}
                         </p>
@@ -106,9 +101,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                     )}
                     {model.action && (
                       <div>
-                        <p className="text-xs font-semibold text-foreground/80">
-                          Action
-                        </p>
+                        <p className="text-xs font-semibold text-foreground/80">Action</p>
                         <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
                           {model.action}
                         </p>
@@ -116,9 +109,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                     )}
                     {model.observation && (
                       <div>
-                        <p className="text-xs font-semibold text-foreground/80">
-                          Observation
-                        </p>
+                        <p className="text-xs font-semibold text-foreground/80">Observation</p>
                         <pre className="max-h-64 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap break-words">
                           {model.observation}
                         </pre>

@@ -83,7 +83,7 @@ security-check:
 
 frontend-check:
 	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && bun install --frozen-lockfile && bun run api:check && bun run type-check && bun run lint:robustness && bun run test:unit && bun run build; \
+		cd src/frontend && pnpm install --frozen-lockfile && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && pnpm run build; \
 	else \
 		echo "No src/frontend/package.json found, skipping frontend checks."; \
 	fi
@@ -108,7 +108,7 @@ sync-ui:
 	cp -R src/frontend/dist src/fleet_rlm/ui/dist
 
 build-ui:
-	cd src/frontend && bun install --frozen-lockfile && bun run build
+	cd src/frontend && pnpm install --frozen-lockfile && pnpm run build
 	$(MAKE) sync-ui
 
 release-check: clean quality-gate security-check build-ui

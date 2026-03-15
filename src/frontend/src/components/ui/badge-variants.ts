@@ -5,8 +5,7 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default:
-          "border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
+        default: "border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
         secondary:
           "border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
         destructive:
@@ -15,8 +14,7 @@ const badgeVariants = cva(
         accent: "border-transparent bg-accent/10 text-accent",
         success: "border-transparent bg-chart-3/10 text-chart-3",
         warning: "border-transparent bg-chart-5/10 text-chart-5",
-        "destructive-subtle":
-          "border-transparent bg-destructive/10 text-destructive",
+        "destructive-subtle": "border-transparent bg-destructive/10 text-destructive",
       },
     },
     defaultVariants: {

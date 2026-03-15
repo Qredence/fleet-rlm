@@ -110,27 +110,18 @@ function Reasoning({
           "transition-colors duration-150",
         )}
         aria-expanded={isOpen}
-        aria-label={
-          isThinking ? "Thinking in progress" : "Toggle reasoning details"
-        }
+        aria-label={isThinking ? "Thinking in progress" : "Toggle reasoning details"}
       >
         <Sparkles
-          className={cn(
-            "size-3.5 shrink-0",
-            isThinking ? "text-accent" : "text-muted-foreground",
-          )}
+          className={cn("size-3.5 shrink-0", isThinking ? "text-accent" : "text-muted-foreground")}
           aria-hidden="true"
         />
-        <span
-          className={cn(isThinking ? "text-accent" : "text-muted-foreground", "typo-caption")}
-        >
+        <span className={cn(isThinking ? "text-accent" : "text-muted-foreground", "typo-caption")}>
           {summaryLabel}
         </span>
         {isThinking && <ThinkingDots reduced={prefersReduced} />}
         {displayDuration && !isThinking && (
-          <span className="text-muted-foreground typo-helper">
-            for {displayDuration}
-          </span>
+          <span className="text-muted-foreground typo-helper">for {displayDuration}</span>
         )}
         <motion.span
           className="ml-auto text-muted-foreground"
@@ -149,19 +140,12 @@ function Reasoning({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={
-              prefersReduced
-                ? { duration: 0.01 }
-                : { duration: 0.2, ease: "easeInOut" }
-            }
+            transition={prefersReduced ? { duration: 0.01 } : { duration: 0.2, ease: "easeInOut" }}
             className="overflow-hidden"
           >
             <div className="border-l-2 border-border-subtle ml-1.5 pl-3 pb-1 pt-1 space-y-2">
               {parts.map((part, i) => (
-                <div
-                  key={i}
-                  className="text-muted-foreground typo-caption"
-                >
+                <div key={i} className="text-muted-foreground typo-caption">
                   <Streamdown
                     content={part.text}
                     streaming={isThinking && i === parts.length - 1}

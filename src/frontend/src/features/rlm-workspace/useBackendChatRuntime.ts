@@ -7,10 +7,7 @@ import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEventAdapter";
 import { applyWsFrameToArtifacts } from "@/features/rlm-workspace/backendArtifactEventAdapter";
 import { buildChatDisplayItems } from "@/features/rlm-workspace/chatDisplayItems";
-import type {
-  ChatRuntime,
-  ChatSubmitOptions,
-} from "@/features/rlm-workspace/runtime-types";
+import type { ChatRuntime, ChatSubmitOptions } from "@/features/rlm-workspace/runtime-types";
 import { useArtifactStore } from "@/stores/artifactStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
@@ -25,9 +22,7 @@ import { useQueryClient } from "@tanstack/react-query";
 function isTerminalFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
   return (
-    frame.data.kind === "final" ||
-    frame.data.kind === "cancelled" ||
-    frame.data.kind === "error"
+    frame.data.kind === "final" || frame.data.kind === "cancelled" || frame.data.kind === "error"
   );
 }
 
@@ -83,10 +78,7 @@ function applyOptimisticHitlResolution(
   });
 }
 
-function revertOptimisticHitlResolution(
-  messages: ChatMessage[],
-  msgId: string,
-): ChatMessage[] {
+function revertOptimisticHitlResolution(messages: ChatMessage[], msgId: string): ChatMessage[] {
   return messages.map((message) => {
     if (message.id !== msgId || message.type !== "hitl" || !message.hitlData) {
       return message;
@@ -246,8 +238,7 @@ export function useBackendChatRuntime(): ChatRuntime {
           },
         );
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown streaming error";
+        const message = error instanceof Error ? error.message : "Unknown streaming error";
         if (!terminalSeen) {
           if (resolvedRuntimeMode === "daytona_pilot") {
             useRunWorkbenchStore.getState().failRun(message);
@@ -326,8 +317,7 @@ export function useBackendChatRuntime(): ChatRuntime {
         );
       } catch (error) {
         setMessages((prev) => revertOptimisticHitlResolution(prev, msgId));
-        const message =
-          error instanceof Error ? error.message : "Unknown command error";
+        const message = error instanceof Error ? error.message : "Unknown command error";
         toast.error("Failed to resolve checkpoint", { description: message });
       }
     },
@@ -336,8 +326,7 @@ export function useBackendChatRuntime(): ChatRuntime {
 
   const resolveClarification = useCallback(() => {
     toast("Live backend mode", {
-      description:
-        "Clarification cards are currently available when emitted by backend events.",
+      description: "Clarification cards are currently available when emitted by backend events.",
     });
   }, []);
 

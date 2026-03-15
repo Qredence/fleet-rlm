@@ -1,6 +1,6 @@
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown";
 
@@ -13,15 +13,9 @@ import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown
 vi.mock("@/components/ui/menubar", () => ({
   Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarTrigger: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  MenubarRadioGroup: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
+  MenubarTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MenubarRadioGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   MenubarRadioItem: ({
     children,
     onSelect,
@@ -43,9 +37,7 @@ describe("RuntimeModeDropdown", () => {
     const root = createRoot(container);
 
     act(() => {
-      root.render(
-        <RuntimeModeDropdown value="daytona_pilot" onChange={() => {}} />,
-      );
+      root.render(<RuntimeModeDropdown value="daytona_pilot" onChange={() => {}} />);
     });
 
     expect(container.textContent).toContain("Daytona pilot");
@@ -62,9 +54,7 @@ describe("RuntimeModeDropdown", () => {
     const onChange = vi.fn();
 
     act(() => {
-      root.render(
-        <RuntimeModeDropdown value="modal_chat" onChange={onChange} />,
-      );
+      root.render(<RuntimeModeDropdown value="modal_chat" onChange={onChange} />);
     });
 
     const daytonaOption = Array.from(container.querySelectorAll("button")).find(

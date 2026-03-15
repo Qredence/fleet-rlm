@@ -2,10 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
-import {
-  AttachmentChip,
-  type AttachedFile,
-} from "@/components/chat/input/AttachmentChip";
+import { AttachmentChip, type AttachedFile } from "@/components/chat/input/AttachmentChip";
 import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
 import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
 import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown";
@@ -38,10 +35,7 @@ interface ChatInputProps {
 }
 
 function createAttachmentId() {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `attachment-${nanoid()}`;
@@ -84,9 +78,7 @@ function ChatInput({
       const newAttachments: AttachedFile[] = Array.from(files).map((file) => ({
         id: createAttachmentId(),
         file,
-        previewUrl: file.type.startsWith("image/")
-          ? URL.createObjectURL(file)
-          : undefined,
+        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
       }));
       setAttachments((prev) => [...prev, ...newAttachments]);
     }
@@ -110,8 +102,7 @@ function ChatInput({
 
   const handleUnsupportedAttachmentSelect = useCallback(() => {
     toast.info("File upload is not available yet", {
-      description:
-        "This backend currently does not accept binary upload payloads.",
+      description: "This backend currently does not accept binary upload payloads.",
     });
   }, []);
 
@@ -158,14 +149,8 @@ function ChatInput({
               onUnsupportedSelect={handleUnsupportedAttachmentSelect}
             />
             <SettingsDropdown />
-            <ExecutionModeDropdown
-              value={executionMode}
-              onChange={onExecutionModeChange}
-            />
-            <RuntimeModeDropdown
-              value={runtimeMode}
-              onChange={onRuntimeModeChange}
-            />
+            <ExecutionModeDropdown value={executionMode} onChange={onExecutionModeChange} />
+            <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
           </PromptInputTools>
 
           <SendButton

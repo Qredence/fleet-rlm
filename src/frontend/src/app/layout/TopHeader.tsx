@@ -6,11 +6,7 @@ import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { UserMenu } from "@/features/shell/UserMenu";
 import { BrandMark } from "@/components/shared/BrandMark";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { NavTab } from "@/components/shared/NavTab";
@@ -41,8 +37,7 @@ export function TopHeader() {
   const { activeNav, isCanvasOpen, toggleCanvas, newSession } = useNavigationStore();
   const { navigateTo, navigate } = useAppNavigate();
   const isMobile = useIsMobile();
-  const panelLabel =
-    activeNav === "workspace" ? "message inspector" : "side panel";
+  const panelLabel = activeNav === "workspace" ? "message inspector" : "side panel";
 
   const handleNewSession = () => {
     newSession();
@@ -56,14 +51,8 @@ export function TopHeader() {
           <IconButton
             onClick={toggleCanvas}
             isActive={isCanvasOpen}
-            aria-label={
-              isCanvasOpen ? `Close ${panelLabel}` : `Open ${panelLabel}`
-            }
-            className={
-              isMobile
-                ? "touch-target"
-                : "h-8 w-8 rounded-lg hover:bg-background/80"
-            }
+            aria-label={isCanvasOpen ? `Close ${panelLabel}` : `Open ${panelLabel}`}
+            className={isMobile ? "touch-target" : "h-8 w-8 rounded-lg hover:bg-background/80"}
           >
             <PanelRight className={isMobile ? "size-6" : "size-5"} />
           </IconButton>
@@ -85,8 +74,7 @@ export function TopHeader() {
         isMobile
           ? {
               paddingBlock: "var(--header-padding-block-mobile)",
-              paddingLeft:
-                "max(var(--header-padding-inline-mobile), var(--safe-area-inset-left))",
+              paddingLeft: "max(var(--header-padding-inline-mobile), var(--safe-area-inset-left))",
               paddingRight:
                 "max(var(--header-padding-inline-mobile), var(--safe-area-inset-right))",
               backgroundColor: "var(--glass-nav-bg)",
@@ -137,12 +125,7 @@ export function TopHeader() {
       )}
 
       {/* ── Action buttons ────────────────────────────────────── */}
-      <div
-        className={cn(
-          "flex items-center shrink-0",
-          isMobile ? "gap-1" : "gap-2.5",
-        )}
-      >
+      <div className={cn("flex items-center shrink-0", isMobile ? "gap-1" : "gap-2.5")}>
         {isMobile ? (
           <>
             <Tooltip>

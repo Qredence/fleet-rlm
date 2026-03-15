@@ -503,7 +503,6 @@ li {
   line-height: 1.4;
 }
 
-
 /* ── Radio Option Card ─────────────────────────────────────────── */
 [data-slot="radio-option-card"] {
   font-family: var(--font-sans);
@@ -516,8 +515,7 @@ li {
   line-height: 1.4;
 }
 
-[data-slot="radio-option-card"][aria-checked="true"]
-  [data-slot="radio-option-card-label"] {
+[data-slot="radio-option-card"][aria-checked="true"] [data-slot="radio-option-card-label"] {
   font-weight: var(--font-weight-medium);
 }
 
