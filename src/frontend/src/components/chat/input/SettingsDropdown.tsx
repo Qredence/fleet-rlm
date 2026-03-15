@@ -35,7 +35,7 @@ function SettingsDropdown() {
     const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
 
     if (!wasHandledByDialog) {
-      navigate("/settings?section=runtime");
+      navigate({ to: "/settings?section=runtime" as any });
     }
   };
 

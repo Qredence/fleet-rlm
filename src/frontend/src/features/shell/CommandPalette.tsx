@@ -154,7 +154,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       action_value: "new_session",
                     });
                     newSession();
-                    navigate("/app/workspace");
+                    navigate({ to: "/app/workspace" as any });
                     close();
                   }}
                   className={cn(
@@ -197,7 +197,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       action_type: "action",
                       action_value: "open_settings",
                     });
-                    navigate("/settings");
+                    navigate({ to: "/settings" as any });
                     close();
                   }}
                   className={cn(

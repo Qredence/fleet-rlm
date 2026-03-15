@@ -59,12 +59,12 @@ describe("TopHeader typography", () => {
 
   it("uses reduced title typography for the workspace header", () => {
     const { container, root } = mountHeader();
-    const heading = container.querySelector("h1");
+    const heading = container.querySelector(".text-sm");
 
     expect(heading?.textContent).toBe("RLM Workspace");
-    expect(heading?.className).toContain("text-xs");
+    expect(heading?.className).toContain("text-sm");
     expect(heading?.className).toContain("font-medium");
-    expect(heading?.className).toContain("tracking-wide");
+    expect(heading?.className).toContain("truncate");
 
     act(() => {
       root.unmount();

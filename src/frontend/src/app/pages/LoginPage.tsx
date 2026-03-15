@@ -5,7 +5,7 @@
  * the user is redirected to the authenticated workspace. This page lives outside the app shell
  * (no header, no tabs, no AuthProvider) — it's entirely self-contained.
  */
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
@@ -37,7 +37,7 @@ function LoginPage() {
       telemetry.capture("user_logged_in", {
         source: "login_page",
       });
-      navigate("/app/workspace", { replace: true });
+      navigate({ to: "/app/workspace", replace: true });
     } catch {
       setError(
         "Microsoft sign-in did not complete. Try again, then verify your Entra tenant, redirect URI, and requested scopes.",

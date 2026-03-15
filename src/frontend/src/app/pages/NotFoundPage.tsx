@@ -7,7 +7,7 @@
  *
  * Offers a link back to the home page (Chat tab).
  */
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link, useRouter } from "@tanstack/react-router";
 import { FileQuestion, ArrowLeft, Home } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { springs } from "@/lib/config/motion-config";
@@ -16,6 +16,7 @@ import { BrandMark } from "@/components/shared/BrandMark";
 
 export function NotFoundPage() {
   const navigate = useNavigate();
+  const router = useRouter();
   const shouldReduceMotion = useReducedMotion();
 
   return (
@@ -42,12 +43,12 @@ export function NotFoundPage() {
           <Button
             variant="default"
             className="w-full sm:flex-1"
-            onClick={() => navigate("/", { replace: true })}
+            onClick={() => navigate({ to: "/", replace: true })}
           >
             <Home className="size-4" />
             <span className="typo-label">Back to Home</span>
           </Button>
-          <Button variant="secondary" className="w-full sm:flex-1" onClick={() => navigate(-1)}>
+          <Button variant="secondary" className="w-full sm:flex-1" onClick={() => router.history.back()}>
             <ArrowLeft className="size-4" />
             <span className="typo-label">Go Back</span>
           </Button>

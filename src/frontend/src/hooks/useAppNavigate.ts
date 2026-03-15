@@ -10,7 +10,7 @@
  * changes and syncs NavigationContext accordingly.
  */
 import { useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate } from "@tanstack/react-router";
 import type { NavItem } from "@/lib/data/types";
 
 // ── Nav ↔ Path mapping ─────────────────────────────────────────────
@@ -51,7 +51,7 @@ export function useAppNavigate() {
   /** Navigate to a top-level tab/section */
   const navigateTo = useCallback(
     (nav: NavItem) => {
-      navigate(navToPath(nav));
+      navigate({ to: navToPath(nav) as any });
     },
     [navigate],
   );

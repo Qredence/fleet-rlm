@@ -19,6 +19,7 @@ import { useNavigationStore } from "@/stores/navigationStore";
 import { TopHeader } from "@/app/layout/TopHeader";
 import { ChatPanel } from "@/app/layout/ChatPanel";
 import { BuilderPanel } from "@/app/layout/BuilderPanel";
+import { AppSidebar } from "@/app/layout/AppSidebar";
 import { cn } from "@/lib/utils/cn";
 
 /* ── Transition applied to both panels for smooth open/close ────── */
@@ -26,6 +27,9 @@ const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
 
 function DesktopShell() {
   const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
+
+  /* ── Sidebar state ─────────────────────────────────────────── */
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   /* ── Panel animation state ─────────────────────────────────── */
   const builderPanelRef = useRef<ImperativePanelHandle>(null);
@@ -51,10 +55,15 @@ function DesktopShell() {
   };
 
   return (
-    <div className="flex flex-col h-dvh bg-background">
-      <TopHeader />
+    <div className="flex h-dvh bg-background overflow-hidden">
+      <AppSidebar
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+      />
+      <div className="flex flex-col flex-1 min-w-0">
+        <TopHeader />
 
-      <PanelGroup direction="horizontal" className="flex-1 min-h-0">
+        <PanelGroup direction="horizontal" className="flex-1 min-h-0">
         {/* ── Chat / main content panel ─────────────────────────── */}
         <Panel id="chat" order={1} minSize={35} style={panelStyle}>
           <ChatPanel />
@@ -93,6 +102,7 @@ function DesktopShell() {
           </div>
         </Panel>
       </PanelGroup>
+      </div>
     </div>
   );
 }

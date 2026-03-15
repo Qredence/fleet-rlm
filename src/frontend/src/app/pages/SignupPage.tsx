@@ -10,7 +10,7 @@
  * the signup flow / direct URL access.
  */
 import { useState } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { springs } from "@/lib/config/motion-config";
@@ -52,7 +52,7 @@ function SignupPage() {
       has_name: Boolean(name.trim()),
     });
 
-    navigate("/", { replace: true });
+    navigate({ to: "/", replace: true });
   }
 
   return (
