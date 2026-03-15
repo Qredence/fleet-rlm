@@ -24,7 +24,7 @@ pytestmark = pytest.mark.usefixtures("react_records")
 def test_react_agent_constructed_with_explicit_signature_and_tools(
     react_records: list[dict[str, object]],
 ):
-    agent = RLMReActChatAgent(interpreter=FakeInterpreter())  # noqa: F841
+    RLMReActChatAgent(interpreter=FakeInterpreter())
 
     assert len(react_records) == 1
     rec = react_records[0]
