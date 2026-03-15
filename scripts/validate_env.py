@@ -80,7 +80,7 @@ def _load_modal_config() -> bool:
 
 def _validate_agent(path: Path) -> list[str]:
     errors: list[str] = []
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
 
     if not content.startswith("---"):
         return [f"{path.name}: Missing YAML frontmatter"]
