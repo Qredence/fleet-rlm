@@ -404,8 +404,8 @@ def do_modal(args: argparse.Namespace) -> int:
     if not results["litellm_secret"]:
         print("\n⚠️  LITELLM secret incomplete - some tests may fail")
         print(
-            "    Run: modal secret create "
-            f"{args.secret_name} DSPY_LM_MODEL=... DSPY_LLM_API_KEY=..."
+            "    Run: modal secret create LITELLM_SECRET_NAME "
+            "DSPY_LM_MODEL=... DSPY_LLM_API_KEY=..."
         )
 
     results["sandbox_creation"] = _test_sandbox_creation(args.timeout)
