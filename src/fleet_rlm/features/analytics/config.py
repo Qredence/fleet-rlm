@@ -6,7 +6,7 @@ import os
 
 from pydantic import BaseModel, Field
 
-from fleet_rlm._env_utils import env_bool as _env_bool
+from fleet_rlm.infrastructure.config._env_utils import env_bool as _env_bool
 
 PROJECT_POSTHOG_DEFAULT_HOST = "https://eu.i.posthog.com"
 PROJECT_POSTHOG_DEFAULT_API_KEY: str | None = None

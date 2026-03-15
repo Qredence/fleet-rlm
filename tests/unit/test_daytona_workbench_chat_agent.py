@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from fleet_rlm.daytona_rlm.chat_agent import DaytonaWorkbenchChatAgent
-from fleet_rlm.daytona_rlm.types import RolloutBudget
+from fleet_rlm.infrastructure.providers.daytona.chat_agent import DaytonaWorkbenchChatAgent
+from fleet_rlm.infrastructure.providers.daytona.types import RolloutBudget
 
 
 class _FakeSession:

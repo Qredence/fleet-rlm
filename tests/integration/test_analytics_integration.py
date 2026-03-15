@@ -10,15 +10,15 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.analytics.config import MlflowConfig, PostHogConfig
-from fleet_rlm.analytics.mlflow_integration import (
+from fleet_rlm.features.analytics.config import MlflowConfig, PostHogConfig
+from fleet_rlm.features.analytics.mlflow_integration import (
     MlflowTraceRequestContext,
     flush_mlflow_traces,
     initialize_mlflow,
     mlflow_request_context,
     trace_result_metadata,
 )
-from fleet_rlm.analytics.posthog_callback import PostHogLLMCallback
+from fleet_rlm.features.analytics.posthog_callback import PostHogLLMCallback
 
 
 class _FakeClient:

@@ -9,18 +9,18 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from fleet_rlm.models import StreamEvent
-from fleet_rlm.server.routers.ws.streaming import (
+from fleet_rlm.api.routers.ws.streaming import (
     _enqueue_latest_nonblocking,
     _emit_stream_event,
     _handle_stream_error,
     _should_reload_docs_path,
 )
-from fleet_rlm.server.routers import ws as ws_router
-from fleet_rlm.server.routers.ws.helpers import (
+from fleet_rlm.api.routers import ws as ws_router
+from fleet_rlm.api.routers.ws.helpers import (
     _close_websocket_safely,
     _try_send_json,
 )
-from fleet_rlm.server.schemas import WSMessage
+from fleet_rlm.api.schemas import WSMessage
 from tests.ui.fixtures_ui import ts
 
 

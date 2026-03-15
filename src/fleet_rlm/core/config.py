@@ -13,8 +13,8 @@ from pathlib import Path
 import dspy
 from dotenv import load_dotenv
 
-from fleet_rlm._env_utils import env_bool as _env_bool
-from fleet_rlm.analytics import MlflowConfig, initialize_mlflow
+from fleet_rlm.infrastructure.config._env_utils import env_bool as _env_bool
+from fleet_rlm.features.analytics import MlflowConfig, initialize_mlflow
 
 load_dotenv()  # Load .env from current working directory by default
 logger = logging.getLogger(__name__)
@@ -70,12 +70,12 @@ def _load_dotenv(path: Path, *, override: bool = False) -> None:
             os.environ[key] = value
 
 
-# _env_bool imported from fleet_rlm._env_utils
+# _env_bool imported from fleet_rlm.infrastructure.config._env_utils
 
 
 def load_posthog_settings_from_env() -> dict[str, object]:
     """Load PostHog analytics settings from environment variables."""
-    from fleet_rlm.analytics.config import (
+    from fleet_rlm.features.analytics.config import (
         PROJECT_POSTHOG_DEFAULT_API_KEY,
         PROJECT_POSTHOG_DEFAULT_HOST,
     )
@@ -114,7 +114,7 @@ def configure_posthog_analytics_from_env() -> object | None:
         return None
 
     try:
-        from fleet_rlm.analytics import configure_analytics
+        from fleet_rlm.features.analytics import configure_analytics
     except Exception:
         return None
 

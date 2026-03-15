@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.react import RLMReActChatAgent
-from fleet_rlm.react.tools.document import _read_document_content
+from fleet_rlm.core.agent import RLMReActChatAgent
+from fleet_rlm.core.tools.document import _read_document_content
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")

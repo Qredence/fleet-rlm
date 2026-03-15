@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import dspy
 
-from fleet_rlm.react.rlm_runtime_modules import AnalyzeLongDocumentModule
+from fleet_rlm.core.models.rlm_runtime_modules import AnalyzeLongDocumentModule
 from tests.unit.fixtures_state_trajectory import (
     ScriptedLM,
     chat_response,

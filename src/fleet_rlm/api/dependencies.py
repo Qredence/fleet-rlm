@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, WebSocket
 
-from fleet_rlm.db import DatabaseManager, FleetRepository
+from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig

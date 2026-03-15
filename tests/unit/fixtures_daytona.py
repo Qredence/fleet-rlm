@@ -3,12 +3,12 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fleet_rlm.daytona_rlm.protocol import (
+from fleet_rlm.infrastructure.providers.daytona.protocol import (
     ExecutionEventFrame,
     ExecutionResponse,
     HostCallbackRequest,
 )
-from fleet_rlm.daytona_rlm.types import ContextSource
+from fleet_rlm.infrastructure.providers.daytona.types import ContextSource
 
 
 class FakeLmSequence:
@@ -151,13 +151,13 @@ class FakeRunSession:
             "preview": text[:120],
         }
         self.prompt_handles.append(handle)
-        from fleet_rlm.daytona_rlm.types import PromptHandle
+        from fleet_rlm.infrastructure.providers.daytona.types import PromptHandle
 
         return PromptHandle.from_raw(handle)
 
     def list_prompts(self, *, timeout: float = 30.0):
         _ = timeout
-        from fleet_rlm.daytona_rlm.types import PromptHandle, PromptManifest
+        from fleet_rlm.infrastructure.providers.daytona.types import PromptHandle, PromptManifest
 
         return PromptManifest(
             handles=[PromptHandle.from_raw(item) for item in self.prompt_handles]

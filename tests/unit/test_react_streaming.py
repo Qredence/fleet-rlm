@@ -10,8 +10,8 @@ import dspy
 import pytest
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
-from fleet_rlm.react import RLMReActChatAgent
-from fleet_rlm.react.streaming import _build_final_payload, _normalize_trajectory
+from fleet_rlm.core.agent import RLMReActChatAgent
+from fleet_rlm.core.execution.streaming import _build_final_payload, _normalize_trajectory
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")

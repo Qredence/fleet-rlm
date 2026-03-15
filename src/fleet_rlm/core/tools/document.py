@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fleet_rlm.document_ingestion import (
+from fleet_rlm.features.document_ingestion.main import (
     read_document_content as _read_document_content,
 )
 

@@ -21,7 +21,7 @@ from fleet_rlm.infrastructure.config.runtime_settings import (
 )
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.daytona_rlm import DaytonaConfigError, resolve_daytona_config
+from fleet_rlm.infrastructure.providers.daytona import DaytonaConfigError, resolve_daytona_config
 from fleet_rlm.utils.modal import load_modal_config
 
 from ..deps import ServerStateDep, require_http_identity
@@ -505,7 +505,7 @@ async def get_volume_tree(
 
     import asyncio
 
-    from fleet_rlm.core.volume_ops import list_volume_tree
+    from fleet_rlm.core.tools.volume_ops import list_volume_tree
 
     try:
         result = await asyncio.wait_for(
@@ -540,7 +540,7 @@ async def get_volume_file_content(
 
     import asyncio
 
-    from fleet_rlm.core.volume_ops import read_volume_file_text
+    from fleet_rlm.core.tools.volume_ops import read_volume_file_text
 
     try:
         result = await asyncio.wait_for(

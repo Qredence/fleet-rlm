@@ -6,10 +6,10 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.analytics import configure_analytics
-from fleet_rlm.analytics.config import PostHogConfig
-from fleet_rlm.analytics.posthog_callback import PostHogLLMCallback
-from fleet_rlm.analytics.trace_context import (
+from fleet_rlm.features.analytics import configure_analytics
+from fleet_rlm.features.analytics.config import PostHogConfig
+from fleet_rlm.features.analytics.posthog_callback import PostHogLLMCallback
+from fleet_rlm.features.analytics.trace_context import (
     runtime_distinct_id_context,
     runtime_telemetry_enabled_context,
 )

@@ -10,8 +10,8 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.analytics import MlflowTraceRequestContext, new_client_request_id
-from fleet_rlm.db.models import RunStatus
+from fleet_rlm.features.analytics import MlflowTraceRequestContext, new_client_request_id
+from fleet_rlm.infrastructure.database.models import RunStatus
 
 from ...deps import ServerState
 from ...execution import ExecutionEventEmitter

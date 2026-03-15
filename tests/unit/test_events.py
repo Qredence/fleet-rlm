@@ -16,7 +16,7 @@ import time
 import pytest
 
 from fleet_rlm.models import StreamEvent, StreamEventKind, TurnState
-from fleet_rlm.server.execution.events import ExecutionStepBuilder
+from fleet_rlm.api.execution.events import ExecutionStepBuilder
 
 
 # ---------------------------------------------------------------------------

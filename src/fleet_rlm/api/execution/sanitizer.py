@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
-from fleet_rlm.execution_limits import (
+from fleet_rlm.features.logs.execution_limits import (
     DEFAULT_MAX_TEXT_CHARS,
     execution_max_collection_items,
     execution_max_recursion_depth,

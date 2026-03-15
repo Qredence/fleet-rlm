@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.db.models import RunStepType
+from fleet_rlm.infrastructure.database.models import RunStepType
 
 from ...auth import AuthError
 from ...deps import ServerState, build_unauthenticated_identity

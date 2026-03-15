@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.daytona_rlm.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.daytona_rlm.config import ResolvedDaytonaConfig
-from fleet_rlm.daytona_rlm.protocol import (
+from fleet_rlm.infrastructure.providers.daytona.diagnostics import DaytonaDiagnosticError
+from fleet_rlm.infrastructure.providers.daytona.config import ResolvedDaytonaConfig
+from fleet_rlm.infrastructure.providers.daytona.protocol import (
     DriverReady,
     ExecutionEventFrame,
     ExecutionRequest,
@@ -17,7 +17,7 @@ from fleet_rlm.daytona_rlm.protocol import (
     decode_frame,
     encode_frame,
 )
-from fleet_rlm.daytona_rlm.sandbox import (
+from fleet_rlm.infrastructure.providers.daytona.sandbox import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
     _resolve_clone_ref,

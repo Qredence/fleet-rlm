@@ -50,8 +50,8 @@ __all__ = [
 # Keep lazy exports while making symbol definitions visible to static analyzers
 # (including CodeQL's py/undefined-export) without eager runtime imports.
 if TYPE_CHECKING:
-    from .analytics import PostHogConfig, PostHogLLMCallback, configure_analytics
-    from .chunking import (
+    from .features.analytics import PostHogConfig, PostHogLLMCallback, configure_analytics
+    from .features.chunking import (
         chunk_by_headers,
         chunk_by_json_keys,
         chunk_by_size,
@@ -63,7 +63,7 @@ if TYPE_CHECKING:
         get_planner_lm_from_env,
         sandbox_driver,
     )
-    from .react import (
+    from .core.agent import (
         COMMAND_DISPATCH,
         RLMReActChatAgent,
         RLMReActChatSignature,
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
         execute_command,
         list_react_tool_names,
     )
-    from .react.signatures import (
+    from .core.agent.signatures import (
         AnalyzeLongDocument,
         ClarificationQuestionSignature,
         CodeChangePlan,
@@ -135,20 +135,20 @@ if TYPE_CHECKING:
     )
 
 _LAZY_ATTRS: dict[str, tuple[str, str]] = {
-    "chunk_by_headers": ("fleet_rlm.chunking", "chunk_by_headers"),
-    "chunk_by_json_keys": ("fleet_rlm.chunking", "chunk_by_json_keys"),
-    "chunk_by_size": ("fleet_rlm.chunking", "chunk_by_size"),
-    "chunk_by_timestamps": ("fleet_rlm.chunking", "chunk_by_timestamps"),
+    "chunk_by_headers": ("fleet_rlm.features.chunking", "chunk_by_headers"),
+    "chunk_by_json_keys": ("fleet_rlm.features.chunking", "chunk_by_json_keys"),
+    "chunk_by_size": ("fleet_rlm.features.chunking", "chunk_by_size"),
+    "chunk_by_timestamps": ("fleet_rlm.features.chunking", "chunk_by_timestamps"),
     "configure_planner_from_env": ("fleet_rlm.core", "configure_planner_from_env"),
     "get_planner_lm_from_env": ("fleet_rlm.core", "get_planner_lm_from_env"),
     "sandbox_driver": ("fleet_rlm.core", "sandbox_driver"),
     "ModalInterpreter": ("fleet_rlm.core", "ModalInterpreter"),
-    "COMMAND_DISPATCH": ("fleet_rlm.react", "COMMAND_DISPATCH"),
-    "execute_command": ("fleet_rlm.react", "execute_command"),
-    "RLMReActChatAgent": ("fleet_rlm.react", "RLMReActChatAgent"),
-    "RLMReActChatSignature": ("fleet_rlm.react", "RLMReActChatSignature"),
-    "build_tool_list": ("fleet_rlm.react", "build_tool_list"),
-    "list_react_tool_names": ("fleet_rlm.react", "list_react_tool_names"),
+    "COMMAND_DISPATCH": ("fleet_rlm.core.agent", "COMMAND_DISPATCH"),
+    "execute_command": ("fleet_rlm.core.agent", "execute_command"),
+    "RLMReActChatAgent": ("fleet_rlm.core.agent", "RLMReActChatAgent"),
+    "RLMReActChatSignature": ("fleet_rlm.core.agent", "RLMReActChatSignature"),
+    "build_tool_list": ("fleet_rlm.core.agent", "build_tool_list"),
+    "list_react_tool_names": ("fleet_rlm.core.agent", "list_react_tool_names"),
     "regex_extract": ("fleet_rlm.utils", "regex_extract"),
     "get_scaffold_dir": ("fleet_rlm.utils", "get_scaffold_dir"),
     "install_agents": ("fleet_rlm.utils", "install_agents"),
@@ -156,42 +156,42 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "install_skills": ("fleet_rlm.utils", "install_skills"),
     "list_agents": ("fleet_rlm.utils", "list_agents"),
     "list_skills": ("fleet_rlm.utils", "list_skills"),
-    "AnalyzeLongDocument": ("fleet_rlm.react.signatures", "AnalyzeLongDocument"),
-    "CodeChangePlan": ("fleet_rlm.react.signatures", "CodeChangePlan"),
+    "AnalyzeLongDocument": ("fleet_rlm.core.agent.signatures", "AnalyzeLongDocument"),
+    "CodeChangePlan": ("fleet_rlm.core.agent.signatures", "CodeChangePlan"),
     "ClarificationQuestionSignature": (
-        "fleet_rlm.react.signatures",
+        "fleet_rlm.core.agent.signatures",
         "ClarificationQuestionSignature",
     ),
     "CoreMemoryUpdateProposal": (
-        "fleet_rlm.react.signatures",
+        "fleet_rlm.core.agent.signatures",
         "CoreMemoryUpdateProposal",
     ),
-    "ExtractFromLogs": ("fleet_rlm.react.signatures", "ExtractFromLogs"),
+    "ExtractFromLogs": ("fleet_rlm.core.agent.signatures", "ExtractFromLogs"),
     "GroundedAnswerWithCitations": (
-        "fleet_rlm.react.signatures",
+        "fleet_rlm.core.agent.signatures",
         "GroundedAnswerWithCitations",
     ),
-    "IncidentTriageFromLogs": ("fleet_rlm.react.signatures", "IncidentTriageFromLogs"),
+    "IncidentTriageFromLogs": ("fleet_rlm.core.agent.signatures", "IncidentTriageFromLogs"),
     "MemoryActionIntentSignature": (
-        "fleet_rlm.react.signatures",
+        "fleet_rlm.core.agent.signatures",
         "MemoryActionIntentSignature",
     ),
     "MemoryStructureAuditSignature": (
-        "fleet_rlm.react.signatures",
+        "fleet_rlm.core.agent.signatures",
         "MemoryStructureAuditSignature",
     ),
     "MemoryStructureMigrationPlanSignature": (
-        "fleet_rlm.react.signatures",
+        "fleet_rlm.core.agent.signatures",
         "MemoryStructureMigrationPlanSignature",
     ),
-    "SummarizeLongDocument": ("fleet_rlm.react.signatures", "SummarizeLongDocument"),
+    "SummarizeLongDocument": ("fleet_rlm.core.agent.signatures", "SummarizeLongDocument"),
     "VolumeFileTreeSignature": (
-        "fleet_rlm.react.signatures",
+        "fleet_rlm.core.agent.signatures",
         "VolumeFileTreeSignature",
     ),
-    "configure_analytics": ("fleet_rlm.analytics", "configure_analytics"),
-    "PostHogConfig": ("fleet_rlm.analytics", "PostHogConfig"),
-    "PostHogLLMCallback": ("fleet_rlm.analytics", "PostHogLLMCallback"),
+    "configure_analytics": ("fleet_rlm.features.analytics", "configure_analytics"),
+    "PostHogConfig": ("fleet_rlm.features.analytics", "PostHogConfig"),
+    "PostHogLLMCallback": ("fleet_rlm.features.analytics", "PostHogLLMCallback"),
 }
 
 _LAZY_MODULES: dict[str, str] = {

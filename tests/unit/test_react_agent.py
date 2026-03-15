@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import dspy
 import pytest
 
-from fleet_rlm.react import RLMReActChatAgent, RLMReActChatSignature
-from fleet_rlm.react import tools as react_tools
+from fleet_rlm.core.agent import RLMReActChatAgent, RLMReActChatSignature
+from fleet_rlm.core.agent import tools as react_tools
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
@@ -443,7 +443,7 @@ def test_get_tool_raises_on_unknown_name(monkeypatch):
 
 
 def test_get_runtime_module_caches_instances(monkeypatch):
-    from fleet_rlm.react import runtime_factory
+    from fleet_rlm.core.agent import runtime_factory
 
     created: list[tuple[str, object, int, int, bool]] = []
     fake_module = object()
@@ -534,7 +534,7 @@ def test_reset_clears_history_and_documents(monkeypatch):
 def test_signature_output_types_are_generic():
     """All Signature output fields should use typed generics, not bare list/dict."""
     import typing
-    from fleet_rlm.react.signatures import (
+    from fleet_rlm.core.agent.signatures import (
         AnalyzeLongDocument,
         CodeChangePlan,
         ClarificationQuestionSignature,

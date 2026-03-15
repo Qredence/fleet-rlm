@@ -4,8 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from fleet_rlm.daytona_rlm.driver import DAYTONA_DRIVER_SOURCE
-from fleet_rlm.daytona_rlm.protocol import (
+from fleet_rlm.infrastructure.providers.daytona.driver import DAYTONA_DRIVER_SOURCE
+from fleet_rlm.infrastructure.providers.daytona.protocol import (
     DriverReady,
     ExecutionRequest,
     ExecutionResponse,

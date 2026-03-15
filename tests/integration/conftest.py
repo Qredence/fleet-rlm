@@ -7,8 +7,8 @@ import pytest
 import pytest_asyncio
 
 from fleet_rlm.core.config import configure_planner_from_env
-from fleet_rlm.daytona_rlm.config import resolve_daytona_config
-from fleet_rlm.db import DatabaseManager, FleetRepository
+from fleet_rlm.infrastructure.providers.daytona.config import resolve_daytona_config
+from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
 
 
 def _lm_configured() -> bool:

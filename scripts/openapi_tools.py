@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 
 def do_generate(args: argparse.Namespace) -> int:
-    from fleet_rlm.server.main import app
+    from fleet_rlm.api.main import app
 
     openapi_schema = app.openapi()
     openapi_schema["openapi"] = "3.1.0"

@@ -84,7 +84,7 @@ def sandbox_driver() -> None:
     from typing import Any, Callable, cast
 
     try:
-        from fleet_rlm.core.driver_factories import (
+        from fleet_rlm.core.execution.driver_factories import (
             FinalOutput,
             inject_sandbox_helpers,
             make_llm_query,
@@ -95,7 +95,7 @@ def sandbox_driver() -> None:
             register_tools,
             wrap_helper,
         )
-        from fleet_rlm.core.sandbox_tools import (
+        from fleet_rlm.core.tools.sandbox_tools import (
             add_buffer,
             chunk_by_headers,
             chunk_by_json_keys,
@@ -107,13 +107,13 @@ def sandbox_driver() -> None:
             peek,
             reset_buffers,
         )
-        from fleet_rlm.core.session_history import (
+        from fleet_rlm.core.agent.session_history import (
             get_last_execution,
             get_session_history,
             log_execution,
             reset_session_history,
         )
-        from fleet_rlm.core.volume_tools import (
+        from fleet_rlm.core.tools.volume_tools import (
             load_from_volume,
             save_to_volume,
             workspace_append,

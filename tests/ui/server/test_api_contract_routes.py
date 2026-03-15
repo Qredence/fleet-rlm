@@ -62,11 +62,11 @@ def test_ready_endpoint_reports_missing_planner(local_client: TestClient) -> Non
 
 def test_ws_router_split_modules_import() -> None:
     """Regression guard for ws module decomposition import stability."""
-    import fleet_rlm.server.routers.ws as ws
-    import fleet_rlm.server.routers.ws.commands as ws_commands
-    import fleet_rlm.server.routers.ws.helpers as ws_helpers
-    import fleet_rlm.server.routers.ws.lifecycle as ws_lifecycle
-    import fleet_rlm.server.routers.ws.session as ws_session
+    import fleet_rlm.api.routers.ws as ws
+    import fleet_rlm.api.routers.ws.commands as ws_commands
+    import fleet_rlm.api.routers.ws.helpers as ws_helpers
+    import fleet_rlm.api.routers.ws.lifecycle as ws_lifecycle
+    import fleet_rlm.api.routers.ws.session as ws_session
 
     assert ws.router is not None
     assert ws_commands._handle_command is not None
@@ -76,7 +76,7 @@ def test_ws_router_split_modules_import() -> None:
 
 
 def test_ws_router_registers_expected_websocket_routes() -> None:
-    import fleet_rlm.server.routers.ws as ws
+    import fleet_rlm.api.routers.ws as ws
 
     websocket_paths = {
         route.path for route in ws.router.routes if getattr(route, "path", None)
@@ -123,7 +123,7 @@ def test_runtime_contract_endpoints_remain_available(
 
 
 def _patch_main_resolve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from fleet_rlm.server import main as server_main
+    from fleet_rlm.api import main as server_main
 
     def fake_resolve(self, *args, **kwargs):  # noqa: ARG001
         return Path(tmp_path / "repo" / "src" / "fleet_rlm" / "server" / "main.py")
@@ -135,7 +135,7 @@ def test_resolve_ui_dist_dir_prefers_frontend_when_both_exist(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.server import main as server_main
+    from fleet_rlm.api import main as server_main
 
     _patch_main_resolve(monkeypatch, tmp_path)
 
@@ -161,7 +161,7 @@ def test_resolve_ui_dist_dir_falls_back_to_packaged_dist(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.server import main as server_main
+    from fleet_rlm.api import main as server_main
 
     _patch_main_resolve(monkeypatch, tmp_path)
 
@@ -187,9 +187,9 @@ def test_create_app_serves_spa_index_from_frontend_dist(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.server import main as server_main
-    from fleet_rlm.server.config import ServerRuntimeConfig
-    from fleet_rlm.server.main import create_app
+    from fleet_rlm.api import main as server_main
+    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.main import create_app
 
     ui_dist = tmp_path / "src" / "frontend" / "dist"
     assets_dir = ui_dist / "assets"

@@ -5,8 +5,8 @@ import dspy
 import pytest
 from dspy.streaming.messages import StatusMessage
 
-from fleet_rlm.react.agent import RLMReActChatAgent
-from fleet_rlm.react.delegate_sub_agent import (
+from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.core.agent.rlm_agent import (
     _build_child_interpreter,
     spawn_delegate_sub_agent_async,
 )

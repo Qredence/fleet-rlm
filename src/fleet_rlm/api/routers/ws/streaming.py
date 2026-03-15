@@ -11,13 +11,13 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.analytics import (
+from fleet_rlm.features.analytics import (
     MlflowTraceRequestContext,
     merge_trace_result_metadata,
     mlflow_request_context,
 )
-from fleet_rlm.analytics.trace_context import runtime_telemetry_enabled_context
-from fleet_rlm.db.models import RunStatus
+from fleet_rlm.features.analytics.trace_context import runtime_telemetry_enabled_context
+from fleet_rlm.infrastructure.database.models import RunStatus
 from fleet_rlm.models import StreamEvent
 from ...execution import ExecutionStepBuilder
 from .contracts import ChatAgentProtocol, LocalPersistFn

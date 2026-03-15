@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.react.signatures import (
+from fleet_rlm.core.agent.signatures import (
     AnalyzeLongDocument,
     CodeChangePlan,
     ClarificationQuestionSignature,
@@ -115,7 +115,7 @@ from fleet_rlm.react.signatures import (
 def test_runtime_module_wraps_rlm(
     monkeypatch, module_name, signature_cls, call_kwargs, expected_field
 ):
-    from fleet_rlm.react import rlm_runtime_modules as runtime_mod
+    from fleet_rlm.core.agent import rlm_runtime_modules as runtime_mod
 
     created = {}
 

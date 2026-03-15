@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 import pytest
 
-from fleet_rlm.react.document_sources import (
+from fleet_rlm.core.execution.document_sources import (
     _rewrite_gist_page_url,
     fetch_url_document_content,
 )

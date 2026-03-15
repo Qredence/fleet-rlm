@@ -33,7 +33,7 @@ from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
 
 from .driver import sandbox_driver
 from . import driver_factories, sandbox_tools, session_history, volume_tools
-from fleet_rlm.execution_limits import execution_max_text_chars
+from fleet_rlm.features.logs.execution_limits import execution_max_text_chars
 from .llm_tools import LLMQueryMixin
 from .output_utils import (
     _redact_sensitive_text,

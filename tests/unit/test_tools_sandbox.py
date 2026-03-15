@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleet_rlm.react.agent import RLMReActChatAgent
-from fleet_rlm.react.tools import build_tool_list
+from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.core.tools import build_tool_list
 import dspy
 
 

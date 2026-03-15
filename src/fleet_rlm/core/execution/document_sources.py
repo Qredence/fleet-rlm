@@ -33,13 +33,13 @@ _URL_SUFFIX_BY_CONTENT_TYPE = {
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    from fleet_rlm._env_utils import env_bool
+    from fleet_rlm.infrastructure.config._env_utils import env_bool
 
     return env_bool(os.getenv(name), default=default)
 
 
 def _env_int(name: str, default: int) -> int:
-    from fleet_rlm._env_utils import env_int
+    from fleet_rlm.infrastructure.config._env_utils import env_int
 
     return env_int(os.getenv(name), default=default)
 

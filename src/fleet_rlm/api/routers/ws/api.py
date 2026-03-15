@@ -11,7 +11,7 @@ import logging
 import dspy
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from fleet_rlm.analytics.trace_context import (
+from fleet_rlm.features.analytics.trace_context import (
     runtime_distinct_id_context,
 )
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fleet_rlm.db import FleetRepository, TenantStatus
-from fleet_rlm.db.types import IdentityUpsertResult
+from fleet_rlm.infrastructure.database import FleetRepository, TenantStatus
+from fleet_rlm.infrastructure.database.types import IdentityUpsertResult
 
 from .base import AuthError
 from .types import NormalizedIdentity

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
-from fleet_rlm.mcp.server import create_mcp_server
+from fleet_rlm.infrastructure.mcp.server import create_mcp_server
 
 
 class _FakeFastMCP:

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fleet_rlm.daytona_rlm.runner import DaytonaRLMRunner
-from fleet_rlm.daytona_rlm.system_prompt import build_system_prompt
-from fleet_rlm.daytona_rlm.types import RecursiveTaskSpec, RolloutBudget
+from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
+from fleet_rlm.infrastructure.providers.daytona.system_prompt import build_system_prompt
+from fleet_rlm.infrastructure.providers.daytona.types import RecursiveTaskSpec, RolloutBudget
 from fleet_rlm.models import StreamEvent
 from tests.unit.fixtures_daytona import (
     FakeLmSequence,

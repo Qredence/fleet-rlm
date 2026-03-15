@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fleet_rlm.daytona_rlm.protocol import ExecutionEventFrame
-from fleet_rlm.daytona_rlm.runner import DaytonaRLMRunner
+from fleet_rlm.infrastructure.providers.daytona.protocol import ExecutionEventFrame
+from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
 from fleet_rlm.models import StreamEvent
 from tests.unit.fixtures_daytona import (
     FakeLmSequence,

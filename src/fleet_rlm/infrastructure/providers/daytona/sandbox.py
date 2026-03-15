@@ -26,7 +26,7 @@ except ImportError as exc:  # pragma: no cover - exercised by runtime users
     _DAYTONA_IMPORT_ERROR = exc
 else:
     _DAYTONA_IMPORT_ERROR = None
-from fleet_rlm.document_ingestion import read_document_content
+from fleet_rlm.features.document_ingestion.main import read_document_content
 
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .diagnostics import DaytonaDiagnosticError
