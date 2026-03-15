@@ -1,83 +1,20 @@
 from contextlib import contextmanager
-import threading
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import dspy
 import pytest
 from dspy.streaming.messages import StatusMessage
 
-from fleet_rlm.core.interpreter import ExecutionProfile, ModalInterpreter
 from fleet_rlm.react.agent import RLMReActChatAgent
 from fleet_rlm.react.delegate_sub_agent import (
     _build_child_interpreter,
     spawn_delegate_sub_agent_async,
 )
 from fleet_rlm.models import StreamEvent
-
-
-def _patch_child_module(monkeypatch, *, answer: str = "ok"):
-    created: list[dict[str, object]] = []
-
-    class _FakeChildModule:
-        async def acall(self, *, prompt: str, context: str):
-            return SimpleNamespace(
-                answer=answer,
-                trajectory=[{"reasoning": f"handled:{prompt}", "output": context}],
-                final_reasoning="done",
-            )
-
-    def _fake_builder(
-        *,
-        interpreter,
-        max_iterations: int,
-        max_llm_calls: int,
-        verbose: bool,
-    ):
-        created.append(
-            {
-                "interpreter": interpreter,
-                "max_iterations": max_iterations,
-                "max_llm_calls": max_llm_calls,
-                "verbose": verbose,
-            }
-        )
-        return _FakeChildModule()
-
-    monkeypatch.setattr(
-        "fleet_rlm.react.delegate_sub_agent.build_recursive_subquery_rlm",
-        _fake_builder,
-    )
-    return created
-
-
-def _make_modal_interpreter(
-    *, max_llm_calls: int, used_calls: int, sandbox_active: bool = False
-) -> ModalInterpreter:
-    interpreter = object.__new__(ModalInterpreter)
-    interpreter.image = object()
-    interpreter._app_obj = None
-    interpreter.secrets = []
-    interpreter.timeout = 60
-    interpreter.idle_timeout = None
-    interpreter.execute_timeout = 60
-    interpreter._app_name = "test-app"
-    interpreter.volume_name = None
-    interpreter.volume_mount_path = "/data"
-    interpreter.summarize_stdout = True
-    interpreter.stdout_summary_threshold = 10_000
-    interpreter.stdout_summary_prefix_len = 200
-    interpreter.sub_lm = None
-    interpreter.max_llm_calls = max_llm_calls
-    interpreter._llm_call_count = used_calls
-    interpreter._llm_call_lock = threading.Lock()
-    interpreter._sub_lm_executor = None
-    interpreter._sub_lm_executor_lock = threading.Lock()
-    interpreter.llm_call_timeout = 60
-    interpreter.default_execution_profile = ExecutionProfile.RLM_DELEGATE
-    interpreter.async_execute = True
-    interpreter._sandbox = object() if sandbox_active else None
-    return interpreter
+from tests.unit.fixtures_state_trajectory import (
+    make_modal_interpreter,
+    patch_child_module,
+)
 
 
 @pytest.mark.asyncio
@@ -86,7 +23,7 @@ async def test_sub_agent_interpreter_sharing(monkeypatch):
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter)
     parent_agent._current_depth = 0
 
-    created = _patch_child_module(monkeypatch)
+    created = patch_child_module(monkeypatch)
 
     result = await spawn_delegate_sub_agent_async(parent_agent, prompt="Test delegate")
 
@@ -97,7 +34,7 @@ async def test_sub_agent_interpreter_sharing(monkeypatch):
 
 
 def test_child_modal_interpreter_shares_parent_llm_budget_counter():
-    parent_interpreter = _make_modal_interpreter(max_llm_calls=4, used_calls=1)
+    parent_interpreter = make_modal_interpreter(max_llm_calls=4, used_calls=1)
     parent_agent = RLMReActChatAgent(interpreter=parent_interpreter)
 
     child_interpreter = _build_child_interpreter(parent_agent, remaining_llm_budget=3)
@@ -108,7 +45,7 @@ def test_child_modal_interpreter_shares_parent_llm_budget_counter():
 
 
 def test_live_modal_interpreter_reuses_parent_sandbox_for_delegate_turns():
-    parent_interpreter = _make_modal_interpreter(
+    parent_interpreter = make_modal_interpreter(
         max_llm_calls=4,
         used_calls=1,
         sandbox_active=True,
@@ -129,7 +66,7 @@ async def test_delegate_budget_cap_returns_bounded_error(monkeypatch):
     )
     parent_agent._current_depth = 0
 
-    _patch_child_module(monkeypatch)
+    patch_child_module(monkeypatch)
 
     first = await spawn_delegate_sub_agent_async(parent_agent, prompt="delegate once")
     second = await spawn_delegate_sub_agent_async(parent_agent, prompt="delegate twice")
@@ -148,7 +85,7 @@ async def test_delegate_result_truncation_updates_metadata(monkeypatch):
     )
     parent_agent._current_depth = 0
 
-    _patch_child_module(monkeypatch, answer="x" * 1024)
+    patch_child_module(monkeypatch, answer="x" * 1024)
 
     result = await spawn_delegate_sub_agent_async(parent_agent, prompt="truncate")
 
@@ -177,7 +114,7 @@ async def test_delegate_uses_delegate_lm_context_when_available(monkeypatch):
     monkeypatch.setattr(
         "fleet_rlm.react.delegate_sub_agent.dspy.context", _fake_context
     )
-    _patch_child_module(monkeypatch)
+    patch_child_module(monkeypatch)
 
     result = await spawn_delegate_sub_agent_async(
         parent_agent, prompt="delegate with lm"
@@ -194,7 +131,7 @@ async def test_delegate_fallback_count_increments_when_delegate_lm_missing(monke
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter, delegate_lm=None)
     parent_agent._current_depth = 0
 
-    _patch_child_module(monkeypatch)
+    patch_child_module(monkeypatch)
 
     result = await spawn_delegate_sub_agent_async(parent_agent, prompt="no delegate lm")
 
@@ -205,7 +142,7 @@ async def test_delegate_fallback_count_increments_when_delegate_lm_missing(monke
 
 @pytest.mark.asyncio
 async def test_delegate_rejects_when_parent_llm_budget_is_exhausted(monkeypatch):
-    parent_interpreter = _make_modal_interpreter(max_llm_calls=2, used_calls=2)
+    parent_interpreter = make_modal_interpreter(max_llm_calls=2, used_calls=2)
     parent_agent = RLMReActChatAgent(interpreter=parent_interpreter)
     parent_agent._current_depth = 0
 
@@ -228,7 +165,7 @@ async def test_async_sub_agent_interpreter_sharing(monkeypatch):
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter)
     parent_agent._current_depth = 0
 
-    created = _patch_child_module(monkeypatch, answer="async sub-agent mock response")
+    created = patch_child_module(monkeypatch, answer="async sub-agent mock response")
 
     result = await spawn_delegate_sub_agent_async(
         parent_agent, prompt="Test async delegate"
@@ -248,7 +185,7 @@ async def test_async_delegate_fallback_count_increments_when_delegate_lm_missing
     parent_agent = RLMReActChatAgent(interpreter=mock_interpreter, delegate_lm=None)
     parent_agent._current_depth = 0
 
-    _patch_child_module(monkeypatch)
+    patch_child_module(monkeypatch)
 
     result = await spawn_delegate_sub_agent_async(
         parent_agent,

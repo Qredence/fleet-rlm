@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import fleet_rlm.core.config as config
 import pytest
 import yaml
+from tests.unit.fixtures_env import clear_env, write_env_file
 
 
 class _FakeLM:
@@ -17,12 +18,14 @@ class _FakeLM:
 
 
 def test_configure_planner_from_env_with_quotes(monkeypatch, tmp_path: Path):
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        'DSPY_LM_MODEL="openai/test-model"\n'
-        "DSPY_LM_API_KEY='sk-test'\n"
-        "DSPY_LM_API_BASE=https://example.test\n"
-        "DSPY_LM_MAX_TOKENS=1234\n"
+    env_file = write_env_file(
+        tmp_path,
+        lines=[
+            'DSPY_LM_MODEL="openai/test-model"',
+            "DSPY_LM_API_KEY='sk-test'",
+            "DSPY_LM_API_BASE=https://example.test",
+            "DSPY_LM_MAX_TOKENS=1234",
+        ],
     )
 
     captured = {}
@@ -33,14 +36,14 @@ def test_configure_planner_from_env_with_quotes(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)
     monkeypatch.setattr(config.dspy, "configure", fake_configure)
 
-    for key in (
+    clear_env(
+        monkeypatch,
         "DSPY_LM_MODEL",
         "DSPY_LLM_API_KEY",
         "DSPY_LM_API_KEY",
         "DSPY_LM_API_BASE",
         "DSPY_LM_MAX_TOKENS",
-    ):
-        monkeypatch.delenv(key, raising=False)
+    )
 
     assert config.configure_planner_from_env(env_file=env_file) is True
     lm = captured["lm"]
@@ -51,24 +54,23 @@ def test_configure_planner_from_env_with_quotes(monkeypatch, tmp_path: Path):
 
 
 def test_configure_planner_from_env_fallback_api_key(monkeypatch, tmp_path: Path):
-    env_file = tmp_path / ".env"
-    env_file.write_text("DSPY_LM_MODEL=openai/test\nDSPY_LM_API_KEY=sk-fallback\n")
+    env_file = write_env_file(
+        tmp_path,
+        lines=["DSPY_LM_MODEL=openai/test", "DSPY_LM_API_KEY=sk-fallback"],
+    )
 
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)
     monkeypatch.setattr(config.dspy, "configure", lambda *, lm: None)
 
-    for key in ("DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "DSPY_LM_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
+    clear_env(monkeypatch, "DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "DSPY_LM_API_KEY")
 
     assert config.configure_planner_from_env(env_file=env_file) is True
 
 
 def test_configure_planner_from_env_missing_vars(monkeypatch, tmp_path: Path):
-    env_file = tmp_path / ".env"
-    env_file.write_text("")
+    env_file = write_env_file(tmp_path)
 
-    for key in ("DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "DSPY_LM_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
+    clear_env(monkeypatch, "DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "DSPY_LM_API_KEY")
 
     assert config.configure_planner_from_env(env_file=env_file) is False
 
@@ -160,20 +162,22 @@ def test_config_model_defaults_match_hydra_yaml():
 
 
 def test_get_delegate_lm_from_env_uses_delegate_model(monkeypatch, tmp_path: Path):
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        "DSPY_DELEGATE_LM_MODEL=openai/delegate-mini\n"
-        "DSPY_DELEGATE_LM_API_KEY=sk-delegate\n"
-        "DSPY_DELEGATE_LM_API_BASE=https://delegate.example\n"
+    env_file = write_env_file(
+        tmp_path,
+        lines=[
+            "DSPY_DELEGATE_LM_MODEL=openai/delegate-mini",
+            "DSPY_DELEGATE_LM_API_KEY=sk-delegate",
+            "DSPY_DELEGATE_LM_API_BASE=https://delegate.example",
+        ],
     )
 
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)
-    for key in (
+    clear_env(
+        monkeypatch,
         "DSPY_DELEGATE_LM_MODEL",
         "DSPY_DELEGATE_LM_API_KEY",
         "DSPY_DELEGATE_LM_API_BASE",
-    ):
-        monkeypatch.delenv(key, raising=False)
+    )
 
     lm = config.get_delegate_lm_from_env(env_file=env_file, default_max_tokens=2048)
     assert lm is not None
@@ -186,18 +190,19 @@ def test_get_delegate_lm_from_env_uses_delegate_model(monkeypatch, tmp_path: Pat
 def test_get_delegate_lm_from_env_returns_none_on_init_error(
     monkeypatch, tmp_path: Path
 ):
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        "DSPY_DELEGATE_LM_MODEL=openai/delegate-mini\n"
-        "DSPY_DELEGATE_LM_API_KEY=sk-delegate\n"
+    env_file = write_env_file(
+        tmp_path,
+        lines=[
+            "DSPY_DELEGATE_LM_MODEL=openai/delegate-mini",
+            "DSPY_DELEGATE_LM_API_KEY=sk-delegate",
+        ],
     )
 
     def _raise_lm(*args, **kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(config.dspy, "LM", _raise_lm)
-    for key in ("DSPY_DELEGATE_LM_MODEL", "DSPY_DELEGATE_LM_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
+    clear_env(monkeypatch, "DSPY_DELEGATE_LM_MODEL", "DSPY_DELEGATE_LM_API_KEY")
 
     lm = config.get_delegate_lm_from_env(env_file=env_file)
     assert lm is None
@@ -206,11 +211,13 @@ def test_get_delegate_lm_from_env_returns_none_on_init_error(
 def test_get_planner_lm_from_env_local_overrides_process_env(
     monkeypatch, tmp_path: Path
 ):
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        "DSPY_LM_MODEL=openai/file-model\n"
-        "DSPY_LLM_API_KEY=sk-from-file\n"
-        "DSPY_LM_API_BASE=https://file.example\n"
+    env_file = write_env_file(
+        tmp_path,
+        lines=[
+            "DSPY_LM_MODEL=openai/file-model",
+            "DSPY_LLM_API_KEY=sk-from-file",
+            "DSPY_LM_API_BASE=https://file.example",
+        ],
     )
 
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)
@@ -229,11 +236,13 @@ def test_get_planner_lm_from_env_local_overrides_process_env(
 def test_get_planner_lm_from_env_production_keeps_process_env(
     monkeypatch, tmp_path: Path
 ):
-    env_file = tmp_path / ".env"
-    env_file.write_text(
-        "DSPY_LM_MODEL=openai/file-model\n"
-        "DSPY_LLM_API_KEY=sk-from-file\n"
-        "DSPY_LM_API_BASE=https://file.example\n"
+    env_file = write_env_file(
+        tmp_path,
+        lines=[
+            "DSPY_LM_MODEL=openai/file-model",
+            "DSPY_LLM_API_KEY=sk-from-file",
+            "DSPY_LM_API_BASE=https://file.example",
+        ],
     )
 
     monkeypatch.setattr(config.dspy, "LM", _FakeLM)

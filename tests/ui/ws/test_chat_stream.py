@@ -8,7 +8,7 @@ import pytest
 
 from fleet_rlm.models import StreamEvent
 
-from ._fakes import DelayedRepository, FakeChatAgent, ts
+from tests.ui.fixtures_ui import DelayedRepository, FakeChatAgent, ts
 
 
 @pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")

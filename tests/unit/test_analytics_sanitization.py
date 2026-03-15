@@ -2,27 +2,33 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fleet_rlm.analytics.sanitization import (
     redact_sensitive,
     sanitize_text,
     truncate_text,
 )
+from tests.unit.fixtures_env import SANITIZATION_CASES
 
 
-def test_redact_sensitive_masks_common_tokens() -> None:
-    raw = (
-        "api_key=sk-abc12345DEF token=my-secret-token Authorization: Bearer abc.def.ghi"
-    )
+@pytest.mark.parametrize(("raw", "expected_snippets"), SANITIZATION_CASES[:1])
+def test_redact_sensitive_masks_common_tokens(
+    raw: str, expected_snippets: list[str]
+) -> None:
     redacted = redact_sensitive(raw)
 
-    assert "api_key=***REDACTED***" in redacted
-    assert "token=***REDACTED***" in redacted
-    assert "Authorization: Bearer ***REDACTED***" in redacted
+    for snippet in expected_snippets:
+        assert snippet in redacted
 
 
-def test_redact_sensitive_preserves_non_sensitive_text() -> None:
-    text = "hello world, no secrets here"
-    assert redact_sensitive(text) == text
+@pytest.mark.parametrize(("text", "expected_snippets"), SANITIZATION_CASES[1:])
+def test_redact_sensitive_preserves_non_sensitive_text(
+    text: str, expected_snippets: list[str]
+) -> None:
+    redacted = redact_sensitive(text)
+    for snippet in expected_snippets:
+        assert snippet == redacted
 
 
 def test_truncate_text_with_suffix() -> None:

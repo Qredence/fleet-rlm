@@ -2,7 +2,7 @@
 
 ## Usage
 Always use uv to run commands, not raw Python or pytest. This ensures the correct environment and dependencies are used.
-Always use bun in src/frontend for frontend commands to run build and dev scripts
+Always use pnpm in src/frontend for frontend commands to run build and dev scripts
 
 ## Project Structure & Module Organization
 Core Python code lives in `src/fleet_rlm/` (`core/`, `react/`, `server/`, `mcp/`, `analytics/`, `db/`).
@@ -50,6 +50,13 @@ Use `pytest` with strict markers (`unit`, `ui`, `integration`, `e2e`, `live_llm`
 Default local run: `uv run pytest -q -m "not live_llm and not live_daytona and not benchmark"`.
 Name tests `test_<behavior>.py` and add regression tests for bug fixes.
 Frontend tests use Vitest (`bun run test:unit`) and Playwright (`bun run test:e2e`).
+When a test double or setup pattern is reused across multiple files, promote it into a domain fixture helper before adding another local copy:
+- `tests/unit/fixtures_daytona.py` for Daytona runner/session doubles
+- `tests/unit/fixtures_react.py` for ReAct/interpreter doubles
+- `tests/unit/fixtures_env.py` for env-file and settings helpers
+- `tests/unit/fixtures_state_trajectory.py` for trajectory/state scaffolding
+- `tests/ui/fixtures_ui.py` for shared UI/websocket agent/runtime fakes
+Keep assertions close to the tests themselves; centralize builders, fakes, and repeated patch wiring, not the scenario-specific expectations.
 For the Daytona pilot, prefer this focused validation set before broader gates:
 - `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`
 - `uv run ruff check src/fleet_rlm/daytona_rlm src/fleet_rlm/cli.py tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`

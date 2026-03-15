@@ -8,74 +8,15 @@ and the tool-registry surface area.
 from __future__ import annotations
 
 import sys
-from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
-from dspy.primitives.code_interpreter import FinalOutput
 
 from fleet_rlm.react import RLMReActChatAgent
 from fleet_rlm.react.tools.document import _read_document_content
+from tests.unit.fixtures_react import FakeInterpreter
 
-
-# ---------------------------------------------------------------------------
-# Shared fakes
-# ---------------------------------------------------------------------------
-
-
-class _FakeInterpreter:
-    def __init__(self):
-        self.start_calls = 0
-        self.shutdown_calls = 0
-        self.execute_calls: list[tuple[str, dict]] = []
-        self.default_execution_profile = "RLM_DELEGATE"
-
-    def start(self):
-        self.start_calls += 1
-
-    def shutdown(self):
-        self.shutdown_calls += 1
-
-    @contextmanager
-    def execution_profile(self, profile):
-        previous = self.default_execution_profile
-        self.default_execution_profile = profile
-        try:
-            yield self
-        finally:
-            self.default_execution_profile = previous
-
-    def execute(self, code, variables=None, **kwargs):
-        self.execute_calls.append((code, variables or {}))
-        return FinalOutput(
-            {
-                "status": "ok",
-                "chunk_count": len((variables or {}).get("prompts", [])),
-                "findings_count": len((variables or {}).get("prompts", [])),
-                "buffer_name": (variables or {}).get("buffer_name", "findings"),
-            }
-        )
-
-
-def _make_fake_react(records):
-    class _FakeReAct:
-        def __init__(self, *, signature, tools, max_iters):
-            records.append(
-                {
-                    "signature": signature,
-                    "tools": tools,
-                    "max_iters": max_iters,
-                }
-            )
-
-        def __call__(self, **kwargs):
-            request = kwargs.get("user_request", "")
-            return SimpleNamespace(
-                assistant_response=f"echo:{request}",
-                trajectory={"tool_name_0": "finish"},
-            )
-
-    return _FakeReAct
+pytestmark = pytest.mark.usefixtures("react_records")
 
 
 # ---------------------------------------------------------------------------
@@ -85,9 +26,6 @@ def _make_fake_react(records):
 
 def test_load_document_directory_returns_file_listing(monkeypatch, tmp_path):
     """When load_document is given a directory, return a file listing instead of crashing."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     # Create a test directory structure
     (tmp_path / "file1.txt").write_text("content1")
     (tmp_path / "file2.txt").write_text("content2")
@@ -95,7 +33,7 @@ def test_load_document_directory_returns_file_listing(monkeypatch, tmp_path):
     subdir.mkdir()
     (subdir / "file3.txt").write_text("content3")
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.load_document(str(tmp_path))
 
     assert result["status"] == "directory"
@@ -111,15 +49,12 @@ def test_load_document_directory_returns_file_listing(monkeypatch, tmp_path):
 
 def test_list_files_returns_glob_matches(monkeypatch, tmp_path):
     """list_files should return files matching a glob pattern."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     # Create test files
     (tmp_path / "test1.py").write_text("python1")
     (tmp_path / "test2.py").write_text("python2")
     (tmp_path / "readme.md").write_text("markdown")
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.list_files(str(tmp_path), pattern="*.py")
 
     assert result["status"] == "ok"
@@ -131,9 +66,6 @@ def test_list_files_returns_glob_matches(monkeypatch, tmp_path):
 
 def test_list_files_recursive_glob_includes_direct_children(monkeypatch, tmp_path):
     """Recursive globs should include direct children under the matched prefix."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     src = tmp_path / "src"
     nested = src / "nested"
     nested.mkdir(parents=True)
@@ -141,7 +73,7 @@ def test_list_files_recursive_glob_includes_direct_children(monkeypatch, tmp_pat
     (nested / "b.py").write_text("print('b')")
     (src / "ignore.txt").write_text("ignore")
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.list_files(str(tmp_path), pattern="src/**/*.py")
 
     assert result["status"] == "ok"
@@ -152,9 +84,6 @@ def test_list_files_recursive_glob_includes_direct_children(monkeypatch, tmp_pat
 
 def test_list_files_ignores_common_dependency_dirs(monkeypatch, tmp_path):
     """Ignored directories should be excluded from listing and counts."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main")
     (tmp_path / "node_modules").mkdir()
@@ -162,7 +91,7 @@ def test_list_files_ignores_common_dependency_dirs(monkeypatch, tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "keep.py").write_text("print('keep')")
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.list_files(str(tmp_path), pattern="**/*")
 
     assert result["status"] == "ok"
@@ -172,16 +101,13 @@ def test_list_files_ignores_common_dependency_dirs(monkeypatch, tmp_path):
 
 def test_list_files_count_size_and_display_cap(monkeypatch, tmp_path):
     """Count and size should include all matches while files list is capped at 100."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     total_size = 0
     for idx in range(105):
         content = f"file-{idx:03d}"
         total_size += len(content)
         (tmp_path / f"f{idx:03d}.txt").write_text(content)
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.list_files(str(tmp_path), pattern="*.txt")
 
     assert result["status"] == "ok"
@@ -192,15 +118,12 @@ def test_list_files_count_size_and_display_cap(monkeypatch, tmp_path):
 
 def test_list_files_source_first_scopes_default_recursive_scan(monkeypatch, tmp_path):
     """Default recursive scans should prioritize source roots and report scope metadata."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "inside.py").write_text("print('inside')")
     (tmp_path / "outside.py").write_text("print('outside')")
 
     monkeypatch.chdir(tmp_path)
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.list_files(".", pattern="**/*.py")
 
     assert result["status"] == "ok"
@@ -214,14 +137,11 @@ def test_list_files_source_first_falls_back_to_root_when_scopes_empty(
     monkeypatch, tmp_path
 ):
     """If scoped roots have no matches, the tool should fall back to root scanning."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     (tmp_path / "src").mkdir()
     (tmp_path / "README.md").write_text("# root")
 
     monkeypatch.chdir(tmp_path)
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.list_files(".", pattern="**/*.md")
 
     assert result["status"] == "ok"
@@ -233,14 +153,11 @@ def test_list_files_source_first_falls_back_to_root_when_scopes_empty(
 
 def test_read_file_slice_returns_line_range(monkeypatch, tmp_path):
     """read_file_slice should return a specific range of lines with line numbers."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     # Create a test file with 10 lines
     test_file = tmp_path / "numbers.txt"
     test_file.write_text("\n".join(f"Line {i}" for i in range(1, 11)))
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.read_file_slice(str(test_file), start_line=3, num_lines=3)
 
     assert result["status"] == "ok"
@@ -258,9 +175,6 @@ def test_read_file_slice_returns_line_range(monkeypatch, tmp_path):
 
 
 def test_load_document_pdf_includes_extraction_metadata(monkeypatch, tmp_path):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     pdf_file = tmp_path / "report.pdf"
     pdf_file.write_bytes(b"%PDF-1.4 test bytes")
 
@@ -277,7 +191,7 @@ def test_load_document_pdf_includes_extraction_metadata(monkeypatch, tmp_path):
         ),
     )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.load_document(str(pdf_file))
 
     assert result["status"] == "ok"
@@ -288,8 +202,6 @@ def test_load_document_pdf_includes_extraction_metadata(monkeypatch, tmp_path):
 
 
 def test_load_document_url_includes_fetch_metadata(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
     monkeypatch.setattr(
         "fleet_rlm.react.tools.document.fetch_url_document_content",
         lambda url, *, read_document_content: (
@@ -306,7 +218,7 @@ def test_load_document_url_includes_fetch_metadata(monkeypatch):
         ),
     )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.load_document("https://example.com/test.txt", alias="web")
 
     assert result["status"] == "ok"
@@ -318,8 +230,6 @@ def test_load_document_url_includes_fetch_metadata(monkeypatch):
 
 
 def test_fetch_web_document_alias_uses_same_url_loader(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
     monkeypatch.setattr(
         "fleet_rlm.react.tools.document.fetch_url_document_content",
         lambda url, *, read_document_content: (
@@ -336,7 +246,7 @@ def test_fetch_web_document_alias_uses_same_url_loader(monkeypatch):
         ),
     )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.fetch_web_document("https://example.com/alias.txt", alias="web")
 
     assert result["status"] == "ok"
@@ -408,9 +318,6 @@ def test_pdf_extraction_returns_ocr_guidance_when_no_text(monkeypatch, tmp_path)
 
 
 def test_read_file_slice_pdf_uses_extracted_text(monkeypatch, tmp_path):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     pdf_file = tmp_path / "slice.pdf"
     pdf_file.write_bytes(b"%PDF-1.4 slice bytes")
     monkeypatch.setattr(
@@ -418,7 +325,7 @@ def test_read_file_slice_pdf_uses_extracted_text(monkeypatch, tmp_path):
         lambda _path: ("Line 1\nLine 2\nLine 3\nLine 4", {"source_type": "pdf"}),
     )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.read_file_slice(str(pdf_file), start_line=2, num_lines=2)
 
     assert result["status"] == "ok"
@@ -428,13 +335,10 @@ def test_read_file_slice_pdf_uses_extracted_text(monkeypatch, tmp_path):
 
 
 def test_read_file_slice_binary_file_returns_user_friendly_error(monkeypatch, tmp_path):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     binary_file = tmp_path / "payload.bin"
     binary_file.write_bytes(b"\x00\x01\x02\x03\x04\xff\xfe")
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     with pytest.raises(ValueError) as excinfo:
         agent.read_file_slice(str(binary_file))
 
@@ -449,9 +353,7 @@ def test_read_file_slice_binary_file_returns_user_friendly_error(monkeypatch, tm
 
 
 def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
     agent.get_runtime_module = lambda _name: (
@@ -472,9 +374,7 @@ def test_analyze_long_document_includes_trajectory_by_default(monkeypatch):
 
 
 def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
     agent.get_runtime_module = lambda _name: (
@@ -494,9 +394,7 @@ def test_analyze_long_document_can_suppress_trajectory(monkeypatch):
 def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
     monkeypatch,
 ):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["doc"] = "hello"
     agent.active_alias = "doc"
     module_outputs = {
@@ -528,14 +426,11 @@ def test_react_runners_include_trajectory_defaults_for_summarize_and_extract(
 
 def test_find_files_with_ripgrep(monkeypatch, tmp_path):
     """find_files should use ripgrep to search file contents."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     # Create test files with searchable content
     (tmp_path / "file1.txt").write_text("hello world\ngoodbye world")
     (tmp_path / "file2.txt").write_text("hello there\nno match here")
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.find_files("world", str(tmp_path))
 
     # If ripgrepy is not installed, should return error status
@@ -550,10 +445,7 @@ def test_find_files_with_ripgrep(monkeypatch, tmp_path):
 
 def test_new_tools_in_tool_registry(monkeypatch):
     """Verify that new filesystem tools are registered."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     tool_names = [
         getattr(tool, "name", None) or getattr(tool, "__name__", str(tool))
         for tool in agent.react_tools
@@ -583,7 +475,7 @@ def test_load_document_directory_recovery_workflow(monkeypatch, tmp_path):
     (test_dir / "doc2.txt").write_text("Content for doc2.")
 
     monkeypatch.chdir(tmp_path)
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
 
     # Step 1: Agent tries to load directory (mimics original problem)
     result1 = agent.load_document("test_knowledge")
