@@ -79,5 +79,5 @@ ls -la ~/.claude/hooks
 If needed:
 
 ```bash
-uv run python scripts/validate_agents.py
+uv run python scripts/validate_env.py agents
 ```

@@ -2,7 +2,7 @@
 
 ## Usage
 Always use uv to run commands, not raw Python or pytest. This ensures the correct environment and dependencies are used.
-Always use pnpm in src/frontend for frontend commands to run build and dev scripts
+Always use bun in src/frontend for frontend commands to run build and dev scripts
 
 ## Project Structure & Module Organization
 Core Python code lives in `src/fleet_rlm/` (`core/`, `react/`, `server/`, `mcp/`, `analytics/`, `db/`).
@@ -28,13 +28,18 @@ The Web UI now exposes this Daytona runtime through an explicit experimental run
 - `make quality-gate`: run lint, format check, type check, tests, docs/metadata checks, and frontend checks.
 - `make release-check`: full pre-release validation (quality + security + build + wheel checks).
 - `make mlflow-server`: start the local OSS MLflow tracking server (`sqlite:///mlruns.db` on port `5000`).
+- Script consolidations:
+  - `uv run python scripts/validate_release.py hygiene|metadata|wheel`
+  - `uv run python scripts/validate_env.py agents|modal`
+  - `uv run python scripts/mlflow_cli.py export|evaluate|optimize ...`
+  - `uv run python scripts/openapi_tools.py generate|validate`
 - Frontend-only loop:
   - `cd src/frontend && bun install --frozen-lockfile`
   - `bun run dev` (local UI), `bun run check` (type/lint/tests/build/e2e)
 - MLflow contributor workflows:
-  - `uv run python scripts/export_mlflow_traces.py`
-  - `uv run python scripts/evaluate_mlflow_traces.py`
-  - `uv run python scripts/optimize_dspy_with_mlflow.py --dataset <json> --program <module:attr>`
+  - `uv run python scripts/mlflow_cli.py export`
+  - `uv run python scripts/mlflow_cli.py evaluate`
+  - `uv run python scripts/mlflow_cli.py optimize --dataset <json> --program <module:attr>`
 
 ## Coding Style & Naming Conventions
 Use Python 3.10+, 4-space indentation, type hints on public functions, and clear docstrings for non-trivial logic.
@@ -58,8 +63,8 @@ When a test double or setup pattern is reused across multiple files, promote it 
 - `tests/ui/fixtures_ui.py` for shared UI/websocket agent/runtime fakes
 Keep assertions close to the tests themselves; centralize builders, fakes, and repeated patch wiring, not the scenario-specific expectations.
 For the Daytona pilot, prefer this focused validation set before broader gates:
-- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`
-- `uv run ruff check src/fleet_rlm/daytona_rlm src/fleet_rlm/cli.py tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`
+- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner_*.py tests/unit/test_daytona_rlm_cli.py`
+- `uv run ruff check src/fleet_rlm/daytona_rlm src/fleet_rlm/cli.py tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner_*.py tests/unit/test_daytona_rlm_cli.py`
 - `DAYTONA_LIVE_TESTS=1 uv run pytest -q tests/integration/test_daytona_smoke_live.py` for the opt-in real Daytona validation lane
 Use the Daytona flow in this order: configure `DAYTONA_API_KEY` + `DAYTONA_API_URL`, run `daytona-smoke`, then run `daytona-rlm` only if the smoke diagnostics are clean.
 For chat-runtime or trace changes, prefer this focused validation set before broader gates:
@@ -68,9 +73,9 @@ For chat-runtime or trace changes, prefer this focused validation set before bro
 - `cd src/frontend && bun run type-check`
 - `cd src/frontend && bun run test:unit src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx`
 For Daytona Web UI runtime-toggle changes, prefer this focused validation set before broader gates:
-- `uv run pytest -q tests/unit/test_daytona_rlm_driver.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_ws_chat_helpers.py tests/ui/ws/test_chat_stream.py`
+- `uv run pytest -q tests/unit/test_daytona_rlm_driver.py tests/unit/test_daytona_rlm_runner_*.py tests/unit/test_ws_chat_helpers.py tests/ui/ws/test_chat_stream.py`
 - `uv run pytest -q tests/unit/test_daytona_rlm_chat_agent.py tests/unit/test_daytona_workbench_chat_agent.py tests/unit/test_daytona_rlm_sandbox.py`
-- `uv run pytest -q tests/ui/server/test_router_runtime.py tests/unit/test_daytona_rlm_driver.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_ws_chat_helpers.py tests/ui/ws/test_chat_stream.py`
+- `uv run pytest -q tests/ui/server/test_router_runtime.py tests/unit/test_daytona_rlm_driver.py tests/unit/test_daytona_rlm_runner_*.py tests/unit/test_ws_chat_helpers.py tests/ui/ws/test_chat_stream.py`
 - `uv run ruff check src/fleet_rlm/daytona_rlm src/fleet_rlm/server/routers/ws src/fleet_rlm/server/schemas src/fleet_rlm/server/runtime_settings.py tests/unit/test_ws_chat_helpers.py tests/ui/ws/test_chat_stream.py tests/ui/server/test_router_runtime.py`
 - `cd src/frontend && bun run test:unit src/features/rlm-workspace/run-workbench/__tests__/runWorkbenchAdapter.test.ts src/features/rlm-workspace/run-workbench/__tests__/RunWorkbench.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.daytona-workbench.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.runtime-warning.test.tsx src/features/rlm-workspace/__tests__/useBackendChatRuntime.daytona-error.test.tsx src/stores/__tests__/chatStore.test.ts src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/RuntimeModeDropdown.test.tsx`
 - `cd src/frontend && bun run type-check`

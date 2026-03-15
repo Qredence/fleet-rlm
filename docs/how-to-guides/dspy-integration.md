@@ -450,7 +450,7 @@ When MLflow is enabled, RLM execution automatically captures:
 Use collected traces for DSPy optimization:
 
 ```bash
-uv run python scripts/optimize_dspy_with_mlflow.py \
+uv run python scripts/mlflow_cli.py optimize \
   --dataset artifacts/mlflow/annotated-traces.json \
   --program my_package.my_module:build_program \
   --input-key question \

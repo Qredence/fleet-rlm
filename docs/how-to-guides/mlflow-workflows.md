@@ -91,7 +91,7 @@ At least one is required.
 
 ```bash
 # from repo root
-uv run python scripts/export_mlflow_traces.py \
+uv run python scripts/mlflow_cli.py export \
   --output artifacts/mlflow/annotated-traces.json
 ```
 
@@ -118,7 +118,7 @@ The exported rows use this shape:
 
 ```bash
 # from repo root
-uv run python scripts/evaluate_mlflow_traces.py \
+uv run python scripts/mlflow_cli.py evaluate \
   --input artifacts/mlflow/annotated-traces.json \
   --results-output artifacts/mlflow/evaluation-results.json
 ```
@@ -132,7 +132,7 @@ Default behavior:
 Optional add-ons:
 
 ```bash
-uv run python scripts/evaluate_mlflow_traces.py \
+uv run python scripts/mlflow_cli.py evaluate \
   --include-safety \
   --guideline "The answer must cite the concrete failing component." \
   --guideline "The answer must stay concise."
@@ -144,7 +144,7 @@ Exported trace datasets can also drive offline DSPy optimization.
 
 ```bash
 # from repo root
-uv run python scripts/optimize_dspy_with_mlflow.py \
+uv run python scripts/mlflow_cli.py optimize \
   --dataset artifacts/mlflow/annotated-traces.json \
   --program your_package.your_module:build_program \
   --input-key question \

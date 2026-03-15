@@ -57,8 +57,8 @@ uv run pytest
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
-uv run python scripts/check_release_hygiene.py
-uv run python scripts/check_release_metadata.py
+uv run python scripts/validate_release.py hygiene
+uv run python scripts/validate_release.py metadata
 uvx pip-audit
 uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
 ```
@@ -69,8 +69,8 @@ If the frontend app is present in your checkout, run its gate too:
 # from repo root
 if [ -f src/frontend/package.json ]; then
   cd src/frontend
-  pnpm install --frozen-lockfile
-  pnpm run check
+  bun install --frozen-lockfile
+  bun run check
   cd ..
 fi
 ```
@@ -90,12 +90,12 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/fleet-rlm/json
 # from repo root
 rm -rf dist build
 uv build
-uv run python scripts/check_wheel_frontend_sync.py
+uv run python scripts/validate_release.py wheel
 uvx twine check dist/*
 ```
 
 `uv build` now runs frontend bundling automatically when `src/frontend` exists.
-In repository checkouts, ensure `pnpm` is installed for release builds.
+In repository checkouts, ensure `bun` is installed for release builds.
 
 Expected outputs:
 
