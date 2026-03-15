@@ -5,6 +5,8 @@ from typing import Iterator
 
 import pytest
 
+pytest_plugins = ("tests.unit.fixtures_react",)
+
 
 def _suite_from_path(path: Path) -> str | None:
     parts = path.parts

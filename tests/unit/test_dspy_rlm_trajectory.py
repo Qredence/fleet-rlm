@@ -16,63 +16,14 @@ generate_action call.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import dspy
 
 from fleet_rlm.react.rlm_runtime_modules import AnalyzeLongDocumentModule
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _chat_response(reasoning: str, code: str) -> str:
-    """Return a string in DSPy ChatAdapter's [[ ## field ## ]] format."""
-    return (
-        f"[[ ## reasoning ## ]]\n{reasoning}\n\n"
-        f"[[ ## code ## ]]\n{code}\n\n"
-        "[[ ## completed ## ]]"
-    )
-
-
-class _ScriptedLM(dspy.LM):
-    """Returns a fixed sequence of strings as LM responses.
-
-    Raises AssertionError if called more times than scripted.
-    """
-
-    def __init__(self, responses: list[str]) -> None:
-        super().__init__("mock/scripted")
-        self._responses = responses
-        self._idx = 0
-
-    def __call__(self, prompt=None, messages=None, **kwargs):
-        if self._idx >= len(self._responses):
-            snippet = messages[-1]["content"][:600] if messages else ""
-            raise AssertionError(
-                f"LM called {self._idx + 1} times but only "
-                f"{len(self._responses)} response(s) were scripted.\n\n"
-                f"Last prompt:\n{snippet}"
-            )
-        resp = self._responses[self._idx]
-        self._idx += 1
-        return [resp]
-
-
-def _make_mock_interpreter(side_effects: list):
-    """Return a MagicMock whose .execute() cycles through side_effects.
-
-    dspy.RLM calls ``interpreter.tools.update(...)`` and may set
-    ``interpreter.output_fields``, so we pre-configure those attributes.
-    """
-    interp = MagicMock()
-    interp.tools = {}  # real dict so .update() works
-    interp.output_fields = []  # list so assignment works
-    interp._tools_registered = False
-    interp.execute.side_effect = side_effects
-    return interp
+from tests.unit.fixtures_state_trajectory import (
+    ScriptedLM,
+    chat_response,
+    make_mock_interpreter,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -94,17 +45,17 @@ class TestRLMTrajectoryPersistence:
         """
         from dspy.primitives.code_interpreter import FinalOutput
 
-        lm = _ScriptedLM(
+        lm = ScriptedLM(
             [
-                _chat_response(
+                chat_response(
                     reasoning="Step 1: inspect the document header for context.",
                     code="peek(context, 0, 80)",
                 ),
-                _chat_response(
+                chat_response(
                     reasoning="Step 2: search for the target phrase in the document.",
                     code="grep(context, 'target phrase')",
                 ),
-                _chat_response(
+                chat_response(
                     reasoning="Step 3: I have enough evidence; submit the answer.",
                     code=(
                         "SUBMIT(findings=['target phrase found'], "
@@ -116,7 +67,7 @@ class TestRLMTrajectoryPersistence:
         )
         dspy.settings.configure(lm=lm)
 
-        interpreter = _make_mock_interpreter(
+        interpreter = make_mock_interpreter(
             side_effects=[
                 "Header preview: target phrase may appear later...",
                 "grep match: target phrase",
@@ -172,17 +123,17 @@ class TestRLMTrajectoryPersistence:
         iteration before a successful SUBMIT."""
         from dspy.primitives.code_interpreter import FinalOutput
 
-        lm = _ScriptedLM(
+        lm = ScriptedLM(
             [
-                _chat_response(
+                chat_response(
                     reasoning="Let's peek at the start of the document.",
                     code="peek(context, 0, 50)",
                 ),
-                _chat_response(
+                chat_response(
                     reasoning="I need to find the revenue figure.",
                     code="grep(context, 'revenue')",
                 ),
-                _chat_response(
+                chat_response(
                     reasoning="Found revenue. Submitting now.",
                     code="SUBMIT(findings=['revenue is $5M'], answer='The revenue is $5M', sections_examined=2)",
                 ),
@@ -190,7 +141,7 @@ class TestRLMTrajectoryPersistence:
         )
         dspy.settings.configure(lm=lm)
 
-        interpreter = _make_mock_interpreter(
+        interpreter = make_mock_interpreter(
             side_effects=[
                 "Document excerpt: Q3 revenue was $5M...",
                 "Q3 revenue was $5M",
@@ -243,9 +194,9 @@ class TestRLMTrajectoryPersistence:
         """Even a one-iteration run must produce a list with one entry."""
         from dspy.primitives.code_interpreter import FinalOutput
 
-        lm = _ScriptedLM(
+        lm = ScriptedLM(
             [
-                _chat_response(
+                chat_response(
                     reasoning="The answer is obvious.",
                     code="SUBMIT(findings=['trivial'], answer='trivial', sections_examined=0)",
                 ),
@@ -253,7 +204,7 @@ class TestRLMTrajectoryPersistence:
         )
         dspy.settings.configure(lm=lm)
 
-        interpreter = _make_mock_interpreter(
+        interpreter = make_mock_interpreter(
             side_effects=[
                 FinalOutput(
                     {
@@ -282,9 +233,9 @@ class TestRLMTrajectoryPersistence:
         and 'code' keys (matching dspy.RLM's REPLEntry.model_dump())."""
         from dspy.primitives.code_interpreter import FinalOutput
 
-        lm = _ScriptedLM(
+        lm = ScriptedLM(
             [
-                _chat_response(
+                chat_response(
                     "Reasoning.",
                     "SUBMIT(findings=['x'], answer='x', sections_examined=1)",
                 ),
@@ -292,7 +243,7 @@ class TestRLMTrajectoryPersistence:
         )
         dspy.settings.configure(lm=lm)
 
-        interpreter = _make_mock_interpreter(
+        interpreter = make_mock_interpreter(
             side_effects=[
                 FinalOutput({"findings": ["x"], "answer": "x", "sections_examined": 1}),
             ]

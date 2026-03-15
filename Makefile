@@ -71,8 +71,8 @@ typecheck:
 		--exclude "src/fleet_rlm/_scaffold/**"
 
 metadata-check:
-	uv run python scripts/check_release_hygiene.py
-	uv run python scripts/check_release_metadata.py
+	uv run python scripts/validate_release.py hygiene
+	uv run python scripts/validate_release.py metadata
 
 docs-check:
 	uv run python scripts/check_docs_quality.py
@@ -114,7 +114,7 @@ build-ui:
 release-check: clean quality-gate security-check build-ui
 	rm -rf dist build
 	uv build
-	uv run python scripts/check_wheel_frontend_sync.py
+	uv run python scripts/validate_release.py wheel
 	uvx twine check dist/*
 
 clean:

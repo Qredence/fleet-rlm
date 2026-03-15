@@ -57,7 +57,7 @@ uv run fleet-rlm check-secret
 uv run fleet-rlm check-secret-key --key DSPY_LLM_API_KEY
 
 # Verify sandbox connectivity
-uv run python scripts/test_modal_connection.py
+uv run python scripts/validate_env.py modal --skip-dspy-rlm
 ```
 
 ## Writing New Tests

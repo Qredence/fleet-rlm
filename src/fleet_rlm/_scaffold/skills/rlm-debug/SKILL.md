@@ -32,7 +32,7 @@ uv run python .claude/skills/rlm-debug/scripts/diagnose.py
 Or the project-level validator:
 
 ```bash
-uv run python scripts/validate_rlm_env.py
+uv run python scripts/validate_env.py modal
 ```
 
 ## Manual Checks

@@ -21,7 +21,7 @@ from fleet_rlm.server.routers.ws.helpers import (
     _try_send_json,
 )
 from fleet_rlm.server.schemas import WSMessage
-from tests.ui.ws._fakes import ts
+from tests.ui.fixtures_ui import ts
 
 
 def test_should_reload_docs_path_dedupes_same_path() -> None:
