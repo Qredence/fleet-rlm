@@ -1,138 +1,162 @@
-# Frontend AGENTS.md
+# Frontend Guidelines
 
-## Purpose
+## Scope
 
-This repository hosts the frontend app for the fleet-rlm ecosystem.
+This file covers the frontend app in `src/frontend/`.
+Use the repo-wide [AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/AGENTS.md) for shared workflow rules and [src/fleet_rlm/AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/src/fleet_rlm/AGENTS.md) for backend-specific details.
 
 ## Tooling
 
-- Runtime/package manager: `pnpm` and the Vite+ (`vp`) toolchain
-- Install deps: `vp install`
-- Dev server: `vp dev`
-- Build: `vp build`
-- Type check: `vp run type-check`
-- Lint: `vp lint`
-- Robustness lint gate: `vp run lint:robustness`
-- Unit tests: `vp run test:unit`
-- E2E smoke tests: `vp run test:e2e`
-- Full quality gate: `vp check`
+- Package manager: `pnpm`
+- Build/runtime toolchain: Vite+ (`vp`) underneath the npm scripts
+- Framework: React 19 + React Router 7 + TanStack Query + Zustand
 
-## shadcn & AI Elements
+Canonical commands:
 
-- `components.json` is the source of truth for shadcn and AI Elements registry wiring.
-- Keep `components.json.aliases.utils` pointed at `@/lib/utils/cn`; do not reintroduce `src/components/ui/utils.ts`.
-- The `@/* -> ./src/*` alias must live in `src/frontend/tsconfig.json` so `pnpm dlx shadcn@latest info --json` resolves real frontend paths.
-- Before refreshing registry-backed components, run `pnpm dlx shadcn@latest info --json` and confirm `importAlias` is `@` and `resolvedPaths.utils` points to `src/lib/utils/cn`.
-- Official AI Elements primitives live under `src/components/ai-elements/*`. Refresh them through shadcn/registry workflow instead of forking custom lookalikes.
-- `src/components/chat/ChatInput.tsx` is a thin product wrapper around the official AI Elements `prompt-input` primitives. Keep execution-mode/settings affordances local, but do not recreate `src/components/chat/prompt-input/*`.
+- `pnpm install --frozen-lockfile`
+- `pnpm run dev`
+- `pnpm run build`
+- `pnpm run preview`
+- `pnpm run type-check`
+- `pnpm run lint`
+- `pnpm run test:unit`
+- `pnpm run test:e2e`
+- `pnpm run api:sync`
+- `pnpm run api:check`
+- `pnpm run check`
 
-## Hook & Lib Ownership
+Direct `vp` usage is optional shorthand for contributors already using Vite+ locally. In this repo, the primary documented workflow is `pnpm run ...`.
 
-- Keep `src/hooks/*` for active cross-cutting React hooks only. Delete zero-reference compatibility shims instead of parking deprecated hooks there.
-- Deprecated navigation/history shims (`NavigationProvider`, `navigation-context`, `navigation-types`, `useNavigation`, `useChatHistory`, `useTheme`) are removed. Prefer `src/stores/navigationStore.ts` plus focused hooks like `useAppNavigate`.
-- Keep `src/lib/*` for active adapters and shared utilities only. Removed mock/legacy modules (`lib/data/mock/skills.ts`, `lib/memory/metadata.ts`, `lib/skills/library.ts`) should stay deleted unless a real caller returns.
+## App Surface
 
-## Backend Integration
+The canonical route surface is:
 
-Core backend integration targets `fleet-rlm` at:
-`<path-to-your-fleet-rlm-repo>`
+- `/app/workspace`
+- `/app/volumes`
+- `/app/settings`
 
-### OpenAPI Sync Workflow
+Legacy routes such as `/app/taxonomy`, `/app/skills`, `/app/memory`, and `/app/analytics` redirect to supported pages. Do not document them as active disabled product surfaces.
 
-- Sync spec snapshot: `vp run api:sync-spec`
-- Generate TS types: `vp run api:types`
-- Full sync: `vp run api:sync`
-- Drift check (must be clean): `vp run api:check`
+## Ownership Map
 
-Generated file policy:
+- `src/app/`: router, shell layout, page entrypoints, providers
+- `src/features/rlm-workspace/`: chat/runtime UX, assistant content, message inspector, Daytona run workbench
+- `src/features/volumes/`: runtime-backed volume browser
+- `src/features/settings/`: runtime settings, diagnostics panes, settings dialog/page
+- `src/features/shell/`: app chrome such as user menu, command palette, dialogs
+- `src/components/ai-elements/`: shared AI Elements primitives
+- `src/components/chat/`: composer wrapper and chat input controls
+- `src/components/ui/`: presentational primitives and thin wrappers
+- `src/lib/rlm-api/`: canonical backend contract layer
+- `src/lib/auth/`: MSAL/Entra session handling and token storage
+- `src/lib/telemetry/`: PostHog frontend telemetry
+- `src/stores/`: Zustand client state
 
-- `src/lib/rlm-api/generated/openapi.ts` is generated and must not be edited manually.
+Keep route pages thin. New product behavior should usually live under `features/`.
 
-## Frontend API Modules
+## Runtime UX Contract
 
-- Sole backend layer: `src/lib/rlm-api/*`
-- Legacy layer `src/lib/api/*` is removed and must not be reintroduced.
+The chat/runtime split is product-visible and must stay aligned with the backend:
 
-## Canonical Source Layout
+- `modal_chat`
+  - default runtime mode
+  - composer may send `execution_mode`
+  - standard right-rail experience centers on the message inspector
+- `daytona_pilot`
+  - experimental runtime mode
+  - composer may send optional `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
+  - `execution_mode` is not sent
+  - the builder panel switches to the dedicated `RunWorkbench`
 
-- Route entrypoints and shells live in `src/app/*`.
-- Reusable domain UI belongs in `src/features/*`.
-- Shared presentational primitives live in `src/components/*`.
-- Backend/data adapters live in `src/lib/*`.
-- Cross-cutting React hooks live in `src/hooks/*`; Zustand stores live in `src/stores/*`.
-- `src/screens/*` is not a general-purpose home for new work. The remaining chat files there are transitional and should only be touched when continuing that refactor.
-- Remove empty folders and dead placeholder modules instead of leaving parallel directory schemes behind.
+Additional expectations:
 
-### API Layer Ownership
+- The main chat surface remains shared between Modal and Daytona sessions.
+- Standard assistant inspection belongs in the `Message Inspector`.
+- Daytona-specific iterations, prompts, callbacks, evidence, and final output belong in `run-workbench/`.
+- Keep the runtime labels user-facing as `Modal chat` and `Daytona pilot`.
 
-- Use `src/lib/rlm-api/*` for all backend contracts (`/health`, `/ready`, `/api/v1/sessions/state`, `/api/v1/runtime/*`, `/api/v1/ws/chat`, `/api/v1/ws/execution`).
-- New frontend data work must map to existing FastAPI endpoints or be gated as unsupported in UI.
-- Supported product surfaces are `workspace`, `volumes`, and `settings`.
-- Legacy `taxonomy`, `skills`, `memory`, and `analytics` URLs should redirect to canonical supported routes instead of remaining in primary navigation.
+## Backend Contract
 
-### State Ownership
+The frontend is backend-driven and should stay aligned with these surfaces:
 
-- Use TanStack Query for backend-backed server state.
-- Use Zustand only for ephemeral client state (streaming/chat/session UI state, artifact canvas state, or explicitly demo/mock-only state).
-- Do not add new feature state to generic app-wide providers when it can live inside a domain module.
+- `/health`
+- `/ready`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/sessions/state`
+- `/api/v1/runtime/settings`
+- `/api/v1/runtime/status`
+- `/api/v1/runtime/tests/modal`
+- `/api/v1/runtime/tests/lm`
+- `/api/v1/runtime/volume/tree`
+- `/api/v1/runtime/volume/file`
+- `POST /api/v1/traces/feedback`
+- `/api/v1/ws/chat`
+- `/api/v1/ws/execution`
 
-### Mock Data
+Generated contract files:
 
-- Canonical mock data lives under `src/lib/data/mock/*`.
-- Import mock data directly from those modules; do not reintroduce compatibility barrels like `src/lib/data/mock-skills.ts`.
-- If a screen is mock-only, label it clearly in code and UI instead of silently degrading from a removed backend route.
+- `openapi/fleet-rlm.openapi.yaml`
+- `src/lib/rlm-api/generated/openapi.ts`
 
-### Runtime Conventions
+Do not hand-edit generated OpenAPI output.
 
-- Route modules are lazy-loaded through `src/lib/perf/lazyWithRetry.ts` and `src/lib/perf/routePreload.tsx`.
-- Navigation preloads likely next routes on intent (`TopHeader`, `mobile-tab-bar`) to reduce first-click latency.
-- Router errors must render `RouteErrorPage` (never rely on React Router’s default crash screen).
-- The RLM Workspace chat flow should use backend runtime only (no legacy API fallback path).
-- Canonical domain ownership now lives in `src/features/rlm-workspace/*` for chat/runtime UX and `src/features/volumes/*` for the Modal Volume browser; route pages under `src/app/pages/*` should stay thin.
-- Assistant-turn composition belongs in `src/features/rlm-workspace/assistant-content/*`; keep `ChatMessageList.tsx` as the conversation shell / standalone trace renderer and `chatDisplayItems.ts` as the grouping + attachment boundary.
-- Keep the chat column as the primary live reasoning surface: current-turn reasoning, trajectory, and attachable execution traces should fold into the active assistant turn in real time instead of waiting for the inspector or rendering as detached standalone rows.
-- The workspace right rail is a message-scoped `Message Inspector`, not a second chat surface. Keep it closed by default, scoped to the selected assistant turn, and driven from the same normalized assistant-content model used in chat.
-- Inline assistant content is summary-first: chat shows the answer, summary pills, and compact trajectory/execution/evidence previews; full-detail inspection belongs in `src/features/rlm-workspace/message-inspector/*`.
-- Do not silently clamp or ellipsize primary reasoning copy in chat or the inspector. Let trajectory cards grow vertically, and keep scrolling at the conversation/panel level instead of clipping the reasoning body inside the card.
-- Inspector tab order is fixed: `Trajectory`, `Execution`, `Evidence`, then `Graph`. Only surface `Graph` when execution artifacts show meaningful branching, delegation, or lineage worth visualizing.
-- Turn-scoped execution graph state persists via `turnArtifactsByMessageId` in chat/history stores. Preserve backward-compatible history hydration when evolving this shape.
-- Product-facing labels should use `RLM Workspace` and `Volumes`; do not introduce new `skill-creation` or `taxonomy` product terminology.
-- Keep `src/components/ui/*` limited to primitives and thin wrappers. Shell navigation or workspace composition widgets belong under `src/features/*` or another shared domain folder.
+## State and Data Ownership
 
-## Environment Variables
+- Use TanStack Query for backend-backed state.
+- Use Zustand for ephemeral client-side state such as chat streaming, artifact UI state, navigation state, and Daytona workbench state.
+- Keep backend communication inside `src/lib/rlm-api/*`.
+- Keep auth token/session logic inside `src/lib/auth/*`.
+
+## Environment Contract
+
+Primary frontend env vars:
 
 - `VITE_FLEET_API_URL`
-- `VITE_FLEET_WS_URL`
 - `VITE_FLEET_WORKSPACE_ID`
 - `VITE_FLEET_USER_ID`
 - `VITE_FLEET_TRACE`
+- `VITE_MOCK_MODE`
+
+Optional overrides:
+
+- `VITE_FLEET_WS_URL`
+  - optional websocket override
+  - if unset, websocket URLs are derived from `VITE_FLEET_API_URL` or the current browser origin
+
+Microsoft Entra SPA auth:
+
 - `VITE_ENTRA_CLIENT_ID`
 - `VITE_ENTRA_AUTHORITY`
 - `VITE_ENTRA_SCOPES`
 - `VITE_ENTRA_REDIRECT_PATH`
-- Default Entra authority is `https://login.microsoftonline.com/organizations`; use `VITE_ENTRA_AUTHORITY` only when you intentionally need an override.
 
-## Validation Expectations
+PostHog frontend telemetry:
 
-Before finishing backend-integration changes, run: 0. `vp install`
+- `VITE_PUBLIC_POSTHOG_API_KEY`
+- `VITE_PUBLIC_POSTHOG_HOST`
 
-1. `vp run api:sync`
-2. `vp run api:check`
-3. `vp run type-check`
-4. `vp run lint:robustness`
-5. `vp run test:unit`
-6. `vp build`
-7. `vp run test:e2e`
-8. `vp check`
+The frontend now uses real Entra bootstrap behavior when configured: initialize MSAL, acquire/store an access token, and call `GET /api/v1/auth/me`.
 
-Focused validation for chat/composer and cleanup work:
+## Validation
 
-1. `vp run type-check`
-2. `vp build`
-3. `vp test src/app/layout/__tests__/BuilderPanel.creation-tabs.test.tsx src/app/layout/__tests__/BuilderPanel.file-detail.test.tsx src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/AttachmentDropdown.test.tsx src/components/chat/input/__tests__/ExecutionModeDropdown.test.tsx src/components/chat/input/__tests__/SettingsDropdown.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.runtime-warning.test.tsx src/features/rlm-workspace/__tests__/chatDisplayItems.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/message-inspector/__tests__/MessageInspectorPanel.test.tsx src/hooks/__tests__/useAppNavigate.test.ts src/stores/__tests__/chatHistoryStore.test.ts src/stores/__tests__/navigationStore.test.ts`
-4. `pnpm dlx shadcn@latest info --json`
+Recommended frontend validation flow:
 
-## Dependency Policy
+1. `pnpm install --frozen-lockfile`
+2. `pnpm run api:sync`
+3. `pnpm run api:check`
+4. `pnpm run type-check`
+5. `pnpm run lint`
+6. `pnpm run test:unit`
+7. `pnpm run build`
+8. `pnpm run test:e2e`
+9. `pnpm run check`
 
-- Curated dependency refreshes can move low-risk packages forward in bulk (Vitest, Radix UI, Tailwind/PostCSS, CodeMirror patches, PostHog patches, `shiki`, `globals`, `typescript-eslint`, `tw-animate-css`).
-- Defer high-risk majors that expand scope into separate follow-ups. Current deferred majors are `eslint`/`@eslint/js` v10, `eslint-plugin-react-hooks` v7, `eslint-plugin-react-refresh` v0.5, `jsdom` v28, `openapi-typescript` v7, and `react-resizable-panels` v4.
+Focused workspace/runtime validation:
+
+- `pnpm run test:unit src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.daytona-workbench.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.runtime-warning.test.tsx src/features/rlm-workspace/__tests__/useBackendChatRuntime.daytona-error.test.tsx src/features/rlm-workspace/run-workbench/__tests__/runWorkbenchAdapter.test.ts src/features/rlm-workspace/run-workbench/__tests__/RunWorkbench.test.tsx src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/RuntimeModeDropdown.test.tsx src/components/chat/input/__tests__/ExecutionModeDropdown.test.tsx src/components/chat/input/__tests__/SettingsDropdown.test.tsx`
+
+## Notes
+
+- Keep `components.json` and the `@/*` alias wiring valid for registry-backed component workflows.
+- Document `pnpm` commands as the contributor surface even though the scripts ultimately invoke Vite+ tooling.
+- When route/runtime/product terminology changes, update this file so it stays aligned with the live app rather than preserving historical names.

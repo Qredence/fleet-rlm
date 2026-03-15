@@ -136,6 +136,11 @@
     "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.11",
     "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.11"
   },
+  "pnpm": {
+    "overrides": {
+      "undici": "6.24.0"
+    }
+  },
   "packageManager": "pnpm@9.12.0",
   "trustedDependencies": [
     "@tailwindcss/oxide",
