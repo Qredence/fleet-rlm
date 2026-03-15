@@ -47,6 +47,7 @@ Use the more specific [src/fleet_rlm/AGENTS.md](/Volumes/StorageBackup/_RLM/flee
 - Keep Modal and Daytona responsibilities distinct:
   - Modal remains the default chat/runtime path.
   - Daytona remains experimental, but it is integrated into the shared websocket workspace and run-workbench flow.
+  - Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
 - Keep backend source of truth for runtime/auth behavior in `src/fleet_rlm/server/*` and frontend source of truth for route/runtime UX in `src/frontend/src/*`.
 
 ## Canonical Commands

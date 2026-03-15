@@ -10,7 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import dspy
 
@@ -20,8 +20,8 @@ from .config import resolve_daytona_lm_runtime_config
 from .dspy_modules import (
     ChildResultSynthesisModule,
     DaytonaConversationGroundingModule,
-    RecursiveTaskDecompositionModule,
     RecursiveSpawnPolicyModule,
+    RecursiveTaskDecompositionModule,
 )
 from .protocol import (
     ExecutionEventFrame,
@@ -29,9 +29,9 @@ from .protocol import (
     HostCallbackResponse,
     RunEventFrame,
 )
-from .runner_callbacks import DaytonaHostCallbackDispatcher
-from .runner_events import DaytonaRuntimeEventEmitter
 from .results import persist_result
+from .runner_callbacks import DaytonaHostCallbackDispatcher, DaytonaRunnerProtocol
+from .runner_events import DaytonaRuntimeEventEmitter
 from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
 from .system_prompt import build_system_prompt, build_user_prompt
 from .types import (
@@ -463,9 +463,10 @@ class DaytonaRLMRunner:
                 for index, task_spec in enumerate(task_specs)
             }
             for future in as_completed(future_map):
-                index = future_map[future]
+                index = cast(int, future_map[future])
                 try:
-                    results[index] = future.result()
+                    child_result = cast(ChildTaskResult, future.result())
+                    results[index] = child_result
                 except Exception as exc:
                     errors.append((index, exc))
 
@@ -866,11 +867,17 @@ class _HostLoopDaytonaRuntime:
             active_iteration_getter=lambda: self._active_iteration,
         )
         self._callback_dispatcher = DaytonaHostCallbackDispatcher(
-            runner=self.runner,
+            runner=cast(DaytonaRunnerProtocol, self.runner),
             task=self.task,
             event_emitter=self._event_emitter,
             active_iteration_getter=lambda: self._active_iteration,
-            merge_child_result=self._merge_child_result,
+            merge_child_result=lambda node, child_result, callback_name: (
+                self._merge_child_result(
+                    node=node,
+                    child_result=child_result,
+                    callback_name=callback_name,
+                )
+            ),
         )
 
     def _node_evaluation(self, node_id: str) -> dict[str, list[dict[str, Any]]]:

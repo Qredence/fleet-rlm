@@ -104,7 +104,7 @@ Preserve these boundaries:
 
 - Keep host-side Modal adapters in `core/` separate from sandbox-side protocol helpers.
 - Keep DSPy signatures and runtime modules centralized under `react/signatures.py` and `react/rlm_runtime_modules.py`.
-- Daytona is not a thin `dspy.RLM` wrapper. It uses a custom host-loop runner plus `dspy.Predict`-backed modules.
+- Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
 - Keep websocket event shaping and session lifecycle inside `server/routers/ws/*`; treat it as a contract with the frontend workspace.
 - Use `src/fleet_rlm/utils/regex.py` for regex helpers instead of recreating local helpers.
 

@@ -188,11 +188,7 @@ class DaytonaHostCallbackDispatcher:
             task_spec=task_spec,
             parent_task=self._task,
         )
-        self._merge_child_result(
-            node=node,
-            child_result=child_result,
-            callback_name="rlm_query",
-        )
+        self._merge_child_result(node, child_result, "rlm_query")
         self._event_emitter.emit_tool_result(
             node,
             "rlm_query",
@@ -232,11 +228,7 @@ class DaytonaHostCallbackDispatcher:
             task_specs=task_specs,
         )
         for child_result in child_results:
-            self._merge_child_result(
-                node=node,
-                child_result=child_result,
-                callback_name="rlm_query_batched",
-            )
+            self._merge_child_result(node, child_result, "rlm_query_batched")
             values.append(child_result.text)
         self._event_emitter.emit_tool_result(
             node,
