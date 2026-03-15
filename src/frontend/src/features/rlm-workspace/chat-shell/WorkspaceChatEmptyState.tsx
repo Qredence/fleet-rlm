@@ -1,7 +1,7 @@
 import { Clock } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { ConversationEmptyState } from "@/components/ai-elements/conversation";
-import { Suggestion } from "@/components/ai-elements/suggestion";
+import { ConversationEmptyState } from "@/components/prompt-kit/conversation";
+import { Suggestion } from "@/components/prompt-kit/suggestion";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
 import {

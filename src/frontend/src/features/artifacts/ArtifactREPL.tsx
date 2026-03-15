@@ -11,8 +11,8 @@ import {
   SandboxTabsList,
   SandboxTabsTrigger,
   SandboxTabContent,
-} from "@/components/ai-elements/sandbox";
-import { ToolOutput } from "@/components/ai-elements/tool";
+} from "@/components/prompt-kit/sandbox";
+import { ToolOutput } from "@/components/prompt-kit/tool";
 import { mapToolState } from "@/lib/utils/ai-elements-state";
 
 // Local tool state type for internal use (matches ChatRenderToolState)

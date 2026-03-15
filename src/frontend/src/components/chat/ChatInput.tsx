@@ -15,7 +15,7 @@ import {
   PromptInputHeader,
   PromptInputTextarea,
   PromptInputTools,
-} from "@/components/ai-elements/prompt-input";
+} from "@/components/prompt-kit/prompt-input";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 
 interface ChatInputProps {

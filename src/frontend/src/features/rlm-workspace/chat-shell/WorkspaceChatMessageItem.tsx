@@ -6,9 +6,9 @@ import {
   ConfirmationRejected,
   ConfirmationRequest,
   ConfirmationTitle,
-} from "@/components/ai-elements/confirmation";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+} from "@/components/prompt-kit/confirmation";
+import { Message, MessageContent, MessageResponse } from "@/components/prompt-kit/message";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
 import { ClarificationCard } from "@/features/rlm-workspace/components/ClarificationCard";
 import {
   ChatMessageLoadingState,

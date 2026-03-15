@@ -3,8 +3,8 @@ import {
   ChainOfThoughtContent,
   ChainOfThoughtHeader,
   ChainOfThoughtStep,
-} from "@/components/ai-elements/chain-of-thought";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+} from "@/components/prompt-kit/chain-of-thought";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
 import { Streamdown } from "@/components/ui/streamdown";
 import { mapTaskStatus } from "@/lib/utils/ai-elements-state";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";

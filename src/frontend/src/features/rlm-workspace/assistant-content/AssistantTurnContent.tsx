@@ -1,5 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from "react";
-import { Message, MessageContent } from "@/components/ai-elements/message";
+import { Message, MessageContent } from "@/components/prompt-kit/message";
 import { Separator } from "@/components/ui/separator";
 import { AssistantAnswerBlock } from "@/features/rlm-workspace/assistant-content/AssistantAnswerBlock";
 import { AssistantSummaryBar } from "@/features/rlm-workspace/assistant-content/AssistantSummaryBar";

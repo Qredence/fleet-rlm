@@ -3,7 +3,7 @@ import {
   AttachmentInfo,
   AttachmentPreview,
   Attachments,
-} from "@/components/ai-elements/attachments";
+} from "@/components/prompt-kit/attachments";
 import {
   InlineCitation,
   InlineCitationCard,
@@ -12,8 +12,8 @@ import {
   InlineCitationQuote,
   InlineCitationSource,
   InlineCitationText,
-} from "@/components/ai-elements/inline-citation";
-import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
+} from "@/components/prompt-kit/inline-citation";
+import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/prompt-kit/sources";
 import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
 import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
 

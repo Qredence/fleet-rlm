@@ -10,7 +10,7 @@ import { useCallback, useState } from "react";
 import {
   useOptionalPromptInputController,
   usePromptInputAttachments,
-} from "@/components/ai-elements/prompt-input.context";
+} from "@/components/prompt-kit/prompt-input.context";
 import { InputGroupTextarea } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils/cn";
 

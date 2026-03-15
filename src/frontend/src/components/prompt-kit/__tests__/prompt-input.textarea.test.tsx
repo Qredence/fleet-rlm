@@ -2,13 +2,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { PromptInputTextarea } from "@/components/ai-elements/prompt-input";
+import { PromptInputTextarea } from "@/components/prompt-kit/prompt-input";
 import {
   LocalAttachmentsContext,
   PromptInputController,
   type AttachmentsContext,
   type PromptInputControllerProps,
-} from "@/components/ai-elements/prompt-input.context";
+} from "@/components/prompt-kit/prompt-input.context";
 
 (
   globalThis as typeof globalThis & {

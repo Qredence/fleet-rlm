@@ -19,14 +19,14 @@ import {
   TaskItem,
   TaskItemFile,
   TaskTrigger,
-} from "@/components/ai-elements/task";
+} from "@/components/prompt-kit/task";
 import {
   Tool,
   ToolContent,
   ToolHeader,
   ToolInput,
   ToolOutput,
-} from "@/components/ai-elements/tool";
+} from "@/components/prompt-kit/tool";
 import {
   Sandbox,
   SandboxContent,
@@ -36,7 +36,7 @@ import {
   SandboxTabsBar,
   SandboxTabsList,
   SandboxTabsTrigger,
-} from "@/components/ai-elements/sandbox";
+} from "@/components/prompt-kit/sandbox";
 import {
   EnvironmentVariable,
   EnvironmentVariableCopyButton,
@@ -49,7 +49,7 @@ import {
   EnvironmentVariablesTitle,
   EnvironmentVariablesToggle,
   EnvironmentVariableValue,
-} from "@/components/ai-elements/environment-variables";
+} from "@/components/prompt-kit/environment-variables";
 import type { ChatRenderToolState } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
 import { mapToolState } from "@/lib/utils/ai-elements-state";

@@ -4,8 +4,8 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import { Message, MessageContent } from "@/components/ai-elements/message";
+} from "@/components/prompt-kit/conversation";
+import { Message, MessageContent } from "@/components/prompt-kit/message";
 import { AssistantTurnContent } from "@/features/rlm-workspace/assistant-content/AssistantTurnContent";
 import { buildAssistantContentModel } from "@/features/rlm-workspace/assistant-content/buildAssistantContentModel";
 import { fadeUp, fadeUpReduced } from "@/features/rlm-workspace/animation-presets";

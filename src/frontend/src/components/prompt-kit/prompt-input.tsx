@@ -19,8 +19,8 @@ import {
   type ReferencedSourcesContext,
   useOptionalPromptInputController,
   usePromptInputAttachments,
-} from "@/components/ai-elements/prompt-input.context";
-import type { PromptInputError } from "@/components/ai-elements/prompt-input.utilities";
+} from "@/components/prompt-kit/prompt-input.context";
+import type { PromptInputError } from "@/components/prompt-kit/prompt-input.utilities";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { InputGroup } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils/cn";

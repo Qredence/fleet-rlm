@@ -4,7 +4,7 @@ import {
   capFilesToCapacity,
   filterAcceptedFiles,
   filterFilesBySize,
-} from "@/components/ai-elements/prompt-input.utilities";
+} from "@/components/prompt-kit/prompt-input.utilities";
 
 const createFile = (name: string, type: string, size = 4) =>
   new File([new Uint8Array(size)], name, { type });
