@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter
 
-from fleet_rlm.server.deps import ServerStateDep
-from fleet_rlm.server.schemas.core import SessionStateResponse, SessionStateSummary
+from fleet_rlm.api.dependencies import ServerStateDep
+from fleet_rlm.api.schemas.core import SessionStateResponse, SessionStateSummary
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 

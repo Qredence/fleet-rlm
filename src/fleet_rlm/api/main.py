@@ -16,7 +16,7 @@ from fleet_rlm.analytics.client import get_posthog_client, shutdown_posthog_clie
 from fleet_rlm.analytics.config import PostHogConfig
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.db import DatabaseManager, FleetRepository
-from fleet_rlm.server.runtime_settings import resolve_env_path
+from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
 
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig

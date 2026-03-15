@@ -13,7 +13,7 @@ from fleet_rlm._env_utils import (
     env_csv as _env_csv,
     env_int as _env_int,
 )
-from fleet_rlm.server.runtime_settings import resolve_env_path
+from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
 
 
 def _env_app_env() -> str:
