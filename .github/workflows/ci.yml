@@ -175,9 +175,9 @@ jobs:
         if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
-          vp check
-          vp test
-          vp build
+          ./node_modules/.bin/vp check
+          ./node_modules/.bin/vp test
+          ./node_modules/.bin/vp build
 
       - name: Frontend check skipped
         if: steps.frontend.outputs.enabled != 'true'
