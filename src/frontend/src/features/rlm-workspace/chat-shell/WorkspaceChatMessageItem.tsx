@@ -15,7 +15,6 @@ import {
   WorkspaceLegacyStatusCard,
   WorkspaceTracePart,
 } from "@/features/rlm-workspace/chat-shell/tracePartRenderers";
-import { SYSTEM_MESSAGE_STYLE } from "@/features/rlm-workspace/chat-shell/chatMessageStyles";
 import type { ChatMessage } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
 import { mapConfirmationState } from "@/lib/utils/ai-elements-state";
@@ -48,10 +47,7 @@ export function WorkspaceChatMessageItem({
       {message.type === "system" ? (
         <div className="flex items-center gap-4 py-4">
           <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
-          <span
-            className="shrink-0 whitespace-pre-line text-muted-foreground uppercase tracking-[0.2em] opacity-40"
-            style={SYSTEM_MESSAGE_STYLE}
-          >
+          <span className="shrink-0 whitespace-pre-line text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
             {message.content}
           </span>
           <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
