@@ -42,6 +42,7 @@ results/
 src/frontend/smoke-*.mjs
 src/frontend/.tmp-*.mjs
 
+src/fleet_rlm/_scaffold/
 src/.tmp/
 src/output/
 src/output/*

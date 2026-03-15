@@ -107,9 +107,7 @@ def test_runtime_contract_endpoints_remain_available(
     monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
     monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
     monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
-    monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.load_modal_config", lambda: {}
-    )
+    monkeypatch.setattr("fleet_rlm.api.routers.runtime.load_modal_config", lambda: {})
 
     settings = local_client.get("/api/v1/runtime/settings")
     status = local_client.get("/api/v1/runtime/status")
@@ -256,11 +254,11 @@ def test_trace_feedback_logs_feedback_by_trace_id(
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.resolve_trace",
+        "fleet_rlm.api.routers.traces.resolve_trace",
         lambda **kwargs: fake_trace,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.log_trace_feedback",
+        "fleet_rlm.api.routers.traces.log_trace_feedback",
         lambda **kwargs: (
             calls.append(kwargs)
             or {"feedback_logged": True, "expectation_logged": True}
@@ -301,11 +299,11 @@ def test_trace_feedback_resolves_by_client_request_id(
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.resolve_trace",
+        "fleet_rlm.api.routers.traces.resolve_trace",
         lambda **kwargs: captured.append(kwargs) or fake_trace,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.log_trace_feedback",
+        "fleet_rlm.api.routers.traces.log_trace_feedback",
         lambda **kwargs: {"feedback_logged": True, "expectation_logged": False},
     )
 
@@ -336,11 +334,11 @@ def test_trace_feedback_returns_403_for_other_users_trace(
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.resolve_trace",
+        "fleet_rlm.api.routers.traces.resolve_trace",
         lambda **kwargs: fake_trace,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.log_trace_feedback",
+        "fleet_rlm.api.routers.traces.log_trace_feedback",
         lambda **kwargs: pytest.fail(
             "feedback logging should not run for another user's trace"
         ),
@@ -386,7 +384,7 @@ def test_trace_feedback_returns_404_when_trace_missing(
 ) -> None:
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.resolve_trace",
+        "fleet_rlm.api.routers.traces.resolve_trace",
         lambda **kwargs: None,
     )
 
@@ -409,7 +407,7 @@ def test_trace_feedback_returns_503_when_lookup_raises(
 ) -> None:
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.traces.resolve_trace",
+        "fleet_rlm.api.routers.traces.resolve_trace",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("mlflow down")),
     )
 

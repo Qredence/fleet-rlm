@@ -97,8 +97,11 @@ mlflow-server:
 
 sync-scaffold:
 	@echo "Syncing .claude/ to src/fleet_rlm/_scaffold/..."
+	mkdir -p src/fleet_rlm/_scaffold/teams src/fleet_rlm/_scaffold/hooks
 	rsync -a --delete .claude/skills/ src/fleet_rlm/_scaffold/skills/
 	rsync -a --delete .claude/agents/ src/fleet_rlm/_scaffold/agents/
+	[ -d .claude/hooks ] && rsync -a --delete .claude/hooks/ src/fleet_rlm/_scaffold/hooks/ || true
+	[ -d .claude/teams ] && rsync -a --delete .claude/teams/ src/fleet_rlm/_scaffold/teams/ || true
 	@echo "Scaffold sync complete"
 
 sync-ui:

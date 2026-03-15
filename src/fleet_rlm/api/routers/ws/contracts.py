@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol
 
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
 
 LocalPersistFn = Callable[..., Awaitable[None]]
 

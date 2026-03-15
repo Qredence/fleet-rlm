@@ -10,10 +10,8 @@ from typing import TYPE_CHECKING
 
 import dspy
 
-from .rlm_runtime_modules import build_runtime_module
-
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from .chat_agent import RLMReActChatAgent
 
 
 def get_runtime_module(agent: "RLMReActChatAgent", name: str) -> dspy.Module:
@@ -32,6 +30,11 @@ def get_runtime_module(agent: "RLMReActChatAgent", name: str) -> dspy.Module:
     Raises:
         ValueError: If the module name is not recognized
     """
+    # Import lazily to avoid circular dependency:
+    # core.agent → core.execution.runtime_factory → core.models.rlm_runtime_modules
+    # → core.agent.signatures → core.agent.__init__ → chat_agent → runtime_factory
+    from fleet_rlm.core.models.rlm_runtime_modules import build_runtime_module
+
     module = agent._runtime_modules.get(name)
     if module is not None:
         return module

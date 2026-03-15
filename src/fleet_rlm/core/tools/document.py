@@ -15,14 +15,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fleet_rlm.core.execution.document_sources import (
+    fetch_url_document_content,
+    is_http_url,
+)
 from fleet_rlm.features.document_ingestion.main import (
     read_document_content as _read_document_content,
 )
 
-from ..document_sources import fetch_url_document_content, is_http_url
-
 if TYPE_CHECKING:
-    from ..agent import RLMReActChatAgent
+    from ..chat_agent import RLMReActChatAgent
 
 
 # ---------------------------------------------------------------------------

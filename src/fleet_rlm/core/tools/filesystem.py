@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..agent import RLMReActChatAgent
+    from ..chat_agent import RLMReActChatAgent
 
 
 @dataclass(slots=True)

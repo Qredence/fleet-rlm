@@ -14,7 +14,7 @@ from typing import Any, Callable, cast
 
 import dspy
 
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
 
 from .config import resolve_daytona_lm_runtime_config
 from .dspy_modules import (

@@ -5,10 +5,17 @@ from __future__ import annotations
 from typing import Any
 
 from fleet_rlm.infrastructure.database import FleetRepository
-from fleet_rlm.infrastructure.database.models import MemoryKind, MemoryScope, MemorySource
-from fleet_rlm.infrastructure.database.types import IdentityUpsertResult, MemoryItemCreateRequest
+from fleet_rlm.infrastructure.database.models import (
+    MemoryKind,
+    MemoryScope,
+    MemorySource,
+)
+from fleet_rlm.infrastructure.database.types import (
+    IdentityUpsertResult,
+    MemoryItemCreateRequest,
+)
 
-from ...deps import ServerState
+from ...dependencies import ServerState
 from .helpers import _now_iso, _sanitize_for_log
 from .lifecycle import PersistenceRequiredError
 

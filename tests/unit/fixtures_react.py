@@ -126,7 +126,7 @@ def make_fake_react(
 def react_records(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "fleet_rlm.react.agent.dspy.ReAct",
+        "fleet_rlm.core.agent.chat_agent.dspy.ReAct",
         make_fake_react(records),
     )
     return records

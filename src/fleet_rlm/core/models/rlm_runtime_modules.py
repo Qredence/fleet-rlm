@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import dspy
 
-from .signatures import (
+from fleet_rlm.core.agent.signatures import (
     AnalyzeLongDocument,
     ClarificationQuestionSignature,
     CodeChangePlan,

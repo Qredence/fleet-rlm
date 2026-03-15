@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .analytics.config import MlflowConfig, PostHogConfig
+from fleet_rlm.features.analytics.config import MlflowConfig, PostHogConfig
 
 
 class MemoryConfig(BaseModel):

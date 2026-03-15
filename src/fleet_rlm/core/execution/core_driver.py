@@ -53,7 +53,9 @@ Final Variable Convention:
 
 from __future__ import annotations
 
-from .driver_factories import FinalOutput  # noqa: F401 — public re-export
+from fleet_rlm.core.execution.driver_factories import (
+    FinalOutput,  # noqa: F401 — public re-export
+)
 
 
 def sandbox_driver() -> None:
@@ -84,6 +86,12 @@ def sandbox_driver() -> None:
     from typing import Any, Callable, cast
 
     try:
+        from fleet_rlm.core.agent.session_history import (
+            get_last_execution,
+            get_session_history,
+            log_execution,
+            reset_session_history,
+        )
         from fleet_rlm.core.execution.driver_factories import (
             FinalOutput,
             inject_sandbox_helpers,
@@ -106,12 +114,6 @@ def sandbox_driver() -> None:
             grep,
             peek,
             reset_buffers,
-        )
-        from fleet_rlm.core.agent.session_history import (
-            get_last_execution,
-            get_session_history,
-            log_execution,
-            reset_session_history,
         )
         from fleet_rlm.core.tools.volume_tools import (
             load_from_volume,

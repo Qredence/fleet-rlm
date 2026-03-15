@@ -50,8 +50,12 @@ const DropdownMenuItem = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof BaseMenu.Item> & {
     inset?: boolean;
     variant?: "default" | "destructive";
+    asChild?: boolean;
   }
->(function DropdownMenuItem({ className, inset, variant = "default", ...props }, ref) {
+>(function DropdownMenuItem({ className, inset, variant = "default", asChild, ...props }, ref) {
+  if (asChild) {
+    return <BaseMenu.Item ref={ref} data-inset={inset} data-variant={variant} className={cn("focus:bg-muted data-[highlighted]:bg-muted relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8", className)} render={<Slot />} {...props} />;
+  }
   return (
     <BaseMenu.Item
       ref={ref}

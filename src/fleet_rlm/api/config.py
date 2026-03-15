@@ -4,20 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field, model_validator, computed_field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from fleet_rlm.infrastructure.config._env_utils import (
-    env_bool as _env_bool,
-    env_csv as _env_csv,
-    env_int as _env_int,
-)
 from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
-
-
-def _env_app_env() -> str:
-    return (os.getenv("APP_ENV") or "local").strip().lower()
 
 
 def _resolve_server_env_path() -> Path:
@@ -30,23 +22,32 @@ def _resolve_server_env_path() -> Path:
     )
 
 
-class ServerRuntimeConfig(BaseModel):
+class ServerRuntimeConfig(BaseSettings):
+    """Server runtime configuration loaded from environment variables.
+
+    Fields are automatically populated from environment variables matching
+    the field name (case-insensitive).  For example, ``app_env`` reads from
+    ``APP_ENV``, ``volume_name`` reads from ``VOLUME_NAME``, etc.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
+
     env_path: Path = Field(default_factory=_resolve_server_env_path)
-    app_env: Literal["local", "staging", "production"] = cast(
-        Literal["local", "staging", "production"],
-        _env_app_env(),
-    )
+    app_env: Literal["local", "staging", "production"] = "local"
     secret_name: str = "LITELLM"
-    volume_name: str | None = Field(
-        default_factory=lambda: os.getenv("VOLUME_NAME") or None
-    )
+    volume_name: str | None = None
     timeout: int = 900
     react_max_iters: int = 15
     deep_react_max_iters: int = 35
     enable_adaptive_iters: bool = True
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
-    rlm_max_depth: int = 2  # Maximum recursion depth for sub-agents (rlm_query)
+    rlm_max_depth: int = 2
     delegate_max_calls_per_turn: int = 8
     delegate_result_truncation_chars: int = 8000
     interpreter_async_execute: bool = True
@@ -57,88 +58,107 @@ class ServerRuntimeConfig(BaseModel):
     ws_default_user_id: str = "anonymous"
     ws_enforce_react_interlocutor: bool = True
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
-    sandbox_provider: str = "modal"  # "modal", "local", "daytona"
-    agent_model: str | None = Field(
-        default_factory=lambda: os.getenv("DSPY_LM_MODEL") or None
-    )  # Model identifier to use for the agent
+    sandbox_provider: str = "modal"
+
+    # Model fields read from DSPY_* env vars
+    agent_model: str | None = Field(default=None, alias="DSPY_LM_MODEL")
     agent_delegate_model: str | None = Field(
-        default_factory=lambda: os.getenv("DSPY_DELEGATE_LM_MODEL") or None
+        default=None, alias="DSPY_DELEGATE_LM_MODEL"
     )
     agent_delegate_small_model: str | None = Field(
-        default_factory=lambda: os.getenv("DSPY_DELEGATE_LM_SMALL_MODEL") or None
+        default=None, alias="DSPY_DELEGATE_LM_SMALL_MODEL"
     )
     agent_delegate_max_tokens: int = Field(
-        default_factory=lambda: _env_int(
-            os.getenv("DSPY_DELEGATE_LM_MAX_TOKENS"), default=64000
-        )
+        default=64000, alias="DSPY_DELEGATE_LM_MAX_TOKENS"
     )
-    database_url: str | None = Field(
-        default_factory=lambda: os.getenv("DATABASE_URL") or None
-    )
-    database_required: bool = Field(
-        default_factory=lambda: _env_bool(
-            os.getenv("DATABASE_REQUIRED"),
-            default=_env_app_env() in {"staging", "production"},
-        )
-    )
+
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    database_required: bool = False
     db_echo: bool = False
     db_validate_on_startup: bool = False
-    allow_debug_auth: bool = Field(
-        default_factory=lambda: _env_bool(
-            os.getenv("ALLOW_DEBUG_AUTH"),
-            default=_env_app_env() == "local",
+    allow_debug_auth: bool = False
+    allow_query_auth_tokens: bool = False
+    cors_allowed_origins: str = ""
+    ws_execution_max_queue: int = 256
+    ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
+    auth_mode: Literal["dev", "entra"] = "dev"
+    auth_required: bool = False
+    dev_jwt_secret: str = "change-me"
+    entra_jwks_url: str | None = None
+    entra_issuer_template: str = "https://login.microsoftonline.com/{tenantid}/v2.0"
+    entra_audience: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse ``cors_allowed_origins`` CSV string into a list."""
+        if not self.cors_allowed_origins:
+            return []
+        return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_env_aware_defaults(cls, values: dict) -> dict:  # type: ignore[override]
+        """Apply cross-field defaults that depend on app_env and auth_mode."""
+        app_env = (
+            str(
+                values.get("app_env")
+                or values.get("APP_ENV")
+                or os.getenv("APP_ENV")
+                or "local"
+            )
+            .strip()
+            .lower()
         )
-    )
-    allow_query_auth_tokens: bool = Field(
-        default_factory=lambda: _env_bool(
-            os.getenv("ALLOW_QUERY_AUTH_TOKENS"),
-            default=(
-                _env_app_env() == "local"
-                or (os.getenv("AUTH_MODE") or "dev").strip().lower() == "entra"
-            ),
+        auth_mode = (
+            str(
+                values.get("auth_mode")
+                or values.get("AUTH_MODE")
+                or os.getenv("AUTH_MODE")
+                or "dev"
+            )
+            .strip()
+            .lower()
         )
-    )
-    cors_allowed_origins: list[str] = Field(
-        default_factory=lambda: _env_csv(
-            os.getenv("CORS_ALLOWED_ORIGINS"),
-            default=["*"] if _env_app_env() == "local" else [],
-        )
-    )
-    ws_execution_max_queue: int = Field(
-        default_factory=lambda: _env_int(
-            os.getenv("WS_EXECUTION_MAX_QUEUE"), default=256
-        )
-    )
-    ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = Field(
-        default_factory=lambda: (
-            (os.getenv("WS_EXECUTION_DROP_POLICY") or "drop_oldest").strip().lower()
-        )
-    )
-    auth_mode: Literal["dev", "entra"] = Field(
-        default_factory=lambda: (os.getenv("AUTH_MODE") or "dev").strip().lower()
-    )
-    auth_required: bool = Field(
-        default_factory=lambda: _env_bool(
-            os.getenv("AUTH_REQUIRED"),
-            default=((os.getenv("AUTH_MODE") or "dev").strip().lower() == "entra"),
-        )
-    )
-    dev_jwt_secret: str = Field(
-        default_factory=lambda: os.getenv("DEV_JWT_SECRET") or "change-me"
-    )
-    entra_jwks_url: str | None = Field(
-        default_factory=lambda: os.getenv("ENTRA_JWKS_URL") or None
-    )
-    entra_issuer_template: str = Field(
-        default_factory=lambda: (
-            os.getenv("ENTRA_ISSUER_TEMPLATE")
-            or os.getenv("ENTRA_ISSUER")
-            or "https://login.microsoftonline.com/{tenantid}/v2.0"
-        )
-    )
-    entra_audience: str | None = Field(
-        default_factory=lambda: os.getenv("ENTRA_AUDIENCE") or None
-    )
+
+        # database_required defaults to True in staging/production
+        if "database_required" not in values and "DATABASE_REQUIRED" not in values:
+            values["database_required"] = app_env in {"staging", "production"}
+
+        # allow_debug_auth defaults to True only in local
+        if "allow_debug_auth" not in values and "ALLOW_DEBUG_AUTH" not in values:
+            values["allow_debug_auth"] = app_env == "local"
+
+        # allow_query_auth_tokens defaults based on env and auth_mode
+        if (
+            "allow_query_auth_tokens" not in values
+            and "ALLOW_QUERY_AUTH_TOKENS" not in values
+        ):
+            values["allow_query_auth_tokens"] = (
+                app_env == "local" or auth_mode == "entra"
+            )
+
+        # cors_allowed_origins defaults to "*" in local
+        if (
+            "cors_allowed_origins" not in values
+            and "CORS_ALLOWED_ORIGINS" not in values
+        ):
+            values["cors_allowed_origins"] = "*" if app_env == "local" else ""
+
+        # auth_required defaults to True when auth_mode is entra
+        if "auth_required" not in values and "AUTH_REQUIRED" not in values:
+            values["auth_required"] = auth_mode == "entra"
+
+        # entra_issuer_template fallback to ENTRA_ISSUER
+        if (
+            "entra_issuer_template" not in values
+            and "ENTRA_ISSUER_TEMPLATE" not in values
+        ):
+            entra_issuer = values.get("ENTRA_ISSUER") or os.getenv("ENTRA_ISSUER")
+            if entra_issuer:
+                values["entra_issuer_template"] = entra_issuer
+
+        return values
 
     def validate_startup_or_raise(self) -> None:
         """Validate environment guardrails before server startup."""
@@ -161,7 +181,7 @@ class ServerRuntimeConfig(BaseModel):
                 raise ValueError(
                     "ALLOW_QUERY_AUTH_TOKENS must be false when APP_ENV is staging/production"
                 )
-            if "*" in self.cors_allowed_origins:
+            if "*" in self.cors_origins_list:
                 raise ValueError(
                     "CORS_ALLOWED_ORIGINS cannot contain '*' in staging/production"
                 )

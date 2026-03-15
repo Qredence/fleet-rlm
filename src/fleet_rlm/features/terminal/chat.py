@@ -20,15 +20,17 @@ from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.table import Table
 
-from .. import runners
-from ..config import AppConfig
-from ..core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from ..models import TraceMode
-from ..react.commands import COMMAND_DISPATCH
+from fleet_rlm import runners
+from fleet_rlm.core.agent.commands import COMMAND_DISPATCH
+from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
+from fleet_rlm.core.models import TraceMode
+from fleet_rlm.infrastructure.config.env import AppConfig
+from fleet_rlm.utils.modal import get_default_volume_name, load_modal_config
+
 from . import (
-    _FleetCompleter,
     _badge,
     _bottom_toolbar,
+    _FleetCompleter,
     _history_path,
     _normalize_trace_mode,
     _print_banner,
@@ -39,7 +41,6 @@ from . import (
     settings_llm,
     settings_modal,
 )
-from ..utils.modal import get_default_volume_name, load_modal_config
 
 
 @dataclass(slots=True)

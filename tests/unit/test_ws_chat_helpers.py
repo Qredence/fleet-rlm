@@ -8,7 +8,7 @@ from typing import Any, Literal, cast
 import pytest
 from fastapi import WebSocketDisconnect
 
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
 from fleet_rlm.api.routers.ws.streaming import (
     _enqueue_latest_nonblocking,
     _emit_stream_event,

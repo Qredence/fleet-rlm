@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fleet_rlm.infrastructure.providers.daytona.protocol import ExecutionEventFrame
 from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
 from tests.unit.fixtures_daytona import (
     FakeLmSequence,
     FakeRunSession,

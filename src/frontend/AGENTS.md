@@ -27,6 +27,25 @@ Canonical commands:
 
 Direct `vp` usage is optional shorthand for contributors already using Vite+ locally. In this repo, the primary documented workflow is `pnpm run ...`.
 
+### UI & Styling
+
+- **Typography**: Never use font weights bolder than `font-medium`. Apply small negative tracking (`tracking-tight` or similar) on main titles.
+- **Colors**:
+  - Use the custom Tailwind palette (e.g., `bg-primary-50`, `text-primary-900`).
+  - Never use arbitrary color values.
+  - Avoid `bg-white`, `bg-black`, `text-white`, `text-black`, and `outline-black`; use primary palette tokens instead.
+- **Markdown Titles**: Avoid top margin on markdown headings.
+- MUST use text-balance for headings and text-pretty for body/paragraphs
+- MUST use tabular-nums for data
+- SHOULD use truncate or line-clamp for dense UI
+- NEVER modify letter-spacing (tracking-\*) unless explicitly requested
+- MUST use a fixed z-index scale (no arbitrary z-\*)
+- SHOULD use size-_ for square elements instead of w-_ + h-\*
+- **Icons**:
+  - All icons should use `size={20}` and `strokeWidth={1.5}` consistently
+- **React 19 Refs**: Use regular `function` components with direct ref passing instead of `React.forwardRef` (React 19 supports refs as regular props)
+
+
 ## App Surface
 
 The canonical route surface is:
@@ -35,24 +54,8 @@ The canonical route surface is:
 - `/app/volumes`
 - `/app/settings`
 
-Legacy routes such as `/app/taxonomy`, `/app/skills`, `/app/memory`, and `/app/analytics` redirect to supported pages. Do not document them as active disabled product surfaces.
 
-## Ownership Map
 
-- `src/app/`: router, shell layout, page entrypoints, providers
-- `src/features/rlm-workspace/`: chat/runtime UX, assistant content, message inspector, Daytona run workbench
-- `src/features/volumes/`: runtime-backed volume browser
-- `src/features/settings/`: runtime settings, diagnostics panes, settings dialog/page
-- `src/features/shell/`: app chrome such as user menu, command palette, dialogs
-- `src/components/ai-elements/`: shared AI Elements primitives
-- `src/components/chat/`: composer wrapper and chat input controls
-- `src/components/ui/`: presentational primitives and thin wrappers
-- `src/lib/rlm-api/`: canonical backend contract layer
-- `src/lib/auth/`: MSAL/Entra session handling and token storage
-- `src/lib/telemetry/`: PostHog frontend telemetry
-- `src/stores/`: Zustand client state
-
-Keep route pages thin. New product behavior should usually live under `features/`.
 
 ## Runtime UX Contract
 
@@ -151,9 +154,6 @@ Recommended frontend validation flow:
 8. `pnpm run test:e2e`
 9. `pnpm run check`
 
-Focused workspace/runtime validation:
-
-- `pnpm run test:unit src/features/rlm-workspace/__tests__/backendChatEventAdapter.test.ts src/features/rlm-workspace/__tests__/ChatMessageList.ai-elements.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.daytona-workbench.test.tsx src/features/rlm-workspace/__tests__/RlmWorkspace.runtime-warning.test.tsx src/features/rlm-workspace/__tests__/useBackendChatRuntime.daytona-error.test.tsx src/features/rlm-workspace/run-workbench/__tests__/runWorkbenchAdapter.test.ts src/features/rlm-workspace/run-workbench/__tests__/RunWorkbench.test.tsx src/components/chat/__tests__/ChatInput.test.tsx src/components/chat/input/__tests__/RuntimeModeDropdown.test.tsx src/components/chat/input/__tests__/ExecutionModeDropdown.test.tsx src/components/chat/input/__tests__/SettingsDropdown.test.tsx`
 
 ## Notes
 

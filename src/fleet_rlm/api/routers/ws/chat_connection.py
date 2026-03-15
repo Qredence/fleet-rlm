@@ -10,13 +10,15 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.features.analytics import MlflowTraceRequestContext, new_client_request_id
+from fleet_rlm.features.analytics import (
+    MlflowTraceRequestContext,
+    new_client_request_id,
+)
 from fleet_rlm.infrastructure.database.models import RunStatus
 
-from ...deps import ServerState
+from ...dependencies import ServerState
 from ...execution import ExecutionEventEmitter
 from ...schemas import WSMessage
-
 from .chat_runtime import _ChatSessionState, _PreparedChatRuntime
 from .contracts import ChatAgentProtocol, LocalPersistFn
 from .helpers import (

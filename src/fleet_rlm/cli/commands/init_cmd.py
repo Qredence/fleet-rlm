@@ -12,7 +12,7 @@ from typing import Callable
 
 import typer
 
-from .. import scaffold
+from fleet_rlm.utils import scaffold
 
 
 def register_init_command(

@@ -18,7 +18,7 @@ from fleet_rlm.features.analytics import (
 )
 from fleet_rlm.features.analytics.trace_context import runtime_telemetry_enabled_context
 from fleet_rlm.infrastructure.database.models import RunStatus
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
 from ...execution import ExecutionStepBuilder
 from .contracts import ChatAgentProtocol, LocalPersistFn
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json

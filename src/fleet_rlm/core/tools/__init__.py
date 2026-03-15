@@ -17,19 +17,29 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal
 
-from dspy.primitives.code_interpreter import FinalOutput
+try:
+    from dspy.primitives.code_interpreter import FinalOutput
+except ImportError:
+    try:
+        from dspy.primitives import FinalOutput
+    except ImportError:
+        try:
+            from dspy import FinalOutput
+        except ImportError:
+            # Fallback for very old versions or misconfigured environments
+            FinalOutput = Any  # type: ignore
 
-from ...chunking import (
+from fleet_rlm.features.chunking import (
     chunk_by_headers,
     chunk_by_json_keys,
     chunk_by_size,
     chunk_by_timestamps,
 )
-from ...core.interpreter import ExecutionProfile
-from ..streaming_citations import _normalize_trajectory
+from fleet_rlm.core.execution.profiles import ExecutionProfile
+from fleet_rlm.core.execution.streaming_citations import _normalize_trajectory
 
 if TYPE_CHECKING:
-    from ..agent import RLMReActChatAgent
+    from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 

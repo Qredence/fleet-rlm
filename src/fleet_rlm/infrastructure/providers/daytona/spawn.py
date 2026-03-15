@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .runner import DaytonaRLMRunner
+    from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
     from .types import ChildTaskResult, RecursiveTaskSpec
 
 

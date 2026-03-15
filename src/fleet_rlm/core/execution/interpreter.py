@@ -24,31 +24,27 @@ import queue
 import threading
 import time
 from contextlib import contextmanager
-from enum import Enum
 from typing import Any, Callable, Iterator, Sequence
 
 import dspy
 import modal
 from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
 
-from .driver import sandbox_driver
-from . import driver_factories, sandbox_tools, session_history, volume_tools
-from fleet_rlm.features.logs.execution_limits import execution_max_text_chars
-from .llm_tools import LLMQueryMixin
-from .output_utils import (
+from fleet_rlm.core.execution.core_driver import sandbox_driver
+
+# Re-export from profiles to maintain backwards compatibility
+from fleet_rlm.core.execution.profiles import ExecutionProfile  # noqa: F811
+from fleet_rlm.core.tools.llm_tools import LLMQueryMixin
+from fleet_rlm.core.tools.output_utils import (
     _redact_sensitive_text,
+)
+from fleet_rlm.core.tools.output_utils import (
     _summarize_stdout as _summarize_stdout_util,
 )
-from .volume_ops import VolumeOpsMixin
+from fleet_rlm.core.tools.volume_ops import VolumeOpsMixin
+from fleet_rlm.features.logs.execution_limits import execution_max_text_chars
 
-
-class ExecutionProfile(str, Enum):
-    """Execution profile controlling sandbox helper/tool exposure."""
-
-    ROOT_INTERLOCUTOR = "ROOT_INTERLOCUTOR"
-    RLM_ROOT = "RLM_ROOT"
-    RLM_DELEGATE = "RLM_DELEGATE"
-    MAINTENANCE = "MAINTENANCE"
+from . import driver_factories
 
 
 def _build_default_image(
@@ -279,6 +275,12 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         """Build sandbox driver command and kwargs shared by start/astart."""
         with self._llm_call_lock:
             self._llm_call_count = 0
+
+        # Deferred imports to break circular dependency:
+        # interpreter → core.tools → interpreter (for ExecutionProfile)
+        from fleet_rlm.core.tools import sandbox_tools
+        from fleet_rlm.core.agent import session_history
+        from fleet_rlm.core.tools import volume_tools
 
         bundled_sources = [
             self._module_source_for_sandbox(driver_factories),

@@ -77,7 +77,7 @@ def test_configure_planner_from_env_missing_vars(monkeypatch, tmp_path: Path):
 
 def test_rlm_settings_defaults():
     """Test RlmSettings model with defaults."""
-    from fleet_rlm.config import RlmSettings
+    from fleet_rlm.infrastructure.config.env import RlmSettings
 
     settings = RlmSettings()
     assert settings.max_depth == 2
@@ -91,7 +91,7 @@ def test_rlm_settings_defaults():
 
 def test_rlm_settings_custom():
     """Test RlmSettings model with custom values."""
-    from fleet_rlm.config import RlmSettings
+    from fleet_rlm.infrastructure.config.env import RlmSettings
 
     settings = RlmSettings(max_depth=3, max_llm_calls=20, max_iters=10)
     assert settings.max_depth == 3
@@ -101,7 +101,7 @@ def test_rlm_settings_custom():
 
 def test_app_config_includes_rlm_settings():
     """Test AppConfig includes rlm_settings field."""
-    from fleet_rlm.config import AppConfig, RlmSettings
+    from fleet_rlm.infrastructure.config.env import AppConfig, RlmSettings
 
     config = AppConfig(
         agent={},
@@ -114,7 +114,7 @@ def test_app_config_includes_rlm_settings():
 
 def test_interpreter_config_async_execute_default():
     """InterpreterConfig should default async_execute to True."""
-    from fleet_rlm.config import InterpreterConfig
+    from fleet_rlm.infrastructure.config.env import InterpreterConfig
 
     interpreter = InterpreterConfig()
     assert interpreter.async_execute is True
@@ -122,7 +122,7 @@ def test_interpreter_config_async_execute_default():
 
 def test_agent_config_guardrail_defaults():
     """AgentConfig should expose guardrail defaults with safe values."""
-    from fleet_rlm.config import AgentConfig
+    from fleet_rlm.infrastructure.config.env import AgentConfig
 
     agent = AgentConfig()
     assert agent.max_iters == 60
@@ -135,7 +135,7 @@ def test_agent_config_guardrail_defaults():
 
 def test_config_model_defaults_match_hydra_yaml():
     """Pydantic defaults should mirror Hydra defaults for shared runtime keys."""
-    from fleet_rlm.config import AgentConfig, RlmSettings
+    from fleet_rlm.infrastructure.config.env import AgentConfig, RlmSettings
 
     config_path = Path("src/fleet_rlm/conf/config.yaml")
     raw = yaml.safe_load(config_path.read_text())

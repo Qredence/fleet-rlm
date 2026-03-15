@@ -9,9 +9,9 @@ from typing import Any, cast
 
 import dspy
 
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
+from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
 
-from .runner import DaytonaRLMRunner
 from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
 from .types import ContextSource, DaytonaRunCancelled, DaytonaRunResult, RolloutBudget
 

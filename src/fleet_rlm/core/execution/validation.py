@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .trajectory_errors import trajectory_has_tool_errors
+from fleet_rlm.core.agent.trajectory_errors import trajectory_has_tool_errors
 
 
 @dataclass

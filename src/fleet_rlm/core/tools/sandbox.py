@@ -21,7 +21,7 @@ from .memory_intelligence import build_memory_intelligence_tools
 from .sandbox_helpers import _resolve_volume_path
 
 if TYPE_CHECKING:
-    from ..agent import RLMReActChatAgent
+    from ..chat_agent import RLMReActChatAgent
 
 
 @dataclass(slots=True)

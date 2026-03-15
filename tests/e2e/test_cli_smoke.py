@@ -6,8 +6,9 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-from fleet_rlm.cli import app, _resolve_server_volume_name
-from fleet_rlm.config import AppConfig
+from fleet_rlm.cli import app
+from fleet_rlm.cli.commands.serve_cmds import _resolve_server_volume_name
+from fleet_rlm.infrastructure.config.env import AppConfig
 
 
 runner = CliRunner()
@@ -21,7 +22,7 @@ def _seed_cli_config(monkeypatch):
     Typer dispatch. These tests call `app` directly, so seed a non-None value
     to exercise command logic instead of the entrypoint guardrail.
     """
-    monkeypatch.setattr("fleet_rlm.cli._CONFIG", object())
+    monkeypatch.setattr("fleet_rlm.cli.fleet_cli._CONFIG", object())
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")

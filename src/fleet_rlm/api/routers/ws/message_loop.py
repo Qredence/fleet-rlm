@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import WebSocket
 from pydantic import ValidationError
 
-from ...deps import ServerState, session_key
+from ...dependencies import ServerState, session_key
 from ...schemas import WSMessage
 from .contracts import ChatAgentProtocol, LocalPersistFn
 from .helpers import _error_envelope, _try_send_json

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from . import chunk_text, execute_submit, normalize_strategy, resolve_document
 
 if TYPE_CHECKING:
-    from ..agent import RLMReActChatAgent
+    from ..chat_agent import RLMReActChatAgent
 
 
 # ---------------------------------------------------------------------------

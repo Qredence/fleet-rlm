@@ -43,12 +43,14 @@ const SelectContent = React.forwardRef<
   React.ComponentRef<typeof BaseSelect.Popup>,
   React.ComponentPropsWithoutRef<typeof BaseSelect.Popup> & {
     position?: "popper" | "item-aligned";
+    align?: "start" | "center" | "end";
+    side?: "top" | "right" | "bottom" | "left";
     sideOffset?: number;
   }
->(function SelectContent({ className, children, position = "popper", sideOffset = 4, ...props }, ref) {
+>(function SelectContent({ className, children, position = "popper", sideOffset = 4, align, side, ...props }, ref) {
   return (
     <BaseSelect.Portal>
-      <BaseSelect.Positioner sideOffset={sideOffset}>
+      <BaseSelect.Positioner sideOffset={sideOffset} align={align as any} side={side}>
         <BaseSelect.Popup
           ref={ref}
           className={cn(

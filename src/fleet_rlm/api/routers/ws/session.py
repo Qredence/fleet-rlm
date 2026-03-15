@@ -11,7 +11,7 @@ from fleet_rlm.core.execution.interpreter import ExecutionProfile
 from fleet_rlm.infrastructure.database import FleetRepository
 from fleet_rlm.infrastructure.database.types import IdentityUpsertResult
 
-from ...deps import ServerState
+from ...dependencies import ServerState
 from .contracts import ChatAgentProtocol
 from .helpers import _sanitize_id
 from .lifecycle import PersistenceRequiredError

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import dspy
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from .chat_agent import RLMReActChatAgent
 
 
 # Frozen set of tool names that support delegation

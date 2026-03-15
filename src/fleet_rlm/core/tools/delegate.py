@@ -15,8 +15,9 @@ from typing import TYPE_CHECKING, Any
 
 import dspy
 
-from ..delegate_sub_agent import spawn_delegate_sub_agent_async
-from ..tool_delegation import _sync_compatible_tool_callable
+from fleet_rlm.core.agent.rlm_agent import spawn_delegate_sub_agent_async
+from fleet_rlm.core.agent.tool_delegation import _sync_compatible_tool_callable
+
 from . import (
     build_trajectory_payload,
     chunk_text,
@@ -26,7 +27,7 @@ from . import (
 )
 
 if TYPE_CHECKING:
-    from ..agent import RLMReActChatAgent
+    from ..chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 

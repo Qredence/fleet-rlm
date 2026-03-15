@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from ..deps import ServerStateDep
+from ..dependencies import ServerStateDep
 from ..schemas.core import HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])

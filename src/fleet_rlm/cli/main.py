@@ -6,8 +6,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from .cli import _initialize_config
-from .terminal.chat import TerminalChatOptions, run_terminal_chat
+from fleet_rlm.features.terminal.chat import TerminalChatOptions, run_terminal_chat
+
+from .fleet_cli import _initialize_config
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -77,7 +78,7 @@ def main() -> None:
         print("Starting Web UI and API server on http://0.0.0.0:8000 ...")
         # Delegate to the fleet-rlm CLI's serve-api command
         # This reuses all the existing config initialization and uvicorn setup
-        from .cli import main as cli_main
+        from .fleet_cli import main as cli_main
 
         # Rewrite sys.argv to simulate running `fleet-rlm serve-api --host 0.0.0.0`
         # Keep any hydra overrides that might have been passed

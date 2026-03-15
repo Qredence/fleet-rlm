@@ -7,6 +7,7 @@ Provides synchronous and asynchronous streaming iterators that yield
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -16,12 +17,13 @@ import dspy
 from dspy.streaming.messages import StatusMessage, StatusMessageProvider, StreamResponse
 from dspy.streaming.streaming_listener import StreamListener
 
-from ..models import StreamEvent
+from fleet_rlm.core.models.streaming import StreamEvent
+
 from .streaming_citations import _build_final_payload, _normalize_trajectory
 from .streaming_context import StreamingContext
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 ToolEventKind = Literal["tool_call", "plan_update", "rlm_executing", "memory_update"]
@@ -112,6 +114,57 @@ class ReActStatusProvider(StatusMessageProvider):
 
     def module_end_status_message(self, outputs: Any):
         return None
+
+
+def _try_parse_hitl_request(
+    tool_name: str | None,
+    payload: dict[str, Any],
+) -> StreamEvent | None:
+    """Detect if a tool result should trigger a human-in-the-loop request."""
+    if not tool_name:
+        return None
+
+    output = payload.get("tool_output")
+    if not isinstance(output, str):
+        return None
+
+    # Try to parse as JSON if it looks like it
+    data = None
+    if output.startswith("{") and output.endswith("}"):
+        try:
+            data = json.loads(output)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    if tool_name == "clarification_questions":
+        questions = []
+        if data and isinstance(data, dict):
+            questions = data.get("questions", [])
+
+        if questions:
+            return StreamEvent(
+                kind="hitl_request",
+                text="The agent has some questions for you.",
+                payload={
+                    "options": questions,
+                    "source": "clarification_questions",
+                    "requires_response": True,
+                },
+            )
+
+    if tool_name == "memory_action_intent":
+        if data and isinstance(data, dict) and data.get("requires_confirmation"):
+            return StreamEvent(
+                kind="hitl_request",
+                text="This memory action requires confirmation.",
+                payload={
+                    "action": data.get("intent"),
+                    "source": "memory_action_intent",
+                    "requires_response": True,
+                },
+            )
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +310,16 @@ def _process_stream_value(
                 text=tool_result,
                 payload=ctx.enrich(result_payload) if ctx else result_payload,
             )
+
+            # Check for HITL triggers
+            hitl_req = _try_parse_hitl_request(
+                tool_name=last_tool_name_ref[0],
+                payload=result_payload,
+            )
+            if hitl_req:
+                if ctx:
+                    hitl_req.payload = ctx.enrich(hitl_req.payload)
+                yield hitl_req
 
 
 def _emit_prediction_trajectory_events(

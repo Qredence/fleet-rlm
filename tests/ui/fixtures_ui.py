@@ -7,9 +7,12 @@ from types import SimpleNamespace
 from typing import Any
 import uuid
 
-from dspy.primitives.code_interpreter import FinalOutput
+try:
+    from dspy.primitives.code_interpreter import FinalOutput
+except ImportError:
+    from dspy import FinalOutput
 
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
 from fleet_rlm.api.config import ServerRuntimeConfig
 from fleet_rlm.api.main import create_app
 
@@ -209,23 +212,23 @@ def patch_runtime_lm_loaders(
     delegate: object = None,
 ) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.server.main.get_planner_lm_from_env",
+        "fleet_rlm.api.main.get_planner_lm_from_env",
         lambda *args, **kwargs: planner,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.main.get_delegate_lm_from_env",
+        "fleet_rlm.api.main.get_delegate_lm_from_env",
         lambda *args, **kwargs: delegate,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.main._emit_posthog_startup_event",
+        "fleet_rlm.api.main._emit_posthog_startup_event",
         lambda *args, **kwargs: False,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
         lambda *args, **kwargs: planner,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_delegate_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_delegate_lm_from_env",
         lambda *args, **kwargs: delegate,
     )
 

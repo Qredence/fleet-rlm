@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 import logging
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import dspy
 
-from ..tool_delegation import _sync_compatible_tool_callable
+from fleet_rlm.core.agent.tool_delegation import _sync_compatible_tool_callable
+
 from .sandbox_helpers import _resolve_volume_path
 
 if TYPE_CHECKING:
-    from ..agent import RLMReActChatAgent
+    from ..chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 

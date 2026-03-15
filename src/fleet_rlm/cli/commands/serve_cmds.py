@@ -57,8 +57,8 @@ def register_serve_commands(
 
             import uvicorn
 
-            from ..server.config import ServerRuntimeConfig
-            from ..server.main import create_app
+            from fleet_rlm.api.config import ServerRuntimeConfig
+            from fleet_rlm.api.main import create_app
 
             app_obj = create_app(
                 config=ServerRuntimeConfig(
@@ -114,7 +114,10 @@ def register_serve_commands(
                 )
                 raise typer.Exit(code=2)
 
-            from ..mcp.server import MCPRuntimeConfig, create_mcp_server
+            from fleet_rlm.infrastructure.mcp.server import (
+                MCPRuntimeConfig,
+                create_mcp_server,
+            )
 
             server = create_mcp_server(
                 config=MCPRuntimeConfig(

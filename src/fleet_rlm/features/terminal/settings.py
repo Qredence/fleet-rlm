@@ -14,9 +14,9 @@ from typing import Any
 from dotenv import set_key
 from rich.panel import Panel
 
-from .. import runners
-from .ui import _prompt_choice, _prompt_value
+from fleet_rlm.cli import runners
 
+from .ui import _prompt_choice, _prompt_value
 
 # Settings keys that require non-empty values
 _SETTINGS_KEYS = (

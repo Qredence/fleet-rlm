@@ -11,16 +11,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from fleet_rlm import __version__
-from fleet_rlm.features.analytics import shutdown_mlflow
-from fleet_rlm.features.analytics.client import get_posthog_client, shutdown_posthog_client
-from fleet_rlm.features.analytics.config import PostHogConfig
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
+from fleet_rlm.features.analytics import shutdown_mlflow
+from fleet_rlm.features.analytics.client import (
+    get_posthog_client,
+    shutdown_posthog_client,
+)
+from fleet_rlm.features.analytics.config import PostHogConfig
 from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
+from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
-from .deps import ServerState
+from .dependencies import ServerState
 from .execution import ExecutionEventEmitter
 from .middleware import add_middlewares
 from .routers import (

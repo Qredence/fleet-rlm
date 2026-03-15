@@ -15,7 +15,7 @@ from fleet_rlm.features.analytics.trace_context import (
     runtime_distinct_id_context,
 )
 
-from ...deps import get_server_state_from_websocket
+from ...dependencies import get_server_state_from_websocket
 from ...execution import (
     ExecutionSubscription,
 )

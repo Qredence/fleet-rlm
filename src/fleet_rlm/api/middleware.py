@@ -15,7 +15,7 @@ def add_middlewares(app, config: ServerRuntimeConfig) -> None:
     """Register all middleware on the given FastAPI app."""
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=config.cors_allowed_origins,
+        allow_origins=config.cors_origins_list,
         allow_methods=["*"],
         allow_headers=["*"],
     )

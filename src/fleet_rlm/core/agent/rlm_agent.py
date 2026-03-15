@@ -10,15 +10,23 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 import dspy
 from dspy.streaming.streaming_listener import StreamListener
 
-from ..core.interpreter import ExecutionProfile, ModalInterpreter
-from ..models import StreamEvent
-from .rlm_runtime_modules import build_recursive_subquery_rlm
-from .streaming import ReActStatusProvider, _process_stream_value
-from .streaming_citations import _normalize_trajectory
-from .streaming_context import StreamingContext
+from fleet_rlm.core.execution.profiles import ExecutionProfile
+from fleet_rlm.core.execution.interpreter import ModalInterpreter
+from fleet_rlm.core.models.streaming import StreamEvent
+
+# NOTE: fleet_rlm.core.models.rlm_runtime_modules is imported lazily inside
+# spawn_delegate_sub_agent_async to avoid the circular import:
+#   rlm_runtime_modules → core.agent.signatures → core.agent.__init__
+#   → chat_agent/rlm_agent → rlm_runtime_modules
+from fleet_rlm.core.execution.streaming import (
+    ReActStatusProvider,
+    _process_stream_value,
+)
+from fleet_rlm.core.execution.streaming_citations import _normalize_trajectory
+from fleet_rlm.core.execution.streaming_context import StreamingContext
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from .chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +286,10 @@ async def spawn_delegate_sub_agent_async(
     )
     effective_max_iters = max(1, int(getattr(agent, "rlm_max_iterations", 30)))
     effective_max_llm_calls = max(1, int(getattr(agent, "rlm_max_llm_calls", 50)))
+    # Lazily imported here to avoid circular:
+    # rlm_runtime_modules → core.agent.signatures → core.agent → rlm_agent → here
+    from fleet_rlm.core.models.rlm_runtime_modules import build_recursive_subquery_rlm  # noqa: PLC0415
+
     child_module = build_recursive_subquery_rlm(
         interpreter=child_interpreter,
         max_iterations=effective_max_iters,

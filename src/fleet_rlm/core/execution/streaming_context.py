@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .agent import RLMReActChatAgent
+    from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
 
 
 @dataclass(frozen=True, slots=True)

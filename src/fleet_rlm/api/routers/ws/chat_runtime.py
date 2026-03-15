@@ -9,14 +9,13 @@ from typing import Any, cast
 from fastapi import WebSocket
 
 from fleet_rlm import runners
-from fleet_rlm.core.execution.interpreter import ExecutionProfile
+from fleet_rlm.core.execution.profiles import ExecutionProfile
 from fleet_rlm.infrastructure.database import FleetRepository
 from fleet_rlm.infrastructure.database.types import IdentityUpsertResult
 
+from ...auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ...config import ServerRuntimeConfig
-from ...deps import ServerState
-from ...auth import AuthError, resolve_admitted_identity
-from ...auth import NormalizedIdentity
+from ...dependencies import ServerState
 from .contracts import ChatAgentProtocol
 from .helpers import (
     _close_websocket_safely,

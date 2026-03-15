@@ -26,10 +26,11 @@ from typing import Any
 import typer
 from omegaconf import OmegaConf
 
-from .cli_commands.init_cmd import register_init_command
-from .cli_commands.serve_cmds import register_serve_commands
-from .config import AppConfig
-from .terminal.chat import TerminalChatOptions, run_terminal_chat
+from fleet_rlm.features.terminal.chat import TerminalChatOptions, run_terminal_chat
+from fleet_rlm.infrastructure.config.env import AppConfig
+
+from .commands.init_cmd import register_init_command
+from .commands.serve_cmds import register_serve_commands
 
 # We use a global variable to store the hydra config so Typer commands can access it
 # This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)
@@ -181,7 +182,10 @@ def daytona_rlm(
 ) -> None:
     """Run the experimental Daytona-backed strict-RLM pilot."""
     try:
-        from .daytona_rlm import RolloutBudget, run_daytona_rlm_pilot
+        from fleet_rlm.infrastructure.providers.daytona.runner import (
+            run_daytona_rlm_pilot,
+        )
+        from fleet_rlm.infrastructure.providers.daytona.types import RolloutBudget
 
         if ref and not repo:
             raise ValueError("--ref requires --repo.")
@@ -234,7 +238,7 @@ def daytona_smoke(
 ) -> None:
     """Run a native Daytona smoke validation without invoking an LM."""
     try:
-        from .daytona_rlm import run_daytona_smoke
+        from fleet_rlm.infrastructure.providers.daytona.smoke import run_daytona_smoke
 
         result = run_daytona_smoke(
             repo=repo,

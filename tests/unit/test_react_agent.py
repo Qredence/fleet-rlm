@@ -15,7 +15,7 @@ import dspy
 import pytest
 
 from fleet_rlm.core.agent import RLMReActChatAgent, RLMReActChatSignature
-from fleet_rlm.core.agent import tools as react_tools
+from fleet_rlm.core import tools as react_tools
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
@@ -78,7 +78,7 @@ def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
 
 def test_chat_turn_defers_mlflow_metadata_merge_to_callers(monkeypatch):
     monkeypatch.setattr(
-        "fleet_rlm.analytics.mlflow_integration.trace_result_metadata",
+        "fleet_rlm.features.analytics.mlflow_integration.trace_result_metadata",
         lambda response_preview=None: {
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",
@@ -443,7 +443,7 @@ def test_get_tool_raises_on_unknown_name(monkeypatch):
 
 
 def test_get_runtime_module_caches_instances(monkeypatch):
-    from fleet_rlm.core.agent import runtime_factory
+    import fleet_rlm.core.execution.runtime_factory as runtime_factory
 
     created: list[tuple[str, object, int, int, bool]] = []
     fake_module = object()

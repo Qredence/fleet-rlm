@@ -27,16 +27,16 @@ from typing import Any, Literal
 
 import dspy
 
-from .analytics import (
+from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.core.agent.signatures import AnalyzeLongDocument, SummarizeLongDocument
+from fleet_rlm.core.config import configure_planner_from_env
+from fleet_rlm.core.execution.interpreter import ModalInterpreter
+from fleet_rlm.features.analytics import (
     MlflowTraceRequestContext,
     merge_trace_result_metadata,
     mlflow_request_context,
     new_client_request_id,
 )
-from .core.config import configure_planner_from_env
-from .core.interpreter import ModalInterpreter
-from .react.agent import RLMReActChatAgent
-from .react.signatures import AnalyzeLongDocument, SummarizeLongDocument
 
 
 @dataclass(slots=True)
@@ -298,8 +298,13 @@ def build_daytona_workbench_chat_agent(
     delegate_lm: Any | None = None,
 ) -> Any:
     """Build the Daytona DSPy workbench chat runtime used by websocket chat."""
-    from .daytona_rlm import DaytonaSandboxRuntime, RolloutBudget
-    from .daytona_rlm.chat_agent import DaytonaWorkbenchChatAgent
+    from fleet_rlm.infrastructure.providers.daytona import (
+        DaytonaSandboxRuntime,
+        RolloutBudget,
+    )
+    from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
+        DaytonaWorkbenchChatAgent,
+    )
 
     runtime = DaytonaSandboxRuntime()
     budget = RolloutBudget(
