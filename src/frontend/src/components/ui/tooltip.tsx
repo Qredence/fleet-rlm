@@ -1,55 +1,51 @@
 import * as React from "react";
-import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import { Slot } from "@radix-ui/react-slot";
+import { Tooltip as BaseTooltip } from "@base-ui/react";
 
 import { cn } from "@/lib/utils/cn";
 
-function TooltipProvider({
-  delayDuration = 0,
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
-  return (
-    <TooltipPrimitive.Provider
-      data-slot="tooltip-provider"
-      delayDuration={delayDuration}
-      {...props}
-    />
-  );
-}
+// Base UI doesn't strictly need a Provider in the same way Radix does,
+// but we keep the export for API compatibility if it was used globally.
+const TooltipProvider = ({ children, ...props }: { children: React.ReactNode; [key: string]: any }) => <>{children}</>;
 
-function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return (
-    <TooltipProvider>
-      <TooltipPrimitive.Root data-slot="tooltip" {...props} />
-    </TooltipProvider>
-  );
-}
+const Tooltip = BaseTooltip.Root;
+const TooltipTrigger = React.forwardRef<any, React.ComponentPropsWithoutRef<typeof BaseTooltip.Trigger> & { asChild?: boolean }>(({ asChild, ...props }, ref) => {
+  if (asChild) {
+    return <BaseTooltip.Trigger render={<Slot />} ref={ref} {...props} />;
+  }
+  return <BaseTooltip.Trigger ref={ref} {...props} />;
+});
+TooltipTrigger.displayName = "TooltipTrigger";
 
-function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
-}
-
-function TooltipContent({
-  className,
-  sideOffset = 0,
-  children,
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+const TooltipContent = React.forwardRef<
+  React.ComponentRef<typeof BaseTooltip.Popup>,
+  React.ComponentPropsWithoutRef<typeof BaseTooltip.Popup> & {
+    sideOffset?: number;
+    alignOffset?: number;
+    align?: "start" | "center" | "end";
+    side?: "top" | "right" | "bottom" | "left";
+    forceMount?: boolean;
+  }
+>(function TooltipContent({ className, sideOffset = 4, alignOffset, align, side, forceMount, children, ...props }, ref) {
   return (
-    <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Content
-        data-slot="tooltip-content"
-        sideOffset={sideOffset}
-        className={cn(
-          "bg-popover text-popover-foreground border border-border-subtle/80 shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit origin-(--radix-tooltip-content-transform-origin) rounded-md px-3 py-1.5 text-balance",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        <TooltipPrimitive.Arrow className="bg-popover fill-popover z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
-      </TooltipPrimitive.Content>
-    </TooltipPrimitive.Portal>
+    <BaseTooltip.Portal>
+      <BaseTooltip.Positioner sideOffset={sideOffset} alignOffset={alignOffset} align={align} side={side}>
+        <BaseTooltip.Popup
+          ref={ref}
+          className={cn(
+            "bg-popover text-popover-foreground border border-border-subtle/80 shadow-md z-50 w-fit rounded-md px-3 py-1.5 text-sm text-balance",
+            "transition-all data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[starting-style]:opacity-0 data-[starting-style]:scale-95",
+            className,
+          )}
+          {...props}
+        >
+          {children}
+          <BaseTooltip.Arrow className="fill-border-subtle/80" />
+        </BaseTooltip.Popup>
+      </BaseTooltip.Positioner>
+    </BaseTooltip.Portal>
   );
-}
+});
+TooltipContent.displayName = "TooltipContent";
 
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };

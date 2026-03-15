@@ -42,7 +42,7 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
                         <Accordion
                           type="single"
                           collapsible
-                          defaultValue={section.defaultOpen ? "details" : undefined}
+                          defaultValue={(section.defaultOpen ? "details" : undefined) as any}
                         >
                           <AccordionItem value="details" className="border-b-0">
                             <AccordionTrigger className="py-0 hover:no-underline">
