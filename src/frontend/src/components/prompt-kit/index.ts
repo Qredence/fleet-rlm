@@ -65,6 +65,9 @@ export {
 // Code Block component (added by ai-elements)
 export { CodeBlock } from "./code-block";
 
+// Shimmer components
+export { Shimmer } from "./shimmer";
+
 // Chain of Thought components
 export {
   ChainOfThought,
@@ -120,9 +123,6 @@ export {
   ConfirmationActions,
   ConfirmationAction,
 } from "./confirmation";
-
-// Shimmer components
-export { Shimmer } from "./shimmer";
 
 // Sandbox components
 export {
