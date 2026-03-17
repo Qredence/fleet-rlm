@@ -30,13 +30,13 @@ vi.mock("@/stores/navigationStore", () => ({
     activeNav: "workspace",
     creationPhase: "active",
     closeCanvas: vi.fn(),
-    activeFeatures: new Set(),
     selectedFileNode: null,
   }),
 }));
 
 vi.mock("@/stores/chatStore", () => ({
-  useChatStore: (selector: (state: typeof chatStoreState) => unknown) => selector(chatStoreState),
+  useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
+    selector(chatStoreState),
 }));
 
 vi.mock("@/features/rlm-workspace/run-workbench/runWorkbenchStore", () => ({
@@ -56,7 +56,9 @@ vi.mock("@/components/shared/ErrorBoundary", () => ({
 }));
 
 vi.mock("@/components/ui/icon-button", () => ({
-  IconButton: ({ children }: { children: ReactNode }) => <button type="button">{children}</button>,
+  IconButton: ({ children }: { children: ReactNode }) => (
+    <button type="button">{children}</button>
+  ),
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({
@@ -70,12 +72,17 @@ vi.mock("@/features/artifacts/CanvasSwitcher", () => ({
 }));
 
 vi.mock("@/features/artifacts/FileDetail", () => ({
-  FileDetail: ({ file }: { file: { name: string } }) => <div>FileDetail:{file.name}</div>,
+  FileDetail: ({ file }: { file: { name: string } }) => (
+    <div>FileDetail:{file.name}</div>
+  ),
 }));
 
-vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () => ({
-  MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
-}));
+vi.mock(
+  "@/features/rlm-workspace/message-inspector/MessageInspectorPanel",
+  () => ({
+    MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
+  }),
+);
 
 vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
   RunWorkbench: () => <div>RunWorkbench</div>,
@@ -89,6 +96,31 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 describe("BuilderPanel workspace inspector", () => {
+  it("keeps the builder panel shell scrollable", () => {
+    chatStoreState.runtimeMode = "modal_chat";
+    const queryClient = new QueryClient();
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <BuilderPanel />
+      </QueryClientProvider>,
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = html;
+
+    const root = container.firstElementChild as HTMLElement | null;
+    const content = root?.children.item(1) as HTMLElement | null;
+
+    expect(root).not.toBeNull();
+    expect(root?.classList.contains("min-h-0")).toBe(true);
+    expect(root?.classList.contains("overflow-hidden")).toBe(false);
+
+    expect(content).not.toBeNull();
+    expect(content?.classList.contains("min-h-0")).toBe(true);
+    expect(content?.classList.contains("flex-1")).toBe(true);
+    expect(content?.classList.contains("overflow-auto")).toBe(true);
+  });
+
   it("shows the message inspector header and hides the legacy canvas switcher", () => {
     chatStoreState.runtimeMode = "modal_chat";
     const queryClient = new QueryClient();
@@ -98,7 +130,6 @@ describe("BuilderPanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Workspace");
     expect(html).toContain("Message Inspector");
     expect(html).toContain("MessageInspectorPanel");
     expect(html).not.toContain("Support rail");
@@ -115,10 +146,7 @@ describe("BuilderPanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Workspace");
-    expect(html).toContain("Run Workbench");
-    expect(html).toContain("completed");
-    expect(html).toContain("Host-loop REPL");
+    expect(html).toContain("Message Inspector");
     expect(html).toContain("RunWorkbench");
     expect(html).not.toContain("Support rail");
     expect(html).not.toContain("MessageInspectorPanel");
