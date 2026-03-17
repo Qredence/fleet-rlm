@@ -6,27 +6,37 @@ This guide covers installation and setup for `fleet-rlm`.
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) package manager
-- [Bun](https://bun.sh/) (for frontend development)
+- [pnpm](https://pnpm.io/) (for frontend development from source)
 - Modal account (for sandbox execution)
 
 ## Option A: Install from PyPI
 
-Install the published package:
+Add the published package to a `uv`-managed project:
 
 ```bash
-uv tool install fleet-rlm
+uv init
+uv add fleet-rlm
 ```
 
 Verify the installation:
 
 ```bash
-fleet --help
+uv run fleet --help
+uv run fleet-rlm --help
 ```
 
 Launch the Web UI:
 
 ```bash
-fleet web
+uv run fleet web
+```
+
+If you already have a `uv` project, skip `uv init` and just run `uv add fleet-rlm`.
+
+If you need the optional MCP surface, install the extra:
+
+```bash
+uv add "fleet-rlm[mcp]"
 ```
 
 ## Option B: Install from Source (Contributors)
@@ -74,7 +84,9 @@ pnpm install --frozen-lockfile
 Verify the frontend setup:
 
 ```bash
+pnpm run api:check
 pnpm run type-check
+pnpm run lint:robustness
 pnpm run test:unit
 ```
 
@@ -96,7 +108,7 @@ Run help commands to verify your setup:
 # CLI entrypoint
 uv run fleet-rlm --help
 
-# Terminal chat launcher
+# Launcher
 uv run fleet --help
 ```
 
@@ -152,27 +164,41 @@ The `.env.example` file contains all configurable environment variables. Key cat
 
 ## Frontend Development Commands
 
-| Command              | Description                            |
-| -------------------- | -------------------------------------- |
-| `pnpm run dev`       | Start development server               |
-| `pnpm run check`     | Run type-check, lint, tests, and build |
-| `pnpm run test:unit` | Run unit tests                         |
-| `pnpm run test:e2e`  | Run end-to-end tests                   |
-| `pnpm run build`     | Build for production                   |
+| Command                    | Description                                                       |
+| -------------------------- | ----------------------------------------------------------------- |
+| `pnpm run dev`             | Start development server                                          |
+| `pnpm run api:check`       | Verify committed frontend OpenAPI artifacts match `openapi.yaml`  |
+| `pnpm run type-check`      | Run TypeScript type checks                                        |
+| `pnpm run lint:robustness` | Run the frontend lint lane used by repo validation                |
+| `pnpm run test:unit`       | Run unit tests                                                    |
+| `pnpm run build`           | Build for production                                              |
+| `pnpm run check`           | Full frontend suite: type-check, lint, unit tests, build, and e2e |
 
 ## Common Makefile Targets
 
 The project includes a `Makefile` for common development tasks:
 
-| Target               | Command                                                 |
-| -------------------- | ------------------------------------------------------- |
-| `make sync-all`      | Install all dependencies (`uv sync --all-extras --dev`) |
-| `make test-fast`     | Run tests excluding `live_llm` and `benchmark`          |
-| `make quality-gate`  | Run lint, format check, type check, and tests           |
-| `make mlflow-server` | Start local MLflow server on port 5000                  |
+| Target               | Command                                                                    |
+| -------------------- | -------------------------------------------------------------------------- |
+| `make sync-all`      | Install all dependencies (`uv sync --all-extras --dev`)                    |
+| `make test-fast`     | Run tests excluding `live_llm` and `benchmark`                             |
+| `make quality-gate`  | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
+| `make release-check` | Run release-oriented validation: quality gate, security checks, UI build, packaging |
+| `make mlflow-server` | Start local MLflow server on port 5000                                     |
+
+## Docs-Only Validation
+
+For docs-only changes, run:
+
+```bash
+uv run python scripts/check_docs_quality.py
+uv run python scripts/validate_release.py hygiene
+uv run python scripts/validate_release.py metadata
+```
 
 ## Next Steps
 
 - [Terminal Chat Tutorial](../tutorials/03-interactive-chat.md) - Learn to use the CLI chat interface
 - [Configuring Modal](configuring-modal.md) - Set up sandbox execution
+- [CLI reference](../reference/cli.md) - Review the current `fleet` and `fleet-rlm` surfaces
 - [MLflow Workflows](mlflow-workflows.md) - DSPy tracing, evaluation, and optimization with MLflow

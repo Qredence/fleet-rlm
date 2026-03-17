@@ -24,16 +24,18 @@ The architecture consists of these layers:
 
 ### 1. Core Agent: RLMReActChatAgent
 
-The primary agent class (`src/fleet_rlm/react/agent.py`) extends `dspy.Module` to provide:
+The primary agent class (`src/fleet_rlm/core/agent/chat_agent.py`) extends
+`dspy.Module` to provide:
 
 - **Stateful conversation**: `dspy.History` for persistent chat memory
 - **ReAct reasoning**: DSPy's ReAct pattern for thought-action-observation loops
 - **Tool orchestration**: Dynamic tool registration and dispatch
-- **Recursive delegation**: `delegate_sub_agent.py` spawns child dspy.RLM instances
+- **Recursive delegation**: `rlm_agent.py` spawns child dspy.RLM instances
 
 ### 2. Signature-Based Contracts
 
-Agent behavior is defined through DSPy signatures (`src/fleet_rlm/react/signatures.py`):
+Agent behavior is defined through DSPy signatures
+(`src/fleet_rlm/core/agent/signatures.py`):
 
 ```python
 class RLMReActChatSignature(dspy.Signature):
@@ -45,7 +47,8 @@ class RLMReActChatSignature(dspy.Signature):
 
 ### 3. Streaming Context
 
-Real-time response streaming via `streaming_context.py` and `streaming.py` provides:
+Real-time response streaming via `core/execution/streaming_context.py` and
+`core/execution/streaming.py` provides:
 
 - WebSocket-compatible event emission
 - Citation tracking for tool outputs
@@ -56,7 +59,7 @@ Real-time response streaming via `streaming_context.py` and `streaming.py` provi
 Long-context or specialized tasks are delegated to child RLM instances:
 
 ```text
-Parent Agent → delegate_sub_agent.spawn_delegate_sub_agent_async()
+Parent Agent → rlm_agent.spawn_delegate_sub_agent_async()
     → Child dspy.RLM → Result aggregation
 ```
 
@@ -85,9 +88,9 @@ The parent shares its LLM budget with children via `_share_llm_budget()` to enfo
 
 ## References
 
-- `src/fleet_rlm/react/agent.py` — RLMReActChatAgent implementation
-- `src/fleet_rlm/react/signatures.py` — DSPy signature definitions
-- `src/fleet_rlm/react/delegate_sub_agent.py` — Recursive delegation logic
-- `src/fleet_rlm/react/streaming.py` — Response streaming implementation
-- `src/fleet_rlm/react/streaming_context.py` — Streaming context management
+- `src/fleet_rlm/core/agent/chat_agent.py` — RLMReActChatAgent implementation
+- `src/fleet_rlm/core/agent/signatures.py` — DSPy signature definitions
+- `src/fleet_rlm/core/agent/rlm_agent.py` — Recursive delegation logic
+- `src/fleet_rlm/core/execution/streaming.py` — Response streaming implementation
+- `src/fleet_rlm/core/execution/streaming_context.py` — Streaming context management
 - DSPy documentation: https://dspy.ai/

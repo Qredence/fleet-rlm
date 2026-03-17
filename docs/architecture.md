@@ -2,7 +2,9 @@
 
 This document describes the maintained architecture for `fleet-rlm`.
 The production chat product remains DSPy + Modal + `RLMReActChatAgent`.
-The repository now also includes an experimental Daytona-backed strict-RLM pilot under `src/fleet_rlm/infrastructure/providers/daytona/`.
+The repository now also includes an experimental Daytona-backed strict-RLM
+pilot under `src/fleet_rlm/infrastructure/providers/daytona/`, with
+`src/fleet_rlm/daytona_rlm/` kept as a compatibility import package.
 
 ## Current Runtime Status
 
@@ -24,10 +26,10 @@ The following diagram shows the complete system architecture with all major comp
 ```mermaid
 graph TB
     subgraph ENTRY["Entry Points"]
-        CLI_FLEET["fleet CLI<br/>(fleet_cli.py)"]
-        CLI_RLM["fleet-rlm CLI<br/>(cli.py)"]
+        CLI_FLEET["fleet CLI<br/>(cli/main.py)"]
+        CLI_RLM["fleet-rlm CLI<br/>(cli/fleet_cli.py)"]
         WEB_UI["Web UI<br/>(frontend/)"]
-        MCP_CLIENT["MCP Client<br/>(mcp/server.py)"]
+        MCP_CLIENT["MCP Client<br/>(infrastructure/mcp/server.py)"]
     end
 
     subgraph SERVER["Service Layer (api/)"]
@@ -55,7 +57,7 @@ graph TB
 
     subgraph EXECUTION["Execution Layer (core/)"]
         INTERPRETER["ModalInterpreter<br/>(interpreter.py)"]
-        DRIVER["Sandbox Driver<br/>(driver.py)"]
+        DRIVER["Sandbox Driver<br/>(core_driver.py)"]
         LLM_TOOLS["LLM Tools<br/>(llm_tools.py)"]
         VOLUME_OPS["Volume Operations<br/>(volume_ops.py)"]
         SANDBOX_TOOLS["Sandbox Tools<br/>(sandbox_tools.py)"]
@@ -142,10 +144,10 @@ graph TB
 
 | Entry Point | Source File                   | Description                                                                                                       |
 | ----------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `fleet`     | `src/fleet_rlm/fleet_cli.py`  | Primary interactive chat launcher. Supports `fleet web` subcommand for Web UI.                                    |
-| `fleet-rlm` | `src/fleet_rlm/cli.py`        | Full CLI with `chat`, `serve-api`, `serve-mcp`, `init`, `daytona-smoke`, and experimental `daytona-rlm` commands. |
+| `fleet`     | `src/fleet_rlm/cli/main.py`                    | Primary interactive chat launcher. Supports `fleet web` for the Web UI.                                           |
+| `fleet-rlm` | `src/fleet_rlm/cli/fleet_cli.py`               | Full CLI with `chat`, `serve-api`, `serve-mcp`, `init`, `daytona-smoke`, and experimental `daytona-rlm` commands. |
 | Web UI      | `src/frontend/`               | React/TypeScript frontend served by FastAPI at `http://0.0.0.0:8000`.                                             |
-| MCP Server  | `src/fleet_rlm/mcp/server.py` | Model Context Protocol server for Claude Desktop integration.                                                     |
+| MCP Server  | `src/fleet_rlm/infrastructure/mcp/server.py`   | Model Context Protocol server for Claude Desktop integration.                                                      |
 
 ## Core Layers
 
@@ -153,8 +155,9 @@ graph TB
 
 Entry points define how users interact with the system:
 
-- **`fleet_cli.py`**: Lightweight wrapper that provides `fleet` command for terminal chat and `fleet web` for Web UI launch.
-- **`cli.py`**: Full Typer-based CLI with subcommands:
+- **`cli/main.py`**: Lightweight wrapper that provides `fleet` for terminal
+  chat and `fleet web` for Web UI launch.
+- **`cli/fleet_cli.py`**: Full Typer-based CLI with subcommands:
   - `chat`: Standalone interactive terminal chat
   - `serve-api`: FastAPI server for HTTP/WebSocket API
   - `serve-mcp`: MCP server for Claude Desktop integration
@@ -168,11 +171,11 @@ The orchestration layer manages the ReAct agent loop and streaming:
 
 | Module                  | Purpose                                                           |
 | ----------------------- | ----------------------------------------------------------------- |
-| `agent.py`              | `RLMReActChatAgent` - stateful conversational agent with tool use |
+| `chat_agent.py`         | `RLMReActChatAgent` - stateful conversational agent with tool use |
 | `signatures.py`         | DSPy signature definitions for agent inputs/outputs               |
 | `streaming.py`          | Real-time streaming of chat turns and trajectory events           |
 | `streaming_context.py`  | Context management for streaming sessions                         |
-| `delegate_sub_agent.py` | Spawns child `dspy.RLM` instances for recursive reasoning         |
+| `rlm_agent.py`          | Spawns child `dspy.RLM` instances for recursive reasoning         |
 | `commands.py`           | Built-in command dispatch (e.g., `/help`, `/reset`)               |
 
 ### 3. Tools Layer (`core/tools/`)
@@ -195,7 +198,7 @@ The execution layer handles remote code execution in Modal:
 | Module                | Purpose                                              |
 | --------------------- | ---------------------------------------------------- |
 | `interpreter.py`      | `ModalInterpreter` - manages Modal sandbox lifecycle |
-| `driver.py`           | `sandbox_driver` - executes Python code in sandbox   |
+| `core_driver.py`     | `sandbox_driver` - executes Python code in sandbox   |
 | `driver_factories.py` | Factory functions for driver configuration           |
 | `llm_tools.py`        | LLM-backed tools for the sandbox                     |
 | `sandbox_tools.py`    | Helper tools for sandbox operations                  |

@@ -117,7 +117,8 @@ The `Makefile` provides convenient targets for running tests:
 | `make test-unit`        | Run unit tests only                                            |
 | `make test-ui`          | Run UI/server tests only                                       |
 | `make test-integration` | Run integration + e2e tests                                    |
-| `make quality-gate`     | Run lint, format check, type check, tests, and frontend checks |
+| `make quality-gate`     | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
+| `make release-check`    | Run release-oriented validation, including security and packaging |
 
 ### Direct pytest Commands
 
@@ -144,13 +145,16 @@ Frontend tests use **Vitest** for unit tests and **Playwright** for end-to-end t
 
 ### Package.json Scripts
 
-| Command                  | Description                                            |
-| ------------------------ | ------------------------------------------------------ |
-| `pnpm run test:unit`     | Run Vitest unit tests                                  |
-| `pnpm run test:e2e`      | Run Playwright end-to-end tests                        |
-| `pnpm run test:watch`    | Run Vitest in watch mode                               |
-| `pnpm run test:coverage` | Run Vitest with coverage report                        |
-| `pnpm run check`         | Run type-check, lint, unit tests, build, and e2e tests |
+| Command                   | Description                                                       |
+| ------------------------- | ----------------------------------------------------------------- |
+| `pnpm run api:check`      | Verify committed frontend OpenAPI artifacts match the backend spec |
+| `pnpm run type-check`     | Run TypeScript type checks                                        |
+| `pnpm run lint:robustness`| Run the repo lint lane                                            |
+| `pnpm run test:unit`      | Run Vitest unit tests                                             |
+| `pnpm run test:e2e`       | Run Playwright end-to-end tests                                   |
+| `pnpm run test:watch`     | Run Vitest in watch mode                                          |
+| `pnpm run test:coverage`  | Run Vitest with coverage report                                   |
+| `pnpm run check`          | Run type-check, lint, unit tests, build, and e2e tests            |
 
 ### Running Frontend Tests
 
@@ -164,7 +168,14 @@ pnpm run test:unit
 # Run e2e tests
 pnpm run test:e2e
 
-# Run all checks (type-check + lint + test:unit + build + test:e2e)
+# Run repo-aligned frontend checks
+pnpm run api:check
+pnpm run type-check
+pnpm run lint:robustness
+pnpm run test:unit
+pnpm run build
+
+# Run the full frontend suite (adds Playwright e2e)
 pnpm run check
 
 # Watch mode for development
@@ -198,8 +209,24 @@ This runs:
 2. `format-check` - Ruff format verification
 3. `typecheck` - Type checking with ty
 4. `test-fast` - Default test suite
-5. `metadata-check` - Release metadata validation
-6. `frontend-check` - Frontend type-check, lint, tests, and build
+5. `metadata-check` - Release metadata and hygiene validation
+6. `docs-check` - Markdown/docs quality validation
+7. `frontend-check` - Frontend OpenAPI sync check, type-check, lint, unit tests, and build
+
+### Release Gate
+
+Run the release-oriented validation lane before tagging:
+
+```bash
+make release-check
+```
+
+This extends `make quality-gate` with:
+
+1. security checks (`pip-audit`, `bandit`)
+2. frontend UI build sync
+3. wheel/sdist build validation
+4. `twine check` for publishability
 
 ### Pre-commit Hooks
 

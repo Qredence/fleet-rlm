@@ -7,6 +7,10 @@ The Model Context Protocol (MCP) lets AI clients call `fleet-rlm` tools through 
 ## Quick Start
 
 ```bash
+# Add the optional MCP extra to your uv project
+uv add "fleet-rlm[mcp]"
+
+# Start the MCP server
 uv run fleet-rlm serve-mcp
 ```
 
@@ -17,7 +21,7 @@ By default, the MCP server runs with `stdio` transport for local tool integratio
 ```text
 Usage: fleet-rlm serve-mcp [OPTIONS]
 
-Run optional FastMCP server surface (requires `--extra mcp`).
+Run optional FastMCP server surface (requires the MCP extra).
 
 Options:
   --transport TEXT     FastMCP transport: stdio, sse, streamable-http
@@ -86,7 +90,8 @@ Common overrides include:
 
 ## Tools Exposed by MCP
 
-The MCP server exposes the following tools from `src/fleet_rlm/mcp/server.py`:
+The MCP server exposes the following tools from
+`src/fleet_rlm/infrastructure/mcp/server.py`:
 
 | Tool | Description |
 |------|-------------|
@@ -101,13 +106,15 @@ The MCP server exposes the following tools from `src/fleet_rlm/mcp/server.py`:
 
 ## Prerequisites
 
-Ensure MCP dependencies are installed:
+Ensure MCP dependencies are installed.
+
+For a package install, add the MCP extra:
 
 ```bash
-uv sync --all-extras --dev
+uv add "fleet-rlm[mcp]"
 ```
 
-Or specifically install the MCP extra:
+From a source checkout, sync the repo extras instead:
 
 ```bash
 uv sync --extra mcp
@@ -119,7 +126,7 @@ uv sync --extra mcp
 
 2. **Verify MCP dependencies** are installed:
    ```bash
-   uv sync --extra mcp
+   uv add "fleet-rlm[mcp]"
    ```
 
 3. **Test server launch locally**:
