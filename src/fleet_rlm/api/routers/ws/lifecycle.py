@@ -7,7 +7,10 @@ from typing import Any
 
 from fleet_rlm.infrastructure.database import FleetRepository
 from fleet_rlm.infrastructure.database.models import RunStatus
-from fleet_rlm.infrastructure.database.types import IdentityUpsertResult, RunStepCreateRequest
+from fleet_rlm.infrastructure.database.types import (
+    IdentityUpsertResult,
+    RunStepCreateRequest,
+)
 
 from ...execution import (
     ExecutionEvent,

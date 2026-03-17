@@ -24,7 +24,7 @@ from fleet_rlm.features.document_ingestion.main import (
 )
 
 if TYPE_CHECKING:
-    from ..chat_agent import RLMReActChatAgent
+    from ..agent.chat_agent import RLMReActChatAgent
 
 
 # ---------------------------------------------------------------------------

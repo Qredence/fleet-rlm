@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import dspy
 
 if TYPE_CHECKING:
-    from .chat_agent import RLMReActChatAgent
+    from ..agent.chat_agent import RLMReActChatAgent
 
 
 def get_runtime_module(agent: "RLMReActChatAgent", name: str) -> dspy.Module:

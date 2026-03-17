@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..chat_agent import RLMReActChatAgent
+    from ..agent.chat_agent import RLMReActChatAgent
 
 
 @dataclass(slots=True)
 class _FilesystemToolContext:
     """Shared tool context for host filesystem operations."""
 
-    agent: "RLMReActChatAgent"
+    agent: RLMReActChatAgent
 
 
 def _list_files_impl(
@@ -83,9 +83,11 @@ def _list_files_impl(
                     candidate_path = base / str(candidate)
                     if _is_included(candidate_path):
                         scoped_matches.append(candidate_path)
-            for candidate in sorted(set(scoped_matches), key=str):
-                if isinstance(candidate, Path):
-                    matched_files.append(candidate)
+            matched_files.extend(
+                candidate
+                for candidate in sorted(set(scoped_matches), key=str)
+                if isinstance(candidate, Path)
+            )
 
     if not matched_files:
         for candidate in base.glob(pattern_norm):

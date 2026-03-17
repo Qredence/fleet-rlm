@@ -17,17 +17,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal
 
-try:
-    from dspy.primitives.code_interpreter import FinalOutput
-except ImportError:
-    try:
-        from dspy.primitives import FinalOutput
-    except ImportError:
-        try:
-            from dspy import FinalOutput
-        except ImportError:
-            # Fallback for very old versions or misconfigured environments
-            FinalOutput = Any  # type: ignore
+from dspy.primitives.code_interpreter import FinalOutput
 
 from fleet_rlm.features.chunking import (
     chunk_by_headers,

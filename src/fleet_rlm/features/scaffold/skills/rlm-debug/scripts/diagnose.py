@@ -72,7 +72,7 @@ def check_secret() -> bool:
     """Check LITELLM Modal secret."""
     print("\n--- LITELLM Secret ---")
     try:
-        from fleet_rlm.runners import check_secret_presence
+        from fleet_rlm.cli.runners import check_secret_presence
 
         result = check_secret_presence()
         ok = True

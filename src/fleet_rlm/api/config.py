@@ -88,7 +88,7 @@ class ServerRuntimeConfig(BaseSettings):
     entra_issuer_template: str = "https://login.microsoftonline.com/{tenantid}/v2.0"
     entra_audience: str | None = None
 
-    @computed_field  # type: ignore[prop-decorator]
+    @computed_field
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse ``cors_allowed_origins`` CSV string into a list."""
@@ -98,7 +98,7 @@ class ServerRuntimeConfig(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def _apply_env_aware_defaults(cls, values: dict) -> dict:  # type: ignore[override]
+    def _apply_env_aware_defaults(cls, values: dict) -> dict:
         """Apply cross-field defaults that depend on app_env and auth_mode."""
         app_env = (
             str(

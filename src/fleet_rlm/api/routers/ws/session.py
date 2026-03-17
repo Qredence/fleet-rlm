@@ -7,7 +7,7 @@ from typing import Any
 
 from dspy.primitives.code_interpreter import FinalOutput
 
-from fleet_rlm.core.execution.interpreter import ExecutionProfile
+from fleet_rlm.core.execution.profiles import ExecutionProfile
 from fleet_rlm.infrastructure.database import FleetRepository
 from fleet_rlm.infrastructure.database.types import IdentityUpsertResult
 

@@ -14,7 +14,7 @@ from fleet_rlm.core.agent.tool_delegation import _sync_compatible_tool_callable
 from .sandbox_helpers import _resolve_volume_path
 
 if TYPE_CHECKING:
-    from ..chat_agent import RLMReActChatAgent
+    from ..agent.chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 

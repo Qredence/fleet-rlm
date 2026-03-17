@@ -102,7 +102,7 @@ def handle_slash_command(
         return alias_result
 
     # Try dispatch to agent commands
-    from ..react.commands import COMMAND_DISPATCH
+    from ...core.agent.commands import COMMAND_DISPATCH
 
     canonical = command.lstrip("/")
     if canonical in COMMAND_DISPATCH:
@@ -420,7 +420,7 @@ def _print_unknown_command(session: Any, command: str) -> None:
         session: The terminal chat session instance.
         command: The unknown command.
     """
-    from ..react.commands import COMMAND_DISPATCH
+    from ...core.agent.commands import COMMAND_DISPATCH
     from ..terminal.chat import _COMMAND_SPECS
 
     options = sorted({spec.name for spec in _COMMAND_SPECS})

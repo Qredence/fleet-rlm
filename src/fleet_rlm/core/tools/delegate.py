@@ -27,7 +27,7 @@ from . import (
 )
 
 if TYPE_CHECKING:
-    from ..chat_agent import RLMReActChatAgent
+    from ..agent.chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class _DelegateToolContext:
     """Shared context for RLM delegate tool callables."""
 
-    agent: "RLMReActChatAgent"
+    agent: RLMReActChatAgent
 
 
 def _coerce_int(
@@ -69,7 +69,7 @@ def _prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
     return getattr(prediction, field_name, default)
 
 
-def _claim_delegate_slot_or_error(agent: "RLMReActChatAgent") -> dict[str, Any] | None:
+def _claim_delegate_slot_or_error(agent: RLMReActChatAgent) -> dict[str, Any] | None:
     if agent._current_depth >= agent._max_depth:
         return {
             "status": "error",
@@ -195,7 +195,7 @@ def _runtime_metadata(
     }
 
 
-def build_rlm_delegate_tools(agent: "RLMReActChatAgent") -> list[Any]:
+def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
     """Build RLM delegation tools bound to *agent*."""
     ctx = _DelegateToolContext(agent=agent)
 
@@ -373,9 +373,9 @@ SUBMIT(
         raw_citations = _prediction_value(prediction, "citations", [])
         citations: list[dict[str, Any]] = []
         if isinstance(raw_citations, list):
-            for item in raw_citations:
-                if isinstance(item, dict):
-                    citations.append(dict(item))
+            citations.extend(
+                dict(item) for item in raw_citations if isinstance(item, dict)
+            )
 
         return {
             "status": "ok",

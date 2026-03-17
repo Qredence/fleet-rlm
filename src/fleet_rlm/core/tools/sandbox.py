@@ -2,10 +2,10 @@
 
 These tools run code inside the Modal sandbox or manage buffer/volume
 operations. They are built by :func:`build_sandbox_tools` and merged
-into the main tool list by :func:`~fleet_rlm.react.tools.build_tool_list`.
+into the main tool list by :func:`~fleet_rlm.core.tools.build_tool_list`.
 
-RLM delegation tools have been extracted to tools_rlm_delegate.py and
-memory intelligence tools to tools_memory_intelligence.py as part of
+RLM delegation tools have been extracted to :mod:`fleet_rlm.core.tools.delegate`
+and memory intelligence tools to :mod:`fleet_rlm.core.tools.memory_intelligence` as part of
 the modularization effort (Linear: QRE-273).
 """
 
@@ -21,14 +21,14 @@ from .memory_intelligence import build_memory_intelligence_tools
 from .sandbox_helpers import _resolve_volume_path
 
 if TYPE_CHECKING:
-    from ..chat_agent import RLMReActChatAgent
+    from ..agent.chat_agent import RLMReActChatAgent
 
 
 @dataclass(slots=True)
 class _SandboxToolContext:
     """Shared context for sandbox/volume tool operations."""
 
-    agent: "RLMReActChatAgent"
+    agent: RLMReActChatAgent
 
 
 def _execute_submit_ctx(
@@ -78,7 +78,7 @@ def _commit_volume_best_effort(ctx: _SandboxToolContext) -> None:
 
 
 def build_sandbox_tools(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
 ) -> list[Any]:
     """Build sandbox / buffer / volume tools bound to *agent*.
 
@@ -88,10 +88,10 @@ def build_sandbox_tools(
     ctx = _SandboxToolContext(agent=agent)
     tools: list[Any] = []
 
-    # -- RLM delegation tools (extracted to tools_rlm_delegate.py) ------------
+    # -- RLM delegation tools (extracted to delegate.py) ----------------------
     tools.extend(build_rlm_delegate_tools(agent))
 
-    # -- Memory intelligence tools (extracted to tools_memory_intelligence.py) -
+    # -- Memory intelligence tools (extracted to memory_intelligence.py) ------
     tools.extend(build_memory_intelligence_tools(agent))
 
     # -- Sandbox editing -----------------------------------------------------

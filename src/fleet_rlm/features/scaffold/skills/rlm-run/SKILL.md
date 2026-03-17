@@ -58,10 +58,9 @@ uv run fleet-rlm run-custom-tool \
 
 ```python
 import dspy
-from fleet_rlm import ModalInterpreter
-from fleet_rlm.config import configure
+from fleet_rlm import ModalInterpreter, configure_planner_from_env
 
-configure()  # Load .env
+configure_planner_from_env()  # Load .env and configure the planner LM
 
 interpreter = ModalInterpreter(timeout=120, volume_name="my-project")
 rlm = dspy.RLM(
@@ -90,7 +89,7 @@ print(result.confidence)   # NOT result["confidence"]
 
 ## Built-in Signatures
 
-See `dspy-signature` skill and `src/fleet_rlm/react/signatures.py` for full details.
+See `dspy-signature` skill and `src/fleet_rlm/core/agent/signatures.py` for full details.
 
 ## Execution Patterns
 
@@ -109,7 +108,7 @@ print(result.answer)
 ### Document Analysis
 
 ```python
-from fleet_rlm.react.signatures import AnalyzeLongDocument
+from fleet_rlm.core.agent.signatures import AnalyzeLongDocument
 
 doc = open("large_document.txt").read()
 rlm = dspy.RLM(

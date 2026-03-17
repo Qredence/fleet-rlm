@@ -4,9 +4,9 @@ This module provides a stateful chat agent that uses ``dspy.ReAct`` for
 reasoning/tool selection while delegating long-context computation to the
 existing ``ModalInterpreter`` and ``dspy.RLM`` workflows in this project.
 
-Tool implementations live in :mod:`fleet_rlm.react_tools`, streaming logic
-in :mod:`fleet_rlm.streaming`, and command dispatch in
-:mod:`fleet_rlm.commands`.
+Tool implementations live in :mod:`fleet_rlm.core.tools`, streaming logic
+in :mod:`fleet_rlm.core.execution.streaming`, and command dispatch in
+:mod:`fleet_rlm.core.agent.commands`.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         - Optional Modal volume persistence survives across runs.
 
     Tool delegation is handled dynamically via ``__getattr__`` - see
-    :mod:`fleet_rlm.react.tool_delegation` for details.
+    :mod:`fleet_rlm.core.agent.tool_delegation` for details.
     """
 
     def __init__(
@@ -375,7 +375,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     ) -> Iterable[StreamEvent]:
         """Yield typed streaming events for one chat turn (sync).
 
-        Delegates to :func:`fleet_rlm.streaming.iter_chat_turn_stream`.
+        Delegates to :func:`fleet_rlm.core.execution.streaming.iter_chat_turn_stream`.
         """
         _ = docs_path
         if self.execution_mode == "rlm_only":
@@ -542,7 +542,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     ) -> AsyncIterator[StreamEvent]:
         """Yield typed streaming events for one chat turn (async).
 
-        Delegates to :func:`fleet_rlm.streaming.aiter_chat_turn_stream`.
+        Delegates to :func:`fleet_rlm.core.execution.streaming.aiter_chat_turn_stream`.
         """
         _ = docs_path
         if self.execution_mode == "rlm_only":
@@ -565,7 +565,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     ) -> dict[str, Any]:
         """Dispatch a named command to the corresponding agent tool.
 
-        Delegates to :func:`fleet_rlm.commands.execute_command`.
+        Delegates to :func:`fleet_rlm.core.agent.commands.execute_command`.
         """
         return await _execute_command(self, command, args)
 
@@ -822,7 +822,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     def get_runtime_module(self, name: str) -> dspy.Module:
         """Return a cached long-context runtime module by name.
 
-        Delegates to :func:`fleet_rlm.react.runtime_factory.get_runtime_module`.
+        Delegates to :func:`fleet_rlm.core.execution.runtime_factory.get_runtime_module`.
         """
         return get_runtime_module(self, name)
 
@@ -997,7 +997,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         Returns sanitized response text and warning messages.
         Raises ``ValueError`` in strict mode for hard guardrail violations.
 
-        Delegates to :func:`fleet_rlm.react.validation.validate_assistant_response`.
+        Delegates to :func:`fleet_rlm.core.execution.validation.validate_assistant_response`.
         """
         return validate_assistant_response(
             assistant_response=assistant_response,
