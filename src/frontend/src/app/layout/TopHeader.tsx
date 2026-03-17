@@ -11,7 +11,7 @@ export function TopHeader() {
 
   // Format the activeNav into a nice title
   const titleMap: Record<string, string> = {
-    workspace: "Workspace",
+    workspace: "RLM Workspace",
     volumes: "Volumes",
     settings: "Settings",
   };

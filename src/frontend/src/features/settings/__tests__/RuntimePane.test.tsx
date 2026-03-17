@@ -114,7 +114,7 @@ describe("RuntimePane", () => {
     expect(html).toContain("Pass");
     expect(html).toContain("Test Credentials + Connection");
     expect(html).toContain('data-variant="outline"');
-    expect(html).toContain('data-variant="secondary"');
+    expect(html).toContain("bg-secondary");
     expect(html).toContain("w-full justify-center rounded-lg");
   });
 });

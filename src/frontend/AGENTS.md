@@ -91,9 +91,13 @@ src/features/
 
 ### Components
 
-- `src/components/ui/` - shadcn/ui primitives (Tailwind + Radix)
-- `src/components/prompt-kit/` - AI SDK prompt components (composer, messages)
-- `src/components/chat/` - Chat-specific components
+- `src/components/ui/` - shadcn/ui primitives using @base-ui/react (with @radix-ui/react-slot for asChild pattern)
+- `src/components/prompt-kit/` - AI SDK prompt components (message display, code blocks, attachments)
+  - Renamed from `ai-elements` to align with OpenAI SDK conventions
+  - Main exports: `Message`, `Conversation`, `PromptInput`, `CodeBlock`, `Tool`, `Task`, `Reasoning`
+  - Components use AI SDK types (`Message`, `Attachment`) for seamless integration
+  - Located wrappers preserve repo's `data-slot` conventions and compound component patterns
+- `src/components/chat/` - Chat-specific components (ChatInput, runtime/execution mode dropdowns)
 - `src/components/shared/` - Shared utilities
 
 ## UI & Styling
