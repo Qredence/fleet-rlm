@@ -108,6 +108,7 @@ function ContextMenuItem({
   inset,
   variant = "default",
   onSelect,
+  onClick,
   ...props
 }: Omit<React.ComponentProps<typeof ContextMenuPrimitive.Item>, "onSelect"> & {
   inset?: boolean;
@@ -124,8 +125,15 @@ function ContextMenuItem({
         className,
       )}
       onClick={
-        onSelect
-          ? (event) => onSelect(event.nativeEvent)
+        onSelect || onClick
+          ? (event) => {
+              if (onSelect) {
+                onSelect(event.nativeEvent);
+              }
+              if (onClick) {
+                onClick(event);
+              }
+            }
           : undefined
       }
       {...props}

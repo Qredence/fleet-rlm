@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils/cn";
 
 function Accordion({
   type = "multiple",
-  collapsible: _collapsible,
+  collapsible,
   value,
   defaultValue,
   ...props
@@ -31,6 +31,9 @@ function Accordion({
     defaultValue: normalizedDefaultValue,
     multiple: type === "multiple",
     value: normalizedValue,
+    ...(type === "single" && typeof collapsible !== "undefined"
+      ? { allowEmptySelection: collapsible }
+      : {}),
   } as unknown as React.ComponentProps<typeof AccordionPrimitive.Root>;
 
   return <AccordionPrimitive.Root {...accordionProps} />;

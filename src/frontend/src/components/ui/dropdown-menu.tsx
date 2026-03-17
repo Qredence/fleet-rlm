@@ -86,6 +86,7 @@ function DropdownMenuItem({
   onSelect?: ((event: Event) => void) | undefined;
 }) {
   const { children, props: itemProps, render } = withAsChild(props);
+  const { onClick: itemOnClick, ...restItemProps } = itemProps;
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
@@ -96,12 +97,15 @@ function DropdownMenuItem({
         "focus:bg-muted data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/20 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive [&_svg:not([class*='text-'])]:text-muted-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
-      onClick={
-        onSelect
-          ? (event) => onSelect(event.nativeEvent)
-          : undefined
-      }
-      {...itemProps}
+      onClick={(event) => {
+        if (onSelect) {
+          onSelect(event.nativeEvent);
+        }
+        if (itemOnClick) {
+          itemOnClick(event);
+        }
+      }}
+      {...restItemProps}
     >
       {children}
     </DropdownMenuPrimitive.Item>
