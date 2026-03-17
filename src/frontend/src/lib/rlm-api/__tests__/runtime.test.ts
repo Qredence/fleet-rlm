@@ -120,18 +120,19 @@ describe("runtimeEndpoints", () => {
   });
 
   it("does not use read fallback for same-origin errors without explicit mock mode", async () => {
+    vi.stubEnv("VITE_FLEET_API_URL", "");
+    vi.stubEnv("VITE_FLEET_WS_URL", "");
+    vi.stubEnv("VITE_MOCK_MODE", "");
+    vi.stubEnv("VITE_E2E", "");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Not Found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { runtimeEndpoints } = await loadRuntimeModule({
-      baseUrl: "",
-      e2eMode: false,
-      mockMode: false,
-    });
+    const { runtimeEndpoints } = await loadRuntimeModule();
 
     await expect(runtimeEndpoints.status()).rejects.toEqual(
       expect.objectContaining<RlmApiError>({
         detail: "Not Found",
+        message: "[404] Not Found",
         name: "RlmApiError",
         status: 404,
       }),
@@ -164,6 +165,7 @@ describe("runtimeEndpoints", () => {
     ).rejects.toEqual(
       expect.objectContaining<RlmApiError>({
         detail: "Bad Gateway",
+        message: "[502] Bad Gateway",
         name: "RlmApiError",
         status: 502,
       }),
