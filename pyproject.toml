@@ -101,7 +101,7 @@ full = [
 [project.scripts]
 fleet = "fleet_rlm.cli.main:main"
 fleet-rlm = "fleet_rlm.cli.fleet_cli:main"
-rlm-modal = "fleet_rlm.cli.main:main"
+rlm-modal = "fleet_rlm.cli.fleet_cli:main"
 
 [tool.fastapi]
 entrypoint = "fleet_rlm.api.main:app"
