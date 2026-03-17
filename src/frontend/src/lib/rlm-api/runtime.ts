@@ -18,35 +18,50 @@ export interface RuntimeSettingsPatchInput {
   updates: Record<string, string>;
 }
 
-function shouldUseRuntimeFallback(error: unknown): boolean {
-  const localLoopbackHosts = new Set(["127.0.0.1", "localhost"]);
-  let hasLocalBackendBaseUrl = false;
-  if (rlmApiConfig.baseUrl) {
-    try {
-      hasLocalBackendBaseUrl = localLoopbackHosts.has(new URL(rlmApiConfig.baseUrl).hostname);
-    } catch {
-      hasLocalBackendBaseUrl = false;
-    }
+const localLoopbackHosts = new Set(["127.0.0.1", "localhost"]);
+
+function hasLocalBackendBaseUrl(): boolean {
+  if (!rlmApiConfig.baseUrl) return false;
+
+  try {
+    return localLoopbackHosts.has(new URL(rlmApiConfig.baseUrl).hostname);
+  } catch {
+    return false;
   }
+}
 
-  const supportsFrontendFallback =
-    !rlmApiConfig.baseUrl || hasLocalBackendBaseUrl || import.meta.env.VITE_E2E === "1";
-
-  if (rlmApiConfig.mockMode) return true;
-  if (!supportsFrontendFallback) return false;
+function isRetryableRuntimeFailure(error: unknown): boolean {
   if (error instanceof RlmApiError) {
     return (
       error.status === 404 || error.status === 502 || error.status === 503 || error.status === 504
     );
   }
+
   return error instanceof SyntaxError || error instanceof TypeError;
 }
 
-async function withRuntimeFallback<T>(request: () => Promise<T>, fallback: () => T): Promise<T> {
+function shouldUseRuntimeReadFallback(error: unknown): boolean {
+  const supportsFrontendFallback =
+    rlmApiConfig.mockMode || rlmApiConfig.e2eMode || hasLocalBackendBaseUrl();
+
+  return supportsFrontendFallback && isRetryableRuntimeFailure(error);
+}
+
+function shouldUseRuntimeWriteFallback(error: unknown): boolean {
+  const supportsFrontendFallback = rlmApiConfig.mockMode || rlmApiConfig.e2eMode;
+
+  return supportsFrontendFallback && isRetryableRuntimeFailure(error);
+}
+
+async function withRuntimeFallback<T>(
+  request: () => Promise<T>,
+  fallback: () => T,
+  shouldFallback: (error: unknown) => boolean = shouldUseRuntimeReadFallback,
+): Promise<T> {
   try {
     return await request();
   } catch (error) {
-    if (shouldUseRuntimeFallback(error)) {
+    if (shouldFallback(error)) {
       return fallback();
     }
     throw error;
@@ -70,6 +85,7 @@ export const runtimeEndpoints = {
           signal,
         ),
       () => applyMockRuntimeUpdates(input.updates),
+      shouldUseRuntimeWriteFallback,
     );
   },
 
