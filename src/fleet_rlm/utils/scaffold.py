@@ -31,23 +31,62 @@ from pathlib import Path
 from typing import Any
 
 
+def _has_visible_entries(path: Path, *, directories_only: bool = False) -> bool:
+    """Return True when *path* contains at least one non-ignored entry."""
+    if not path.exists():
+        return False
+
+    for child in path.iterdir():
+        if _is_ignored(Path(child.name)):
+            continue
+        if directories_only and not child.is_dir():
+            continue
+        return True
+
+    return False
+
+
+def _is_complete_scaffold_dir(scaffold_dir: Path) -> bool:
+    """Return True when a scaffold tree contains all installable categories."""
+    return (
+        _has_visible_entries(scaffold_dir / "skills", directories_only=True)
+        and _has_visible_entries(scaffold_dir / "agents")
+        and _has_visible_entries(scaffold_dir / "teams", directories_only=True)
+        and _has_visible_entries(scaffold_dir / "hooks")
+    )
+
+
 def get_scaffold_dir() -> Path:
     """Get the path to the bundled scaffold directory.
 
     Returns:
-        Path to the _scaffold/ directory in the installed package.
+        Path to the scaffold directory in the current checkout or package.
 
     Raises:
         FileNotFoundError: If the scaffold directory cannot be located.
     """
-    # The _scaffold directory is in the parent package directory
-    scaffold_dir = Path(__file__).parent.parent / "_scaffold"
-    if not scaffold_dir.exists():
+    package_root = Path(__file__).parent.parent
+    candidates = (
+        package_root / "features" / "scaffold",
+        package_root / "_scaffold",
+    )
+
+    for scaffold_dir in candidates:
+        if _is_complete_scaffold_dir(scaffold_dir):
+            return scaffold_dir
+
+    existing = [str(path) for path in candidates if path.exists()]
+    searched = ", ".join(str(path) for path in candidates)
+    if existing:
         raise FileNotFoundError(
-            f"Scaffold directory not found at {scaffold_dir}. "
-            "The fleet-rlm package may not be properly installed."
+            "Found scaffold directories but they are incomplete: "
+            f"{', '.join(existing)}. Searched: {searched}."
         )
-    return scaffold_dir
+
+    raise FileNotFoundError(
+        f"Scaffold directory not found. Searched: {searched}. "
+        "The fleet-rlm package may not be properly installed."
+    )
 
 
 def _parse_frontmatter(path: Path) -> dict[str, Any]:

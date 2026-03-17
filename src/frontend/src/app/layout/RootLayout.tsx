@@ -40,8 +40,7 @@ function ShellSelector() {
   useEffect(() => {
     const handleOpenLogin = (event: Event) => {
       const customEvent = event as CustomEvent<OpenLoginEventDetail>;
-      loginReturnFocusRef.current =
-        customEvent.detail?.returnFocusTarget ?? null;
+      loginReturnFocusRef.current = customEvent.detail?.returnFocusTarget ?? null;
       setLoginOpen(true);
       customEvent.preventDefault();
     };

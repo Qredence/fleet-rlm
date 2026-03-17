@@ -26,7 +26,6 @@ from typing import Any
 import typer
 from omegaconf import OmegaConf
 
-from fleet_rlm.features.terminal.chat import TerminalChatOptions, run_terminal_chat
 from fleet_rlm.infrastructure.config.env import AppConfig
 
 from .commands.init_cmd import register_init_command
@@ -97,6 +96,8 @@ def chat(
     ),
 ) -> None:
     """Start standalone in-process interactive terminal chat."""
+    from fleet_rlm.features.terminal.chat import TerminalChatOptions, run_terminal_chat
+
     global _CONFIG
     if _CONFIG is None:
         typer.echo(

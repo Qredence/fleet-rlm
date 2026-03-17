@@ -1,13 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AppSidebar } from "@/app/layout/AppSidebar";
 import type { Conversation } from "@/stores/chatHistoryStore";
@@ -41,11 +34,7 @@ vi.mock("lucide-react", () => {
 });
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    className,
-    ...props
-  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  Button: ({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" className={className} {...props}>
       {children}
     </button>
@@ -162,9 +151,7 @@ describe("AppSidebar session actions", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(useNavigationStore.getState().requestedConversationId).toBe(
-      "conv-1",
-    );
+    expect(useNavigationStore.getState().requestedConversationId).toBe("conv-1");
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
 
     act(() => {

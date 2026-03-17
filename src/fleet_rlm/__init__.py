@@ -53,13 +53,6 @@ _LAZY_MODULES: dict[str, str] = {
     "daytona_rlm": "fleet_rlm.daytona_rlm",
 }
 
-# Bind exported submodules eagerly so names listed in __all__ are real module
-# attributes at import time and remain compatible with star imports/review tools.
-runners = import_module(_LAZY_MODULES["runners"])
-fleet_cli = import_module(_LAZY_MODULES["fleet_cli"])
-scaffold = import_module(_LAZY_MODULES["scaffold"])
-daytona_rlm = import_module(_LAZY_MODULES["daytona_rlm"])
-
 
 def __getattr__(name: str) -> Any:
     """Load exported symbols lazily to reduce top-level import cost."""

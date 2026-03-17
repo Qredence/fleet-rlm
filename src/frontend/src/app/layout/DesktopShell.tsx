@@ -28,8 +28,7 @@ const OPEN_LAYOUT = { chat: 50, builder: 50 };
 const CLOSED_LAYOUT = { chat: 100, builder: 0 };
 
 function DesktopShell() {
-  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
-    useNavigationStore();
+  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
 
   /* ── Sidebar state ─────────────────────────────────────────── */
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -107,9 +106,7 @@ function DesktopShell() {
           <PanelResizeHandle
             className={cn(
               "relative transition-colors",
-              isCanvasOpen
-                ? "w-px bg-border-subtle hover:bg-accent"
-                : "w-0 pointer-events-none",
+              isCanvasOpen ? "w-px bg-border-subtle hover:bg-accent" : "w-0 pointer-events-none",
             )}
             onPointerDown={() => setIsResizing(true)}
             disabled={!isCanvasOpen}

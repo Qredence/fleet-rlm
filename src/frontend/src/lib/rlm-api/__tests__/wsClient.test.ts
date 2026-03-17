@@ -1,11 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeEach,
-  afterEach,
-} from "vite-plus/test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
 import type { WsCommandRequest, WsMessageRequest } from "../wsClient";
 
 const MockWebSocket = vi.fn();
@@ -49,10 +42,7 @@ function installSocketFactory() {
     const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
 
     this.readyState = 0;
-    this.addEventListener = (
-      event: string,
-      cb: (...args: unknown[]) => void,
-    ) => {
+    this.addEventListener = (event: string, cb: (...args: unknown[]) => void) => {
       if (!listeners[event]) listeners[event] = [];
       listeners[event].push(cb);
     };
@@ -251,9 +241,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
 
     await Promise.resolve();
 
-    expect(sockets[0]?.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "cancel" }),
-    );
+    expect(sockets[0]?.send).toHaveBeenCalledWith(JSON.stringify({ type: "cancel" }));
     expect(sockets[0]?.close).not.toHaveBeenCalled();
 
     sockets[0]?.trigger("message", {
@@ -319,9 +307,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
 
     await Promise.resolve();
 
-    expect(sockets[0]?.send).not.toHaveBeenCalledWith(
-      JSON.stringify({ type: "cancel" }),
-    );
+    expect(sockets[0]?.send).not.toHaveBeenCalledWith(JSON.stringify({ type: "cancel" }));
     expect(sockets[0]?.close).toHaveBeenCalled();
   });
 

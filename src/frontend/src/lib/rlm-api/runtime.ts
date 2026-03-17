@@ -23,36 +23,26 @@ function shouldUseRuntimeFallback(error: unknown): boolean {
   let hasLocalBackendBaseUrl = false;
   if (rlmApiConfig.baseUrl) {
     try {
-      hasLocalBackendBaseUrl = localLoopbackHosts.has(
-        new URL(rlmApiConfig.baseUrl).hostname,
-      );
+      hasLocalBackendBaseUrl = localLoopbackHosts.has(new URL(rlmApiConfig.baseUrl).hostname);
     } catch {
       hasLocalBackendBaseUrl = false;
     }
   }
 
   const supportsFrontendFallback =
-    !rlmApiConfig.baseUrl ||
-    hasLocalBackendBaseUrl ||
-    import.meta.env.VITE_E2E === "1";
+    !rlmApiConfig.baseUrl || hasLocalBackendBaseUrl || import.meta.env.VITE_E2E === "1";
 
   if (rlmApiConfig.mockMode) return true;
   if (!supportsFrontendFallback) return false;
   if (error instanceof RlmApiError) {
     return (
-      error.status === 404 ||
-      error.status === 502 ||
-      error.status === 503 ||
-      error.status === 504
+      error.status === 404 || error.status === 502 || error.status === 503 || error.status === 504
     );
   }
   return error instanceof SyntaxError || error instanceof TypeError;
 }
 
-async function withRuntimeFallback<T>(
-  request: () => Promise<T>,
-  fallback: () => T,
-): Promise<T> {
+async function withRuntimeFallback<T>(request: () => Promise<T>, fallback: () => T): Promise<T> {
   try {
     return await request();
   } catch (error) {
@@ -66,11 +56,7 @@ async function withRuntimeFallback<T>(
 export const runtimeEndpoints = {
   settings(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () =>
-        rlmApiClient.get<RuntimeSettingsSnapshot>(
-          "/api/v1/runtime/settings",
-          signal,
-        ),
+      () => rlmApiClient.get<RuntimeSettingsSnapshot>("/api/v1/runtime/settings", signal),
       () => getMockRuntimeSettings(),
     );
   },
@@ -113,11 +99,7 @@ export const runtimeEndpoints = {
 
   status(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () =>
-        rlmApiClient.get<RuntimeStatusResponse>(
-          "/api/v1/runtime/status",
-          signal,
-        ),
+      () => rlmApiClient.get<RuntimeStatusResponse>("/api/v1/runtime/status", signal),
       () => getMockRuntimeStatus(),
     );
   },
