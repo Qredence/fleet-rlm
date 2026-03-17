@@ -68,14 +68,14 @@ For frontend development, install dependencies in the `src/frontend/` directory:
 
 ```bash
 cd src/frontend
-bun install --frozen-lockfile
+pnpm install --frozen-lockfile
 ```
 
 Verify the frontend setup:
 
 ```bash
-bun run type-check
-bun run test:unit
+pnpm run type-check
+pnpm run test:unit
 ```
 
 ### 4. Configure Modal
@@ -118,58 +118,58 @@ The `.env.example` file contains all configurable environment variables. Key cat
 
 ### Required: LLM Configuration
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DSPY_LM_MODEL` | LLM model for the planner (DSPy's reasoning engine) | `openai/gpt-4o` |
-| `DSPY_LLM_API_KEY` | API key for the LLM provider | `sk-...` |
+| Variable           | Description                                         | Example         |
+| ------------------ | --------------------------------------------------- | --------------- |
+| `DSPY_LM_MODEL`    | LLM model for the planner (DSPy's reasoning engine) | `openai/gpt-4o` |
+| `DSPY_LLM_API_KEY` | API key for the LLM provider                        | `sk-...`        |
 
 ### Optional: API Server & Database
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string (Neon) | - |
-| `AUTH_MODE` | Auth mode: `dev` or `entra` | `dev` |
-| `APP_ENV` | Environment: `local`, `staging`, `production` | `local` |
-| `AUTH_REQUIRED` | Require authentication on API routes | `false` |
-| `DEV_JWT_SECRET` | Secret for local development tokens | `change-me` |
+| Variable         | Description                                   | Default     |
+| ---------------- | --------------------------------------------- | ----------- |
+| `DATABASE_URL`   | PostgreSQL connection string (Neon)           | -           |
+| `AUTH_MODE`      | Auth mode: `dev` or `entra`                   | `dev`       |
+| `APP_ENV`        | Environment: `local`, `staging`, `production` | `local`     |
+| `AUTH_REQUIRED`  | Require authentication on API routes          | `false`     |
+| `DEV_JWT_SECRET` | Secret for local development tokens           | `change-me` |
 
 ### Optional: MLflow Tracing
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MLFLOW_ENABLED` | Enable MLflow tracing | `true` |
-| `MLFLOW_TRACKING_URI` | MLflow server URL | `http://127.0.0.1:5000` |
-| `MLFLOW_EXPERIMENT` | Experiment name for traces | `fleet-rlm` |
+| Variable              | Description                | Default                 |
+| --------------------- | -------------------------- | ----------------------- |
+| `MLFLOW_ENABLED`      | Enable MLflow tracing      | `true`                  |
+| `MLFLOW_TRACKING_URI` | MLflow server URL          | `http://127.0.0.1:5000` |
+| `MLFLOW_EXPERIMENT`   | Experiment name for traces | `fleet-rlm`             |
 
 ### Optional: Analytics
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `POSTHOG_ENABLED` | Enable PostHog analytics | `false` |
-| `POSTHOG_HOST` | PostHog host URL | `https://eu.i.posthog.com` |
+| Variable          | Description              | Default                    |
+| ----------------- | ------------------------ | -------------------------- |
+| `POSTHOG_ENABLED` | Enable PostHog analytics | `false`                    |
+| `POSTHOG_HOST`    | PostHog host URL         | `https://eu.i.posthog.com` |
 
 > **Security Note:** Never commit your `.env` file with real secrets. Use Modal's secret management for team setups.
 
 ## Frontend Development Commands
 
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Start development server |
-| `bun run check` | Run type-check, lint, tests, and build |
-| `bun run test:unit` | Run unit tests |
-| `bun run test:e2e` | Run end-to-end tests |
-| `bun run build` | Build for production |
+| Command              | Description                            |
+| -------------------- | -------------------------------------- |
+| `pnpm run dev`       | Start development server               |
+| `pnpm run check`     | Run type-check, lint, tests, and build |
+| `pnpm run test:unit` | Run unit tests                         |
+| `pnpm run test:e2e`  | Run end-to-end tests                   |
+| `pnpm run build`     | Build for production                   |
 
 ## Common Makefile Targets
 
 The project includes a `Makefile` for common development tasks:
 
-| Target | Command |
-|--------|---------|
-| `make sync-all` | Install all dependencies (`uv sync --all-extras --dev`) |
-| `make test-fast` | Run tests excluding `live_llm` and `benchmark` |
-| `make quality-gate` | Run lint, format check, type check, and tests |
-| `make mlflow-server` | Start local MLflow server on port 5000 |
+| Target               | Command                                                 |
+| -------------------- | ------------------------------------------------------- |
+| `make sync-all`      | Install all dependencies (`uv sync --all-extras --dev`) |
+| `make test-fast`     | Run tests excluding `live_llm` and `benchmark`          |
+| `make quality-gate`  | Run lint, format check, type check, and tests           |
+| `make mlflow-server` | Start local MLflow server on port 5000                  |
 
 ## Next Steps
 

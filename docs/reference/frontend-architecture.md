@@ -44,91 +44,91 @@ src/frontend/src/
 
 The primary chat interface for DSPy.RLM runtime. This is the main user-facing feature.
 
-| File | Purpose |
-|------|---------|
-| `RlmWorkspace.tsx` | Root workspace component; orchestrates chat input, message list, and conversation history |
-| `ChatMessageList.tsx` | Renders the scrollable list of chat messages with streaming support |
-| `ConversationHistory.tsx` | Sidebar showing saved conversation history |
-| `ClarificationCard.tsx` | UI for handling clarification requests from the agent |
-| `useBackendChatRuntime.ts` | Hook managing WebSocket-based chat runtime state |
-| `backendChatEventAdapter.ts` | Transforms WebSocket frames into React state updates |
-| `backendChatEventReferences.ts` | Reference handling for tool outputs and citations |
-| `backendChatEventToolParts.ts` | Tool result rendering utilities |
-| `chatDisplayItems.ts` | Display item model for message rendering |
-| `runtime-types.ts` | TypeScript types for runtime messages |
+| File                            | Purpose                                                                                   |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| `RlmWorkspace.tsx`              | Root workspace component; orchestrates chat input, message list, and conversation history |
+| `ChatMessageList.tsx`           | Renders the scrollable list of chat messages with streaming support                       |
+| `ConversationHistory.tsx`       | Sidebar showing saved conversation history                                                |
+| `ClarificationCard.tsx`         | UI for handling clarification requests from the agent                                     |
+| `useBackendChatRuntime.ts`      | Hook managing WebSocket-based chat runtime state                                          |
+| `backendChatEventAdapter.ts`    | Transforms WebSocket frames into React state updates                                      |
+| `backendChatEventReferences.ts` | Reference handling for tool outputs and citations                                         |
+| `backendChatEventToolParts.ts`  | Tool result rendering utilities                                                           |
+| `chatDisplayItems.ts`           | Display item model for message rendering                                                  |
+| `runtime-types.ts`              | TypeScript types for runtime messages                                                     |
 
 #### `assistant-content/` Subdirectory
 
 Components for rendering assistant responses with rich content:
 
-| File | Purpose |
-|------|---------|
-| `AssistantTurnContent.tsx` | Main container for assistant response rendering |
-| `AssistantAnswerBlock.tsx` | Renders the primary answer section |
-| `AssistantPreviewSections.tsx` | Preview sections for tool outputs |
-| `AssistantSummaryBar.tsx` | Summary bar with execution metadata |
-| `EvidenceGroup.tsx` | Groups evidence/citations |
-| `ExecutionDetailsGroup.tsx` | Detailed execution trace display |
-| `ExecutionHighlightsGroup.tsx` | Highlighted execution steps |
-| `TrajectoryTimeline.tsx` | Timeline visualization of agent trajectory |
-| `buildAssistantContentModel.ts` | Data model builder for assistant content |
-| `runtimeBadges.tsx` | Status badges for runtime states |
-| `types.ts` | TypeScript types for assistant content |
+| File                            | Purpose                                         |
+| ------------------------------- | ----------------------------------------------- |
+| `AssistantTurnContent.tsx`      | Main container for assistant response rendering |
+| `AssistantAnswerBlock.tsx`      | Renders the primary answer section              |
+| `AssistantPreviewSections.tsx`  | Preview sections for tool outputs               |
+| `AssistantSummaryBar.tsx`       | Summary bar with execution metadata             |
+| `EvidenceGroup.tsx`             | Groups evidence/citations                       |
+| `ExecutionDetailsGroup.tsx`     | Detailed execution trace display                |
+| `ExecutionHighlightsGroup.tsx`  | Highlighted execution steps                     |
+| `TrajectoryTimeline.tsx`        | Timeline visualization of agent trajectory      |
+| `buildAssistantContentModel.ts` | Data model builder for assistant content        |
+| `runtimeBadges.tsx`             | Status badges for runtime states                |
+| `types.ts`                      | TypeScript types for assistant content          |
 
 #### `message-inspector/` Subdirectory
 
-| File | Purpose |
-|------|---------|
+| File                        | Purpose                                                   |
+| --------------------------- | --------------------------------------------------------- |
 | `MessageInspectorPanel.tsx` | Inspect message details, tool calls, and execution traces |
 
 ### `features/settings/`
 
 Settings dialog with multiple panes for runtime configuration.
 
-| File | Purpose |
-|------|---------|
-| `SettingsDialog.tsx` | Root settings dialog container |
-| `GroupedSettingsPane.tsx` | Settings pane with grouped sections |
-| `RuntimePane.tsx` | Runtime model configuration (DSPY_LM_MODEL, etc.) |
-| `useRuntimeSettings.ts` | Hook for fetching and updating runtime settings |
-| `SettingsPaneContent.tsx` | Generic settings pane layout |
-| `SettingsToggleRow.tsx` | Toggle switch row component |
-| `types.ts` | Settings-related types |
-| `runtimePaneHydration.ts` | Hydration utilities for runtime settings |
+| File                      | Purpose                                           |
+| ------------------------- | ------------------------------------------------- |
+| `SettingsDialog.tsx`      | Root settings dialog container                    |
+| `GroupedSettingsPane.tsx` | Settings pane with grouped sections               |
+| `RuntimePane.tsx`         | Runtime model configuration (DSPY_LM_MODEL, etc.) |
+| `useRuntimeSettings.ts`   | Hook for fetching and updating runtime settings   |
+| `SettingsPaneContent.tsx` | Generic settings pane layout                      |
+| `SettingsToggleRow.tsx`   | Toggle switch row component                       |
+| `types.ts`                | Settings-related types                            |
+| `runtimePaneHydration.ts` | Hydration utilities for runtime settings          |
 
 ### `features/shell/`
 
 Shell-level components shared across the application.
 
-| File | Purpose |
-|------|---------|
-| `CommandPalette.tsx` | Keyboard-accessible command palette (Cmd+K) |
-| `UserMenu.tsx` | User dropdown menu with profile and logout |
-| `LoginDialog.tsx` | Login modal for authentication |
-| `IntegrationsDialog.tsx` | Integration configuration dialog |
-| `PricingDialog.tsx` | Pricing/plans display |
-| `MobileTabBar.tsx` | Bottom navigation for mobile |
-| `NavTab.tsx` | Individual navigation tab |
+| File                     | Purpose                                     |
+| ------------------------ | ------------------------------------------- |
+| `CommandPalette.tsx`     | Keyboard-accessible command palette (Cmd+K) |
+| `UserMenu.tsx`           | User dropdown menu with profile and logout  |
+| `LoginDialog.tsx`        | Login modal for authentication              |
+| `IntegrationsDialog.tsx` | Integration configuration dialog            |
+| `PricingDialog.tsx`      | Pricing/plans display                       |
+| `MobileTabBar.tsx`       | Bottom navigation for mobile                |
+| `NavTab.tsx`             | Individual navigation tab                   |
 
 ### `features/artifacts/`
 
 Code and file artifact display components.
 
-| File | Purpose |
-|------|---------|
-| `CodeArtifact.tsx` | Syntax-highlighted code display with copy actions |
-| `FileDetail.tsx` | File content viewer with metadata |
-| `CanvasSwitcher.tsx` | Switch between artifact views |
-| `PanelHeaderChip.tsx` | Header chip for artifact panels |
-| `parsers/` | Parsers for artifact content |
+| File                  | Purpose                                           |
+| --------------------- | ------------------------------------------------- |
+| `CodeArtifact.tsx`    | Syntax-highlighted code display with copy actions |
+| `FileDetail.tsx`      | File content viewer with metadata                 |
+| `CanvasSwitcher.tsx`  | Switch between artifact views                     |
+| `PanelHeaderChip.tsx` | Header chip for artifact panels                   |
+| `parsers/`            | Parsers for artifact content                      |
 
 ### `features/volumes/`
 
 Modal volume browser for persistent storage.
 
-| File | Purpose |
-|------|---------|
-| `VolumesBrowser.tsx` | Main volume browser component |
+| File                         | Purpose                          |
+| ---------------------------- | -------------------------------- |
+| `VolumesBrowser.tsx`         | Main volume browser component    |
 | `VolumesBrowserSections.tsx` | Sectioned volume content display |
 
 ---
@@ -140,6 +140,7 @@ Modal volume browser for persistent storage.
 shadcn/ui components styled for the application. These are Radix UI primitives with Tailwind styling.
 
 Key components include:
+
 - `button.tsx`, `icon-button.tsx` - Button variants
 - `dialog.tsx`, `drawer.tsx`, `sheet.tsx` - Modal surfaces
 - `sidebar.tsx` - Sidebar navigation
@@ -157,74 +158,74 @@ Key components include:
 
 AI chat interface components from the ai-elements library. These provide specialized UI for chat applications.
 
-| Component | Purpose |
-|-----------|---------|
-| `prompt-input.tsx` | Rich text input with attachment support |
-| `message.tsx` | Chat message container |
-| `agent.tsx` | Agent avatar and status |
-| `reasoning.tsx` | Chain-of-thought display |
-| `chain-of-thought.tsx` | Thinking process visualization |
-| `tool.tsx` | Tool call display |
-| `code-block.tsx` | Syntax-highlighted code blocks |
-| `terminal.tsx` | Terminal output display |
-| `test-results.tsx` | Test result visualization |
-| `file-tree.tsx` | File tree navigation |
-| `commit.tsx` | Git commit display |
-| `schema-display.tsx` | JSON schema visualization |
-| `attachments.tsx` | File attachment display |
-| `voice-selector.tsx`, `mic-selector.tsx` | Voice input components |
-| `speech-input.tsx`, `audio-player.tsx` | Audio handling |
+| Component                                | Purpose                                 |
+| ---------------------------------------- | --------------------------------------- |
+| `prompt-input.tsx`                       | Rich text input with attachment support |
+| `message.tsx`                            | Chat message container                  |
+| `agent.tsx`                              | Agent avatar and status                 |
+| `reasoning.tsx`                          | Chain-of-thought display                |
+| `chain-of-thought.tsx`                   | Thinking process visualization          |
+| `tool.tsx`                               | Tool call display                       |
+| `code-block.tsx`                         | Syntax-highlighted code blocks          |
+| `terminal.tsx`                           | Terminal output display                 |
+| `test-results.tsx`                       | Test result visualization               |
+| `file-tree.tsx`                          | File tree navigation                    |
+| `commit.tsx`                             | Git commit display                      |
+| `schema-display.tsx`                     | JSON schema visualization               |
+| `attachments.tsx`                        | File attachment display                 |
+| `voice-selector.tsx`, `mic-selector.tsx` | Voice input components                  |
+| `speech-input.tsx`, `audio-player.tsx`   | Audio handling                          |
 
 ### `components/shared/`
 
 Application-specific shared components.
 
-| Component | Purpose |
-|-----------|---------|
-| `ErrorBoundary.tsx` | React error boundary with fallback UI |
-| `BrandMark.tsx` | Logo/brand mark |
-| `LargeTitleHeader.tsx` | Page header component |
-| `SkillMarkdown.tsx` | Markdown renderer for skill documentation |
-| `SettingsRow.tsx`, `SettingsNavItem.tsx` | Settings layout components |
-| `ListRow.tsx` | Generic list row |
-| `SectionHeader.tsx` | Section header with title |
-| `ToggleSwitch.tsx` | Toggle switch component |
-| `ResolvedChip.tsx` | Status chip for resolved items |
-| `SuggestionIcons.tsx` | Icon set for suggestions |
-| `ImageWithFallback.tsx` | Image with fallback |
-| `SkillCardSkeleton.tsx` | Skeleton loader for skill cards |
-| `PageSkeleton.tsx` | Page-level skeleton loader |
+| Component                                | Purpose                                   |
+| ---------------------------------------- | ----------------------------------------- |
+| `ErrorBoundary.tsx`                      | React error boundary with fallback UI     |
+| `BrandMark.tsx`                          | Logo/brand mark                           |
+| `LargeTitleHeader.tsx`                   | Page header component                     |
+| `SkillMarkdown.tsx`                      | Markdown renderer for skill documentation |
+| `SettingsRow.tsx`, `SettingsNavItem.tsx` | Settings layout components                |
+| `ListRow.tsx`                            | Generic list row                          |
+| `SectionHeader.tsx`                      | Section header with title                 |
+| `ToggleSwitch.tsx`                       | Toggle switch component                   |
+| `ResolvedChip.tsx`                       | Status chip for resolved items            |
+| `SuggestionIcons.tsx`                    | Icon set for suggestions                  |
+| `ImageWithFallback.tsx`                  | Image with fallback                       |
+| `SkillCardSkeleton.tsx`                  | Skeleton loader for skill cards           |
+| `PageSkeleton.tsx`                       | Page-level skeleton loader                |
 
 ### `components/chat/`
 
 Chat-specific components.
 
-| Component | Purpose |
-|-----------|---------|
+| Component       | Purpose                                           |
+| --------------- | ------------------------------------------------- |
 | `ChatInput.tsx` | Main chat input component with attachment support |
 
 #### `chat/input/` Subdirectory
 
-| Component | Purpose |
-|-----------|---------|
-| `AgentDropdown.tsx` | Agent selection dropdown |
-| `AttachmentChip.tsx` | Attached file chip display |
-| `AttachmentDropdown.tsx` | Attachment management dropdown |
+| Component                   | Purpose                                  |
+| --------------------------- | ---------------------------------------- |
+| `AgentDropdown.tsx`         | Agent selection dropdown                 |
+| `AttachmentChip.tsx`        | Attached file chip display               |
+| `AttachmentDropdown.tsx`    | Attachment management dropdown           |
 | `ExecutionModeDropdown.tsx` | Execution mode selector (auto/step/repl) |
-| `SendButton.tsx` | Send message button |
-| `SettingsDropdown.tsx` | Quick settings access |
-| `ThinkButton.tsx` | Toggle thinking mode |
-| `composerActionStyles.ts` | Shared styles for composer actions |
+| `SendButton.tsx`            | Send message button                      |
+| `SettingsDropdown.tsx`      | Quick settings access                    |
+| `ThinkButton.tsx`           | Toggle thinking mode                     |
+| `composerActionStyles.ts`   | Shared styles for composer actions       |
 
 ### `components/domain/artifacts/`
 
 Domain-specific artifact display.
 
-| Component | Purpose |
-|-----------|---------|
-| `CodeArtifact.tsx` | Code display with syntax highlighting |
-| `FileDetail.tsx` | File content viewer |
-| `CanvasSwitcher.tsx` | Artifact view switcher |
+| Component            | Purpose                               |
+| -------------------- | ------------------------------------- |
+| `CodeArtifact.tsx`   | Code display with syntax highlighting |
+| `FileDetail.tsx`     | File content viewer                   |
+| `CanvasSwitcher.tsx` | Artifact view switcher                |
 
 ---
 
@@ -232,23 +233,23 @@ Domain-specific artifact display.
 
 Located in `hooks/`. These provide reusable stateful logic.
 
-| Hook | Purpose |
-|------|---------|
-| `AuthProvider.tsx` | Context provider for authentication state |
-| `useAuth.ts` | Access authentication state and actions |
-| `useAppNavigate.ts` | Type-safe navigation hook |
-| `useCodeMirror.ts` | CodeMirror editor setup and configuration |
-| `useFilesystem.ts` | File system operations (virtual or real) |
-| `useIsMobile.ts` | Responsive mobile detection |
-| `useStickToBottom.ts` | Auto-scroll to bottom for chat lists |
+| Hook                  | Purpose                                   |
+| --------------------- | ----------------------------------------- |
+| `AuthProvider.tsx`    | Context provider for authentication state |
+| `useAuth.ts`          | Access authentication state and actions   |
+| `useAppNavigate.ts`   | Type-safe navigation hook                 |
+| `useCodeMirror.ts`    | CodeMirror editor setup and configuration |
+| `useFilesystem.ts`    | File system operations (virtual or real)  |
+| `useIsMobile.ts`      | Responsive mobile detection               |
+| `useStickToBottom.ts` | Auto-scroll to bottom for chat lists      |
 
 ### Auth Types
 
-| Type | Purpose |
-|------|---------|
-| `auth-context.ts` | Auth context type definitions |
-| `auth-types.ts` | User profile types |
-| `auth-mock-user.ts` | Mock user for development |
+| Type                | Purpose                       |
+| ------------------- | ----------------------------- |
+| `auth-context.ts`   | Auth context type definitions |
+| `auth-types.ts`     | User profile types            |
+| `auth-mock-user.ts` | Mock user for development     |
 
 ---
 
@@ -258,57 +259,57 @@ Located in `hooks/`. These provide reusable stateful logic.
 
 Backend API client for communicating with the Fleet-RLM server.
 
-| File | Purpose |
-|------|---------|
-| `client.ts` | HTTP client with auth token injection |
-| `wsClient.ts` | WebSocket client for real-time chat |
-| `wsReconnecting.ts` | Auto-reconnecting WebSocket wrapper |
-| `wsFrameParser.ts` | Parse WebSocket frames into typed events |
-| `wsTypes.ts` | TypeScript types for WebSocket messages |
-| `adapters.ts` | Response adapters for API calls |
-| `auth.ts` | Auth endpoints (login, logout, me) |
-| `capabilities.ts` | Feature capability checks |
-| `config.ts` | API configuration (base URL, timeouts) |
-| `messages.ts` | Message-related utilities |
-| `runtime.ts` | Runtime settings API |
-| `types.ts` | Shared API types |
+| File                | Purpose                                  |
+| ------------------- | ---------------------------------------- |
+| `client.ts`         | HTTP client with auth token injection    |
+| `wsClient.ts`       | WebSocket client for real-time chat      |
+| `wsReconnecting.ts` | Auto-reconnecting WebSocket wrapper      |
+| `wsFrameParser.ts`  | Parse WebSocket frames into typed events |
+| `wsTypes.ts`        | TypeScript types for WebSocket messages  |
+| `adapters.ts`       | Response adapters for API calls          |
+| `auth.ts`           | Auth endpoints (login, logout, me)       |
+| `capabilities.ts`   | Feature capability checks                |
+| `config.ts`         | API configuration (base URL, timeouts)   |
+| `messages.ts`       | Message-related utilities                |
+| `runtime.ts`        | Runtime settings API                     |
+| `types.ts`          | Shared API types                         |
 
 ### `lib/auth/`
 
 Authentication utilities for Microsoft Entra ID.
 
-| File | Purpose |
-|------|---------|
-| `entra.ts` | Entra ID authentication flow |
-| `tokenStore.ts` | Secure token storage |
-| `types.ts` | Auth-related types |
+| File            | Purpose                      |
+| --------------- | ---------------------------- |
+| `entra.ts`      | Entra ID authentication flow |
+| `tokenStore.ts` | Secure token storage         |
+| `types.ts`      | Auth-related types           |
 
 ### `lib/data/`
 
 Data types and mock data for development.
 
-| File | Purpose |
-|------|---------|
-| `types.ts` | Core data types (ChatMessage, FsNode, etc.) |
-| `codemirror-modules.ts` | CodeMirror module loading |
-| `codemirror-theme.ts` | CodeMirror theme configuration |
-| `mock/` | Mock data generators |
+| File                    | Purpose                                     |
+| ----------------------- | ------------------------------------------- |
+| `types.ts`              | Core data types (ChatMessage, FsNode, etc.) |
+| `codemirror-modules.ts` | CodeMirror module loading                   |
+| `codemirror-theme.ts`   | CodeMirror theme configuration              |
+| `mock/`                 | Mock data generators                        |
 
 ### `lib/telemetry/`
 
 PostHog analytics integration.
 
-| File | Purpose |
-|------|---------|
-| `client.ts` | PostHog client initialization |
+| File              | Purpose                             |
+| ----------------- | ----------------------------------- |
+| `client.ts`       | PostHog client initialization       |
 | `useTelemetry.ts` | Hook for capturing analytics events |
 
 ### `lib/utils/`
 
 General utilities.
 
-| File | Purpose |
-|------|---------|
+| File    | Purpose                                    |
+| ------- | ------------------------------------------ |
 | `cn.ts` | Class name utility (clsx + tailwind-merge) |
 
 ### `lib/perf/`
@@ -337,12 +338,19 @@ interface ChatStore {
   // Actions
   setSessionId: (id: string) => void;
   resetSession: () => void;
-  setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+  setMessages: (
+    messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
+  ) => void;
   addMessage: (message: ChatMessage) => void;
   clearMessages: () => void;
 
   // Streaming
-  streamMessage: (text: string, onFrameCallback?, queryClient?, options?) => Promise<void>;
+  streamMessage: (
+    text: string,
+    onFrameCallback?,
+    queryClient?,
+    options?,
+  ) => Promise<void>;
   stopStreaming: () => void;
 }
 ```
@@ -399,7 +407,12 @@ LocalStorage-backed conversation history.
 ```typescript
 interface ChatHistoryState {
   conversations: Conversation[];
-  saveConversation: (messages, phase, conversationId?, turnArtifacts?) => string;
+  saveConversation: (
+    messages,
+    phase,
+    conversationId?,
+    turnArtifacts?,
+  ) => string;
   loadConversation: (id: string) => Conversation | null;
   deleteConversation: (id: string) => void;
   clearHistory: () => void;
@@ -446,47 +459,47 @@ State for mock/demo mode.
 
 Root application structure.
 
-| File | Purpose |
-|------|---------|
-| `App.tsx` | Root component |
+| File        | Purpose                             |
+| ----------- | ----------------------------------- |
+| `App.tsx`   | Root component                      |
 | `routes.ts` | Route definitions with react-router |
 
 ### `app/layout/`
 
 Layout components for different contexts.
 
-| Component | Purpose |
-|-----------|---------|
-| `RootLayout.tsx` | Root layout wrapper |
-| `DesktopShell.tsx` | Desktop layout with sidebar |
-| `MobileShell.tsx` | Mobile layout with bottom nav |
-| `TopHeader.tsx` | Top header bar |
+| Component          | Purpose                          |
+| ------------------ | -------------------------------- |
+| `RootLayout.tsx`   | Root layout wrapper              |
+| `DesktopShell.tsx` | Desktop layout with sidebar      |
+| `MobileShell.tsx`  | Mobile layout with bottom nav    |
+| `TopHeader.tsx`    | Top header bar                   |
 | `BuilderPanel.tsx` | Panel for builder/workspace mode |
-| `ChatPanel.tsx` | Chat panel container |
-| `RouteSync.tsx` | Syncs URL with navigation state |
+| `ChatPanel.tsx`    | Chat panel container             |
+| `RouteSync.tsx`    | Syncs URL with navigation state  |
 
 ### `app/pages/`
 
 Route-level page components.
 
-| Page | Route | Purpose |
-|------|-------|---------|
-| `RlmWorkspacePage.tsx` | `/` | Main chat workspace |
-| `SettingsPage.tsx` | `/settings` | Settings page |
-| `VolumesPage.tsx` | `/volumes` | Volume browser |
-| `LoginPage.tsx` | `/login` | Login page |
-| `LogoutPage.tsx` | `/logout` | Logout page |
-| `SignupPage.tsx` | `/signup` | Signup page |
-| `NotFoundPage.tsx` | `*` | 404 page |
-| `RouteErrorPage.tsx` | - | Error boundary page |
+| Page                   | Route       | Purpose             |
+| ---------------------- | ----------- | ------------------- |
+| `RlmWorkspacePage.tsx` | `/`         | Main chat workspace |
+| `SettingsPage.tsx`     | `/settings` | Settings page       |
+| `VolumesPage.tsx`      | `/volumes`  | Volume browser      |
+| `LoginPage.tsx`        | `/login`    | Login page          |
+| `LogoutPage.tsx`       | `/logout`   | Logout page         |
+| `SignupPage.tsx`       | `/signup`   | Signup page         |
+| `NotFoundPage.tsx`     | `*`         | 404 page            |
+| `RouteErrorPage.tsx`   | -           | Error boundary page |
 
 ### `app/providers/`
 
 React context providers.
 
-| Provider | Purpose |
-|----------|---------|
-| `AppProviders.tsx` | Root provider wrapper |
+| Provider            | Purpose                 |
+| ------------------- | ----------------------- |
+| `AppProviders.tsx`  | Root provider wrapper   |
 | `QueryProvider.tsx` | TanStack Query provider |
 
 ---
@@ -696,11 +709,12 @@ Tests are colocated with components in `__tests__/` subdirectories:
 - `stores/__tests__/` - Store tests
 
 Run tests with:
+
 ```bash
 cd src/frontend
-bun run test:unit           # Unit tests
-bun run test:e2e            # E2E tests
-bun run check               # Full check (type, lint, test, build)
+pnpm run test:unit          # Unit tests
+pnpm run test:e2e           # E2E tests
+pnpm run check              # Full check (type, lint, test, build)
 ```
 
 ---
