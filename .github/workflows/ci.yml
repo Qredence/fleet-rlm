@@ -49,6 +49,9 @@ jobs:
           uvx pip-audit
           uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
 
+      - name: Python unused dependencies (deptry)
+        run: uvx deptry . --config pyproject.toml
+
       - name: Lint with Ruff
         run: |
           uv run ruff check src tests
@@ -178,6 +181,7 @@ jobs:
         if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
+          pnpm dlx knip --no-progress || echo "⚠️ Unused dependencies detected - see report above"
           ./node_modules/.bin/vp check
           ./node_modules/.bin/vp test
           ./node_modules/.bin/vp build

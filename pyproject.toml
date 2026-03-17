@@ -145,3 +145,24 @@ markers = [
 
 [tool.ty.src]
 exclude = ["tests/", "scripts/", "notebooks/", "test_modal_guard.py"]
+
+[tool.deptry]
+# Exclude test directories and node_modules from import scanning
+extend_exclude = ["node_modules/"]
+# Ignore unused dependencies (DEP002) - many are transitive or used in optional extras
+# Ignore missing dependencies (DEP001) - many are transitive deps of installed packages
+ignore = ["DEP001", "DEP002"]
+# Mark dev extra as development dependencies
+pep621_dev_dependency_groups = ["dev"]
+# Known first-party modules
+known_first_party = ["fleet_rlm"]
+
+[tool.deptry.package_module_name_map]
+hydra-core = "hydra"
+pydantic-settings = "pydantic_settings"
+prompt-toolkit = "prompt_toolkit"
+python-dotenv = "dotenv"
+pyyaml = "yaml"
+dspy-ai = "dspy"
+PyJWT = "jwt"
+scalar-fastapi = "scalar_fastapi"

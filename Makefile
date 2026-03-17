@@ -1,7 +1,7 @@
 PYTHON_SOURCES = src tests
 PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
-.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold sync-ui build-ui release-check clean mlflow-server
+.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check dependency-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold sync-ui build-ui release-check clean mlflow-server
 
 help:
 	@echo "Targets:"
@@ -20,6 +20,7 @@ help:
 	@echo "  make metadata-check    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make docs-check        - Run docs quality checks"
 	@echo "  make security-check    - Run pip-audit + bandit"
+	@echo "  make dependency-check  - Check for unused dependencies (deptry, knip)"
 	@echo "  make frontend-check    - Run frontend checks when src/frontend exists"
 	@echo "  make quality-gate      - Run lint + format-check + typecheck + test + metadata-check + frontend-check"
 	@echo "  make check             - Alias for quality-gate"
@@ -81,6 +82,12 @@ docs-check:
 security-check:
 	uvx pip-audit
 	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+
+dependency-check:
+	uvx deptry .
+	@if [ -f src/frontend/package.json ]; then \
+		cd src/frontend && pnpm dlx knip --no-progress || echo "⚠️ Unused dependencies detected - see report above"; \
+	fi
 
 frontend-check:
 	@if [ -f src/frontend/package.json ]; then \
