@@ -53,6 +53,13 @@ _LAZY_MODULES: dict[str, str] = {
     "daytona_rlm": "fleet_rlm.daytona_rlm",
 }
 
+# Annotate lazily loaded module exports so static analyzers can see the names
+# listed in ``__all__`` without forcing eager imports at runtime.
+runners: Any
+fleet_cli: Any
+scaffold: Any
+daytona_rlm: Any
+
 
 def __getattr__(name: str) -> Any:
     """Load exported symbols lazily to reduce top-level import cost."""
