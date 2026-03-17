@@ -49,7 +49,7 @@ function TooltipContent({
   align,
   side,
   sideOffset = 0,
-  forceMount,
+  forceMount: _forceMount,
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Popup> & {

@@ -132,7 +132,7 @@ export const Reasoning = memo(
     );
 
     const contextValue = useMemo(
-      () => ({ duration, isOpen, isStreaming, setIsOpen }),
+      () => ({ duration, isOpen: isOpen ?? false, isStreaming, setIsOpen }),
       [duration, isOpen, isStreaming, setIsOpen]
     );
 
@@ -141,7 +141,7 @@ export const Reasoning = memo(
         <Collapsible
           className={cn("not-prose mb-4", className)}
           onOpenChange={handleOpenChange}
-          open={isOpen}
+          open={isOpen ?? false}
           {...props}
         >
           {children}

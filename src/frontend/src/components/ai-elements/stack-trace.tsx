@@ -194,7 +194,7 @@ export const StackTrace = memo(
 
     const contextValue = useMemo(
       () => ({
-        isOpen,
+        isOpen: isOpen ?? false,
         onFilePathClick,
         raw: trace,
         setIsOpen,

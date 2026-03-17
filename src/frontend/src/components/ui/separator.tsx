@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils/cn";
 function Separator({
   className,
   orientation = "horizontal",
-  decorative = true,
+  decorative: _decorative = true,
   ...props
 }: React.ComponentProps<typeof SeparatorPrimitive> & { decorative?: boolean }) {
   return (

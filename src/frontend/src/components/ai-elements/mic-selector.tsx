@@ -77,7 +77,7 @@ export const MicSelector = ({
       data: devices,
       onOpenChange,
       onValueChange,
-      open,
+      open: open ?? false,
       value,
     }),
     [devices, onOpenChange, onValueChange, open, value]
@@ -85,7 +85,7 @@ export const MicSelector = ({
 
   return (
     <MicSelectorContext.Provider value={contextValue}>
-      <Popover {...props} onOpenChange={onOpenChange} open={open} />
+      <Popover {...props} onOpenChange={onOpenChange} open={open ?? false} />
     </MicSelectorContext.Provider>
   );
 };

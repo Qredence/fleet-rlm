@@ -5,8 +5,8 @@ import { withAsChild } from "@/lib/base-ui/as-child";
 import { cn } from "@/lib/utils/cn";
 
 function HoverCard({
-  openDelay,
-  closeDelay,
+  openDelay: _openDelay,
+  closeDelay: _closeDelay,
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Root> & {
   openDelay?: number;

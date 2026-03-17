@@ -51,7 +51,12 @@ export const Transcription = ({
   });
 
   const contextValue = useMemo(
-    () => ({ currentTime, onSeek, onTimeUpdate: setCurrentTime, segments }),
+    () => ({
+      currentTime: currentTime ?? 0,
+      onSeek,
+      onTimeUpdate: setCurrentTime,
+      segments,
+    }),
     [currentTime, onSeek, setCurrentTime, segments]
   );
 

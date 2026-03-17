@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils/cn";
 
 function Accordion({
   type = "multiple",
-  collapsible,
+  collapsible: _collapsible,
   value,
   defaultValue,
   ...props
@@ -25,16 +25,15 @@ function Accordion({
     type === "single" && typeof defaultValue === "string"
       ? [defaultValue]
       : defaultValue;
+  const accordionProps = {
+    ...props,
+    "data-slot": "accordion",
+    defaultValue: normalizedDefaultValue,
+    multiple: type === "multiple",
+    value: normalizedValue,
+  } as unknown as React.ComponentProps<typeof AccordionPrimitive.Root>;
 
-  return (
-    <AccordionPrimitive.Root
-      data-slot="accordion"
-      defaultValue={normalizedDefaultValue as string[] | undefined}
-      multiple={type === "multiple"}
-      value={normalizedValue as string[] | undefined}
-      {...props}
-    />
-  );
+  return <AccordionPrimitive.Root {...accordionProps} />;
 }
 
 function AccordionItem({
