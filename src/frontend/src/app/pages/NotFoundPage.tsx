@@ -5,7 +5,7 @@
  *   1. Inside the app shell (wildcard `*` route) — fills available space
  *   2. Standalone at `/404` (outside the shell) — fills the viewport
  *
- * Offers a link back to the home page (Chat tab).
+ * Offers a link back to the canonical workspace surface.
  */
 import { useNavigate, Link, useRouter } from "@tanstack/react-router";
 import { FileQuestion, ArrowLeft, Home } from "lucide-react";
@@ -43,13 +43,17 @@ export function NotFoundPage() {
           <Button
             variant="default"
             className="w-full sm:flex-1"
-            onClick={() => navigate({ to: "/", replace: true })}
+            onClick={() => navigate({ to: "/app/workspace", replace: true })}
           >
-            <Home className="size-4" />
+            <Home className="size-5" strokeWidth={1.5} />
             <span className="typo-label">Back to Home</span>
           </Button>
-          <Button variant="secondary" className="w-full sm:flex-1" onClick={() => router.history.back()}>
-            <ArrowLeft className="size-4" />
+          <Button
+            variant="secondary"
+            className="w-full sm:flex-1"
+            onClick={() => router.history.back()}
+          >
+            <ArrowLeft className="size-5" strokeWidth={1.5} />
             <span className="typo-label">Go Back</span>
           </Button>
         </div>

@@ -34,8 +34,9 @@ export function RouteErrorPage({ error, reset }: { error: unknown; reset?: () =>
         <p className="mb-1 text-muted-foreground typo-label">Route Error {status}</p>
         <h1 className="mb-3 text-foreground typo-h3">We hit a rendering issue on this route</h1>
         <p className="mb-6 max-w-md text-muted-foreground typo-caption">
-          The page failed while loading <span className="text-foreground">{routerState.location.pathname}</span>
-          . You can retry, go back home, or continue in another section.
+          The page failed while loading{" "}
+          <span className="text-foreground">{routerState.location.pathname}</span>. You can retry,
+          go back home, or continue in another section.
         </p>
 
         <pre
@@ -49,7 +50,14 @@ export function RouteErrorPage({ error, reset }: { error: unknown; reset?: () =>
         </pre>
 
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button variant="secondary" onClick={() => { reset?.(); router.invalidate() }} aria-label="Retry route">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              reset?.();
+              router.invalidate();
+            }}
+            aria-label="Retry route"
+          >
             <RotateCcw className="size-4" aria-hidden="true" />
             Retry
           </Button>

@@ -26,7 +26,7 @@ export function SettingsPage() {
   const { isDark, toggle: toggleTheme } = useThemeStore();
   const isMobile = useIsMobile();
   const router = useRouter();
-  const searchParams: any = useSearch({ strict: false });
+  const searchParams = useSearch({ strict: false }) as { section?: string };
 
   const sectionFromQuery = searchParams.section;
   const selectedSection =
