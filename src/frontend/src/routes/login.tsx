@@ -1,8 +1,8 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { LazyRouteComponents } from "@/lib/perf/routePreload"
-import { RouteErrorPage } from "@/app/pages/RouteErrorPage"
+import { createFileRoute } from "@tanstack/react-router";
+import { LazyRouteComponents } from "@/lib/perf/routePreload";
+import { RouteErrorPage } from "@/app/pages/RouteErrorPage";
 
-export const Route = createFileRoute('/login')({
+export const Route = createFileRoute("/login")({
   component: () => <LazyRouteComponents.LoginPage />,
   errorComponent: RouteErrorPage,
-})
+});

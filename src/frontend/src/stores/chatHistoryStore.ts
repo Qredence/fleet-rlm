@@ -8,9 +8,9 @@
  */
 import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
 import { createLocalId } from "@/lib/id";
-import type { ExecutionStep } from "@/stores/artifactStore";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -58,6 +58,36 @@ function deriveTitle(messages: ChatMessage[]): string {
   return text.length > 60 ? `${text.slice(0, 57)}…` : text;
 }
 
+function logicalSessionKey(messages: ChatMessage[]): string | null {
+  const firstMessage = messages[0];
+  if (!firstMessage) return null;
+  return `${firstMessage.type}:${firstMessage.id}`;
+}
+
+function sortByUpdatedAtDesc(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+}
+
+function normalizeConversations(conversations: Conversation[]): Conversation[] {
+  const dedupedBySession = new Map<string, Conversation>();
+  const withoutSessionKey: Conversation[] = [];
+
+  for (const conversation of sortByUpdatedAtDesc(conversations)) {
+    const sessionKey = logicalSessionKey(conversation.messages);
+    if (!sessionKey) {
+      withoutSessionKey.push(conversation);
+      continue;
+    }
+    if (!dedupedBySession.has(sessionKey)) {
+      dedupedBySession.set(sessionKey, conversation);
+    }
+  }
+
+  return [...dedupedBySession.values(), ...withoutSessionKey].slice(0, MAX_CONVERSATIONS);
+}
+
 function parseStoredJson(raw: string | null): unknown {
   try {
     return raw ? (JSON.parse(raw) as unknown) : null;
@@ -67,7 +97,7 @@ function parseStoredJson(raw: string | null): unknown {
 }
 
 function toConversationArray(value: unknown): Conversation[] | null {
-  return Array.isArray(value) ? (value as Conversation[]) : null;
+  return Array.isArray(value) ? normalizeConversations(value as Conversation[]) : null;
 }
 
 function toPersistedChatHistory(value: unknown): StorageValue<ChatHistoryPersistedState> | null {
@@ -122,14 +152,22 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
         // Don't save empty conversations
         if (messages.length === 0) return conversationId ?? "";
 
-        const finalId = conversationId ?? generateId();
+        const sessionKey = logicalSessionKey(messages);
+        const existingConversationId =
+          conversationId ??
+          (sessionKey
+            ? get().conversations.find(
+                (conversation) => logicalSessionKey(conversation.messages) === sessionKey,
+              )?.id
+            : undefined);
+        const finalId = existingConversationId ?? generateId();
         const title = deriveTitle(messages);
 
         set((state) => {
           let updated: Conversation[];
 
-          if (conversationId) {
-            const idx = state.conversations.findIndex((c) => c.id === conversationId);
+          if (existingConversationId) {
+            const idx = state.conversations.findIndex((c) => c.id === existingConversationId);
             if (idx >= 0) {
               const existing = state.conversations[idx];
               if (!existing) return state;
@@ -144,7 +182,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
               updated = [updatedConv, ...state.conversations.filter((_, i) => i !== idx)];
             } else {
               const newConv: Conversation = {
-                id: conversationId,
+                id: finalId,
                 title,
                 messages,
                 turnArtifactsByMessageId,
@@ -168,7 +206,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
           }
 
           return {
-            conversations: updated.slice(0, MAX_CONVERSATIONS),
+            conversations: normalizeConversations(updated),
           };
         });
 

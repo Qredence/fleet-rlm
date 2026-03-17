@@ -1,9 +1,9 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute('/app/memory')({
+export const Route = createFileRoute("/app/memory")({
   beforeLoad: () => {
     throw redirect({
-      to: '/app/workspace',
-    })
+      to: "/app/workspace",
+    });
   },
-})
+});

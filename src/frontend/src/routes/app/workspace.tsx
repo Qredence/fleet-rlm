@@ -1,6 +1,6 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { LazyRouteComponents } from "@/lib/perf/routePreload"
+import { createFileRoute } from "@tanstack/react-router";
+import { LazyRouteComponents } from "@/lib/perf/routePreload";
 
-export const Route = createFileRoute('/app/workspace')({
+export const Route = createFileRoute("/app/workspace")({
   component: () => <LazyRouteComponents.RlmWorkspacePage />,
-})
+});

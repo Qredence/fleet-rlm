@@ -11,7 +11,7 @@ import { applyWsFrameToMessages } from "@/features/rlm-workspace/backendChatEven
 import { telemetryClient } from "@/lib/telemetry/client";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { QueryClient } from "@tanstack/react-query";
-import type { ExecutionStep } from "@/stores/artifactStore";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 
 interface StreamMessageOptions {
   traceEnabled?: boolean;
