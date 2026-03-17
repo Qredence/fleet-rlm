@@ -7,156 +7,182 @@ Use the repo-wide [AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/AGENTS.
 
 ## Tooling
 
-- Package manager: `pnpm`
-- Build/runtime toolchain: Vite+ (`vp`) underneath the npm scripts
-- Framework: React 19 + React Router 7 + TanStack Query + Zustand
+- Package manager: `pnpm` (use `pnpm install --frozen-lockfile`)
+- Build toolchain: Vite+ (`vp`) surfaced through npm scripts
+- Framework: React 19 + TanStack Router + TanStack Query + Zustand
 
 Canonical commands:
 
-- `pnpm install --frozen-lockfile`
-- `pnpm run dev`
-- `pnpm run build`
-- `pnpm run preview`
-- `pnpm run type-check`
-- `pnpm run lint`
-- `pnpm run test:unit`
-- `pnpm run test:e2e`
-- `pnpm run api:sync`
-- `pnpm run api:check`
-- `pnpm run check`
+```bash
+pnpm install --frozen-lockfile  # Install dependencies
+pnpm run dev                    # Start dev server (proxies to localhost:8000)
+pnpm run build                  # Production build
+pnpm run type-check             # TypeScript check
+pnpm run lint                   # Lint src/
+pnpm run test:unit              # Unit tests (single pass)
+pnpm run test:watch             # Unit tests (watch mode)
+pnpm run test:coverage          # Unit tests with coverage
+pnpm run test:e2e               # E2E tests (Playwright)
+pnpm run api:sync               # Sync OpenAPI spec and generate types
+pnpm run check                  # Full validation: types, lint, unit tests, build, e2e
+```
 
-Direct `vp` usage is optional shorthand for contributors already using Vite+ locally. In this repo, the primary documented workflow is `pnpm run ...`.
+Single test execution:
 
-### UI & Styling
+- Unit: `pnpm run test:unit src/path/to/__tests__/file.test.ts`
+- E2E: `pnpm run test:e2e tests/e2e/file.spec.ts`
 
-- **Typography**: Never use font weights bolder than `font-medium`. Apply small negative tracking (`tracking-tight` or similar) on main titles.
-- **Colors**:
-  - Use the custom Tailwind palette (e.g., `bg-primary-50`, `text-primary-900`).
-  - Never use arbitrary color values.
-  - Avoid `bg-white`, `bg-black`, `text-white`, `text-black`, and `outline-black`; use primary palette tokens instead.
-- **Markdown Titles**: Avoid top margin on markdown headings.
-- MUST use text-balance for headings and text-pretty for body/paragraphs
-- MUST use tabular-nums for data
-- SHOULD use truncate or line-clamp for dense UI
-- NEVER modify letter-spacing (tracking-\*) unless explicitly requested
-- MUST use a fixed z-index scale (no arbitrary z-\*)
-- SHOULD use size-_ for square elements instead of w-_ + h-\*
-- **Icons**:
-  - All icons should use `size={20}` and `strokeWidth={1.5}` consistently
-- **React 19 Refs**: Use regular `function` components with direct ref passing instead of `React.forwardRef` (React 19 supports refs as regular props)
+## High-Level Architecture
 
+### Routing (TanStack Router)
 
-## App Surface
+File-based routing in `src/routes/` with auto-generated route tree:
 
-The canonical route surface is:
+- `src/router.tsx` - Router instance with generated `routeTree`
+- `src/routeTree.gen.ts` - Auto-generated, do not edit
+- Routes are file-based: `src/routes/app/workspace.tsx` → `/app/workspace`
 
-- `/app/workspace`
-- `/app/volumes`
-- `/app/settings`
+App surface:
 
+- `/app/workspace` - RLM Workspace (chat/runtime)
+- `/app/volumes` - Volume browser
+- `/app/settings` - Settings
 
+Legacy routes (`taxonomy`, `skills`, `memory`, `analytics`) redirect to supported pages.
 
+### State Management
+
+- **TanStack Query**: Backend-backed state (API data, caching)
+- **Zustand**: Ephemeral client state (`src/stores/`)
+  - `chatStore.ts` - Chat streaming, messages
+  - `artifactStore.ts` - Artifact UI state
+  - `navigationStore.ts` - Navigation state
+  - `themeStore.ts` - Theme preferences
+
+### Backend Integration
+
+All backend communication goes through `src/lib/rlm-api/`:
+
+- `client.ts` - REST API client
+- `wsClient.ts` - WebSocket client
+- `wsReconnecting.ts` - Reconnecting WebSocket wrapper
+- `wsFrameParser.ts` - Binary frame parsing
+- `generated/openapi.ts` - Generated types (do not edit)
+
+Backend endpoints:
+
+- REST: `/health`, `/ready`, `/api/v1/auth/me`, `/api/v1/sessions/state`, `/api/v1/runtime/*`
+- WebSocket: `/api/v1/ws/chat`, `/api/v1/ws/execution`
+
+### Feature Structure
+
+```
+src/features/
+  rlm-workspace/    # Main chat/runtime surface
+    assistant-content/  # Assistant message rendering
+    chat-shell/         # Chat container/layout
+    message-inspector/  # Right-rail message details
+    run-workbench/      # Daytona pilot workbench
+  artifacts/        # Artifact canvas, graph, timeline, REPL
+  settings/         # Settings pages
+  volumes/          # Volume browser
+  shell/            # App shell, navigation
+```
+
+### Components
+
+- `src/components/ui/` - shadcn/ui primitives (Tailwind + Radix)
+- `src/components/prompt-kit/` - AI SDK prompt components (composer, messages)
+- `src/components/chat/` - Chat-specific components
+- `src/components/shared/` - Shared utilities
+
+## UI & Styling
+
+### Design Tokens
+
+Theme defined in `src/styles.css` using OpenAI Apps SDK design tokens:
+
+- Alpha primitives: `--alpha-02` through `--alpha-50`
+- Semantic colors: `--color-text-*`, `--color-surface-*`, `--color-background-*`
+- Typography: `--font-heading-*`, `--font-text-*`
+- Radius: `--radius-*` (2xs to 4xl, full)
+- Shadows: `--shadow-100` through `--shadow-400`
+
+### Tailwind Conventions
+
+- Typography: Never use font weights bolder than `font-medium`. Apply `tracking-tight` on main titles.
+- Colors: Use custom palette tokens (`bg-primary-50`, `text-primary-900`). Never use arbitrary values or `bg-white`/`text-black`.
+- Text: Use `text-balance` for headings, `text-pretty` for body, `tabular-nums` for data.
+- Layout: Use `size-*` for square elements, `truncate`/`line-clamp` for dense UI.
+- Z-index: Use fixed scale, no arbitrary `z-*`.
+- Icons: `size={20}` and `strokeWidth={1.5}` consistently.
+
+### React 19 Refs
+
+Use regular `function` components with direct ref passing. React 19 supports refs as regular props, so `React.forwardRef` is not needed.
 
 ## Runtime UX Contract
 
-The chat/runtime split is product-visible and must stay aligned with the backend:
+Two runtime modes, backend-driven:
 
-- `modal_chat`
-  - default runtime mode
-  - composer may send `execution_mode`
-  - standard right-rail experience centers on the message inspector
-- `daytona_pilot`
-  - experimental runtime mode
-  - composer may send optional `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
-  - `execution_mode` is not sent
-  - the builder panel switches to the dedicated `RunWorkbench`
+- **modal_chat** (default): Composer sends `execution_mode`. Standard right-rail with message inspector.
+- **daytona_pilot** (experimental): Composer sends `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`. Switches to `RunWorkbench`.
 
-Additional expectations:
+Runtime labels are user-facing: "Modal chat" and "Daytona pilot".
 
-- The main chat surface remains shared between Modal and Daytona sessions.
-- Standard assistant inspection belongs in the `Message Inspector`.
-- Daytona-specific iterations, prompts, callbacks, evidence, and final output belong in `run-workbench/`.
-- Keep the runtime labels user-facing as `Modal chat` and `Daytona pilot`.
+## Environment
 
-## Backend Contract
+Create `.env` from `.env.example`:
 
-The frontend is backend-driven and should stay aligned with these surfaces:
+```
+VITE_FLEET_API_URL=http://localhost:8000
+VITE_FLEET_WORKSPACE_ID=default
+VITE_FLEET_USER_ID=fleetwebapp-user
+VITE_FLEET_TRACE=true
+```
 
-- `/health`
-- `/ready`
-- `GET /api/v1/auth/me`
-- `GET /api/v1/sessions/state`
-- `/api/v1/runtime/settings`
-- `/api/v1/runtime/status`
-- `/api/v1/runtime/tests/modal`
-- `/api/v1/runtime/tests/lm`
-- `/api/v1/runtime/volume/tree`
-- `/api/v1/runtime/volume/file`
-- `POST /api/v1/traces/feedback`
-- `/api/v1/ws/chat`
-- `/api/v1/ws/execution`
+Optional:
 
-Generated contract files:
+- `VITE_FLEET_WS_URL` - WebSocket URL override
+- `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_SCOPES` - Microsoft Entra SPA auth
+- `VITE_PUBLIC_POSTHOG_API_KEY`, `VITE_PUBLIC_POSTHOG_HOST` - PostHog analytics
 
-- `openapi/fleet-rlm.openapi.yaml`
-- `src/lib/rlm-api/generated/openapi.ts`
+## Backend Startup
 
-Do not hand-edit generated OpenAPI output.
+From the repo root:
 
-## State and Data Ownership
+```bash
+uv run fleet-rlm serve-api --port 8000
+```
 
-- Use TanStack Query for backend-backed state.
-- Use Zustand for ephemeral client-side state such as chat streaming, artifact UI state, navigation state, and Daytona workbench state.
-- Keep backend communication inside `src/lib/rlm-api/*`.
-- Keep auth token/session logic inside `src/lib/auth/*`.
+## OpenAPI Type Sync
 
-## Environment Contract
+```bash
+pnpm run api:sync   # Copies spec and generates types
+pnpm run api:check  # Verifies sync (fails if drifted)
+```
 
-Primary frontend env vars:
-
-- `VITE_FLEET_API_URL`
-- `VITE_FLEET_WORKSPACE_ID`
-- `VITE_FLEET_USER_ID`
-- `VITE_FLEET_TRACE`
-- `VITE_MOCK_MODE`
-
-Optional overrides:
-
-- `VITE_FLEET_WS_URL`
-  - optional websocket override
-  - if unset, websocket URLs are derived from `VITE_FLEET_API_URL` or the current browser origin
-
-Microsoft Entra SPA auth:
-
-- `VITE_ENTRA_CLIENT_ID`
-- `VITE_ENTRA_AUTHORITY`
-- `VITE_ENTRA_SCOPES`
-- `VITE_ENTRA_REDIRECT_PATH`
-
-PostHog frontend telemetry:
-
-- `VITE_PUBLIC_POSTHOG_API_KEY`
-- `VITE_PUBLIC_POSTHOG_HOST`
-
-The frontend now uses real Entra bootstrap behavior when configured: initialize MSAL, acquire/store an access token, and call `GET /api/v1/auth/me`.
+Generated: `src/lib/rlm-api/generated/openapi.ts` (do not edit).
 
 ## Validation
 
-Recommended frontend validation flow:
+Full frontend validation:
 
-1. `pnpm install --frozen-lockfile`
-2. `pnpm run api:sync`
-3. `pnpm run api:check`
-4. `pnpm run type-check`
-5. `pnpm run lint`
-6. `pnpm run test:unit`
-7. `pnpm run build`
-8. `pnpm run test:e2e`
-9. `pnpm run check`
-
+```bash
+pnpm install --frozen-lockfile
+pnpm run api:sync
+pnpm run api:check
+pnpm run type-check
+pnpm run lint
+pnpm run test:unit
+pnpm run build
+pnpm run test:e2e
+pnpm run check
+```
 
 ## Notes
 
-- Keep `components.json` and the `@/*` alias wiring valid for registry-backed component workflows.
-- Document `pnpm` commands as the contributor surface even though the scripts ultimately invoke Vite+ tooling.
-- When route/runtime/product terminology changes, update this file so it stays aligned with the live app rather than preserving historical names.
+- `components.json` defines `@/*` alias and shadcn registry config.
+- The dev server proxies `/api/v1` and `/health` to localhost:8000.
+- PostHog analytics initialize in `main.tsx` when `VITE_PUBLIC_POSTHOG_API_KEY` is set.
+- Keep runtime labels and endpoint contracts aligned with backend.

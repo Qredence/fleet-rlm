@@ -1,5 +1,5 @@
-import { RouterProvider } from '@tanstack/react-router'
-import { router } from '@/router'
+import { RouterProvider } from "@tanstack/react-router";
+import { router } from "@/router";
 
 /**
  * Root application component.
@@ -12,5 +12,5 @@ export default function App() {
     <>
       <RouterProvider router={router} />
     </>
-  )
+  );
 }
