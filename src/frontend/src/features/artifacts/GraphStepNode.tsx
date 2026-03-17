@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import type { ArtifactActorKind, ArtifactStepType } from "@/stores/artifactStore";
+import type { ArtifactActorKind, ArtifactStepType } from "@/lib/data/artifactTypes";
 import { cn } from "@/lib/utils/cn";
 import { NODE_WIDTH, STEP_TYPE_META } from "@/features/artifacts/GraphStepNode.constants";
 import {

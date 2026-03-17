@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
+import { useChatRuntime } from "@/features/rlm-workspace/useChatRuntime";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -123,13 +123,13 @@ function resetState() {
   mocked.toastError.mockReset();
 }
 
-describe("useBackendChatRuntime Daytona transport failures", () => {
+describe("useChatRuntime Daytona transport failures", () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
-  let runtime: ReturnType<typeof useBackendChatRuntime> | null = null;
+  let runtime: ReturnType<typeof useChatRuntime> | null = null;
 
   function Harness() {
-    runtime = useBackendChatRuntime();
+    runtime = useChatRuntime();
     return null;
   }
 

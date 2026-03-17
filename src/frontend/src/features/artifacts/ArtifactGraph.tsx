@@ -10,7 +10,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import type { ArtifactActorKind, ExecutionStep } from "@/stores/artifactStore";
+import type { ArtifactActorKind, ExecutionStep } from "@/lib/data/artifactTypes";
 import { NODE_WIDTH, STEP_TYPE_META } from "@/features/artifacts/GraphStepNode.constants";
 import { GraphStepNode, type GraphStepNodeData } from "@/features/artifacts/GraphStepNode";
 import { extractToolBadgeFromStep } from "@/features/artifacts/graphToolBadge";

@@ -1,6 +1,6 @@
 import { useCodeMirror } from "@/hooks/useCodeMirror";
 
-import type { ExecutionStep } from "@/stores/artifactStore";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sandbox,
@@ -13,7 +13,7 @@ import {
   SandboxTabContent,
 } from "@/components/prompt-kit/sandbox";
 import { ToolOutput } from "@/components/prompt-kit/tool";
-import { mapToolState } from "@/lib/utils/ai-elements-state";
+import { mapToolState } from "@/lib/utils/prompt-kit-state";
 
 // Local tool state type for internal use (matches ChatRenderToolState)
 type LocalToolState = "input-streaming" | "running" | "output-available" | "output-error";
@@ -182,7 +182,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
               <SandboxTabContent value="output">
                 <ToolOutput
                   output={
-                    <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+                    <pre className="text-xs text-foreground whitespace-pre-wrap overflow-wrap-break-word">
                       {output || "No output captured."}
                     </pre>
                   }
@@ -199,7 +199,7 @@ export function ArtifactREPL({ steps, activeStepId }: ArtifactReplProps) {
             <p className="mb-2 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Variables
             </p>
-            <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+            <pre className="text-xs text-foreground whitespace-pre-wrap overflow-wrap-break-word">
               {JSON.stringify(variables, null, 2)}
             </pre>
           </div>

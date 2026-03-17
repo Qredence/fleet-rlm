@@ -1,6 +1,6 @@
 import { Brain, Database, FileOutput, Terminal, Wrench } from "lucide-react";
 
-import type { ArtifactStepType } from "@/stores/artifactStore";
+import type { ArtifactStepType } from "@/lib/data/artifactTypes";
 
 const STEP_TYPE_META: Record<
   ArtifactStepType,

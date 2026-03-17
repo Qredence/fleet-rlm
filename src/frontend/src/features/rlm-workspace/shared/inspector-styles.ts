@@ -67,7 +67,7 @@ export const inspectorStyles = {
     /** Status badges: Pending / Running / Completed / Failed. */
     status: "rounded-full",
     /** Meta/runtime/count badges. */
-    meta: "rounded-full text-[10px] font-medium",
+    meta: "rounded-full text-xs font-medium",
     /** Standard badge row. */
     row: "flex flex-wrap gap-1.5",
   },

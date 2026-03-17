@@ -7,10 +7,9 @@ import { GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ArtifactGraph } from "@/features/artifacts/ArtifactGraph";
 import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
-import type { ExecutionStep } from "@/stores/artifactStore";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
-import { stringifyValue } from "../utils/inspector-utils";
-import { DetailBlock } from "../components/inspector-components";
+import { DetailBlock, stringifyValue } from "../ui/inspector-ui";
 
 export const GraphInspectorTab = memo(function GraphInspectorTab({
   steps,
@@ -107,12 +106,12 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
                     {selectedStep.type}
                   </Badge>
                   {selectedStep.actor_kind ? (
-                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                    <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                       {selectedStep.actor_kind.replace(/_/g, " ")}
                     </Badge>
                   ) : null}
                   {selectedStep.actor_id ? (
-                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                    <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                       {selectedStep.actor_id}
                     </Badge>
                   ) : null}

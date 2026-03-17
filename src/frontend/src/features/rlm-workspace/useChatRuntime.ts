@@ -94,7 +94,7 @@ function revertOptimisticHitlResolution(messages: ChatMessage[], msgId: string):
   });
 }
 
-export function useBackendChatRuntime(): ChatRuntime {
+export function useChatRuntime(): ChatRuntime {
   const { setCreationPhase, sessionId: navSessionId } = useNavigationStore();
   const clearArtifactSteps = useArtifactStore((state) => state.clear);
 

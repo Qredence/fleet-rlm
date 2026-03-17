@@ -17,7 +17,7 @@ import {
 } from "@/features/rlm-workspace/chat-shell/tracePartRenderers";
 import type { ChatMessage } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
-import { mapConfirmationState } from "@/lib/utils/ai-elements-state";
+import { mapConfirmationState } from "@/lib/utils/prompt-kit-state";
 
 interface WorkspaceChatMessageItemProps {
   message: ChatMessage;
@@ -75,12 +75,12 @@ export function WorkspaceChatMessageItem({
               />
             ))}
             {message.type === "assistant" && message.content ? (
-              <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
+              <div className="max-w-content rounded-bubble border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
                 <MessageResponse>{message.content}</MessageResponse>
               </div>
             ) : null}
             {message.type === "assistant" && message.streaming && !message.content ? (
-              <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
+              <div className="max-w-content rounded-bubble border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
                 <ChatMessageLoadingState />
               </div>
             ) : null}

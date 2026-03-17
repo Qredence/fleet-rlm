@@ -5,13 +5,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
 import { cn } from "@/lib/utils/cn";
-import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/model";
 import {
   inspectorStyles,
   inspectorInsetClass,
 } from "@/features/rlm-workspace/shared/inspector-styles";
-import { statusTone } from "../utils/inspector-utils";
-import { renderBadges } from "../components/inspector-components";
+import { renderBadges, statusTone } from "../ui/inspector-ui";
 
 export const TrajectoryInspectorTab = memo(function TrajectoryInspectorTab({
   model,

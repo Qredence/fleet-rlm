@@ -9,10 +9,15 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/model";
 import { inspectorStyles } from "@/features/rlm-workspace/shared/inspector-styles";
-import { sectionGroups, executionSectionState, statusTone } from "../utils/inspector-utils";
-import { renderBadges, renderExecutionSectionDetails } from "../components/inspector-components";
+import {
+  executionSectionState,
+  renderBadges,
+  renderExecutionSectionDetails,
+  sectionGroups,
+  statusTone,
+} from "../ui/inspector-ui";
 
 export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
   model,
@@ -42,7 +47,7 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
                         <Accordion
                           type="single"
                           collapsible
-                          defaultValue={(section.defaultOpen ? "details" : undefined) as any}
+                          defaultValue={section.defaultOpen ? "details" : undefined}
                         >
                           <AccordionItem value="details" className="border-b-0">
                             <AccordionTrigger className="py-0 hover:no-underline">

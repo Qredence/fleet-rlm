@@ -62,13 +62,7 @@ import {
   TaskItemFile,
   TaskTrigger,
 } from "@/components/prompt-kit/task";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/prompt-kit/tool";
+import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/prompt-kit/tool";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Queue,
@@ -86,8 +80,8 @@ import { Streamdown } from "@/components/ui/streamdown";
 import { TextShimmer } from "@/components/ui/text-shimmer";
 import type { ChatRenderPart, ChatRenderToolState, RuntimeContext } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
-import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/ai-elements-state";
-import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/runtimeBadges";
+import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
+import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/model";
 import type { ToolSessionItem, TraceDisplayItem } from "@/features/rlm-workspace/chatDisplayItems";
 import {
   MONO_BASE_MEDIUM_STYLE,

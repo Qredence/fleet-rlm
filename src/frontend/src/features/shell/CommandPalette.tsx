@@ -33,7 +33,7 @@ interface CommandPaletteProps {
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const { newSession } = useNavigationStore();
   const { isDark, toggle: toggleTheme } = useThemeStore();
-  const { navigateTo, navigate } = useAppNavigate();
+  const { navigateTo } = useAppNavigate();
   const telemetry = useTelemetry();
 
   const [search, setSearch] = useState("");
@@ -91,7 +91,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         aria-modal="true"
         aria-label="Command palette"
       >
-        <div className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-[var(--shadow-200-stronger)]">
+        <div className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-(--shadow-200-stronger)">
           <Command
             loop
             shouldFilter
@@ -134,7 +134,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                         "text-foreground data-[selected=true]:bg-muted",
                       )}
                     >
-                      <Icon className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                      <Icon
+                        className="size-5 text-muted-foreground shrink-0"
+                        aria-hidden="true"
+                        strokeWidth={1.5}
+                      />
                       <span className="typo-label">{page.label}</span>
                     </Command.Item>
                   );
@@ -154,7 +158,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       action_value: "new_session",
                     });
                     newSession();
-                    navigate({ to: "/app/workspace" as any });
+                    navigateTo("workspace");
                     close();
                   }}
                   className={cn(
@@ -162,7 +166,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
-                  <Plus className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                  <Plus
+                    className="size-5 text-muted-foreground shrink-0"
+                    aria-hidden="true"
+                    strokeWidth={1.5}
+                  />
                   <span className="typo-label">New Session</span>
                 </Command.Item>
 
@@ -183,9 +191,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   )}
                 >
                   {isDark ? (
-                    <Sun className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                    <Sun
+                      className="size-5 text-muted-foreground shrink-0"
+                      aria-hidden="true"
+                      strokeWidth={1.5}
+                    />
                   ) : (
-                    <Moon className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                    <Moon
+                      className="size-5 text-muted-foreground shrink-0"
+                      aria-hidden="true"
+                      strokeWidth={1.5}
+                    />
                   )}
                   <span className="typo-label">Switch to {isDark ? "Light" : "Dark"} Mode</span>
                 </Command.Item>
@@ -197,7 +213,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       action_type: "action",
                       action_value: "open_settings",
                     });
-                    navigate({ to: "/settings" as any });
+                    navigateTo("settings");
                     close();
                   }}
                   className={cn(
@@ -205,7 +221,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     "text-foreground data-[selected=true]:bg-muted",
                   )}
                 >
-                  <Settings className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                  <Settings
+                    className="size-5 text-muted-foreground shrink-0"
+                    aria-hidden="true"
+                    strokeWidth={1.5}
+                  />
                   <span className="typo-label">Open Settings</span>
                 </Command.Item>
               </Command.Group>

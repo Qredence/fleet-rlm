@@ -10,12 +10,12 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { cn } from "@/lib/utils/cn";
-import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/model";
 import {
   inspectorStyles,
   inspectorInsetClass,
 } from "@/features/rlm-workspace/shared/inspector-styles";
-import { ExternalAnchor } from "../components/inspector-components";
+import { ExternalAnchor } from "../ui/inspector-ui";
 
 export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
   model,
@@ -86,7 +86,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                           {source.kind}
                         </Badge>
                         {source.displayUrl ? (
-                          <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                          <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                             {source.displayUrl}
                           </Badge>
                         ) : null}
@@ -145,7 +145,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                           </Badge>
                         ) : null}
                         {attachment.sizeBytes != null ? (
-                          <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                          <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                             {attachment.sizeBytes} bytes
                           </Badge>
                         ) : null}

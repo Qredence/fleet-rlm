@@ -67,8 +67,8 @@ vi.mock("@/stores/chatStore", () => ({
     selector(chatStoreMockState),
 }));
 
-vi.mock("@/features/rlm-workspace/useBackendChatRuntime", () => ({
-  useBackendChatRuntime: () => ({
+vi.mock("@/features/rlm-workspace/useChatRuntime", () => ({
+  useChatRuntime: () => ({
     messages: [],
     inputValue: "",
     setInputValue: vi.fn(),
