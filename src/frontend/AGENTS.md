@@ -21,7 +21,7 @@ This repository hosts the frontend app for the fleet-rlm ecosystem.
 - The `@/* -> ./src/*` alias must live in `src/frontend/tsconfig.json` so `bunx --bun shadcn@latest info --json` resolves real frontend paths.
 - Before refreshing registry-backed components, run `bunx --bun shadcn@latest info --json` and confirm `importAlias` is `@` and `resolvedPaths.utils` points to `src/lib/utils/cn`.
 - Official AI Elements primitives live under `src/components/ai-elements/*`. Refresh them through shadcn/registry workflow instead of forking custom lookalikes.
-- `src/components/chat/ChatInput.tsx` is a thin product wrapper around the official AI Elements `prompt-input` primitives. Keep execution-mode/settings affordances local, but do not recreate `src/components/chat/prompt-input/*`.
+- `src/components/chat/ChatInput.tsx` is a thin product wrapper around the official AI Elements prompt-kit surface rooted in `src/components/ai-elements/prompt-input.tsx` and the local `src/components/chat/input/*` composition helpers. Keep execution-mode/settings affordances local, but do not recreate a parallel `src/components/chat/prompt-kit/*` or `src/components/chat/prompt-input/*` primitive layer.
 
 ## Hook & Lib Ownership
 - Keep `src/hooks/*` for active cross-cutting React hooks only. Delete zero-reference compatibility shims instead of parking deprecated hooks there.

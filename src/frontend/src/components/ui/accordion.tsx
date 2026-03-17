@@ -1,13 +1,40 @@
 import * as React from "react";
-import * as AccordionPrimitive from "@radix-ui/react-accordion";
+import { Accordion as AccordionPrimitive } from "@base-ui/react/accordion";
 import { ChevronDownIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils/cn";
 
 function Accordion({
+  type = "multiple",
+  collapsible,
+  value,
+  defaultValue,
   ...props
-}: React.ComponentProps<typeof AccordionPrimitive.Root>) {
-  return <AccordionPrimitive.Root data-slot="accordion" {...props} />;
+}: Omit<
+  React.ComponentProps<typeof AccordionPrimitive.Root>,
+  "defaultValue" | "multiple" | "value"
+> & {
+  type?: "multiple" | "single";
+  collapsible?: boolean;
+  value?: string | string[];
+  defaultValue?: string | string[];
+}) {
+  const normalizedValue =
+    type === "single" && typeof value === "string" ? [value] : value;
+  const normalizedDefaultValue =
+    type === "single" && typeof defaultValue === "string"
+      ? [defaultValue]
+      : defaultValue;
+
+  return (
+    <AccordionPrimitive.Root
+      data-slot="accordion"
+      defaultValue={normalizedDefaultValue as string[] | undefined}
+      multiple={type === "multiple"}
+      value={normalizedValue as string[] | undefined}
+      {...props}
+    />
+  );
 }
 
 function AccordionItem({
@@ -49,15 +76,15 @@ function AccordionContent({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof AccordionPrimitive.Content>) {
+}: React.ComponentProps<typeof AccordionPrimitive.Panel>) {
   return (
-    <AccordionPrimitive.Content
+    <AccordionPrimitive.Panel
       data-slot="accordion-content"
       className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden"
       {...props}
     >
       <div className={cn("pt-0 pb-4", className)}>{children}</div>
-    </AccordionPrimitive.Content>
+    </AccordionPrimitive.Panel>
   );
 }
 

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
+import { Slot } from "@/lib/base-ui/slot";
 import type { VariantProps } from "class-variance-authority";
 
 import { badgeVariants } from "@/components/ui/badge-variants";

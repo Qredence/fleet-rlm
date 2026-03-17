@@ -1,5 +1,5 @@
 import * as React from "react";
-import * as SheetPrimitive from "@radix-ui/react-dialog";
+import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils/cn";
@@ -21,11 +21,11 @@ function SheetClose({
 }
 
 const SheetOverlay = React.forwardRef<
-  React.ComponentRef<typeof SheetPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
+  React.ComponentRef<typeof SheetPrimitive.Backdrop>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Backdrop>
 >(function SheetOverlay({ className, ...props }, ref) {
   return (
-    <SheetPrimitive.Overlay
+    <SheetPrimitive.Backdrop
       ref={ref}
       data-slot="sheet-overlay"
       className={cn(
@@ -39,8 +39,8 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = "SheetOverlay";
 
 const SheetContent = React.forwardRef<
-  React.ComponentRef<typeof SheetPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content> & {
+  React.ComponentRef<typeof SheetPrimitive.Popup>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Popup> & {
     side?: "top" | "right" | "bottom" | "left";
   }
 >(function SheetContent(
@@ -49,8 +49,8 @@ const SheetContent = React.forwardRef<
 ) {
   return (
     <SheetPrimitive.Portal>
-      <SheetPrimitive.Overlay className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50" />
-      <SheetPrimitive.Content
+      <SheetPrimitive.Backdrop className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50" />
+      <SheetPrimitive.Popup
         ref={ref}
         data-slot="sheet-content"
         className={cn(
@@ -72,7 +72,7 @@ const SheetContent = React.forwardRef<
           <XIcon className="size-4" />
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>
-      </SheetPrimitive.Content>
+      </SheetPrimitive.Popup>
     </SheetPrimitive.Portal>
   );
 });

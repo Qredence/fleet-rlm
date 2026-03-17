@@ -1,5 +1,5 @@
 import * as React from "react";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils/cn";
@@ -29,11 +29,11 @@ function DialogClose({
 }
 
 const DialogOverlay = React.forwardRef<
-  React.ComponentRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
+  React.ComponentRef<typeof DialogPrimitive.Backdrop>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Backdrop>
 >(function DialogOverlay({ className, ...props }, ref) {
   return (
-    <DialogPrimitive.Overlay
+    <DialogPrimitive.Backdrop
       ref={ref}
       data-slot="dialog-overlay"
       className={cn(
@@ -47,13 +47,13 @@ const DialogOverlay = React.forwardRef<
 DialogOverlay.displayName = "DialogOverlay";
 
 const DialogContent = React.forwardRef<
-  React.ComponentRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+  React.ComponentRef<typeof DialogPrimitive.Popup>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Popup>
 >(function DialogContent({ className, children, ...props }, ref) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50" />
-      <DialogPrimitive.Content
+      <DialogPrimitive.Backdrop className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50" />
+      <DialogPrimitive.Popup
         ref={ref}
         data-slot="dialog-content"
         className={cn(
@@ -67,7 +67,7 @@ const DialogContent = React.forwardRef<
           <XIcon />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
-      </DialogPrimitive.Content>
+      </DialogPrimitive.Popup>
     </DialogPrimitive.Portal>
   );
 });

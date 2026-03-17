@@ -16,3 +16,12 @@ repos:
           - --fix
           - --exit-non-zero-on-fix
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: frontend-knip-unused-deps
+        name: frontend knip unused dependency check
+        entry: bash -lc 'cd src/frontend && bun run check:unused'
+        language: system
+        pass_filenames: false
+        files: ^src/frontend/

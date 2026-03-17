@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema-jsonc.json",
+  "ignoreDependencies": [
+    "@codemirror/autocomplete",
+    "@dagrejs/dagre",
+    "@lezer/common",
+    "@lezer/python",
+    "@marijn/find-cluster-break",
+    "@rive-app/react-webgl2",
+    "@xyflow/react",
+    "ansi-to-react",
+    "codemirror",
+    "crelt",
+    "media-chrome",
+    "next-themes",
+    "react-jsx-parser",
+    "reactflow",
+    "style-mod",
+    "tokenlens",
+    "w3c-keyname"
+  ]
+}

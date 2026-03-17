@@ -1,7 +1,7 @@
 
 import type { ComponentProps } from "react";
 
-import { useControllableState } from "@radix-ui/react-use-controllable-state";
+import { useControllableState } from "@/lib/base-ui/use-controllable-state";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
