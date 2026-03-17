@@ -14,5 +14,9 @@ __all__ = getattr(
 
 globals().update({name: getattr(_impl, name) for name in __all__})
 
+# Keep the primary interpreter type explicitly bound for static analyzers and
+# import sites such as ``from fleet_rlm.core.interpreter import ModalInterpreter``.
+ModalInterpreter = _impl.ModalInterpreter
+
 # Tests still patch ``fleet_rlm.core.interpreter.asyncio.*`` directly.
 asyncio: Any = _impl.asyncio
