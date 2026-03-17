@@ -17,7 +17,7 @@ help:
 	@echo "  make format-check      - Run ruff format --check"
 	@echo "  make format            - Run ruff format (writes changes)"
 	@echo "  make typecheck         - Run ty check"
-	@echo "  make metadata-check    - Run release metadata/hygiene scripts"
+	@echo "  make metadata-check    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make docs-check        - Run docs quality checks"
 	@echo "  make security-check    - Run pip-audit + bandit"
 	@echo "  make frontend-check    - Run frontend checks when src/frontend exists"
@@ -73,6 +73,7 @@ typecheck:
 metadata-check:
 	uv run python scripts/validate_release.py hygiene
 	uv run python scripts/validate_release.py metadata
+	uv run python scripts/check_agents_md_freshness.py
 
 docs-check:
 	uv run python scripts/check_docs_quality.py

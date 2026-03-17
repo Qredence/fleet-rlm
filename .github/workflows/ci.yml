@@ -41,6 +41,9 @@ jobs:
       - name: Docs quality checks
         run: uv run python scripts/check_docs_quality.py
 
+      - name: AGENTS.md freshness validation
+        run: uv run python scripts/check_agents_md_freshness.py
+
       - name: Security checks
         run: |
           uvx pip-audit
