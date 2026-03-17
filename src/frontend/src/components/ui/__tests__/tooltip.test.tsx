@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
@@ -35,6 +36,33 @@ describe("TooltipContent", () => {
     expect(tooltip?.className).toContain("bg-popover");
     expect(tooltip?.className).toContain("text-popover-foreground");
     expect(tooltip?.className).toContain("border-border-subtle/80");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("keeps force-mounted content in the DOM under an outer provider", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <TooltipProvider delayDuration={300}>
+          <Tooltip open={false}>
+            <TooltipTrigger asChild>
+              <button type="button">Trigger</button>
+            </TooltipTrigger>
+            <TooltipContent forceMount>Shared tooltip</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>,
+      );
+    });
+
+    const tooltip = document.querySelector('[data-slot="tooltip-content"]');
+
+    expect(tooltip).not.toBeNull();
 
     act(() => {
       root.unmount();

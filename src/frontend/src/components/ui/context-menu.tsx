@@ -125,13 +125,11 @@ function ContextMenuItem({
         className,
       )}
       onClick={
-        onSelect || onClick
+        onClick || onSelect
           ? (event) => {
-              if (onSelect) {
-                onSelect(event.nativeEvent);
-              }
-              if (onClick) {
-                onClick(event);
+              onClick?.(event);
+              if (!event.defaultPrevented) {
+                onSelect?.(event.nativeEvent);
               }
             }
           : undefined

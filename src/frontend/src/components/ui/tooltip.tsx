@@ -1,28 +1,4 @@
 import * as React from "react";
-import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-
-export const TooltipProvider = TooltipPrimitive.Provider;
-
-const Tooltip = TooltipPrimitive.Root;
-
-const TooltipTrigger = TooltipPrimitive.Trigger;
-
-const TooltipContent = React.forwardRef<
-  React.ElementRef<typeof TooltipPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
-  <TooltipPrimitive.Content
-    ref={ref}
-    sideOffset={sideOffset}
-    className={className}
-    {...props}
-  />
-));
-
-TooltipContent.displayName = TooltipPrimitive.Content.displayName;
-
-export { Tooltip, TooltipTrigger, TooltipContent };
-import * as React from "react";
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 
 import { withAsChild } from "@/lib/base-ui/as-child";
@@ -46,11 +22,7 @@ function TooltipProvider({
 function Tooltip({
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return (
-    <TooltipProvider>
-      <TooltipPrimitive.Root data-slot="tooltip" {...props} />
-    </TooltipProvider>
-  );
+  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
 }
 
 function TooltipTrigger({
@@ -73,7 +45,7 @@ function TooltipContent({
   align,
   side,
   sideOffset = 0,
-  forceMount: _forceMount,
+  forceMount,
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Popup> & {
@@ -83,7 +55,7 @@ function TooltipContent({
   forceMount?: boolean;
 }) {
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal keepMounted={forceMount}>
       <TooltipPrimitive.Positioner
         align={align}
         side={side}
@@ -92,7 +64,7 @@ function TooltipContent({
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "bg-popover text-popover-foreground border border-border-subtle/80 shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit origin-(--radix-tooltip-content-transform-origin) rounded-md px-3 py-1.5 text-balance",
+            "bg-popover text-popover-foreground border border-border-subtle/80 shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit origin-(--transform-origin) rounded-md px-3 py-1.5 text-balance",
             className,
           )}
           {...props}

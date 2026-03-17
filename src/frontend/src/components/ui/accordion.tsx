@@ -6,37 +6,87 @@ import { cn } from "@/lib/utils/cn";
 
 function Accordion({
   type = "multiple",
-  collapsible,
+  collapsible = false,
   value,
   defaultValue,
+  onValueChange,
   ...props
 }: Omit<
   React.ComponentProps<typeof AccordionPrimitive.Root>,
-  "defaultValue" | "multiple" | "value"
+  "defaultValue" | "multiple" | "onValueChange" | "value"
 > & {
   type?: "multiple" | "single";
   collapsible?: boolean;
   value?: string | string[];
   defaultValue?: string | string[];
+  onValueChange?: (
+    value: string | string[] | undefined,
+    eventDetails: Parameters<
+      NonNullable<React.ComponentProps<typeof AccordionPrimitive.Root>["onValueChange"]>
+    >[1],
+  ) => void;
 }) {
-  const normalizedValue =
-    type === "single" && typeof value === "string" ? [value] : value;
-  const normalizedDefaultValue =
-    type === "single" && typeof defaultValue === "string"
-      ? [defaultValue]
-      : defaultValue;
-  const accordionProps = {
-    ...props,
-    "data-slot": "accordion",
-    defaultValue: normalizedDefaultValue,
-    multiple: type === "multiple",
-    value: normalizedValue,
-    ...(type === "single" && typeof collapsible !== "undefined"
-      ? { allowEmptySelection: collapsible }
-      : {}),
-  } as unknown as React.ComponentProps<typeof AccordionPrimitive.Root>;
+  const controlledSingleValue = typeof value === "string" ? value : value?.[0];
+  const defaultSingleValue =
+    typeof defaultValue === "string" ? defaultValue : defaultValue?.[0];
+  const firstItemValue = React.useMemo(() => {
+    const items = React.Children.toArray(props.children);
 
-  return <AccordionPrimitive.Root {...accordionProps} />;
+    for (const item of items) {
+      if (
+        React.isValidElement<{ value?: string }>(item) &&
+        typeof item.props.value === "string"
+      ) {
+        return item.props.value;
+      }
+    }
+
+    return undefined;
+  }, [props.children]);
+  const [uncontrolledSingleValue, setUncontrolledSingleValue] = React.useState<
+    string | undefined
+  >(defaultSingleValue ?? (!collapsible ? firstItemValue : undefined));
+  const singleValue =
+    controlledSingleValue !== undefined
+      ? controlledSingleValue
+      : uncontrolledSingleValue ?? (!collapsible ? firstItemValue : undefined);
+
+  if (type === "single") {
+    return (
+      <AccordionPrimitive.Root
+        data-slot="accordion"
+        defaultValue={defaultSingleValue ? [defaultSingleValue] : []}
+        multiple={false}
+        onValueChange={(nextValue, eventDetails) => {
+          const nextSingleValue = nextValue[0];
+          const resolvedValue =
+            nextSingleValue ??
+            (collapsible ? undefined : singleValue ?? firstItemValue);
+
+          if (controlledSingleValue === undefined) {
+            setUncontrolledSingleValue(resolvedValue);
+          }
+
+          onValueChange?.(resolvedValue, eventDetails);
+        }}
+        value={singleValue ? [singleValue] : []}
+        {...props}
+      />
+    );
+  }
+
+  return (
+    <AccordionPrimitive.Root
+      data-slot="accordion"
+      defaultValue={Array.isArray(defaultValue) ? defaultValue : []}
+      multiple
+      onValueChange={(nextValue, eventDetails) => {
+        onValueChange?.(nextValue, eventDetails);
+      }}
+      value={Array.isArray(value) ? value : undefined}
+      {...props}
+    />
+  );
 }
 
 function AccordionItem({

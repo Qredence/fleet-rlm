@@ -120,9 +120,9 @@ export const MicSelectorContent = ({
 }: MicSelectorContentProps) => {
   const { onValueChange, value } = useContext(MicSelectorContext);
 
-  return (
+    return (
     <PopoverContent
-      className={cn("w-(--radix-popover-trigger-width) p-0", className)}
+      className={cn("w-(--anchor-width) p-0", className)}
       {...popoverOptions}
     >
       <Command onValueChange={onValueChange} value={value} {...props} />
