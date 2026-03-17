@@ -5,11 +5,7 @@ import type { WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { MenuItem } from "@/components/ui/menu-item";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils/cn";
 import {
   PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,

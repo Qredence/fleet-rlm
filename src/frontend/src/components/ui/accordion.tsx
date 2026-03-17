@@ -4,10 +4,22 @@ import { ChevronDownIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils/cn";
 
-// We use `any` here to bypass strict discrimination between single/multiple arrays
-// so consumer code that uses strings (Radix single style) doesn't break
-function Accordion({ type, collapsible, ...props }: React.ComponentProps<typeof BaseAccordion.Root> & { type?: "single" | "multiple", collapsible?: boolean, defaultValue?: any, value?: any, onValueChange?: any }) {
-  return <BaseAccordion.Root {...props} />;
+type AccordionRootProps = React.ComponentProps<typeof BaseAccordion.Root>;
+type AccordionProps = Omit<
+  AccordionRootProps,
+  "type" | "defaultValue" | "value" | "onValueChange"
+> & {
+  type?: "single" | "multiple";
+  collapsible?: boolean;
+  defaultValue?: unknown;
+  value?: unknown;
+  onValueChange?: unknown;
+};
+
+function Accordion({ type, collapsible, ...props }: AccordionProps) {
+  const accordionProps = { type, collapsible, ...props } as AccordionRootProps;
+
+  return <BaseAccordion.Root {...accordionProps} />;
 }
 
 function AccordionItem({ className, ...props }: React.ComponentProps<typeof BaseAccordion.Item>) {
@@ -34,7 +46,10 @@ function AccordionTrigger({
         {...props}
       >
         {children}
-        <ChevronDownIcon className="text-muted-foreground pointer-events-none size-4 shrink-0 translate-y-0.5 transition-transform duration-200" />
+        <ChevronDownIcon
+          className="text-muted-foreground pointer-events-none size-5 shrink-0 translate-y-0.5 transition-transform duration-200"
+          strokeWidth={1.5}
+        />
       </BaseAccordion.Trigger>
     </BaseAccordion.Header>
   );
@@ -47,7 +62,7 @@ function AccordionContent({
 }: React.ComponentProps<typeof BaseAccordion.Panel>) {
   return (
     <BaseAccordion.Panel
-      className="data-[ending-style]:animate-accordion-up data-[starting-style]:animate-accordion-down overflow-hidden transition-all"
+      className="data-ending-style:animate-accordion-up data-starting-style:animate-accordion-down overflow-hidden transition-all"
       {...props}
     >
       <div className={cn("pt-0 pb-4", className)}>{children}</div>

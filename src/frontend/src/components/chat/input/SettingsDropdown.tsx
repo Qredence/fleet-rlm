@@ -1,20 +1,10 @@
 import { Settings } from "lucide-react";
 
 import { IconButton } from "@/components/ui/icon-button";
-import {
-  Dropdown,
-} from "@/components/ui/dropdown";
+import { Dropdown } from "@/components/ui/dropdown";
 import { MenuItem } from "@/components/ui/menu-item";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import {
   PROMPT_INPUT_ICON_BUTTON_CLASSNAME,
@@ -29,16 +19,12 @@ function SettingsDropdown() {
   const { navigate } = useAppNavigate();
 
   const handleOpenSettings = () => {
-    const openSettingsEvent = new CustomEvent<OpenSettingsEventDetail>(
-      "open-settings",
-      {
-        detail: { section: "runtime" },
-        cancelable: true,
-      },
-    );
+    const openSettingsEvent = new CustomEvent<OpenSettingsEventDetail>("open-settings", {
+      detail: { section: "runtime" },
+      cancelable: true,
+    });
 
-    const wasHandledByDialog =
-      document.dispatchEvent(openSettingsEvent) === false;
+    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
 
     if (!wasHandledByDialog) {
       navigate({ to: "/settings", search: { section: "runtime" } });

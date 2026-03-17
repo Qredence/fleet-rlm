@@ -21,13 +21,13 @@ import {
   usePromptInputAttachments,
 } from "@/components/prompt-kit/prompt-input.context";
 import type { PromptInputError } from "@/components/prompt-kit/prompt-input.utilities";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { InputGroup } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils/cn";
 import { ImageIcon } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { PromptInputActionMenuItem } from "./prompt-input.ui-wrappers";
 import {
   capFilesToCapacity,
   convertBlobUrlToDataUrl,
@@ -145,28 +145,32 @@ export const PromptInputProvider = ({
   );
 };
 
-export type PromptInputActionAddAttachmentsProps = ComponentProps<typeof DropdownMenuItem> & {
+export type PromptInputActionAddAttachmentsProps = ComponentProps<
+  typeof PromptInputActionMenuItem
+> & {
   label?: string;
 };
 
 export const PromptInputActionAddAttachments = ({
   label = "Add photos or files",
+  onSelect,
   ...props
 }: PromptInputActionAddAttachmentsProps) => {
   const attachments = usePromptInputAttachments();
 
-  const handleSelect = useCallback(
-    (e: Event) => {
-      e.preventDefault();
+  const handleSelect = (
+    event: Parameters<NonNullable<PromptInputActionAddAttachmentsProps["onSelect"]>>[0],
+  ) => {
+    onSelect?.(event);
+    if (!event.defaultPrevented) {
       attachments.openFileDialog();
-    },
-    [attachments],
-  );
+    }
+  };
 
   return (
-    <DropdownMenuItem {...props} onClick={handleSelect as any}>
+    <PromptInputActionMenuItem {...props} onSelect={handleSelect}>
       <ImageIcon className="mr-2 size-4" /> {label}
-    </DropdownMenuItem>
+    </PromptInputActionMenuItem>
   );
 };
 
@@ -517,7 +521,7 @@ export const PromptInput = ({
         type="file"
       />
       <form className={cn("w-full", className)} onSubmit={handleSubmit} ref={formRef} {...props}>
-        <InputGroup className="prompt-composer-shell bg-(--color-surface-elevated)! flex-col items-stretch overflow-hidden rounded-2xl border-0 p-1">
+        <InputGroup className="prompt-composer-shell bg-(--color-surface-elevated)! flex-col items-stretch rounded-2xl border-0 p-1">
           {children}
         </InputGroup>
       </form>

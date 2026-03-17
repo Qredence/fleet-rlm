@@ -9,7 +9,9 @@ import { fontWeights } from "@/lib/font-weight";
 import { useShape } from "@/lib/shape-context";
 
 interface MenuItemProps extends HTMLAttributes<HTMLDivElement> {
-  icon: LucideIcon | React.ComponentType<{ className?: string; size?: number; strokeWidth?: number | string }>;
+  icon:
+    | LucideIcon
+    | React.ComponentType<{ className?: string; size?: number; strokeWidth?: number | string }>;
   label: string;
   index: number;
   checked?: boolean;
@@ -17,10 +19,7 @@ interface MenuItemProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
-  (
-    { icon: Icon, label, index, checked, onSelect, className, ...props },
-    ref
-  ) => {
+  ({ icon: Icon, label, index, checked, onSelect, className, ...props }, ref) => {
     const internalRef = useRef<HTMLDivElement>(null);
     const hasMounted = useRef(false);
     const { registerItem, activeIndex, checkedIndex } = useDropdown();
@@ -59,7 +58,7 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
         }}
         className={cn(
           `relative z-10 flex items-center gap-2 ${shape.item} px-2 py-2 cursor-pointer outline-none`,
-          className
+          className,
         )}
         {...props}
       >
@@ -72,9 +71,7 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
             strokeWidth={isActive || checked ? 2 : 1.5}
             className={cn(
               "col-start-1 row-start-1 transition-[color,stroke-width] duration-80",
-              isActive || checked
-                ? "text-foreground"
-                : "text-muted-foreground"
+              isActive || checked ? "text-foreground" : "text-muted-foreground",
             )}
           />
         </span>
@@ -89,14 +86,10 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
           <span
             className={cn(
               "col-start-1 row-start-1 transition-[color,font-variation-settings] duration-80",
-              isActive || checked
-                ? "text-foreground"
-                : "text-muted-foreground"
+              isActive || checked ? "text-foreground" : "text-muted-foreground",
             )}
             style={{
-              fontVariationSettings: checked
-                ? fontWeights.semibold
-                : fontWeights.normal,
+              fontVariationSettings: checked ? fontWeights.semibold : fontWeights.normal,
             }}
           >
             {label}
@@ -136,7 +129,7 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
         </AnimatePresence>
       </div>
     );
-  }
+  },
 );
 
 MenuItem.displayName = "MenuItem";

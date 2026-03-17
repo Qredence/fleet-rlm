@@ -1,4 +1,4 @@
-import * as React from "react";
+import type * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { Dialog as BaseDialog } from "@base-ui/react";
 import { XIcon } from "lucide-react";
@@ -6,45 +6,59 @@ import { XIcon } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 const Dialog = BaseDialog.Root;
-const DialogTrigger = React.forwardRef<any, React.ComponentPropsWithoutRef<typeof BaseDialog.Trigger> & { asChild?: boolean }>(({ asChild, ...props }, ref) => {
+
+function DialogTrigger({
+  asChild,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseDialog.Trigger> & {
+  asChild?: boolean;
+  ref?: React.ComponentPropsWithRef<typeof BaseDialog.Trigger>["ref"];
+}) {
   if (asChild) {
     return <BaseDialog.Trigger render={<Slot />} ref={ref} {...props} />;
   }
   return <BaseDialog.Trigger ref={ref} {...props} />;
-});
-DialogTrigger.displayName = "DialogTrigger";
+}
+
 const DialogPortal = BaseDialog.Portal;
 const DialogClose = BaseDialog.Close;
 
-const DialogOverlay = React.forwardRef<
-  React.ComponentRef<typeof BaseDialog.Backdrop>,
-  React.ComponentPropsWithoutRef<typeof BaseDialog.Backdrop>
->(function DialogOverlay({ className, ...props }, ref) {
+function DialogOverlay({
+  className,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseDialog.Backdrop> & {
+  ref?: React.Ref<React.ComponentRef<typeof BaseDialog.Backdrop>>;
+}) {
   return (
     <BaseDialog.Backdrop
       ref={ref}
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
+        "fixed inset-0 z-50 bg-black/50 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
       {...props}
     />
   );
-});
-DialogOverlay.displayName = "DialogOverlay";
+}
 
-const DialogContent = React.forwardRef<
-  React.ComponentRef<typeof BaseDialog.Popup>,
-  React.ComponentPropsWithoutRef<typeof BaseDialog.Popup>
->(function DialogContent({ className, children, ...props }, ref) {
+function DialogContent({
+  className,
+  children,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseDialog.Popup> & {
+  ref?: React.Ref<React.ComponentRef<typeof BaseDialog.Popup>>;
+}) {
   return (
     <BaseDialog.Portal>
       <DialogOverlay />
       <BaseDialog.Popup
         ref={ref}
         className={cn(
-          "bg-background fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border border-border-subtle p-6 shadow-lg duration-200 sm:max-w-lg",
-          "transition-all data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[starting-style]:opacity-0 data-[starting-style]:scale-95",
+          "bg-background fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border-subtle p-6 shadow-lg duration-200 sm:max-w-lg",
+          "transition-all data-ending-style:opacity-0 data-ending-style:scale-95 data-starting-style:opacity-0 data-starting-style:scale-95",
           className,
         )}
         {...props}
@@ -57,15 +71,11 @@ const DialogContent = React.forwardRef<
       </BaseDialog.Popup>
     </BaseDialog.Portal>
   );
-});
-DialogContent.displayName = "DialogContent";
+}
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <div
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
-      {...props}
-    />
+    <div className={cn("flex flex-col gap-2 text-center sm:text-left", className)} {...props} />
   );
 }
 
@@ -78,25 +88,37 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-const DialogTitle = React.forwardRef<
-  React.ComponentRef<typeof BaseDialog.Title>,
-  React.ComponentPropsWithoutRef<typeof BaseDialog.Title>
->(function DialogTitle({ className, ...props }, ref) {
+function DialogTitle({
+  className,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseDialog.Title> & {
+  ref?: React.Ref<React.ComponentRef<typeof BaseDialog.Title>>;
+}) {
   return (
-    <BaseDialog.Title ref={ref} className={cn("text-lg font-semibold leading-none tracking-tight", className)} {...props} />
+    <BaseDialog.Title
+      ref={ref}
+      className={cn("text-lg font-medium leading-none tracking-tight", className)}
+      {...props}
+    />
   );
-});
-DialogTitle.displayName = "DialogTitle";
+}
 
-const DialogDescription = React.forwardRef<
-  React.ComponentRef<typeof BaseDialog.Description>,
-  React.ComponentPropsWithoutRef<typeof BaseDialog.Description>
->(function DialogDescription({ className, ...props }, ref) {
+function DialogDescription({
+  className,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseDialog.Description> & {
+  ref?: React.Ref<React.ComponentRef<typeof BaseDialog.Description>>;
+}) {
   return (
-    <BaseDialog.Description ref={ref} className={cn("text-muted-foreground text-sm", className)} {...props} />
+    <BaseDialog.Description
+      ref={ref}
+      className={cn("text-muted-foreground text-sm", className)}
+      {...props}
+    />
   );
-});
-DialogDescription.displayName = "DialogDescription";
+}
 
 export {
   Dialog,

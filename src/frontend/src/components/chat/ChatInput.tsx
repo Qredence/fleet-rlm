@@ -7,7 +7,6 @@ import { AttachmentDropdown } from "@/components/chat/input/AttachmentDropdown";
 import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDropdown";
 import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown";
 import { SendButton } from "@/components/chat/input/SendButton";
-import { SettingsDropdown } from "@/components/chat/input/SettingsDropdown";
 import {
   PromptInput,
   PromptInputBody,
@@ -148,7 +147,6 @@ function ChatInput({
               onFilesSelected={handleFilesSelected}
               onUnsupportedSelect={handleUnsupportedAttachmentSelect}
             />
-            <SettingsDropdown />
             <ExecutionModeDropdown value={executionMode} onChange={onExecutionModeChange} />
             <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
           </PromptInputTools>

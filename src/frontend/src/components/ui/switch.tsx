@@ -7,8 +7,8 @@ function Switch({ className, ...props }: React.ComponentProps<typeof BaseSwitch.
   return (
     <BaseSwitch.Root
       className={cn(
-        "peer inline-flex h-[31px] w-[51px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-xs transition-all outline-none",
-        "bg-[var(--toggle-inactive)] data-[checked]:bg-[var(--toggle-active)]",
+        "peer inline-flex h-7.75 w-12.75 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-xs transition-all outline-none",
+        "bg-toggle-inactive data-checked:bg-toggle-active",
         "focus-visible:ring-ring/50 focus-visible:ring-[3px]",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
@@ -17,8 +17,8 @@ function Switch({ className, ...props }: React.ComponentProps<typeof BaseSwitch.
     >
       <BaseSwitch.Thumb
         className={cn(
-          "pointer-events-none block size-[27px] rounded-full bg-[var(--toggle-knob)] shadow-[var(--toggle-knob-shadow)] ring-0 transition-transform",
-          "data-[checked]:translate-x-[20px] translate-x-0",
+          "pointer-events-none block size-6.75 rounded-full bg-toggle-knob shadow-(--toggle-knob-shadow) ring-0 transition-transform",
+          "data-checked:translate-x-5 translate-x-0",
         )}
       />
     </BaseSwitch.Root>

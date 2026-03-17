@@ -13,18 +13,10 @@ function Avatar({ className, ...props }: React.ComponentProps<typeof BaseAvatar.
 }
 
 function AvatarImage({ className, ...props }: React.ComponentProps<typeof BaseAvatar.Image>) {
-  return (
-    <BaseAvatar.Image
-      className={cn("aspect-square size-full", className)}
-      {...props}
-    />
-  );
+  return <BaseAvatar.Image className={cn("aspect-square size-full", className)} {...props} />;
 }
 
-function AvatarFallback({
-  className,
-  ...props
-}: React.ComponentProps<typeof BaseAvatar.Fallback>) {
+function AvatarFallback({ className, ...props }: React.ComponentProps<typeof BaseAvatar.Fallback>) {
   return (
     <BaseAvatar.Fallback
       className={cn("bg-muted flex size-full items-center justify-center rounded-full", className)}

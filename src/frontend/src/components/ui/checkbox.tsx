@@ -13,9 +13,7 @@ function Checkbox({ className, ...props }: React.ComponentProps<typeof BaseCheck
       )}
       {...props}
     >
-      <BaseCheckbox.Indicator
-        className="flex items-center justify-center text-current transition-none"
-      >
+      <BaseCheckbox.Indicator className="flex items-center justify-center text-current transition-none">
         <CheckIcon className="size-3.5" />
       </BaseCheckbox.Indicator>
     </BaseCheckbox.Root>

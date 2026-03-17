@@ -1,12 +1,12 @@
 /**
- * AI Elements Components
+ * Prompt kit components
  *
- * These components are the official Vercel ai-elements components installed
- * via `npx ai-elements add <component>`. They follow ai-elements patterns
- * with data-slot attributes and compound component composition.
+ * These components are local prompt-oriented wrappers around the Vercel AI SDK
+ * element patterns. They preserve the repo's `data-slot` conventions and
+ * compound component composition while exposing a project-specific namespace.
  *
- * Note: Components use AI SDK types for seamless integration.
- * Custom wrapper components are provided for backward compatibility where needed.
+ * Components use AI SDK types for seamless integration. Compatibility helpers
+ * remain in place where the surrounding workspace UI expects stable APIs.
  */
 
 // Message components
@@ -62,7 +62,7 @@ export {
   type ToolProps,
 } from "./tool";
 
-// Code Block component (added by ai-elements)
+// Code block component
 export { CodeBlock } from "./code-block";
 
 // Shimmer components
@@ -149,3 +149,55 @@ export {
   EnvironmentVariableValue,
   EnvironmentVariableCopyButton,
 } from "./environment-variables";
+
+// Suggestion components
+export { Suggestions, Suggestion, type SuggestionsProps, type SuggestionProps } from "./suggestion";
+
+// PromptInput components (re-exported from prompt-input module)
+export {
+  PromptInput,
+  PromptInputProvider,
+  PromptInputActionAddAttachments,
+  PromptInputTextarea,
+  PromptInputBody,
+  PromptInputHeader,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputButton,
+  PromptInputTools,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuItem,
+  PromptInputActionMenuTrigger,
+  PromptInputSelect,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
+  PromptInputCommand,
+  PromptInputCommandEmpty,
+  PromptInputCommandGroup,
+  PromptInputCommandInput,
+  PromptInputCommandItem,
+  PromptInputCommandList,
+  PromptInputCommandSeparator,
+  PromptInputHoverCard,
+  PromptInputHoverCardContent,
+  PromptInputHoverCardTrigger,
+  PromptInputTab,
+  PromptInputTabBody,
+  PromptInputTabItem,
+  PromptInputTabLabel,
+  PromptInputTabsList,
+  usePromptInputController,
+  usePromptInputAttachments,
+  usePromptInputReferencedSources,
+  useProviderAttachments,
+  LocalReferencedSourcesContext,
+  type PromptInputProps,
+  type PromptInputMessage,
+  type PromptInputTextareaProps,
+  type PromptInputProviderProps,
+  type PromptInputControllerProps,
+  type PromptInputActionAddAttachmentsProps,
+} from "./prompt-input";

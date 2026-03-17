@@ -77,7 +77,10 @@ describe("SettingsDropdown", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(navigate).toHaveBeenCalledWith({ to: "/settings?section=runtime" });
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/settings",
+      search: { section: "runtime" },
+    });
 
     act(() => {
       root.unmount();

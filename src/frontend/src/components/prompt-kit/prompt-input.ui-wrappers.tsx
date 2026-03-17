@@ -31,6 +31,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils/cn";
 import { CornerDownLeftIcon, PlusIcon, SquareIcon, XIcon } from "lucide-react";
 
+const PROMPT_INPUT_MENU_CONTENT_CLASSNAME = "prompt-composer-menu rounded-2xl p-1.5";
+const PROMPT_INPUT_MENU_ITEM_CLASSNAME =
+  "prompt-composer-menu-item cursor-pointer gap-3 rounded-xl px-3 py-2.5";
+
 export type PromptInputBodyProps = HTMLAttributes<HTMLDivElement>;
 
 export const PromptInputBody = ({ className, ...props }: PromptInputBodyProps) => (
@@ -139,7 +143,11 @@ export const PromptInputActionMenuContent = ({
   className,
   ...props
 }: PromptInputActionMenuContentProps) => (
-  <DropdownMenuContent align="start" className={cn(className)} {...props} />
+  <DropdownMenuContent
+    align="start"
+    className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, className)}
+    {...props}
+  />
 );
 
 export type PromptInputActionMenuItemProps = ComponentProps<typeof DropdownMenuItem>;
@@ -147,7 +155,9 @@ export type PromptInputActionMenuItemProps = ComponentProps<typeof DropdownMenuI
 export const PromptInputActionMenuItem = ({
   className,
   ...props
-}: PromptInputActionMenuItemProps) => <DropdownMenuItem className={cn(className)} {...props} />;
+}: PromptInputActionMenuItemProps) => (
+  <DropdownMenuItem className={cn(PROMPT_INPUT_MENU_ITEM_CLASSNAME, className)} {...props} />
+);
 
 export type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
   status?: ChatStatus;
@@ -228,12 +238,14 @@ export type PromptInputSelectContentProps = ComponentProps<typeof SelectContent>
 export const PromptInputSelectContent = ({
   className,
   ...props
-}: PromptInputSelectContentProps) => <SelectContent className={cn(className)} {...props} />;
+}: PromptInputSelectContentProps) => (
+  <SelectContent className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, className)} {...props} />
+);
 
 export type PromptInputSelectItemProps = ComponentProps<typeof SelectItem>;
 
 export const PromptInputSelectItem = ({ className, ...props }: PromptInputSelectItemProps) => (
-  <SelectItem className={cn(className)} {...props} />
+  <SelectItem className={cn(PROMPT_INPUT_MENU_ITEM_CLASSNAME, className)} {...props} />
 );
 
 export type PromptInputSelectValueProps = ComponentProps<typeof SelectValue>;

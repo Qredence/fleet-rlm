@@ -55,11 +55,9 @@ const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
     const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
     const activeRect = activeIndex !== null ? itemRects[activeIndex] : null;
-    const checkedRect =
-      checkedIndex != null ? itemRects[checkedIndex] : null;
+    const checkedRect = checkedIndex != null ? itemRects[checkedIndex] : null;
     const focusRect = focusedIndex !== null ? itemRects[focusedIndex] : null;
-    const isHoveringOther =
-      activeIndex !== null && activeIndex !== checkedIndex;
+    const isHoveringOther = activeIndex !== null && activeIndex !== checkedIndex;
     const shape = useShape();
 
     return (
@@ -80,9 +78,7 @@ const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
             if (indexAttr != null) {
               const idx = Number(indexAttr);
               setActiveIndex(idx);
-              setFocusedIndex(
-                (e.target as HTMLElement).matches(":focus-visible") ? idx : null
-              );
+              setFocusedIndex((e.target as HTMLElement).matches(":focus-visible") ? idx : null);
             }
           }}
           onBlur={(e) => {
@@ -92,7 +88,7 @@ const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
           }}
           onKeyDown={(e) => {
             const items = Array.from(
-              containerRef.current?.querySelectorAll('[role="menuitemradio"]') ?? []
+              containerRef.current?.querySelectorAll('[role="menuitemradio"]') ?? [],
             ) as HTMLElement[];
             const currentIdx = items.indexOf(e.target as HTMLElement);
             if (currentIdx === -1) return;
@@ -114,7 +110,7 @@ const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
           role="menu"
           className={cn(
             `relative flex flex-col gap-0.5 w-72 max-w-full ${shape.container} bg-card shadow-[0_4px_12px_rgba(0,0,0,0.02)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5)] border border-border/60 p-1 select-none`,
-            className
+            className,
           )}
           {...props}
         >
@@ -194,7 +190,7 @@ const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
         </div>
       </DropdownContext.Provider>
     );
-  }
+  },
 );
 
 Dropdown.displayName = "Dropdown";
@@ -207,13 +203,10 @@ const DropdownLabel = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn(
-        "px-2 py-1.5 text-[11px] text-muted-foreground",
-        className
-      )}
+      className={cn("px-2 py-1.5 text-[11px] text-muted-foreground", className)}
       {...props}
     />
-  )
+  ),
 );
 
 DropdownLabel.displayName = "DropdownLabel";
@@ -222,17 +215,16 @@ DropdownLabel.displayName = "DropdownLabel";
 // DropdownSeparator
 // ---------------------------------------------------------------------------
 
-const DropdownSeparator = forwardRef<
-  HTMLDivElement,
-  HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    role="separator"
-    className={cn("my-1 -mx-1 h-px bg-border/60", className)}
-    {...props}
-  />
-));
+const DropdownSeparator = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      role="separator"
+      className={cn("my-1 -mx-1 h-px bg-border/60", className)}
+      {...props}
+    />
+  ),
+);
 
 DropdownSeparator.displayName = "DropdownSeparator";
 
