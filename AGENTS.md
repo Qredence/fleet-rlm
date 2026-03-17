@@ -58,6 +58,10 @@ Use the more specific [src/fleet_rlm/AGENTS.md](/Volumes/StorageBackup/_RLM/flee
   - `uv run fleet web`
 - Quick test suite:
   - `make test-fast`
+- Run specific test markers:
+  - `uv run pytest -q -m "not live_llm and not benchmark"`
+  - `uv run pytest -q -m "live_llm"` (requires Modal + configured LM secret)
+  - `uv run pytest -q -m "live_daytona"` (requires live Daytona backend)
 - Main repo validation:
   - `make quality-gate`
 - Full release-oriented validation:
@@ -66,6 +70,8 @@ Use the more specific [src/fleet_rlm/AGENTS.md](/Volumes/StorageBackup/_RLM/flee
   - `cd src/frontend && pnpm install --frozen-lockfile`
   - `pnpm run dev`
   - `pnpm run check`
+- Clean stale caches before debugging test failures:
+  - `rm -rf .ruff_cache __pycache__ .pytest_cache`
 
 ## Validation Lanes
 

@@ -104,7 +104,7 @@ fleet-rlm = "fleet_rlm.cli.fleet_cli:main"
 rlm-modal = "fleet_rlm.cli.main:main"
 
 [tool.fastapi]
-entrypoint = "fleet_rlm.server.main:app"
+entrypoint = "fleet_rlm.api.main:app"
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
