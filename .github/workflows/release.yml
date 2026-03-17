@@ -100,21 +100,30 @@ jobs:
           cache: "pnpm"
           cache-dependency-path: "src/frontend/pnpm-lock.yaml"
 
+      - name: Install Vite+ CLI
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        run: npm install -g vite-plus@0.1.11
+
       - name: Frontend install
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          pnpm install --frozen-lockfile
+          vp install
+
+      - name: Install Playwright browser
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        run: |
+          cd src/frontend
+          pnpm dlx playwright install --with-deps chromium
 
       - name: Frontend quality gate
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          pnpm run api:check
-          pnpm run type-check
-          pnpm run lint:robustness
-          pnpm run test:unit
-          pnpm run build
+          pnpm dlx knip --no-progress || echo "⚠️ Unused dependencies detected - see report above"
+          ./node_modules/.bin/vp check
+          ./node_modules/.bin/vp test
+          ./node_modules/.bin/vp build
 
   build:
     name: Build Distribution
