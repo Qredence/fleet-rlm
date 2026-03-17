@@ -181,9 +181,9 @@ class DatabaseManager:
 
 ## References
 
-- `src/fleet_rlm/db/models.py` — SQLAlchemy model definitions
-- `src/fleet_rlm/db/repository.py` — Data access repository
-- `src/fleet_rlm/db/engine.py` — Connection management
-- `src/fleet_rlm/server/auth/admission.py` — Tenant admission flow
+- `src/fleet_rlm/infrastructure/database/models.py` — SQLAlchemy model definitions
+- `src/fleet_rlm/infrastructure/database/repository.py` — Data access repository
+- `src/fleet_rlm/infrastructure/database/engine.py` — Connection management
+- `src/fleet_rlm/api/auth/admission.py` — Tenant admission flow
 - `migrations/` — Alembic migration scripts
 - Neon documentation: https://neon.tech/docs

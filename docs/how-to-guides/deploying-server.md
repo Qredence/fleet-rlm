@@ -28,7 +28,10 @@ This starts both the API server and serves frontend static assets.
 |----------|---------|
 | `/health` | Liveness probe (always returns `ok: true`) |
 | `/ready` | Readiness probe (checks planner, database) |
-| `/api/v1/*` | REST API endpoints |
+| `/api/v1/auth/me` | Identity bootstrap for the SPA |
+| `/api/v1/sessions/state` | Lightweight in-memory session summaries |
+| `/api/v1/runtime/*` | Runtime settings, diagnostics, and volume access |
+| `POST /api/v1/traces/feedback` | Trace correctness/expectation feedback |
 | `/api/v1/ws/chat` | WebSocket chat runtime |
 | `/api/v1/ws/execution` | WebSocket execution stream |
 
@@ -228,7 +231,7 @@ Response:
 ```json
 {
   "ok": true,
-  "version": "0.4.95"
+  "version": "0.4.98"
 }
 ```
 

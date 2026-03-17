@@ -1,6 +1,6 @@
 # HTTP API Reference
 
-This reference documents the REST and WebSocket API surface exposed by `src/fleet_rlm/server/main.py`.
+This reference documents the REST and WebSocket API surface exposed by `src/fleet_rlm/api/main.py`.
 
 ## Overview
 
@@ -39,7 +39,7 @@ Basic liveness check.
 ```json
 {
   "ok": true,
-  "version": "0.4.95"
+  "version": "0.4.98"
 }
 ```
 
@@ -396,6 +396,7 @@ Send a user message to initiate or continue a conversation.
   "trace": true,
   "trace_mode": "compact",
   "execution_mode": "auto",
+  "runtime_mode": "modal_chat",
   "workspace_id": "default",
   "user_id": "anonymous",
   "session_id": "session-uuid"
@@ -412,6 +413,11 @@ Send a user message to initiate or continue a conversation.
 | `trace` | boolean | no | `true` | Enable tracing |
 | `trace_mode` | `"compact"` \| `"verbose"` \| `"off"` | no | `"compact"` | Trace output verbosity |
 | `execution_mode` | `"auto"` \| `"rlm_only"` \| `"tools_only"` | no | `"auto"` | Execution strategy |
+| `runtime_mode` | `"modal_chat"` \| `"daytona_pilot"` | no | `"modal_chat"` | Top-level runtime selector |
+| `repo_url` | string | no | `null` | Daytona-only repository URL |
+| `repo_ref` | string | no | `null` | Daytona branch or commit; requires `repo_url` |
+| `context_paths` | string[] | no | `null` | Daytona-only staged local host paths |
+| `batch_concurrency` | integer | no | `null` | Daytona-only recursive batch concurrency |
 | `workspace_id` | string | no | `"default"` | Workspace identifier |
 | `user_id` | string | no | `"anonymous"` | User identifier |
 | `session_id` | string | no | auto-generated | Session identifier |
@@ -423,6 +429,21 @@ Send a user message to initiate or continue a conversation.
 | `auto` | Full RLM with tools, delegation, and RLM fallback |
 | `rlm_only` | Deep reasoning only, no tool execution |
 | `tools_only` | Direct tool execution without RLM reasoning |
+
+**Runtime Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `modal_chat` | Default product runtime with Modal-backed execution |
+| `daytona_pilot` | Experimental Daytona workbench/runtime inside `RLM Workspace` |
+
+When `runtime_mode="daytona_pilot"`:
+
+- `execution_mode` is ignored
+- `repo_ref` requires `repo_url`
+- request-side `max_depth` is rejected
+- Daytona source controls may be included via `repo_url`, `repo_ref`,
+  `context_paths`, and `batch_concurrency`
 
 ---
 
@@ -795,8 +816,8 @@ The following endpoints have been removed from the API:
 rg -n "^  /" openapi.yaml
 
 # Verify router definitions
-rg -n "@router\.(get|post|patch)" src/fleet_rlm/server/routers/
+rg -n "@router\.(get|post|patch)" src/fleet_rlm/api/routers/
 
 # Check WebSocket routes
-rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
+rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/api.py
 ```

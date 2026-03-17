@@ -12,36 +12,24 @@ Before you begin, ensure you have:
 
 ## Installation
 
-### Option 1: Install with uv (Recommended)
+### Option 1: Add to a uv-managed project (Recommended)
 
-Install Fleet-RLM globally using uv:
-
-```bash
-uv tool install fleet-rlm
-```
-
-This makes `fleet` and `fleet-rlm` commands available system-wide.
-
-### Option 2: Install in a Virtual Environment
-
-For project-specific use, install within a virtual environment:
+Add Fleet-RLM to a local `uv` project:
 
 ```bash
-# Create and activate a virtual environment
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install Fleet-RLM
-uv pip install fleet-rlm
+uv init
+uv add fleet-rlm
 ```
+
+If you already have a `uv` project, skip `uv init` and just run `uv add fleet-rlm`.
 
 ### Verify Installation
 
 Confirm the installation was successful:
 
 ```bash
-fleet --help
-fleet-rlm --help
+uv run fleet --help
+uv run fleet-rlm --help
 ```
 
 ## Configuration
@@ -85,7 +73,7 @@ For other supported models, see the [LiteLLM model availability](../litellm-mode
 Start the Fleet-RLM Web UI:
 
 ```bash
-fleet web
+uv run fleet web
 ```
 
 This launches a local server. Open your browser to:
@@ -100,7 +88,7 @@ The server runs with sensible defaults. For custom configuration:
 
 ```bash
 # Custom host and port
-fleet-rlm serve-api --host 0.0.0.0 --port 3000
+uv run fleet-rlm serve-api --host 0.0.0.0 --port 3000
 ```
 
 ## Terminal Chat
@@ -108,20 +96,20 @@ fleet-rlm serve-api --host 0.0.0.0 --port 3000
 For command-line usage, start an interactive chat session:
 
 ```bash
-fleet
+uv run fleet
 ```
 
 ### Terminal Chat Options
 
 ```bash
 # Preload a document into context
-fleet --docs-path README.md
+uv run fleet --docs-path README.md
 
 # Enable verbose trace output
-fleet --trace-mode verbose
+uv run fleet --trace-mode verbose
 
 # Use a custom Modal volume for persistence
-fleet --volume-name my-volume --secret-name my-secrets
+uv run fleet --volume-name my-volume --secret-name my-secrets
 ```
 
 #### Trace Modes
@@ -150,14 +138,10 @@ Example prompts to try:
 
 ### "No module named 'fleet_rlm'"
 
-**Solution:** Ensure you've installed Fleet-RLM and activated your virtual environment (if using one):
+**Solution:** Ensure you've added Fleet-RLM to the current `uv` project:
 
 ```bash
-# Verify installation
-uv pip list | grep fleet-rlm
-
-# Or with global tool install
-uv tool list
+uv tree | rg fleet-rlm
 ```
 
 ### "Modal authentication required"
@@ -186,17 +170,12 @@ cp .env.example .env
 lsof -i :8000
 
 # Or use a different port
-fleet-rlm serve-api --port 8001
+uv run fleet-rlm serve-api --port 8001
 ```
 
 ### "Permission denied" errors
 
-**Solution:** If using uv tool install, ensure your PATH includes the uv bin directory. On macOS/Linux:
-
-```bash
-# Add to your shell profile (~/.zshrc, ~/.bashrc, etc.)
-export PATH="$HOME/.local/bin:$PATH"
-```
+**Solution:** Prefer `uv run fleet ...` or `uv run fleet-rlm ...` inside the project instead of relying on a global tool install.
 
 ### Python Version Mismatch
 

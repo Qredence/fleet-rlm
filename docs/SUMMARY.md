@@ -58,3 +58,7 @@
   * [fleet-rlm Concepts](explanation/concepts.md)
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)
+
+## Internal Plans
+
+* [Post-Restructure Stabilization and Uncommitted Work Commit Plan](superpowers/plans/2026-03-16-post-restructure-stabilization.md)

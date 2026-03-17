@@ -6,6 +6,33 @@ All notable changes to this project are documented in this file.
 
 - No changes yet.
 
+## [0.4.98] - 2026-03-17
+
+### Highlights (User Impact)
+
+- Tightened the release packaging story for `0.4.98` by aligning package metadata, runtime version exports, OpenAPI contracts, generated frontend API types, and lockfile state on the same release number.
+
+### Breaking Changes
+
+- **Change:** No breaking API, CLI, runtime-behavior, or frontend contract changes were introduced in `0.4.98`.
+  **Outcome:** Upgrading from `0.4.97` to `0.4.98` remains a release-metadata and packaging-consistency update rather than a compatibility migration.
+
+### Changed
+
+- **Change:** Bumped the canonical package/version sources to `0.4.98` in `pyproject.toml`, `src/fleet_rlm/__init__.py`, and `uv.lock`.
+  **Outcome:** Build metadata, editable-install state, and runtime introspection now report the same release number consistently.
+- **Change:** Updated the canonical and frontend OpenAPI documents to `0.4.98` and re-synced generated frontend client typings from the refreshed spec snapshot.
+  **Outcome:** Backend schema metadata and frontend API artifacts now stay aligned for this release instead of advertising an older version.
+- **Change:** Added a dedicated `0.4.98` changelog section to make the release metadata bump explicit in project history.
+  **Outcome:** Contributors and release tooling now have a clear, validator-friendly record of what shipped in `0.4.98`.
+
+### Fixed
+
+- **Change:** Fixed release metadata drift between package configuration, runtime `__version__`, OpenAPI `info.version`, and generated frontend API defaults.
+  **Outcome:** Version checks, generated client surfaces, and user-visible metadata now agree on `0.4.98` instead of mixing release identifiers.
+- **Change:** Fixed the health-schema/default-version exposure in generated API artifacts to reflect the current release number.
+  **Outcome:** Consumers inspecting generated types or OpenAPI-derived defaults now see the active release version rather than stale `0.4.97` metadata.
+
 ## [0.4.97] - 2026-03-13
 
 ### Highlights (User Impact)

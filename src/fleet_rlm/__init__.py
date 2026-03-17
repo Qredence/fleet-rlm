@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.4.97"
+__version__ = "0.4.98"
 
 # ---------------------------------------------------------------------------
 # Public API surface
@@ -17,16 +17,16 @@ __version__ = "0.4.97"
 # ---------------------------------------------------------------------------
 
 __all__ = [
+    "ModalInterpreter",
     "__version__",
     # Core planner / interpreter
     "configure_planner_from_env",
+    "daytona_rlm",
+    "fleet_cli",
     "get_planner_lm_from_env",
-    "ModalInterpreter",
     # Lazy sub-modules (accessed as fleet_rlm.runners, fleet_rlm.fleet_cli)
     "runners",
-    "fleet_cli",
     "scaffold",
-    "daytona_rlm",
 ]
 
 if TYPE_CHECKING:

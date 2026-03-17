@@ -1,6 +1,6 @@
 # Fleet-RLM Documentation
 
-Welcome to the `fleet-rlm` documentation. This documentation follows the [Diataxis framework](https://diataxis.fr/) for comprehensive coverage.
+Welcome to the `fleet-rlm` documentation. The docs are organized roughly around the [Diataxis framework](https://diataxis.fr/) and focus on the current product/runtime split: a default Modal-backed Web UI path plus an experimental Daytona workbench path that shares the same frontend workspace and websocket contract.
 
 ## Quick Links
 
@@ -15,8 +15,9 @@ Welcome to the `fleet-rlm` documentation. This documentation follows the [Diatax
 ## Quick Start
 
 ```bash
-uv tool install fleet-rlm
-fleet web
+uv init
+uv add fleet-rlm
+uv run fleet web
 ```
 
 Then open `http://localhost:8000`.
@@ -47,15 +48,16 @@ Then open `http://localhost:8000`.
 ### Contribute
 
 - [Contributing Guide](../CONTRIBUTING.md)
-- [Post-restructure stabilization plan](superpowers/plans/2026-03-16-post-restructure-stabilization.md)
+- [Developer setup](how-to-guides/developer-setup.md)
+- [CLI reference](reference/cli.md)
 
 ## Source-of-Truth Policy
 
 When documentation conflicts with implementation, treat these as authoritative:
 
-- **CLI truth**: `uv run fleet-rlm --help`
+- **CLI truth**: `uv run fleet-rlm --help` and `uv run fleet --help`
 - **API truth**: `openapi.yaml`
-- **WebSocket truth**: `src/fleet_rlm/server/routers/ws/api.py`
+- **WebSocket truth**: `src/fleet_rlm/api/routers/ws/api.py`
 
 ---
 
