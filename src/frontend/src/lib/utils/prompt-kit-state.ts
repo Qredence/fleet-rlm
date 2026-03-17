@@ -1,7 +1,8 @@
 /**
- * State mapping utilities for ai-elements components.
+ * State mapping utilities for prompt-kit components.
  *
- * Maps our custom state types to AI SDK types used by official ai-elements components.
+ * Maps workspace state into the AI SDK-facing state values used by the local
+ * prompt-kit wrappers.
  */
 
 import type { ToolUIPart } from "ai";
@@ -49,7 +50,7 @@ export function mapToolState(state: ChatRenderToolState): ToolUIPart["state"] {
  * - "rejected" → was rejected
  *
  * Note: "approved" and "rejected" are terminal states that don't have
- * direct equivalents in AI SDK. We map them to closest states.
+ * direct equivalents in AI SDK. We map them to the closest compatible states.
  */
 export function mapConfirmationState(
   state: "approval-requested" | "approved" | "rejected",
