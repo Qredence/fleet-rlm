@@ -1,6 +1,13 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { RlmWorkspace } from "@/features/rlm-workspace/RlmWorkspace";
 import type { Conversation } from "@/stores/chatHistoryStore";
@@ -87,7 +94,11 @@ describe("RlmWorkspace requested conversation loading", () => {
     backendRuntimeState.resolveClarification.mockReset();
     backendRuntimeState.loadConversation.mockReset();
 
-    localStorage.clear();
+    try {
+      localStorage.clear();
+    } catch {
+      // Some test workers replace storage with a spy object that omits .clear().
+    }
     useChatHistoryStore.setState({ conversations: [] });
     useNavigationStore.setState({
       activeNav: "workspace",
@@ -134,7 +145,9 @@ describe("RlmWorkspace requested conversation loading", () => {
       root.render(<RlmWorkspace />);
     });
 
-    expect(backendRuntimeState.loadConversation).toHaveBeenCalledWith(conversation);
+    expect(backendRuntimeState.loadConversation).toHaveBeenCalledWith(
+      conversation,
+    );
     expect(useNavigationStore.getState().requestedConversationId).toBeNull();
 
     act(() => {

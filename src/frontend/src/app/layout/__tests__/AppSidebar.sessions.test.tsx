@@ -1,6 +1,13 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { AppSidebar } from "@/app/layout/AppSidebar";
 import type { Conversation } from "@/stores/chatHistoryStore";
@@ -29,11 +36,16 @@ vi.mock("lucide-react", () => {
     PanelLeftOpen: Icon,
     Database: Icon,
     LogIn: Icon,
+    MessageSquare: Icon,
   };
 });
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  Button: ({
+    children,
+    className,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" className={className} {...props}>
       {children}
     </button>
@@ -76,7 +88,11 @@ describe("AppSidebar session actions", () => {
     navigateToMock.mockReset();
     navigateMock.mockReset();
     locationState.pathname = "/app/workspace";
-    localStorage.clear();
+    try {
+      localStorage.clear();
+    } catch {
+      // Some test workers replace storage with a spy object that omits .clear().
+    }
 
     useChatHistoryStore.setState({ conversations: [] });
     useNavigationStore.setState({
@@ -97,6 +113,8 @@ describe("AppSidebar session actions", () => {
 
   it("starts a new workspace session from the sidebar", () => {
     const { container, root } = mountSidebar();
+
+    expect(findButtonByText(container, "RLM Workspace")).toBeTruthy();
 
     const button = findButtonByText(container, "New Session");
     expect(button).toBeTruthy();
@@ -144,7 +162,9 @@ describe("AppSidebar session actions", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(useNavigationStore.getState().requestedConversationId).toBe("conv-1");
+    expect(useNavigationStore.getState().requestedConversationId).toBe(
+      "conv-1",
+    );
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
 
     act(() => {

@@ -47,11 +47,18 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
 }
 
 _LAZY_MODULES: dict[str, str] = {
-    "scaffold": "fleet_rlm.utils.scaffold",
-    "runners": "fleet_rlm.cli.runners",
-    "fleet_cli": "fleet_rlm.cli.fleet_cli",
-    "daytona_rlm": "fleet_rlm.infrastructure.providers.daytona",
+    "scaffold": "fleet_rlm.scaffold",
+    "runners": "fleet_rlm.runners",
+    "fleet_cli": "fleet_rlm.cli.main",
+    "daytona_rlm": "fleet_rlm.daytona_rlm",
 }
+
+# Bind exported submodules eagerly so names listed in __all__ are real module
+# attributes at import time and remain compatible with star imports/review tools.
+runners = import_module(_LAZY_MODULES["runners"])
+fleet_cli = import_module(_LAZY_MODULES["fleet_cli"])
+scaffold = import_module(_LAZY_MODULES["scaffold"])
+daytona_rlm = import_module(_LAZY_MODULES["daytona_rlm"])
 
 
 def __getattr__(name: str) -> Any:

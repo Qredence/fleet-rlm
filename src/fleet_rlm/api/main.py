@@ -3,7 +3,9 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI
@@ -242,7 +244,9 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     _register_api_routes(app)
 
     try:
-        from scalar_fastapi import get_scalar_api_reference
+        get_scalar_api_reference: Any = import_module(
+            "scalar_fastapi"
+        ).get_scalar_api_reference
 
         @app.get("/scalar", include_in_schema=False)
         async def scalar_docs():

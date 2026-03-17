@@ -182,10 +182,7 @@ def daytona_rlm(
 ) -> None:
     """Run the experimental Daytona-backed strict-RLM pilot."""
     try:
-        from fleet_rlm.infrastructure.providers.daytona.runner import (
-            run_daytona_rlm_pilot,
-        )
-        from fleet_rlm.infrastructure.providers.daytona.types import RolloutBudget
+        from fleet_rlm.daytona_rlm import RolloutBudget, run_daytona_rlm_pilot
 
         if ref and not repo:
             raise ValueError("--ref requires --repo.")
@@ -238,7 +235,7 @@ def daytona_smoke(
 ) -> None:
     """Run a native Daytona smoke validation without invoking an LM."""
     try:
-        from fleet_rlm.infrastructure.providers.daytona.smoke import run_daytona_smoke
+        from fleet_rlm.daytona_rlm import run_daytona_smoke
 
         result = run_daytona_smoke(
             repo=repo,

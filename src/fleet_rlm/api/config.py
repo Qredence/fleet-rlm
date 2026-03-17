@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator, computed_field
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
@@ -31,7 +31,6 @@ class ServerRuntimeConfig(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
@@ -78,7 +77,7 @@ class ServerRuntimeConfig(BaseSettings):
     db_validate_on_startup: bool = False
     allow_debug_auth: bool = False
     allow_query_auth_tokens: bool = False
-    cors_allowed_origins: str = ""
+    cors_allowed_origins: list[str] | str = Field(default_factory=list)
     ws_execution_max_queue: int = 256
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
     auth_mode: Literal["dev", "entra"] = "dev"
@@ -91,10 +90,19 @@ class ServerRuntimeConfig(BaseSettings):
     @computed_field
     @property
     def cors_origins_list(self) -> list[str]:
-        """Parse ``cors_allowed_origins`` CSV string into a list."""
-        if not self.cors_allowed_origins:
+        """Return CORS origins as a normalized list."""
+        return list(self.cors_allowed_origins)
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def _normalize_cors_allowed_origins(cls, value: object) -> list[str]:
+        if value is None:
             return []
-        return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raise TypeError("cors_allowed_origins must be provided as a string or list")
 
     @model_validator(mode="before")
     @classmethod
@@ -143,7 +151,7 @@ class ServerRuntimeConfig(BaseSettings):
             "cors_allowed_origins" not in values
             and "CORS_ALLOWED_ORIGINS" not in values
         ):
-            values["cors_allowed_origins"] = "*" if app_env == "local" else ""
+            values["cors_allowed_origins"] = ["*"] if app_env == "local" else []
 
         # auth_required defaults to True when auth_mode is entra
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:

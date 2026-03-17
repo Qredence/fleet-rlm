@@ -13,12 +13,13 @@
  * Also exports `RootHydrateFallback` — the skeleton shown by React Router
  * during initial hydration while lazy route modules are being fetched.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppProviders } from "@/app/providers/AppProviders";
 import { DesktopShell } from "@/app/layout/DesktopShell";
 import { MobileShell } from "@/app/layout/MobileShell";
 import { RouteSync } from "@/app/layout/RouteSync";
 import { CommandPalette } from "@/features/shell/CommandPalette";
+import { LoginDialog } from "@/features/shell/LoginDialog";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -26,15 +27,41 @@ import { Toaster } from "@/components/ui/sonner";
  * Inner shell selector — must be inside AppProviders so it can use hooks
  * that depend on context (useIsMobile, etc.).
  */
+type OpenLoginEventDetail = {
+  returnFocusTarget?: HTMLElement | null;
+};
+
 function ShellSelector() {
   const isMobile = useIsMobile();
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const loginReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const handleOpenLogin = (event: Event) => {
+      const customEvent = event as CustomEvent<OpenLoginEventDetail>;
+      loginReturnFocusRef.current =
+        customEvent.detail?.returnFocusTarget ?? null;
+      setLoginOpen(true);
+      customEvent.preventDefault();
+    };
+
+    document.addEventListener("open-login", handleOpenLogin);
+    return () => {
+      document.removeEventListener("open-login", handleOpenLogin);
+    };
+  }, []);
 
   return (
     <>
       <RouteSync />
       {isMobile ? <MobileShell /> : <DesktopShell />}
       <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
+      <LoginDialog
+        open={loginOpen}
+        onOpenChange={setLoginOpen}
+        returnFocusRef={loginReturnFocusRef}
+      />
       <Toaster position={isMobile ? "top-center" : "bottom-right"} />
     </>
   );

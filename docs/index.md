@@ -38,6 +38,7 @@ Then open `http://localhost:8000`.
 ### Understand the System
 
 - [Architecture Overview](architecture.md)
+- [Backend/Frontend Wiring Analysis](wiring-analysis.md)
 - [Module Map](reference/module-map.md)
 - [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)
@@ -46,6 +47,7 @@ Then open `http://localhost:8000`.
 ### Contribute
 
 - [Contributing Guide](../CONTRIBUTING.md)
+- [Post-restructure stabilization plan](superpowers/plans/2026-03-16-post-restructure-stabilization.md)
 
 ## Source-of-Truth Policy
 

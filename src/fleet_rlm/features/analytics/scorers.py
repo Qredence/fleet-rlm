@@ -23,7 +23,7 @@ try:
     )
 except ImportError:
     # Use generic scorers or provide placeholders for missing ones if needed
-    from mlflow.genai.scorers import scorer  # type: ignore
+    from mlflow.genai.scorers import scorer
 
     # Provide placeholders for missing scorers if they are not in the current mlflow version
     class PlaceholderScorer:
@@ -35,16 +35,16 @@ except ImportError:
                 value=1, rationale="Scorer not available in this environment"
             )
 
-    RelevanceToQuery = PlaceholderScorer
-    RetrievalGroundedness = PlaceholderScorer
-    ToolCallCorrectness = PlaceholderScorer
-    ToolCallEfficiency = PlaceholderScorer
+    RelevanceToQuery: Any = PlaceholderScorer
+    RetrievalGroundedness: Any = PlaceholderScorer
+    ToolCallCorrectness: Any = PlaceholderScorer
+    ToolCallEfficiency: Any = PlaceholderScorer
 
 
 def get_default_judge_model() -> str:
     """Get the model ID configured for the LLM judge.
     Returns the DSPY_LM_MODEL or a default appropriate for litellm."""
-    return os.environ.get("DSPY_LM_MODEL", "openai:/gemini/gemini-3.1-pro-preview")
+    return os.environ.get("DSPY_LM_MODEL", "openai/gemini-3-flash-preview")
 
 
 def build_rlm_scorers(model: str | None = None) -> list[Any]:

@@ -237,6 +237,18 @@ def apply_ui_test_env(monkeypatch, tmp_path, *, planner: object = "fake-planner-
     env_path = tmp_path / ".env"
     env_path.touch(exist_ok=True)
     monkeypatch.setenv("FLEET_RLM_ENV_PATH", str(env_path))
+    for key in (
+        "SECRET_NAME",
+        "VOLUME_NAME",
+        "DSPY_LM_MODEL",
+        "DSPY_DELEGATE_LM_MODEL",
+        "DSPY_DELEGATE_LM_SMALL_MODEL",
+        "DAYTONA_API_KEY",
+        "DAYTONA_API_URL",
+        "MODAL_TOKEN_ID",
+        "MODAL_TOKEN_SECRET",
+    ):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
