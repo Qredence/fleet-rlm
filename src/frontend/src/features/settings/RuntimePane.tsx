@@ -392,6 +392,7 @@ export function RuntimePane() {
                           type="button"
                           size="sm"
                           variant={clearSecretFlags[secretKey] ? "soft" : "outline"}
+                          className="h-full rounded-none border-y-0 border-r-0 border-l border-border-subtle/70 px-4 shadow-none"
                           aria-pressed={clearSecretFlags[secretKey] ?? false}
                           onClick={() => toggleClearSecret(secretKey)}
                         >

@@ -167,8 +167,8 @@ rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
 From `src/frontend` (optional frontend validation):
 
 ```bash
-bun install --frozen-lockfile
-bun run check
+pnpm install --frozen-lockfile
+pnpm run check
 ```
 
 ## Change Policy

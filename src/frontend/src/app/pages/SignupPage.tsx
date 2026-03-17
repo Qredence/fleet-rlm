@@ -3,14 +3,14 @@
  *
  * Full-screen centered registration form with the app logo. Mirrors the
  * LoginPage visual language. On successful signup the user is redirected
- * to `/`. This page lives outside the app shell (no header, no tabs,
+ * to the canonical workspace route. This page lives outside the app shell (no header, no tabs,
  * no AuthProvider) -- it's entirely self-contained.
  *
  * Since the app uses mock auth, this page is mainly for demonstrating
  * the signup flow / direct URL access.
  */
 import { useState } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { springs } from "@/lib/config/motion-config";
@@ -52,7 +52,7 @@ function SignupPage() {
       has_name: Boolean(name.trim()),
     });
 
-    navigate("/", { replace: true });
+    navigate({ to: "/app/workspace", replace: true });
   }
 
   return (
@@ -147,7 +147,10 @@ function SignupPage() {
           >
             {loading ? (
               <>
-                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                <Loader2
+                  className="size-5 animate-spin motion-reduce:animate-none"
+                  strokeWidth={1.5}
+                />
                 <span className="typo-label">Creating account...</span>
               </>
             ) : (
@@ -164,7 +167,7 @@ function SignupPage() {
               to="/login"
               className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground typo-caption"
             >
-              <ArrowLeft className="size-3.5" />
+              <ArrowLeft className="size-5" strokeWidth={1.5} />
               Already have an account? Sign in
             </Link>
           </div>

@@ -6,14 +6,14 @@ import uuid
 import jwt
 import pytest
 
-from fleet_rlm.db import TenantStatus
-from fleet_rlm.server.auth import (
+from fleet_rlm.infrastructure.database import TenantStatus
+from fleet_rlm.api.auth import (
     DevAuthProvider,
     EntraAuthProvider,
     resolve_admitted_identity,
 )
-from fleet_rlm.server.auth.base import AuthError
-from fleet_rlm.server.auth.types import NormalizedIdentity
+from fleet_rlm.api.auth.base import AuthError
+from fleet_rlm.api.auth.types import NormalizedIdentity
 
 TEST_SECRET = "0123456789abcdef0123456789abcdef"
 

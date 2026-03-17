@@ -4,10 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.daytona_rlm.protocol import HostCallbackRequest
-from fleet_rlm.daytona_rlm.runner import DaytonaRLMRunner, run_daytona_rlm_pilot
-from fleet_rlm.daytona_rlm.types import ContextSource, RolloutBudget
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.infrastructure.providers.daytona.protocol import HostCallbackRequest
+from fleet_rlm.infrastructure.providers.daytona.runner import (
+    DaytonaRLMRunner,
+    run_daytona_rlm_pilot,
+)
+from fleet_rlm.infrastructure.providers.daytona.types import (
+    ContextSource,
+    RolloutBudget,
+)
+from fleet_rlm.core.models import StreamEvent
 from tests.unit.fixtures_daytona import (
     FakeLmSequence,
     FakeRunSession,

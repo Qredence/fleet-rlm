@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fleet_rlm.analytics.config import MlflowConfig, PostHogConfig
+from fleet_rlm.features.analytics.config import MlflowConfig, PostHogConfig
 from fleet_rlm.core.config import load_posthog_settings_from_env
 from tests.unit.fixtures_env import (
     apply_mlflow_env,

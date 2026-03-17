@@ -13,8 +13,8 @@ from pathlib import Path
 import dspy
 from dotenv import load_dotenv
 
-from fleet_rlm._env_utils import env_bool as _env_bool
-from fleet_rlm.analytics import MlflowConfig, initialize_mlflow
+from fleet_rlm.infrastructure.config._env_utils import env_bool as _env_bool
+from fleet_rlm.features.analytics import MlflowConfig, initialize_mlflow
 
 load_dotenv()  # Load .env from current working directory by default
 logger = logging.getLogger(__name__)
@@ -39,43 +39,12 @@ def _find_project_root(start: Path) -> Path:
     return start
 
 
-def _load_dotenv(path: Path, *, override: bool = False) -> None:
-    """Load environment variables from a .env file.
-
-    Parses the file line by line, handling comments (lines starting with #),
-    empty lines, and quoted values.
-
-    Args:
-        path: Path to the .env file.
-        override: When True, replace existing environment values with .env
-            values. When False, keep existing process env values.
-    """
-    if not path.exists():
-        return
-
-    for raw in path.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and (
-            (value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")
-        ):
-            value = value[1:-1]
-
-        if key and (override or key not in os.environ):
-            os.environ[key] = value
-
-
-# _env_bool imported from fleet_rlm._env_utils
+# _env_bool imported from fleet_rlm.infrastructure.config._env_utils
 
 
 def load_posthog_settings_from_env() -> dict[str, object]:
     """Load PostHog analytics settings from environment variables."""
-    from fleet_rlm.analytics.config import (
+    from fleet_rlm.features.analytics.config import (
         PROJECT_POSTHOG_DEFAULT_API_KEY,
         PROJECT_POSTHOG_DEFAULT_HOST,
     )
@@ -114,7 +83,7 @@ def configure_posthog_analytics_from_env() -> object | None:
         return None
 
     try:
-        from fleet_rlm.analytics import configure_analytics
+        from fleet_rlm.features.analytics import configure_analytics
     except Exception:
         return None
 
@@ -143,7 +112,7 @@ def _prepare_env(*, env_file: Path | None = None) -> None:
         dotenv_path = project_root / ".env"
 
     app_env = (os.getenv("APP_ENV") or "local").strip().lower()
-    _load_dotenv(dotenv_path, override=app_env == "local")
+    load_dotenv(dotenv_path, override=app_env == "local")
     _guard_modal_shadowing()
     configure_posthog_analytics_from_env()
     initialize_mlflow(MlflowConfig.from_env())

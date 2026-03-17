@@ -10,12 +10,13 @@
  * trigger points using `useAppNavigate()`.
  */
 import { useEffect, useRef } from "react";
-import { useLocation } from "react-router";
+import { useRouterState } from "@tanstack/react-router";
 import { pathToNav } from "@/hooks/useAppNavigate";
 import { useNavigationStore } from "@/stores/navigationStore";
 
 function RouteSync() {
-  const location = useLocation();
+  const routerState = useRouterState();
+  const location = routerState.location;
   const { setActiveNav, selectFile, openCanvas, activeNav } = useNavigationStore();
 
   // Track previous section to avoid redundant updates

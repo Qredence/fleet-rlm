@@ -1,4 +1,4 @@
-import { MessageResponse } from "@/components/ai-elements/message";
+import { MessageResponse } from "@/components/prompt-kit/message";
 import { TextShimmer } from "@/components/ui/text-shimmer";
 
 function LoadingState() {

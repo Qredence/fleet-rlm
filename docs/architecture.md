@@ -2,7 +2,7 @@
 
 This document describes the maintained architecture for `fleet-rlm`.
 The production chat product remains DSPy + Modal + `RLMReActChatAgent`.
-The repository now also includes an experimental Daytona-backed strict-RLM pilot under `src/fleet_rlm/daytona_rlm/`.
+The repository now also includes an experimental Daytona-backed strict-RLM pilot under `src/fleet_rlm/infrastructure/providers/daytona/`.
 
 ## Current Runtime Status
 
@@ -30,21 +30,21 @@ graph TB
         MCP_CLIENT["MCP Client<br/>(mcp/server.py)"]
     end
 
-    subgraph SERVER["Service Layer (server/)"]
+    subgraph SERVER["Service Layer (api/)"]
         MAIN["FastAPI App<br/>(main.py)"]
         ROUTERS["Routers<br/>(routers/)"]
         AUTH["Auth<br/>(auth/)"]
         WS["WebSocket<br/>(routers/ws/)"]
     end
 
-    subgraph ORCHESTRATION["Orchestration Layer (react/)"]
-        AGENT["RLMReActChatAgent<br/>(agent.py)"]
-        SIGNATURES["Signatures<br/>(signatures.py)"]
-        STREAMING["Streaming<br/>(streaming.py, streaming_context.py)"]
-        DELEGATE["Delegate Sub-Agent<br/>(delegate_sub_agent.py)"]
+    subgraph ORCHESTRATION["Orchestration Layer (core/agent + core/execution)"]
+        AGENT["RLMReActChatAgent<br/>(core/agent/chat_agent.py)"]
+        SIGNATURES["Signatures<br/>(core/agent/signatures.py)"]
+        STREAMING["Streaming<br/>(core/execution/streaming.py, streaming_context.py)"]
+        DELEGATE["Delegate Sub-Agent<br/>(core/agent/rlm_agent.py)"]
     end
 
-    subgraph TOOLS["Tools Layer (react/tools/)"]
+    subgraph TOOLS["Tools Layer (core/tools/)"]
         TOOL_DELEGATE["delegate.py"]
         TOOL_DOCUMENT["document.py"]
         TOOL_SANDBOX["sandbox.py"]
@@ -67,10 +67,10 @@ graph TB
     end
 
     subgraph PERSISTENCE["Persistence Layer"]
-        DB["Database (db/)<br/>engine.py, models.py, repository.py"]
+        DB["Database (infrastructure/database/)<br/>engine.py, models.py, repository.py"]
         NEON[("Neon Postgres<br/>(RLS-enabled)")]
-        MLFLOW["MLflow Integration<br/>(analytics/)"]
-        POSTHOG["PostHog Callback<br/>(analytics/)"]
+        MLFLOW["MLflow Integration<br/>(features/analytics/)"]
+        POSTHOG["PostHog Callback<br/>(features/analytics/)"]
     end
 
     subgraph LLM["Language Models"]
@@ -140,12 +140,12 @@ graph TB
 
 ## Entry Points
 
-| Entry Point | Source File | Description |
-|-------------|-------------|-------------|
-| `fleet` | `src/fleet_rlm/fleet_cli.py` | Primary interactive chat launcher. Supports `fleet web` subcommand for Web UI. |
-| `fleet-rlm` | `src/fleet_rlm/cli.py` | Full CLI with `chat`, `serve-api`, `serve-mcp`, `init`, `daytona-smoke`, and experimental `daytona-rlm` commands. |
-| Web UI | `src/frontend/` | React/TypeScript frontend served by FastAPI at `http://0.0.0.0:8000`. |
-| MCP Server | `src/fleet_rlm/mcp/server.py` | Model Context Protocol server for Claude Desktop integration. |
+| Entry Point | Source File                   | Description                                                                                                       |
+| ----------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `fleet`     | `src/fleet_rlm/fleet_cli.py`  | Primary interactive chat launcher. Supports `fleet web` subcommand for Web UI.                                    |
+| `fleet-rlm` | `src/fleet_rlm/cli.py`        | Full CLI with `chat`, `serve-api`, `serve-mcp`, `init`, `daytona-smoke`, and experimental `daytona-rlm` commands. |
+| Web UI      | `src/frontend/`               | React/TypeScript frontend served by FastAPI at `http://0.0.0.0:8000`.                                             |
+| MCP Server  | `src/fleet_rlm/mcp/server.py` | Model Context Protocol server for Claude Desktop integration.                                                     |
 
 ## Core Layers
 
@@ -162,62 +162,62 @@ Entry points define how users interact with the system:
   - `daytona-smoke`: native Daytona smoke validation for repo clone + driver persistence
   - `daytona-rlm`: Experimental Daytona-backed strict-RLM pilot for workspace-scoped tasks
 
-### 2. Orchestration Layer (`react/`)
+### 2. Orchestration Layer (`core/agent/` + `core/execution/`)
 
 The orchestration layer manages the ReAct agent loop and streaming:
 
-| Module | Purpose |
-|--------|---------|
-| `agent.py` | `RLMReActChatAgent` - stateful conversational agent with tool use |
-| `signatures.py` | DSPy signature definitions for agent inputs/outputs |
-| `streaming.py` | Real-time streaming of chat turns and trajectory events |
-| `streaming_context.py` | Context management for streaming sessions |
-| `delegate_sub_agent.py` | Spawns child `dspy.RLM` instances for recursive reasoning |
-| `commands.py` | Built-in command dispatch (e.g., `/help`, `/reset`) |
+| Module                  | Purpose                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| `agent.py`              | `RLMReActChatAgent` - stateful conversational agent with tool use |
+| `signatures.py`         | DSPy signature definitions for agent inputs/outputs               |
+| `streaming.py`          | Real-time streaming of chat turns and trajectory events           |
+| `streaming_context.py`  | Context management for streaming sessions                         |
+| `delegate_sub_agent.py` | Spawns child `dspy.RLM` instances for recursive reasoning         |
+| `commands.py`           | Built-in command dispatch (e.g., `/help`, `/reset`)               |
 
-### 3. Tools Layer (`react/tools/`)
+### 3. Tools Layer (`core/tools/`)
 
 Tools provide capabilities for the ReAct agent:
 
-| Module | Purpose |
-|--------|---------|
-| `delegate.py` | Delegates tasks to child RLM agents |
-| `document.py` | Document loading and processing |
-| `sandbox.py` | Code execution in Modal sandbox |
-| `memory_intelligence.py` | Intelligent memory management |
-| `chunking.py` | Text chunking for long documents |
-| `filesystem.py` | File system operations in sandbox |
+| Module                   | Purpose                             |
+| ------------------------ | ----------------------------------- |
+| `delegate.py`            | Delegates tasks to child RLM agents |
+| `document.py`            | Document loading and processing     |
+| `sandbox.py`             | Code execution in Modal sandbox     |
+| `memory_intelligence.py` | Intelligent memory management       |
+| `chunking.py`            | Text chunking for long documents    |
+| `filesystem.py`          | File system operations in sandbox   |
 
 ### 4. Execution Layer (`core/`)
 
 The execution layer handles remote code execution in Modal:
 
-| Module | Purpose |
-|--------|---------|
-| `interpreter.py` | `ModalInterpreter` - manages Modal sandbox lifecycle |
-| `driver.py` | `sandbox_driver` - executes Python code in sandbox |
-| `driver_factories.py` | Factory functions for driver configuration |
-| `llm_tools.py` | LLM-backed tools for the sandbox |
-| `sandbox_tools.py` | Helper tools for sandbox operations |
-| `volume_ops.py` | Modal volume operations for persistence |
-| `volume_tools.py` | Tools for volume management |
+| Module                | Purpose                                              |
+| --------------------- | ---------------------------------------------------- |
+| `interpreter.py`      | `ModalInterpreter` - manages Modal sandbox lifecycle |
+| `driver.py`           | `sandbox_driver` - executes Python code in sandbox   |
+| `driver_factories.py` | Factory functions for driver configuration           |
+| `llm_tools.py`        | LLM-backed tools for the sandbox                     |
+| `sandbox_tools.py`    | Helper tools for sandbox operations                  |
+| `volume_ops.py`       | Modal volume operations for persistence              |
+| `volume_tools.py`     | Tools for volume management                          |
 
-### 4a. Experimental Daytona Pilot (`daytona_rlm/`)
+### 4a. Experimental Daytona Pilot (`infrastructure/providers/daytona/`)
 
 The Daytona pilot is a separate experimental runtime and is not part of the production chat architecture shown in the diagrams above.
 
-| Module | Purpose |
-|--------|---------|
-| `types.py` | Rollout budget, execution observations, agent tree nodes, final artifact types |
-| `config.py` | Explicit native Daytona env resolution and preflight validation |
-| `sandbox.py` | Daytona SDK client bootstrap, stateful workspace sessions, local context staging, and persistent driver execution |
-| `smoke.py` | CLI-first Daytona smoke workflow with phase-aware live diagnostics for sandbox clone + persistent driver validation |
-| `runner.py` | Host-loop orchestration facade for recursion, cancellation, retry flow, and session coordination |
-| `runner_callbacks.py` | Structured host-callback dispatch and recursive task payload normalization |
-| `runner_events.py` | Shared public runtime-event emission and payload shaping for Daytona runs |
-| `spawn.py` | Canonical `llm_query` / `llm_query_batched` helpers plus recursive child-Daytona helpers |
-| `system_prompt.py` | Guide-first Daytona system prompt construction for the `SUBMIT(...)`-only contract |
-| `results.py` | Persisted JSON rollout traces under `results/daytona-rlm/` |
+| Module                | Purpose                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `types.py`            | Rollout budget, execution observations, agent tree nodes, final artifact types                                      |
+| `config.py`           | Explicit native Daytona env resolution and preflight validation                                                     |
+| `sandbox.py`          | Daytona SDK client bootstrap, stateful workspace sessions, local context staging, and persistent driver execution   |
+| `smoke.py`            | CLI-first Daytona smoke workflow with phase-aware live diagnostics for sandbox clone + persistent driver validation |
+| `runner.py`           | Host-loop orchestration facade for recursion, cancellation, retry flow, and session coordination                    |
+| `runner_callbacks.py` | Structured host-callback dispatch and recursive task payload normalization                                          |
+| `runner_events.py`    | Shared public runtime-event emission and payload shaping for Daytona runs                                           |
+| `spawn.py`            | Canonical `llm_query` / `llm_query_batched` helpers plus recursive child-Daytona helpers                            |
+| `system_prompt.py`    | Guide-first Daytona system prompt construction for the `SUBMIT(...)`-only contract                                  |
+| `results.py`          | Persisted JSON rollout traces under `results/daytona-rlm/`                                                          |
 
 Important scope notes:
 
@@ -239,16 +239,16 @@ Important scope notes:
 
 The Daytona pilot now has a dedicated DSPy-native websocket chat agent plus a workbench inspector in `RLM Workspace`.
 
-| Module | Purpose |
-|--------|---------|
-| `daytona_rlm/chat_agent.py` | `DaytonaWorkbenchChatAgent` - DSPy `Module`/`Signature` wrapper that owns Daytona session history, docs preload state, and host-loop run streaming |
-| `server/schemas/core.py` | Adds Daytona websocket source controls (`runtime_mode`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus Daytona runtime readiness metadata; request-side `max_depth` is explicitly rejected for Daytona chat |
-| `server/routers/ws/api.py` / `server/routers/ws/chat_runtime.py` | Select the top-level websocket chat agent from the first message so Daytona sessions do not require Modal startup |
-| `server/routers/ws/chat_connection.py` / `server/routers/ws/streaming.py` | Route Daytona turns through the shared websocket session/streaming lifecycle instead of a one-shot Daytona-only branch |
-| `frontend/src/stores/chatStore.ts` | Persists runtime selection and Daytona source/runtime options in UI state |
-| `frontend/src/components/chat/ChatInput.tsx` | Renders the runtime selector and keeps execution-mode controls Modal-only |
-| `frontend/src/features/rlm-workspace/RlmWorkspace.tsx` | Keeps the shared chat surface visible, switches warnings by runtime, and relies on the workbench instead of a mandatory Daytona setup card |
-| `frontend/src/features/rlm-workspace/run-workbench/*` | Dedicated analyst workbench state/UI for iterations, evidence, callbacks, prompt objects, and final output |
+| Module                                                              | Purpose                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infrastructure/providers/daytona/chat_agent.py`                    | `DaytonaWorkbenchChatAgent` - DSPy `Module`/`Signature` wrapper that owns Daytona session history, docs preload state, and host-loop run streaming                                                                              |
+| `api/schemas/core.py`                                               | Adds Daytona websocket source controls (`runtime_mode`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus Daytona runtime readiness metadata; request-side `max_depth` is explicitly rejected for Daytona chat |
+| `api/routers/ws/api.py` / `api/routers/ws/chat_runtime.py`          | Select the top-level websocket chat agent from the first message so Daytona sessions do not require Modal startup                                                                                                               |
+| `api/routers/ws/chat_connection.py` / `api/routers/ws/streaming.py` | Route Daytona turns through the shared websocket session/streaming lifecycle instead of a one-shot Daytona-only branch                                                                                                          |
+| `frontend/src/stores/chatStore.ts`                                  | Persists runtime selection and Daytona source/runtime options in UI state                                                                                                                                                       |
+| `frontend/src/components/chat/ChatInput.tsx`                        | Renders the runtime selector and keeps execution-mode controls Modal-only                                                                                                                                                       |
+| `frontend/src/features/rlm-workspace/RlmWorkspace.tsx`              | Keeps the shared chat surface visible, switches warnings by runtime, and relies on the workbench instead of a mandatory Daytona setup card                                                                                      |
+| `frontend/src/features/rlm-workspace/run-workbench/*`               | Dedicated analyst workbench state/UI for iterations, evidence, callbacks, prompt objects, and final output                                                                                                                      |
 
 Important scope notes:
 
@@ -302,37 +302,37 @@ sequenceDiagram
     Adapter->>UI: hydrate iterations, evidence, callbacks, prompts, final output
 ```
 
-### 5. Service Layer (`server/`)
+### 5. Service Layer (`api/`)
 
 The service layer provides HTTP and WebSocket APIs:
 
-| Module | Purpose |
-|--------|---------|
-| `main.py` | FastAPI application factory |
-| `routers/runtime.py` | Runtime settings and status endpoints |
-| `routers/sessions.py` | Session state management |
-| `routers/traces.py` | MLflow trace endpoints |
-| `routers/health.py` | Health check endpoints (`/health`, `/ready`) |
-| `routers/auth.py` | Authentication endpoints |
-| `routers/ws/chat_runtime.py` | WebSocket chat runtime |
-| `routers/ws/api.py` | WebSocket API surface |
-| `auth/` | Authentication middleware (dev/Entra modes) |
+| Module                       | Purpose                                      |
+| ---------------------------- | -------------------------------------------- |
+| `main.py`                    | FastAPI application factory                  |
+| `routers/runtime.py`         | Runtime settings and status endpoints        |
+| `routers/sessions.py`        | Session state management                     |
+| `routers/traces.py`          | MLflow trace endpoints                       |
+| `routers/health.py`          | Health check endpoints (`/health`, `/ready`) |
+| `routers/auth.py`            | Authentication endpoints                     |
+| `routers/ws/chat_runtime.py` | WebSocket chat runtime                       |
+| `routers/ws/api.py`          | WebSocket API surface                        |
+| `auth/`                      | Authentication middleware (dev/Entra modes)  |
 
 ### 6. Persistence Layer
 
-| Component | Purpose |
-|-----------|---------|
-| `db/engine.py` | Async database engine with connection pooling |
-| `db/models.py` | SQLModel definitions for runs, steps, artifacts, memory |
-| `db/repository.py` | Repository pattern for database operations |
-| `analytics/mlflow_integration.py` | MLflow tracing for DSPy optimization |
-| `analytics/posthog_callback.py` | PostHog telemetry callback |
+| Component                                  | Purpose                                                 |
+| ------------------------------------------ | ------------------------------------------------------- |
+| `infrastructure/database/engine.py`        | Async database engine with connection pooling           |
+| `infrastructure/database/models.py`        | SQLModel definitions for runs, steps, artifacts, memory |
+| `infrastructure/database/repository.py`    | Repository pattern for database operations              |
+| `features/analytics/mlflow_integration.py` | MLflow tracing for DSPy optimization                    |
+| `features/analytics/posthog_callback.py`   | PostHog telemetry callback                              |
 
 ## Data Flow Diagrams
 
 ### Chat Turn Flow
 
-This diagram shows the complete flow of a chat turn from user message to response streaming, based on the WebSocket runtime in `src/fleet_rlm/server/routers/ws/`.
+This diagram shows the complete flow of a chat turn from user message to response streaming, based on the WebSocket runtime in `src/fleet_rlm/api/routers/ws/`.
 
 ```mermaid
 sequenceDiagram
@@ -344,10 +344,10 @@ sequenceDiagram
     participant Agent as RLMReActChatAgent<br/>(agent.py)
     participant StreamCtx as StreamingContext<br/>(streaming_context.py)
     participant Stream as streaming.py
-    participant Tools as Tools<br/>(react/tools/)
+    participant Tools as Tools<br/>(core/tools/)
     participant Interpreter as ModalInterpreter<br/>(interpreter.py)
     participant Modal as Modal Sandbox
-    participant DB as Neon Postgres<br/>(db/repository.py)
+    participant DB as Neon Postgres<br/>(infrastructure/database/repository.py)
 
     User->>WS: WSMessage {type: "message"}
     WS->>MsgLoop: parse_ws_message_or_send_error()
@@ -382,16 +382,16 @@ sequenceDiagram
 
 **Key Components:**
 
-| Component | Source File | Role |
-|-----------|-------------|------|
-| `parse_ws_message_or_send_error` | `ws/message_loop.py` | Parse incoming WebSocket JSON into `WSMessage` |
-| `_prepare_chat_runtime` | `ws/chat_runtime.py` | Initialize agent with planner LM, delegate LM, repository |
-| `StreamingContext` | `react/streaming_context.py` | Immutable snapshot of agent state for event enrichment |
-| `aiter_chat_turn_stream` | `react/streaming.py` | Async iterator yielding `StreamEvent` objects |
+| Component                        | Source File                           | Role                                                      |
+| -------------------------------- | ------------------------------------- | --------------------------------------------------------- |
+| `parse_ws_message_or_send_error` | `ws/message_loop.py`                  | Parse incoming WebSocket JSON into `WSMessage`            |
+| `_prepare_chat_runtime`          | `ws/chat_runtime.py`                  | Initialize agent with planner LM, delegate LM, repository |
+| `StreamingContext`               | `core/execution/streaming_context.py` | Immutable snapshot of agent state for event enrichment    |
+| `aiter_chat_turn_stream`         | `core/execution/streaming.py`         | Async iterator yielding `StreamEvent` objects             |
 
 ### RLM Delegation Flow
 
-This diagram shows how parent agents spawn child RLM instances for recursive reasoning, based on `src/fleet_rlm/react/delegate_sub_agent.py`.
+This diagram shows how parent agents spawn child RLM instances for recursive reasoning, based on `src/fleet_rlm/core/agent/rlm_agent.py`.
 
 ```mermaid
 sequenceDiagram
@@ -444,27 +444,28 @@ sequenceDiagram
 
 **Key Components:**
 
-| Function | Source File | Purpose |
-|----------|-------------|---------|
-| `spawn_delegate_sub_agent_async` | `react/delegate_sub_agent.py` | Main entry point for delegation |
-| `_claim_delegate_slot_or_error` | `react/delegate_sub_agent.py` | Enforce `delegate_max_calls_per_turn` limit |
-| `_build_child_interpreter` | `react/delegate_sub_agent.py` | Create or reuse ModalInterpreter for child |
-| `build_recursive_subquery_rlm` | `react/rlm_runtime_modules.py` | Construct `dspy.RLM` module with sandbox tools |
-| `_delegate_streaming_context` | `react/delegate_sub_agent.py` | Build `StreamingContext` for child depth tracking |
+| Function                         | Source File                          | Purpose                                           |
+| -------------------------------- | ------------------------------------ | ------------------------------------------------- |
+| `spawn_delegate_sub_agent_async` | `core/agent/rlm_agent.py`            | Main entry point for delegation                   |
+| `_claim_delegate_slot_or_error`  | `core/agent/rlm_agent.py`            | Enforce `delegate_max_calls_per_turn` limit       |
+| `_build_child_interpreter`       | `core/agent/rlm_agent.py`            | Create or reuse ModalInterpreter for child        |
+| `build_recursive_subquery_rlm`   | `core/models/rlm_runtime_modules.py` | Construct `dspy.RLM` module with sandbox tools    |
+| `_delegate_streaming_context`    | `core/agent/rlm_agent.py`            | Build `StreamingContext` for child depth tracking |
 
 **Depth and Budget Controls:**
+
 - `max_depth`: Maximum recursion depth (default: 2)
 - `delegate_max_calls_per_turn`: Maximum delegate calls per parent turn (default: 8)
 - `max_llm_calls`: LLM call budget shared between parent and children
 
 ### Sandbox Execution Flow
 
-This diagram shows how code execution flows from tool calls through the ModalInterpreter to the sandbox driver, based on `src/fleet_rlm/core/interpreter.py` and `driver.py`.
+This diagram shows how code execution flows from tool calls through the ModalInterpreter to the sandbox driver, based on `src/fleet_rlm/core/execution/interpreter.py` and `core_driver.py`.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Tool as Tool<br/>(react/tools/)
+    participant Tool as Tool<br/>(core/tools/)
     participant Interp as ModalInterpreter<br/>(interpreter.py)
     participant VolOps as VolumeOpsMixin<br/>(volume_ops.py)
     participant Driver as sandbox_driver<br/>(driver.py)
@@ -523,7 +524,7 @@ The driver communicates via JSON over stdin/stdout:
 ```json
 {
   "code": "result = analyze_data(df)\nFinal = result",
-  "variables": {"df": {}},
+  "variables": { "df": {} },
   "tool_names": ["llm_query"],
   "output_names": ["result"],
   "execution_profile": "ROOT_INTERLOCUTOR"
@@ -536,28 +537,28 @@ The driver communicates via JSON over stdin/stdout:
 {
   "stdout": "...",
   "stderr": "",
-  "final": {"result": {}}
+  "final": { "result": {} }
 }
 ```
 
 **Execution Profiles:**
 
-| Profile | When Used | Tool Exposure |
-|---------|-----------|---------------|
-| `ROOT_INTERLOCUTOR` | Primary user chat | Full tools + sandbox helpers |
-| `RLM_ROOT` | RLM query mode | Full tools + sandbox helpers |
-| `RLM_DELEGATE` | Child RLM delegation | Restricted tools, bounded execution |
-| `MAINTENANCE` | Administrative tasks | Minimal tools |
+| Profile             | When Used            | Tool Exposure                       |
+| ------------------- | -------------------- | ----------------------------------- |
+| `ROOT_INTERLOCUTOR` | Primary user chat    | Full tools + sandbox helpers        |
+| `RLM_ROOT`          | RLM query mode       | Full tools + sandbox helpers        |
+| `RLM_DELEGATE`      | Child RLM delegation | Restricted tools, bounded execution |
+| `MAINTENANCE`       | Administrative tasks | Minimal tools                       |
 
 **Key Components:**
 
-| Component | Source File | Role |
-|-----------|-------------|------|
-| `ModalInterpreter` | `core/interpreter.py` | Main interpreter class, manages sandbox lifecycle |
-| `sandbox_driver` | `core/driver.py` | Long-lived JSON protocol driver inside sandbox |
-| `VolumeOpsMixin` | `core/volume_ops.py` | Volume persistence operations (upload, commit, reload) |
-| `ExecutionProfile` | `core/interpreter.py` | Enum controlling sandbox helper/tool exposure |
-| `inject_sandbox_helpers` | `core/driver_factories.py` | Inject `SUBMIT`, `Final`, `llm_query`, etc. into sandbox globals |
+| Component                | Source File                     | Role                                                             |
+| ------------------------ | ------------------------------- | ---------------------------------------------------------------- |
+| `ModalInterpreter`       | `core/execution/interpreter.py` | Main interpreter class, manages sandbox lifecycle                |
+| `sandbox_driver`         | `core/execution/core_driver.py` | Long-lived JSON protocol driver inside sandbox                   |
+| `VolumeOpsMixin`         | `core/volume_ops.py`            | Volume persistence operations (upload, commit, reload)           |
+| `ExecutionProfile`       | `core/execution/profiles.py`    | Enum controlling sandbox helper/tool exposure                    |
+| `inject_sandbox_helpers` | `core/driver_factories.py`      | Inject `SUBMIT`, `Final`, `llm_query`, etc. into sandbox globals |
 
 ## API and Streaming Surfaces
 
@@ -575,6 +576,7 @@ Configuration is managed via Hydra with YAML files in `src/fleet_rlm/conf/`:
 - Environment overrides via `key=value` CLI arguments
 
 Key configuration areas:
+
 - `interpreter`: Modal interpreter settings (volume, secrets, timeout)
 - `agent`: ReAct agent settings (max iterations, delegate LM)
 - `server`: FastAPI server settings (host, port, auth mode)

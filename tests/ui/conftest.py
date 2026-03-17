@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server.main import create_app
+from fleet_rlm.api.config import ServerRuntimeConfig
+from fleet_rlm.api.main import create_app
 from tests.ui.fixtures_ui import apply_ui_test_env
 
 

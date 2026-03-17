@@ -10,8 +10,11 @@ import dspy
 import pytest
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
-from fleet_rlm.react import RLMReActChatAgent
-from fleet_rlm.react.streaming import _build_final_payload, _normalize_trajectory
+from fleet_rlm.core.agent import RLMReActChatAgent
+from fleet_rlm.core.execution.streaming import (
+    _build_final_payload,
+    _normalize_trajectory,
+)
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
@@ -49,7 +52,9 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.chat_turn_stream(message="say hi", trace=False)
@@ -74,7 +79,9 @@ def test_iter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(
         interpreter=FakeInterpreter(),
@@ -92,7 +99,9 @@ def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _bad_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _bad_streamify
+    )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.chat_turn_stream(message="test fallback", trace=False)
@@ -129,7 +138,9 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("say hi", trace=False))
@@ -156,7 +167,9 @@ def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("store memory", trace=False))
@@ -196,7 +209,9 @@ async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = [
@@ -228,7 +243,9 @@ async def test_aiter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(
         interpreter=FakeInterpreter(),
@@ -266,7 +283,9 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     call_count = 0
 
@@ -297,7 +316,9 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _bad_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _bad_streamify
+    )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("fallback now", trace=False))
@@ -323,7 +344,9 @@ def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(
         interpreter=FakeInterpreter(),
@@ -362,7 +385,9 @@ def test_iter_chat_turn_stream_enriches_final_payload_with_sources_and_citations
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("cite", trace=False))

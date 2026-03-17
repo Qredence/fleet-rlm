@@ -10,7 +10,7 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
-from fleet_rlm.db.engine import DatabaseManager
+from fleet_rlm.infrastructure.database.engine import DatabaseManager
 
 
 def main() -> int:

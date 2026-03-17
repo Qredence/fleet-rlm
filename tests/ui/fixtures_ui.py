@@ -7,11 +7,14 @@ from types import SimpleNamespace
 from typing import Any
 import uuid
 
-from dspy.primitives.code_interpreter import FinalOutput
+try:
+    from dspy.primitives.code_interpreter import FinalOutput
+except ImportError:
+    from dspy import FinalOutput
 
-from fleet_rlm.models import StreamEvent
-from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server.main import create_app
+from fleet_rlm.core.models import StreamEvent
+from fleet_rlm.api.config import ServerRuntimeConfig
+from fleet_rlm.api.main import create_app
 
 
 def ts(epoch: float = 1_234_567_890.0) -> datetime:
@@ -209,23 +212,23 @@ def patch_runtime_lm_loaders(
     delegate: object = None,
 ) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.server.main.get_planner_lm_from_env",
+        "fleet_rlm.api.main.get_planner_lm_from_env",
         lambda *args, **kwargs: planner,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.main.get_delegate_lm_from_env",
+        "fleet_rlm.api.main.get_delegate_lm_from_env",
         lambda *args, **kwargs: delegate,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.main._emit_posthog_startup_event",
+        "fleet_rlm.api.main._emit_posthog_startup_event",
         lambda *args, **kwargs: False,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
         lambda *args, **kwargs: planner,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_delegate_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_delegate_lm_from_env",
         lambda *args, **kwargs: delegate,
     )
 
@@ -234,6 +237,18 @@ def apply_ui_test_env(monkeypatch, tmp_path, *, planner: object = "fake-planner-
     env_path = tmp_path / ".env"
     env_path.touch(exist_ok=True)
     monkeypatch.setenv("FLEET_RLM_ENV_PATH", str(env_path))
+    for key in (
+        "SECRET_NAME",
+        "VOLUME_NAME",
+        "DSPY_LM_MODEL",
+        "DSPY_DELEGATE_LM_MODEL",
+        "DSPY_DELEGATE_LM_SMALL_MODEL",
+        "DAYTONA_API_KEY",
+        "DAYTONA_API_URL",
+        "MODAL_TOKEN_ID",
+        "MODAL_TOKEN_SECRET",
+    ):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False)

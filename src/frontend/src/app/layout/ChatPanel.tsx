@@ -9,7 +9,7 @@
  * does NOT re-trigger the page transition animation.
  */
 import { Suspense } from "react";
-import { Outlet, useLocation } from "react-router";
+import { Outlet, useRouterState } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { fades } from "@/lib/config/motion-config";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -17,7 +17,8 @@ import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageSkeleton } from "@/components/shared/PageSkeleton";
 
 export function ChatPanel() {
-  const location = useLocation();
+  const routerState = useRouterState();
+  const location = routerState.location;
   const isMobile = useIsMobile();
   const prefersReduced = useReducedMotion();
 

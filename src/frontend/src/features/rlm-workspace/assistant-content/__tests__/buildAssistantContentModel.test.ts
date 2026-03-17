@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { buildAssistantContentModel } from "@/features/rlm-workspace/assistant-content/buildAssistantContentModel";
+import {
+  buildAssistantContentModel,
+  getRuntimeBadgeStrings,
+} from "@/features/rlm-workspace/assistant-content/model";
 import type {
   AssistantTurnDisplayItem,
   AssistantTurnReasoningItem,
@@ -107,6 +110,24 @@ function makeAssistantTurn(
 }
 
 describe("buildAssistantContentModel", () => {
+  it("preserves runtime badge formatting in the canonical model helpers", () => {
+    expect(
+      getRuntimeBadgeStrings({
+        ...runtimeContext,
+        depth: 0,
+        runtimeMode: "daytona_pilot",
+        volumeName: "rlm-volume-dspy",
+      }),
+    ).toEqual([
+      "runtime daytona_pilot",
+      "mode rlm",
+      "sandbox",
+      "sandbox sb-1234567",
+      "rlm-volume-dspy",
+      "rlm delegate",
+    ]);
+  });
+
   it("builds overview and sorted timeline items from trace reasoning and trajectory data", () => {
     const item = makeAssistantTurn({
       reasoningItems: [

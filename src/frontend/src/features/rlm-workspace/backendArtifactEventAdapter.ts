@@ -1,11 +1,11 @@
 import type { WsServerMessage } from "@/lib/rlm-api";
 import {
   type ArtifactActorKind,
-  useArtifactStore,
   type ArtifactStepType,
   type ExecutionStep,
-} from "@/stores/artifactStore";
+} from "@/lib/data/artifactTypes";
 import { createLocalId } from "@/lib/id";
+import { useArtifactStore } from "@/stores/artifactStore";
 
 function nextId(prefix: string): string {
   return createLocalId(prefix);

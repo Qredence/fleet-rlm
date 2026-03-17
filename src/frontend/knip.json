@@ -1,0 +1,45 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": ["src/main.tsx", "src/router.tsx", "src/routeTree.gen.ts"],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/__tests__/**",
+    "**/node_modules/**"
+  ],
+  "ignoreDependencies": [
+    "@types/bun",
+    "@types/node",
+    "@types/react",
+    "@types/react-dom",
+    "globals",
+    "jsdom",
+    "prettier",
+    "vite",
+    "vitest",
+    "vite-plus",
+    "@eslint/js",
+    "eslint-plugin-react-hooks",
+    "eslint-plugin-react-refresh",
+    "tailwindcss",
+    "typescript-eslint",
+    "@xyflow/react",
+    "tw-animate-css"
+  ],
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+    "type": true
+  },
+  "includeEntryExports": false,
+  "rules": {
+    "exports": "warn",
+    "nsExports": "warn",
+    "types": "warn",
+    "nsTypes": "warn",
+    "enumMembers": "warn",
+    "classMembers": "warn"
+  }
+}

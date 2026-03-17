@@ -6,19 +6,18 @@ import {
   ConfirmationRejected,
   ConfirmationRequest,
   ConfirmationTitle,
-} from "@/components/ai-elements/confirmation";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+} from "@/components/prompt-kit/confirmation";
+import { Message, MessageContent, MessageResponse } from "@/components/prompt-kit/message";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
 import { ClarificationCard } from "@/features/rlm-workspace/components/ClarificationCard";
 import {
   ChatMessageLoadingState,
   WorkspaceLegacyStatusCard,
   WorkspaceTracePart,
 } from "@/features/rlm-workspace/chat-shell/tracePartRenderers";
-import { SYSTEM_MESSAGE_STYLE } from "@/features/rlm-workspace/chat-shell/chatMessageStyles";
 import type { ChatMessage } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
-import { mapConfirmationState } from "@/lib/utils/ai-elements-state";
+import { mapConfirmationState } from "@/lib/utils/prompt-kit-state";
 
 interface WorkspaceChatMessageItemProps {
   message: ChatMessage;
@@ -48,10 +47,7 @@ export function WorkspaceChatMessageItem({
       {message.type === "system" ? (
         <div className="flex items-center gap-4 py-4">
           <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
-          <span
-            className="shrink-0 whitespace-pre-line text-muted-foreground uppercase tracking-[0.2em] opacity-40"
-            style={SYSTEM_MESSAGE_STYLE}
-          >
+          <span className="shrink-0 whitespace-pre-line text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
             {message.content}
           </span>
           <div className="h-[0.5px] flex-1 bg-border-strong opacity-20" />
@@ -79,12 +75,12 @@ export function WorkspaceChatMessageItem({
               />
             ))}
             {message.type === "assistant" && message.content ? (
-              <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
+              <div className="max-w-content rounded-bubble border-subtle/80 px-4 py-3.5 shadow-sm md:px-5 md:py-4">
                 <MessageResponse>{message.content}</MessageResponse>
               </div>
             ) : null}
             {message.type === "assistant" && message.streaming && !message.content ? (
-              <div className="max-w-content rounded-[22px] border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
+              <div className="max-w-content rounded-bubble border-subtle/80 px-4 py-3.5 md:px-5 md:py-4">
                 <ChatMessageLoadingState />
               </div>
             ) : null}

@@ -1,12 +1,12 @@
 import type { KeyboardEvent, MouseEvent } from "react";
-import { Message, MessageContent } from "@/components/ai-elements/message";
+import { Message, MessageContent } from "@/components/prompt-kit/message";
 import { Separator } from "@/components/ui/separator";
 import { AssistantAnswerBlock } from "@/features/rlm-workspace/assistant-content/AssistantAnswerBlock";
 import { AssistantSummaryBar } from "@/features/rlm-workspace/assistant-content/AssistantSummaryBar";
 import { TrajectoryTimeline } from "@/features/rlm-workspace/assistant-content/TrajectoryTimeline";
 import { ExecutionHighlightsGroup } from "@/features/rlm-workspace/assistant-content/ExecutionHighlightsGroup";
 import { EvidencePreview } from "@/features/rlm-workspace/assistant-content/AssistantPreviewSections";
-import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/model";
 import type { InspectorTab } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
 
@@ -67,7 +67,7 @@ export function AssistantTurnContent({
       <MessageContent className="w-full space-y-2.5">
         <div
           className={cn(
-            "max-w-content rounded-[22px] px-4 py-3.5 shadow-sm md:px-5 md:py-4",
+            "max-w-content rounded-bubble px-4 py-3.5 shadow-sm md:px-5 md:py-4",
             "border border-border-subtle/60 transition-colors",
             selected && "border-accent/20 bg-accent/5",
             !selected && "bg-transparent",

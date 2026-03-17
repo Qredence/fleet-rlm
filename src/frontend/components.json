@@ -5,7 +5,7 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "src/styles/tailwind.css",
+    "css": "src/styles.css",
     "baseColor": "slate",
     "cssVariables": true,
     "prefix": ""
@@ -19,6 +19,8 @@
     "hooks": "@/hooks"
   },
   "registries": {
-    "@ai-elements": "https://ai-sdk.dev/elements/api/registry/{name}.json"
+    "@ai-elements": "https://ai-sdk.dev/elements/api/registry/{name}.json",
+    "@prompt-kit": "https://www.prompt-kit.com/c/{name}.json",
+    "@fluid": "https://www.fluidfunctionalism.com/r/{name}.json"
   }
 }

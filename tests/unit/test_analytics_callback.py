@@ -6,10 +6,10 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.analytics import configure_analytics
-from fleet_rlm.analytics.config import PostHogConfig
-from fleet_rlm.analytics.posthog_callback import PostHogLLMCallback
-from fleet_rlm.analytics.trace_context import (
+from fleet_rlm.features.analytics import configure_analytics
+from fleet_rlm.features.analytics.config import PostHogConfig
+from fleet_rlm.features.analytics.posthog_callback import PostHogLLMCallback
+from fleet_rlm.features.analytics.trace_context import (
     runtime_distinct_id_context,
     runtime_telemetry_enabled_context,
 )
@@ -40,7 +40,7 @@ def _enabled_config(*, optimization: bool = False) -> PostHogConfig:
 def test_callback_emits_generation_event(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -72,7 +72,7 @@ def test_callback_emits_generation_event(monkeypatch) -> None:
 def test_callback_emits_error_shape(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -90,7 +90,7 @@ def test_callback_emits_error_shape(monkeypatch) -> None:
 def test_callback_disabled_no_emission(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -104,7 +104,7 @@ def test_callback_disabled_no_emission(monkeypatch) -> None:
 def test_optimization_mode_suppresses_emission(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -119,7 +119,7 @@ def test_optimization_mode_suppresses_emission(monkeypatch) -> None:
 def test_optimization_mode_can_be_enabled(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -134,7 +134,7 @@ def test_optimization_mode_can_be_enabled(monkeypatch) -> None:
 def test_nested_calls_have_parent_trace_id(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -152,7 +152,7 @@ def test_nested_calls_have_parent_trace_id(monkeypatch) -> None:
 def test_runtime_distinct_id_takes_precedence(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -167,7 +167,7 @@ def test_runtime_distinct_id_takes_precedence(monkeypatch) -> None:
 def test_runtime_telemetry_disable_suppresses_emission(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+        "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
         lambda _config: fake_client,
     )
 
@@ -185,7 +185,7 @@ def test_configure_analytics_is_idempotent(monkeypatch) -> None:
         monkeypatch.setenv("POSTHOG_ENABLED", "true")
         monkeypatch.setenv("POSTHOG_API_KEY", "phc_test")
         monkeypatch.setattr(
-            "fleet_rlm.analytics.posthog_callback.get_posthog_client",
+            "fleet_rlm.features.analytics.posthog_callback.get_posthog_client",
             lambda _config: _FakeClient(),
         )
 

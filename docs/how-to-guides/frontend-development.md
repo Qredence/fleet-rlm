@@ -2,6 +2,8 @@
 
 This guide covers the frontend development workflow for Fleet-RLM. The frontend is a React + TypeScript application built with Vite, located in `src/frontend/`.
 
+> For the latest subsystem conventions, treat `src/frontend/AGENTS.md` as the source of truth for frontend tooling and validation commands.
+
 ## Quick Start
 
 ```bash
@@ -9,10 +11,10 @@ This guide covers the frontend development workflow for Fleet-RLM. The frontend 
 cd src/frontend
 
 # Install dependencies
-bun install --frozen-lockfile
+pnpm install --frozen-lockfile
 
 # Start development server
-bun run dev
+pnpm run dev
 ```
 
 The development server runs at `http://localhost:5173` with hot module replacement. It proxies API requests to the backend at `http://localhost:8000`.
@@ -21,24 +23,24 @@ The development server runs at `http://localhost:5173` with hot module replaceme
 
 All commands run from `src/frontend/`:
 
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Start development server with HMR |
-| `bun run build` | Production build |
-| `bun run preview` | Preview production build locally |
-| `bun run type-check` | TypeScript type checking |
-| `bun run lint` | ESLint code linting |
-| `bun run format` | Format code with Prettier |
-| `bun run format:check` | Check formatting without changes |
-| `bun run test:unit` | Run Vitest unit tests |
-| `bun run test:watch` | Run Vitest in watch mode |
-| `bun run test:coverage` | Run Vitest with coverage report |
-| `bun run test:e2e` | Run Playwright end-to-end tests |
-| `bun run check` | Full quality gate (type-check + lint + test + build + e2e) |
+| Command                  | Description                                                |
+| ------------------------ | ---------------------------------------------------------- |
+| `pnpm run dev`           | Start development server with HMR                          |
+| `pnpm run build`         | Production build                                           |
+| `pnpm run preview`       | Preview production build locally                           |
+| `pnpm run type-check`    | TypeScript type checking                                   |
+| `pnpm run lint`          | ESLint code linting                                        |
+| `pnpm run format`        | Format code with Prettier                                  |
+| `pnpm run format:check`  | Check formatting without changes                           |
+| `pnpm run test:unit`     | Run Vitest unit tests                                      |
+| `pnpm run test:watch`    | Run Vitest in watch mode                                   |
+| `pnpm run test:coverage` | Run Vitest with coverage report                            |
+| `pnpm run test:e2e`      | Run Playwright end-to-end tests                            |
+| `pnpm run check`         | Full quality gate (type-check + lint + test + build + e2e) |
 
 ### Quality Gate
 
-The `bun run check` command runs the complete validation suite:
+The `pnpm run check` command runs the complete validation suite:
 
 1. TypeScript type checking
 2. ESLint linting
@@ -89,13 +91,13 @@ src/frontend/src/
 
 Features are self-contained modules with their own components, hooks, and sometimes state. Each feature represents a distinct product area.
 
-| Feature | Purpose |
-|---------|---------|
-| `rlm-workspace/` | Main chat interface for DSPy.RLM runtime |
-| `settings/` | Runtime model configuration dialogs |
-| `shell/` | Application shell components (CommandPalette, UserMenu) |
-| `artifacts/` | Code and file artifact display |
-| `volumes/` | Modal volume browser |
+| Feature          | Purpose                                                 |
+| ---------------- | ------------------------------------------------------- |
+| `rlm-workspace/` | Main chat interface for DSPy.RLM runtime                |
+| `settings/`      | Runtime model configuration dialogs                     |
+| `shell/`         | Application shell components (CommandPalette, UserMenu) |
+| `artifacts/`     | Code and file artifact display                          |
+| `volumes/`       | Modal volume browser                                    |
 
 **Guidelines:**
 
@@ -110,6 +112,7 @@ Features are self-contained modules with their own components, hooks, and someti
 Radix UI primitives styled with Tailwind CSS. These are the building blocks for all UI.
 
 Key components:
+
 - `button.tsx`, `icon-button.tsx` — Button variants
 - `dialog.tsx`, `drawer.tsx`, `sheet.tsx` — Modal surfaces
 - `sidebar.tsx` — Sidebar navigation
@@ -128,34 +131,34 @@ Key components:
 
 Specialized UI for chat applications from the ai-elements library:
 
-| Component | Purpose |
-|-----------|---------|
+| Component          | Purpose                                 |
+| ------------------ | --------------------------------------- |
 | `prompt-input.tsx` | Rich text input with attachment support |
-| `message.tsx` | Chat message container |
-| `reasoning.tsx` | Chain-of-thought display |
-| `tool.tsx` | Tool call display |
-| `code-block.tsx` | Syntax-highlighted code blocks |
+| `message.tsx`      | Chat message container                  |
+| `reasoning.tsx`    | Chain-of-thought display                |
+| `tool.tsx`         | Tool call display                       |
+| `code-block.tsx`   | Syntax-highlighted code blocks          |
 
 #### `components/shared/` — Application Shared Components
 
 Application-specific shared components that aren't generic primitives:
 
-| Component | Purpose |
-|-----------|---------|
-| `ErrorBoundary.tsx` | React error boundary with fallback UI |
-| `BrandMark.tsx` | Logo/brand mark |
-| `LargeTitleHeader.tsx` | Page header component |
-| `SkillMarkdown.tsx` | Markdown renderer for documentation |
+| Component              | Purpose                               |
+| ---------------------- | ------------------------------------- |
+| `ErrorBoundary.tsx`    | React error boundary with fallback UI |
+| `BrandMark.tsx`        | Logo/brand mark                       |
+| `LargeTitleHeader.tsx` | Page header component                 |
+| `SkillMarkdown.tsx`    | Markdown renderer for documentation   |
 
 ### When to Use Which Directory
 
-| Component Type | Location |
-|----------------|----------|
-| Generic UI primitive (button, input, dialog) | `components/ui/` |
-| AI/chat-specific primitive | `components/ai-elements/` |
-| Reusable across multiple features | `components/shared/` |
-| Single-feature use case | `features/<feature>/` |
-| Domain-specific (artifacts, files) | `components/domain/` |
+| Component Type                               | Location                  |
+| -------------------------------------------- | ------------------------- |
+| Generic UI primitive (button, input, dialog) | `components/ui/`          |
+| AI/chat-specific primitive                   | `components/ai-elements/` |
+| Reusable across multiple features            | `components/shared/`      |
+| Single-feature use case                      | `features/<feature>/`     |
+| Domain-specific (artifacts, files)           | `components/domain/`      |
 
 ## TypeScript Conventions
 
@@ -208,15 +211,14 @@ Use `React.forwardRef` for components that should forward refs:
 
 ```typescript
 interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    ButtonVariantProps {
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>, ButtonVariantProps {
   asChild?: boolean;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     // Implementation
-  }
+  },
 );
 Button.displayName = "Button";
 ```
@@ -233,13 +235,13 @@ type DialogProps = React.ComponentProps<typeof Dialog>;
 
 Global state uses Zustand stores located in `stores/`:
 
-| Store | Purpose |
-|-------|---------|
-| `chatStore.ts` | Active conversation state and streaming |
-| `navigationStore.ts` | Navigation, canvas, inspector state |
+| Store                 | Purpose                                  |
+| --------------------- | ---------------------------------------- |
+| `chatStore.ts`        | Active conversation state and streaming  |
+| `navigationStore.ts`  | Navigation, canvas, inspector state      |
 | `chatHistoryStore.ts` | LocalStorage-backed conversation history |
-| `themeStore.ts` | Dark mode toggle |
-| `artifactStore.ts` | Execution step tracking |
+| `themeStore.ts`       | Dark mode toggle                         |
+| `artifactStore.ts`    | Execution step tracking                  |
 
 **Guidelines:**
 
@@ -251,14 +253,14 @@ Global state uses Zustand stores located in `stores/`:
 
 Custom hooks in `hooks/` provide reusable stateful logic:
 
-| Hook | Purpose |
-|------|---------|
-| `useAuth.ts` | Authentication state and actions |
-| `useAppNavigate.ts` | Type-safe navigation |
-| `useCodeMirror.ts` | CodeMirror editor setup |
-| `useFilesystem.ts` | File system operations |
-| `useIsMobile.ts` | Responsive mobile detection |
-| `useStickToBottom.ts` | Auto-scroll for chat lists |
+| Hook                  | Purpose                          |
+| --------------------- | -------------------------------- |
+| `useAuth.ts`          | Authentication state and actions |
+| `useAppNavigate.ts`   | Type-safe navigation             |
+| `useCodeMirror.ts`    | CodeMirror editor setup          |
+| `useFilesystem.ts`    | File system operations           |
+| `useIsMobile.ts`      | Responsive mobile detection      |
+| `useStickToBottom.ts` | Auto-scroll for chat lists       |
 
 ## Testing
 
@@ -286,18 +288,19 @@ src/
 
 ```bash
 # Run all unit tests
-bun run test:unit
+pnpm run test:unit
 
 # Watch mode for development
-bun run test:watch
+pnpm run test:watch
 
 # With coverage
-bun run test:coverage
+pnpm run test:coverage
 ```
 
 **Test Setup:**
 
 Global setup in `src/test/setup.ts` provides:
+
 - Web Storage mock (localStorage, sessionStorage)
 - `window.matchMedia` mock
 - `ResizeObserver` mock
@@ -305,12 +308,12 @@ Global setup in `src/test/setup.ts` provides:
 
 **Coverage Thresholds:**
 
-| Metric | Threshold |
-|--------|-----------|
-| Lines | 60% |
-| Functions | 60% |
-| Branches | 50% |
-| Statements | 60% |
+| Metric     | Threshold |
+| ---------- | --------- |
+| Lines      | 60%       |
+| Functions  | 60%       |
+| Branches   | 50%       |
+| Statements | 60%       |
 
 **Writing Tests:**
 
@@ -339,12 +342,13 @@ E2E tests are in `tests/e2e/` at the frontend root.
 
 ```bash
 # Run E2E tests
-bun run test:e2e
+pnpm run test:e2e
 ```
 
 **Configuration:**
 
 Playwright configuration in `playwright.config.ts`:
+
 - Runs against `http://127.0.0.1:4173`
 - Uses Chromium browser
 - Retries twice on CI
@@ -371,8 +375,12 @@ const settings = await apiClient.get("/api/v1/runtime/settings");
 
 // WebSocket streaming
 wsClient.connect("/api/v1/ws/chat", {
-  onMessage: (frame) => { /* handle frame */ },
-  onError: (error) => { /* handle error */ }
+  onMessage: (frame) => {
+    /* handle frame */
+  },
+  onError: (error) => {
+    /* handle error */
+  },
 });
 ```
 
@@ -382,16 +390,16 @@ Keep TypeScript types in sync with the backend OpenAPI spec:
 
 ```bash
 # Sync spec snapshot from backend
-bun run api:sync-spec
+pnpm run api:sync-spec
 
 # Generate TypeScript types
-bun run api:types
+pnpm run api:types
 
 # Full sync
-bun run api:sync
+pnpm run api:sync
 
 # Check for drift (CI gate)
-bun run api:check
+pnpm run api:check
 ```
 
 Generated types are in `src/lib/rlm-api/generated/openapi.ts`. Do not edit this file manually.
@@ -442,7 +450,7 @@ const buttonVariants = cva(
       variant: "default",
       size: "default",
     },
-  }
+  },
 );
 
 type ButtonVariantProps = VariantProps<typeof buttonVariants>;
@@ -452,17 +460,17 @@ type ButtonVariantProps = VariantProps<typeof buttonVariants>;
 
 Configure in `.env` (see `.env.example`):
 
-| Variable | Purpose |
-|----------|---------|
-| `VITE_FLEET_API_URL` | Backend API base URL |
-| `VITE_FLEET_WS_URL` | WebSocket URL |
-| `VITE_FLEET_WORKSPACE_ID` | Workspace identifier |
-| `VITE_FLEET_USER_ID` | User identifier |
-| `VITE_FLEET_TRACE` | Enable tracing |
-| `VITE_ENTRA_CLIENT_ID` | Microsoft Entra client ID |
-| `VITE_ENTRA_AUTHORITY` | Microsoft Entra authority URL |
-| `VITE_ENTRA_SCOPES` | OAuth scopes |
-| `VITE_ENTRA_REDIRECT_PATH` | OAuth redirect path |
+| Variable                   | Purpose                       |
+| -------------------------- | ----------------------------- |
+| `VITE_FLEET_API_URL`       | Backend API base URL          |
+| `VITE_FLEET_WS_URL`        | WebSocket URL                 |
+| `VITE_FLEET_WORKSPACE_ID`  | Workspace identifier          |
+| `VITE_FLEET_USER_ID`       | User identifier               |
+| `VITE_FLEET_TRACE`         | Enable tracing                |
+| `VITE_ENTRA_CLIENT_ID`     | Microsoft Entra client ID     |
+| `VITE_ENTRA_AUTHORITY`     | Microsoft Entra authority URL |
+| `VITE_ENTRA_SCOPES`        | OAuth scopes                  |
+| `VITE_ENTRA_REDIRECT_PATH` | OAuth redirect path           |
 
 ## Common Workflows
 
@@ -474,6 +482,7 @@ Configure in `.env` (see `.env.example`):
    - Shared across features → `components/shared/`
 
 2. Create the component with TypeScript types:
+
    ```typescript
    // MyComponent.tsx
    import * as React from "react";
@@ -495,6 +504,7 @@ Configure in `.env` (see `.env.example`):
 ### Adding a New Store
 
 1. Create `stores/myStore.ts`:
+
    ```typescript
    import { create } from "zustand";
 
@@ -516,8 +526,9 @@ Configure in `.env` (see `.env.example`):
 1. Add endpoint method to `lib/rlm-api/client.ts` or create a new module
 
 2. Update OpenAPI types:
+
    ```bash
-   bun run api:sync
+   pnpm run api:sync
    ```
 
 3. Use TanStack Query for data fetching in components

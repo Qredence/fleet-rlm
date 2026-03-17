@@ -1,6 +1,7 @@
 import { defineConfig } from "vite-plus";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -120,7 +121,7 @@ export default defineConfig({
     ],
     options: {},
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [TanStackRouterVite(), react(), tailwindcss()],
   resolve: {
     // Prevent duplicate package instances in the client bundle.
     dedupe: [
@@ -152,7 +153,6 @@ export default defineConfig({
     warmup: {
       clientFiles: [
         "src/app/App.tsx",
-        "src/app/routes.ts",
         "src/app/layout/RootLayout.tsx",
         "src/features/rlm-workspace/RlmWorkspace.tsx",
         "src/features/rlm-workspace/ChatMessageList.tsx",

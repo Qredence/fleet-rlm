@@ -4,13 +4,13 @@ This guide walks through setting up a complete local development environment for
 
 ## Prerequisites
 
-| Requirement | Version | Purpose |
-|-------------|---------|---------|
-| Python | 3.10+ | Runtime and development |
-| uv | Latest | Package and dependency management |
-| Bun | Latest | Frontend development |
-| Git | 2.x | Version control |
-| Modal Account | - | Sandbox execution |
+| Requirement   | Version | Purpose                           |
+| ------------- | ------- | --------------------------------- |
+| Python        | 3.10+   | Runtime and development           |
+| uv            | Latest  | Package and dependency management |
+| Bun           | Latest  | Frontend development              |
+| Git           | 2.x     | Version control                   |
+| Modal Account | -       | Sandbox execution                 |
 
 ## 1. Install Python
 
@@ -91,6 +91,7 @@ uv sync --all-extras --dev
 ```
 
 This command:
+
 - Creates a virtual environment in `.venv/`
 - Installs all runtime dependencies
 - Installs development dependencies (`pytest`, `ruff`, `ty`, etc.)
@@ -124,13 +125,13 @@ DSPY_LM_API_KEY=sk-your-api-key-here
 
 ### Environment Variable Categories
 
-| Category | Variables | Required |
-|----------|-----------|----------|
-| **LLM** | `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY` | Yes |
-| **Database** | `DATABASE_URL` | For persistence |
-| **Auth** | `AUTH_MODE`, `AUTH_REQUIRED` | For API server |
-| **MLflow** | `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI` | For tracing |
-| **PostHog** | `POSTHOG_ENABLED`, `POSTHOG_API_KEY` | For analytics |
+| Category     | Variables                               | Required        |
+| ------------ | --------------------------------------- | --------------- |
+| **LLM**      | `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY`     | Yes             |
+| **Database** | `DATABASE_URL`                          | For persistence |
+| **Auth**     | `AUTH_MODE`, `AUTH_REQUIRED`            | For API server  |
+| **MLflow**   | `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI` | For tracing     |
+| **PostHog**  | `POSTHOG_ENABLED`, `POSTHOG_API_KEY`    | For analytics   |
 
 ### Key Configuration Options
 
@@ -177,6 +178,7 @@ uv run modal setup
 ```
 
 This command:
+
 - Opens a browser for authentication
 - Stores credentials in `~/.modal.toml`
 
@@ -213,14 +215,14 @@ If you're working on the web UI, install frontend dependencies:
 
 ```bash
 cd src/frontend
-bun install --frozen-lockfile
+pnpm install --frozen-lockfile
 ```
 
 ### Verify Frontend Setup
 
 ```bash
-bun run type-check
-bun run test:unit
+pnpm run type-check
+pnpm run test:unit
 ```
 
 ## 7. Verify Your Setup
@@ -250,7 +252,7 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 
 # Type checking
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" --exclude "src/fleet_rlm/analytics/**" --exclude "src/fleet_rlm/daytona_rlm/**"
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" --exclude "src/fleet_rlm/analytics/**" --exclude "src/fleet_rlm/infrastructure/providers/daytona/**"
 ```
 
 ### Start Development Server
@@ -336,25 +338,25 @@ require('lspconfig').pyright.setup {
 
 ### Makefile Targets
 
-| Command | Description |
-|---------|-------------|
-| `make sync-all` | Install all dependencies |
-| `make test-fast` | Run fast test suite |
-| `make quality-gate` | Run lint, format, type check, tests |
-| `make format` | Format code with ruff |
-| `make lint` | Check linting with ruff |
-| `make typecheck` | Run type checker |
-| `make mlflow-server` | Start local MLflow server |
+| Command              | Description                         |
+| -------------------- | ----------------------------------- |
+| `make sync-all`      | Install all dependencies            |
+| `make test-fast`     | Run fast test suite                 |
+| `make quality-gate`  | Run lint, format, type check, tests |
+| `make format`        | Format code with ruff               |
+| `make lint`          | Check linting with ruff             |
+| `make typecheck`     | Run type checker                    |
+| `make mlflow-server` | Start local MLflow server           |
 
 ### Frontend Commands
 
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Start development server |
-| `bun run check` | Run all frontend checks |
-| `bun run test:unit` | Run unit tests |
-| `bun run test:e2e` | Run e2e tests |
-| `bun run build` | Build for production |
+| Command              | Description              |
+| -------------------- | ------------------------ |
+| `pnpm run dev`       | Start development server |
+| `pnpm run check`     | Run all frontend checks  |
+| `pnpm run test:unit` | Run unit tests           |
+| `pnpm run test:e2e`  | Run e2e tests            |
+| `pnpm run build`     | Build for production     |
 
 ## Troubleshooting
 

@@ -23,8 +23,8 @@ const backendRuntimeState = {
 
 let capturedOnSend: ((attachments: never[]) => void) | null = null;
 
-vi.mock("@/features/rlm-workspace/useBackendChatRuntime", () => ({
-  useBackendChatRuntime: () => backendRuntimeState,
+vi.mock("@/features/rlm-workspace/useChatRuntime", () => ({
+  useChatRuntime: () => backendRuntimeState,
 }));
 
 vi.mock("@/hooks/useStickToBottom", () => ({

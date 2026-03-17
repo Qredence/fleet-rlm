@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import type { InspectorTab } from "@/lib/data/types";
-import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/model";
 import {
   inspectorStyles,
   inspectorPreviewButtonClass,
@@ -38,7 +38,7 @@ export function ExecutionHighlightsGroup({
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {highlight.count && highlight.count > 1 ? (
-                    <Badge variant="outline" className={inspectorStyles.badge.meta}>
+                    <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                       {highlight.count}x
                     </Badge>
                   ) : null}
@@ -52,7 +52,7 @@ export function ExecutionHighlightsGroup({
                   {highlight.runtimeBadges.slice(0, 3).map((badge) => (
                     <Badge
                       key={`${highlight.id}-${badge}`}
-                      variant="outline"
+                      variant="secondary"
                       className={inspectorStyles.badge.meta}
                     >
                       {badge}

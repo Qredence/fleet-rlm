@@ -36,10 +36,16 @@ function useCarousel() {
   return context;
 }
 
-const Carousel = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement> & CarouselProps
->(({ orientation = "horizontal", opts, setApi, plugins, className, children, ...props }, ref) => {
+function Carousel({
+  orientation = "horizontal",
+  opts,
+  setApi,
+  plugins,
+  className,
+  children,
+  ref,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & CarouselProps & { ref?: React.Ref<HTMLDivElement> }) {
   const [carouselRef, api] = useEmblaCarousel(
     {
       ...opts,
@@ -126,48 +132,45 @@ const Carousel = React.forwardRef<
       </div>
     </CarouselContext.Provider>
   );
-});
-Carousel.displayName = "Carousel";
+}
 
-const CarouselContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => {
-    const { carouselRef, orientation } = useCarousel();
+function CarouselContent({
+  className,
+  ref,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { ref?: React.Ref<HTMLDivElement> }) {
+  const { carouselRef, orientation } = useCarousel();
 
-    return (
-      <div ref={carouselRef} className="overflow-hidden">
-        <div
-          className={cn(
-            "flex",
-            orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col",
-            className,
-          )}
-          ref={ref}
-          {...props}
-        />
-      </div>
-    );
-  },
-);
-CarouselContent.displayName = "CarouselContent";
-
-const CarouselItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => {
-    const { orientation } = useCarousel();
-
-    return (
+  return (
+    <div ref={carouselRef} className="overflow-hidden">
       <div
-        aria-roledescription="slide"
-        className={cn(
-          "min-w-0 shrink-0 grow-0 basis-full",
-          orientation === "horizontal" ? "pl-4" : "pt-4",
-          className,
-        )}
+        className={cn("flex", orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col", className)}
         ref={ref}
         {...props}
       />
-    );
-  },
-);
-CarouselItem.displayName = "CarouselItem";
+    </div>
+  );
+}
+
+function CarouselItem({
+  className,
+  ref,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { ref?: React.Ref<HTMLDivElement> }) {
+  const { orientation } = useCarousel();
+
+  return (
+    <div
+      aria-roledescription="slide"
+      className={cn(
+        "min-w-0 shrink-0 grow-0 basis-full",
+        orientation === "horizontal" ? "pl-4" : "pt-4",
+        className,
+      )}
+      ref={ref}
+      {...props}
+    />
+  );
+}
 
 export { type CarouselApi, Carousel, CarouselContent, CarouselItem };

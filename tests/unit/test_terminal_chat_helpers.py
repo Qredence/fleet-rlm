@@ -6,7 +6,7 @@ from pathlib import Path
 
 from prompt_toolkit.document import Document
 
-from fleet_rlm.terminal import (
+from fleet_rlm.features.terminal import (
     _FleetCompleter,
     _coerce_value,
     _iter_mention_paths,

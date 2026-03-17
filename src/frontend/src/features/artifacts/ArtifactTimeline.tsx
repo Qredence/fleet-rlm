@@ -1,6 +1,6 @@
 import { Brain, Terminal, Wrench, Database, FileOutput } from "lucide-react";
 
-import type { ArtifactStepType, ExecutionStep } from "@/stores/artifactStore";
+import type { ArtifactStepType, ExecutionStep } from "@/lib/data/artifactTypes";
 import { cn } from "@/lib/utils/cn";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { summarizeArtifactStep } from "@/features/artifacts/parsers/artifactPayloadSummaries";
@@ -106,7 +106,7 @@ export function ArtifactTimeline({ steps, activeStepId, onSelectStep }: Artifact
   return (
     <ScrollArea className="h-full pr-1">
       <div className="space-y-3 pb-2">
-        <section className="rounded-[22px] border border-border-subtle/80 bg-linear-to-br from-card via-card/95 to-muted/15 p-3.5 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.24)]">
+        <section className="rounded-bubble border border-border-subtle/80 bg-linear-to-br from-card via-card/95 to-muted/15 p-3.5 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.24)]">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -187,7 +187,7 @@ export function ArtifactTimeline({ steps, activeStepId, onSelectStep }: Artifact
             return (
               <div key={step.id} className="relative" style={{ paddingInlineStart: "2.8rem" }}>
                 {hasConnector ? (
-                  <div className="absolute left-[0.95rem] top-10 bottom-[-0.75rem] w-px bg-linear-to-b from-border-strong/50 via-border-subtle/40 to-transparent" />
+                  <div className="absolute left-[0.95rem] top-10 -bottom-3 w-px bg-linear-to-b from-border-strong/50 via-border-subtle/40 to-transparent" />
                 ) : null}
 
                 <div
@@ -249,7 +249,7 @@ export function ArtifactTimeline({ steps, activeStepId, onSelectStep }: Artifact
                     </h3>
 
                     {showSummary ? (
-                      <p className="mt-2 text-xs leading-5 text-muted-foreground whitespace-pre-wrap break-words">
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground whitespace-pre-wrap wrap-break-word">
                         {summary}
                       </p>
                     ) : null}

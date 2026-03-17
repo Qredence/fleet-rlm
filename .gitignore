@@ -42,6 +42,7 @@ results/
 src/frontend/smoke-*.mjs
 src/frontend/.tmp-*.mjs
 
+src/fleet_rlm/_scaffold/
 src/.tmp/
 src/output/
 src/output/*
@@ -123,3 +124,4 @@ src/frontend/test-results/.last-run.json
 .posthog-events.json
 src/frontend/posthog-setup-report.md
 .codex/config.toml
+PLANS.md

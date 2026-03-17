@@ -1,73 +1,25 @@
-"""Experimental Daytona-backed strict-RLM pilot."""
+"""Compatibility package for legacy ``fleet_rlm.daytona_rlm`` imports."""
 
-from .chat_agent import DaytonaWorkbenchChatAgent
-from .config import DaytonaConfigError, ResolvedDaytonaConfig, resolve_daytona_config
-from .diagnostics import DaytonaDiagnosticError
-from .dspy_modules import (
-    ChildResultSynthesisModule,
-    DaytonaConversationGroundingModule,
-    DaytonaConversationGroundingSignature,
-    RecursiveSpawnPolicyModule,
-    RecursiveSpawnPolicySignature,
-    RecursiveTaskDecompositionModule,
-    RecursiveTaskDecompositionSignature,
-)
-from .results import persist_result
-from .runner import DaytonaRLMRunner, run_daytona_rlm_pilot
-from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
-from .smoke import run_daytona_smoke
-from .types import (
-    AgentNode,
-    ChildLink,
-    ChildTaskResult,
-    ContextSource,
-    DaytonaEvidenceRef,
-    DaytonaRunResult,
-    DaytonaSmokeResult,
-    ExecutionObservation,
-    FinalArtifact,
-    PromptHandle,
-    PromptManifest,
-    PromptSliceRef,
-    RecursiveTaskSpec,
-    RolloutBudget,
-    RolloutSummary,
-    TaskSourceProvenance,
+from __future__ import annotations
+
+from importlib import import_module
+import sys
+
+from fleet_rlm.infrastructure.providers.daytona import *  # noqa: F403
+
+_SUBMODULES = (
+    "chat_agent",
+    "config",
+    "diagnostics",
+    "dspy_modules",
+    "results",
+    "runner",
+    "sandbox",
+    "smoke",
+    "types",
 )
 
-__all__ = [
-    "AgentNode",
-    "ChildResultSynthesisModule",
-    "ChildLink",
-    "ChildTaskResult",
-    "ContextSource",
-    "DaytonaConfigError",
-    "DaytonaConversationGroundingModule",
-    "DaytonaConversationGroundingSignature",
-    "DaytonaDiagnosticError",
-    "DaytonaEvidenceRef",
-    "DaytonaRLMRunner",
-    "DaytonaRunResult",
-    "DaytonaSandboxRuntime",
-    "DaytonaSandboxSession",
-    "DaytonaSmokeResult",
-    "DaytonaWorkbenchChatAgent",
-    "ExecutionObservation",
-    "FinalArtifact",
-    "PromptHandle",
-    "PromptManifest",
-    "PromptSliceRef",
-    "RecursiveSpawnPolicyModule",
-    "RecursiveSpawnPolicySignature",
-    "RecursiveTaskSpec",
-    "RecursiveTaskDecompositionModule",
-    "RecursiveTaskDecompositionSignature",
-    "ResolvedDaytonaConfig",
-    "RolloutBudget",
-    "RolloutSummary",
-    "TaskSourceProvenance",
-    "persist_result",
-    "resolve_daytona_config",
-    "run_daytona_rlm_pilot",
-    "run_daytona_smoke",
-]
+for _name in _SUBMODULES:
+    _module = import_module(f"fleet_rlm.infrastructure.providers.daytona.{_name}")
+    globals()[_name] = _module
+    sys.modules[f"{__name__}.{_name}"] = _module

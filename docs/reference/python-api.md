@@ -18,15 +18,17 @@ with ModalInterpreter(timeout=600, secret_name="LITELLM", volume_name="rlm-volum
 ```
 
 Key capabilities:
+
 - lifecycle control (`start`, `shutdown`, context managers)
 - sync/async execution (`execute`, `aexecute`)
 - execution profile support used by server and delegate workflows
 
-### `fleet_rlm.react.agent.RLMReActChatAgent`
+### `fleet_rlm.core.agent.chat_agent.RLMReActChatAgent`
 
 Interactive ReAct orchestration module used by CLI and server chat surfaces.
 
 Key behaviors:
+
 - document loading and active-alias management
 - command dispatch execution
 - sync/async chat turn helpers
@@ -46,6 +48,7 @@ Current maintained runner surface:
 ### `build_react_chat_agent(...)`
 
 Constructs an `RLMReActChatAgent` with runtime controls such as:
+
 - ReAct/RLM iteration budgets
 - recursion depth
 - Modal timeout/secret/volume
@@ -57,6 +60,7 @@ Constructs an `RLMReActChatAgent` with runtime controls such as:
 Single-turn wrappers around the interactive ReAct agent.
 
 Common output shape includes:
+
 - `assistant_response`
 - optional trajectory metadata (when enabled)
 - turn/session metadata and warnings
@@ -66,6 +70,7 @@ Common output shape includes:
 Long-document analysis/summarization helper backed by DSPy RLM signatures.
 
 Modes:
+
 - `analyze` → `AnalyzeLongDocument`
 - `summarize` → `SummarizeLongDocument`
 
@@ -76,7 +81,7 @@ Modes:
 
 These execute Modal-side checks for required environment keys.
 
-## Signatures (`fleet_rlm.react.signatures`)
+## Signatures (`fleet_rlm.core.agent.signatures`)
 
 Current maintained signatures include:
 
@@ -110,5 +115,5 @@ print(result["answer"])
 
 ```bash
 uv run python -c "from fleet_rlm.runners import run_long_context, run_react_chat_once"
-uv run python -c "from fleet_rlm.react.signatures import AnalyzeLongDocument"
+uv run python -c "from fleet_rlm.core.agent.signatures import AnalyzeLongDocument"
 ```

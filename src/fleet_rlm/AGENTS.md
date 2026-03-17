@@ -10,20 +10,29 @@ Use the repo-wide [AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/AGENTS.
 Active top-level areas under `src/fleet_rlm/`:
 
 - `_scaffold/`: bundled skills, agents, teams, and hooks exposed by `fleet-rlm init`
-- `analytics/`: PostHog callbacks, MLflow tracing/evaluation/optimization helpers
-- `chunking/`: reusable text chunking helpers
-- `cli_commands/`: shared Typer command registration
+- `api/`: FastAPI app (`main.py`), auth, middleware, routers (HTTP + websocket), schemas, execution event helpers, and server utilities
+- `cli/`: Typer CLI surface (`main.py`, `fleet_cli.py`), command modules (`commands/`), and runtime builder constructors (`runners.py`)
 - `conf/`: Hydra config defaults
-- `core/`: planner/interpreter config plus Modal sandbox runtime
-- `daytona_rlm/`: experimental Daytona runner, sandbox orchestration, and websocket chat agent
-- `db/`: Neon/Postgres data access and repository layer
-- `mcp/`: FastMCP server surface
-- `models/`: shared streaming and transport models
-- `react/`: ReAct chat agent, runtime modules, tool definitions, and streaming helpers
-- `server/`: FastAPI app, auth, routers, runtime settings, websocket lifecycle
-- `terminal/`: standalone terminal chat runtime
+- `core/`: ReAct chat agent, DSPy signatures, runtime modules, execution drivers, streaming context, tool definitions, sandbox helpers, and Modal sandbox runtime
+  - `core/agent/`: chat agent, RLM agent, signatures, memory, session history, tool delegation
+  - `core/execution/`: interpreter, driver factories, streaming context/citations, document cache/sources, validation
+  - `core/models/`: RLM runtime modules, streaming models
+  - `core/tools/`: sandbox, filesystem, volume, document, chunking, LLM, memory-intelligence, and delegate tools
+- `features/`: domain feature modules
+  - `features/analytics/`: PostHog callbacks, MLflow tracing/evaluation/optimization, scorers, sanitization
+  - `features/chunking/`: reusable text chunking helpers (headers, JSON keys, size, timestamps)
+  - `features/document_ingestion/`: document ingestion pipeline
+  - `features/logs/`: execution logging and limits
+  - `features/scaffold/`: bundled scaffold skills and templates
+  - `features/terminal/`: interactive terminal chat UI, slash-commands, display settings, and Rich-based rendering
+- `infrastructure/`: external provider integrations and data access
+  - `infrastructure/config/`: environment variable loading (`AppConfig`), runtime settings resolution, and env-var parsing utilities
+  - `infrastructure/database/`: Neon/Postgres engine, models, repository layer
+  - `infrastructure/mcp/`: FastMCP server surface
+  - `infrastructure/providers/daytona/`: experimental Daytona runner, sandbox orchestration, DSPy modules, and websocket chat agent
+  - `infrastructure/providers/modal/`: Modal provider adapters
 - `ui/`: packaged built frontend assets for installed distributions
-- `utils/`: shared helpers including scaffold and regex utilities
+- `utils/`: shared helpers including scaffold, regex, Modal, and tool utilities
 
 ## CLI Surface
 
@@ -68,7 +77,7 @@ Canonical HTTP and websocket surfaces:
 - `/api/v1/ws/execution`
 - Optional `/scalar` docs when `scalar_fastapi` is installed
 
-`src/fleet_rlm/server/main.py` is the source of truth for route mounting and SPA asset resolution.
+`src/fleet_rlm/api/main.py` is the source of truth for route mounting and SPA asset resolution.
 
 ## Runtime Modes and Boundaries
 
@@ -82,8 +91,8 @@ Preserve these boundaries:
 - `execution_mode` is Modal-only.
 - Daytona request-side source controls are `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
 - Daytona workbench runs stream through the shared websocket chat surface instead of a separate frontend/runtime stack.
-- `src/fleet_rlm/runners.py` is the canonical constructor layer for top-level runtime builders.
-- `src/fleet_rlm/server/routers/ws/chat_runtime.py` is the runtime-mode switch point.
+- `src/fleet_rlm/cli/runners.py` is the canonical constructor layer for top-level runtime builders.
+- `src/fleet_rlm/api/routers/ws/chat_runtime.py` is the runtime-mode switch point.
 
 ## Auth, Persistence, and Analytics
 
@@ -103,9 +112,9 @@ Preserve these boundaries:
 ## Backend Architecture Notes
 
 - Keep host-side Modal adapters in `core/` separate from sandbox-side protocol helpers.
-- Keep DSPy signatures and runtime modules centralized under `react/signatures.py` and `react/rlm_runtime_modules.py`.
+- Keep DSPy signatures and runtime modules centralized under `core/agent/signatures.py` and `core/models/rlm_runtime_modules.py`.
 - Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
-- Keep websocket event shaping and session lifecycle inside `server/routers/ws/*`; treat it as a contract with the frontend workspace.
+- Keep websocket event shaping and session lifecycle inside `api/routers/ws/*`; treat it as a contract with the frontend workspace.
 - Use `src/fleet_rlm/utils/regex.py` for regex helpers instead of recreating local helpers.
 
 ## Canonical Commands

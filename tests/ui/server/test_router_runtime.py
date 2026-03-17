@@ -69,11 +69,11 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
         return delegate
 
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
         _planner_factory,
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_delegate_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_delegate_lm_from_env",
         _delegate_factory,
     )
 
@@ -254,7 +254,7 @@ def test_runtime_modal_smoke_preflight_failure(
     monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
     monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.load_modal_config",
+        "fleet_rlm.api.routers.runtime.load_modal_config",
         lambda: {},
     )
 
@@ -279,7 +279,7 @@ def test_runtime_lm_smoke_success(
             return [{"text": "OK"}]
 
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
         lambda model_name=None, env_file=None: _FakeLM(),
     )
 
@@ -305,7 +305,7 @@ def test_runtime_lm_smoke_handles_planner_init_error(
         raise RuntimeError("planner init failed")
 
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.runtime.get_planner_lm_from_env",
+        "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
         _planner_factory,
     )
 
@@ -381,7 +381,7 @@ def test_runtime_volume_tree_maps_backend_errors_to_502(
 ) -> None:
     _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.volume_ops.list_volume_tree",
+        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
     )
 
@@ -397,7 +397,7 @@ def test_runtime_volume_file_maps_not_found_errors_to_404(
 ) -> None:
     _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
     )
 
@@ -413,7 +413,7 @@ def test_runtime_volume_file_maps_directory_errors_to_400(
 ) -> None:
     _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
     )
 
@@ -432,7 +432,7 @@ def test_runtime_volume_file_maps_unknown_errors_to_502(
 ) -> None:
     _server_state(local_client).config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.volume_ops.read_volume_file_text",
+        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),
     )
 

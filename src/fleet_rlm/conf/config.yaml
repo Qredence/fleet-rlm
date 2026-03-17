@@ -4,9 +4,9 @@ defaults:
 agent:
   max_iters: 60
   # Default to DSPY_LM_MODEL environment variable if set, otherwise fallback to a known model
-  # from config/config.yaml (e.g., gemini-3.1-pro-preview or deepseek-v3.2-maas).
+  # from config/config.yaml (e.g., gemini-3-flash-preview or deepseek-v3.2-maas).
   # We use OC env interpolation to respect user's existing .env setup.
-  model: ${oc.env:DSPY_LM_MODEL,openai/gemini/gemini-3.1-pro-preview}
+  model: ${oc.env:DSPY_LM_MODEL,openai/gemini-3-flash-preview}
   temperature: 1
   delegate_model: null
   delegate_max_tokens: 64000

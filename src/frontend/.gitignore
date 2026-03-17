@@ -28,3 +28,4 @@ dist/
 test-results/
 .tmp-bun
 .factory/
+src/frontend/.tanstack/

@@ -5,7 +5,7 @@
  * page layout within the app shell. Accessible via direct URL navigation,
  * ⌘K command palette, or user menu.
  */
-import { useNavigate, useSearchParams } from "react-router";
+import { useSearch, useRouter } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { useThemeStore } from "@/stores/themeStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -25,10 +25,10 @@ import {
 export function SettingsPage() {
   const { isDark, toggle: toggleTheme } = useThemeStore();
   const isMobile = useIsMobile();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const router = useRouter();
+  const searchParams = useSearch({ strict: false }) as { section?: string };
 
-  const sectionFromQuery = searchParams.get("section");
+  const sectionFromQuery = searchParams.section;
   const selectedSection =
     sectionFromQuery && settingsSections.some((section) => section.key === sectionFromQuery)
       ? (sectionFromQuery as SettingsSection)
@@ -49,7 +49,7 @@ export function SettingsPage() {
           <TooltipTrigger asChild>
             <span className="inline-flex">
               <IconButton
-                onClick={() => navigate(-1)}
+                onClick={() => router.history.back()}
                 aria-label="Go back"
                 className={isMobile ? "touch-target" : undefined}
               >

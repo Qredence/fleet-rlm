@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.analytics.config import MlflowConfig
-import fleet_rlm.analytics.mlflow_integration as mlflow_integration
+from fleet_rlm.features.analytics.config import MlflowConfig
+import fleet_rlm.features.analytics.mlflow_integration as mlflow_integration
 from tests.unit.fixtures_env import clear_env
 
 

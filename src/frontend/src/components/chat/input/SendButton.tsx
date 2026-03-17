@@ -1,6 +1,6 @@
 import { ArrowUp } from "lucide-react";
 
-import { PromptInputSubmit } from "@/components/ai-elements/prompt-input";
+import { PromptInputSubmit } from "@/components/prompt-kit/prompt-input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils/cn";
 

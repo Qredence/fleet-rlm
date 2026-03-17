@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.react import RLMReActChatAgent
+from fleet_rlm.core.agent import RLMReActChatAgent
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
