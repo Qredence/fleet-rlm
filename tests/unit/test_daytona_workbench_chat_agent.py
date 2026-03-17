@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from fleet_rlm.infrastructure.providers.daytona.chat_agent import DaytonaWorkbenchChatAgent
+from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
+    DaytonaWorkbenchChatAgent,
+)
 from fleet_rlm.infrastructure.providers.daytona.types import RolloutBudget
 
 

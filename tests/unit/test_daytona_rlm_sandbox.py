@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.infrastructure.providers.daytona.diagnostics import DaytonaDiagnosticError
+from fleet_rlm.infrastructure.providers.daytona.diagnostics import (
+    DaytonaDiagnosticError,
+)
 from fleet_rlm.infrastructure.providers.daytona.config import ResolvedDaytonaConfig
 from fleet_rlm.infrastructure.providers.daytona.protocol import (
     DriverReady,

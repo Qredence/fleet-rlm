@@ -157,7 +157,10 @@ class FakeRunSession:
 
     def list_prompts(self, *, timeout: float = 30.0):
         _ = timeout
-        from fleet_rlm.infrastructure.providers.daytona.types import PromptHandle, PromptManifest
+        from fleet_rlm.infrastructure.providers.daytona.types import (
+            PromptHandle,
+            PromptManifest,
+        )
 
         return PromptManifest(
             handles=[PromptHandle.from_raw(item) for item in self.prompt_handles]

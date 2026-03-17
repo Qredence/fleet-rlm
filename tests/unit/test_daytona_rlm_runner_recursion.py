@@ -8,7 +8,10 @@ import pytest
 
 from fleet_rlm.infrastructure.providers.daytona.protocol import HostCallbackRequest
 from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
-from fleet_rlm.infrastructure.providers.daytona.types import RecursiveTaskSpec, RolloutBudget
+from fleet_rlm.infrastructure.providers.daytona.types import (
+    RecursiveTaskSpec,
+    RolloutBudget,
+)
 from tests.unit.fixtures_daytona import (
     FakeLmSequence,
     FakeRunSession,
