@@ -29,7 +29,7 @@ interface UseProximityHoverReturn {
 
 export function useProximityHover<T extends HTMLElement>(
   containerRef: RefObject<T | null>,
-  options: UseProximityHoverOptions = {}
+  options: UseProximityHoverOptions = {},
 ): UseProximityHoverReturn {
   const { axis = "y" } = options;
   const itemsRef = useRef(new Map<number, HTMLElement>());
@@ -39,16 +39,13 @@ export function useProximityHover<T extends HTMLElement>(
   const sessionRef = useRef(0);
   const rafIdRef = useRef<number | null>(null);
 
-  const registerItem = useCallback(
-    (index: number, element: HTMLElement | null) => {
-      if (element) {
-        itemsRef.current.set(index, element);
-      } else {
-        itemsRef.current.delete(index);
-      }
-    },
-    []
-  );
+  const registerItem = useCallback((index: number, element: HTMLElement | null) => {
+    if (element) {
+      itemsRef.current.set(index, element);
+    } else {
+      itemsRef.current.delete(index);
+    }
+  }, []);
 
   const measureItems = useCallback(() => {
     const container = containerRef.current;
@@ -125,7 +122,7 @@ export function useProximityHover<T extends HTMLElement>(
         setActiveIndex(containingIndex ?? closestIndex);
       });
     },
-    [axis, containerRef]
+    [axis, containerRef],
   );
 
   const handleMouseEnter = useCallback(() => {
@@ -171,7 +168,7 @@ export function useProximityHover<T extends HTMLElement>(
 export function useRegisterProximityItem(
   registerItem: (index: number, element: HTMLElement | null) => void,
   index: number,
-  ref: RefObject<HTMLElement | null>
+  ref: RefObject<HTMLElement | null>,
 ) {
   useEffect(() => {
     registerItem(index, ref.current);

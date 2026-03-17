@@ -1,13 +1,13 @@
 /**
  * Application-level navigation hook.
  *
- * Wraps React Router's `useNavigate()` with convenience methods that
+ * Wraps TanStack Router's `useNavigate()` with convenience methods that
  * know the app's route structure. All navigation trigger points
  * (TopHeader, MobileTabBar, CommandPalette, etc.) should use this hook
  * instead of calling `setActiveNav()` directly.
  *
- * The URL is the source of truth — RouteSync in RootLayout watches URL
- * changes and syncs NavigationContext accordingly.
+ * The URL is the source of truth — `RouteSync` in `RootLayout` watches
+ * URL changes and syncs the navigation store accordingly.
  */
 import { useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -51,7 +51,7 @@ export function useAppNavigate() {
   /** Navigate to a top-level tab/section */
   const navigateTo = useCallback(
     (nav: NavItem) => {
-      navigate({ to: navToPath(nav) as any });
+      navigate({ to: navToPath(nav) as never });
     },
     [navigate],
   );
