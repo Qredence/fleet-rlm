@@ -152,8 +152,8 @@ class _FakeSession:
 
 
 class _FakeRuntime:
-    def __init__(self):
-        self.session = _FakeSession()
+    def __init__(self, session: _FakeSession | None = None):
+        self.session = session or _FakeSession()
 
     def create_workspace_session(
         self,
@@ -241,12 +241,7 @@ def test_run_daytona_smoke_reports_driver_execution_failures_and_cleans_up():
             del code, callback_handler, timeout, submit_schema
             raise RuntimeError("driver broke")
 
-    class _BrokenRuntime(_FakeRuntime):
-        def __init__(self):
-            super().__init__()
-            self.session = _BrokenSession()
-
-    runtime = _BrokenRuntime()
+    runtime = _FakeRuntime(session=_BrokenSession())
     result = run_daytona_smoke(
         repo="https://github.com/example/repo.git",
         runtime=runtime,
@@ -268,12 +263,7 @@ def test_run_daytona_smoke_reports_driver_start_failures():
                 phase="driver_start",
             )
 
-    class _StartBrokenRuntime(_FakeRuntime):
-        def __init__(self):
-            super().__init__()
-            self.session = _StartBrokenSession()
-
-    runtime = _StartBrokenRuntime()
+    runtime = _FakeRuntime(session=_StartBrokenSession())
     result = run_daytona_smoke(
         repo="https://github.com/example/repo.git",
         runtime=runtime,
@@ -291,12 +281,7 @@ def test_run_daytona_smoke_reports_cleanup_failures():
             self.deleted = True
             raise RuntimeError("cleanup broke")
 
-    class _CleanupBrokenRuntime(_FakeRuntime):
-        def __init__(self):
-            super().__init__()
-            self.session = _CleanupBrokenSession()
-
-    runtime = _CleanupBrokenRuntime()
+    runtime = _FakeRuntime(session=_CleanupBrokenSession())
     result = run_daytona_smoke(
         repo="https://github.com/example/repo.git",
         runtime=runtime,
