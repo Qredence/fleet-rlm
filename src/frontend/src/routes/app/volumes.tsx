@@ -1,6 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { LazyRouteComponents } from "@/lib/perf/routePreload";
+import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/app/volumes")({
-  component: () => <LazyRouteComponents.VolumesPage />,
+  component: lazyRouteComponent(
+    () => import("@/screens/volumes/volumes-screen"),
+    "VolumesScreen",
+  ),
 });

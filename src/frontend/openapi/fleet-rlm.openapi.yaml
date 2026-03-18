@@ -47,7 +47,8 @@ paths:
       tags:
         - sessions
       summary: List Session State
-      description: Return lightweight summaries of active/restored in-memory session
+      description:
+        Return lightweight summaries of active/restored in-memory session
         state.
       operationId: list_session_state_api_v1_sessions_state_get
       responses:

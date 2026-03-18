@@ -118,6 +118,67 @@ export default defineConfig({
           browser: true,
         },
       },
+      {
+        files: [
+          "src/components/ui/**/*.{ts,tsx}",
+          "src/components/prompt-kit/**/*.{ts,tsx}",
+        ],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  group: ["@/screens/*"],
+                  message:
+                    "Shared components must not depend on screen-owned modules.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ["src/screens/**/model/**/*.{ts,tsx}"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  group: ["@/screens/*/components/*"],
+                  message:
+                    "Screen model modules must not depend on screen component modules.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ["src/screens/shell/**/*.{ts,tsx}"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  group: [
+                    "@/screens/workspace/components/*",
+                    "@/screens/workspace/model/*",
+                    "@/screens/workspace/hooks/*",
+                    "@/screens/volumes/components/*",
+                    "@/screens/volumes/model/*",
+                    "@/screens/volumes/hooks/*",
+                  ],
+                  message:
+                    "Shell modules must import screen-owned panels through top-level screen contracts only.",
+                },
+              ],
+            },
+          ],
+        },
+      },
     ],
     options: {},
   },
@@ -153,10 +214,13 @@ export default defineConfig({
     warmup: {
       clientFiles: [
         "src/app/App.tsx",
-        "src/app/layout/RootLayout.tsx",
-        "src/features/rlm-workspace/RlmWorkspace.tsx",
-        "src/features/rlm-workspace/ChatMessageList.tsx",
-        "src/components/chat/ChatInput.tsx",
+        "src/screens/shell/app-shell-screen.tsx",
+        "src/screens/workspace/workspace-screen.tsx",
+        "src/screens/workspace/components/workspace-message-list.tsx",
+        "src/screens/workspace/components/workspace-composer.tsx",
+        "src/screens/settings/settings-screen.tsx",
+        "src/screens/settings/grouped-settings-pane.tsx",
+        "src/screens/settings/runtime-pane.tsx",
       ],
     },
   },
@@ -178,7 +242,10 @@ export default defineConfig({
     // ── File discovery ──────────────────────────────────────────────
     // Unit tests live inside src/**/__tests__/ or are named *.test.*
     // E2E Playwright tests live in tests/ and are excluded here.
-    include: ["src/**/__tests__/**/*.{test,spec}.{ts,tsx}", "src/**/*.{test,spec}.{ts,tsx}"],
+    include: [
+      "src/**/__tests__/**/*.{test,spec}.{ts,tsx}",
+      "src/**/*.{test,spec}.{ts,tsx}",
+    ],
     exclude: ["node_modules", "dist", "tests/e2e/**"],
 
     // ── Globals ─────────────────────────────────────────────────────

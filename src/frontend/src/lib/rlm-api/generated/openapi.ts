@@ -3,6 +3,7 @@
  * Do not make direct changes to the file.
  */
 
+
 export interface paths {
   "/health": {
     /** Health */
@@ -403,6 +404,7 @@ export type $defs = Record<string, never>;
 export type external = Record<string, never>;
 
 export interface operations {
+
   /** Health */
   health_health_get: {
     responses: {

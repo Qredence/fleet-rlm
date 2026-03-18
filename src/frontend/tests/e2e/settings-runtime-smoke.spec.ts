@@ -6,7 +6,7 @@ test("settings renders runtime health and connectivity controls", async ({ page 
 
   await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
   await expect(page.getByText("Runtime Status", { exact: true })).toBeVisible();
-  await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Runtime readiness is (healthy|degraded)\./)).toBeVisible();
 
   await expect(
     page.getByRole("heading", {

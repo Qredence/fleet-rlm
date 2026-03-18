@@ -10,8 +10,8 @@
  * URL changes and syncs the navigation store accordingly.
  */
 import { useCallback } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import type { NavItem } from "@/lib/data/types";
+import { useNavigate, useRouter } from "@tanstack/react-router";
+import type { NavItem } from "@/stores/navigation-types";
 
 // ── Nav ↔ Path mapping ─────────────────────────────────────────────
 
@@ -47,6 +47,7 @@ export function pathToNav(pathname: string): NavItem | null {
 
 export function useAppNavigate() {
   const navigate = useNavigate();
+  const router = useRouter();
 
   /** Navigate to a top-level tab/section */
   const navigateTo = useCallback(
@@ -56,5 +57,13 @@ export function useAppNavigate() {
     [navigate],
   );
 
-  return { navigate, navigateTo };
+  /** Warm the route module for a top-level tab/section */
+  const preloadNav = useCallback(
+    (nav: NavItem) => {
+      return router.preloadRoute({ to: navToPath(nav) as never });
+    },
+    [router],
+  );
+
+  return { navigate, navigateTo, preloadNav };
 }
