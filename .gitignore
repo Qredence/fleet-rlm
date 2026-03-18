@@ -57,13 +57,6 @@ artifacts/
 .letta/
 .agents/
 .codex/
-!.codex/
-!.codex/config.toml
-!.codex/agents/
-!.codex/agents/*.toml
-!.codex/prompts/
-!.codex/prompts/v0_4_8/
-!.codex/prompts/v0_4_8/*.md
 .codex/environments/
 .npm-cache/
 .opencode/
@@ -123,5 +116,4 @@ tui-ink/package-lock.json
 src/frontend/test-results/.last-run.json
 .posthog-events.json
 src/frontend/posthog-setup-report.md
-.codex/config.toml
 PLANS.md

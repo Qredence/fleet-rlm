@@ -18,6 +18,13 @@ This repo explicitly overrides the global bun default for frontend work. When yo
 - Long-form docs and runbooks: `docs/`
 Use the more specific [src/fleet_rlm/AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/src/fleet_rlm/AGENTS.md) and [src/frontend/AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/src/frontend/AGENTS.md) files for subsystem-specific guidance.
 
+## Local Codex Workflow Files
+
+- `.codex/agents/*.toml` defines repo-specific role overlays for lead, explorer, backend/frontend implementation, reviewer, docs hygiene, Playwright QA, and Linear operations.
+- `.codex/prompts/v0_4_8/*.md` contains reusable runbooks/templates for kickoff, execution, validation, docs hygiene, PR sync, and browser smoke checks.
+- Keep `.codex/` instructions aligned with this file, the subsystem AGENTS files, `plans/`, `TASKS.md`, and live Makefile/package scripts.
+- Avoid hard-coded machine/worktree paths or milestone-specific plan references in reusable `.codex` prompts unless they currently exist in the repo.
+
 ## Product and Runtime Contract
 
 - The supported app surfaces are `RLM Workspace`, `Volumes`, and `Settings`.
