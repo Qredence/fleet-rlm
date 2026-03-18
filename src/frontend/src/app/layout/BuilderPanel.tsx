@@ -4,19 +4,32 @@ import { useChatStore } from "@/stores/chatStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { cn } from "@/lib/utils/cn";
-import type { CanvasMode } from "@/features/artifacts/CanvasSwitcher";
 import { FileDetail } from "@/features/artifacts/FileDetail";
 import { RunWorkbench } from "@/features/rlm-workspace/run-workbench/RunWorkbench";
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
-import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
+import {
+  isRlmCoreEnabled,
+  isSectionSupported,
+  UNSUPPORTED_SECTION_REASON,
+} from "@/lib/rlm-api";
 
-function UnsupportedState({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
+type CanvasMode = "creation" | "file-detail" | "empty";
+
+function UnsupportedState({
+  sectionLabel,
+  reason,
+}: {
+  sectionLabel: string;
+  reason?: string;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
         <PanelRight className="h-6 w-6 text-muted-foreground" />
       </div>
-      <p className="mb-1 text-foreground typo-label">{sectionLabel} unavailable</p>
+      <p className="mb-1 text-foreground typo-label">
+        {sectionLabel} unavailable
+      </p>
       <p className="text-muted-foreground typo-caption">
         {reason || "This functionality is currently disabled or unsupported."}
       </p>
@@ -68,10 +81,13 @@ export function BuilderPanel() {
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
   const showRunWorkbench =
-    activeNav === "workspace" && !isUnsupportedNav && runtimeMode === "daytona_pilot";
+    activeNav === "workspace" &&
+    !isUnsupportedNav &&
+    runtimeMode === "daytona_pilot";
 
   const showInspector = activeNav === "workspace" && !isUnsupportedNav;
-  const showFileDetail = activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
+  const showFileDetail =
+    activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
 
   const canvasMode: CanvasMode = showInspector
     ? "creation"
@@ -112,7 +128,9 @@ export function BuilderPanel() {
             />
           </ErrorBoundary>
         ) : showInspector ? (
-          <ErrorBoundary name={showRunWorkbench ? "Run Workbench" : "Message Inspector"}>
+          <ErrorBoundary
+            name={showRunWorkbench ? "Run Workbench" : "Message Inspector"}
+          >
             {showRunWorkbench ? <RunWorkbench /> : <MessageInspectorPanel />}
           </ErrorBoundary>
         ) : showFileDetail && selectedFileNode ? (

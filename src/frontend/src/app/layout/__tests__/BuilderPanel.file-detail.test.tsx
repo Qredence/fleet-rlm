@@ -27,7 +27,8 @@ vi.mock("@/stores/navigationStore", () => ({
 }));
 
 vi.mock("@/stores/chatStore", () => ({
-  useChatStore: (selector: (state: typeof chatStoreState) => unknown) => selector(chatStoreState),
+  useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
+    selector(chatStoreState),
 }));
 
 vi.mock("@/hooks/useAppNavigate", () => ({
@@ -43,7 +44,9 @@ vi.mock("@/components/shared/ErrorBoundary", () => ({
 }));
 
 vi.mock("@/components/ui/icon-button", () => ({
-  IconButton: ({ children }: { children: ReactNode }) => <button type="button">{children}</button>,
+  IconButton: ({ children }: { children: ReactNode }) => (
+    <button type="button">{children}</button>
+  ),
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({
@@ -52,17 +55,18 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/features/artifacts/CanvasSwitcher", () => ({
-  CanvasSwitcher: () => <div>CanvasSwitcher</div>,
-}));
-
 vi.mock("@/features/artifacts/FileDetail", () => ({
-  FileDetail: ({ file }: { file: { name: string } }) => <div>FileDetail:{file.name}</div>,
+  FileDetail: ({ file }: { file: { name: string } }) => (
+    <div>FileDetail:{file.name}</div>
+  ),
 }));
 
-vi.mock("@/features/rlm-workspace/message-inspector/MessageInspectorPanel", () => ({
-  MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
-}));
+vi.mock(
+  "@/features/rlm-workspace/message-inspector/MessageInspectorPanel",
+  () => ({
+    MessageInspectorPanel: () => <div>MessageInspectorPanel</div>,
+  }),
+);
 
 vi.mock("@/features/rlm-workspace/run-workbench/RunWorkbench", () => ({
   RunWorkbench: () => <div>RunWorkbench</div>,
@@ -87,7 +91,6 @@ describe("BuilderPanel file detail mode", () => {
     expect(html).toContain("File Preview");
     expect(html).toContain("FileDetail:README.md");
     expect(html).not.toContain("No active panel");
-    expect(html).not.toContain("CanvasSwitcher");
     expect(html).not.toContain("MessageInspectorPanel");
   });
 });

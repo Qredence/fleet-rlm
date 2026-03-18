@@ -1,6 +1,13 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { useChatRuntime } from "@/features/rlm-workspace/useChatRuntime";
@@ -58,7 +65,10 @@ vi.mock("@/stores/navigationStore", () => ({
 
 vi.mock("@/stores/artifactStore", () => ({
   useArtifactStore: (
-    selector: (state: { clear: typeof mocked.clearArtifactSteps; steps: [] }) => unknown,
+    selector: (state: {
+      clear: typeof mocked.clearArtifactSteps;
+      steps: [];
+    }) => unknown,
   ) => selector({ clear: mocked.clearArtifactSteps, steps: [] }),
 }));
 
