@@ -88,13 +88,13 @@ jobs:
 
       - name: Install pnpm
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@f8f698fa4c9186c9e5d575fa0c5fe10530cd0307 # v5
         with:
           version: 10.32.1
 
       - name: Set up Node.js
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@e0e7c6c27c0190b15e4a6ad5c088e1f52bd8d7d9 # v6
         with:
           node-version: "24"
           cache: "pnpm"
