@@ -41,8 +41,7 @@ When operating inside `src/frontend`, use `pnpm install --frozen-lockfile` and `
 - `tests/unit/`, `tests/ui/`, `tests/integration/`, `tests/e2e/`: automated test suites
 - `scripts/`: release, docs, and repository validation utilities
 - `migrations/`: Alembic migrations
-- `docs/`: architecture, reference docs, runbooks, and how-to guides
-- `plans/`: long-form planning and architecture review documents
+- `docs/`: architecture, reference docs, runbooks, how-to guides, and durable planning/architecture review documents
 - `.claude/`: local agent, hook, MCP, and skill overlays used in this checkout
 - `.mcp.json`: workspace MCP configuration
 
