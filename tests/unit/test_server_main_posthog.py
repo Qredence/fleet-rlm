@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server import main as server_main
+from fleet_rlm.api.config import ServerRuntimeConfig
+from fleet_rlm.api import main as server_main
 
 
 class _CaptureClient:

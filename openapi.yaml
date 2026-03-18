@@ -1,216 +1,217 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.4.97
+  version: 0.4.98
 paths:
   /health:
     get:
       tags:
-      - health
+        - health
       summary: Health
       operationId: health_health_get
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
+                $ref: "#/components/schemas/HealthResponse"
   /ready:
     get:
       tags:
-      - health
+        - health
       summary: Ready
       operationId: ready_ready_get
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReadyResponse'
+                $ref: "#/components/schemas/ReadyResponse"
   /api/v1/auth/me:
     get:
       tags:
-      - auth
+        - auth
       summary: Get Me
       operationId: get_me_api_v1_auth_me_get
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthMeResponse'
+                $ref: "#/components/schemas/AuthMeResponse"
   /api/v1/sessions/state:
     get:
       tags:
-      - sessions
+        - sessions
       summary: List Session State
-      description: Return lightweight summaries of active/restored in-memory session
+      description:
+        Return lightweight summaries of active/restored in-memory session
         state.
       operationId: list_session_state_api_v1_sessions_state_get
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SessionStateResponse'
+                $ref: "#/components/schemas/SessionStateResponse"
   /api/v1/runtime/settings:
     get:
       tags:
-      - runtime
+        - runtime
       summary: Get Runtime Settings
       operationId: get_runtime_settings_api_v1_runtime_settings_get
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeSettingsSnapshot'
+                $ref: "#/components/schemas/RuntimeSettingsSnapshot"
     patch:
       tags:
-      - runtime
+        - runtime
       summary: Patch Runtime Settings
       operationId: patch_runtime_settings_api_v1_runtime_settings_patch
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RuntimeSettingsUpdateRequest'
+              $ref: "#/components/schemas/RuntimeSettingsUpdateRequest"
         required: true
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeSettingsUpdateResponse'
-        '422':
+                $ref: "#/components/schemas/RuntimeSettingsUpdateResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/runtime/tests/modal:
     post:
       tags:
-      - runtime
+        - runtime
       summary: Test Modal Connection
       operationId: test_modal_connection_api_v1_runtime_tests_modal_post
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+                $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
   /api/v1/runtime/tests/lm:
     post:
       tags:
-      - runtime
+        - runtime
       summary: Test Lm Connection
       operationId: test_lm_connection_api_v1_runtime_tests_lm_post
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+                $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
   /api/v1/runtime/status:
     get:
       tags:
-      - runtime
+        - runtime
       summary: Get Runtime Status
       operationId: get_runtime_status_api_v1_runtime_status_get
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeStatusResponse'
+                $ref: "#/components/schemas/RuntimeStatusResponse"
   /api/v1/runtime/volume/tree:
     get:
       tags:
-      - runtime
+        - runtime
       summary: Get Volume Tree
       description: List the file tree of the configured Modal Volume.
       operationId: get_volume_tree_api_v1_runtime_volume_tree_get
       parameters:
-      - name: root_path
-        in: query
-        required: false
-        schema:
-          type: string
-          default: /
-          title: Root Path
-      - name: max_depth
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 10
-          minimum: 1
-          default: 3
-          title: Max Depth
+        - name: root_path
+          in: query
+          required: false
+          schema:
+            type: string
+            default: /
+            title: Root Path
+        - name: max_depth
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 10
+            minimum: 1
+            default: 3
+            title: Max Depth
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VolumeTreeResponse'
-        '422':
+                $ref: "#/components/schemas/VolumeTreeResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/runtime/volume/file:
     get:
       tags:
-      - runtime
+        - runtime
       summary: Get Volume File Content
       description: Read a volume file as UTF-8 text for frontend preview.
       operationId: get_volume_file_content_api_v1_runtime_volume_file_get
       parameters:
-      - name: path
-        in: query
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          title: Path
-      - name: max_bytes
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000000
-          minimum: 1
-          default: 200000
-          title: Max Bytes
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            title: Path
+        - name: max_bytes
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 1000000
+            minimum: 1
+            default: 200000
+            title: Max Bytes
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VolumeFileContentResponse'
-        '422':
+                $ref: "#/components/schemas/VolumeFileContentResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/traces/feedback:
     post:
       tags:
-      - traces
+        - traces
       summary: Create Trace Feedback
       description: Record human feedback and optional ground truth for an MLflow trace.
       operationId: create_trace_feedback_api_v1_traces_feedback_post
@@ -218,21 +219,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TraceFeedbackRequest'
+              $ref: "#/components/schemas/TraceFeedbackRequest"
         required: true
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TraceFeedbackResponse'
-        '422':
+                $ref: "#/components/schemas/TraceFeedbackResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
 components:
   schemas:
     AuthMeResponse:
@@ -245,34 +246,34 @@ components:
           title: User Claim
         email:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Email
         name:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Name
         tenant_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Tenant Id
         user_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: User Id
       type: object
       required:
-      - tenant_claim
-      - user_claim
+        - tenant_claim
+        - user_claim
       title: AuthMeResponse
     HTTPValidationError:
       properties:
         detail:
           items:
-            $ref: '#/components/schemas/ValidationError'
+            $ref: "#/components/schemas/ValidationError"
           type: array
           title: Detail
       type: object
@@ -286,7 +287,7 @@ components:
         version:
           type: string
           title: Version
-          default: 0.4.97
+          default: 0.4.98
       type: object
       title: HealthResponse
     ReadyResponse:
@@ -300,16 +301,16 @@ components:
         planner:
           type: string
           enum:
-          - ready
-          - missing
+            - ready
+            - missing
           title: Planner
         database:
           type: string
           enum:
-          - ready
-          - missing
-          - disabled
-          - degraded
+            - ready
+            - missing
+            - disabled
+            - degraded
           title: Database
         database_required:
           type: boolean
@@ -319,27 +320,27 @@ components:
           title: Sandbox Provider
       type: object
       required:
-      - ready
-      - planner_configured
-      - planner
-      - database
-      - database_required
-      - sandbox_provider
+        - ready
+        - planner_configured
+        - planner
+        - database
+        - database_required
+        - sandbox_provider
       title: ReadyResponse
     RuntimeActiveModels:
       properties:
         planner:
           type: string
           title: Planner
-          default: ''
+          default: ""
         delegate:
           type: string
           title: Delegate
-          default: ''
+          default: ""
         delegate_small:
           type: string
           title: Delegate Small
-          default: ''
+          default: ""
       type: object
       title: RuntimeActiveModels
     RuntimeConnectivityTestResponse:
@@ -347,8 +348,8 @@ components:
         kind:
           type: string
           enum:
-          - modal
-          - lm
+            - modal
+            - lm
           title: Kind
         ok:
           type: boolean
@@ -370,25 +371,25 @@ components:
           title: Guidance
         latency_ms:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: "null"
           title: Latency Ms
         output_preview:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Output Preview
         error:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Error
       type: object
       required:
-      - kind
-      - ok
-      - preflight_ok
-      - checked_at
+        - kind
+        - ok
+        - preflight_ok
+        - checked_at
       title: RuntimeConnectivityTestResponse
     RuntimeSettingsSnapshot:
       properties:
@@ -412,7 +413,7 @@ components:
           title: Masked Values
       type: object
       required:
-      - env_path
+        - env_path
       title: RuntimeSettingsSnapshot
     RuntimeSettingsUpdateRequest:
       properties:
@@ -434,7 +435,7 @@ components:
           title: Env Path
       type: object
       required:
-      - env_path
+        - env_path
       title: RuntimeSettingsUpdateResponse
     RuntimeStatusResponse:
       properties:
@@ -448,7 +449,7 @@ components:
           type: boolean
           title: Ready
         active_models:
-          $ref: '#/components/schemas/RuntimeActiveModels'
+          $ref: "#/components/schemas/RuntimeActiveModels"
         llm:
           additionalProperties: true
           type: object
@@ -462,7 +463,7 @@ components:
           type: object
           title: Daytona
         tests:
-          $ref: '#/components/schemas/RuntimeTestCache'
+          $ref: "#/components/schemas/RuntimeTestCache"
         guidance:
           items:
             type: string
@@ -470,22 +471,22 @@ components:
           title: Guidance
       type: object
       required:
-      - app_env
-      - write_enabled
-      - ready
-      - active_models
-      - tests
+        - app_env
+        - write_enabled
+        - ready
+        - active_models
+        - tests
       title: RuntimeStatusResponse
     RuntimeTestCache:
       properties:
         modal:
           anyOf:
-          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
-          - type: 'null'
+            - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
+            - type: "null"
         lm:
           anyOf:
-          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
-          - type: 'null'
+            - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
+            - type: "null"
       type: object
       title: RuntimeTestCache
     SessionStateResponse:
@@ -496,7 +497,7 @@ components:
           default: true
         sessions:
           items:
-            $ref: '#/components/schemas/SessionStateSummary'
+            $ref: "#/components/schemas/SessionStateSummary"
           type: array
           title: Sessions
       type: object
@@ -514,8 +515,8 @@ components:
           title: User Id
         session_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Session Id
         history_turns:
           type: integer
@@ -539,43 +540,43 @@ components:
           default: 0
         updated_at:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Updated At
       type: object
       required:
-      - key
-      - workspace_id
-      - user_id
+        - key
+        - workspace_id
+        - user_id
       title: SessionStateSummary
     TraceFeedbackRequest:
       properties:
         trace_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Trace Id
         client_request_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Client Request Id
         is_correct:
           type: boolean
           title: Is Correct
         comment:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Comment
         expected_response:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Expected Response
       type: object
       required:
-      - is_correct
+        - is_correct
       title: TraceFeedbackRequest
     TraceFeedbackResponse:
       properties:
@@ -588,8 +589,8 @@ components:
           title: Trace Id
         client_request_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Client Request Id
         feedback_logged:
           type: boolean
@@ -601,15 +602,15 @@ components:
           default: false
       type: object
       required:
-      - trace_id
+        - trace_id
       title: TraceFeedbackResponse
     ValidationError:
       properties:
         loc:
           items:
             anyOf:
-            - type: string
-            - type: integer
+              - type: string
+              - type: integer
           type: array
           title: Location
         msg:
@@ -625,9 +626,9 @@ components:
           title: Context
       type: object
       required:
-      - loc
-      - msg
-      - type
+        - loc
+        - msg
+        - type
       title: ValidationError
     VolumeFileContentResponse:
       properties:
@@ -649,10 +650,10 @@ components:
           default: false
       type: object
       required:
-      - path
-      - mime
-      - size
-      - content
+        - path
+        - mime
+        - size
+        - content
       title: VolumeFileContentResponse
       description: Response for runtime volume file-content preview endpoint.
     VolumeTreeNode:
@@ -669,31 +670,31 @@ components:
         type:
           type: string
           enum:
-          - volume
-          - directory
-          - file
+            - volume
+            - directory
+            - file
           title: Type
         children:
           items:
-            $ref: '#/components/schemas/VolumeTreeNode'
+            $ref: "#/components/schemas/VolumeTreeNode"
           type: array
           title: Children
         size:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: "null"
           title: Size
         modified_at:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Modified At
       type: object
       required:
-      - id
-      - name
-      - path
-      - type
+        - id
+        - name
+        - path
+        - type
       title: VolumeTreeNode
       description: A single node in the volume file tree.
     VolumeTreeResponse:
@@ -706,7 +707,7 @@ components:
           title: Root Path
         nodes:
           items:
-            $ref: '#/components/schemas/VolumeTreeNode'
+            $ref: "#/components/schemas/VolumeTreeNode"
           type: array
           title: Nodes
         total_files:
@@ -723,8 +724,8 @@ components:
           default: false
       type: object
       required:
-      - volume_name
-      - root_path
-      - nodes
+        - volume_name
+        - root_path
+        - nodes
       title: VolumeTreeResponse
       description: Response for the volume tree listing endpoint.

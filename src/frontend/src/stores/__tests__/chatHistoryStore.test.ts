@@ -66,6 +66,41 @@ describe("useChatHistoryStore", () => {
     expect(useChatHistoryStore.getState().conversations).toEqual([conversationFixture]);
   });
 
+  it("keeps only the newest stored item for the same logical chat session", async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          conversations: [
+            {
+              ...conversationFixture,
+              id: "conv-newer",
+              updatedAt: "2026-03-09T11:00:00.000Z",
+            },
+            {
+              ...conversationFixture,
+              id: "conv-older",
+              updatedAt: "2026-03-09T10:00:00.000Z",
+            },
+          ],
+        },
+        version: 2,
+      }),
+    );
+
+    const { useChatHistoryStore } = await import("@/stores/chatHistoryStore");
+
+    await useChatHistoryStore.persist.rehydrate();
+
+    expect(useChatHistoryStore.getState().conversations).toEqual([
+      {
+        ...conversationFixture,
+        id: "conv-newer",
+        updatedAt: "2026-03-09T11:00:00.000Z",
+      },
+    ]);
+  });
+
   it("persists turn-scoped artifacts with saved conversations", async () => {
     const { useChatHistoryStore } = await import("@/stores/chatHistoryStore");
 
@@ -126,5 +161,62 @@ describe("useChatHistoryStore", () => {
         },
       ],
     });
+  });
+
+  it("updates the existing saved item when the same chat session is saved again", async () => {
+    const { useChatHistoryStore } = await import("@/stores/chatHistoryStore");
+
+    const firstSaveId = useChatHistoryStore.getState().saveConversation(
+      [
+        {
+          id: "user-1",
+          type: "user",
+          content: "Start this session",
+        },
+        {
+          id: "assistant-1",
+          type: "assistant",
+          content: "First reply",
+          streaming: false,
+        },
+      ],
+      "idle",
+    );
+
+    const secondSaveId = useChatHistoryStore.getState().saveConversation(
+      [
+        {
+          id: "user-1",
+          type: "user",
+          content: "Start this session",
+        },
+        {
+          id: "assistant-1",
+          type: "assistant",
+          content: "First reply",
+          streaming: false,
+        },
+        {
+          id: "user-2",
+          type: "user",
+          content: "Follow up",
+        },
+        {
+          id: "assistant-2",
+          type: "assistant",
+          content: "Updated reply",
+          streaming: false,
+        },
+      ],
+      "complete",
+    );
+
+    const conversations = useChatHistoryStore.getState().conversations;
+
+    expect(secondSaveId).toBe(firstSaveId);
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0]?.id).toBe(firstSaveId);
+    expect(conversations[0]?.phase).toBe("complete");
+    expect(conversations[0]?.messages.at(-1)?.id).toBe("assistant-2");
   });
 });

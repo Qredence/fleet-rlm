@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.core.volume_ops import list_volume_tree, read_volume_file_text
+from fleet_rlm.core.tools.volume_ops import list_volume_tree, read_volume_file_text
 
 
 def test_list_volume_tree_raises_when_listdir_fails(
@@ -16,7 +16,7 @@ def test_list_volume_tree_raises_when_listdir_fails(
             raise RuntimeError("listdir boom")
 
     monkeypatch.setattr(
-        "fleet_rlm.core.volume_ops.modal.Volume.from_name",
+        "fleet_rlm.core.tools.volume_ops.modal.Volume.from_name",
         lambda *args, **kwargs: _FakeVolume(),
     )
 
@@ -43,7 +43,7 @@ def test_read_volume_file_text_stops_after_preview_cap(
 
     fake_volume = _FakeVolume()
     monkeypatch.setattr(
-        "fleet_rlm.core.volume_ops.modal.Volume.from_name",
+        "fleet_rlm.core.tools.volume_ops.modal.Volume.from_name",
         lambda *args, **kwargs: fake_volume,
     )
 
@@ -71,7 +71,7 @@ def test_read_volume_file_text_uses_metadata_size_when_truncated(
             yield b"uvwxyz"
 
     monkeypatch.setattr(
-        "fleet_rlm.core.volume_ops.modal.Volume.from_name",
+        "fleet_rlm.core.tools.volume_ops.modal.Volume.from_name",
         lambda *args, **kwargs: _FakeVolume(),
     )
 

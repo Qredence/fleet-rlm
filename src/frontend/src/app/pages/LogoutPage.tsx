@@ -8,7 +8,7 @@
  * Signs out of the browser session and clears local access tokens.
  */
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import { LogOut, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { springs, fades } from "@/lib/config/motion-config";
@@ -56,7 +56,7 @@ function LogoutPage() {
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-100 shadow-(--shadow-200-stronger)">
+      <Card className="w-full max-w-100 gap-6 shadow-(--shadow-200-stronger)">
         <AnimatePresence mode="wait">
           {phase === "signing-out" ? (
             <motion.div
@@ -116,7 +116,10 @@ function LogoutPage() {
                 </div>
               </CardHeader>
               <CardFooter className="flex flex-col items-stretch gap-3">
-                <Button className="w-full" onClick={() => navigate("/login", { replace: true })}>
+                <Button
+                  className="w-full"
+                  onClick={() => navigate({ to: "/login", replace: true })}
+                >
                   <span className="typo-label">Sign In</span>
                   <ArrowRight className="size-4" />
                 </Button>

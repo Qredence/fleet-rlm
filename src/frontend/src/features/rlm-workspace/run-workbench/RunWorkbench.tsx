@@ -99,7 +99,7 @@ function PromptHandleList({ handles }: { handles: PromptHandleSummary[] }) {
           <CardHeader className="gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle className="text-sm">{handle.label ?? handle.handleId}</CardTitle>
-              {handle.kind ? <Badge variant="outline">{handle.kind}</Badge> : null}
+              {handle.kind ? <Badge variant="secondary">{handle.kind}</Badge> : null}
             </div>
             <CardDescription>{handle.path || "Sandbox prompt object"}</CardDescription>
           </CardHeader>
@@ -132,12 +132,12 @@ function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
-        {artifact.kind ? <Badge variant="outline">{artifact.kind}</Badge> : null}
+        {artifact.kind ? <Badge variant="secondary">{artifact.kind}</Badge> : null}
         {artifact.finalizationMode ? (
           <Badge variant="secondary">{artifact.finalizationMode}</Badge>
         ) : null}
         {artifact.variableName ? (
-          <Badge variant="outline">var {artifact.variableName}</Badge>
+          <Badge variant="secondary">var {artifact.variableName}</Badge>
         ) : null}
       </div>
       {artifact.textPreview ? (
@@ -145,7 +145,7 @@ function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
           <CardContent className="pt-4 text-sm text-foreground">{artifact.textPreview}</CardContent>
         </Card>
       ) : null}
-      <pre className="max-h-96 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+      <pre className="max-h-96 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
         {renderedArtifactText ?? stringifyValue(artifact.value)}
       </pre>
     </div>
@@ -180,7 +180,7 @@ function IterationRow({
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">iter {iteration.iteration}</Badge>
+        <Badge variant="secondary">iter {iteration.iteration}</Badge>
         <Badge variant={statusBadgeVariant(iteration.status)}>{iteration.status}</Badge>
         {iteration.phase ? <Badge variant="secondary">{iteration.phase}</Badge> : null}
       </div>
@@ -211,7 +211,7 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-sm">Iteration {iteration.iteration}</CardTitle>
           <Badge variant={statusBadgeVariant(iteration.status)}>{iteration.status}</Badge>
-          {iteration.phase ? <Badge variant="outline">{iteration.phase}</Badge> : null}
+          {iteration.phase ? <Badge variant="secondary">{iteration.phase}</Badge> : null}
         </div>
         <CardDescription>{iteration.summary}</CardDescription>
       </CardHeader>
@@ -231,7 +231,7 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Executed code
             </div>
-            <pre className="max-h-64 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+            <pre className="max-h-64 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
               {iteration.code}
             </pre>
           </section>
@@ -241,7 +241,7 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               STDOUT
             </div>
-            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
               {iteration.stdout}
             </pre>
           </section>
@@ -251,7 +251,7 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               STDERR
             </div>
-            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
               {iteration.stderr}
             </pre>
           </section>
@@ -288,7 +288,7 @@ function CallbackRow({
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">{callback.callbackName}</Badge>
+        <Badge variant="secondary">{callback.callbackName}</Badge>
         <Badge variant={statusBadgeVariant(callback.status)}>{callback.status}</Badge>
         {callback.iteration != null ? (
           <Badge variant="secondary">iter {callback.iteration}</Badge>
@@ -320,7 +320,7 @@ function CallbackDetail({ callback }: { callback?: CallbackSummary | null }) {
           <CardTitle className="text-sm">{callback.callbackName}</CardTitle>
           <Badge variant={statusBadgeVariant(callback.status)}>{callback.status}</Badge>
           {callback.iteration != null ? (
-            <Badge variant="outline">iter {callback.iteration}</Badge>
+            <Badge variant="secondary">iter {callback.iteration}</Badge>
           ) : null}
         </div>
         <CardDescription>{callback.label ?? callback.task}</CardDescription>
@@ -379,7 +379,7 @@ function ContextSourceCard({ source }: { source: ContextSourceSummary }) {
       <CardHeader className="gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-sm">{source.hostPath}</CardTitle>
-          <Badge variant="outline">{source.kind}</Badge>
+          <Badge variant="secondary">{source.kind}</Badge>
           {source.sourceType ? <Badge variant="secondary">{source.sourceType}</Badge> : null}
         </div>
         <CardDescription>
@@ -463,7 +463,7 @@ export function RunWorkbench() {
       <Card className="shrink-0 border-border-subtle/80 bg-card/80">
         <CardHeader className="gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">Daytona analyst workspace</Badge>
+            <Badge variant="secondary">Daytona analyst workspace</Badge>
             <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
             {summary?.terminationReason ? (
               <Badge variant="secondary">{summary.terminationReason}</Badge>
@@ -534,11 +534,13 @@ export function RunWorkbench() {
                         <Card key={entry.id} className="border-border-subtle/80 bg-muted/15">
                           <CardContent className="flex flex-col gap-2 pt-4">
                             <div className="flex flex-wrap gap-2">
-                              <Badge variant="outline">{entry.kind}</Badge>
+                              <Badge variant="secondary">{entry.kind}</Badge>
                               {entry.iteration != null ? (
                                 <Badge variant="secondary">iter {entry.iteration}</Badge>
                               ) : null}
-                              {entry.phase ? <Badge variant="outline">{entry.phase}</Badge> : null}
+                              {entry.phase ? (
+                                <Badge variant="secondary">{entry.phase}</Badge>
+                              ) : null}
                             </div>
                             <p className="text-sm text-foreground">{entry.text}</p>
                           </CardContent>
@@ -624,7 +626,7 @@ export function RunWorkbench() {
                             <div className="flex flex-wrap items-center gap-2">
                               <CardTitle className="text-sm">{attachment.name}</CardTitle>
                               {attachment.kind ? (
-                                <Badge variant="outline">{attachment.kind}</Badge>
+                                <Badge variant="secondary">{attachment.kind}</Badge>
                               ) : null}
                               {attachment.mimeType || attachment.mediaType ? (
                                 <Badge variant="secondary">

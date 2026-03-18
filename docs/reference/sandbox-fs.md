@@ -18,7 +18,7 @@ WebSocket session manifests are persisted under:
 /data/workspaces/<workspace_id>/users/<user_id>/memory/react-session-<session_id>.json
 ```
 
-This path is built in `src/fleet_rlm/server/routers/ws/session.py`.
+This path is built in `src/fleet_rlm/api/routers/ws/session.py`.
 
 ## Common Persistence Helpers
 
@@ -28,8 +28,8 @@ Sandbox-side helpers exposed by the driver include:
 - `load_from_volume(path)`
 - workspace helpers for local ephemeral file access
 
-These are wired through `src/fleet_rlm/core/driver.py` and bundled from
-`src/fleet_rlm/core/volume_tools.py`.
+These are wired through `src/fleet_rlm/core/execution/core_driver.py` and bundled from
+`src/fleet_rlm/core/tools/volume_tools.py`.
 
 ## Operational Notes
 

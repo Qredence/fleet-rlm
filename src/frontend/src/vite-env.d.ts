@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_FLEET_TRACE?: string;
   /** Enable mock mode — bypass backend entirely ("true"/"false"). */
   readonly VITE_MOCK_MODE?: string;
+  /** Marks Playwright-driven dev servers so test-only overlays can be disabled. */
+  readonly VITE_E2E?: string;
   /** Microsoft Entra (Azure AD) application client ID. */
   readonly VITE_ENTRA_CLIENT_ID?: string;
   /** Microsoft Entra authority URL. */

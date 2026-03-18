@@ -1,6 +1,6 @@
 # fleet-rlm Documentation
 
-`fleet-rlm` provides secure, cloud-sandboxed recursive language model workflows with a Web UI, API, and MCP server.
+`fleet-rlm` provides secure, cloud-sandboxed recursive language model workflows with a Web UI, API, and optional MCP server. The default product path is Modal-backed. The Daytona path is experimental, but it plugs into the same workspace and transport contract instead of acting like a separate app.
 
 This documentation is for both:
 
@@ -10,8 +10,9 @@ This documentation is for both:
 ## Quickstart
 
 ```bash
-uv tool install fleet-rlm
-fleet web
+uv init
+uv add fleet-rlm
+uv run fleet web
 ```
 
 Then open `http://localhost:8000`.
@@ -61,9 +62,9 @@ Next steps:
 
 When docs conflict with implementation, treat these as authoritative:
 
-- CLI truth: `fleet-rlm --help`
+- CLI truth: `uv run fleet-rlm --help` and `uv run fleet --help`
 - API truth: `openapi.yaml`
-- WebSocket truth: `src/fleet_rlm/server/routers/ws/api.py`
+- WebSocket truth: `src/fleet_rlm/api/routers/ws/api.py`
 
 ## Archive Note
 

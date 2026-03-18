@@ -42,6 +42,7 @@ results/
 src/frontend/smoke-*.mjs
 src/frontend/.tmp-*.mjs
 
+src/fleet_rlm/_scaffold/
 src/.tmp/
 src/output/
 src/output/*
@@ -56,13 +57,6 @@ artifacts/
 .letta/
 .agents/
 .codex/
-!.codex/
-!.codex/config.toml
-!.codex/agents/
-!.codex/agents/*.toml
-!.codex/prompts/
-!.codex/prompts/v0_4_8/
-!.codex/prompts/v0_4_8/*.md
 .codex/environments/
 .npm-cache/
 .opencode/
@@ -95,7 +89,7 @@ TASKS.md
 .neon
 
 .playwright-mcp/
-
+src/frontend/.tanstack/
 
 src/frontend/node_modules/
 src/frontend/dist/
@@ -122,4 +116,4 @@ tui-ink/package-lock.json
 src/frontend/test-results/.last-run.json
 .posthog-events.json
 src/frontend/posthog-setup-report.md
-.codex/config.toml
+PLANS.md

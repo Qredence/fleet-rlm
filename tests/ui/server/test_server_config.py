@@ -4,9 +4,9 @@ from fastapi import HTTPException
 from importlib.metadata import version
 from types import SimpleNamespace
 
-from fleet_rlm.server.config import ServerRuntimeConfig
-from fleet_rlm.server.deps import ServerState, get_server_state, session_key
-from fleet_rlm.server.schemas import (
+from fleet_rlm.api.config import ServerRuntimeConfig
+from fleet_rlm.api.dependencies import ServerState, get_server_state, session_key
+from fleet_rlm.api.schemas import (
     AuthMeResponse,
     ChatRequest,
     ChatResponse,

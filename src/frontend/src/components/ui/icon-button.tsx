@@ -9,14 +9,22 @@ interface IconButtonProps extends React.ComponentPropsWithoutRef<typeof Button> 
   isActive?: boolean;
 }
 
-function normalizeIconButtonChildren(children: React.ReactNode) {
+const iconSizeMap: Record<string, string> = {
+  sm: "size-3.5",
+  default: "size-4",
+  icon: "size-4",
+  lg: "size-5",
+};
+
+function normalizeIconButtonChildren(children: React.ReactNode, size?: string | null) {
+  const iconClass = iconSizeMap[size ?? "icon"] ?? "size-4";
   return React.Children.map(children, (child) => {
     if (!React.isValidElement<{ className?: string }>(child)) {
       return child;
     }
 
     return React.cloneElement(child, {
-      className: cn(child.props.className, "size-4 shrink-0"),
+      className: cn(child.props.className, iconClass, "shrink-0"),
     });
   });
 }
@@ -55,7 +63,7 @@ function IconButton({
       )}
       {...props}
     >
-      {normalizeIconButtonChildren(children)}
+      {normalizeIconButtonChildren(children, size ?? "icon")}
     </Button>
   );
 }

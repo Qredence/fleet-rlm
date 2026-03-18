@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -8,29 +7,22 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 
-from fleet_rlm.db import DatabaseManager
-
-DATABASE_URL = os.getenv("DATABASE_URL")
+from fleet_rlm.infrastructure.database import DatabaseManager
 
 pytestmark = [
-    pytest.mark.skipif(
-        not DATABASE_URL,
-        reason="DATABASE_URL not configured",
-    ),
     pytest.mark.db,
 ]
 
 
 @pytest.mark.asyncio
-async def test_migrations_apply_and_core_tables_exist():
+async def test_migrations_apply_and_core_tables_exist(require_database_url: str):
     repo_root = Path(__file__).resolve().parents[2]
 
     cfg = Config(str(repo_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(repo_root / "migrations"))
     command.upgrade(cfg, "head")
 
-    assert DATABASE_URL is not None
-    db = DatabaseManager(DATABASE_URL)
+    db = DatabaseManager(require_database_url)
     try:
         async with db.session() as session:
             async with session.begin():

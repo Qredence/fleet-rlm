@@ -6,76 +6,18 @@ and fallback-to-non-streaming error resilience.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from types import SimpleNamespace
-
 import dspy
 import pytest
-from dspy.primitives.code_interpreter import FinalOutput
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
-from fleet_rlm.react import RLMReActChatAgent
-from fleet_rlm.react.streaming import _build_final_payload, _normalize_trajectory
+from fleet_rlm.core.agent import RLMReActChatAgent
+from fleet_rlm.core.execution.streaming import (
+    _build_final_payload,
+    _normalize_trajectory,
+)
+from tests.unit.fixtures_react import FakeInterpreter
 
-
-# ---------------------------------------------------------------------------
-# Shared fakes
-# ---------------------------------------------------------------------------
-
-
-class _FakeInterpreter:
-    def __init__(self):
-        self.start_calls = 0
-        self.shutdown_calls = 0
-        self.execute_calls: list[tuple[str, dict]] = []
-        self.default_execution_profile = "RLM_DELEGATE"
-
-    def start(self):
-        self.start_calls += 1
-
-    def shutdown(self):
-        self.shutdown_calls += 1
-
-    @contextmanager
-    def execution_profile(self, profile):
-        previous = self.default_execution_profile
-        self.default_execution_profile = profile
-        try:
-            yield self
-        finally:
-            self.default_execution_profile = previous
-
-    def execute(self, code, variables=None, **kwargs):
-        self.execute_calls.append((code, variables or {}))
-        return FinalOutput(
-            {
-                "status": "ok",
-                "chunk_count": len((variables or {}).get("prompts", [])),
-                "findings_count": len((variables or {}).get("prompts", [])),
-                "buffer_name": (variables or {}).get("buffer_name", "findings"),
-            }
-        )
-
-
-def _make_fake_react(records):
-    class _FakeReAct:
-        def __init__(self, *, signature, tools, max_iters):
-            records.append(
-                {
-                    "signature": signature,
-                    "tools": tools,
-                    "max_iters": max_iters,
-                }
-            )
-
-        def __call__(self, **kwargs):
-            request = kwargs.get("user_request", "")
-            return SimpleNamespace(
-                assistant_response=f"echo:{request}",
-                trajectory={"tool_name_0": "finish"},
-            )
-
-    return _FakeReAct
+pytestmark = pytest.mark.usefixtures("react_records")
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +26,6 @@ def _make_fake_react(records):
 
 
 def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             assert "user_request" in stream_kwargs
@@ -113,9 +52,11 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.chat_turn_stream(message="say hi", trace=False)
 
     assert result["assistant_response"] == "hello world"
@@ -126,9 +67,6 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
 
 
 def test_iter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     captured: dict[str, object] = {}
 
     def _fake_streamify(*args, **kwargs):
@@ -141,10 +79,12 @@ def test_iter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         react_max_iters=15,
         deep_react_max_iters=35,
     )
@@ -153,18 +93,17 @@ def test_iter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
 
 
 def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _bad_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             raise RuntimeError("broken stream")
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _bad_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _bad_streamify
+    )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.chat_turn_stream(message="test fallback", trace=False)
 
     assert result["assistant_response"] == "echo:test fallback"
@@ -177,9 +116,6 @@ def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
 
 
 def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             yield StatusMessage(message="thinking")
@@ -202,9 +138,11 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("say hi", trace=False))
 
     kinds = [e.kind for e in events]
@@ -218,9 +156,6 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
 
 
 def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             yield StatusMessage(message="Calling tool: memory_write(path='/tmp/x')")
@@ -232,9 +167,11 @@ def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("store memory", trace=False))
 
     tool_call_event = next(
@@ -251,9 +188,6 @@ def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _fake_streamify(*args, **kwargs):
         assert kwargs.get("async_streaming") is True
 
@@ -275,9 +209,11 @@ async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = [
         event
         async for event in agent.aiter_chat_turn_stream(
@@ -293,9 +229,6 @@ async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_aiter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     captured: dict[str, object] = {}
 
     def _fake_streamify(*args, **kwargs):
@@ -310,10 +243,12 @@ async def test_aiter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         react_max_iters=15,
         deep_react_max_iters=35,
     )
@@ -330,9 +265,6 @@ async def test_aiter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
 
 
 def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             yield StatusMessage(message="reasoning")
@@ -351,7 +283,9 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     call_count = 0
 
@@ -360,7 +294,7 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
         call_count += 1
         return call_count > 2
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(
         agent.iter_chat_turn_stream(
             "please",
@@ -376,18 +310,17 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
 
 
 def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _bad_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             raise RuntimeError("broken stream")
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _bad_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _bad_streamify
+    )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("fallback now", trace=False))
     assert events[0].kind == "status"
     assert events[-1].kind == "final"
@@ -396,9 +329,6 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
 
 
 def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             yield StreamResponse(
@@ -414,10 +344,12 @@ def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         guardrail_mode="warn",
         min_substantive_chars=20,
     )
@@ -433,9 +365,6 @@ def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
 def test_iter_chat_turn_stream_enriches_final_payload_with_sources_and_citations(
     monkeypatch,
 ):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     def _fake_streamify(*args, **kwargs):
         def _stream(**stream_kwargs):
             yield dspy.Prediction(
@@ -456,9 +385,11 @@ def test_iter_chat_turn_stream_enriches_final_payload_with_sources_and_citations
 
         return _stream
 
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.streamify", _fake_streamify)
+    monkeypatch.setattr(
+        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+    )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("cite", trace=False))
     final_event = events[-1]
 

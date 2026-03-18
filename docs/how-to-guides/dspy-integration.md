@@ -13,7 +13,7 @@ Fleet-rlm extends DSPy with `dspy.RLM`, a recursive language model runtime that 
 
 ## Signatures
 
-Signatures define the input/output contract for DSPy modules. Fleet-rlm keeps all production signatures centralized in `src/fleet_rlm/react/signatures.py`.
+Signatures define the input/output contract for DSPy modules. Fleet-rlm keeps all production signatures centralized in `src/fleet_rlm/core/agent/signatures.py`.
 
 ### Signature Structure
 
@@ -47,7 +47,7 @@ Fleet-rlm provides several production-ready signatures:
 #### Long-Document Analysis
 
 ```python
-from fleet_rlm.react.signatures import AnalyzeLongDocument
+from fleet_rlm.core.agent.signatures import AnalyzeLongDocument
 
 class AnalyzeLongDocument(dspy.Signature):
     """Analyze a long document by navigating, querying, and synthesizing.
@@ -64,7 +64,7 @@ class AnalyzeLongDocument(dspy.Signature):
 ```
 
 ```python
-from fleet_rlm.react.signatures import SummarizeLongDocument
+from fleet_rlm.core.agent.signatures import SummarizeLongDocument
 
 class SummarizeLongDocument(dspy.Signature):
     """Summarize a long document with controllable focus.
@@ -82,7 +82,7 @@ class SummarizeLongDocument(dspy.Signature):
 #### Log Analysis
 
 ```python
-from fleet_rlm.react.signatures import ExtractFromLogs, IncidentTriageFromLogs
+from fleet_rlm.core.agent.signatures import ExtractFromLogs, IncidentTriageFromLogs
 
 class ExtractFromLogs(dspy.Signature):
     """Extract patterns from log-style text."""
@@ -107,7 +107,7 @@ class IncidentTriageFromLogs(dspy.Signature):
 #### Grounded Answers with Citations
 
 ```python
-from fleet_rlm.react.signatures import GroundedAnswerWithCitations
+from fleet_rlm.core.agent.signatures import GroundedAnswerWithCitations
 
 class GroundedAnswerWithCitations(dspy.Signature):
     """Answer questions using chunked evidence and explicit citations.
@@ -131,7 +131,7 @@ class GroundedAnswerWithCitations(dspy.Signature):
 #### Code Planning
 
 ```python
-from fleet_rlm.react.signatures import CodeChangePlan
+from fleet_rlm.core.agent.signatures import CodeChangePlan
 
 class CodeChangePlan(dspy.Signature):
     """Generate a structured implementation plan for a code change."""
@@ -149,7 +149,7 @@ class CodeChangePlan(dspy.Signature):
 #### Memory Operations
 
 ```python
-from fleet_rlm.react.signatures import (
+from fleet_rlm.core.agent.signatures import (
     VolumeFileTreeSignature,
     MemoryActionIntentSignature,
     CoreMemoryUpdateProposal,
@@ -202,7 +202,7 @@ class MyCustomSignature(dspy.Signature):
     output_field: str = dspy.OutputField(desc="Description of output")
 ```
 
-Place custom signatures in `src/fleet_rlm/react/signatures.py` to integrate with the runtime module registry.
+Place custom signatures in `src/fleet_rlm/core/agent/signatures.py` to integrate with the runtime module registry.
 
 ## Module Construction
 
@@ -213,9 +213,9 @@ Modules wrap signatures with execution logic. Fleet-rlm provides factory functio
 Use `create_runtime_rlm()` for canonical RLM construction:
 
 ```python
-from fleet_rlm.react.rlm_runtime_modules import create_runtime_rlm
+from fleet_rlm.core.models.rlm_runtime_modules import create_runtime_rlm
 from fleet_rlm.react.signatures import AnalyzeLongDocument
-from fleet_rlm.core.interpreter import ModalInterpreter
+from fleet_rlm.core.execution.interpreter import ModalInterpreter
 
 # Set up the Modal interpreter
 interpreter = ModalInterpreter(
@@ -248,8 +248,8 @@ print(result.findings)
 For production use, prefer registry-based module construction:
 
 ```python
-from fleet_rlm.react.rlm_runtime_modules import build_runtime_module
-from fleet_rlm.core.interpreter import ModalInterpreter
+from fleet_rlm.core.models.rlm_runtime_modules import build_runtime_module
+from fleet_rlm.core.execution.interpreter import ModalInterpreter
 
 interpreter = ModalInterpreter(timeout=600, secret_name="LITELLM")
 
@@ -265,28 +265,28 @@ rlm = build_runtime_module(
 
 Available module names:
 
-| Name | Signature | Purpose |
-|------|-----------|---------|
-| `analyze_long_document` | `AnalyzeLongDocument` | Navigate and synthesize long documents |
-| `summarize_long_document` | `SummarizeLongDocument` | Focused summarization |
-| `extract_from_logs` | `ExtractFromLogs` | Pattern extraction from logs |
-| `grounded_answer` | `GroundedAnswerWithCitations` | Evidence-based answers with citations |
-| `triage_incident_logs` | `IncidentTriageFromLogs` | Incident diagnostics |
-| `plan_code_change` | `CodeChangePlan` | Implementation planning |
-| `propose_core_memory_update` | `CoreMemoryUpdateProposal` | Memory state updates |
-| `memory_tree` | `VolumeFileTreeSignature` | File tree traversal |
-| `memory_action_intent` | `MemoryActionIntentSignature` | Action classification |
-| `memory_structure_audit` | `MemoryStructureAuditSignature` | Structure auditing |
-| `memory_structure_migration_plan` | `MemoryStructureMigrationPlanSignature` | Migration planning |
-| `clarification_questions` | `ClarificationQuestionSignature` | Ambiguity resolution |
+| Name                              | Signature                               | Purpose                                |
+| --------------------------------- | --------------------------------------- | -------------------------------------- |
+| `analyze_long_document`           | `AnalyzeLongDocument`                   | Navigate and synthesize long documents |
+| `summarize_long_document`         | `SummarizeLongDocument`                 | Focused summarization                  |
+| `extract_from_logs`               | `ExtractFromLogs`                       | Pattern extraction from logs           |
+| `grounded_answer`                 | `GroundedAnswerWithCitations`           | Evidence-based answers with citations  |
+| `triage_incident_logs`            | `IncidentTriageFromLogs`                | Incident diagnostics                   |
+| `plan_code_change`                | `CodeChangePlan`                        | Implementation planning                |
+| `propose_core_memory_update`      | `CoreMemoryUpdateProposal`              | Memory state updates                   |
+| `memory_tree`                     | `VolumeFileTreeSignature`               | File tree traversal                    |
+| `memory_action_intent`            | `MemoryActionIntentSignature`           | Action classification                  |
+| `memory_structure_audit`          | `MemoryStructureAuditSignature`         | Structure auditing                     |
+| `memory_structure_migration_plan` | `MemoryStructureMigrationPlanSignature` | Migration planning                     |
+| `clarification_questions`         | `ClarificationQuestionSignature`        | Ambiguity resolution                   |
 
 ### Recursive Sub-Query RLM
 
 For delegated sub-problems, use the recursive query pattern:
 
 ```python
-from fleet_rlm.react.rlm_runtime_modules import build_recursive_subquery_rlm
-from fleet_rlm.core.interpreter import ModalInterpreter
+from fleet_rlm.core.models.rlm_runtime_modules import build_recursive_subquery_rlm
+from fleet_rlm.core.execution.interpreter import ModalInterpreter
 
 interpreter = ModalInterpreter(timeout=300, secret_name="LITELLM")
 
@@ -312,7 +312,8 @@ The `dspy.RLM` class extends DSPy with Modal sandbox execution. Configure it thr
 ### ModalInterpreter Options
 
 ```python
-from fleet_rlm.core.interpreter import ModalInterpreter, ExecutionProfile
+from fleet_rlm.core.execution.interpreter import ModalInterpreter
+from fleet_rlm.core.execution.profiles import ExecutionProfile
 
 interpreter = ModalInterpreter(
     # Core settings
@@ -341,12 +342,12 @@ interpreter = ModalInterpreter(
 
 Fleet-rlm uses execution profiles to categorize sandbox behavior:
 
-| Profile | Purpose |
-|---------|---------|
-| `RLM_DELEGATE` | Child RLM for delegated sub-queries |
-| `RLM_ROOT` | Root RLM for primary execution |
-| `ROOT_INTERLOCUTOR` | Primary user-facing interaction |
-| `MAINTENANCE` | Maintenance operations |
+| Profile             | Purpose                             |
+| ------------------- | ----------------------------------- |
+| `RLM_DELEGATE`      | Child RLM for delegated sub-queries |
+| `RLM_ROOT`          | Root RLM for primary execution      |
+| `ROOT_INTERLOCUTOR` | Primary user-facing interaction     |
+| `MAINTENANCE`       | Maintenance operations              |
 
 Set the profile explicitly:
 
@@ -398,7 +399,7 @@ async for value in stream_rlm(prompt="Analyze this document", context="..."):
 The `RLMReActChatAgent` delegates to child RLMs via the `rlm_query` tool:
 
 ```python
-from fleet_rlm.react.agent import RLMReActChatAgent
+from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
 
 agent = RLMReActChatAgent(
     react_max_iters=10,
@@ -416,13 +417,13 @@ result = agent.chat_turn("Analyze the architecture of this codebase")
 
 Delegate configuration:
 
-| Parameter | Purpose |
-|-----------|---------|
-| `delegate_lm` | Optional separate LM for delegation (uses parent LM if `None`) |
-| `delegate_max_calls_per_turn` | Max delegate calls per chat turn |
-| `delegate_result_truncation_chars` | Truncate delegate results longer than this |
-| `rlm_max_iterations` | Max iterations for delegate RLM |
-| `rlm_max_llm_calls` | Max LLM calls for delegate RLM |
+| Parameter                          | Purpose                                                        |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `delegate_lm`                      | Optional separate LM for delegation (uses parent LM if `None`) |
+| `delegate_max_calls_per_turn`      | Max delegate calls per chat turn                               |
+| `delegate_result_truncation_chars` | Truncate delegate results longer than this                     |
+| `rlm_max_iterations`               | Max iterations for delegate RLM                                |
+| `rlm_max_llm_calls`                | Max LLM calls for delegate RLM                                 |
 
 ## MLflow Tracing Integration
 
@@ -450,7 +451,7 @@ When MLflow is enabled, RLM execution automatically captures:
 Use collected traces for DSPy optimization:
 
 ```bash
-uv run python scripts/optimize_dspy_with_mlflow.py \
+uv run python scripts/mlflow_cli.py optimize \
   --dataset artifacts/mlflow/annotated-traces.json \
   --program my_package.my_module:build_program \
   --input-key question \

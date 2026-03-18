@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.daytona_rlm.dspy_modules import (
+from fleet_rlm.infrastructure.providers.daytona.dspy_modules import (
     ChildResultSynthesisModule,
     RecursiveSpawnPolicyModule,
     RecursiveTaskDecompositionModule,

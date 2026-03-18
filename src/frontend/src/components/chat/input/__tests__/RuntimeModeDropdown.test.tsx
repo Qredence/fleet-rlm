@@ -1,4 +1,4 @@
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -9,22 +9,6 @@ import { RuntimeModeDropdown } from "@/components/chat/input/RuntimeModeDropdown
     IS_REACT_ACT_ENVIRONMENT?: boolean;
   }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-vi.mock("@/components/ui/menubar", () => ({
-  Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarRadioGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarRadioItem: ({
-    children,
-    onSelect,
-  }: {
-    children: ReactNode;
-    onSelect?: () => void;
-    showIndicator?: boolean;
-  }) => <button onClick={onSelect}>{children}</button>,
-}));
 
 describe("RuntimeModeDropdown", () => {
   afterEach(() => {
@@ -57,8 +41,14 @@ describe("RuntimeModeDropdown", () => {
       root.render(<RuntimeModeDropdown value="modal_chat" onChange={onChange} />);
     });
 
-    const daytonaOption = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Daytona pilot") ?? false,
+    const trigger = container.querySelector('button[aria-label="Runtime mode: Modal chat"]');
+
+    act(() => {
+      trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const daytonaOption = Array.from(document.querySelectorAll('[role="menuitemradio"]')).find(
+      (item) => item.textContent?.includes("Daytona pilot") ?? false,
     );
 
     act(() => {

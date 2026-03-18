@@ -1,22 +1,14 @@
-import { X, PanelRight } from "lucide-react";
-import { useCallback } from "react";
+import { PanelRight } from "lucide-react";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useChatStore } from "@/stores/chatStore";
-import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { IconButton } from "@/components/ui/icon-button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
-import { Badge } from "@/components/ui/badge";
-import { CanvasSwitcher, type CanvasMode } from "@/features/artifacts/CanvasSwitcher";
+import type { CanvasMode } from "@/features/artifacts/CanvasSwitcher";
 import { FileDetail } from "@/features/artifacts/FileDetail";
 import { RunWorkbench } from "@/features/rlm-workspace/run-workbench/RunWorkbench";
-import { formatDaytonaModeLabel } from "@/features/rlm-workspace/run-workbench/daytonaMode";
-import { useRunWorkbenchStore } from "@/features/rlm-workspace/run-workbench/runWorkbenchStore";
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
 import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
-import { buildSourceStateLabel } from "@/lib/utils/sourceContext";
 
 function UnsupportedState({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
   return (
@@ -68,20 +60,9 @@ function getHeaderLabel(mode: CanvasMode): string {
   }
 }
 
-function runStatusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
-  if (status === "completed") return "default";
-  if (status === "error") return "destructive";
-  if (status === "cancelling") return "outline";
-  if (status === "cancelled") return "secondary";
-  if (status === "bootstrapping") return "secondary";
-  return "outline";
-}
-
 export function BuilderPanel() {
-  const { activeNav, closeCanvas, selectedFileNode } = useNavigationStore();
+  const { activeNav, selectedFileNode } = useNavigationStore();
   const runtimeMode = useChatStore((state) => state.runtimeMode);
-  const runWorkbenchState = useRunWorkbenchStore();
-  const { navigateTo } = useAppNavigate();
   const isMobile = useIsMobile();
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
@@ -92,53 +73,14 @@ export function BuilderPanel() {
   const showInspector = activeNav === "workspace" && !isUnsupportedNav;
   const showFileDetail = activeNav === "volumes" && !!selectedFileNode && !isUnsupportedNav;
 
-  const sourceStateLabel = buildSourceStateLabel({
-    hasRepo: Boolean(runWorkbenchState.repoUrl),
-    hasContext: runWorkbenchState.contextSources.length > 0,
-  });
-  const daytonaModeLabel = formatDaytonaModeLabel(runWorkbenchState.daytonaMode);
-  const terminationReason = runWorkbenchState.summary?.terminationReason;
-
-  const PANEL_INFO = {
-    runWorkbench: {
-      title: "Run Workbench",
-      description:
-        "Inspect Daytona iterations, evidence, semantic callbacks, prompt handles, and final output.",
-    },
-    messageInspector: {
-      title: "Message Inspector",
-      description: "Inspect trajectory, execution, evidence, and graph context.",
-    },
-  };
-
-  const currentPanelInfo = showRunWorkbench ? PANEL_INFO.runWorkbench : PANEL_INFO.messageInspector;
-
   const canvasMode: CanvasMode = showInspector
     ? "creation"
     : showFileDetail
       ? "file-detail"
       : "empty";
 
-  const handleSelectView = useCallback(
-    (mode: CanvasMode) => {
-      switch (mode) {
-        case "volumes-browser":
-        case "file-detail":
-          navigateTo("volumes");
-          break;
-        case "creation":
-        case "code-artifact":
-          navigateTo("workspace");
-          break;
-        default:
-          break;
-      }
-    },
-    [navigateTo],
-  );
-
   return (
-    <div className="flex h-full flex-col bg-muted/15">
+    <div className="flex h-full min-h-0 flex-col bg-muted/15">
       <div
         className={cn(
           "shrink-0 border-b border-border-subtle/80 bg-card/80 py-3 backdrop-blur-sm",
@@ -147,67 +89,14 @@ export function BuilderPanel() {
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            {showInspector ? (
-              <>
-                <div className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Workspace
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="min-w-0 truncate text-sm font-medium text-foreground">
-                    {currentPanelInfo.title}
-                  </div>
-
-                  {showRunWorkbench ? (
-                    <>
-                      <Badge variant={runStatusVariant(runWorkbenchState.status)}>
-                        {runWorkbenchState.status}
-                      </Badge>
-                      <Badge variant="secondary">{sourceStateLabel}</Badge>
-                      {daytonaModeLabel ? (
-                        <Badge variant="outline">{daytonaModeLabel}</Badge>
-                      ) : null}
-                      {terminationReason && terminationReason !== runWorkbenchState.status ? (
-                        <Badge variant="outline">{terminationReason}</Badge>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
-
-                <p className="truncate text-xs text-muted-foreground">
-                  {currentPanelInfo.description}
-                </p>
-              </>
-            ) : (
-              <CanvasSwitcher
-                canvasMode={canvasMode}
-                headerLabel={getHeaderLabel(canvasMode)}
-                skills={[]}
-                selectedSkill={null}
-                onSelectView={handleSelectView}
-                onSelectSkill={() => {}}
-              />
-            )}
+            <div className="truncate text-sm font-medium text-foreground">
+              {getHeaderLabel(canvasMode)}
+            </div>
           </div>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex">
-                <IconButton
-                  className={cn("ml-2 shrink-0", isMobile && "touch-target")}
-                  onClick={closeCanvas}
-                  aria-label="Close panel"
-                >
-                  <X className="size-5 text-muted-foreground" />
-                </IconButton>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Close panel</TooltipContent>
-          </Tooltip>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-auto">
         {isUnsupportedNav ? (
           <ErrorBoundary name="Unsupported Section">
             <UnsupportedState

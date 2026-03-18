@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ChatInput, type AttachedFile } from "@/components/chat/ChatInput";
 import { ConversationHistory } from "@/components/shared/ConversationHistory";
 import { ChatMessageList } from "@/features/rlm-workspace/ChatMessageList";
-import { useBackendChatRuntime } from "@/features/rlm-workspace/useBackendChatRuntime";
+import { useChatRuntime } from "@/features/rlm-workspace/useChatRuntime";
 import { useRuntimeStatus } from "@/features/settings/useRuntimeSettings";
 import { detectRepoContext } from "@/lib/utils/repoContext";
 import { detectContextPaths } from "@/lib/utils/sourceContext";
@@ -23,7 +23,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 /**
  * RlmWorkspace — chat-first DSPy.RLM runtime surface.
  *
- * Chat logic (messages, phases, backend events) lives in `useBackendChatRuntime`.
+ * Chat logic (messages, phases, backend events) lives in `useChatRuntime`.
  * Shared session state still flows through `NavigationStore` so it persists
  * across shell navigation.
  *
@@ -39,7 +39,7 @@ export function RlmWorkspace() {
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
-  const backendRuntime = useBackendChatRuntime();
+  const backendRuntime = useChatRuntime();
   const chatRuntime = backendRuntime;
 
   const {
@@ -102,7 +102,12 @@ export function RlmWorkspace() {
     ],
   );
 
-  const { sessionId } = useNavigationStore();
+  const {
+    sessionId,
+    requestedConversationId,
+    clearRequestedConversation,
+    requestConversationLoad,
+  } = useNavigationStore();
 
   // Chat history
   const {
@@ -156,18 +161,36 @@ export function RlmWorkspace() {
     };
   }, [sessionId, saveConversation, telemetry]);
 
+  useEffect(() => {
+    if (!requestedConversationId) return;
+
+    const conversation = loadConv(requestedConversationId);
+    if (!conversation) {
+      clearRequestedConversation();
+      return;
+    }
+
+    if (messagesRef.current.length > 0 && messagesRef.current !== conversation.messages) {
+      saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current);
+    }
+
+    loadConversation(conversation);
+    clearRequestedConversation();
+    setShowHistory(false);
+  }, [
+    clearRequestedConversation,
+    loadConv,
+    loadConversation,
+    requestedConversationId,
+    saveConversation,
+  ]);
+
   const handleSelectConversation = useCallback(
     (id: string) => {
-      const conv = loadConv(id);
-      if (!conv) return;
-      // Save current conversation first if it has messages
-      if (messages.length > 0) {
-        saveConversation(messages, phase, undefined, turnArtifactsByMessageId);
-      }
-      loadConversation(conv);
+      requestConversationLoad(id);
       setShowHistory(false);
     },
-    [loadConv, loadConversation, messages, phase, saveConversation, turnArtifactsByMessageId],
+    [requestConversationLoad],
   );
 
   const handleToggleHistory = useCallback(() => {
@@ -186,7 +209,7 @@ export function RlmWorkspace() {
 
     const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
-      navigate("/settings?section=runtime");
+      navigate({ to: "/settings", search: { section: "runtime" } });
     }
   }, [navigate]);
 

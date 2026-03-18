@@ -9,96 +9,25 @@ Tool / filesystem / PDF tests live in test_react_tools.py.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from types import SimpleNamespace
 
 import dspy
 import pytest
 
-try:
-    from dspy.primitives.code_interpreter import FinalOutput
-except ImportError:
+from fleet_rlm.core.agent import RLMReActChatAgent, RLMReActChatSignature
+from fleet_rlm.core import tools as react_tools
+from tests.unit.fixtures_react import FakeInterpreter
 
-    class FinalOutput(dict):
-        """Minimal compatibility shim when DSPy FinalOutput import is unavailable."""
-
-        def __init__(self, output):
-            super().__init__(output if isinstance(output, dict) else {"output": output})
-            self.output = output
-
-        def __eq__(self, other):
-            if not isinstance(other, FinalOutput):
-                return NotImplemented
-            return dict.__eq__(self, other) and self.output == other.output
+pytestmark = pytest.mark.usefixtures("react_records")
 
 
-from fleet_rlm.react import RLMReActChatAgent, RLMReActChatSignature
-from fleet_rlm.react import tools as react_tools
+def test_react_agent_constructed_with_explicit_signature_and_tools(
+    react_records: list[dict[str, object]],
+):
+    RLMReActChatAgent(interpreter=FakeInterpreter())
 
-
-class _FakeInterpreter:
-    def __init__(self):
-        self.start_calls = 0
-        self.shutdown_calls = 0
-        self.execute_calls: list[tuple[str, dict]] = []
-        self.default_execution_profile = "RLM_DELEGATE"
-
-    def start(self):
-        self.start_calls += 1
-
-    def shutdown(self):
-        self.shutdown_calls += 1
-
-    @contextmanager
-    def execution_profile(self, profile):
-        previous = self.default_execution_profile
-        self.default_execution_profile = profile
-        try:
-            yield self
-        finally:
-            self.default_execution_profile = previous
-
-    def execute(self, code, variables=None, **kwargs):
-        self.execute_calls.append((code, variables or {}))
-        return FinalOutput(
-            {
-                "status": "ok",
-                "chunk_count": len((variables or {}).get("prompts", [])),
-                "findings_count": len((variables or {}).get("prompts", [])),
-                "buffer_name": (variables or {}).get("buffer_name", "findings"),
-            }
-        )
-
-
-def _make_fake_react(records):
-    class _FakeReAct:
-        def __init__(self, *, signature, tools, max_iters):
-            records.append(
-                {
-                    "signature": signature,
-                    "tools": tools,
-                    "max_iters": max_iters,
-                }
-            )
-
-        def __call__(self, **kwargs):
-            request = kwargs.get("user_request", "")
-            return SimpleNamespace(
-                assistant_response=f"echo:{request}",
-                trajectory={"tool_name_0": "finish"},
-            )
-
-    return _FakeReAct
-
-
-def test_react_agent_constructed_with_explicit_signature_and_tools(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())  # noqa: F841
-
-    assert len(records) == 1
-    rec = records[0]
+    assert len(react_records) == 1
+    rec = react_records[0]
     assert rec["signature"] is RLMReActChatSignature
     assert isinstance(rec["tools"], list) and len(rec["tools"]) > 0
     assert rec["max_iters"] == 10
@@ -116,20 +45,19 @@ def test_react_agent_constructed_with_explicit_signature_and_tools(monkeypatch):
         assert expected in tool_names, f"Missing tool: {expected}"
 
 
-def test_tool_registry_includes_specialized_tools_and_extra_tools(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
+def test_tool_registry_includes_specialized_tools_and_extra_tools(
+    react_records: list[dict[str, object]],
+):
     def custom_tool(topic: str) -> str:
         """Custom research tool for tests."""
         return f"researched: {topic}"
 
     agent = RLMReActChatAgent(  # noqa: F841
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         extra_tools=[custom_tool],
     )
 
-    rec = records[0]
+    rec = react_records[0]
     tool_names = [
         getattr(tool, "name", None) or getattr(tool, "__name__", str(tool))
         for tool in rec["tools"]
@@ -138,10 +66,7 @@ def test_tool_registry_includes_specialized_tools_and_extra_tools(monkeypatch):
 
 
 def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     r1 = agent.chat_turn("hello")
     r2 = agent.chat_turn("how are you?")
 
@@ -152,17 +77,15 @@ def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
 
 
 def test_chat_turn_defers_mlflow_metadata_merge_to_callers(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
     monkeypatch.setattr(
-        "fleet_rlm.analytics.mlflow_integration.trace_result_metadata",
+        "fleet_rlm.features.analytics.mlflow_integration.trace_result_metadata",
         lambda response_preview=None: {
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",
         },
     )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.chat_turn("hello")
 
     assert "mlflow_trace_id" not in result
@@ -170,10 +93,7 @@ def test_chat_turn_defers_mlflow_metadata_merge_to_callers(monkeypatch):
 
 
 def test_parallel_semantic_map_uses_llm_query_batched(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["test_doc"] = "line1\nline2"
     agent.active_alias = "test_doc"
 
@@ -187,10 +107,7 @@ def test_parallel_semantic_map_uses_llm_query_batched(monkeypatch):
 
 
 def test_context_manager_starts_and_stops_interpreter(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    fake_interp = _FakeInterpreter()
+    fake_interp = FakeInterpreter()
     agent = RLMReActChatAgent(interpreter=fake_interp)
 
     with agent:
@@ -207,20 +124,14 @@ def test_context_manager_starts_and_stops_interpreter(monkeypatch):
 
 def test_agent_is_dspy_module_subclass(monkeypatch):
     """RLMReActChatAgent must subclass dspy.Module."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     assert issubclass(RLMReActChatAgent, dspy.Module)
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     assert isinstance(agent, dspy.Module)
 
 
 def test_agent_has_react_as_discoverable_submodule(monkeypatch):
     """self.react (dspy.ReAct) must appear in named_sub_modules."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     assert hasattr(agent, "react")
     # The fake isn't a real dspy.Module so it won't appear in named_sub_modules,
     # but the attribute assignment itself is correct.
@@ -229,10 +140,7 @@ def test_agent_has_react_as_discoverable_submodule(monkeypatch):
 
 def test_forward_delegates_to_react_and_starts_interpreter(monkeypatch):
     """forward() should call self.react(...) and start the interpreter."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    fake_interpreter = _FakeInterpreter()
+    fake_interpreter = FakeInterpreter()
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
 
     prediction = agent.forward(user_request="test query")
@@ -242,10 +150,7 @@ def test_forward_delegates_to_react_and_starts_interpreter(monkeypatch):
 
 def test_forward_accepts_custom_history(monkeypatch):
     """forward() should use the provided history, not the agent's own."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     custom_history = dspy.History(
         messages=[{"user_request": "prior", "assistant_response": "old"}]
     )
@@ -257,9 +162,6 @@ def test_forward_accepts_custom_history(monkeypatch):
 
 
 def test_forward_uses_baseline_iters_for_normal_prompt(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     captured: dict[str, object] = {}
 
     class _CaptureReact:
@@ -268,7 +170,7 @@ def test_forward_uses_baseline_iters_for_normal_prompt(monkeypatch):
             return SimpleNamespace(assistant_response="ok", trajectory={})
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         react_max_iters=15,
         deep_react_max_iters=35,
         enable_adaptive_iters=True,
@@ -281,9 +183,6 @@ def test_forward_uses_baseline_iters_for_normal_prompt(monkeypatch):
 
 
 def test_forward_uses_deep_iters_for_deep_analysis_prompt(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     captured: dict[str, object] = {}
 
     class _CaptureReact:
@@ -292,7 +191,7 @@ def test_forward_uses_deep_iters_for_deep_analysis_prompt(monkeypatch):
             return SimpleNamespace(assistant_response="ok", trajectory={})
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         react_max_iters=15,
         deep_react_max_iters=35,
         enable_adaptive_iters=True,
@@ -307,9 +206,6 @@ def test_forward_uses_deep_iters_for_deep_analysis_prompt(monkeypatch):
 
 
 def test_forward_escalates_after_repeated_tool_errors(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     class _ErrorReact:
         def __call__(self, **kwargs):
             return SimpleNamespace(
@@ -330,7 +226,7 @@ def test_forward_escalates_after_repeated_tool_errors(monkeypatch):
             return SimpleNamespace(assistant_response="second", trajectory={})
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         react_max_iters=15,
         deep_react_max_iters=35,
         enable_adaptive_iters=True,
@@ -346,9 +242,6 @@ def test_forward_escalates_after_repeated_tool_errors(monkeypatch):
 
 
 def test_forward_disable_adaptive_iters_keeps_baseline(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     captured: dict[str, object] = {}
 
     class _CaptureReact:
@@ -357,7 +250,7 @@ def test_forward_disable_adaptive_iters_keeps_baseline(monkeypatch):
             return SimpleNamespace(assistant_response="ok", trajectory={})
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         react_max_iters=15,
         deep_react_max_iters=35,
         enable_adaptive_iters=False,
@@ -373,9 +266,6 @@ def test_forward_disable_adaptive_iters_keeps_baseline(monkeypatch):
 
 def test_chat_turn_uses_module_call_semantics(monkeypatch):
     """chat_turn() should invoke the DSPy module call path (`self(...)`)."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     called: dict[str, object] = {"used": False, "kwargs": {}}
 
     def _fake_module_call(self, *args, **kwargs):
@@ -389,7 +279,7 @@ def test_chat_turn_uses_module_call_semantics(monkeypatch):
 
     monkeypatch.setattr(RLMReActChatAgent, "__call__", _fake_module_call)
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.chat_turn("hello")
 
     assert called["used"] is True
@@ -400,15 +290,12 @@ def test_chat_turn_uses_module_call_semantics(monkeypatch):
 
 
 def test_forward_guardrail_strict_rejects_empty_response(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     class _EmptyReact:
         def __call__(self, **kwargs):
             return SimpleNamespace(assistant_response="   ", trajectory={})
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         guardrail_mode="strict",
     )
     agent.react = _EmptyReact()  # type: ignore[assignment]
@@ -418,15 +305,12 @@ def test_forward_guardrail_strict_rejects_empty_response(monkeypatch):
 
 
 def test_chat_turn_warn_mode_includes_guardrail_warnings(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     class _ShortReact:
         def __call__(self, **kwargs):
             return SimpleNamespace(assistant_response="ok", trajectory={})
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         guardrail_mode="warn",
         min_substantive_chars=20,
     )
@@ -439,9 +323,6 @@ def test_chat_turn_warn_mode_includes_guardrail_warnings(monkeypatch):
 
 
 def test_forward_warn_mode_reports_tool_error_trajectory(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
     class _ToolErrorReact:
         def __call__(self, **kwargs):
             return SimpleNamespace(
@@ -450,7 +331,7 @@ def test_forward_warn_mode_reports_tool_error_trajectory(monkeypatch):
             )
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         guardrail_mode="warn",
     )
     agent.react = _ToolErrorReact()  # type: ignore[assignment]
@@ -463,10 +344,7 @@ def test_forward_warn_mode_reports_tool_error_trajectory(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_achat_turn_passes_core_memory_to_react(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     captured: dict[str, object] = {}
 
     class _FakeAsyncReact:
@@ -491,10 +369,7 @@ async def test_achat_turn_passes_core_memory_to_react(monkeypatch):
 
 def test_all_tools_are_dspy_tool_wrappers(monkeypatch):
     """All tools in react_tools should be dspy.Tool instances."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     for tool in agent.react_tools:
         assert isinstance(tool, dspy.Tool), (
             f"Tool {tool} is {type(tool).__name__}, expected dspy.Tool"
@@ -505,15 +380,13 @@ def test_all_tools_are_dspy_tool_wrappers(monkeypatch):
 
 def test_extra_tools_auto_wrapped_in_dspy_tool(monkeypatch):
     """Extra tools passed as raw callables should be auto-wrapped in dspy.Tool."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def my_custom_tool(x: str) -> str:
         """A custom helper."""
         return x.upper()
 
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         extra_tools=[my_custom_tool],
     )
     # Find the custom tool in the list (may not be last due to core_memory tools)
@@ -531,15 +404,13 @@ def test_extra_tools_auto_wrapped_in_dspy_tool(monkeypatch):
 
 def test_extra_dspy_tool_not_double_wrapped(monkeypatch):
     """Extra tools that are already dspy.Tool should not be re-wrapped."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
 
     def raw_fn(x: str) -> str:
         return x
 
     pre_wrapped = dspy.Tool(raw_fn, name="pre_wrapped", desc="already wrapped")
     agent = RLMReActChatAgent(
-        interpreter=_FakeInterpreter(),
+        interpreter=FakeInterpreter(),
         extra_tools=[pre_wrapped],
     )
     # Find the pre_wrapped tool in the list (may not be last due to core_memory tools)
@@ -557,10 +428,7 @@ def test_extra_dspy_tool_not_double_wrapped(monkeypatch):
 
 def test_get_tool_returns_underlying_callable(monkeypatch):
     """_get_tool should return the underlying func from dspy.Tool wrappers."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     tool_fn = agent._get_tool("load_document")
     assert callable(tool_fn)
     # Should be the unwrapped function, not the dspy.Tool wrapper
@@ -569,18 +437,13 @@ def test_get_tool_returns_underlying_callable(monkeypatch):
 
 def test_get_tool_raises_on_unknown_name(monkeypatch):
     """_get_tool should raise AttributeError for unknown tool names."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     with pytest.raises(AttributeError, match="nonexistent_tool"):
         agent._get_tool("nonexistent_tool")
 
 
 def test_get_runtime_module_caches_instances(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-    from fleet_rlm.react import runtime_factory
+    import fleet_rlm.core.execution.runtime_factory as runtime_factory
 
     created: list[tuple[str, object, int, int, bool]] = []
     fake_module = object()
@@ -600,7 +463,7 @@ def test_get_runtime_module_caches_instances(monkeypatch):
         runtime_factory, "build_runtime_module", _fake_build_runtime_module
     )
 
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter(), verbose=True)
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter(), verbose=True)
     first = agent.get_runtime_module("grounded_answer")
     second = agent.get_runtime_module("grounded_answer")
 
@@ -615,20 +478,14 @@ def test_get_runtime_module_caches_instances(monkeypatch):
 
 
 def test_get_runtime_module_raises_on_unknown_name(monkeypatch):
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     with pytest.raises(ValueError, match="Unknown runtime module: does_not_exist"):
         agent.get_runtime_module("does_not_exist")
 
 
 def test_list_react_tool_names_handles_dspy_tool(monkeypatch):
     """list_react_tool_names should work with dspy.Tool wrappers."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     names = react_tools.list_react_tool_names(agent.react_tools)
     assert isinstance(names, list)
     assert "load_document" in names
@@ -638,10 +495,7 @@ def test_list_react_tool_names_handles_dspy_tool(monkeypatch):
 
 def test_register_extra_tool_rebuilds_react(monkeypatch):
     """register_extra_tool should rebuild self.react with the new tool."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     initial_count = len(agent.react_tools)
 
     def new_tool(x: str) -> str:
@@ -654,10 +508,7 @@ def test_register_extra_tool_rebuilds_react(monkeypatch):
 
 def test_reset_clears_history_and_documents(monkeypatch):
     """reset() should clear history AND host-side document state."""
-    records = []
-    monkeypatch.setattr("fleet_rlm.react.agent.dspy.ReAct", _make_fake_react(records))
-
-    agent = RLMReActChatAgent(interpreter=_FakeInterpreter())
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.chat_turn("hello")
     assert len(agent.history.messages) == 1
     # Simulate a loaded document
@@ -683,7 +534,7 @@ def test_reset_clears_history_and_documents(monkeypatch):
 def test_signature_output_types_are_generic():
     """All Signature output fields should use typed generics, not bare list/dict."""
     import typing
-    from fleet_rlm.react.signatures import (
+    from fleet_rlm.core.agent.signatures import (
         AnalyzeLongDocument,
         CodeChangePlan,
         ClarificationQuestionSignature,

@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from fleet_rlm.models import StreamEvent
+from fleet_rlm.core.models import StreamEvent
 
-from ._fakes import DelayedRepository, FakeChatAgent, ts
+from tests.ui.fixtures_ui import DelayedRepository, FakeChatAgent, ts
 
 
 @pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
@@ -450,7 +450,7 @@ def test_websocket_final_event_can_include_mlflow_metadata(
         ]
     )
     monkeypatch.setattr(
-        "fleet_rlm.server.routers.ws.streaming.merge_trace_result_metadata",
+        "fleet_rlm.api.routers.ws.streaming.merge_trace_result_metadata",
         lambda payload, response_preview=None: {
             **(payload or {}),
             "mlflow_trace_id": "trace-123",

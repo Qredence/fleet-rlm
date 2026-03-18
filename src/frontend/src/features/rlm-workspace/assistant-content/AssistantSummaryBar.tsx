@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils/cn";
 import type { InspectorTab } from "@/lib/data/types";
-import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/types";
+import type { AssistantContentModel } from "@/features/rlm-workspace/assistant-content/model";
 
 type SummaryPill = {
   key: string;

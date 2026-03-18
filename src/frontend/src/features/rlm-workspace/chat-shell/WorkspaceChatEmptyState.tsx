@@ -1,7 +1,7 @@
 import { Clock } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { ConversationEmptyState } from "@/components/ai-elements/conversation";
-import { Suggestion } from "@/components/ai-elements/suggestion";
+import { ConversationEmptyState } from "@/components/prompt-kit/conversation";
+import { Suggestion } from "@/components/prompt-kit/suggestion";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -64,7 +64,7 @@ export function WorkspaceChatEmptyState({
     >
       <div className="mb-4 flex w-full flex-col justify-center gap-2 pb-1.25">
         <Badge
-          variant="outline"
+          variant="secondary"
           className="w-fit border-border-subtle/80 bg-card/60 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground"
         >
           Operator workspace

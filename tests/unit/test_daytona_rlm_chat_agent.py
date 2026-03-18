@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dspy
 
-from fleet_rlm.daytona_rlm.chat_agent import (
+from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
     DaytonaWorkbenchChatAgent,
     _render_final_text,
 )

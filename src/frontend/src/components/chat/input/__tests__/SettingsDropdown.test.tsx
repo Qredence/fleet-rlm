@@ -1,4 +1,4 @@
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -10,15 +10,32 @@ vi.mock("@/hooks/useAppNavigate", () => ({
   useAppNavigate: () => ({ navigate }),
 }));
 
-vi.mock("@/components/ui/menubar", () => ({
-  Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
-    <button onClick={onSelect}>{children}</button>
+vi.mock("@/components/ui/menu-item", () => ({
+  MenuItem: ({ onSelect }: { children: React.ReactNode; onSelect?: () => void }) => (
+    <div role="menuitemradio" onClick={onSelect}>
+      Open runtime settings
+    </div>
   ),
+}));
+
+vi.mock("@/components/ui/dropdown", () => ({
+  Dropdown: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock("@/components/ui/popover", () => ({
+  Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PopoverContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: () => null,
+}));
+
+vi.mock("@/components/ui/icon-button", () => ({
+  IconButton: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
 }));
 
 describe("SettingsDropdown", () => {
@@ -41,12 +58,10 @@ describe("SettingsDropdown", () => {
       root.render(<SettingsDropdown />);
     });
 
-    const button = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Open runtime settings") ?? false,
-    );
+    const menuItem = container.querySelector('[role="menuitemradio"]');
 
     act(() => {
-      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      menuItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(handleOpenSettings).toHaveBeenCalledOnce();
@@ -69,15 +84,16 @@ describe("SettingsDropdown", () => {
       root.render(<SettingsDropdown />);
     });
 
-    const button = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Open runtime settings") ?? false,
-    );
+    const menuItem = container.querySelector('[role="menuitemradio"]');
 
     act(() => {
-      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      menuItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(navigate).toHaveBeenCalledWith("/settings?section=runtime");
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/settings",
+      search: { section: "runtime" },
+    });
 
     act(() => {
       root.unmount();

@@ -3,7 +3,7 @@
 This document captures the current integration contract between:
 
 - Frontend SPA: `src/frontend`
-- Backend API: `src/fleet_rlm/server`
+- Backend API: `src/fleet_rlm/api`
 
 ## Supported Frontend Product Surfaces
 
@@ -50,6 +50,9 @@ Runtime settings behavior:
   - `active_models.planner`
   - `active_models.delegate`
   - `active_models.delegate_small`
+- `execution_mode` is Modal-only request state. Daytona requests do not send it.
+- Daytona-specific source controls are `repo_url`, `repo_ref`,
+  `context_paths`, and `batch_concurrency`.
 
 Deprecated/planned surfaces removed from backend:
 
@@ -81,6 +84,13 @@ Deprecated/planned surfaces removed from backend:
 - Accepts `message`, `cancel`, and `command` payloads.
 - Emits `event`, `command_result`, and `error` envelopes.
 - Auth claims are canonical tenant/user authority.
+- `runtime_mode` selects the top-level runtime:
+  - `modal_chat` for the default product path
+  - `daytona_pilot` for the experimental workbench path
+- Daytona `message` frames may also carry `repo_url`, `repo_ref`,
+  `context_paths`, and `batch_concurrency`.
+- Daytona requests reject request-side `max_depth`, and `repo_ref` requires
+  `repo_url`.
 
 ### Chat Trace Render Contract
 
@@ -161,14 +171,18 @@ From repo root:
 ```bash
 uv run fleet-rlm serve-api --port 8000
 rg -n "^  /" openapi.yaml
-rg -n "@router.websocket" src/fleet_rlm/server/routers/ws/api.py
+rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/api.py
 ```
 
 From `src/frontend` (optional frontend validation):
 
 ```bash
-bun install --frozen-lockfile
-bun run check
+pnpm install --frozen-lockfile
+pnpm run api:check
+pnpm run type-check
+pnpm run lint:robustness
+pnpm run test:unit
+pnpm run build
 ```
 
 ## Change Policy

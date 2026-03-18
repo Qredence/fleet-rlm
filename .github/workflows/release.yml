@@ -62,8 +62,8 @@ jobs:
 
       - name: Release hygiene checks
         run: |
-          uv run python scripts/check_release_hygiene.py
-          uv run python scripts/check_release_metadata.py
+          uv run python scripts/validate_release.py hygiene
+          uv run python scripts/validate_release.py metadata
 
       - name: Security checks
         run: |
@@ -86,38 +86,44 @@ jobs:
           --timeout=120
           --timeout-method=thread
 
-      - name: Set up Bun for frontend checks
+      - name: Install pnpm
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
+        uses: pnpm/action-setup@v3
         with:
-          bun-version: "1.2.10"
+          version: 9.12.0
 
-      - name: Cache Bun packages
+      - name: Set up Node.js
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/setup-node@v4
         with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('src/frontend/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
+          node-version: "24"
+          cache: "pnpm"
+          cache-dependency-path: "src/frontend/pnpm-lock.yaml"
+
+      - name: Install Vite+ CLI
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        run: npm install -g vite-plus@0.1.11
 
       - name: Frontend install
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          bun install --frozen-lockfile
+          vp install
 
       - name: Install Playwright browser
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          bunx playwright install --with-deps chromium
+          pnpm dlx playwright install --with-deps chromium
 
       - name: Frontend quality gate
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          bun run check
+          pnpm dlx knip --no-progress || echo "⚠️ Unused dependencies detected - see report above"
+          ./node_modules/.bin/vp check
+          ./node_modules/.bin/vp test
+          ./node_modules/.bin/vp build
 
   build:
     name: Build Distribution
@@ -134,10 +140,30 @@ jobs:
         with:
           version: "latest"
 
-      - name: Set up Bun for frontend packaging
-        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
+      - name: Install pnpm
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        uses: pnpm/action-setup@v3
         with:
-          bun-version: "1.2.10"
+          version: 9.12.0
+
+      - name: Set up Node.js
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+          cache-dependency-path: "src/frontend/pnpm-lock.yaml"
+
+      - name: Build packaged frontend assets
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        run: |
+          cd src/frontend
+          pnpm install --frozen-lockfile
+          pnpm run build
+          cd ../..
+          rm -rf src/fleet_rlm/ui/dist
+          mkdir -p src/fleet_rlm/ui
+          cp -R src/frontend/dist src/fleet_rlm/ui/dist
 
       - name: Clean previous builds
         run: rm -rf dist build
@@ -146,7 +172,7 @@ jobs:
         run: uv build
 
       - name: Verify packaged frontend assets
-        run: uv run python scripts/check_wheel_frontend_sync.py
+        run: uv run python scripts/validate_release.py wheel
 
       - name: Verify distributions
         run: uvx twine check dist/*

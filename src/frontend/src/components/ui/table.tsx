@@ -47,31 +47,29 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   );
 }
 
-function TableHead({ className, ...props }: React.ComponentProps<"th">) {
-  return (
-    <th
-      data-slot="table-head"
-      className={cn(
-        "text-foreground h-10 px-2 text-left align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
+const TableHead = ({ className, ref, ...props }: React.ComponentProps<"th">) => (
+  <th
+    ref={ref}
+    className={cn(
+      "text-muted-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 *:[[role=checkbox]]:translate-y-0.5",
+      className,
+    )}
+    {...props}
+  />
+);
+TableHead.displayName = "TableHead";
 
-function TableCell({ className, ...props }: React.ComponentProps<"td">) {
-  return (
-    <td
-      data-slot="table-cell"
-      className={cn(
-        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
+const TableCell = ({ className, ref, ...props }: React.ComponentProps<"td">) => (
+  <td
+    ref={ref}
+    className={cn(
+      "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 *:[[role=checkbox]]:translate-y-0.5",
+      className,
+    )}
+    {...props}
+  />
+);
+TableCell.displayName = "TableCell";
 
 function TableCaption({ className, ...props }: React.ComponentProps<"caption">) {
   return (

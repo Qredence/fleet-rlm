@@ -1,8 +1,9 @@
-import * as React from "react";
+import type * as React from "react";
 import { cn } from "@/lib/utils/cn";
 
 interface SpinnerProps extends React.HTMLAttributes<HTMLDivElement> {
   size?: "sm" | "md" | "lg";
+  ref?: React.Ref<HTMLDivElement>;
 }
 
 const sizeClasses = {
@@ -11,23 +12,20 @@ const sizeClasses = {
   lg: "size-8",
 };
 
-const Spinner = React.forwardRef<HTMLDivElement, SpinnerProps>(
-  ({ className, size = "md", ...props }, ref) => {
-    return (
-      <div
-        ref={ref}
-        role="status"
-        aria-label="Loading"
-        className={cn(
-          "animate-spin rounded-full border-2 border-muted border-t-primary",
-          sizeClasses[size],
-          className,
-        )}
-        {...props}
-      />
-    );
-  },
-);
-Spinner.displayName = "Spinner";
+function Spinner({ className, size = "md", ref, ...props }: SpinnerProps) {
+  return (
+    <div
+      ref={ref}
+      role="status"
+      aria-label="Loading"
+      className={cn(
+        "animate-spin rounded-full border-2 border-muted border-t-primary",
+        sizeClasses[size],
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
 export { Spinner };

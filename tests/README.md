@@ -24,7 +24,10 @@ uv run pytest -q -m "not live_llm and not benchmark"
 
 - Shared suite fixtures live in `tests/conftest.py`.
 - UI/server fixture boundaries live in `tests/ui/conftest.py`.
-- WebSocket test fakes + app/client fixtures live in `tests/ui/ws/`.
+- Domain-specific unit-test fakes live in `tests/unit/fixtures_*.py`.
+  Current shared modules: Daytona (`fixtures_daytona.py`), ReAct (`fixtures_react.py`), env/config (`fixtures_env.py`), and state/trajectory (`fixtures_state_trajectory.py`).
+- Shared UI/server fakes and app/runtime patch helpers live in `tests/ui/fixtures_ui.py`.
+- WebSocket test app/client fixtures stay in `tests/ui/ws/`, but they should consume the shared UI fixtures instead of redefining agent/runtime doubles locally.
 - Integration runtime gates + DB fixtures live in `tests/integration/conftest.py`.
 - Prefer consolidating related websocket behavior into `tests/ui/ws/test_chat_stream.py` and HTTP contract checks into `tests/ui/server/test_api_contract_routes.py` instead of creating many tiny route-specific files.
 
@@ -44,3 +47,4 @@ make test-integration
 - Rebuilding `create_app()` boilerplate inside every test module.
 - Hidden startup side effects in tests (analytics/network calls).
 - Embedding shared fake agent logic directly in individual test files.
+- Adding another copy of a fake/session/runtime helper when the same pattern already exists in a domain fixture module.

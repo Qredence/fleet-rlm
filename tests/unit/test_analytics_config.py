@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-from fleet_rlm.analytics.config import MlflowConfig, PostHogConfig
+from fleet_rlm.features.analytics.config import MlflowConfig, PostHogConfig
 from fleet_rlm.core.config import load_posthog_settings_from_env
+from tests.unit.fixtures_env import (
+    apply_mlflow_env,
+    apply_posthog_defaults,
+    clear_env,
+)
 
 
 def test_posthog_config_from_env_supports_project_default_fallback(monkeypatch):
-    monkeypatch.delenv("POSTHOG_ENABLED", raising=False)
-    monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
-    monkeypatch.delenv("POSTHOG_HOST", raising=False)
-    monkeypatch.setattr(
-        "fleet_rlm.analytics.config.PROJECT_POSTHOG_DEFAULT_API_KEY", "phc_default"
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.analytics.config.PROJECT_POSTHOG_DEFAULT_HOST",
-        "https://eu.i.posthog.com",
-    )
+    clear_env(monkeypatch, "POSTHOG_ENABLED", "POSTHOG_API_KEY", "POSTHOG_HOST")
+    apply_posthog_defaults(monkeypatch)
 
     cfg = PostHogConfig.from_env()
 
@@ -24,9 +21,7 @@ def test_posthog_config_from_env_supports_project_default_fallback(monkeypatch):
 
 
 def test_posthog_config_from_env_env_overrides_take_precedence(monkeypatch):
-    monkeypatch.setattr(
-        "fleet_rlm.analytics.config.PROJECT_POSTHOG_DEFAULT_API_KEY", "phc_default"
-    )
+    apply_posthog_defaults(monkeypatch)
     monkeypatch.setenv("POSTHOG_API_KEY", "phc_env")
     monkeypatch.setenv("POSTHOG_HOST", "https://us.i.posthog.com")
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
@@ -39,16 +34,8 @@ def test_posthog_config_from_env_env_overrides_take_precedence(monkeypatch):
 
 
 def test_core_load_posthog_settings_matches_default_fallback_logic(monkeypatch):
-    monkeypatch.delenv("POSTHOG_ENABLED", raising=False)
-    monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
-    monkeypatch.delenv("POSTHOG_HOST", raising=False)
-    monkeypatch.setattr(
-        "fleet_rlm.analytics.config.PROJECT_POSTHOG_DEFAULT_API_KEY", "phc_default"
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.analytics.config.PROJECT_POSTHOG_DEFAULT_HOST",
-        "https://eu.i.posthog.com",
-    )
+    clear_env(monkeypatch, "POSTHOG_ENABLED", "POSTHOG_API_KEY", "POSTHOG_HOST")
+    apply_posthog_defaults(monkeypatch)
 
     settings = load_posthog_settings_from_env()
 
@@ -58,14 +45,7 @@ def test_core_load_posthog_settings_matches_default_fallback_logic(monkeypatch):
 
 
 def test_mlflow_config_from_env_supports_explicit_overrides(monkeypatch):
-    monkeypatch.setenv("MLFLOW_ENABLED", "true")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:6001")
-    monkeypatch.setenv("MLFLOW_EXPERIMENT", "fleet-rlm-test")
-    monkeypatch.setenv("MLFLOW_ACTIVE_MODEL_ID", "model-123")
-    monkeypatch.setenv("MLFLOW_DSPY_LOG_TRACES_FROM_COMPILE", "true")
-    monkeypatch.setenv("MLFLOW_DSPY_LOG_TRACES_FROM_EVAL", "false")
-    monkeypatch.setenv("MLFLOW_DSPY_LOG_COMPILES", "true")
-    monkeypatch.setenv("MLFLOW_DSPY_LOG_EVALS", "true")
+    apply_mlflow_env(monkeypatch)
 
     cfg = MlflowConfig.from_env()
 

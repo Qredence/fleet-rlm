@@ -16,13 +16,15 @@ The `fleet-rlm` command provides the primary CLI interface.
 ```text
 Usage: fleet-rlm [OPTIONS] COMMAND [ARGS]...
 
-Run DSPy RLM demos backed by a Modal sandbox.
+Run fleet-rlm demos and experimental runtimes.
 
 Commands:
   init        Bootstrap Claude Code scaffold assets to user-level directory.
   serve-api   Run the FastAPI server surface (used by `fleet web`).
   serve-mcp   Run optional FastMCP server surface (requires `--extra mcp`).
   chat        Start standalone in-process interactive terminal chat.
+  daytona-smoke  Run a native Daytona smoke validation without invoking an LM.
+  daytona-rlm    Run the experimental Daytona-backed strict-RLM pilot.
 ```
 
 ### `fleet-rlm init`
@@ -88,6 +90,12 @@ uv run fleet-rlm serve-api --host 0.0.0.0 --port 8080
 
 Run the FastMCP server for Model Context Protocol integration. Requires the `mcp` extra to be installed.
 
+For a package install, add the extra with:
+
+```bash
+uv add "fleet-rlm[mcp]"
+```
+
 ```text
 Usage: fleet-rlm serve-mcp [OPTIONS]
 
@@ -150,6 +158,59 @@ uv run fleet-rlm chat --docs-path ./docs/architecture.md
 uv run fleet-rlm chat --trace --trace-mode verbose
 ```
 
+### `fleet-rlm daytona-smoke`
+
+Run a native Daytona smoke validation without invoking an LM.
+
+```text
+Usage: fleet-rlm daytona-smoke [OPTIONS]
+
+Options:
+  --repo TEXT   Repository URL to clone into the Daytona sandbox.  [required]
+  --ref TEXT    Optional branch or commit SHA to checkout after clone.
+  --help        Show this message and exit.
+```
+
+**Examples:**
+
+```bash
+# Validate the experimental Daytona setup against a repository
+uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
+```
+
+### `fleet-rlm daytona-rlm`
+
+Run the experimental Daytona-backed strict-RLM pilot.
+
+```text
+Usage: fleet-rlm daytona-rlm [OPTIONS]
+
+Options:
+  --repo TEXT                     Optional repository URL to clone into the Daytona sandbox.
+  --context-path PATH             Optional local file or directory path to stage into the Daytona workspace. Repeat for multiple paths.
+  --task TEXT                     Task for the experimental Daytona-backed RLM pilot.  [required]
+  --ref TEXT                      Optional branch or commit SHA to checkout after clone.
+  --max-sandboxes INTEGER         Deprecated compatibility flag.
+  --max-depth INTEGER             Deprecated compatibility flag.
+  --max-iterations INTEGER        Maximum number of root/child iterations per node.
+  --global-timeout INTEGER        Global timeout for the entire rollout in seconds.
+  --result-truncation-limit INTEGER
+                                  Maximum child-result size before truncation.
+  --batch-concurrency INTEGER     Maximum concurrent child Daytona subcalls in rlm_query_batched.
+  --output-dir PATH               Directory for persisted rollout JSON artifacts.
+  --help                          Show this message and exit.
+```
+
+**Examples:**
+
+```bash
+# Run the experimental Daytona pilot against a repository
+uv run fleet-rlm daytona-rlm \
+  --repo https://github.com/qredence/fleet-rlm.git \
+  --task "Summarize the tracing architecture" \
+  --batch-concurrency 4
+```
+
 ## `fleet` Launcher
 
 The `fleet` command is a lightweight launcher that provides quick access to terminal chat and the Web UI.
@@ -204,7 +265,7 @@ The `web` subcommand launches the Web UI server.
 uv run fleet web
 ```
 
-The Web UI will be available at `http://127.0.0.1:8000`. This is equivalent to running `fleet-rlm serve-api`.
+The Web UI will be available at `http://127.0.0.1:8000`. The launcher delegates to `fleet-rlm serve-api --host 0.0.0.0 --port 8000` while preserving Hydra overrides.
 
 ## Hydra Overrides
 

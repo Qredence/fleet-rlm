@@ -8,15 +8,15 @@ fleet-rlm uses pytest markers to categorize tests by scope and runtime requireme
 
 ### Backend Markers
 
-| Marker | Description | Typical Duration |
-|--------|-------------|------------------|
-| `unit` | Fast unit tests for isolated modules | Milliseconds |
-| `ui` | UI/server tests for API and WebSocket behavior | Seconds |
-| `integration` | Integration tests across DB/runtime boundaries | Seconds |
-| `db` | Database-backed integration tests | Seconds |
-| `e2e` | End-to-end workflow smoke tests | Seconds to minutes |
-| `benchmark` | Performance/throughput benchmark tests | Variable |
-| `live_llm` | Tests requiring live Modal + configured LLM | Variable, requires credentials |
+| Marker        | Description                                    | Typical Duration               |
+| ------------- | ---------------------------------------------- | ------------------------------ |
+| `unit`        | Fast unit tests for isolated modules           | Milliseconds                   |
+| `ui`          | UI/server tests for API and WebSocket behavior | Seconds                        |
+| `integration` | Integration tests across DB/runtime boundaries | Seconds                        |
+| `db`          | Database-backed integration tests              | Seconds                        |
+| `e2e`         | End-to-end workflow smoke tests                | Seconds to minutes             |
+| `benchmark`   | Performance/throughput benchmark tests         | Variable                       |
+| `live_llm`    | Tests requiring live Modal + configured LLM    | Variable, requires credentials |
 
 ### Marker Usage
 
@@ -29,6 +29,7 @@ uv run pytest -q -m "not live_llm and not benchmark"
 ```
 
 This ensures fast feedback during development without requiring:
+
 - Modal credentials
 - Configured LLM API keys
 - External service connections
@@ -88,12 +89,12 @@ tests/
 
 ### Directory Guidelines
 
-| Directory | Purpose | Dependencies |
-|-----------|---------|--------------|
-| `tests/unit/` | Isolated module tests, no external services | None |
-| `tests/ui/` | API routes, WebSocket endpoints, server behavior | FastAPI test client |
-| `tests/integration/` | Cross-boundary tests, database operations | Database, runtime |
-| `tests/e2e/` | Full workflow smoke tests | Full stack |
+| Directory            | Purpose                                          | Dependencies        |
+| -------------------- | ------------------------------------------------ | ------------------- |
+| `tests/unit/`        | Isolated module tests, no external services      | None                |
+| `tests/ui/`          | API routes, WebSocket endpoints, server behavior | FastAPI test client |
+| `tests/integration/` | Cross-boundary tests, database operations        | Database, runtime   |
+| `tests/e2e/`         | Full workflow smoke tests                        | Full stack          |
 
 ### Fixture Organization
 
@@ -110,13 +111,14 @@ tests/
 
 The `Makefile` provides convenient targets for running tests:
 
-| Command | Description |
-|---------|-------------|
-| `make test-fast` | Run default test suite (excludes `live_llm` and `benchmark`) |
-| `make test-unit` | Run unit tests only |
-| `make test-ui` | Run UI/server tests only |
-| `make test-integration` | Run integration + e2e tests |
-| `make quality-gate` | Run lint, format check, type check, tests, and frontend checks |
+| Command                 | Description                                                    |
+| ----------------------- | -------------------------------------------------------------- |
+| `make test-fast`        | Run default test suite (excludes `live_llm` and `benchmark`)   |
+| `make test-unit`        | Run unit tests only                                            |
+| `make test-ui`          | Run UI/server tests only                                       |
+| `make test-integration` | Run integration + e2e tests                                    |
+| `make quality-gate`     | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
+| `make release-check`    | Run release-oriented validation, including security and packaging |
 
 ### Direct pytest Commands
 
@@ -143,13 +145,16 @@ Frontend tests use **Vitest** for unit tests and **Playwright** for end-to-end t
 
 ### Package.json Scripts
 
-| Command | Description |
-|---------|-------------|
-| `bun run test:unit` | Run Vitest unit tests |
-| `bun run test:e2e` | Run Playwright end-to-end tests |
-| `bun run test:watch` | Run Vitest in watch mode |
-| `bun run test:coverage` | Run Vitest with coverage report |
-| `bun run check` | Run type-check, lint, unit tests, build, and e2e tests |
+| Command                   | Description                                                       |
+| ------------------------- | ----------------------------------------------------------------- |
+| `pnpm run api:check`      | Verify committed frontend OpenAPI artifacts match the backend spec |
+| `pnpm run type-check`     | Run TypeScript type checks                                        |
+| `pnpm run lint:robustness`| Run the repo lint lane                                            |
+| `pnpm run test:unit`      | Run Vitest unit tests                                             |
+| `pnpm run test:e2e`       | Run Playwright end-to-end tests                                   |
+| `pnpm run test:watch`     | Run Vitest in watch mode                                          |
+| `pnpm run test:coverage`  | Run Vitest with coverage report                                   |
+| `pnpm run check`          | Run type-check, lint, unit tests, build, and e2e tests            |
 
 ### Running Frontend Tests
 
@@ -158,16 +163,23 @@ Frontend tests use **Vitest** for unit tests and **Playwright** for end-to-end t
 cd src/frontend
 
 # Run unit tests
-bun run test:unit
+pnpm run test:unit
 
 # Run e2e tests
-bun run test:e2e
+pnpm run test:e2e
 
-# Run all checks (type-check + lint + test:unit + build + test:e2e)
-bun run check
+# Run repo-aligned frontend checks
+pnpm run api:check
+pnpm run type-check
+pnpm run lint:robustness
+pnpm run test:unit
+pnpm run build
+
+# Run the full frontend suite (adds Playwright e2e)
+pnpm run check
 
 # Watch mode for development
-bun run test:watch
+pnpm run test:watch
 ```
 
 ### Frontend Test Organization
@@ -192,12 +204,29 @@ make quality-gate
 ```
 
 This runs:
+
 1. `lint` - Ruff linting
 2. `format-check` - Ruff format verification
 3. `typecheck` - Type checking with ty
 4. `test-fast` - Default test suite
-5. `metadata-check` - Release metadata validation
-6. `frontend-check` - Frontend type-check, lint, tests, and build
+5. `metadata-check` - Release metadata and hygiene validation
+6. `docs-check` - Markdown/docs quality validation
+7. `frontend-check` - Frontend OpenAPI sync check, type-check, lint, unit tests, and build
+
+### Release Gate
+
+Run the release-oriented validation lane before tagging:
+
+```bash
+make release-check
+```
+
+This extends `make quality-gate` with:
+
+1. security checks (`pip-audit`, `bandit`)
+2. frontend UI build sync
+3. wheel/sdist build validation
+4. `twine check` for publishability
 
 ### Pre-commit Hooks
 

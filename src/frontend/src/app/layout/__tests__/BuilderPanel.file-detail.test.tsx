@@ -14,7 +14,6 @@ vi.mock("@/stores/navigationStore", () => ({
     activeNav: "volumes",
     creationPhase: "idle",
     closeCanvas: vi.fn(),
-    activeFeatures: new Set(),
     selectedFileNode: {
       id: "file-1",
       name: "README.md",
@@ -85,9 +84,10 @@ describe("BuilderPanel file detail mode", () => {
       </QueryClientProvider>,
     );
 
+    expect(html).toContain("File Preview");
     expect(html).toContain("FileDetail:README.md");
-    expect(html).not.toContain("No active canvas");
-    expect(html).toContain("CanvasSwitcher");
+    expect(html).not.toContain("No active panel");
+    expect(html).not.toContain("CanvasSwitcher");
     expect(html).not.toContain("MessageInspectorPanel");
   });
 });

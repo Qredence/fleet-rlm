@@ -1,48 +1,146 @@
-# Repository Guidelines
+# Backend Guidelines
 
-## Project Structure & Module Organization
-From the repo root, core Python code lives in `src/fleet_rlm/` (notably `core/`, `react/`, `server/`, `terminal/`, `models/`, and `analytics/`). Tests are in `tests/` and split by intent: `unit/`, `ui/`, `integration/`, and `e2e/`. Operational scripts (release checks, DB/bootstrap, perf, env validation) are in `scripts/`. The web client is in `src/frontend/`; release/source packaging runs `scripts/build_ui.py` to sync built assets into `src/fleet_rlm/ui/dist`. API contract source is `openapi.yaml`; schema migrations are in `migrations/`.
-Within `src/fleet_rlm/core/`, keep host-side adapters (`interpreter.py`, `llm_tools.py`, `volume_ops.py`) conceptually separate from sandbox-side protocol/helpers (`driver.py`, `sandbox_tools.py`, `volume_tools.py`).
-For utilities, use `src/fleet_rlm/utils/regex.py` for regex helpers.
+## Scope
 
-## Build, Test, and Development Commands
-- `uv sync --extra dev --extra server`: install Python deps for local dev + API work.
-- `uv run fleet-rlm --help`: verify CLI entrypoint.
-- `make test-fast`: quick default suite (`not live_llm and not benchmark`).
-- `make quality-gate`: lint, format check, type check, tests, docs/metadata, frontend checks.
-- `make release-check`: full pre-release validation (`clean`, quality, security, build, wheel frontend sync check, twine check).
-- Frontend (when touched): `cd src/frontend && pnpm install --frozen-lockfile && pnpm run build`.
+This file covers the Python/backend side of the repo under `src/fleet_rlm/`.
+Use the repo-wide [AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/AGENTS.md) for shared workflow rules and the frontend-specific [src/frontend/AGENTS.md](/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/src/frontend/AGENTS.md) for UI guidance.
 
-## Coding Style & Naming Conventions
-Use Python 3.10+ with 4-space indentation, explicit type hints, and clear docstrings for non-trivial modules/functions. Enforce style with Ruff and `ty`:
-- `uv run ruff format src tests`
-- `uv run ruff check src tests`
-- `uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"`
+## Package Layout
 
-Naming conventions: modules/functions/tests use `snake_case`; classes use `PascalCase`; constants use `UPPER_SNAKE_CASE`. Prefer small, focused modules over large mixed-responsibility files.
+Active top-level areas under `src/fleet_rlm/`:
 
-## FastAPI and DSPy Conventions
-- Keep FastAPI router `prefix`, `tags`, and shared dependencies on the router declaration rather than at `include_router()` call sites.
-- Prefer `Annotated[...]` dependency aliases from `src/fleet_rlm/server/deps.py` for request-bound server state, config, and identity.
-- When async handlers need blocking provider or filesystem work, wrap it with `asyncio.to_thread(...)` instead of running it inline inside `async def`.
-- Keep `src/fleet_rlm/server/routers/ws/api.py` router-oriented. Chat runtime/bootstrap helpers belong in `server/routers/ws/chat_runtime.py`; the websocket message loop belongs in `server/routers/ws/chat_connection.py`.
-- Keep `src/fleet_rlm/server/execution/step_builder.py` focused on sequencing/orchestration. Pure actor/lane extraction and stream-event mapping helpers belong in `step_builder_extractors.py` and `step_builder_mapping.py`.
-- Keep DSPy signatures centralized in `src/fleet_rlm/react/signatures.py`, and prefer reusable runtime modules/factories over ad hoc `dspy.RLM(...)` creation scattered across callers.
+- `_scaffold/`: bundled skills, agents, teams, and hooks exposed by `fleet-rlm init`
+- `api/`: FastAPI app (`main.py`), auth, middleware, routers (HTTP + websocket), schemas, execution event helpers, and server utilities
+- `cli/`: Typer CLI surface (`main.py`, `fleet_cli.py`), command modules (`commands/`), and runtime builder constructors (`runners.py`)
+- `conf/`: Hydra config defaults
+- `core/`: ReAct chat agent, DSPy signatures, runtime modules, execution drivers, streaming context, tool definitions, sandbox helpers, and Modal sandbox runtime
+  - `core/agent/`: chat agent, RLM agent, signatures, memory, session history, tool delegation
+  - `core/execution/`: interpreter, driver factories, streaming context/citations, document cache/sources, validation
+  - `core/models/`: RLM runtime modules, streaming models
+  - `core/tools/`: sandbox, filesystem, volume, document, chunking, LLM, memory-intelligence, and delegate tools
+- `features/`: domain feature modules
+  - `features/analytics/`: PostHog callbacks, MLflow tracing/evaluation/optimization, scorers, sanitization
+  - `features/chunking/`: reusable text chunking helpers (headers, JSON keys, size, timestamps)
+  - `features/document_ingestion/`: document ingestion pipeline
+  - `features/logs/`: execution logging and limits
+  - `features/scaffold/`: bundled scaffold skills and templates
+  - `features/terminal/`: interactive terminal chat UI, slash-commands, display settings, and Rich-based rendering
+- `infrastructure/`: external provider integrations and data access
+  - `infrastructure/config/`: environment variable loading (`AppConfig`), runtime settings resolution, and env-var parsing utilities
+  - `infrastructure/database/`: Neon/Postgres engine, models, repository layer
+  - `infrastructure/mcp/`: FastMCP server surface
+  - `infrastructure/providers/daytona/`: experimental Daytona runner, sandbox orchestration, DSPy modules, and websocket chat agent
+  - `infrastructure/providers/modal/`: Modal provider adapters
+- `ui/`: packaged built frontend assets for installed distributions
+- `utils/`: shared helpers including scaffold, regex, Modal, and tool utilities
+
+## CLI Surface
+
+Published scripts from `pyproject.toml`:
+
+- `fleet`: standalone terminal entrypoint, with `fleet web` delegating into `serve-api`
+- `fleet-rlm`: full Typer CLI
+- `rlm-modal`: alias of `fleet-rlm`
+
+Document and preserve these commands:
+
+- `fleet web`
+- `fleet-rlm chat`
+- `fleet-rlm serve-api`
+- `fleet-rlm serve-mcp`
+- `fleet-rlm init`
+- `fleet-rlm daytona-smoke`
+- `fleet-rlm daytona-rlm`
+
+Important nuance:
+
+- `fleet web` is not a separate backend implementation. It rewrites into `fleet-rlm serve-api --host 0.0.0.0 --port 8000`.
+- The `daytona-rlm` CLI still exposes `--max-depth` as a deprecated compatibility flag.
+- Daytona websocket requests do not accept request-side `max_depth`; that is enforced by the server schema layer.
+
+## Server and Runtime Contract
+
+Canonical HTTP and websocket surfaces:
+
+- `/health`
+- `/ready`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/sessions/state`
+- `GET/PATCH /api/v1/runtime/settings`
+- `POST /api/v1/runtime/tests/modal`
+- `POST /api/v1/runtime/tests/lm`
+- `GET /api/v1/runtime/status`
+- `GET /api/v1/runtime/volume/tree`
+- `GET /api/v1/runtime/volume/file`
+- `POST /api/v1/traces/feedback`
+- `/api/v1/ws/chat`
+- `/api/v1/ws/execution`
+- Optional `/scalar` docs when `scalar_fastapi` is installed
+
+`src/fleet_rlm/api/main.py` is the source of truth for route mounting and SPA asset resolution.
+
+## Runtime Modes and Boundaries
+
+The websocket chat runtime supports two top-level modes:
+
+- `modal_chat`: builds `RLMReActChatAgent`
+- `daytona_pilot`: builds `DaytonaWorkbenchChatAgent`
+
+Preserve these boundaries:
+
+- `execution_mode` is Modal-only.
+- Daytona request-side source controls are `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
+- Daytona workbench runs stream through the shared websocket chat surface instead of a separate frontend/runtime stack.
+- `src/fleet_rlm/cli/runners.py` is the canonical constructor layer for top-level runtime builders.
+- `src/fleet_rlm/api/routers/ws/chat_runtime.py` is the runtime-mode switch point.
+
+## Auth, Persistence, and Analytics
+
+- Supported auth modes are `dev` and `entra`.
+- `AUTH_MODE=entra` requires:
+  - `AUTH_REQUIRED=true`
+  - `DATABASE_REQUIRED=true`
+  - `ENTRA_JWKS_URL`
+  - `ENTRA_AUDIENCE`
+  - an issuer template containing `{tenantid}`
+- Entra access is not just token validation. Tenant admission also depends on the repository-backed tenant/user lookup path.
+- Runtime settings writes are local-only; `PATCH /api/v1/runtime/settings` is blocked unless `APP_ENV=local`.
+- PostHog and MLflow are both active runtime codepaths:
+  - PostHog captures runtime/LLM analytics when configured
+  - MLflow handles tracing, evaluation, optimization, and feedback workflows
+
+## Backend Architecture Notes
+
+- Keep host-side Modal adapters in `core/` separate from sandbox-side protocol helpers.
+- Keep DSPy signatures and runtime modules centralized under `core/agent/signatures.py` and `core/models/rlm_runtime_modules.py`.
 - Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
-- Keep the canonical runtime module registry in `src/fleet_rlm/react/rlm_runtime_modules.py`; `runtime_factory.py` should be a thin cache/assembly layer rather than a second source of truth.
-- Avoid new compatibility shims for internal imports; prefer moving call sites to canonical modules and deleting the shim once in-repo usage reaches zero.
+- Keep websocket event shaping and session lifecycle inside `api/routers/ws/*`; treat it as a contract with the frontend workspace.
+- Use `src/fleet_rlm/utils/regex.py` for regex helpers instead of recreating local helpers.
 
-## Auth Contract
-- Public auth HTTP surface is `/api/v1/auth/me`; do not reintroduce dummy `/api/v1/auth/login` or `/api/v1/auth/logout` endpoints.
-- `AUTH_MODE=entra` is multitenant by default and must validate real Entra bearer tokens with `ENTRA_JWKS_URL`, `ENTRA_AUDIENCE`, and an issuer template (default `https://login.microsoftonline.com/{tenantid}/v2.0`).
-- Entra-authenticated tenants must already exist in the Neon `tenants` table with `status=active`; login/runtime bootstrap must not auto-create tenants.
-- WebSocket auth may reuse the same bearer token through the existing `access_token` query-string bootstrap when `ALLOW_QUERY_AUTH_TOKENS=true`.
+## Canonical Commands
 
-## Testing Guidelines
-Use `pytest` with strict markers (`unit`, `ui`, `integration`, `e2e`, `live_llm`, `benchmark`). Default local run:
-- `uv run pytest -q -m "not live_llm and not benchmark"`
+- Install backend + repo dependencies:
+  - `uv sync --all-extras --dev`
+- Run the local app:
+  - `uv run fleet web`
+- Run the API server directly:
+  - `uv run fleet-rlm serve-api --port 8000`
+- Run the MCP server:
+  - `uv run fleet-rlm serve-mcp --transport stdio`
+- Run Daytona validation:
+  - `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]`
+- Run the Daytona pilot:
+  - `uv run fleet-rlm daytona-rlm [--repo <url>] [--context-path <path> ...] --task <text> [--batch-concurrency N]`
 
-Use targeted runs while iterating (for example `uv run pytest -q tests/unit`). Add or update regression tests for every bug fix and keep fixtures deterministic.
+## Validation
 
-## Commit & Pull Request Guidelines
-Follow Conventional Commits as seen in history (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`; optional scopes like `feat(react): ...`). Before opening a PR, run `make clean && make quality-gate` (plus `make security-check` for auth/server/runtime-sensitive work). PRs should include a concise summary, linked issue(s) (e.g., `Fixes #123`), commands run with results, and screenshots/GIFs for UI changes. Update docs (`README.md`, `AGENTS.md`, relevant runbooks) when behavior changes.
+- Fast local confidence:
+  - `make test-fast`
+- Main repo gate:
+  - `make quality-gate`
+- Focused backend/runtime coverage:
+  - `uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/test_ws_chat_helpers.py`
+- Daytona-focused backend coverage:
+  - `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`
+
+Keep command examples aligned with the Makefile, `pyproject.toml`, and the live router/schema contract.

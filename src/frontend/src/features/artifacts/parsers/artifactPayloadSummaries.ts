@@ -1,4 +1,4 @@
-import type { ExecutionStep } from "@/stores/artifactStore";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 import {
   parseArtifactPayload,
   parseFinalOutputEnvelope,

@@ -39,6 +39,26 @@ describe("WorkspaceChatMessageItem", () => {
     document.body.innerHTML = "";
   });
 
+  it("uses readable tokenized typography for system/status labels", () => {
+    const message: ChatMessage = {
+      id: "system-1",
+      type: "system",
+      content: "Backend error: WebSocket connection failed after 5 retries",
+    };
+
+    const { container, root } = mountMessage(message);
+    const systemLabel = container.querySelector("span");
+
+    expect(systemLabel?.className).toContain("text-xs");
+    expect(systemLabel?.className).toContain("font-medium");
+    expect(systemLabel?.className).toContain("tracking-wide");
+    expect(systemLabel?.className).toContain("text-muted-foreground/70");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("forwards HITL confirmation actions without changing message semantics", () => {
     const onResolveHitl = vi.fn();
     const message: ChatMessage = {

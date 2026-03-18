@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from fleet_rlm.daytona_rlm.config import DaytonaConfigError
-from fleet_rlm.daytona_rlm.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.daytona_rlm.smoke import run_daytona_smoke
-from fleet_rlm.daytona_rlm.types import PromptHandle, PromptManifest, PromptSliceRef
+from fleet_rlm.infrastructure.providers.daytona.config import DaytonaConfigError
+from fleet_rlm.infrastructure.providers.daytona.diagnostics import (
+    DaytonaDiagnosticError,
+)
+from fleet_rlm.infrastructure.providers.daytona.smoke import run_daytona_smoke
+from fleet_rlm.infrastructure.providers.daytona.types import (
+    PromptHandle,
+    PromptManifest,
+    PromptSliceRef,
+)
 
 
 class _FakeSession:

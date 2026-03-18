@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import { MessageInspectorPanel } from "@/features/rlm-workspace/message-inspector/MessageInspectorPanel";
 import type { ChatMessage } from "@/lib/data/types";
-import type { ExecutionStep } from "@/stores/artifactStore";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 import { useChatStore } from "@/stores/chatStore";
 import { useNavigationStore } from "@/stores/navigationStore";
 
@@ -219,7 +219,8 @@ describe("MessageInspectorPanel", () => {
 
     const { container, root } = mountInspector();
 
-    expect(container.textContent).toContain("Selected assistant turn");
+    expect(container.textContent).toContain("Completed");
+    expect(container.textContent).not.toContain("Selected assistant turn");
     expect(container.textContent).not.toContain("Selected response");
     expect(container.textContent).toContain(
       "This is a long trajectory body that should remain fully visible inside the inspector without being clipped into a teaser.",
@@ -294,8 +295,12 @@ describe("MessageInspectorPanel", () => {
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map((tab) =>
       tab.textContent?.trim(),
     );
+    const tabList = container.querySelector('[role="tablist"]');
+    const tabsRoot = tabList?.parentElement?.parentElement as HTMLElement | null;
 
     expect(tabs).toEqual(["Trajectory", "Execution", "Evidence", "Graph"]);
+    expect(tabsRoot?.classList.contains("flex")).toBe(true);
+    expect(tabsRoot?.classList.contains("flex-col")).toBe(true);
     expect(container.textContent).toContain("Relationships");
     expect(container.querySelector('[data-testid="artifact-graph"]')?.textContent).toContain(
       "3 steps",

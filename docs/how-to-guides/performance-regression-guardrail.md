@@ -34,7 +34,10 @@ uv run pytest -q tests/integration/test_rlm_benchmarks.py
 
 - Run benchmarks for PRs that change:
   - `src/fleet_rlm/core/*`
-  - `src/fleet_rlm/react/*`
+  - `src/fleet_rlm/core/agent/*`
+  - `src/fleet_rlm/core/execution/*`
+  - `src/fleet_rlm/core/tools/*`
+  - `src/fleet_rlm/api/routers/ws/*`
   - `src/fleet_rlm/runners.py`
   - server execution streaming logic
 - Treat repeated duration inflation as regression candidates even if tests still pass.

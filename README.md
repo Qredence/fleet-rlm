@@ -1,269 +1,203 @@
 # fleet-rlm
 
 [![PyPI version](https://img.shields.io/pypi/v/fleet-rlm.svg)](https://pypi.org/project/fleet-rlm/)
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml/badge.svg)](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/fleet-rlm?period=monthly&units=INTERNATIONAL_SYSTEM&left_color=MAGENTA&right_color=BLACK&left_text=downloads%2Fmonth)](https://pepy.tech/projects/fleet-rlm)
 
-**Secure, cloud-sandboxed Recursive Language Models (RLM) with DSPy, Modal, and an experimental Daytona pilot.**
+`fleet-rlm` is a Web UI-first recursive language model runtime for long-context code and document work. It ships a Modal-backed default runtime, an integrated FastAPI + WebSocket surface, packaged frontend assets, and an experimental Daytona workbench path that plugs into the same workspace instead of living as a separate product.
 
-`fleet-rlm` gives AI agents a secure cloud sandbox for long-context code and document work, with a Web UI-first experience, recursive delegation, and DSPy-aligned tooling. The current product runtime is still Modal/ReAct-based; the repo now also includes an experimental Daytona-backed strict-RLM pilot for narrower recursive rollout experiments.
+[Docs](docs/) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
-[Paper](https://arxiv.org/abs/2501.123) | [Docs](docs/) | [Contributing](CONTRIBUTING.md)
+## Why This Repo Exists
 
----
+- Use a single workspace for long-context reasoning, chat turns, run inspection, and runtime diagnostics.
+- Keep the default product path Modal-backed and chat-oriented.
+- Expose an experimental Daytona pilot without forking the frontend or transport contract.
+- Ship both a user-facing Web UI and integration surfaces for CLI, HTTP, WebSocket, and MCP workflows.
+
+The supported app surfaces are `RLM Workspace`, `Volumes`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes now redirect to supported pages instead of remaining first-class product surfaces.
 
 ## Quick Start
 
-Install and launch the Web UI in under a minute:
+Add `fleet-rlm` to a `uv`-managed project and launch the Web UI:
 
 ```bash
-# Option 1: install as a runnable tool
-uv tool install fleet-rlm
-fleet web
-```
+# Create a project if you do not already have one
+uv init
 
-Or in your active environment:
+# Add fleet-rlm to the environment
+uv add fleet-rlm
 
-```bash
-# Option 2: regular environment install
-uv pip install fleet-rlm
-fleet web
-```
-
-Open `http://localhost:8000` in your browser.
-
-`fleet web` is the primary interactive interface. The published package already includes the built frontend assets, so end users do not need `pnpm` or a separate frontend toolchain.
-
-## What You Get
-
-- Browser-first RLM chat (`fleet web`)
-- A focused Web UI with `RLM Workspace`, `Volumes`, and `Settings`
-- Secure Modal-backed long-context execution for code/doc workflows
-- Experimental Daytona-backed strict-RLM pilot for repo-centric recursive rollouts
-- WS-first runtime streaming for chat and execution events
-- `GET /api/v1/auth/me` as the canonical frontend identity/bootstrap surface
-- Multitenant Entra auth with Neon-backed tenant admission when `AUTH_MODE=entra`
-- Runtime configuration and diagnostics from the Web UI settings
-- MLflow-backed trace correlation, feedback capture, offline evaluation, and DSPy optimization workflows
-- Optional MCP server surface (`fleet-rlm serve-mcp`)
-
-## Common Commands
-
-```bash
-# Standalone terminal chat
-fleet-rlm chat --trace-mode compact
-
-# Explicit API server
-fleet-rlm serve-api --port 8000
-
-# MCP server
-fleet-rlm serve-mcp --transport stdio
-
-# Native Daytona validation before the pilot rollout
-fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
-
-# Experimental Daytona-backed strict-RLM pilot
-fleet-rlm daytona-rlm --repo https://github.com/qredence/fleet-rlm.git --task "Summarize the tracing architecture" --max-depth 2 --batch-concurrency 4
-
-# Scaffold assets for Claude Code
-fleet-rlm init --list
-```
-
-## Runtime Notes
-
-- The current Web UI shell supports `RLM Workspace`, `Volumes`, and `Settings`.
-- Legacy `taxonomy`, `skills`, `memory`, and `analytics` browser routes redirect to the supported surfaces.
-- Product chat transport is WS-first (`/api/v1/ws/chat`).
-- The main product runtime remains Modal-backed and ReAct-oriented in this release.
-- The new `fleet-rlm daytona-rlm` command is an isolated experimental runner.
-- The Web UI now exposes an explicit experimental runtime toggle in `RLM Workspace`: `Modal chat` stays the default, while `Daytona pilot` opens a dedicated Daytona workbench on top of the same chat websocket transport.
-- The Daytona Web UI path is task-first and corpus-oriented: repository URL and local context paths are optional compatibility controls, while the workbench is designed for grounded Q&A over staged diligence materials, code, or reasoning-only runs.
-- The Daytona pilot still does not replace the default Web UI runtime, the MCP server, or the existing terminal chat.
-- Daytona setup for the pilot uses `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`. `DAYTONA_API_BASE_URL` is treated as a misconfiguration.
-- `fleet-rlm daytona-smoke` now reports phase-aware diagnostics for `config`, `sandbox_create`, `repo_clone`, `driver_start`, `exec_step_1`, `exec_step_2`, and `cleanup`.
-- The Daytona pilot is analysis-first in this release: it supports optional repo clone inputs, staged local document/directory corpora, host-bridged semantic callbacks, typed `SUBMIT`, prompt-object externalization, and environment-backed finalization, but not repo-editing workflows. Image-only or scanned PDFs must be OCR'd before analysis.
-- Frontend identity/bootstrap is `GET /api/v1/auth/me`.
-- Runtime model updates from Settings are hot-applied in-process (`/api/v1/runtime/settings`) and reflected on `/api/v1/runtime/status`.
-- Secret inputs in Runtime Settings are write-only.
-- In `AUTH_MODE=entra`, bearer tokens are validated against Entra JWKS and admitted only for active Neon tenants.
-
-## Running From Source (Contributors)
-
-```bash
-# from repo root
-uv sync --extra dev --extra server
-uv run fleet web
-uv run fastapi dev
-```
-
-For release/packaging workflows, `uv build` now runs frontend build sync automatically (requires `pnpm` in repo checkouts that include `src/frontend`).
-
-Use full contributor setup and quality gates in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## MLflow Workflows
-
-`fleet-rlm` now supports MLflow as the GenAI tracing and evaluation plane on top of the existing PostHog runtime telemetry.
-
-```bash
-# from repo root
-make mlflow-server
-
-# in another shell
-export MLFLOW_ENABLED=true
-export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
-export MLFLOW_EXPERIMENT=fleet-rlm
+# Start the Web UI + API server
 uv run fleet web
 ```
 
-- Live chat turns and offline runner entry points emit MLflow-correlated traces with `mlflow_trace_id` / `mlflow_client_request_id` on final payloads when MLflow is enabled.
-- Human feedback can be recorded through `POST /api/v1/traces/feedback`.
-- Contributors can export annotated traces, run MLflow GenAI evaluation, and optimize DSPy programs with the scripts documented in [`docs/how-to-guides/mlflow-workflows.md`](docs/how-to-guides/mlflow-workflows.md).
+Open `http://127.0.0.1:8000`.
 
-## Experimental Daytona Pilot
+If you already have a `uv` project, skip `uv init` and just run `uv add fleet-rlm`.
 
-The experimental `fleet-rlm daytona-rlm` command is a strict Daytona + DSPy RLM pilot for grounded analysis over large corpora, inspired by Daytona's DSPy RLM guide and the RLM paper.
+Published installs already include built frontend assets, so end users do not need `pnpm`, `vp`, or a separate frontend build step.
 
-- Use this order for the Daytona path:
-  1. Set `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`.
-  2. Run `fleet-rlm daytona-smoke --repo <url> [--ref <branch-or-sha>]`.
-  3. Only then run `fleet-rlm daytona-rlm [--repo <url>] [--context-path <path> ...] --task <text> ...`.
-- The pilot resolves Daytona configuration explicitly from `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`.
-- Each root Daytona call uses one active sandbox workspace with a persistent driver, while Python REPL state is reset between root calls even when the workspace session is reused across chat turns.
-- Its interpreter core follows the Daytona DSPy guide closely: persistent sandbox-side Python execution, workspace-native inspection helpers, canonical host-bridged `llm_query(...)` / `llm_query_batched(...)`, and typed `SUBMIT(...)`.
-- It stays analysis-first: the model-facing helper surface is `run`, `read_file`, `read_file_slice`, `list_files`, `find_files`, `grep_repo`, `chunk_text`, `chunk_file`, `llm_query`, `llm_query_batched`, and `SUBMIT`.
-- Large task, observation, and history payloads are externalized into sandbox-resident prompt objects when they exceed the inline threshold, and the LM sees prompt-manifest metadata plus access instructions by default.
-- The prompt-object helper surface is environment-native too: `store_prompt`, `list_prompts`, and `read_prompt_slice` live inside the persistent Daytona driver and survive across iterations.
-- `rlm_query` and `rlm_query_batched` are the recursive child-Daytona helpers; finalization is `SUBMIT(...)` only.
-- In the Daytona pilot, `find_files` is path/glob discovery and `grep_repo` is structured content search.
-- The repo and corpus helpers remain sandbox-resident capabilities of the persistent Daytona driver rather than host-side callbacks, so the pilot still behaves like a real environment-centric RLM loop over staged source material.
-- Product-specific behavior stays in a thin adapter above the interpreter core: trajectory serialization, evidence/citation shaping, persisted rollout traces, WebSocket event shaping, and cancellation wiring.
-- Daytona cancellation is root-run scoped: cancelling a run stops further iterations, tears down the active sandbox session, and returns a cancelled result with warning summaries if shutdown is not perfectly clean.
-- The smoke command returns structured diagnostics including `termination_phase`, `error_category`, phase timings, and an `error_message` when a live Daytona step fails.
-- It persists a local JSON artifact under `results/daytona-rlm/` with the internal node graph plus a public analyst-oriented payload: iterations, semantic callbacks, prompt handles, evidence sources, attachments, final typed output, and rollout summary.
-- It intentionally does not replace the current Modal/WebSocket product runtime yet. It is materially closer to strict-RLM prompt handling now, but still keeps product-wide session/history assembly host-managed.
+## Primary Workflows
 
-## Experimental Daytona Workbench
+### Use the Web UI
 
-`RLM Workspace` now includes an explicit runtime selector:
-
-- `Modal chat`: the existing Modal-backed `RLMReActChatAgent` websocket path.
-- `Daytona pilot`: the experimental strict-RLM Daytona path wired through the same `/api/v1/ws/chat` endpoint with `runtime_mode="daytona_pilot"`.
-
-Important constraints:
-
-- `Modal chat` remains the default and keeps the existing `execution_mode` behavior.
-- `Daytona pilot` is task-first and can optionally accept `repo_url`, `repo_ref`, and `context_paths`; `batch_concurrency` remains the main Daytona tuning knob exposed in the UI path.
-- The Daytona UI path calls the real `src/fleet_rlm/daytona_rlm/` runner directly; it does not shell out to the CLI.
-- Daytona streaming in the UI reuses the existing chat event contract with `status`, `tool_call`, `tool_result`, `final`, `error`, and `cancelled` events rendered from the pilot's environment-backed `FinalArtifact`.
-- Daytona final payloads now hydrate a shared analyst-oriented `run_result` contract with ordered `iterations`, `callbacks`, `prompts`, `sources`, `attachments`, and the final typed output plus rollout summary.
-- When `runtime_mode="daytona_pilot"`, the main chat surface stays visible while the right-hand panel switches to a dedicated Daytona analyst workbench with:
-  - a runtime/task summary,
-  - `Iterations`, `Evidence`, `Callbacks`, `Prompts`, and `Final` tabs,
-  - staged-corpus metadata and cited excerpts for follow-up diligence questions,
-  - live callback and warning activity as the host loop runs.
-
-## Architecture Overview
-
-Read this after the quick start if you want the full system picture (entry points, ReAct orchestration, tools, Modal execution, persistent storage).
-
-```mermaid
-graph TB
-    subgraph entry ["🚪 Entry Points"]
-        CLI["fleet / fleet-rlm CLI"]
-        WebUI["Web UI<br/>(React SPA)"]
-        API["FastAPI<br/>(WS/REST)"]
-        TUI["Ink TUI<br/>(standalone runtime)"]
-        MCP["MCP Server"]
-    end
-
-    subgraph orchestration ["🧠 Orchestration Layer"]
-        Agent["RLMReActChatAgent<br/>(dspy.Module)"]
-        LMs["Planner / Delegate LMs"]
-        History["Chat History"]
-        Memory["Core Memory<br/>(Persona/Human/Scratchpad)"]
-        DocCache["Document Cache"]
-    end
-
-    subgraph tools ["🔧 ReAct Tools"]
-        DocTools["📄 load_document<br/>read_file_slice<br/>chunk_by_*"]
-        RecursiveTools["🔄 llm_query<br/>rlm_query (alias)<br/>(recursive delegation)"]
-        ExecTools["⚡ execute_code<br/>edit_file<br/>search_code"]
-    end
-
-    subgraph execution ["⚙️ Execution Layer"]
-        Interpreter["ModalInterpreter<br/>(JSON protocol)"]
-        Profiles["Execution Profiles:<br/>ROOT | DELEGATE | MAINTENANCE"]
-    end
-
-    subgraph cloud ["☁️ Cloud & Persistence"]
-        Sandbox["Modal Sandbox<br/>(Python REPL + Driver)"]
-        Volume[("💾 Modal Volume<br/>/data/<br/>• workspaces<br/>• docs/metadata")]
-        Neon[("🐘 Neon Postgres<br/>• runs / steps<br/>• artifacts<br/>• tenants")]
-        PostHog["📈 PostHog<br/>(LLM Observability)"]
-    end
-
-    WebUI -->|"WS / REST"| API
-    CLI --> Agent
-    API --> Agent
-    TUI --> Agent
-    MCP --> Agent
-
-    Agent --> LMs
-    Agent --> History
-    Agent --> Memory
-    Agent --> DocCache
-
-    Agent --> DocTools
-    Agent --> RecursiveTools
-    Agent --> ExecTools
-
-    API -.->|"Persistence"| Neon
-    Agent -.->|"Traces"| PostHog
-
-    DocTools --> Interpreter
-    RecursiveTools --> Interpreter
-    ExecTools --> Interpreter
-
-    Interpreter --> Profiles
-    Interpreter -->|"stdin/stdout<br/>JSON commands"| Sandbox
-    Sandbox -->|"read/write"| Volume
-
-    style entry fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style orchestration fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style tools fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style execution fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-    style cloud fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+```bash
+uv run fleet web
 ```
 
-## Docs and Guides
+This starts the main product surface with:
+
+- `RLM Workspace` for chat and runtime execution
+- `Volumes` for runtime-backed file browsing
+- `Settings` for runtime configuration and diagnostics
+
+### Use terminal chat
+
+```bash
+uv run fleet-rlm chat --trace-mode compact
+```
+
+### Run the API directly
+
+```bash
+uv run fleet-rlm serve-api --host 127.0.0.1 --port 8000
+```
+
+### Enable MCP support
+
+If you want the optional MCP server surface, install the extra first:
+
+```bash
+uv add "fleet-rlm[mcp]"
+uv run fleet-rlm serve-mcp --transport stdio
+```
+
+## Runtime Modes
+
+`fleet-rlm` currently has two top-level runtime modes:
+
+- `modal_chat`: the default product path
+- `daytona_pilot`: the experimental workbench path
+
+In the shared runtime contract:
+
+- Modal requests can include `execution_mode`.
+- Daytona requests can include `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
+- Daytona still uses the same websocket workspace and run-workbench flow, but it intentionally remains experimental.
+- `fleet-rlm daytona-rlm --max-depth` remains available only as a deprecated compatibility flag for the CLI pilot path.
+
+## CLI Surfaces
+
+This package exposes two command entrypoints:
+
+- `fleet`: lightweight launcher for terminal chat and `fleet web`
+- `fleet-rlm`: fuller Typer CLI for API, MCP, scaffold, and Daytona flows
+
+Common commands:
+
+```bash
+# Web UI
+uv run fleet web
+
+# Terminal chat
+uv run fleet
+uv run fleet-rlm chat --trace-mode verbose
+
+# FastAPI server
+uv run fleet-rlm serve-api --port 8000
+
+# Optional MCP server
+uv run fleet-rlm serve-mcp --transport stdio
+
+# Scaffold bundled Claude Code assets
+uv run fleet-rlm init --list
+
+# Experimental Daytona validation
+uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
+
+# Experimental Daytona pilot
+uv run fleet-rlm daytona-rlm \
+  --repo https://github.com/qredence/fleet-rlm.git \
+  --task "Summarize the tracing architecture" \
+  --batch-concurrency 4
+```
+
+## HTTP and WebSocket Contract
+
+The current frontend/backend contract centers on:
+
+- `/health`
+- `/ready`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/sessions/state`
+- `/api/v1/runtime/*`
+- `POST /api/v1/traces/feedback`
+- `/api/v1/ws/chat`
+- `/api/v1/ws/execution`
+
+When `AUTH_MODE=entra`, HTTP and WebSocket access use real Entra bearer-token validation plus Neon-backed tenant admission. Runtime settings writes are intentionally limited to `APP_ENV=local`.
+
+The canonical schema lives in [`openapi.yaml`](openapi.yaml).
+
+## Source Development
+
+From the repo root:
+
+```bash
+uv sync --all-extras --dev
+uv run fleet web
+```
+
+Frontend contributors should use `pnpm` inside `src/frontend`:
+
+```bash
+cd src/frontend
+pnpm install --frozen-lockfile
+pnpm run dev
+pnpm run check
+```
+
+This repo explicitly uses `pnpm` for frontend work even though the packaged frontend is built with Vite+ under the hood.
+
+## Validation
+
+Repo-level validation:
+
+```bash
+make test-fast
+make quality-gate
+make release-check
+```
+
+Focused docs validation:
+
+```bash
+uv run python scripts/check_docs_quality.py
+uv run python scripts/validate_release.py hygiene
+uv run python scripts/validate_release.py metadata
+```
+
+## Experimental Daytona Notes
+
+Use this order for Daytona work:
+
+1. Set `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`.
+2. Run `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch-or-sha>]`.
+3. Only then run `uv run fleet-rlm daytona-rlm [--repo <url>] [--context-path <path> ...] --task <text> ...`.
+
+This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_URL` instead.
+
+## Documentation Map
 
 - [Documentation index](docs/index.md)
-- [Explanation index](docs/explanation/index.md)
-- [Quick install + setup](docs/how-to-guides/installation.md)
-- [Configure Modal](docs/how-to-guides/configuring-modal.md)
-- [Runtime settings (LM/Modal diagnostics)](docs/how-to-guides/runtime-settings.md)
-- [MLflow tracing, feedback, eval, and optimization](docs/how-to-guides/mlflow-workflows.md)
-- [Deploying the server](docs/how-to-guides/deploying-server.md)
-- [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
-- [Frontend ↔ Backend integration](docs/reference/frontend-backend-integration.md)
+- [Installation guide](docs/how-to-guides/installation.md)
+- [Developer setup](docs/how-to-guides/developer-setup.md)
 - [CLI reference](docs/reference/cli.md)
 - [HTTP API reference](docs/reference/http-api.md)
-- [Auth modes](docs/reference/auth.md)
-- [Database architecture](docs/reference/database.md)
-- [Source layout](docs/reference/source-layout.md)
-
-## Advanced Features (Docs-First)
-
-`fleet-rlm` also supports runtime diagnostics endpoints, WebSocket execution streams (`/api/v1/ws/execution`), multi-tenant Neon-backed persistence, and opt-in PostHog LLM analytics. Those workflows are documented in the guides/reference docs rather than front-loaded here.
-
-## Contributing
-
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), then use [`AGENTS.md`](AGENTS.md) for repo-specific commands and quality gates.
-
-## License
-
-MIT License — see [LICENSE](LICENSE).
-
-Based on [Recursive Language Modeling](https://arxiv.org/abs/2501.123) research by **Alex L. Zhang** (MIT CSAIL), **Omar Khattab** (Stanford), and **Tim Kraska** (MIT).
+- [Auth reference](docs/reference/auth.md)
+- [Frontend/backend integration](docs/reference/frontend-backend-integration.md)
+- [Runtime settings](docs/how-to-guides/runtime-settings.md)
+- [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
+- [MLflow workflows](docs/how-to-guides/mlflow-workflows.md)

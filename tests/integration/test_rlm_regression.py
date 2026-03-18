@@ -291,7 +291,7 @@ class TestDSPyRLMIntegrationIssues:
         """Signature fields should be properly handled."""
         import dspy
         from fleet_rlm import ModalInterpreter
-        from fleet_rlm.react.signatures import AnalyzeLongDocument
+        from fleet_rlm.core.agent.signatures import AnalyzeLongDocument
 
         with ModalInterpreter(timeout=120) as interpreter:
             rlm = dspy.RLM(

@@ -6,7 +6,6 @@ It is skipped by default and only runs when all required live env vars are set.
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from pathlib import Path
@@ -15,24 +14,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import and_, func, select, text
 
-from fleet_rlm.core.config import configure_planner_from_env
-from fleet_rlm.db import DatabaseManager, FleetRepository
-from fleet_rlm.db.models import Artifact, Run, RunStatus, RunStep
-from fleet_rlm.server.main import create_app
+from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
+from fleet_rlm.infrastructure.database.models import Artifact, Run, RunStatus, RunStep
+from fleet_rlm.api.main import create_app
 
-_DATABASE_URL = os.getenv("DATABASE_URL")
-_LIVE_ENABLED = os.getenv("QRE301_LIVE") == "1"
-_MODAL_READY = bool(os.getenv("MODAL_TOKEN_ID") and os.getenv("MODAL_TOKEN_SECRET"))
-_PLANNER_READY = configure_planner_from_env()
-
-pytestmark = pytest.mark.skipif(
-    not (_LIVE_ENABLED and _MODAL_READY and _DATABASE_URL and _PLANNER_READY),
-    reason=(
-        "QRE-301 live credential-gated test requires "
-        "QRE301_LIVE=1, MODAL_TOKEN_ID, MODAL_TOKEN_SECRET, DATABASE_URL, "
-        "and planner LM configuration."
-    ),
-)
+pytestmark = [pytest.mark.live_llm, pytest.mark.db]
 
 
 def _wait_for_execution_completed(
@@ -65,9 +51,9 @@ def _wait_for_chat_terminal(chat_ws, *, timeout_seconds: float) -> list[dict]:
 
 
 @pytest.mark.asyncio
-async def test_qre301_live_trace_websocket_and_persistence_flow():
-    assert _DATABASE_URL is not None
-
+async def test_qre301_live_trace_websocket_and_persistence_flow(
+    require_qre301_live: str,
+):
     workspace_id = "default"
     user_id = "alice"
     session_id = f"qre301-live-{uuid.uuid4().hex[:8]}"
@@ -223,7 +209,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow():
         assert matching, "Target session not found in /api/v1/sessions/state"
         assert int(matching[0].get("history_turns", 0)) >= 1
 
-    db = DatabaseManager(_DATABASE_URL)
+    db = DatabaseManager(require_qre301_live)
     repo = FleetRepository(db)
     identity = await repo.upsert_identity(
         entra_tenant_id=workspace_id,

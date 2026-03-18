@@ -1,7 +1,7 @@
 import type { ChatMessage, CreationPhase } from "@/lib/data/types";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 import type { Conversation } from "@/stores/chatHistoryStore";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
-import type { ExecutionStep } from "@/stores/artifactStore";
 
 export interface ChatSubmitAttachment {
   id: string;

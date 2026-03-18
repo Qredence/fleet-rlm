@@ -6,10 +6,9 @@ from typing import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from fleet_rlm.daytona_rlm.config import resolve_daytona_config
-from fleet_rlm.db import DatabaseManager, FleetRepository
-
-DATABASE_URL = os.getenv("DATABASE_URL")
+from fleet_rlm.core.config import configure_planner_from_env
+from fleet_rlm.infrastructure.providers.daytona.config import resolve_daytona_config
+from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
 
 
 def _lm_configured() -> bool:
@@ -48,6 +47,10 @@ def _live_llm_enabled() -> bool:
 def _live_daytona_enabled() -> bool:
     """Explicit gate for live Daytona integration tests."""
     return os.environ.get("DAYTONA_LIVE_TESTS", "0") == "1"
+
+
+def _database_url() -> str | None:
+    return os.environ.get("DATABASE_URL")
 
 
 def pytest_collection_modifyitems(
@@ -92,12 +95,32 @@ def require_daytona_runtime() -> None:
     _ = resolve_daytona_config()
 
 
+@pytest.fixture
+def require_database_url() -> str:
+    database_url = _database_url()
+    if not database_url:
+        pytest.skip("DATABASE_URL not configured")
+    return database_url
+
+
+@pytest.fixture
+def require_qre301_live(require_database_url: str) -> str:
+    if os.environ.get("QRE301_LIVE") != "1":
+        pytest.skip("QRE301_LIVE=1 is required")
+    if not _modal_credentials_present():
+        pytest.skip("Modal credentials not configured")
+    if not configure_planner_from_env():
+        pytest.skip("Planner LM not configured")
+    return require_database_url
+
+
 @pytest_asyncio.fixture
 async def database_manager() -> AsyncIterator[DatabaseManager]:
     """DB manager fixture for integration tests."""
-    if not DATABASE_URL:
+    database_url = _database_url()
+    if not database_url:
         pytest.skip("DATABASE_URL not configured")
-    db = DatabaseManager(DATABASE_URL)
+    db = DatabaseManager(database_url)
     try:
         yield db
     finally:

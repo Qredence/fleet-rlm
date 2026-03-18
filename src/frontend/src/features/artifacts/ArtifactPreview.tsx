@@ -1,6 +1,6 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SkillMarkdown } from "@/components/shared/SkillMarkdown";
-import type { ExecutionStep } from "@/stores/artifactStore";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 import { buildArtifactPreviewModel } from "@/features/artifacts/parsers/artifactPayloadSummaries";
 
 interface ArtifactPreviewProps {
@@ -32,7 +32,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                 return <SkillMarkdown content={model.text} />;
               case "text":
                 return (
-                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+                  <pre className="text-xs text-foreground whitespace-pre-wrap overflow-wrap-break-word">
                     {model.text || "No preview output was captured for this run."}
                   </pre>
                 );
@@ -42,11 +42,11 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                     <p className="text-xs font-semibold uppercase tracking-wide text-red-500">
                       Execution failed
                     </p>
-                    <p className="mt-1 text-sm text-foreground whitespace-pre-wrap break-words">
+                    <p className="mt-1 text-sm text-foreground whitespace-pre-wrap overflow-wrap-break-word">
                       {model.message}
                     </p>
                     {model.details && (
-                      <pre className="mt-2 max-h-80 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 text-xs whitespace-pre-wrap break-words">
+                      <pre className="mt-2 max-h-80 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 text-xs whitespace-pre-wrap overflow-wrap-break-word">
                         {model.details}
                       </pre>
                     )}
@@ -68,7 +68,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                           Input
                         </p>
-                        <pre className="max-h-40 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap break-words">
+                        <pre className="max-h-40 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap overflow-wrap-break-word">
                           {model.input}
                         </pre>
                       </div>
@@ -78,7 +78,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                           Output
                         </p>
-                        <pre className="max-h-64 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap break-words">
+                        <pre className="max-h-64 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap overflow-wrap-break-word">
                           {model.output}
                         </pre>
                       </div>
@@ -94,7 +94,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                     {model.thought && (
                       <div>
                         <p className="text-xs font-semibold text-foreground/80">Thought</p>
-                        <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
                           {model.thought}
                         </p>
                       </div>
@@ -102,7 +102,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                     {model.action && (
                       <div>
                         <p className="text-xs font-semibold text-foreground/80">Action</p>
-                        <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
                           {model.action}
                         </p>
                       </div>
@@ -110,7 +110,7 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                     {model.observation && (
                       <div>
                         <p className="text-xs font-semibold text-foreground/80">Observation</p>
-                        <pre className="max-h-64 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap break-words">
+                        <pre className="max-h-64 overflow-auto rounded-md border border-border-subtle bg-muted/30 p-2 text-xs whitespace-pre-wrap overflow-wrap-break-word">
                           {model.observation}
                         </pre>
                       </div>
@@ -119,14 +119,14 @@ export function ArtifactPreview({ steps, activeStepId }: ArtifactPreviewProps) {
                 );
               case "json":
                 return (
-                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+                  <pre className="text-xs text-foreground whitespace-pre-wrap overflow-wrap-break-word">
                     {JSON.stringify(model.value, null, 2)}
                   </pre>
                 );
               case "empty":
               default:
                 return (
-                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words">
+                  <pre className="text-xs text-foreground whitespace-pre-wrap overflow-wrap-break-word">
                     No preview output was captured for this run.
                   </pre>
                 );

@@ -7,14 +7,7 @@
  * - Consistent with other stores
  */
 import { create } from "zustand";
-import type {
-  CreationPhase,
-  FsNode,
-  InspectorTab,
-  NavItem,
-  PromptFeature,
-  PromptMode,
-} from "@/lib/data/types";
+import type { CreationPhase, FsNode, InspectorTab, NavItem } from "@/lib/data/types";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -55,18 +48,9 @@ interface NavigationState {
   // Session
   newSession: () => void;
   sessionId: number;
-
-  // Features
-  activeFeatures: Set<PromptFeature>;
-  toggleFeature: (feature: PromptFeature) => void;
-
-  // Prompt mode
-  promptMode: PromptMode;
-  setPromptMode: (mode: PromptMode) => void;
-
-  // Skills
-  selectedPromptSkills: string[];
-  togglePromptSkill: (skillId: string) => void;
+  requestedConversationId: string | null;
+  requestConversationLoad: (conversationId: string) => void;
+  clearRequestedConversation: () => void;
 }
 
 // ── Canvas Handlers (external registration) ──────────────────────────
@@ -152,46 +136,25 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   // Session
   sessionId: 0,
+  requestedConversationId: null,
   newSession: () => {
     set({
       activeNav: "workspace",
       creationPhase: "idle",
-      activeFeatures: new Set(),
-      promptMode: "auto",
-      selectedPromptSkills: [],
       selectedAssistantTurnId: null,
       activeInspectorTab: "trajectory",
+      requestedConversationId: null,
       sessionId: get().sessionId + 1,
     });
   },
-
-  // Features
-  activeFeatures: new Set(),
-  toggleFeature: (feature) => {
-    set((state) => {
-      const next = new Set(state.activeFeatures);
-      if (next.has(feature)) {
-        next.delete(feature);
-      } else {
-        next.add(feature);
-      }
-      return { activeFeatures: next };
-    });
-  },
-
-  // Prompt mode
-  promptMode: "auto",
-  setPromptMode: (mode) => set({ promptMode: mode }),
-
-  // Skills
-  selectedPromptSkills: [],
-  togglePromptSkill: (skillId) => {
-    set((state) => ({
-      selectedPromptSkills: state.selectedPromptSkills.includes(skillId)
-        ? state.selectedPromptSkills.filter((id) => id !== skillId)
-        : [...state.selectedPromptSkills, skillId],
-    }));
-  },
+  requestConversationLoad: (conversationId) =>
+    set({
+      activeNav: "workspace",
+      selectedAssistantTurnId: null,
+      activeInspectorTab: "trajectory",
+      requestedConversationId: conversationId,
+    }),
+  clearRequestedConversation: () => set({ requestedConversationId: null }),
 }));
 
 // ── Selector hooks for performance ───────────────────────────────────
@@ -200,10 +163,14 @@ export const useActiveNav = () => useNavigationStore((s) => s.activeNav);
 export const useIsCanvasOpen = () => useNavigationStore((s) => s.isCanvasOpen);
 export const useSessionId = () => useNavigationStore((s) => s.sessionId);
 export const useCreationPhase = () => useNavigationStore((s) => s.creationPhase);
-export const useActiveFeatures = () => useNavigationStore((s) => s.activeFeatures);
-export const usePromptMode = () => useNavigationStore((s) => s.promptMode);
-export const useSelectedPromptSkills = () => useNavigationStore((s) => s.selectedPromptSkills);
 export const useSelectedFileNode = () => useNavigationStore((s) => s.selectedFileNode);
 export const useSelectedAssistantTurnId = () =>
   useNavigationStore((s) => s.selectedAssistantTurnId);
 export const useActiveInspectorTab = () => useNavigationStore((s) => s.activeInspectorTab);
+
+export {
+  useActiveFeatures,
+  usePromptMode,
+  usePromptPreferencesStore,
+  useSelectedPromptSkills,
+} from "./promptPreferencesStore";

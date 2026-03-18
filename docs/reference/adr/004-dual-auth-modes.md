@@ -209,10 +209,10 @@ The system enforces guardrails at startup to prevent misconfiguration:
 
 ## References
 
-- `src/fleet_rlm/server/auth/factory.py` — Auth provider factory
-- `src/fleet_rlm/server/auth/dev.py` — Development auth provider
-- `src/fleet_rlm/server/auth/entra.py` — Entra auth provider
-- `src/fleet_rlm/server/auth/base.py` — Auth provider interface
-- `src/fleet_rlm/server/auth/types.py` — NormalizedIdentity type
-- `src/fleet_rlm/server/auth/admission.py` — Tenant admission logic
+- `src/fleet_rlm/api/auth/factory.py` — Auth provider factory
+- `src/fleet_rlm/api/auth/dev.py` — Development auth provider
+- `src/fleet_rlm/api/auth/entra.py` — Entra auth provider
+- `src/fleet_rlm/api/auth/base.py` — Auth provider interface
+- `src/fleet_rlm/api/auth/types.py` — NormalizedIdentity type
+- `src/fleet_rlm/api/auth/admission.py` — Tenant admission logic
 - `docs/reference/auth.md` — Full auth documentation

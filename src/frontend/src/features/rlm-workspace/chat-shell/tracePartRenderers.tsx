@@ -4,13 +4,13 @@ import {
   AttachmentInfo,
   Attachments,
   AttachmentPreview,
-} from "@/components/ai-elements/attachments";
+} from "@/components/prompt-kit/attachments";
 import {
   ChainOfThought,
   ChainOfThoughtContent,
   ChainOfThoughtHeader,
   ChainOfThoughtStep,
-} from "@/components/ai-elements/chain-of-thought";
+} from "@/components/prompt-kit/chain-of-thought";
 import {
   Confirmation,
   ConfirmationAccepted,
@@ -19,7 +19,7 @@ import {
   ConfirmationRejected,
   ConfirmationRequest,
   ConfirmationTitle,
-} from "@/components/ai-elements/confirmation";
+} from "@/components/prompt-kit/confirmation";
 import {
   EnvironmentVariable,
   EnvironmentVariableCopyButton,
@@ -32,7 +32,7 @@ import {
   EnvironmentVariablesTitle,
   EnvironmentVariablesToggle,
   EnvironmentVariableValue,
-} from "@/components/ai-elements/environment-variables";
+} from "@/components/prompt-kit/environment-variables";
 import {
   InlineCitation,
   InlineCitationCard,
@@ -41,9 +41,9 @@ import {
   InlineCitationQuote,
   InlineCitationSource,
   InlineCitationText,
-} from "@/components/ai-elements/inline-citation";
-import { Message, MessageContent } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+} from "@/components/prompt-kit/inline-citation";
+import { Message, MessageContent } from "@/components/prompt-kit/message";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/prompt-kit/reasoning";
 import {
   Sandbox,
   SandboxContent,
@@ -53,22 +53,16 @@ import {
   SandboxTabsBar,
   SandboxTabsList,
   SandboxTabsTrigger,
-} from "@/components/ai-elements/sandbox";
-import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
+} from "@/components/prompt-kit/sandbox";
+import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/prompt-kit/sources";
 import {
   Task,
   TaskContent,
   TaskItem,
   TaskItemFile,
   TaskTrigger,
-} from "@/components/ai-elements/task";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
+} from "@/components/prompt-kit/task";
+import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/prompt-kit/tool";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Queue,
@@ -86,8 +80,8 @@ import { Streamdown } from "@/components/ui/streamdown";
 import { TextShimmer } from "@/components/ui/text-shimmer";
 import type { ChatRenderPart, ChatRenderToolState, RuntimeContext } from "@/lib/data/types";
 import { cn } from "@/lib/utils/cn";
-import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/ai-elements-state";
-import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/runtimeBadges";
+import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
+import { RuntimeContextBadge } from "@/features/rlm-workspace/assistant-content/model";
 import type { ToolSessionItem, TraceDisplayItem } from "@/features/rlm-workspace/chatDisplayItems";
 import {
   MONO_BASE_MEDIUM_STYLE,

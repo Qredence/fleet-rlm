@@ -314,8 +314,8 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 uv run pytest -q
-uv run python scripts/check_release_hygiene.py
-uv run python scripts/check_release_metadata.py
+uv run python scripts/validate_release.py hygiene
+uv run python scripts/validate_release.py metadata
 uv run python scripts/check_docs_quality.py
 ```
 

@@ -1,4 +1,4 @@
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -9,23 +9,6 @@ import { ExecutionModeDropdown } from "@/components/chat/input/ExecutionModeDrop
     IS_REACT_ACT_ENVIRONMENT?: boolean;
   }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-vi.mock("@/components/ui/menubar", () => ({
-  Menubar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarRadioGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  MenubarRadioItem: ({
-    children,
-    onSelect,
-  }: {
-    children: ReactNode;
-    onSelect?: () => void;
-    showIndicator?: boolean;
-  }) => <button onClick={onSelect}>{children}</button>,
-}));
 
 describe("ExecutionModeDropdown", () => {
   afterEach(() => {
@@ -62,8 +45,14 @@ describe("ExecutionModeDropdown", () => {
       root.render(<ExecutionModeDropdown value="auto" onChange={onChange} />);
     });
 
-    const rlmOnlyOption = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("RLM only") ?? false,
+    const trigger = container.querySelector('button[aria-label="Execution mode: Auto"]');
+
+    act(() => {
+      trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const rlmOnlyOption = Array.from(document.querySelectorAll('[role="menuitemradio"]')).find(
+      (item) => item.textContent?.includes("RLM only") ?? false,
     );
 
     act(() => {

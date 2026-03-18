@@ -5,9 +5,9 @@
  *   1. Inside the app shell (wildcard `*` route) — fills available space
  *   2. Standalone at `/404` (outside the shell) — fills the viewport
  *
- * Offers a link back to the home page (Chat tab).
+ * Offers a link back to the canonical workspace surface.
  */
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link, useRouter } from "@tanstack/react-router";
 import { FileQuestion, ArrowLeft, Home } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { springs } from "@/lib/config/motion-config";
@@ -16,6 +16,7 @@ import { BrandMark } from "@/components/shared/BrandMark";
 
 export function NotFoundPage() {
   const navigate = useNavigate();
+  const router = useRouter();
   const shouldReduceMotion = useReducedMotion();
 
   return (
@@ -42,13 +43,17 @@ export function NotFoundPage() {
           <Button
             variant="default"
             className="w-full sm:flex-1"
-            onClick={() => navigate("/", { replace: true })}
+            onClick={() => navigate({ to: "/app/workspace", replace: true })}
           >
-            <Home className="size-4" />
+            <Home className="size-5" strokeWidth={1.5} />
             <span className="typo-label">Back to Home</span>
           </Button>
-          <Button variant="secondary" className="w-full sm:flex-1" onClick={() => navigate(-1)}>
-            <ArrowLeft className="size-4" />
+          <Button
+            variant="secondary"
+            className="w-full sm:flex-1"
+            onClick={() => router.history.back()}
+          >
+            <ArrowLeft className="size-5" strokeWidth={1.5} />
             <span className="typo-label">Go Back</span>
           </Button>
         </div>

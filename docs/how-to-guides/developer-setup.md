@@ -4,13 +4,13 @@ This guide walks through setting up a complete local development environment for
 
 ## Prerequisites
 
-| Requirement | Version | Purpose |
-|-------------|---------|---------|
-| Python | 3.10+ | Runtime and development |
-| uv | Latest | Package and dependency management |
-| Bun | Latest | Frontend development |
-| Git | 2.x | Version control |
-| Modal Account | - | Sandbox execution |
+| Requirement   | Version | Purpose                           |
+| ------------- | ------- | --------------------------------- |
+| Python        | 3.10+   | Runtime and development           |
+| uv            | Latest  | Package and dependency management |
+| pnpm          | Latest  | Frontend development              |
+| Git           | 2.x     | Version control                   |
+| Modal Account | -       | Sandbox execution                 |
 
 ## 1. Install Python
 
@@ -91,6 +91,7 @@ uv sync --all-extras --dev
 ```
 
 This command:
+
 - Creates a virtual environment in `.venv/`
 - Installs all runtime dependencies
 - Installs development dependencies (`pytest`, `ruff`, `ty`, etc.)
@@ -119,18 +120,18 @@ At minimum, configure the LLM provider:
 ```ini
 # LLM Configuration - REQUIRED
 DSPY_LM_MODEL=openai/gpt-4o
-DSPY_LM_API_KEY=sk-your-api-key-here
+DSPY_LLM_API_KEY=sk-your-api-key-here
 ```
 
 ### Environment Variable Categories
 
-| Category | Variables | Required |
-|----------|-----------|----------|
-| **LLM** | `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY` | Yes |
-| **Database** | `DATABASE_URL` | For persistence |
-| **Auth** | `AUTH_MODE`, `AUTH_REQUIRED` | For API server |
-| **MLflow** | `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI` | For tracing |
-| **PostHog** | `POSTHOG_ENABLED`, `POSTHOG_API_KEY` | For analytics |
+| Category     | Variables                               | Required        |
+| ------------ | --------------------------------------- | --------------- |
+| **LLM**      | `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY`     | Yes             |
+| **Database** | `DATABASE_URL`                          | For persistence |
+| **Auth**     | `AUTH_MODE`, `AUTH_REQUIRED`            | For API server  |
+| **MLflow**   | `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI` | For tracing     |
+| **PostHog**  | `POSTHOG_ENABLED`, `POSTHOG_API_KEY`, `POSTHOG_HOST` | For analytics |
 
 ### Key Configuration Options
 
@@ -177,6 +178,7 @@ uv run modal setup
 ```
 
 This command:
+
 - Opens a browser for authentication
 - Stores credentials in `~/.modal.toml`
 
@@ -213,14 +215,16 @@ If you're working on the web UI, install frontend dependencies:
 
 ```bash
 cd src/frontend
-bun install --frozen-lockfile
+pnpm install --frozen-lockfile
 ```
 
 ### Verify Frontend Setup
 
 ```bash
-bun run type-check
-bun run test:unit
+pnpm run api:check
+pnpm run type-check
+pnpm run lint:robustness
+pnpm run test:unit
 ```
 
 ## 7. Verify Your Setup
@@ -250,7 +254,7 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 
 # Type checking
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" --exclude "src/fleet_rlm/analytics/**" --exclude "src/fleet_rlm/daytona_rlm/**"
+uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
 ```
 
 ### Start Development Server
@@ -336,25 +340,30 @@ require('lspconfig').pyright.setup {
 
 ### Makefile Targets
 
-| Command | Description |
-|---------|-------------|
-| `make sync-all` | Install all dependencies |
-| `make test-fast` | Run fast test suite |
-| `make quality-gate` | Run lint, format, type check, tests |
-| `make format` | Format code with ruff |
-| `make lint` | Check linting with ruff |
-| `make typecheck` | Run type checker |
-| `make mlflow-server` | Start local MLflow server |
+| Command                                      | Description                                                                  |
+| -------------------------------------------- | ---------------------------------------------------------------------------- |
+| `make sync-all`                              | Install all dependencies                                                     |
+| `make test-fast`                             | Run the default fast backend test suite                                      |
+| `make quality-gate`                          | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
+| `make release-check`                         | Run release-oriented validation, including security and packaging            |
+| `make format`                                | Format code with ruff                                                        |
+| `make lint`                                  | Check linting with ruff                                                      |
+| `make typecheck`                             | Run type checker                                                             |
+| `uv run python scripts/check_docs_quality.py` | Run docs-only validation                                                     |
+| `make mlflow-server`                         | Start local MLflow server                                                    |
 
 ### Frontend Commands
 
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Start development server |
-| `bun run check` | Run all frontend checks |
-| `bun run test:unit` | Run unit tests |
-| `bun run test:e2e` | Run e2e tests |
-| `bun run build` | Build for production |
+| Command                    | Description                                                       |
+| -------------------------- | ----------------------------------------------------------------- |
+| `pnpm run dev`             | Start development server                                          |
+| `pnpm run api:check`       | Verify committed frontend OpenAPI artifacts are up to date        |
+| `pnpm run type-check`      | Run TypeScript type checks                                        |
+| `pnpm run lint:robustness` | Run the repo lint lane                                            |
+| `pnpm run test:unit`       | Run unit tests                                                    |
+| `pnpm run test:e2e`        | Run e2e tests                                                     |
+| `pnpm run build`           | Build for production                                              |
+| `pnpm run check`           | Full frontend suite: type-check, lint, unit tests, build, and e2e |
 
 ## Troubleshooting
 
@@ -394,6 +403,17 @@ echo $MODAL_TOKEN_SECRET
 
 ```bash
 uv run pytest -q
+```
+
+### Frontend commands fail
+
+**Symptom:** `pnpm run dev` or `pnpm run check` fails inside `src/frontend`.
+
+**Solution:** Reinstall frontend dependencies with the repo-standard package manager:
+
+```bash
+cd src/frontend
+pnpm install --frozen-lockfile
 ```
 
 ### Pre-commit hooks fail

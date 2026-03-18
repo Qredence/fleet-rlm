@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.analytics.config import MlflowConfig
-import fleet_rlm.analytics.mlflow_integration as mlflow_integration
+from fleet_rlm.features.analytics.config import MlflowConfig
+import fleet_rlm.features.analytics.mlflow_integration as mlflow_integration
+from tests.unit.fixtures_env import clear_env
 
 
 @pytest.fixture(autouse=True)
@@ -107,9 +107,9 @@ def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
 
 def test_initialize_mlflow_retries_after_non_auth_failure(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ):
     calls = {"set_experiment": 0}
+    warning_messages: list[str] = []
 
     def _set_experiment(**kwargs):
         _ = kwargs
@@ -123,14 +123,18 @@ def test_initialize_mlflow_retries_after_non_auth_failure(
     )
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
-    caplog.set_level(logging.WARNING)
+    monkeypatch.setattr(
+        mlflow_integration.logger,
+        "warning",
+        lambda message, *args: warning_messages.append(message % args),
+    )
 
     config = MlflowConfig(enabled=True, tracking_uri="https://mlflow.example.com")
 
     assert mlflow_integration.initialize_mlflow(config) is False
     assert mlflow_integration.initialize_mlflow(config) is False
     assert calls["set_experiment"] == 2
-    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 2
+    assert len(warning_messages) == 2
 
 
 def test_initialize_mlflow_retries_when_auth_env_changes(
@@ -150,7 +154,7 @@ def test_initialize_mlflow_retries_when_auth_env_changes(
         dspy=SimpleNamespace(autolog=lambda **kwargs: None),
     )
 
-    monkeypatch.delenv("MLFLOW_TRACKING_TOKEN", raising=False)
+    clear_env(monkeypatch, "MLFLOW_TRACKING_TOKEN")
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
     monkeypatch.setattr(mlflow_integration, "_existing_trace_callback", object)
 
@@ -164,9 +168,10 @@ def test_initialize_mlflow_retries_when_auth_env_changes(
 
 def test_initialize_mlflow_logs_actionable_warning_for_http_403(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ):
     calls = {"set_experiment": 0}
+    warning_messages: list[str] = []
+    debug_exc_infos: list[object] = []
 
     def _set_experiment(**kwargs):
         _ = kwargs
@@ -182,12 +187,23 @@ def test_initialize_mlflow_logs_actionable_warning_for_http_403(
         dspy=SimpleNamespace(autolog=lambda **kwargs: None),
     )
 
-    monkeypatch.delenv("MLFLOW_TRACKING_TOKEN", raising=False)
-    monkeypatch.delenv("MLFLOW_TRACKING_USERNAME", raising=False)
-    monkeypatch.delenv("MLFLOW_TRACKING_PASSWORD", raising=False)
+    clear_env(
+        monkeypatch,
+        "MLFLOW_TRACKING_TOKEN",
+        "MLFLOW_TRACKING_USERNAME",
+        "MLFLOW_TRACKING_PASSWORD",
+    )
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
-
-    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(
+        mlflow_integration.logger,
+        "warning",
+        lambda message, *args: warning_messages.append(message % args),
+    )
+    monkeypatch.setattr(
+        mlflow_integration.logger,
+        "debug",
+        lambda message, *args, exc_info=None: debug_exc_infos.append(exc_info),
+    )
 
     assert (
         mlflow_integration.initialize_mlflow(
@@ -208,11 +224,6 @@ def test_initialize_mlflow_logs_actionable_warning_for_http_403(
         is False
     )
 
-    warning_messages = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.WARNING
-    ]
     assert any("HTTP 403" in message for message in warning_messages)
     assert any("MLFLOW_TRACKING_TOKEN" in message for message in warning_messages)
     assert any(
@@ -223,10 +234,7 @@ def test_initialize_mlflow_logs_actionable_warning_for_http_403(
         "secret" not in message and "token=hidden" not in message
         for message in warning_messages
     )
-    assert any(
-        record.levelno == logging.DEBUG and record.exc_info is not None
-        for record in caplog.records
-    )
+    assert any(exc_info is not None for exc_info in debug_exc_infos)
     assert calls["set_experiment"] == 1
 
 

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ArtifactGraph } from "@/features/artifacts/ArtifactGraph";
-import type { ExecutionStep } from "@/stores/artifactStore";
+import type { ExecutionStep } from "@/lib/data/artifactTypes";
 
 const steps: ExecutionStep[] = [
   {

@@ -42,9 +42,6 @@ describe("MobileShell canvas handlers", () => {
       selectedFileNode: null,
       creationPhase: "idle",
       sessionId: 0,
-      activeFeatures: new Set(),
-      promptMode: "auto",
-      selectedPromptSkills: [],
     });
   });
 
