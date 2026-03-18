@@ -243,6 +243,7 @@ def test_run_daytona_smoke_reports_driver_execution_failures_and_cleans_up():
 
     class _BrokenRuntime(_FakeRuntime):
         def __init__(self):
+            super().__init__()
             self.session = _BrokenSession()
 
     runtime = _BrokenRuntime()
@@ -269,6 +270,7 @@ def test_run_daytona_smoke_reports_driver_start_failures():
 
     class _StartBrokenRuntime(_FakeRuntime):
         def __init__(self):
+            super().__init__()
             self.session = _StartBrokenSession()
 
     runtime = _StartBrokenRuntime()
@@ -291,6 +293,7 @@ def test_run_daytona_smoke_reports_cleanup_failures():
 
     class _CleanupBrokenRuntime(_FakeRuntime):
         def __init__(self):
+            super().__init__()
             self.session = _CleanupBrokenSession()
 
     runtime = _CleanupBrokenRuntime()
