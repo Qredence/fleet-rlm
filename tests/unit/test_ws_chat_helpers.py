@@ -21,7 +21,15 @@ from fleet_rlm.api.routers.ws.helpers import (
     _try_send_json,
 )
 from fleet_rlm.api.schemas import WSMessage
-from tests.ui.fixtures_ui import ts
+
+
+def ts(value: Any) -> Any:
+    """
+    Local test helper to avoid depending on UI test fixtures.
+    Mirrors the interface of the original `ts` helper sufficiently
+    for this test module by returning the provided value unchanged.
+    """
+    return value
 
 
 def test_should_reload_docs_path_dedupes_same_path() -> None:
@@ -278,4 +286,6 @@ def test_ws_message_accepts_daytona_runtime_fields() -> None:
 
 
 async def _noop_persist(*, include_volume_save: bool = True) -> None:
+    """Shared no-op persist helper used by specific tests to satisfy the
+    persist_session_state API without performing any side effects."""
     _ = include_volume_save
