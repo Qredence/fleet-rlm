@@ -99,6 +99,7 @@ Auth, persistence, and analytics constraints:
 - Keep DSPy signatures and runtime modules centralized under `core/agent/signatures.py` and `core/models/rlm_runtime_modules.py`.
 - Keep websocket event shaping and session lifecycle inside `api/routers/ws/*`; treat that layer as a contract with the frontend workspace.
 - Daytona remains experimental and intentionally uses a custom recursive host-loop runner with `dspy.Predict`-backed grounding/decomposition/synthesis modules. Do not collapse it into generic `dspy.RLM` language.
+- Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
 - Reuse `src/fleet_rlm/utils/regex.py` for regex helpers instead of creating new local variants.
 
 ## Canonical Commands

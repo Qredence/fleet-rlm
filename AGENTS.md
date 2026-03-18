@@ -87,6 +87,7 @@ Cross-stack source-of-truth boundaries:
 ## Agent Operating Rules
 
 - Keep Modal and Daytona responsibilities distinct. Daytona is integrated into the shared workspace flow, but it is still experimental and should not be treated as a generic `dspy.RLM` wrapper.
+- Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
 - Treat `openapi.yaml` as the canonical API contract. If you change backend request/response shapes or routes, update generated frontend API artifacts and verify drift with `pnpm run api:check`.
 - `fleet web` is the main local app entrypoint. It delegates into `fleet-rlm serve-api`.
 - Source checkouts prefer `src/frontend/dist` for UI serving. Packaged installs fall back to `src/fleet_rlm/ui/dist`.
