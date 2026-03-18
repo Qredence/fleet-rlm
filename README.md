@@ -5,6 +5,8 @@
 [![CI](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml/badge.svg)](https://github.com/Qredence/fleet-rlm/actions/workflows/ci.yml)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/fleet-rlm?period=monthly&units=INTERNATIONAL_SYSTEM&left_color=MAGENTA&right_color=BLACK&left_text=downloads%2Fmonth)](https://pepy.tech/projects/fleet-rlm)
 
+![thumbnail](src/frontend/public/branding/thumbnail.png)
+
 `fleet-rlm` is a Web UI-first recursive language model runtime for long-context code and document work. It ships a Modal-backed default runtime, an integrated FastAPI + WebSocket surface, packaged frontend assets, and an experimental Daytona workbench path that plugs into the same workspace instead of living as a separate product.
 
 [Docs](docs/) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
