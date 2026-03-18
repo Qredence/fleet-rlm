@@ -91,7 +91,7 @@ Cross-stack source-of-truth boundaries:
 - `fleet web` is the main local app entrypoint. It delegates into `fleet-rlm serve-api`.
 - Source checkouts prefer `src/frontend/dist` for UI serving. Packaged installs fall back to `src/fleet_rlm/ui/dist`.
 - Keep docs in sync when tooling, routes, runtime contracts, or agent workflow change. If you learn a stable repo convention, record it here or in the subsystem AGENTS file instead of leaving it only in chat.
-- Prefer `plans/` for durable repo-level planning and architecture notes. Use `src/frontend/PLANS.md` for frontend-specific execution plans.
+- Prefer `plans/` for durable repo-level planning and architecture notes.
 
 ## Canonical Commands
 
