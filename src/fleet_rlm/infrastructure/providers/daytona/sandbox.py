@@ -74,7 +74,6 @@ _OUTPUT_ONLY_SUBMIT_SCHEMA = [{"name": "output", "type": "object"}]
 _LOG_WAIT_INTERVAL_S = 0.1
 _REMOTE_REF_RESOLUTION_TIMEOUT_S = 5
 _T = TypeVar("_T")
-_LEGACY_SYNC_CLIENT_FACTORY = build_daytona_client
 
 
 def _require_daytona_sdk() -> tuple[Any, Any, Any]:
