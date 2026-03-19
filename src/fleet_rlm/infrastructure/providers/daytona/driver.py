@@ -32,6 +32,9 @@ DAYTONA_DRIVER_SOURCE = (
     FLEET_ROOT = pathlib.Path(REPO_PATH) / ".fleet-rlm"
     PROMPT_ROOT = FLEET_ROOT / "prompts"
     PROMPT_MANIFEST_PATH = PROMPT_ROOT / "manifest.json"
+    MEMORY_ROOT = pathlib.Path("/home/daytona/memory")
+    WORKSPACE_VOLUME_ROOT = MEMORY_ROOT / "workspace"
+    BUFFER_STORE: dict[str, list[object]] = {}
     STATE: dict[str, object] = {
         "__builtins__": __builtins__,
         "json": json,
@@ -117,6 +120,143 @@ DAYTONA_DRIVER_SOURCE = (
             return str(path.relative_to(REPO_PATH))
         except ValueError:
             return str(path)
+
+
+    def peek(text: str, start: int = 0, length: int = 2000) -> str:
+        source = str(text or "")
+        start_idx = max(0, int(start))
+        window = max(0, int(length))
+        return source[start_idx : start_idx + window]
+
+
+    def grep(text: str, pattern: str, *, context: int = 0) -> list[str]:
+        if not text:
+            return []
+        compiled = re.compile(pattern)
+        lines = str(text).splitlines()
+        radius = max(0, int(context))
+        results: list[str] = []
+        for index, line in enumerate(lines):
+            if not compiled.search(line):
+                continue
+            start_idx = max(0, index - radius)
+            end_idx = min(len(lines), index + radius + 1)
+            snippet = "\n".join(lines[start_idx:end_idx])
+            results.append(snippet)
+        return results
+
+
+    def reset_buffers() -> None:
+        BUFFER_STORE.clear()
+
+
+    def add_buffer(name: str, item: object) -> dict[str, object]:
+        key = str(name or "").strip() or "default"
+        items = BUFFER_STORE.setdefault(key, [])
+        items.append(item)
+        return {"status": "ok", "name": key, "count": len(items)}
+
+
+    def get_buffer(name: str) -> list[object]:
+        key = str(name or "").strip() or "default"
+        return list(BUFFER_STORE.get(key, []))
+
+
+    def clear_buffer(name: str | None = None) -> dict[str, object]:
+        key = str(name or "").strip()
+        if key:
+            BUFFER_STORE.pop(key, None)
+            return {"status": "ok", "scope": "single", "name": key}
+        BUFFER_STORE.clear()
+        return {"status": "ok", "scope": "all"}
+
+
+    def _resolve_persistent_path(path: str, *, default_root: pathlib.Path) -> tuple[str | None, str | None]:
+        raw = str(path or "").strip()
+        if not raw:
+            return None, "[error: volume path cannot be empty]"
+
+        if not MEMORY_ROOT.exists():
+            return None, f"[error: no volume mounted at {MEMORY_ROOT}]"
+
+        candidate = pathlib.Path(raw)
+        if candidate.is_absolute():
+            resolved = pathlib.Path(os.path.realpath(os.path.normpath(str(candidate))))
+        else:
+            resolved = pathlib.Path(
+                os.path.realpath(os.path.normpath(str(default_root / candidate)))
+            )
+
+        memory_real = pathlib.Path(os.path.realpath(str(MEMORY_ROOT)))
+        if resolved != memory_real and not str(resolved).startswith(str(memory_real) + os.sep):
+            return None, f"[error: invalid volume path: {raw}]"
+        return str(resolved), None
+
+
+    def save_to_volume(path: str, content: str) -> str:
+        full, path_error = _resolve_persistent_path(path, default_root=MEMORY_ROOT)
+        if path_error is not None or full is None:
+            return path_error or "[error: invalid volume path]"
+        os.makedirs(os.path.dirname(full) or str(MEMORY_ROOT), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(str(content))
+        return full
+
+
+    def load_from_volume(path: str) -> str:
+        full, path_error = _resolve_persistent_path(path, default_root=MEMORY_ROOT)
+        if path_error is not None or full is None:
+            return path_error or "[error: invalid volume path]"
+        if not os.path.isfile(full):
+            return f"[error: file not found: {full}]"
+        with open(full, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+
+
+    def workspace_write(path: str, content: str) -> str:
+        full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
+        if path_error is not None or full is None:
+            return path_error or "[error: invalid workspace path]"
+        os.makedirs(os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(str(content))
+        return full
+
+
+    def workspace_read(path: str) -> str:
+        full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
+        if path_error is not None or full is None:
+            return path_error or "[error: invalid workspace path]"
+        if not os.path.isfile(full):
+            return f"[error: file not found: {full}]"
+        with open(full, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+
+
+    def workspace_append(path: str, content: str) -> str:
+        full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
+        if path_error is not None or full is None:
+            return path_error or "[error: invalid workspace path]"
+        os.makedirs(os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
+        with open(full, "a", encoding="utf-8") as handle:
+            handle.write(str(content))
+        return full
+
+
+    def workspace_list(pattern: str = "*") -> list[str]:
+        base = pathlib.Path(os.path.realpath(str(WORKSPACE_VOLUME_ROOT)))
+        if not base.exists():
+            return []
+        files = glob.glob(str(base / "**" / pattern), recursive=True)
+        results: list[str] = []
+        for found in files:
+            candidate = pathlib.Path(os.path.realpath(found))
+            if not candidate.is_file():
+                continue
+            if candidate != base and not str(candidate).startswith(str(base) + os.sep):
+                continue
+            results.append(os.fsdecode(os.path.relpath(candidate, base)))
+        return sorted(results)
 
 
     def collapse_preview(text: str, limit: int = 240) -> str:
@@ -837,6 +977,52 @@ DAYTONA_DRIVER_SOURCE = (
             return message.get("value")
 
 
+    def register_host_tools(tool_names: list[object]) -> None:
+        for raw_name in tool_names:
+            name = str(raw_name or "").strip()
+            if not name or not name.isidentifier() or keyword.iskeyword(name):
+                continue
+            if name in {
+                "run",
+                "read_file",
+                "list_files",
+                "find_files",
+                "grep_repo",
+                "chunk_text",
+                "chunk_file",
+                "store_prompt",
+                "list_prompts",
+                "read_prompt_slice",
+                "read_file_slice",
+                "peek",
+                "grep",
+                "add_buffer",
+                "get_buffer",
+                "clear_buffer",
+                "save_to_volume",
+                "load_from_volume",
+                "workspace_write",
+                "workspace_read",
+                "workspace_list",
+                "workspace_append",
+                "llm_query",
+                "llm_query_batched",
+                "rlm_query",
+                "rlm_query_batched",
+                "SUBMIT",
+            }:
+                continue
+
+            def _host_tool(*args: object, __name: str = name, **kwargs: object) -> object:
+                return request_host_callback(
+                    __name,
+                    {"args": list(args), "kwargs": kwargs},
+                )
+
+            _host_tool.__name__ = name
+            STATE[name] = _host_tool
+
+
     def llm_query(task: object) -> object:
         return request_host_callback("llm_query", {"task": task})
 
@@ -889,6 +1075,11 @@ DAYTONA_DRIVER_SOURCE = (
         final_artifact = None
         callback_count = 0
         install_submit(message.get("submit_schema"))
+        variables = message.get("variables", {}) or {}
+        if not isinstance(variables, dict):
+            variables = {}
+        STATE.update({str(key): value for key, value in variables.items()})
+        register_host_tools(list(message.get("tool_names", []) or []))
         stdout = io.StringIO()
         stderr = io.StringIO()
         progress_stdout = ProgressCapture(

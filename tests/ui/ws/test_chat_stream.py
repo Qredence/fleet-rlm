@@ -87,18 +87,11 @@ def test_websocket_accepts_query_auth_in_dev_mode(ws_client, fake_agent: FakeCha
         assert data["data"]["text"] == "ok"
 
 
-def test_websocket_routes_daytona_runtime_messages_through_daytona_chat_agent(
+def test_websocket_routes_daytona_runtime_messages_through_shared_daytona_agent(
     ws_client,
     fake_agent: FakeChatAgent,
     websocket_auth_headers,
-    monkeypatch,
 ):
-    monkeypatch.setattr(
-        "fleet_rlm.runners.build_react_chat_agent",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("Modal chat agent should not bootstrap for Daytona turns")
-        ),
-    )
     fake_agent.set_events(
         [
             StreamEvent(

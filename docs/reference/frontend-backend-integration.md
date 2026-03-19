@@ -98,7 +98,7 @@ Deprecated/planned surfaces removed from backend:
 - Auth claims are canonical tenant/user authority.
 - `runtime_mode` selects the top-level runtime:
   - `modal_chat` for the default product path
-  - `daytona_pilot` for the experimental workbench path
+  - `daytona_pilot` for the Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
 - Daytona `message` frames may also carry `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 - Daytona requests reject request-side `max_depth`, and `repo_ref` requires

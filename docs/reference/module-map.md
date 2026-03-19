@@ -159,7 +159,7 @@ graph LR
 | --- | --- | --- |
 | `infrastructure/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py` |
 | `infrastructure/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
-| `infrastructure/providers/daytona/` | Experimental Daytona runtime | `chat_agent.py`, `runner.py`, `dspy_modules.py`, `config.py` |
+| `infrastructure/providers/daytona/` | Experimental Daytona interpreter backend | `chat_agent.py`, `interpreter.py`, `sandbox.py`, `config.py` |
 | `features/analytics/` | Telemetry and evaluation | `client.py`, `posthog_callback.py`, `mlflow_integration.py`, `trace_context.py` |
 | `features/terminal/` | Terminal chat UX | `chat.py`, `commands.py`, `settings.py`, `ui.py` |
 | `features/scaffold/` | Packaged Codex/Claude assets | `skills/`, `agents/`, `hooks/`, `teams/` |
@@ -174,7 +174,6 @@ working while the real implementation lives elsewhere.
 | `fleet_rlm.runners` | `fleet_rlm.cli.runners` |
 | `fleet_rlm.scaffold` | `fleet_rlm.utils.scaffold` |
 | `fleet_rlm.analytics` | `fleet_rlm.features.analytics` |
-| `fleet_rlm.daytona_rlm` | CLI-facing Daytona pilot compatibility layer |
 
 ## Verification
 

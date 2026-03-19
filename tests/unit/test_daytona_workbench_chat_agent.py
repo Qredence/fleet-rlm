@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
+import dspy
+import pytest
 
+from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.core.models import StreamEvent
 from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
     DaytonaWorkbenchChatAgent,
 )
-from fleet_rlm.infrastructure.providers.daytona.types import RolloutBudget
 
 
 class _FakeSession:
@@ -16,32 +17,46 @@ class _FakeSession:
         self.sandbox_id = "sbx-root"
         self.closed = 0
         self.deleted = 0
+        self.driver_started = 0
 
-    def close_driver(self) -> None:
+    async def astart_driver(self, *, timeout: float) -> None:
+        _ = timeout
+        self.driver_started += 1
+
+    def start_driver(self, *, timeout: float) -> None:
+        _ = timeout
+        self.driver_started += 1
+
+    async def aclose_driver(self) -> None:
         self.closed += 1
 
-    def delete(self) -> None:
+    async def adelete(self) -> None:
         self.deleted += 1
 
 
 class _FakeRuntime:
     def __init__(self, session: _FakeSession) -> None:
         self.session = session
-        self.calls: list[tuple[str | None, str | None, list[str]]] = []
+        self._resolved_config = object()
+        self.create_calls: list[
+            tuple[str | None, str | None, list[str], str | None]
+        ] = []
         self.resume_calls: list[tuple[str, str | None, str | None, str]] = []
 
-    def create_workspace_session(
+    async def acreate_workspace_session(
         self,
         *,
         repo_url: str | None,
         ref: str | None,
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
-    ):
-        self.calls.append((repo_url, ref, list(context_paths or [])))
+    ) -> _FakeSession:
+        self.create_calls.append(
+            (repo_url, ref, list(context_paths or []), volume_name)
+        )
         return self.session
 
-    def resume_workspace_session(
+    async def aresume_workspace_session(
         self,
         *,
         sandbox_id: str,
@@ -49,59 +64,65 @@ class _FakeRuntime:
         ref: str | None,
         workspace_path: str,
         context_sources=None,
-    ):
+    ) -> _FakeSession:
         _ = context_sources
         self.resume_calls.append((sandbox_id, repo_url, ref, workspace_path))
         return self.session
 
 
-class _FakeRunner:
-    init_kwargs: dict[str, object] | None = None
-    last_run_kwargs: dict[str, object] | None = None
-
-    def __init__(self, **kwargs) -> None:
-        _FakeRunner.init_kwargs = kwargs
-
-    def run(self, **kwargs):
-        _FakeRunner.last_run_kwargs = kwargs
-        return SimpleNamespace()
-
-
-def test_daytona_workbench_chat_agent_delegates_to_runner_with_session(
+@pytest.mark.asyncio
+async def test_daytona_workbench_chat_agent_uses_shared_react_stream_with_daytona_runtime(
     monkeypatch,
 ) -> None:
-    session = _FakeSession()
-    runtime = _FakeRuntime(session)
-    planner_lm = object()
+    runtime = _FakeRuntime(_FakeSession())
     agent = DaytonaWorkbenchChatAgent(
         runtime=runtime,
-        budget=RolloutBudget(max_depth=3, batch_concurrency=6),
-        planner_lm=planner_lm,
-        output_dir=Path("results/daytona-rlm"),
     )
+    assert isinstance(agent, RLMReActChatAgent)
+    forwarded_calls: list[dict[str, object]] = []
 
-    monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.chat_agent.DaytonaRLMRunner",
-        _FakeRunner,
-    )
+    async def _fake_stream(self, *args, **kwargs):
+        forwarded_calls.append(kwargs)
+        yield StreamEvent(
+            kind="final",
+            text="Daytona done",
+            payload={"history_turns": 1},
+        )
 
-    _ = agent._run_turn_blocking(
-        message="inspect recursive reasoning",
-        repo_url=None,
-        repo_ref=None,
-        context_paths=[],
-        budget=RolloutBudget(max_depth=3, batch_concurrency=6),
-        event_callback=lambda event: None,
-        cancel_check=lambda: False,
-        volume_name="tenant-a",
-    )
+    monkeypatch.setattr(RLMReActChatAgent, "aiter_chat_turn_stream", _fake_stream)
 
-    assert _FakeRunner.init_kwargs is not None
-    assert _FakeRunner.init_kwargs["lm"] is planner_lm
-    assert _FakeRunner.init_kwargs["volume_name"] == "tenant-a"
-    assert _FakeRunner.last_run_kwargs is not None
-    assert _FakeRunner.last_run_kwargs["session"] is session
-    assert _FakeRunner.last_run_kwargs["task"] == "inspect recursive reasoning"
+    events = [
+        event
+        async for event in agent.aiter_chat_turn_stream(
+            "inspect recursive reasoning",
+            repo_url="https://github.com/example/repo.git",
+            repo_ref="main",
+            context_paths=["docs/spec.md"],
+            batch_concurrency=6,
+            volume_name="tenant-a",
+        )
+    ]
+
+    assert len(events) == 2
+    assert events[0].kind == "status"
+    assert events[0].payload["runtime"]["runtime_mode"] == "daytona_pilot"
+    assert events[0].payload["runtime"]["volume_name"] == "tenant-a"
+    assert events[1].kind == "final"
+    assert events[1].payload["runtime_mode"] == "daytona_pilot"
+    assert events[1].payload["runtime"]["runtime_mode"] == "daytona_pilot"
+    assert runtime.create_calls == []
+    assert forwarded_calls == [
+        {
+            "message": "inspect recursive reasoning",
+            "trace": True,
+            "cancel_check": None,
+            "docs_path": None,
+        }
+    ]
+    assert agent.interpreter.repo_url == "https://github.com/example/repo.git"
+    assert agent.interpreter.repo_ref == "main"
+    assert agent.interpreter.context_paths == ["docs/spec.md"]
+    assert agent.interpreter.volume_name == "tenant-a"
 
 
 def test_exported_daytona_session_state_can_resume_existing_sandbox() -> None:
@@ -111,14 +132,27 @@ def test_exported_daytona_session_state_can_resume_existing_sandbox() -> None:
         runtime=runtime,
         delete_session_on_shutdown=False,
     )
-    agent.repo_url = "https://github.com/example/repo.git"
-    agent.repo_ref = "main"
-    agent.context_paths = ["/tmp/context.md"]
-    agent._session = session
-    agent._session_source_key = (
+    agent.loaded_document_paths = ["docs/spec.md"]
+    agent.history = dspy.History(
+        messages=[
+            {
+                "user_request": "Inspect the repo.",
+                "assistant_response": "Done.",
+            }
+        ]
+    )
+    agent.interpreter.configure_workspace(
+        repo_url="https://github.com/example/repo.git",
+        repo_ref="main",
+        context_paths=["docs/spec.md"],
+        volume_name="tenant-a",
+    )
+    agent.interpreter._session = session
+    agent.interpreter._session_source_key = (
         "https://github.com/example/repo.git",
         "main",
-        ("/tmp/context.md",),
+        ("docs/spec.md",),
+        "tenant-a",
     )
 
     exported = agent.export_session_state()
@@ -128,13 +162,9 @@ def test_exported_daytona_session_state_can_resume_existing_sandbox() -> None:
         delete_session_on_shutdown=False,
     )
     restored.import_session_state(exported)
-    resumed = restored._ensure_session(
-        repo_url="https://github.com/example/repo.git",
-        repo_ref="main",
-        context_paths=["/tmp/context.md"],
-    )
+    restored.interpreter.start()
 
-    assert resumed is session
+    assert restored.loaded_document_paths == ["docs/spec.md"]
     assert runtime.resume_calls == [
         (
             "sbx-root",
@@ -152,7 +182,7 @@ def test_shutdown_preserves_remote_session_when_configured() -> None:
         runtime=runtime,
         delete_session_on_shutdown=False,
     )
-    agent._session = session
+    agent.interpreter._session = session
 
     agent.shutdown()
 

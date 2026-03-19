@@ -22,6 +22,7 @@ from fleet_rlm.infrastructure.providers.daytona.protocol import (
 )
 from fleet_rlm.infrastructure.providers.daytona.sdk import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+    build_async_daytona_client,
     build_daytona_client,
 )
 from fleet_rlm.infrastructure.providers.daytona.sandbox import (
@@ -280,6 +281,10 @@ def _patch_daytona_sdk(
         lambda config=None: _FakeDaytona(config),
     )
     monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_async_daytona_client",
+        lambda config=None: _FakeDaytona(config),
+    )
+    monkeypatch.setattr(
         "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
         None,
     )
@@ -305,6 +310,39 @@ def test_build_daytona_client_uses_explicit_python_sdk_config(
     )
 
     build_daytona_client(config=_resolved_config())
+
+    assert captured["config_kwargs"] == {
+        "api_key": "key",
+        "api_url": "https://api.daytona.example",
+        "target": None,
+    }
+    assert captured["client_config"] is not None
+
+
+def test_build_async_daytona_client_uses_explicit_python_sdk_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeDaytonaConfig:
+        def __init__(self, **kwargs):
+            captured["config_kwargs"] = kwargs
+
+    class _FakeAsyncDaytona:
+        def __init__(self, config=None):
+            captured["client_config"] = config
+
+    monkeypatch.setitem(
+        sys.modules,
+        "daytona",
+        SimpleNamespace(
+            AsyncDaytona=_FakeAsyncDaytona,
+            Daytona=_FakeAsyncDaytona,
+            DaytonaConfig=_FakeDaytonaConfig,
+        ),
+    )
+
+    build_async_daytona_client(config=_resolved_config())
 
     assert captured["config_kwargs"] == {
         "api_key": "key",
@@ -363,6 +401,10 @@ def test_daytona_runtime_mounts_workspace_volume_via_python_sdk(
 
     monkeypatch.setattr(
         "fleet_rlm.infrastructure.providers.daytona.sandbox.build_daytona_client",
+        lambda config=None: _FakeDaytonaClient(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_async_daytona_client",
         lambda config=None: _FakeDaytonaClient(),
     )
     monkeypatch.setattr(
@@ -458,6 +500,34 @@ def test_daytona_sandbox_driver_persists_state_and_supports_submit():
     assert second.final_artifact["finalization_mode"] == "SUBMIT"
 
 
+@pytest.mark.asyncio
+async def test_daytona_async_sandbox_driver_persists_state_and_supports_submit():
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        workspace_path="/workdir/workspace/repo",
+    )
+
+    await session.astart_driver(timeout=1.0)
+    first = await session.aexecute_code(
+        code="counter = 4",
+        callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
+        timeout=1.0,
+    )
+    second = await session.aexecute_code(
+        code="counter += 6\nSUBMIT(counter)",
+        callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
+        timeout=1.0,
+    )
+
+    assert first.final_artifact is None
+    assert second.final_artifact is not None
+    assert second.final_artifact["value"] == 10
+    assert second.final_artifact["finalization_mode"] == "SUBMIT"
+
+
 def test_daytona_sandbox_driver_supports_typed_submit_schema():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
@@ -529,7 +599,8 @@ def test_daytona_sandbox_driver_returns_structured_errors():
     assert "ValueError: boom" in response.error
 
 
-def test_daytona_sandbox_execute_code_forwards_progress_events():
+@pytest.mark.asyncio
+async def test_daytona_sandbox_execute_code_forwards_progress_events():
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
@@ -537,11 +608,13 @@ def test_daytona_sandbox_execute_code_forwards_progress_events():
         ref="main",
         workspace_path="/workdir/workspace/repo",
     )
-    session.start_driver = lambda timeout=1.0: None
+    session.astart_driver = lambda timeout=1.0: asyncio.sleep(0)
     sent_frames: list[dict[str, object]] = []
-    session._send_frame = lambda payload: sent_frames.append(payload)
+    session._asend_frame = lambda payload: asyncio.sleep(
+        0, result=sent_frames.append(payload)
+    )
 
-    def _read_until(predicate, timeout, cancel_check=None):
+    async def _read_until(predicate, timeout, cancel_check=None):
         del predicate, timeout, cancel_check
         request_id = str(sent_frames[0]["request_id"])
         if not emitted:
@@ -556,10 +629,10 @@ def test_daytona_sandbox_execute_code_forwards_progress_events():
             duration_ms=1,
         ).to_dict()
 
-    session._read_until = _read_until
+    session._aread_until = _read_until
 
     emitted: list[ExecutionEventFrame] = []
-    response = session.execute_code(
+    response = await session.aexecute_code(
         code="print('loading repository')",
         callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
         timeout=1.0,
@@ -633,7 +706,7 @@ def test_daytona_runtime_clones_branch(monkeypatch: pytest.MonkeyPatch):
     fake_sandbox = _FakeSandbox()
     _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._list_remote_refs",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox._list_remote_refs",
         lambda repo_url: {"main"},
     )
 
@@ -688,7 +761,7 @@ def test_resolve_clone_ref_uses_longest_matching_remote_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._list_remote_refs",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox._list_remote_refs",
         lambda repo_url: {"main", "release/2026-03", "feature/foo"},
     )
 
@@ -753,6 +826,106 @@ def test_daytona_runtime_can_resume_existing_workspace_session(
     assert "sandbox_resume" in session.phase_timings_ms
 
 
+@pytest.mark.asyncio
+async def test_daytona_async_runtime_uses_workspace_volume_and_resume_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_sandbox = _FakeSandbox()
+    captured: dict[str, object] = {}
+
+    class _FakeVolume:
+        id = "vol-async"
+
+    class _FakeVolumeService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def get(self, name: str, create: bool = False):
+            self.calls.append((name, create))
+            return _FakeVolume()
+
+    class _FakeVolumeMount:
+        def __init__(
+            self, *, volume_id: str, mount_path: str, subpath: str | None = None
+        ):
+            self.volume_id = volume_id
+            self.mount_path = mount_path
+            self.subpath = subpath
+
+    class _FakeCreateSandboxFromSnapshotParams:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    volume_service = _FakeVolumeService()
+
+    class _FakeAsyncDaytonaClient:
+        def __init__(self) -> None:
+            self.volume = volume_service
+
+        async def create(self, params=None):
+            captured["create_params"] = params
+            return fake_sandbox
+
+        async def get(self, sandbox_id: str):
+            assert sandbox_id == fake_sandbox.id
+            return fake_sandbox
+
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_async_daytona_client",
+        lambda config=None: _FakeAsyncDaytonaClient(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.AsyncDaytona",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.VolumeMount",
+        _FakeVolumeMount,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.CreateSandboxFromSnapshotParams",
+        _FakeCreateSandboxFromSnapshotParams,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
+        None,
+    )
+
+    runtime = DaytonaSandboxRuntime(config=_resolved_config())
+    session = await runtime.acreate_workspace_session(
+        repo_url=None,
+        ref=None,
+        context_paths=None,
+        volume_name="tenant-async",
+    )
+    resumed = await runtime.aresume_workspace_session(
+        sandbox_id="sbx-123",
+        repo_url=None,
+        ref=None,
+        workspace_path=session.workspace_path,
+        context_sources=[],
+    )
+
+    assert volume_service.calls == [("tenant-async", True)]
+    params = captured["create_params"]
+    mounts = params.kwargs["volumes"]
+    assert mounts[0].volume_id == "vol-async"
+    assert mounts[0].mount_path == str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH)
+    assert resumed.sandbox_id == "sbx-123"
+
+
 def test_daytona_runtime_supports_reasoning_only_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -781,7 +954,7 @@ def test_daytona_runtime_stages_document_context_without_repo(
     doc_path.write_bytes(b"%PDF-1.7 fake")
     _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox.read_document_content",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.read_document_content",
         lambda path: (
             f"Extracted {path.name}",
             {
@@ -824,7 +997,7 @@ def test_daytona_runtime_surfaces_ocr_required_for_scanned_pdf_context(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox.read_document_content",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.read_document_content",
         _raise_scanned_pdf,
     )
 
@@ -844,14 +1017,18 @@ def test_daytona_runtime_surfaces_ocr_required_for_scanned_pdf_context(
 def test_daytona_runtime_raises_helpful_error_when_sdk_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr("fleet_rlm.daytona_rlm.sandbox.Daytona", None)
-    monkeypatch.setattr("fleet_rlm.daytona_rlm.sandbox.DaytonaConfig", None)
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox.SessionExecuteRequest",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona", None
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig", None
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
         None,
     )
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._DAYTONA_IMPORT_ERROR",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
         ImportError("missing daytona"),
     )
 
@@ -880,7 +1057,7 @@ def test_daytona_runtime_stages_directory_context_with_skipped_files(
 
     _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox.read_document_content",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.read_document_content",
         _fake_read_document_content,
     )
 

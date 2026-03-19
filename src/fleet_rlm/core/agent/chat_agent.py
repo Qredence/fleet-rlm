@@ -11,9 +11,7 @@ in :mod:`fleet_rlm.core.execution.streaming`, and command dispatch in
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
-from contextlib import suppress
 from typing import Any, Callable, Iterable, Literal
 
 import dspy
@@ -32,6 +30,34 @@ from fleet_rlm.core.models.streaming import StreamEvent
 from fleet_rlm.core.tools import ExecutionMode, build_tool_list
 
 from .commands import execute_command as _execute_command
+from .chat_session_state import (
+    append_history as _append_history_state,
+    export_session_state as _export_session_state,
+    forced_delegate_context as _forced_delegate_context_state,
+    history_messages as _history_messages,
+    history_turns as _history_turns,
+    import_session_state as _import_session_state,
+)
+from .chat_turns import (
+    TurnMetricsSnapshot,
+    build_turn_result as _build_turn_result_payload,
+    claim_delegate_slot as _claim_delegate_slot_state,
+    finalize_turn as _finalize_turn_state,
+    prediction_guardrail_warnings as _prediction_guardrail_warnings_state,
+    prediction_response_and_trajectory as _prediction_response_and_trajectory_state,
+    prepare_routed_turn as _prepare_routed_turn_state,
+    prepare_turn as _prepare_turn_state,
+    record_delegate_fallback as _record_delegate_fallback_state,
+    record_delegate_truncation as _record_delegate_truncation_state,
+    snapshot_turn_metrics as _snapshot_turn_metrics,
+    turn_metrics_from_prediction as _turn_metrics_from_prediction,
+)
+from .forced_routing import (
+    ForcedFinalPayloadInput,
+    aiter_forced_rlm_turn_stream as _aiter_forced_rlm_turn_stream_impl,
+    forced_stream_final_payload as _forced_stream_final_payload_impl,
+    prediction_from_forced_rlm_result as _prediction_from_forced_rlm_result_impl,
+)
 from .memory import CoreMemoryMixin
 from .rlm_agent import spawn_delegate_sub_agent_async
 from .tool_delegation import TOOL_DELEGATE_NAMES, get_tool_by_name
@@ -232,31 +258,11 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def export_session_state(self) -> dict[str, Any]:
         """Export serializable session state for persistence."""
-        return {
-            "history": self.history_messages(),
-            **self.get_document_cache_state(),
-            "core_memory": self._core_memory,
-        }
+        return _export_session_state(self)
 
     def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """Restore session state from a previously exported payload."""
-        history = state.get("history", [])
-        if not isinstance(history, list):
-            history = []
-        self.history = dspy.History(messages=history)
-
-        self.restore_document_cache_state(state)
-
-        core_memory = state.get("core_memory")
-        self.set_core_memory(core_memory)
-
-        return {
-            "status": "ok",
-            "history_turns": self.history_turns(),
-            "documents": len(self._document_cache),
-            "active_alias": self.active_alias,
-            "core_memory_keys": self.get_core_memory_keys(),
-        }
+        return _import_session_state(self, state)
 
     # -----------------------------------------------------------------
     # DSPy Module forward
@@ -335,34 +341,9 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             trajectory=trajectory,
             guardrail_warnings=guardrail_warnings,
             include_core_memory_snapshot=True,
-            turn_metrics={
-                "effective_max_iters": int(
-                    getattr(
-                        prediction,
-                        "effective_max_iters",
-                        self._current_effective_max_iters,
-                    )
-                ),
-                "delegate_calls_turn": int(
-                    getattr(
-                        prediction, "delegate_calls_turn", self._delegate_calls_turn
-                    )
-                ),
-                "delegate_fallback_count_turn": int(
-                    getattr(
-                        prediction,
-                        "delegate_fallback_count_turn",
-                        self._delegate_fallback_count_turn,
-                    )
-                ),
-                "delegate_result_truncated_count_turn": int(
-                    getattr(
-                        prediction,
-                        "delegate_result_truncated_count_turn",
-                        self._delegate_result_truncated_count_turn,
-                    )
-                ),
-            },
+            turn_metrics=_turn_metrics_from_prediction(
+                prediction, _snapshot_turn_metrics(self)
+            ),
         )
 
     def iter_chat_turn_stream(
@@ -504,7 +485,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
                 trajectory=trajectory,
                 guardrail_warnings=warnings,
                 include_core_memory_snapshot=False,
-                turn_metrics=self._turn_metrics(),
+                turn_metrics=_snapshot_turn_metrics(self),
             )
 
         self.start()
@@ -529,7 +510,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             trajectory=trajectory,
             guardrail_warnings=warnings,
             include_core_memory_snapshot=False,
-            turn_metrics=self._turn_metrics(),
+            turn_metrics=_snapshot_turn_metrics(self),
         )
 
     async def aiter_chat_turn_stream(
@@ -640,66 +621,12 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         )
 
     def _forced_delegate_context(self) -> str:
-        parts: list[str] = []
-
-        core_memory = str(self.fmt_core_memory() or "").strip()
-        if core_memory:
-            parts.append(f"Core memory:\n{core_memory}")
-
-        history_lines: list[str] = []
-        for item in self.history_messages()[-6:]:
-            if not isinstance(item, dict):
-                continue
-            user_request = str(item.get("user_request", "") or "").strip()
-            assistant_response = str(item.get("assistant_response", "") or "").strip()
-            if user_request:
-                history_lines.append(f"User: {user_request}")
-            if assistant_response:
-                history_lines.append(f"Assistant: {assistant_response}")
-
-        if history_lines:
-            parts.append("Recent conversation:\n" + "\n".join(history_lines))
-
-        return "\n\n".join(parts)
+        return _forced_delegate_context_state(self)
 
     def _prediction_from_forced_rlm_result(
         self, result: dict[str, Any]
     ) -> dspy.Prediction:
-        trajectory = result.get("trajectory", {})
-        if not isinstance(trajectory, dict):
-            trajectory = {}
-
-        assistant_response = str(
-            result.get("assistant_response") or result.get("answer") or ""
-        ).strip()
-        self._finalize_turn(trajectory)
-        assistant_response, warnings = self._validate_assistant_response(
-            assistant_response=assistant_response,
-            trajectory=trajectory,
-        )
-
-        prediction = dspy.Prediction(
-            assistant_response=assistant_response,
-            trajectory=trajectory,
-        )
-        final_reasoning = str(result.get("final_reasoning") or "").strip()
-        if final_reasoning:
-            setattr(prediction, "final_reasoning", final_reasoning)
-        if warnings:
-            setattr(prediction, "guardrail_warnings", warnings)
-        setattr(prediction, "effective_max_iters", self._current_effective_max_iters)
-        setattr(prediction, "delegate_calls_turn", self._delegate_calls_turn)
-        setattr(
-            prediction,
-            "delegate_fallback_count_turn",
-            self._delegate_fallback_count_turn,
-        )
-        setattr(
-            prediction,
-            "delegate_result_truncated_count_turn",
-            self._delegate_result_truncated_count_turn,
-        )
-        return prediction
+        return _prediction_from_forced_rlm_result_impl(self, result)
 
     def _forced_stream_final_payload(
         self,
@@ -709,14 +636,14 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         final_reasoning: str,
         ctx: StreamingContext,
     ) -> dict[str, Any]:
-        return ctx.enrich(
-            {
-                "trajectory": trajectory,
-                "history_turns": self.history_turns(),
-                "guardrail_warnings": guardrail_warnings,
-                "final_reasoning": final_reasoning,
-                **self._turn_metrics(),
-            }
+        return _forced_stream_final_payload_impl(
+            self,
+            payload_input=ForcedFinalPayloadInput(
+                trajectory=trajectory,
+                guardrail_warnings=guardrail_warnings,
+                final_reasoning=final_reasoning,
+            ),
+            ctx=ctx,
         )
 
     async def _aiter_forced_rlm_turn_stream(
@@ -725,99 +652,10 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         message: str,
         cancel_check: Callable[[], bool] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        if not message or not message.strip():
-            raise ValueError("message cannot be empty")
-
-        await self.astart()
-        effective_max_iters = self.prepare_routed_turn()
-        ctx = StreamingContext.from_agent(self, effective_max_iters=effective_max_iters)
-
-        yield StreamEvent(
-            kind="status",
-            text="Execution mode: RLM only",
-            payload=ctx.enrich({"forced": True}),
-        )
-        yield StreamEvent(
-            kind="rlm_executing",
-            text="tool call: rlm_query",
-            payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
-        )
-
-        pending_events: asyncio.Queue[StreamEvent] = asyncio.Queue()
-
-        async def _queue_event(event: Any) -> None:
-            if isinstance(event, StreamEvent):
-                await pending_events.put(event)
-
-        task = asyncio.create_task(
-            spawn_delegate_sub_agent_async(
-                self,
-                prompt=message,
-                context=self._forced_delegate_context(),
-                stream_event_callback=_queue_event,
-            )
-        )
-
-        try:
-            while True:
-                if cancel_check is not None and cancel_check():
-                    task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        _ = await task
-                    cancelled_text = "[cancelled]"
-                    self._append_history(message, cancelled_text)
-                    yield StreamEvent(
-                        kind="cancelled",
-                        text=cancelled_text,
-                        payload={
-                            "history_turns": self.history_turns(),
-                            **self._turn_metrics(),
-                        },
-                    )
-                    return
-
-                try:
-                    event = await asyncio.wait_for(pending_events.get(), timeout=0.05)
-                except asyncio.TimeoutError:
-                    if task.done():
-                        break
-                    continue
-
-                yield event
-
-            forced_result = await task
-        finally:
-            if not task.done():
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    _ = await task
-
-        while not pending_events.empty():
-            yield pending_events.get_nowait()
-
-        prediction = self._prediction_from_forced_rlm_result(forced_result)
-        assistant_response, trajectory = self._prediction_response_and_trajectory(
-            prediction
-        )
-        guardrail_warnings = self._prediction_guardrail_warnings(prediction)
-        self._append_history(message, assistant_response)
-
-        yield StreamEvent(
-            kind="tool_result",
-            text="tool result: rlm_query completed",
-            payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
-        )
-        yield StreamEvent(
-            kind="final",
-            flush_tokens=True,
-            text=assistant_response,
-            payload=self._forced_stream_final_payload(
-                trajectory=trajectory,
-                guardrail_warnings=guardrail_warnings,
-                final_reasoning=str(getattr(prediction, "final_reasoning", "") or ""),
-                ctx=ctx,
-            ),
-        )
+        async for event in _aiter_forced_rlm_turn_stream_impl(
+            self, message=message, cancel_check=cancel_check
+        ):
+            yield event
 
     def get_runtime_module(self, name: str) -> dspy.Module:
         """Return a cached long-context runtime module by name.
@@ -828,53 +666,27 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def history_messages(self) -> list[Any]:
         """Return chat history messages as a defensive list copy."""
-        messages = getattr(self.history, "messages", None)
-        if messages is None:
-            return []
-        try:
-            return list(messages)
-        except TypeError:
-            return []
+        return _history_messages(self)
 
     def history_turns(self) -> int:
         """Return number of stored history turns safely."""
-        return len(self.history_messages())
+        return _history_turns(self)
 
     def _append_history(self, user_request: str, assistant_response: str) -> None:
-        messages = self.history_messages()
-        messages.append(
-            {
-                "user_request": user_request,
-                "assistant_response": assistant_response,
-            }
-        )
-        if self.history_max_turns is not None and self.history_max_turns > 0:
-            messages = messages[-self.history_max_turns :]
-        self.history = dspy.History(messages=messages)
+        _append_history_state(self, user_request, assistant_response)
 
     def _turn_metrics(self) -> dict[str, int]:
-        return {
-            "effective_max_iters": int(self._current_effective_max_iters),
-            "delegate_calls_turn": int(self._delegate_calls_turn),
-            "delegate_fallback_count_turn": int(self._delegate_fallback_count_turn),
-            "delegate_result_truncated_count_turn": int(
-                self._delegate_result_truncated_count_turn
-            ),
-        }
+        return _snapshot_turn_metrics(self).as_payload()
 
     @staticmethod
     def _prediction_response_and_trajectory(
         prediction: dspy.Prediction,
     ) -> tuple[str, dict[str, Any]]:
-        assistant_response = str(getattr(prediction, "assistant_response", "")).strip()
-        trajectory = getattr(prediction, "trajectory", {})
-        if not isinstance(trajectory, dict):
-            trajectory = {}
-        return assistant_response, trajectory
+        return _prediction_response_and_trajectory_state(prediction)
 
     @staticmethod
     def _prediction_guardrail_warnings(prediction: dspy.Prediction) -> list[str]:
-        return list(getattr(prediction, "guardrail_warnings", []) or [])
+        return _prediction_guardrail_warnings_state(prediction)
 
     def _build_turn_result(
         self,
@@ -883,61 +695,26 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         trajectory: dict[str, Any],
         guardrail_warnings: list[str],
         include_core_memory_snapshot: bool,
-        turn_metrics: dict[str, Any],
+        turn_metrics: TurnMetricsSnapshot,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "assistant_response": assistant_response,
-            "trajectory": trajectory,
-            "history_turns": self.history_turns(),
-            "guardrail_warnings": guardrail_warnings,
-            "effective_max_iters": int(
-                turn_metrics.get(
-                    "effective_max_iters", self._current_effective_max_iters
-                )
-            ),
-            "delegate_calls_turn": int(
-                turn_metrics.get("delegate_calls_turn", self._delegate_calls_turn)
-            ),
-            "delegate_fallback_count_turn": int(
-                turn_metrics.get(
-                    "delegate_fallback_count_turn", self._delegate_fallback_count_turn
-                )
-            ),
-            "delegate_result_truncated_count_turn": int(
-                turn_metrics.get(
-                    "delegate_result_truncated_count_turn",
-                    self._delegate_result_truncated_count_turn,
-                )
-            ),
-        }
-        if include_core_memory_snapshot:
-            payload["core_memory_snapshot"] = self.get_core_memory_snapshot()
-        return payload
+        if not isinstance(turn_metrics, TurnMetricsSnapshot):
+            turn_metrics = _snapshot_turn_metrics(self)
+        return _build_turn_result_payload(
+            self,
+            assistant_response=assistant_response,
+            trajectory=trajectory,
+            guardrail_warnings=guardrail_warnings,
+            include_core_memory_snapshot=include_core_memory_snapshot,
+            turn_metrics=turn_metrics,
+        )
 
     def _prepare_turn(self, user_request: str) -> int:
         """Initialize per-turn counters and compute effective iteration budget."""
-        self._delegate_calls_turn = 0
-        self._delegate_fallback_count_turn = 0
-        self._delegate_result_truncated_count_turn = 0
-        self._current_effective_max_iters = self._compute_effective_max_iters(
-            user_request
-        )
-        return self._current_effective_max_iters
+        return _prepare_turn_state(self, user_request)
 
     def prepare_routed_turn(self, *, effective_max_iters: int | None = None) -> int:
         """Reset per-turn counters for an externally-routed RLM turn."""
-        self._delegate_calls_turn = 0
-        self._delegate_fallback_count_turn = 0
-        self._delegate_result_truncated_count_turn = 0
-        self._current_effective_max_iters = max(
-            1,
-            int(
-                effective_max_iters
-                if effective_max_iters is not None
-                else self.rlm_max_iterations
-            ),
-        )
-        return self._current_effective_max_iters
+        return _prepare_routed_turn_state(self, effective_max_iters=effective_max_iters)
 
     def _compute_effective_max_iters(self, user_request: str) -> int:
         baseline = max(1, int(self.react_max_iters))
@@ -968,23 +745,19 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def _finalize_turn(self, trajectory: Any) -> None:
         """Capture post-turn metrics for adaptive follow-up turns."""
-        self._last_tool_error_count = self._count_tool_errors(trajectory)
+        _finalize_turn_state(self, trajectory)
 
     def _count_tool_errors(self, trajectory: Any) -> int:
         return count_tool_errors(trajectory)
 
     def _claim_delegate_slot(self) -> tuple[bool, int]:
-        limit = max(1, int(self.delegate_max_calls_per_turn))
-        if self._delegate_calls_turn >= limit:
-            return False, limit
-        self._delegate_calls_turn += 1
-        return True, limit
+        return _claim_delegate_slot_state(self)
 
     def _record_delegate_fallback(self) -> None:
-        self._delegate_fallback_count_turn += 1
+        _record_delegate_fallback_state(self)
 
     def _record_delegate_truncation(self) -> None:
-        self._delegate_result_truncated_count_turn += 1
+        _record_delegate_truncation_state(self)
 
     def _validate_assistant_response(
         self,

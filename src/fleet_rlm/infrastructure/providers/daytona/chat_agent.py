@@ -1,359 +1,164 @@
-"""DSPy-native chat wrapper for Daytona host-loop workbench sessions."""
+"""Thin Daytona compatibility wrapper over the shared ReAct + RLM agent."""
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable
 
-import dspy
-
+from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.core.models import StreamEvent
-from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
 
 from .chat_state import (
     dedupe_paths,
-    history_messages,
-    normalized_context_sources,
-    normalized_history_messages,
     normalize_history_turn,
-    render_cancelled_text,
     render_final_text,
 )
-from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
-from .types import ContextSource, DaytonaRunCancelled, DaytonaRunResult, RolloutBudget
+from .interpreter import DaytonaInterpreter
+from .sandbox import DaytonaSandboxRuntime
+
+_render_final_text = render_final_text
 
 
-class DaytonaWorkbenchChatAgent(dspy.Module):
-    """Stateful Daytona chat runtime that streams workbench and chat events."""
+class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
+    """Compatibility wrapper that uses Daytona as the interpreter backend only."""
 
     def __init__(
         self,
         *,
         runtime: DaytonaSandboxRuntime | None = None,
-        budget: RolloutBudget | None = None,
-        output_dir: Path | str = "results/daytona-rlm",
         history_max_turns: int | None = None,
         planner_lm: Any | None = None,
         delegate_lm: Any | None = None,
         delete_session_on_shutdown: bool = True,
+        react_max_iters: int = 15,
+        deep_react_max_iters: int = 35,
+        enable_adaptive_iters: bool = True,
+        rlm_max_iterations: int = 30,
+        rlm_max_llm_calls: int = 50,
+        max_depth: int = 2,
+        timeout: int = 900,
+        verbose: bool = False,
+        guardrail_mode: str = "off",
+        max_output_chars: int = 10000,
+        min_substantive_chars: int = 20,
+        delegate_max_calls_per_turn: int = 8,
+        delegate_result_truncation_chars: int = 8000,
     ) -> None:
-        super().__init__()
-        self.runtime = runtime
-        self.default_budget = budget or RolloutBudget()
-        self.output_dir = Path(output_dir)
-        self.history_max_turns = history_max_turns
-        self.planner_lm = planner_lm
-        self.delegate_lm = delegate_lm
-        self.delete_session_on_shutdown = delete_session_on_shutdown
-        self.history = dspy.History(messages=[])
-        self.execution_mode: str = "auto"
-        self.repo_url: str | None = None
-        self.repo_ref: str | None = None
-        self.context_paths: list[str] = []
+        _ = planner_lm
+        self.runtime = runtime or DaytonaSandboxRuntime()
         self.loaded_document_paths: list[str] = []
-        self._session: DaytonaSandboxSession | None = None
-        self._session_source_key: (
-            tuple[str | None, str | None, tuple[str, ...]] | None
-        ) = None
-        self._persisted_sandbox_id: str | None = None
-        self._persisted_workspace_path: str | None = None
-        self._persisted_context_sources: list[ContextSource] = []
 
-    def __enter__(self) -> DaytonaWorkbenchChatAgent:
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        _ = (exc_type, exc_val, exc_tb)
-        self.shutdown()
-        return False
-
-    async def __aenter__(self) -> DaytonaWorkbenchChatAgent:
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
-        _ = (exc_type, exc_val, exc_tb)
-        self.shutdown()
-        return False
-
-    def shutdown(self) -> None:
-        self._detach_session(delete=self.delete_session_on_shutdown)
-
-    def _persist_session_snapshot(
-        self, session: DaytonaSandboxSession | None = None
-    ) -> None:
-        active_session = session or self._session
-        if active_session is None:
-            return
-        self._persisted_sandbox_id = active_session.sandbox_id
-        self._persisted_workspace_path = active_session.workspace_path
-        self._persisted_context_sources = list(active_session.context_sources)
-
-    def _detach_session(self, *, delete: bool) -> None:
-        if self._session is None:
-            if delete:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-            return
-
-        active_session = self._session
-        self._persist_session_snapshot(active_session)
-        try:
-            if delete:
-                active_session.delete()
-            else:
-                active_session.close_driver()
-        finally:
-            if delete:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-            self._session = None
-            self._session_source_key = None
-
-    def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
-        _ = clear_sandbox_buffers
-        self.history = dspy.History(messages=[])
-        self.loaded_document_paths = []
-        self._detach_session(delete=True)
-        return {"status": "ok", "history_turns": 0, "buffers_cleared": True}
-
-    def history_turns(self) -> int:
-        return len(history_messages(self.history))
-
-    def set_execution_mode(self, execution_mode: str) -> None:
-        normalized = (
-            execution_mode
-            if execution_mode in {"auto", "rlm_only", "tools_only"}
-            else "auto"
+        interpreter = DaytonaInterpreter(
+            runtime=self.runtime,
+            timeout=timeout,
+            delete_session_on_shutdown=delete_session_on_shutdown,
+            max_llm_calls=rlm_max_llm_calls,
         )
-        self.execution_mode = normalized
 
-    def load_document(self, path: str, alias: str = "active") -> None:
-        _ = alias
+        super().__init__(
+            react_max_iters=react_max_iters,
+            deep_react_max_iters=deep_react_max_iters,
+            enable_adaptive_iters=enable_adaptive_iters,
+            rlm_max_iterations=rlm_max_iterations,
+            rlm_max_llm_calls=rlm_max_llm_calls,
+            timeout=timeout,
+            verbose=verbose,
+            history_max_turns=history_max_turns,
+            interpreter=interpreter,
+            max_depth=max_depth,
+            guardrail_mode=guardrail_mode,  # type: ignore[arg-type]
+            max_output_chars=max_output_chars,
+            min_substantive_chars=min_substantive_chars,
+            delegate_lm=delegate_lm,
+            delegate_max_calls_per_turn=delegate_max_calls_per_turn,
+            delegate_result_truncation_chars=delegate_result_truncation_chars,
+        )
+
+    def _build_task_prompt(self, message: str) -> str:
+        return str(message or "").strip()
+
+    def load_document(self, path: str, alias: str = "active") -> dict[str, Any]:
+        result = self._get_tool("load_document")(path, alias=alias)
         normalized = str(path or "").strip()
-        if not normalized:
-            return
-        self.loaded_document_paths = dedupe_paths(
-            [*self.loaded_document_paths, normalized]
-        )
+        if normalized:
+            self.loaded_document_paths = dedupe_paths(
+                [*self.loaded_document_paths, normalized]
+            )
+        return result
 
     def export_session_state(self) -> dict[str, Any]:
-        document_map = {path: {"path": path} for path in self.loaded_document_paths}
-        self._persist_session_snapshot()
-        context_sources = (
-            list(self._session.context_sources)
-            if self._session is not None
-            else list(self._persisted_context_sources)
-        )
-        return {
-            "history": list(normalized_history_messages(self.history)),
-            "documents": document_map,
-            "daytona": {
-                "repo_url": self.repo_url,
-                "repo_ref": self.repo_ref,
-                "context_paths": list(self.context_paths),
-                "loaded_document_paths": list(self.loaded_document_paths),
-                "execution_mode": self.execution_mode,
-                "sandbox_id": (
-                    self._session.sandbox_id
-                    if self._session is not None
-                    else self._persisted_sandbox_id
-                ),
-                "workspace_path": (
-                    self._session.workspace_path
-                    if self._session is not None
-                    else self._persisted_workspace_path
-                ),
-                "context_sources": [item.to_dict() for item in context_sources],
-            },
-        }
+        payload = super().export_session_state()
+        history = []
+        raw_history = payload.get("history", [])
+        if not isinstance(raw_history, list):
+            raw_history = []
+        for item in raw_history:
+            if not isinstance(item, dict):
+                continue
+            turn = normalize_history_turn(item)
+            if turn is not None:
+                history.append(turn)
+        payload["history"] = history
+        daytona = payload.get("daytona", {})
+        if not isinstance(daytona, dict):
+            daytona = {}
+        daytona["loaded_document_paths"] = list(self.loaded_document_paths)
+        payload["daytona"] = daytona
+        return payload
 
     def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        self._detach_session(delete=False)
+        raw_daytona = state.get("daytona", {})
+        daytona_state = raw_daytona if isinstance(raw_daytona, dict) else {}
+        self.loaded_document_paths = dedupe_paths(
+            [str(item) for item in daytona_state.get("loaded_document_paths", []) or []]
+        )
         history = state.get("history", [])
-        normalized_history: list[dict[str, str]] = []
         if isinstance(history, list):
+            normalized_history = []
             for item in history:
                 if not isinstance(item, dict):
                     continue
                 turn = normalize_history_turn(item)
                 if turn is not None:
                     normalized_history.append(turn)
-        self.history = dspy.History(messages=normalized_history)
-
-        raw_daytona = state.get("daytona", {})
-        daytona_state = raw_daytona if isinstance(raw_daytona, dict) else {}
-        self.repo_url = cast(str | None, daytona_state.get("repo_url"))
-        self.repo_ref = cast(str | None, daytona_state.get("repo_ref"))
-        self.context_paths = dedupe_paths(
-            [str(item) for item in daytona_state.get("context_paths", []) or []]
-        )
-        documents = state.get("documents", {})
-        document_paths = list(documents.keys()) if isinstance(documents, dict) else []
-        loaded_document_paths = [
-            str(item)
-            for item in daytona_state.get("loaded_document_paths", []) or document_paths
-        ]
-        self.loaded_document_paths = dedupe_paths(loaded_document_paths)
-        self.execution_mode = str(daytona_state.get("execution_mode", "auto") or "auto")
-        self._persisted_sandbox_id = cast(str | None, daytona_state.get("sandbox_id"))
-        self._persisted_workspace_path = cast(
-            str | None, daytona_state.get("workspace_path")
-        )
-        self._persisted_context_sources = normalized_context_sources(
-            daytona_state.get("context_sources", [])
-        )
-        self._session_source_key = None
-        return {
-            "status": "ok",
-            "history_turns": self.history_turns(),
-            "documents": len(self.loaded_document_paths),
-        }
-
-    def _ensure_runtime(self) -> DaytonaSandboxRuntime:
-        if self.runtime is None:
-            self.runtime = DaytonaSandboxRuntime()
-        return self.runtime
+            state = dict(state)
+            state["history"] = normalized_history
+        return super().import_session_state(state)
 
     def _effective_context_paths(
-        self, extra_context_paths: list[str] | None = None
+        self, *, docs_path: str | None, context_paths: list[str] | None
     ) -> list[str]:
         return dedupe_paths(
             [
-                *self.context_paths,
                 *self.loaded_document_paths,
-                *(extra_context_paths or []),
+                *(context_paths or []),
+                *([str(docs_path)] if docs_path else []),
             ]
         )
 
-    def _ensure_session(
+    def _configure_daytona_workspace(
         self,
         *,
+        docs_path: str | None,
         repo_url: str | None,
         repo_ref: str | None,
-        context_paths: list[str],
-        volume_name: str | None = None,
-    ) -> DaytonaSandboxSession:
-        source_key = (repo_url, repo_ref, tuple(context_paths))
-        if self._session is not None and self._session_source_key == source_key:
-            return self._session
-
-        if self._session is not None:
-            self._detach_session(delete=True)
-
-        self.repo_url = repo_url
-        self.repo_ref = repo_ref
-        self.context_paths = list(context_paths)
-        runtime = self._ensure_runtime()
-        if (
-            self._persisted_sandbox_id
-            and self._persisted_workspace_path
-            and source_key == (self.repo_url, self.repo_ref, tuple(context_paths))
-        ):
-            try:
-                self._session = runtime.resume_workspace_session(
-                    sandbox_id=self._persisted_sandbox_id,
-                    repo_url=repo_url,
-                    ref=repo_ref,
-                    workspace_path=self._persisted_workspace_path,
-                    context_sources=self._persisted_context_sources,
-                )
-                self._session_source_key = source_key
-                self._persist_session_snapshot()
-                return self._session
-            except Exception:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-        self._session = runtime.create_workspace_session(
-            repo_url=repo_url,
-            ref=repo_ref,
-            context_paths=context_paths,
-            volume_name=volume_name,
-        )
-        self._session_source_key = source_key
-        self._persist_session_snapshot()
-        return self._session
-
-    def _build_budget(
-        self,
-        *,
-        batch_concurrency: int | None,
-    ) -> RolloutBudget:
-        return RolloutBudget(
-            max_sandboxes=self.default_budget.max_sandboxes,
-            max_depth=self.default_budget.max_depth,
-            max_iterations=self.default_budget.max_iterations,
-            global_timeout=self.default_budget.global_timeout,
-            result_truncation_limit=self.default_budget.result_truncation_limit,
-            batch_concurrency=(
-                batch_concurrency
-                if batch_concurrency is not None
-                else self.default_budget.batch_concurrency
-            ),
-        )
-
-    def _build_task_prompt(self, message: str) -> str:
-        return str(message or "").strip()
-
-    def _append_history(self, *, user_request: str, assistant_response: str) -> None:
-        messages = list(normalized_history_messages(self.history))
-        turn = normalize_history_turn(
-            {
-                "user_request": user_request,
-                "assistant_response": assistant_response,
-            }
-        )
-        if turn is not None:
-            messages.append(turn)
-        if self.history_max_turns is not None and self.history_max_turns > 0:
-            messages = messages[-self.history_max_turns :]
-        self.history = dspy.History(messages=messages)
-
-    def _run_turn_blocking(
-        self,
-        *,
-        message: str,
-        repo_url: str | None,
-        repo_ref: str | None,
-        context_paths: list[str],
-        budget: RolloutBudget,
-        event_callback,
-        cancel_check,
-        volume_name: str | None = None,
-    ) -> DaytonaRunResult:
-        session = self._ensure_session(
+        context_paths: list[str] | None,
+        volume_name: str | None,
+    ) -> None:
+        self.interpreter.configure_workspace(
             repo_url=repo_url,
             repo_ref=repo_ref,
-            context_paths=context_paths,
+            context_paths=self._effective_context_paths(
+                docs_path=docs_path,
+                context_paths=context_paths,
+            ),
             volume_name=volume_name,
-        )
-        runner = DaytonaRLMRunner(
-            lm=self.planner_lm,
-            delegate_lm=self.delegate_lm,
-            runtime=self._ensure_runtime(),
-            budget=budget,
-            output_dir=self.output_dir,
-            event_callback=event_callback,
-            cancel_check=cancel_check,
-            volume_name=volume_name,
-        )
-        return runner.run(
-            repo=repo_url,
-            ref=repo_ref,
-            context_paths=context_paths,
-            task=self._build_task_prompt(message),
-            conversation_history=normalized_history_messages(self.history),
-            session=session,
         )
 
     async def aiter_chat_turn_stream(
         self,
         message: str,
         trace: bool = True,
-        cancel_check=None,
+        cancel_check: Callable[[], bool] | None = None,
         *,
         docs_path: str | None = None,
         repo_url: str | None = None,
@@ -362,170 +167,64 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
     ):
-        _ = trace
-        if docs_path:
-            self.load_document(str(docs_path))
-
-        effective_repo_url = repo_url if repo_url is not None else self.repo_url
-        effective_repo_ref = (
-            repo_ref
-            if repo_ref is not None
-            else (self.repo_ref if repo_url is None else None)
+        _ = batch_concurrency
+        self._configure_daytona_workspace(
+            docs_path=docs_path,
+            repo_url=repo_url,
+            repo_ref=repo_ref,
+            context_paths=context_paths,
+            volume_name=volume_name,
         )
-        effective_context_paths = self._effective_context_paths(context_paths)
-        budget = self._build_budget(batch_concurrency=batch_concurrency)
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
-        result_box: dict[str, DaytonaRunResult] = {}
-        error_box: dict[str, BaseException] = {}
-
-        def enqueue_event(event: StreamEvent) -> None:
-            loop.call_soon_threadsafe(queue.put_nowait, event)
-
-        if self.execution_mode == "tools_only":
-            yield StreamEvent(
-                kind="status",
-                text="Daytona workbench does not support tools-only mode; continuing with host-loop RLM reasoning.",
-                payload={
-                    "runtime_mode": "daytona_pilot",
-                    "warning": True,
-                    "execution_mode_requested": "tools_only",
-                    "execution_mode_effective": "auto",
-                },
-            )
 
         yield StreamEvent(
             kind="status",
-            text="Bootstrapping Daytona workbench runtime",
+            text="Bootstrapping Daytona RLM session",
             payload={
+                "runtime_mode": "daytona_pilot",
+                "repo_url": repo_url,
+                "repo_ref": repo_ref,
+                "context_paths": self._effective_context_paths(
+                    docs_path=docs_path,
+                    context_paths=context_paths,
+                ),
                 "runtime": {
                     "runtime_mode": "daytona_pilot",
-                    "daytona_mode": "host_loop_rlm",
-                    "run_id": None,
-                    "depth": 0,
-                    "max_depth": budget.max_depth,
-                    "effective_max_iters": budget.max_iterations,
+                    "execution_mode": self.execution_mode,
+                    "depth": self.current_depth,
+                    "max_depth": self._max_depth,
+                    "execution_profile": str(
+                        getattr(
+                            self.interpreter.default_execution_profile,
+                            "value",
+                            self.interpreter.default_execution_profile,
+                        )
+                    ),
                     "sandbox_active": False,
-                    "volume_name": volume_name,
+                    "sandbox_id": None,
+                    "effective_max_iters": max(
+                        self.react_max_iters, self.rlm_max_iterations
+                    ),
+                    "volume_name": self.interpreter.volume_name,
                 },
-                "runtime_mode": "daytona_pilot",
-                "daytona_mode": "host_loop_rlm",
-                "repo_url": effective_repo_url,
-                "repo_ref": effective_repo_ref,
-                "context_paths": effective_context_paths,
-                "volume_name": volume_name,
             },
         )
 
-        async def run_in_thread() -> None:
-            try:
-                result = await asyncio.to_thread(
-                    self._run_turn_blocking,
-                    message=message,
-                    repo_url=effective_repo_url,
-                    repo_ref=effective_repo_ref,
-                    context_paths=effective_context_paths,
-                    budget=budget,
-                    event_callback=enqueue_event,
-                    cancel_check=cancel_check,
-                    volume_name=volume_name,
-                )
-                result_box["result"] = result
-            except Exception as exc:  # noqa: BLE001 - surfaced by tests
-                error_box["error"] = exc
-
-        task = asyncio.create_task(run_in_thread())
-
-        while True:
-            if task.done() and queue.empty():
-                break
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=0.1)
-            except asyncio.TimeoutError:
-                continue
-            yield event
-
-        await task
-
-        if "error" in error_box:
-            exc = error_box["error"]
-            if isinstance(exc, DaytonaRunCancelled):
-                cancelled_text = str(exc)
-                self._append_history(
-                    user_request=message,
-                    assistant_response=cancelled_text,
-                )
-                yield StreamEvent(
-                    kind="cancelled",
-                    text=cancelled_text,
-                    payload={
-                        "runtime_mode": "daytona_pilot",
-                        "history_turns": self.history_turns(),
-                    },
-                )
-                return
-
-            error_text = str(exc)
+        async for event in super().aiter_chat_turn_stream(
+            message=message,
+            trace=trace,
+            cancel_check=cancel_check,
+            docs_path=docs_path,
+        ):
+            payload = dict(event.payload or {})
+            runtime_payload = dict(payload.get("runtime", {}) or {})
+            runtime_payload.setdefault("runtime_mode", "daytona_pilot")
+            runtime_payload.setdefault("volume_name", self.interpreter.volume_name)
+            payload["runtime"] = runtime_payload
+            payload.setdefault("runtime_mode", "daytona_pilot")
             yield StreamEvent(
-                kind="error",
-                text=error_text,
-                payload={
-                    "runtime_mode": "daytona_pilot",
-                    "history_turns": self.history_turns(),
-                },
+                kind=event.kind,
+                text=event.text,
+                payload=payload,
+                timestamp=event.timestamp,
+                flush_tokens=event.flush_tokens,
             )
-            return
-
-        result = result_box["result"]
-        root = result.nodes.get(result.root_id)
-        public_result = result.to_public_dict()
-        runtime_payload = {
-            "depth": root.depth if root is not None else 0,
-            "max_depth": result.budget.max_depth,
-            "execution_profile": "DAYTONA_PILOT_HOST_LOOP",
-            "sandbox_active": root is not None and root.sandbox_id is not None,
-            "effective_max_iters": result.budget.max_iterations,
-            "runtime_mode": "daytona_pilot",
-            "daytona_mode": "host_loop_rlm",
-            "sandbox_id": root.sandbox_id if root is not None else None,
-            "run_id": result.run_id,
-            "phase_timings_ms": dict(result.summary.phase_timings_ms),
-        }
-
-        terminal_kind = (
-            "cancelled" if result.summary.termination_reason == "cancelled" else "final"
-        )
-        terminal_text = (
-            render_cancelled_text(result)
-            if terminal_kind == "cancelled"
-            else render_final_text(
-                result.final_artifact.value if result.final_artifact else ""
-            )
-        )
-        self._append_history(user_request=message, assistant_response=terminal_text)
-
-        yield StreamEvent(
-            kind=terminal_kind,
-            text=terminal_text,
-            payload={
-                "history_turns": self.history_turns(),
-                "runtime_mode": "daytona_pilot",
-                "repo_url": result.repo or None,
-                "repo_ref": result.ref,
-                "context_sources": [item.to_dict() for item in result.context_sources],
-                "prompts": public_result.get("prompts", []),
-                "iterations": public_result.get("iterations", []),
-                "callbacks": public_result.get("callbacks", []),
-                "sources": public_result.get("sources", []),
-                "attachments": public_result.get("attachments", []),
-                "final_artifact": (
-                    result.final_artifact.to_dict()
-                    if result.final_artifact is not None
-                    else None
-                ),
-                "summary": result.summary.to_dict(),
-                "result_path": result.result_path,
-                "run_result": public_result,
-                "runtime": runtime_payload,
-            },
-        )

@@ -52,12 +52,10 @@ Preserve these command surfaces:
 - `fleet-rlm serve-mcp`
 - `fleet-rlm init`
 - `fleet-rlm daytona-smoke`
-- `fleet-rlm daytona-rlm`
 
 Important CLI/runtime nuances:
 
 - `fleet web` is not a separate backend implementation. It rewrites into `fleet-rlm serve-api --host 0.0.0.0 --port 8000`.
-- `daytona-rlm` still exposes `--max-depth` only as a deprecated compatibility flag.
 - Daytona websocket requests do not accept request-side `max_depth`; schema enforcement happens on the server side.
 
 Canonical HTTP and websocket surfaces:
@@ -80,7 +78,7 @@ Canonical HTTP and websocket surfaces:
 Runtime-mode boundaries:
 
 - `modal_chat`: builds `RLMReActChatAgent`
-- `daytona_pilot`: builds `DaytonaWorkbenchChatAgent`
+- `daytona_pilot`: uses the same `RLMReActChatAgent` backbone, configured with a Daytona-backed interpreter (`DaytonaWorkbenchChatAgent` is a thin compatibility wrapper over that shared agent)
 - `execution_mode` is Modal-only
 - Daytona request controls are `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
 - `src/fleet_rlm/api/routers/ws/chat_runtime.py` is the runtime-mode switch point
@@ -98,22 +96,37 @@ Auth, persistence, and analytics constraints:
 
 - Keep host-side Modal adapters in `core/` separate from sandbox-side protocol helpers.
 - Keep DSPy signatures and runtime modules centralized under `core/agent/signatures.py` and `core/models/rlm_runtime_modules.py`.
+- Keep `core/agent/chat_agent.py` as a façade. Session/history state belongs in `core/agent/chat_session_state.py`, per-turn budgeting/result shaping in `core/agent/chat_turns.py`, and forced `rlm_only` routing helpers in `core/agent/forced_routing.py`.
+- Keep shared delegate guards and recursive child-run policy in `core/agent/delegation_policy.py`; `core/tools/delegate.py` should remain tool-facing, while `core/agent/rlm_agent.py` remains the recursive child-run executor.
+- Keep `core/execution/interpreter.py` as a façade over `core/execution/interpreter_lifecycle.py`, `core/execution/interpreter_session.py`, and `core/execution/interpreter_events.py`. Preserve the historical `ModalInterpreter` method names so tests and import sites remain stable even when logic moves behind helper modules.
 - Keep `src/fleet_rlm/api/routers/runtime.py` thin. Route orchestration for runtime settings, diagnostics, status assembly, and volume browsing now lives under `src/fleet_rlm/api/runtime_services/*`.
 - Keep websocket event shaping and session lifecycle inside `api/routers/ws/*`; treat that layer as a contract with the frontend workspace.
 - Treat `/api/v1/ws/chat` as the conversational stream and `/api/v1/ws/execution` as the canonical execution/workbench stream. Do not reintroduce Daytona-only workbench hydration through chat-final payload scraping.
-- Daytona host-loop chat should emit live canonical `trajectory_step`, `reasoning_step`, `status`, `warning`, `tool_call`, and `tool_result` events during execution; do not defer the entire trace to the terminal `final` payload.
+- Daytona-backed chat should emit live canonical `trajectory_step`, `reasoning_step`, `status`, `warning`, `tool_call`, and `tool_result` events during execution through the shared ReAct/RLM flow plus interpreter callbacks; do not defer the entire trace to the terminal `final` payload.
 - Keep runtime streaming websocket-first. FastAPI `StreamingResponse` / SSE may be used only for narrow read-only HTTP flows with a clear product win; they are not the default replacement for workspace/chat/execution websockets.
 - Treat the official Daytona docs as the normative baseline for backend integration:
   - Python SDK: [docs](https://www.daytona.io/docs/en/python-sdk/)
+  - Async SDK: [docs](https://www.daytona.io/docs/en/python-sdk/async/async-daytona/)
+  - Async Sandbox: [docs](https://www.daytona.io/docs/en/python-sdk/async/async-sandbox/)
+  - Async File System: [docs](https://www.daytona.io/docs/en/python-sdk/async/async-file-system/)
+  - Async Volume: [docs](https://www.daytona.io/docs/en/python-sdk/async/async-volume/)
+  - Async Code Interpreter: [docs](https://www.daytona.io/docs/en/python-sdk/async/async-code-interpreter/)
+  - Log Streaming: [docs](https://www.daytona.io/docs/en/log-streaming/)
   - Volumes: [docs](https://www.daytona.io/docs/en/volumes/)
   - Recursive Language Models / DSPy: [docs](https://www.daytona.io/docs/en/guides/recursive-language-models)
 - For repo-specific Daytona architecture decisions and intentional deviations, see
   [docs/reference/daytona-runtime-architecture.md](../../docs/reference/daytona-runtime-architecture.md).
-- Daytona remains experimental and intentionally uses a custom recursive host-loop runner with `dspy.Predict`-backed grounding/decomposition/synthesis modules. Do not collapse it into generic `dspy.RLM` language.
+- Daytona is now aligned to the shared ReAct + `dspy.RLM` runtime architecture. Keep Daytona-specific behavior in `infrastructure/providers/daytona/*`, not in a parallel chat/runtime orchestrator.
+- `spawn_delegate_sub_agent_async` remains the one true recursive child-RLM path for both Modal and Daytona. `llm_query` stays semantic-only; `rlm_query` and `rlm_query_batched` remain the true child-RLM entrypoints.
 - `DAYTONA_TARGET` is Daytona SDK routing/config only. Do not treat it as a workspace id, sandbox id, or volume name.
 - The workspace Daytona persistent volume is derived from the authenticated workspace/tenant claim, created/read through `client.volume.get(..., create=True)`, and mounted into Daytona sandboxes through `VolumeMount`.
+- Keep the Daytona sandbox adapter async-first internally. `DaytonaSandboxRuntime` and `DaytonaSandboxSession` should prefer the official async SDK (`AsyncDaytona`, async sandbox/process/fs/volume APIs, async session-command log streaming) and expose sync methods only as thin compatibility wrappers.
 - Root and recursive Daytona child runs should share the same workspace-scoped persistent volume when one is configured, while still using distinct Daytona sandbox sessions per child run.
-- Keep Daytona chat/session normalization helpers in `infrastructure/providers/daytona/chat_state.py` so `chat_agent.py` stays focused on session lifecycle and stream orchestration.
+- Daytona interpreter execution is intentionally not implemented on top of `sandbox.code_interpreter.run_code()` yet. The repo keeps a minimal long-lived REPL bridge because the shared `dspy.RLM` interpreter contract still depends on host callbacks, prompt-handle helpers, structured execution events, and custom final-artifact submission.
+- Persistent Daytona memory has two layers:
+  - volatile REPL/session state inside the live sandbox-side Python process
+  - durable workspace state on the mounted Daytona volume at `/home/daytona/memory`
+- Keep Daytona chat/session normalization helpers in `infrastructure/providers/daytona/chat_state.py` so `chat_agent.py` stays a thin compatibility wrapper over the shared agent.
 - Reuse `src/fleet_rlm/utils/regex.py` for regex helpers instead of creating new local variants.
 
 ## Canonical Commands
@@ -128,7 +141,6 @@ Backend setup and runtime:
 Daytona workflows:
 
 - `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]`
-- `uv run fleet-rlm daytona-rlm [--repo <url>] [--context-path <path> ...] --task <text> [--batch-concurrency N]`
 
 ## Validation by Change Type
 
@@ -146,6 +158,6 @@ Focused backend/runtime coverage:
 
 Daytona-focused backend coverage:
 
-- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_rlm_runner.py tests/unit/test_daytona_rlm_cli.py`
+- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_workbench_chat_agent.py`
 
 Keep command examples aligned with `Makefile`, `pyproject.toml`, and the live router/schema contract.

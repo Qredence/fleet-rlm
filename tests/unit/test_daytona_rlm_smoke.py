@@ -197,7 +197,7 @@ def test_run_daytona_smoke_reports_config_errors(monkeypatch):
         raise DaytonaConfigError("Missing DAYTONA_API_URL.")
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.smoke.DaytonaSandboxRuntime",
+        "fleet_rlm.infrastructure.providers.daytona.smoke.DaytonaSandboxRuntime",
         _broken_runtime,
     )
 

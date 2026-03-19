@@ -435,7 +435,7 @@ Send a user message to initiate or continue a conversation.
 | Mode | Behavior |
 |------|----------|
 | `modal_chat` | Default product runtime with Modal-backed execution |
-| `daytona_pilot` | Experimental Daytona workbench/runtime inside `RLM Workspace` |
+| `daytona_pilot` | Experimental Daytona-backed variant of the shared ReAct + `dspy.RLM` runtime inside `RLM Workspace` |
 
 When `runtime_mode="daytona_pilot"`:
 

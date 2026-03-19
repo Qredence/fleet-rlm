@@ -33,11 +33,45 @@ class ExecutionRequest:
 
     request_id: str
     code: str
+    variables: dict[str, Any] | None = None
+    tool_names: list[str] | None = None
     submit_schema: list[dict[str, Any]] | None = None
+    execution_profile: str | None = None
     type: str = "execute_request"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ExecutionRequest":
+        raw_variables = payload.get("variables")
+        variables = raw_variables if isinstance(raw_variables, dict) else None
+        raw_tool_names = payload.get("tool_names")
+        tool_names = (
+            [str(item) for item in raw_tool_names if item is not None]
+            if isinstance(raw_tool_names, list)
+            else None
+        )
+        raw_submit_schema = payload.get("submit_schema")
+        submit_schema = (
+            [item for item in raw_submit_schema if isinstance(item, dict)]
+            if isinstance(raw_submit_schema, list)
+            else None
+        )
+        raw_execution_profile = payload.get("execution_profile")
+        execution_profile = (
+            str(raw_execution_profile).strip() or None
+            if raw_execution_profile is not None
+            else None
+        )
+        return cls(
+            request_id=str(payload["request_id"]),
+            code=str(payload.get("code", "") or ""),
+            variables=_coerce_mapping(variables or {}) or None,
+            tool_names=tool_names,
+            submit_schema=submit_schema,
+            execution_profile=execution_profile,
+        )
 
 
 @dataclass(slots=True)
