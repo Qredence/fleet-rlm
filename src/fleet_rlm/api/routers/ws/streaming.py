@@ -56,7 +56,7 @@ def _build_execution_completion_summary(
 ) -> dict[str, Any]:
     payload = _as_record(event.payload)
     runtime = _as_record(payload.get("runtime"))
-    run_result = _as_record(payload.get("run_result") or payload.get("runResult"))
+    run_result = _as_record(payload.get("run_result"))
     summary_payload = _as_record(payload.get("summary"))
     runtime_mode = (
         _as_text(payload.get("runtime_mode"))
