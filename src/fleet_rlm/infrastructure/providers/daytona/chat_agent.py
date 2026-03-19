@@ -15,6 +15,7 @@ from .chat_state import (
 from .interpreter import DaytonaInterpreter
 from .sandbox import DaytonaSandboxRuntime
 
+_render_final_text = render_final_text
 
 
 class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
