@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import import_module
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, cast
 
 import dspy
 
@@ -142,8 +142,14 @@ def optimize_program_with_mipro(
 
     optimizer = dspy.teleprompt.MIPROv2(metric=metric, auto=auto)
     resolved_run_name = run_name or f"MIPROv2::{program_spec}"
+    start_run = getattr(mlflow, "start_run", None)
+    log_metric = getattr(mlflow, "log_metric", None)
+    if start_run is None or log_metric is None:
+        raise RuntimeError(
+            "MLflow tracking helpers are unavailable in this environment."
+        )
 
-    with mlflow.start_run(run_name=resolved_run_name):
+    with cast(Any, start_run)(run_name=resolved_run_name):
         optimized = optimizer.compile(
             program,
             trainset=trainset,
@@ -153,7 +159,9 @@ def optimize_program_with_mipro(
         if valset:
             evaluator = dspy.Evaluate(devset=valset, metric=metric)
             validation_score = evaluator(optimized)
-            mlflow.log_metric("optimization_validation_score", float(validation_score))
+            cast(Any, log_metric)(
+                "optimization_validation_score", float(validation_score)
+            )
 
         if output_path is not None:
             output_path.parent.mkdir(parents=True, exist_ok=True)

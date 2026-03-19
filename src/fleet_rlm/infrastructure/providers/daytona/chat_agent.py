@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.core.models import StreamEvent
@@ -144,7 +144,8 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
         context_paths: list[str] | None,
         volume_name: str | None,
     ) -> None:
-        self.interpreter.configure_workspace(
+        interpreter = cast(DaytonaInterpreter, self.interpreter)
+        interpreter.configure_workspace(
             repo_url=repo_url,
             repo_ref=repo_ref,
             context_paths=self._effective_context_paths(

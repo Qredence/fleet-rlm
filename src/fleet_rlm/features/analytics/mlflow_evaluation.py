@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .config import MlflowConfig
 from .mlflow_integration import (
@@ -102,7 +102,14 @@ def evaluate_trace_rows(
     rlm_scorers = build_rlm_scorers()
     scorers.extend(rlm_scorers)
 
-    return mlflow.genai.evaluate(
+    mlflow_genai = getattr(mlflow, "genai", None)
+    evaluate = getattr(mlflow_genai, "evaluate", None)
+    if evaluate is None:
+        raise RuntimeError(
+            "MLflow GenAI evaluate() is unavailable in this environment."
+        )
+
+    return cast(Any, evaluate)(
         data=dataset,
         scorers=scorers,
         model_id=resolved.active_model_id,

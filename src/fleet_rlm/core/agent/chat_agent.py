@@ -108,7 +108,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         verbose: bool = False,
         history_max_turns: int | None = None,
         extra_tools: list[Callable[..., Any]] | None = None,
-        interpreter: ModalInterpreter | None = None,
+        interpreter: Any | None = None,
         max_depth: int = 2,
         current_depth: int = 0,
         interpreter_async_execute: bool = True,

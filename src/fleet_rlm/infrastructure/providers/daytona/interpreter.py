@@ -447,12 +447,12 @@ class DaytonaInterpreter(LLMQueryMixin):
                     prompts = []
                 value = self.llm_query_batched([str(item) for item in prompts])
             elif name in self._tools:
-                args = (
-                    payload.get("args") if isinstance(payload.get("args"), list) else []
-                )
-                kwargs = (
-                    payload.get("kwargs")
-                    if isinstance(payload.get("kwargs"), dict)
+                raw_args = payload.get("args")
+                args: list[Any] = raw_args if isinstance(raw_args, list) else []
+                raw_kwargs = payload.get("kwargs")
+                kwargs: dict[str, Any] = (
+                    {str(key): value for key, value in raw_kwargs.items()}
+                    if isinstance(raw_kwargs, dict)
                     else {}
                 )
                 value = self._tools[name](*args, **kwargs)

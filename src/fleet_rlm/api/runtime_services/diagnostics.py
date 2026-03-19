@@ -7,7 +7,7 @@ import os
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Any
+from typing import Any, Literal
 
 from fleet_rlm.infrastructure.providers.daytona import DaytonaConfigError
 
@@ -151,7 +151,7 @@ def daytona_preflight(
 
 def preflight_failure_result(
     *,
-    kind: str,
+    kind: Literal["modal", "lm", "daytona"],
     checked_at: str,
     checks: dict[str, Any],
     guidance: list[str],

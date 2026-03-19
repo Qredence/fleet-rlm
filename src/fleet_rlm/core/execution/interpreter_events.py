@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any, Protocol
 
 from fleet_rlm.features.logs.execution_limits import execution_max_text_chars
 
-if TYPE_CHECKING:
-    from .interpreter import ModalInterpreter
+
+class SupportsExecutionEventCallback(Protocol):
+    execution_event_callback: Any
 
 
 @dataclass(slots=True)
@@ -66,7 +67,7 @@ def summarize_code(code: str) -> tuple[str, str]:
 
 
 def emit_execution_event(
-    interpreter: "ModalInterpreter",
+    interpreter: SupportsExecutionEventCallback,
     event_data: InterpreterExecutionEventData,
 ) -> None:
     """Best-effort execution hook dispatch for observability callbacks."""
