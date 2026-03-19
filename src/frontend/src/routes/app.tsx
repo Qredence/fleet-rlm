@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RootLayout, RootHydrateFallback } from "@/app/layout/RootLayout";
-import { RouteErrorPage } from "@/app/pages/RouteErrorPage";
+import { RootLayout, RootHydrateFallback } from "@/screens/shell/app-shell-screen";
+import { RouteErrorScreen } from "@/screens/shell/standalone/route-error-screen";
 
 export const Route = createFileRoute("/app")({
   component: RootLayout,
   pendingComponent: RootHydrateFallback,
-  errorComponent: RouteErrorPage,
+  errorComponent: RouteErrorScreen,
 });
