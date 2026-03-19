@@ -10,11 +10,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { IconButton } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils/cn";
 
 import { GroupedSettingsPane } from "@/screens/settings/grouped-settings-pane";
@@ -33,14 +29,12 @@ export function SettingsScreen() {
 
   const sectionFromQuery = searchParams.section;
   const selectedSection =
-    sectionFromQuery &&
-    settingsSections.some((section) => section.key === sectionFromQuery)
+    sectionFromQuery && settingsSections.some((section) => section.key === sectionFromQuery)
       ? (sectionFromQuery as SettingsSection)
       : undefined;
 
   const sectionTitle =
-    settingsSections.find((section) => section.key === selectedSection)
-      ?.label ?? "Settings";
+    settingsSections.find((section) => section.key === selectedSection)?.label ?? "Settings";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

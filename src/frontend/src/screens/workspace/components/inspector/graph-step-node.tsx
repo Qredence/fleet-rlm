@@ -2,7 +2,10 @@ import { memo } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { ArtifactActorKind, ArtifactStepType } from "@/screens/workspace/model/artifact-types";
 import { cn } from "@/lib/utils/cn";
-import { NODE_WIDTH, STEP_TYPE_META } from "@/screens/workspace/components/inspector/graph-step-node.constants";
+import {
+  NODE_WIDTH,
+  STEP_TYPE_META,
+} from "@/screens/workspace/components/inspector/graph-step-node.constants";
 import {
   extractErrorDetails,
   extractReplCodePreview,

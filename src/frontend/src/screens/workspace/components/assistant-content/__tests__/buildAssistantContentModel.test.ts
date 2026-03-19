@@ -8,7 +8,11 @@ import type {
   AssistantTurnReasoningItem,
   AssistantTurnTrajectoryItem,
 } from "@/screens/workspace/model/chat-display-items";
-import type { ChatMessage, ChatRenderPart, RuntimeContext } from "@/screens/workspace/model/workspace-types";
+import type {
+  ChatMessage,
+  ChatRenderPart,
+  RuntimeContext,
+} from "@/screens/workspace/model/workspace-types";
 
 const runtimeContext: RuntimeContext = {
   depth: 1,

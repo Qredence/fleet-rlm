@@ -69,10 +69,7 @@ export function WorkspaceChatEmptyState({
           <h2 className="w-full text-foreground" style={DISPLAY_TITLE_STYLE}>
             Agentic Fleet Session
           </h2>
-          <p
-            className="w-full text-muted-foreground"
-            style={DISPLAY_SUBTITLE_STYLE}
-          >
+          <p className="w-full text-muted-foreground" style={DISPLAY_SUBTITLE_STYLE}>
             What do you need?
           </p>
         </div>
@@ -88,11 +85,7 @@ export function WorkspaceChatEmptyState({
             key={suggestion.text}
             initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={
-              prefersReduced
-                ? { duration: 0.01 }
-                : { delay: 0.15 + index * 0.08 }
-            }
+            transition={prefersReduced ? { duration: 0.01 } : { delay: 0.15 + index * 0.08 }}
           >
             <Suggestion
               suggestion={suggestion.text}
@@ -122,13 +115,8 @@ export function WorkspaceChatEmptyState({
             className="flex items-center gap-2 rounded-button border-subtle px-4 py-2.5 transition-colors hover:border-border-strong hover:bg-secondary/60"
             onClick={onToggleHistory}
           >
-            <Clock
-              className="size-4 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <span className="text-muted-foreground typo-label">
-              View recent conversations
-            </span>
+            <Clock className="size-4 text-muted-foreground" aria-hidden="true" />
+            <span className="text-muted-foreground typo-label">View recent conversations</span>
           </button>
         </motion.div>
       ) : null}

@@ -1,13 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { useWorkspaceRuntime } from "@/screens/workspace/hooks/use-workspace-runtime";
@@ -57,7 +50,12 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/screens/workspace/model/workspace-ui-store", () => ({
-  useWorkspaceUiStore: (selector?: (state: { setCreationPhase: typeof mocked.setCreationPhase; sessionRevision: string }) => unknown) => {
+  useWorkspaceUiStore: (
+    selector?: (state: {
+      setCreationPhase: typeof mocked.setCreationPhase;
+      sessionRevision: string;
+    }) => unknown,
+  ) => {
     const state = {
       setCreationPhase: mocked.setCreationPhase,
       sessionRevision: "nav-session-1",
@@ -68,10 +66,7 @@ vi.mock("@/screens/workspace/model/workspace-ui-store", () => ({
 
 vi.mock("@/screens/workspace/model/artifact-store", () => ({
   useArtifactStore: (
-    selector: (state: {
-      clear: typeof mocked.clearArtifactSteps;
-      steps: [];
-    }) => unknown,
+    selector: (state: { clear: typeof mocked.clearArtifactSteps; steps: [] }) => unknown,
   ) => selector({ clear: mocked.clearArtifactSteps, steps: [] }),
 }));
 

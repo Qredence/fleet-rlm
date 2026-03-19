@@ -59,8 +59,7 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
       detail: { section: "general" },
       cancelable: true,
     });
-    const wasHandledByDialog =
-      document.dispatchEvent(openSettingsEvent) === false;
+    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigateTo("settings");
     }
@@ -94,16 +93,8 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
   if (isCollapsed) {
     return (
       <div className="flex h-full w-15 flex-col items-center border-r border-border-subtle bg-surface py-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleCollapse}
-          className="mb-4 rounded-md!"
-        >
-          <PanelLeftOpen
-            className="size-5 text-muted-foreground"
-            strokeWidth={1.5}
-          />
+        <Button variant="ghost" size="icon" onClick={onToggleCollapse} className="mb-4 rounded-md!">
+          <PanelLeftOpen className="size-5 text-muted-foreground" strokeWidth={1.5} />
         </Button>
         <Button
           variant="ghost"
@@ -112,10 +103,7 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
           className="mb-2 rounded-md!"
           aria-label="RLM Workspace"
         >
-          <MessageSquare
-            className="size-5 text-muted-foreground"
-            strokeWidth={1.5}
-          />
+          <MessageSquare className="size-5 text-muted-foreground" strokeWidth={1.5} />
         </Button>
         <Button
           variant="ghost"
@@ -134,10 +122,7 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
           className="mb-4 rounded-md!"
           aria-label="Open settings"
         >
-          <Settings
-            className="size-5 text-muted-foreground"
-            strokeWidth={1.5}
-          />
+          <Settings className="size-5 text-muted-foreground" strokeWidth={1.5} />
         </Button>
         <Button
           variant="ghost"
@@ -160,16 +145,8 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
           <QredenceLogo className="h-5 w-auto" />
           <span className="typo-base font-medium">Qredence</span>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleCollapse}
-          className="rounded-md!"
-        >
-          <PanelLeftClose
-            className="size-5 text-muted-foreground"
-            strokeWidth={1.5}
-          />
+        <Button variant="ghost" size="icon" onClick={onToggleCollapse} className="rounded-md!">
+          <PanelLeftClose className="size-5 text-muted-foreground" strokeWidth={1.5} />
         </Button>
       </div>
 
@@ -223,9 +200,7 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
           )}
         >
           <Database className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-            Volumes
-          </span>
+          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">Volumes</span>
         </Button>
       </div>
 
@@ -252,9 +227,7 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
                 )}
               >
                 <div className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-[450] text-foreground">
-                    {session.title}
-                  </div>
+                  <div className="truncate text-sm font-[450] text-foreground">{session.title}</div>
                   <div className="truncate text-xs text-muted-foreground">
                     {formatSessionTimestamp(session.updatedAt)}
                   </div>
@@ -274,9 +247,7 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
           className="group w-full justify-start rounded-md! pl-1.5 text-left text-muted-foreground transition-colors duration-0"
         >
           <Settings className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-            Settings
-          </span>
+          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">Settings</span>
         </Button>
         <Button
           onClick={handleOpenLogin}
@@ -285,9 +256,7 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
           className="group w-full justify-start rounded-md! pl-1.5 text-left text-muted-foreground transition-colors duration-0"
         >
           <LogIn className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-            Sign In
-          </span>
+          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">Sign In</span>
         </Button>
       </div>
     </div>

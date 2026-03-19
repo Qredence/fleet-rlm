@@ -78,11 +78,18 @@ import {
 } from "@/components/ui/queue";
 import { Streamdown } from "@/components/ui/streamdown";
 import { TextShimmer } from "@/components/ui/text-shimmer";
-import type { ChatRenderPart, ChatRenderToolState, RuntimeContext } from "@/screens/workspace/model/workspace-types";
+import type {
+  ChatRenderPart,
+  ChatRenderToolState,
+  RuntimeContext,
+} from "@/screens/workspace/model/workspace-types";
 import { cn } from "@/lib/utils/cn";
 import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
 import { RuntimeContextBadge } from "@/screens/workspace/components/assistant-content/model";
-import type { ToolSessionItem, TraceDisplayItem } from "@/screens/workspace/model/chat-display-items";
+import type {
+  ToolSessionItem,
+  TraceDisplayItem,
+} from "@/screens/workspace/model/chat-display-items";
 import {
   MONO_BASE_MEDIUM_STYLE,
   MONO_BASE_STYLE,

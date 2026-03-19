@@ -11,8 +11,14 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import type { ArtifactActorKind, ExecutionStep } from "@/screens/workspace/model/artifact-types";
-import { NODE_WIDTH, STEP_TYPE_META } from "@/screens/workspace/components/inspector/graph-step-node.constants";
-import { GraphStepNode, type GraphStepNodeData } from "@/screens/workspace/components/inspector/graph-step-node";
+import {
+  NODE_WIDTH,
+  STEP_TYPE_META,
+} from "@/screens/workspace/components/inspector/graph-step-node.constants";
+import {
+  GraphStepNode,
+  type GraphStepNodeData,
+} from "@/screens/workspace/components/inspector/graph-step-node";
 import { extractToolBadgeFromStep } from "@/screens/workspace/components/inspector/graph-tool-badge";
 import { summarizeArtifactStep } from "@/screens/workspace/components/inspector/parsers/artifactPayloadSummaries";
 

@@ -10,9 +10,7 @@ const fileDetailState = {
 };
 
 vi.mock("@/stores/navigationStore", () => ({
-  useNavigationStore: (
-    selector?: (state: { activeNav: "volumes" }) => unknown,
-  ) =>
+  useNavigationStore: (selector?: (state: { activeNav: "volumes" }) => unknown) =>
     selector
       ? selector({ activeNav: fileDetailState.activeNav })
       : { activeNav: fileDetailState.activeNav },
@@ -31,9 +29,7 @@ vi.mock("@/components/shared/ErrorBoundary", () => ({
 }));
 
 vi.mock("@/components/ui/icon-button", () => ({
-  IconButton: ({ children }: { children: ReactNode }) => (
-    <button type="button">{children}</button>
-  ),
+  IconButton: ({ children }: { children: ReactNode }) => <button type="button">{children}</button>,
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({

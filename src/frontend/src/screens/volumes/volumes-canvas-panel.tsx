@@ -21,9 +21,7 @@ export function VolumesCanvasPanel() {
         </EmptyMedia>
         <EmptyContent>
           <EmptyTitle>No file selected</EmptyTitle>
-          <EmptyDescription>
-            Open a file in Volumes to preview its contents here.
-          </EmptyDescription>
+          <EmptyDescription>Open a file in Volumes to preview its contents here.</EmptyDescription>
         </EmptyContent>
       </Empty>
     );

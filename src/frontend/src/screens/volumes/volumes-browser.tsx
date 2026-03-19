@@ -20,7 +20,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils/cn";
 import { FsItem } from "@/screens/volumes/volumes-browser-sections";
-import { collectExpandableIds, countFiles, filterFs } from "@/screens/volumes/model/volumes-browser-utils";
+import {
+  collectExpandableIds,
+  countFiles,
+  filterFs,
+} from "@/screens/volumes/model/volumes-browser-utils";
 
 export function VolumesBrowser() {
   const openCanvas = useNavigationStore((state) => state.openCanvas);
@@ -132,10 +136,7 @@ export function VolumesBrowser() {
           onChange={(e) => setFsSearch(e.target.value)}
           placeholder="Search files…"
           aria-label="Search files"
-          className={cn(
-            "pl-9 typo-label",
-            isMobile && "touch-target",
-          )}
+          className={cn("pl-9 typo-label", isMobile && "touch-target")}
         />
       </div>
     </div>

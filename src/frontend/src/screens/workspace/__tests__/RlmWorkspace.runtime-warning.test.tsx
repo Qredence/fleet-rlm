@@ -140,9 +140,7 @@ describe("WorkspaceScreen runtime warning", () => {
         guidance: [],
         daytona: {
           configured: false,
-          guidance: [
-            "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands.",
-          ],
+          guidance: ["Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."],
         },
       },
     };

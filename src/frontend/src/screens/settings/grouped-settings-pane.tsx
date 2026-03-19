@@ -36,14 +36,9 @@ interface GroupedSettingsPaneProps {
   section?: SettingsSection;
 }
 
-const SETTINGS_FIELD_CLASSNAME =
-  "border-b border-border-subtle py-4 last:border-b-0";
+const SETTINGS_FIELD_CLASSNAME = "border-b border-border-subtle py-4 last:border-b-0";
 
-export function GroupedSettingsPane({
-  isDark,
-  onToggleTheme,
-  section,
-}: GroupedSettingsPaneProps) {
+export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedSettingsPaneProps) {
   const { settingsQuery, statusQuery, saveSettings } = useRuntimeSettings();
 
   const [telemetryEnabled, setTelemetryEnabled] = useState(true);
@@ -57,8 +52,7 @@ export function GroupedSettingsPane({
   const [baselineApiBase, setBaselineApiBase] = useState("");
   const [baselineLmModel, setBaselineLmModel] = useState("");
   const [baselineDelegateLmModel, setBaselineDelegateLmModel] = useState("");
-  const [baselineDelegateLmSmallModel, setBaselineDelegateLmSmallModel] =
-    useState("");
+  const [baselineDelegateLmSmallModel, setBaselineDelegateLmSmallModel] = useState("");
 
   useEffect(() => {
     setTelemetryEnabled(telemetryClient.isAnonymousTelemetryEnabled());
@@ -119,10 +113,7 @@ export function GroupedSettingsPane({
     lmModel,
   ]);
 
-  const dirtyKeys = useMemo(
-    () => Object.keys(runtimeUpdates),
-    [runtimeUpdates],
-  );
+  const dirtyKeys = useMemo(() => Object.keys(runtimeUpdates), [runtimeUpdates]);
   const status = statusQuery.data;
   const writeEnabled = status?.write_enabled !== false;
 
@@ -148,10 +139,7 @@ export function GroupedSettingsPane({
         setApiKeyInput("");
         setClearApiKeyOnSave(false);
         toast.success("LM integration settings saved", {
-          description:
-            updated.length > 0
-              ? `Updated: ${updated.join(", ")}`
-              : "No keys changed.",
+          description: updated.length > 0 ? `Updated: ${updated.join(", ")}` : "No keys changed.",
         });
       },
       onError: (error) => {
@@ -162,11 +150,9 @@ export function GroupedSettingsPane({
     });
   };
 
-  const saveDisabled =
-    dirtyKeys.length === 0 || saveSettings.isPending || !writeEnabled;
+  const saveDisabled = dirtyKeys.length === 0 || saveSettings.isPending || !writeEnabled;
   const showAllSections = section == null;
-  const showSection = (key: SettingsSection) =>
-    showAllSections || section === key;
+  const showSection = (key: SettingsSection) => showAllSections || section === key;
 
   return (
     <div>
@@ -174,19 +160,14 @@ export function GroupedSettingsPane({
         <>
           {showAllSections && (
             <div className="py-3 border-b border-border-subtle">
-              <span className="text-sm text-muted-foreground font-medium">
-                Appearance
-              </span>
+              <span className="text-sm text-muted-foreground font-medium">Appearance</span>
             </div>
           )}
 
           <FieldGroup className="gap-0">
             <Field
               orientation="responsive"
-              className={cn(
-                SETTINGS_FIELD_CLASSNAME,
-                section === "appearance" && "border-b-0",
-              )}
+              className={cn(SETTINGS_FIELD_CLASSNAME, section === "appearance" && "border-b-0")}
             >
               <FieldContent>
                 <FieldTitle>Theme</FieldTitle>
@@ -229,23 +210,18 @@ export function GroupedSettingsPane({
         <>
           {showAllSections && (
             <div className="py-3 border-b border-border-subtle">
-              <span className="text-sm text-muted-foreground font-medium">
-                Telemetry
-              </span>
+              <span className="text-sm text-muted-foreground font-medium">Telemetry</span>
             </div>
           )}
 
           <FieldGroup className="gap-0">
-            <Field
-              orientation="responsive"
-              className={SETTINGS_FIELD_CLASSNAME}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Anonymous telemetry</FieldTitle>
                 <FieldDescription>
-                  Share anonymous usage telemetry to help improve Fleet-RLM.
-                  This preference now updates web PostHog capture immediately
-                  and propagates to backend AI analytics for new chat turns.
+                  Share anonymous usage telemetry to help improve Fleet-RLM. This preference now
+                  updates web PostHog capture immediately and propagates to backend AI analytics for
+                  new chat turns.
                 </FieldDescription>
               </FieldContent>
               <Switch
@@ -259,9 +235,7 @@ export function GroupedSettingsPane({
                     source: "grouped_settings",
                   });
                   toast.success(
-                    val
-                      ? "Anonymous telemetry enabled"
-                      : "Anonymous telemetry disabled",
+                    val ? "Anonymous telemetry enabled" : "Anonymous telemetry disabled",
                   );
                 }}
               />
@@ -269,17 +243,13 @@ export function GroupedSettingsPane({
 
             <Field
               orientation="responsive"
-              className={cn(
-                SETTINGS_FIELD_CLASSNAME,
-                section === "telemetry" && "border-b-0",
-              )}
+              className={cn(SETTINGS_FIELD_CLASSNAME, section === "telemetry" && "border-b-0")}
             >
               <FieldContent>
                 <FieldTitle>Telemetry scope</FieldTitle>
                 <FieldDescription>
-                  No account/billing/profile settings are exposed here in
-                  v0.4.8. This surface is intentionally limited to functional
-                  runtime and privacy controls.
+                  No account/billing/profile settings are exposed here in v0.4.8. This surface is
+                  intentionally limited to functional runtime and privacy controls.
                 </FieldDescription>
               </FieldContent>
               <Badge variant="secondary">Anonymous-only</Badge>
@@ -292,52 +262,39 @@ export function GroupedSettingsPane({
         <>
           {showAllSections && (
             <div className="py-3 border-b border-border-subtle">
-              <span className="text-sm text-muted-foreground font-medium">
-                LiteLLM Integration
-              </span>
+              <span className="text-sm text-muted-foreground font-medium">LiteLLM Integration</span>
             </div>
           )}
 
           <FieldGroup className="gap-0">
-            <Field
-              orientation="responsive"
-              className={SETTINGS_FIELD_CLASSNAME}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>LiteLLM integration</FieldTitle>
                 <FieldDescription>
-                  Configure a custom LiteLLM-compatible endpoint and API key for
-                  planner/provider routing. These values are saved through the
-                  runtime settings API when local writes are enabled.
+                  Configure a custom LiteLLM-compatible endpoint and API key for planner/provider
+                  routing. These values are saved through the runtime settings API when local writes
+                  are enabled.
                 </FieldDescription>
               </FieldContent>
             </Field>
 
             {!writeEnabled ? (
-              <Field
-                orientation="responsive"
-                className={SETTINGS_FIELD_CLASSNAME}
-              >
+              <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
                 <FieldContent>
                   <FieldTitle>Write Protection</FieldTitle>
                   <FieldDescription>
-                    Runtime settings updates are disabled because APP_ENV is not
-                    local.
+                    Runtime settings updates are disabled because APP_ENV is not local.
                   </FieldDescription>
                 </FieldContent>
                 <Badge variant="destructive-subtle">Read-only</Badge>
               </Field>
             ) : null}
 
-            <Field
-              orientation="responsive"
-              className={SETTINGS_FIELD_CLASSNAME}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Planner LM model</FieldTitle>
                 <FieldDescription>
-                  Primary planner model identifier used for chat turns and
-                  planning.
+                  Primary planner model identifier used for chat turns and planning.
                 </FieldDescription>
               </FieldContent>
               <Input
@@ -351,15 +308,11 @@ export function GroupedSettingsPane({
               />
             </Field>
 
-            <Field
-              orientation="responsive"
-              className={SETTINGS_FIELD_CLASSNAME}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Delegate LM model</FieldTitle>
                 <FieldDescription>
-                  Optional delegate model used for recursive or long-context
-                  sub-agent tasks.
+                  Optional delegate model used for recursive or long-context sub-agent tasks.
                 </FieldDescription>
               </FieldContent>
               <Input
@@ -373,15 +326,11 @@ export function GroupedSettingsPane({
               />
             </Field>
 
-            <Field
-              orientation="responsive"
-              className={SETTINGS_FIELD_CLASSNAME}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Delegate small LM model</FieldTitle>
                 <FieldDescription>
-                  Optional lightweight delegate model for fast/low-cost
-                  operations.
+                  Optional lightweight delegate model for fast/low-cost operations.
                 </FieldDescription>
               </FieldContent>
               <Input
@@ -390,22 +339,15 @@ export function GroupedSettingsPane({
                 placeholder=""
                 autoComplete="off"
                 aria-label="Delegate small LM model"
-                onChange={(event) =>
-                  setDelegateLmSmallModel(event.target.value)
-                }
+                onChange={(event) => setDelegateLmSmallModel(event.target.value)}
                 className="w-[260px] max-w-[50vw]"
               />
             </Field>
 
-            <Field
-              orientation="responsive"
-              className={SETTINGS_FIELD_CLASSNAME}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Custom API endpoint</FieldTitle>
-                <FieldDescription>
-                  Optional LiteLLM (or provider proxy) base URL.
-                </FieldDescription>
+                <FieldDescription>Optional LiteLLM (or provider proxy) base URL.</FieldDescription>
               </FieldContent>
               <Input
                 type="text"
@@ -418,15 +360,12 @@ export function GroupedSettingsPane({
               />
             </Field>
 
-            <Field
-              orientation="responsive"
-              className={SETTINGS_FIELD_CLASSNAME}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>API key</FieldTitle>
                 <FieldDescription>
-                  Provider or proxy key used for LM requests. Leave unchanged to
-                  keep the current value.
+                  Provider or proxy key used for LM requests. Leave unchanged to keep the current
+                  value.
                 </FieldDescription>
               </FieldContent>
               <div className="flex w-full max-w-[min(100%,20rem)] flex-col gap-2">
@@ -457,16 +396,13 @@ export function GroupedSettingsPane({
                         }
                       }}
                     >
-                      {clearApiKeyOnSave
-                        ? "Will clear on save"
-                        : "Clear saved value"}
+                      {clearApiKeyOnSave ? "Will clear on save" : "Clear saved value"}
                     </InputGroupButton>
                   </InputGroupAddon>
                 </InputGroup>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <span className="text-right text-xs text-muted-foreground">
-                    Write-only input. Configured value:{" "}
-                    {maskedApiKey || "not set"}.
+                    Write-only input. Configured value: {maskedApiKey || "not set"}.
                   </span>
                 </div>
               </div>

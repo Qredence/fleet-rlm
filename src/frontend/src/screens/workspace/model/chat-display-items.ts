@@ -1,4 +1,8 @@
-import type { ChatMessage, ChatRenderPart, RuntimeContext } from "@/screens/workspace/model/workspace-types";
+import type {
+  ChatMessage,
+  ChatRenderPart,
+  RuntimeContext,
+} from "@/screens/workspace/model/workspace-types";
 
 type ToolSessionEventKind = "tool_call" | "tool_result" | "status";
 

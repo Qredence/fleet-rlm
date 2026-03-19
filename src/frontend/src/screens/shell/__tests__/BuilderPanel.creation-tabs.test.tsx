@@ -19,9 +19,7 @@ vi.mock("@/components/shared/ErrorBoundary", () => ({
 }));
 
 vi.mock("@/components/ui/icon-button", () => ({
-  IconButton: ({ children }: { children: ReactNode }) => (
-    <button type="button">{children}</button>
-  ),
+  IconButton: ({ children }: { children: ReactNode }) => <button type="button">{children}</button>,
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({

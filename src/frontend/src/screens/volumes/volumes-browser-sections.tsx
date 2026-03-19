@@ -15,7 +15,11 @@ import type { FsNode } from "@/screens/volumes/model/volumes-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
-import { countFiles, formatDate, formatFileSize } from "@/screens/volumes/model/volumes-browser-utils";
+import {
+  countFiles,
+  formatDate,
+  formatFileSize,
+} from "@/screens/volumes/model/volumes-browser-utils";
 
 function getTreeIndentStyle(depth: number) {
   return {

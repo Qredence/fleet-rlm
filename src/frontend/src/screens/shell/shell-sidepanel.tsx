@@ -17,21 +17,11 @@ import {
   useWorkspaceCanvasTitle,
   WorkspaceCanvasUnavailablePanel,
 } from "@/screens/workspace/workspace-canvas-panel";
-import {
-  isRlmCoreEnabled,
-  isSectionSupported,
-  UNSUPPORTED_SECTION_REASON,
-} from "@/lib/rlm-api";
+import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
 
 type CanvasMode = "workspace" | "volumes" | "empty";
 
-function EmptyPanel({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
+function EmptyPanel({ title, description }: { title: string; description: string }) {
   return (
     <Empty className="h-full rounded-none border-0 bg-transparent">
       <EmptyMedia variant="icon">
@@ -45,13 +35,7 @@ function EmptyPanel({
   );
 }
 
-function UnsupportedPanel({
-  sectionLabel,
-  reason,
-}: {
-  sectionLabel: string;
-  reason?: string;
-}) {
+function UnsupportedPanel({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
   return (
     <EmptyPanel
       title={`${sectionLabel} unavailable`}
@@ -128,7 +112,10 @@ export function ShellSidepanel() {
       <div className="min-h-0 flex-1 overflow-auto">
         {isUnsupportedNav ? (
           <ErrorBoundary name="Unsupported Section">
-            <UnsupportedPanel sectionLabel={navLabel(activeNav)} reason={UNSUPPORTED_SECTION_REASON} />
+            <UnsupportedPanel
+              sectionLabel={navLabel(activeNav)}
+              reason={UNSUPPORTED_SECTION_REASON}
+            />
           </ErrorBoundary>
         ) : activeNav === "workspace" && !coreReady ? (
           <ErrorBoundary name="Mock Mode Active">

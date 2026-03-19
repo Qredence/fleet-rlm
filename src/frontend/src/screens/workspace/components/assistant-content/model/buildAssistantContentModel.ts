@@ -1,4 +1,7 @@
-import type { ChatRenderPart, ChatRenderToolState } from "@/screens/workspace/model/workspace-types";
+import type {
+  ChatRenderPart,
+  ChatRenderToolState,
+} from "@/screens/workspace/model/workspace-types";
 import type {
   AssistantTurnDisplayItem,
   ToolSessionItem,

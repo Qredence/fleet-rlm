@@ -1,4 +1,9 @@
-import type { ChatMessage, ChatQueueItem, ChatRenderPart, ChatTraceStep } from "@/screens/workspace/model/workspace-types";
+import type {
+  ChatMessage,
+  ChatQueueItem,
+  ChatRenderPart,
+  ChatTraceStep,
+} from "@/screens/workspace/model/workspace-types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
 import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";

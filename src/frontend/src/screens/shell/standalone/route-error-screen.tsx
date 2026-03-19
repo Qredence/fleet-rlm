@@ -32,10 +32,7 @@ export function RouteErrorScreen({ error, reset }: { error: unknown; reset?: () 
         </div>
 
         <p className="mb-1 text-muted-foreground typo-label">Route Error {status}</p>
-        <h1
-          className="mb-3 text-foreground typo-h3"
-          style={{ fontSize: "14px" }}
-        >
+        <h1 className="mb-3 text-foreground typo-h3" style={{ fontSize: "14px" }}>
           We hit a rendering issue on this route
         </h1>
         <p className="mb-6 max-w-md text-muted-foreground typo-caption">

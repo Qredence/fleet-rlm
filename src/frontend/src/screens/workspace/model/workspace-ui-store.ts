@@ -76,5 +76,4 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
 
 export const useSelectedAssistantTurnId = () =>
   useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
-export const useActiveInspectorTab = () =>
-  useWorkspaceUiStore((state) => state.activeInspectorTab);
+export const useActiveInspectorTab = () => useWorkspaceUiStore((state) => state.activeInspectorTab);

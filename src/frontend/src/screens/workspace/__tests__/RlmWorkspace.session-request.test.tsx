@@ -1,13 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
 import type { Conversation } from "@/screens/workspace/model/chat-history-store";
@@ -147,9 +140,7 @@ describe("WorkspaceScreen requested conversation loading", () => {
       root.render(<WorkspaceScreen />);
     });
 
-    expect(backendRuntimeState.loadConversation).toHaveBeenCalledWith(
-      conversation,
-    );
+    expect(backendRuntimeState.loadConversation).toHaveBeenCalledWith(conversation);
     expect(useWorkspaceUiStore.getState().requestedConversationId).toBeNull();
 
     act(() => {
