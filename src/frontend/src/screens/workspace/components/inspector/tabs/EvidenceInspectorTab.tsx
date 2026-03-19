@@ -42,7 +42,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                           <CardDescription>{citation.description}</CardDescription>
                         ) : null}
                       </div>
-                      <Badge variant="accent" className={inspectorStyles.badge.status}>
+                      <Badge variant="secondary" className={inspectorStyles.badge.status}>
                         #{citation.number ?? index + 1}
                       </Badge>
                     </div>

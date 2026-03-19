@@ -3,6 +3,7 @@
  * Do not make direct changes to the file.
  */
 
+
 export interface paths {
   "/health": {
     /** Health */
@@ -33,6 +34,10 @@ export interface paths {
     /** Test Modal Connection */
     post: operations["test_modal_connection_api_v1_runtime_tests_modal_post"];
   };
+  "/api/v1/runtime/tests/daytona": {
+    /** Test Daytona Connection */
+    post: operations["test_daytona_connection_api_v1_runtime_tests_daytona_post"];
+  };
   "/api/v1/runtime/tests/lm": {
     /** Test Lm Connection */
     post: operations["test_lm_connection_api_v1_runtime_tests_lm_post"];
@@ -44,7 +49,7 @@ export interface paths {
   "/api/v1/runtime/volume/tree": {
     /**
      * Get Volume Tree
-     * @description List the file tree of the configured Modal Volume.
+     * @description List the file tree of the configured runtime volume.
      */
     get: operations["get_volume_tree_api_v1_runtime_volume_tree_get"];
   };
@@ -146,7 +151,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: "modal" | "lm";
+      kind: "modal" | "lm" | "daytona";
       /** Ok */
       ok: boolean;
       /** Preflight Ok */
@@ -204,6 +209,11 @@ export interface components {
       /** Ready */
       ready: boolean;
       active_models: components["schemas"]["RuntimeActiveModels"];
+      /**
+       * Sandbox Provider
+       * @default modal
+       */
+      sandbox_provider?: string;
       /** Llm */
       llm?: {
         [key: string]: unknown;
@@ -224,6 +234,7 @@ export interface components {
     RuntimeTestCache: {
       modal?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
       lm?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
+      daytona?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
     };
     /** SessionStateResponse */
     SessionStateResponse: {
@@ -322,10 +333,16 @@ export interface components {
       ctx?: Record<string, never>;
     };
     /**
+     * VolumeProvider
+     * @enum {string}
+     */
+    VolumeProvider: "modal" | "daytona";
+    /**
      * VolumeFileContentResponse
      * @description Response for runtime volume file-content preview endpoint.
      */
     VolumeFileContentResponse: {
+      provider: components["schemas"]["VolumeProvider"];
       /** Path */
       path: string;
       /** Mime */
@@ -368,6 +385,7 @@ export interface components {
      * @description Response for the volume tree listing endpoint.
      */
     VolumeTreeResponse: {
+      provider: components["schemas"]["VolumeProvider"];
       /** Volume Name */
       volume_name: string;
       /** Root Path */
@@ -403,6 +421,7 @@ export type $defs = Record<string, never>;
 export type external = Record<string, never>;
 
 export interface operations {
+
   /** Health */
   health_health_get: {
     responses: {
@@ -494,6 +513,17 @@ export interface operations {
       };
     };
   };
+  /** Test Daytona Connection */
+  test_daytona_connection_api_v1_runtime_tests_daytona_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
+        };
+      };
+    };
+  };
   /** Test Lm Connection */
   test_lm_connection_api_v1_runtime_tests_lm_post: {
     responses: {
@@ -518,13 +548,14 @@ export interface operations {
   };
   /**
    * Get Volume Tree
-   * @description List the file tree of the configured Modal Volume.
+   * @description List the file tree of the configured runtime volume.
    */
   get_volume_tree_api_v1_runtime_volume_tree_get: {
     parameters: {
       query?: {
         root_path?: string;
         max_depth?: number;
+        provider?: components["schemas"]["VolumeProvider"] | null;
       };
     };
     responses: {
@@ -551,6 +582,7 @@ export interface operations {
       query: {
         path: string;
         max_bytes?: number;
+        provider?: components["schemas"]["VolumeProvider"] | null;
       };
     };
     responses: {

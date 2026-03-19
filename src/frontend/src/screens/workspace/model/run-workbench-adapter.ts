@@ -473,7 +473,7 @@ function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
   };
 }
 
-function hydrateFromRunResult(
+function hydrateFromRunSummary(
   state: RunWorkbenchState,
   raw: Record<string, unknown>,
 ): RunWorkbenchState {
@@ -504,7 +504,7 @@ function hydrateFromRunResult(
   return {
     ...state,
     runId: asText(raw.run_id ?? raw.runId) ?? state.runId,
-    repoUrl: asText(raw.repo) ?? state.repoUrl,
+    repoUrl: asText(raw.repo ?? raw.repo_url ?? raw.repoUrl) ?? state.repoUrl,
     repoRef: asText(raw.ref) ?? state.repoRef ?? null,
     task: asText(raw.task) ?? state.task,
     contextSources: asArray(raw.context_sources ?? raw.contextSources)
@@ -575,7 +575,8 @@ export function failRunWorkbenchRun(
   state: RunWorkbenchState,
   errorMessage: string,
 ): RunWorkbenchState {
-  const message = collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) || "Daytona run failed.";
+  const message =
+    collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) || "Workspace run failed.";
 
   return {
     ...state,
@@ -601,9 +602,14 @@ function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return false;
   const payload = asRecord(frame.data.payload);
   const runtime = extractRuntime(payload);
+  const sourceType = asText(payload?.source_type ?? payload?.sourceType);
   return (
+    sourceType === "execution_started" ||
+    sourceType === "execution_step" ||
+    sourceType === "execution_completed" ||
     asText(payload?.runtime_mode) === "daytona_pilot" ||
     asText(runtime?.runtime_mode) === "daytona_pilot" ||
+    payload?.run_summary != null ||
     payload?.run_result != null ||
     payload?.final_artifact != null ||
     payload?.iterations != null
@@ -649,10 +655,12 @@ export function applyFrameToRunWorkbenchState(
 
   const payload = asRecord(frame.data.payload);
   const runtime = extractRuntime(payload);
-  const runResult = asRecord(payload?.run_result ?? payload?.runResult);
+  const runSummary = asRecord(
+    payload?.run_summary ?? payload?.runSummary ?? payload?.run_result ?? payload?.runResult,
+  );
 
-  if (runResult) {
-    next = hydrateFromRunResult(next, runResult);
+  if (runSummary) {
+    next = hydrateFromRunSummary(next, runSummary);
   }
 
   const payloadPrompts = dedupePromptHandles([
@@ -681,7 +689,7 @@ export function applyFrameToRunWorkbenchState(
   }
 
   const iterationNumber = asNumber(payload?.iteration);
-  if (iterationNumber != null && !runResult) {
+  if (iterationNumber != null && !runSummary) {
     next = {
       ...next,
       iterations: upsertIteration(next.iterations, {
@@ -766,10 +774,15 @@ export function applyFrameToRunWorkbenchState(
     sources: payloadSources,
     attachments: payloadAttachments,
     finalArtifact:
-      normalizeArtifact(payload?.final_artifact ?? payload?.finalArtifact) ??
+      normalizeArtifact(
+        payload?.final_artifact ??
+          payload?.finalArtifact ??
+          runSummary?.final_artifact ??
+          runSummary?.finalArtifact,
+      ) ??
       next.finalArtifact ??
       null,
-    summary: normalizeSummary(payload?.summary) ?? next.summary,
+    summary: normalizeSummary(payload?.summary ?? runSummary?.summary) ?? next.summary,
     errorMessage: frame.data.kind === "error" ? frame.data.text : (next.errorMessage ?? null),
   };
 }

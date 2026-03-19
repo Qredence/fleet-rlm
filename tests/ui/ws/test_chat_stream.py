@@ -164,6 +164,82 @@ def test_websocket_routes_daytona_runtime_messages_through_daytona_chat_agent(
     assert final["data"]["text"] == "Daytona done"
 
 
+def test_websocket_streams_live_daytona_reasoning_and_trajectory_events(
+    ws_client,
+    fake_agent: FakeChatAgent,
+    websocket_auth_headers,
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="trajectory_step",
+                text="Starting Daytona iteration 1.",
+                payload={
+                    "phase": "iteration",
+                    "step_index": 0,
+                    "step_data": {
+                        "index": 0,
+                        "action": "Iteration 1",
+                        "thought": "Begin host-loop iteration 1.",
+                    },
+                    "runtime": {
+                        "depth": 0,
+                        "max_depth": 3,
+                        "execution_profile": "DAYTONA_PILOT_HOST_LOOP",
+                        "sandbox_active": True,
+                        "effective_max_iters": 50,
+                        "runtime_mode": "daytona_pilot",
+                    },
+                },
+                timestamp=ts(1.0),
+            ),
+            StreamEvent(
+                kind="reasoning_step",
+                text="Planner prompt preview:\n\nSummarize the repo.",
+                payload={
+                    "phase": "prepare_prompt",
+                    "reasoning_label": "prompt_iter_1",
+                    "runtime": {
+                        "depth": 0,
+                        "max_depth": 3,
+                        "execution_profile": "DAYTONA_PILOT_HOST_LOOP",
+                        "sandbox_active": True,
+                        "effective_max_iters": 50,
+                        "runtime_mode": "daytona_pilot",
+                    },
+                },
+                timestamp=ts(2.0),
+            ),
+            StreamEvent(
+                kind="final",
+                text="Done",
+                payload={"runtime_mode": "daytona_pilot", "history_turns": 1},
+                timestamp=ts(3.0),
+            ),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "analyze the repo",
+                "runtime_mode": "daytona_pilot",
+            }
+        )
+        trajectory = websocket.receive_json()
+        reasoning = websocket.receive_json()
+        final = websocket.receive_json()
+
+    assert trajectory["data"]["kind"] == "trajectory_step"
+    assert trajectory["data"]["payload"]["step_data"]["action"] == "Iteration 1"
+    assert reasoning["data"]["kind"] == "reasoning_step"
+    assert reasoning["data"]["payload"]["reasoning_label"] == "prompt_iter_1"
+    assert final["data"]["kind"] == "final"
+
+
 def test_websocket_routes_daytona_repo_only_messages_to_daytona_chat_agent(
     ws_client,
     fake_agent: FakeChatAgent,
@@ -401,6 +477,10 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
     assert any(step["step"]["type"] == "llm" for step in step_events)
     assert any(step["step"]["type"] == "output" for step in step_events)
     assert execution_events[-1]["type"] == "execution_completed"
+    assert execution_events[-1]["summary"]["run_id"].endswith(":1")
+    assert execution_events[-1]["summary"]["runtime_mode"] == "modal_chat"
+    assert execution_events[-1]["summary"]["task"] == "test execution events"
+    assert execution_events[-1]["summary"]["status"] == "completed"
 
 
 def test_websocket_final_event_waits_for_run_completion(

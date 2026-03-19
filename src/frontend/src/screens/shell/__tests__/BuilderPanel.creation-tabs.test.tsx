@@ -29,11 +29,9 @@ vi.mock("@/components/ui/tooltip", () => ({
 }));
 
 const workspaceCanvas = vi.fn(() => <div>MessageInspectorPanel</div>);
-const workspaceCanvasTitle = vi.fn(() => "Message Inspector");
-
 vi.mock("@/screens/workspace/workspace-canvas-panel", () => ({
   WorkspaceCanvasPanel: () => workspaceCanvas(),
-  useWorkspaceCanvasTitle: () => workspaceCanvasTitle(),
+  useWorkspaceCanvasTitle: () => "Canvas",
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
 }));
 
@@ -90,7 +88,7 @@ describe("ShellSidepanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Message Inspector");
+    expect(html).toContain("Canvas");
     expect(html).toContain("MessageInspectorPanel");
     expect(html).not.toContain("Support rail");
   });
@@ -101,7 +99,6 @@ describe("ShellSidepanel workspace inspector", () => {
       isCanvasOpen: false,
     });
     workspaceCanvas.mockReturnValueOnce(<div>RunWorkbench</div>);
-    workspaceCanvasTitle.mockReturnValueOnce("Run Workbench");
     const queryClient = new QueryClient();
     const html = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
@@ -109,7 +106,7 @@ describe("ShellSidepanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Run Workbench");
+    expect(html).toContain("Canvas");
     expect(html).toContain("RunWorkbench");
     expect(html).not.toContain("Support rail");
     expect(html).not.toContain("MessageInspectorPanel");

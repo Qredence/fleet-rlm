@@ -36,6 +36,7 @@ class _FakeRuntime:
         repo_url: str | None,
         ref: str | None,
         context_paths: list[str] | None = None,
+        volume_name: str | None = None,
     ):
         self.calls.append((repo_url, ref, list(context_paths or [])))
         return self.session
@@ -92,10 +93,12 @@ def test_daytona_workbench_chat_agent_delegates_to_runner_with_session(
         budget=RolloutBudget(max_depth=3, batch_concurrency=6),
         event_callback=lambda event: None,
         cancel_check=lambda: False,
+        volume_name="tenant-a",
     )
 
     assert _FakeRunner.init_kwargs is not None
     assert _FakeRunner.init_kwargs["lm"] is planner_lm
+    assert _FakeRunner.init_kwargs["volume_name"] == "tenant-a"
     assert _FakeRunner.last_run_kwargs is not None
     assert _FakeRunner.last_run_kwargs["session"] is session
     assert _FakeRunner.last_run_kwargs["task"] == "inspect recursive reasoning"

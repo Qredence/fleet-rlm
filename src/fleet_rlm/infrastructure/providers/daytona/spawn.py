@@ -1,4 +1,4 @@
-"""Guide-native semantic and recursive helper adapters for Daytona RLM."""
+"""SDK-backed semantic and recursive helper adapters for Daytona RLM."""
 
 from __future__ import annotations
 

@@ -44,7 +44,7 @@ vi.mock("@/screens/volumes/volumes-canvas-panel", () => ({
 
 vi.mock("@/screens/workspace/workspace-canvas-panel", () => ({
   WorkspaceCanvasPanel: () => <div>MessageInspectorPanel</div>,
-  useWorkspaceCanvasTitle: () => "Message Inspector",
+  useWorkspaceCanvasTitle: () => "Canvas",
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
 }));
 
@@ -63,7 +63,7 @@ describe("ShellSidepanel file detail mode", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("File Preview");
+    expect(html).toContain("Preview");
     expect(html).toContain("VolumeFileDetail:README.md");
     expect(html).not.toContain("No active panel");
     expect(html).not.toContain("MessageInspectorPanel");

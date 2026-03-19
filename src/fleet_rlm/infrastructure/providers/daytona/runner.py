@@ -1,4 +1,4 @@
-"""Host-managed Daytona REPL runner aligned with the official DSPy RLM guide."""
+"""Custom Daytona host-loop runner that preserves the guide's core RLM invariants."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, cast
 
@@ -64,6 +65,21 @@ _GUIDE_SUBMIT_SCHEMA = [
 ]
 
 _EVALUATION_TRACE_KEYS = ("spawn_policy", "decomposition", "child_synthesis")
+
+
+@dataclass(slots=True)
+class _IterationOutcome:
+    completed: bool
+    observation_text: str
+    last_iteration: int
+    final_artifact: FinalArtifact | None = None
+
+
+@dataclass(slots=True)
+class _RunTerminalState:
+    termination_reason: str = "completed"
+    error_text: str | None = None
+    final_artifact: FinalArtifact | None = None
 
 
 def _collapse_preview(text: str, *, limit: int = 240) -> str:
@@ -195,12 +211,14 @@ class DaytonaRLMRunner:
         output_dir: Path | str = "results/daytona-rlm",
         event_callback: Callable[[StreamEvent], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        volume_name: str | None = None,
     ) -> None:
         self.runtime = runtime or DaytonaSandboxRuntime()
         self.budget = budget or RolloutBudget()
         self.output_dir = Path(output_dir)
         self.event_callback = event_callback
         self.cancel_check = cancel_check
+        self.volume_name = volume_name
         self.run_id = str(uuid.uuid4())
         self._lm = lm
         self._delegate_lm = delegate_lm
@@ -276,6 +294,7 @@ class DaytonaRLMRunner:
                 repo_url=repo,
                 ref=ref,
                 context_paths=context_paths,
+                volume_name=self.volume_name,
             )
             created_session = True
 
@@ -706,6 +725,7 @@ class DaytonaRLMRunner:
             "cancelled",
             "warning",
             "reasoning_step",
+            "trajectory_step",
         }:
             kind = "status"
         self.event_callback(
@@ -856,6 +876,7 @@ class _HostLoopDaytonaRuntime:
         self._history_grounding: str = ""
         self._history_grounding_resolved = False
         self._active_iteration: int | None = None
+        self._trajectory_step_index = 0
         self._evaluation: dict[str, Any] = {"nodes": {}}
         self._event_emitter = DaytonaRuntimeEventEmitter(
             emit_runtime_event=self.runner._handle_runtime_event,
@@ -865,6 +886,7 @@ class _HostLoopDaytonaRuntime:
             request_id=self.request_id,
             started_at=self.started_at,
             active_iteration_getter=lambda: self._active_iteration,
+            volume_name=self.runner.volume_name,
         )
         self._callback_dispatcher = DaytonaHostCallbackDispatcher(
             runner=cast(DaytonaRunnerProtocol, self.runner),
@@ -948,11 +970,7 @@ class _HostLoopDaytonaRuntime:
             }
         )
 
-    def run(self) -> DaytonaRunResult:
-        termination_reason = "completed"
-        error_text: str | None = None
-        final_artifact: FinalArtifact | None = None
-
+    def _create_root_node(self) -> AgentNode:
         root = AgentNode(
             node_id=self.root_id,
             parent_id=self.parent_id,
@@ -966,12 +984,15 @@ class _HostLoopDaytonaRuntime:
         )
         self.nodes[root.node_id] = root
         self._node_evaluation(root.node_id)
+        return root
 
+    def _emit_startup(self, root: AgentNode) -> None:
         self._emit_status(root, "Starting Daytona host-loop run.", phase="node_start")
         for warning in self.summary_warnings:
             root.warnings.append(warning)
             self._emit_warning(root, warning, phase="compatibility")
 
+    def _build_static_prompts(self) -> tuple[str, str]:
         system_prompt = build_system_prompt(
             workspace_path=self.session.workspace_path,
             budget=self.budget,
@@ -981,240 +1002,527 @@ class _HostLoopDaytonaRuntime:
             ref=self.ref,
             context_sources=self.session.context_sources,
         )
+        return system_prompt, user_prompt
+
+    def _start_iteration(self, *, root: AgentNode, iteration: int) -> None:
+        self._assert_not_cancelled()
+        self._assert_time_budget()
+        self._active_iteration = iteration
+        root.iteration_count = iteration
+        self._emit_progress_status(
+            root,
+            f"Running Daytona iteration {iteration}.",
+            phase="iteration",
+            iteration=iteration,
+        )
+        self._emit_trajectory_step(
+            root,
+            f"Starting Daytona iteration {iteration}.",
+            phase="iteration",
+            iteration=iteration,
+            thought=f"Begin host-loop iteration {iteration}.",
+            action=f"Iteration {iteration}",
+        )
+
+    def _invoke_iteration(
+        self,
+        *,
+        root: AgentNode,
+        system_prompt: str,
+        user_prompt: str,
+        observation_text: str,
+        iteration: int,
+    ) -> str:
+        self._emit_progress_status(
+            root,
+            f"Preparing prompt for iteration {iteration}.",
+            phase="prepare_prompt",
+            iteration=iteration,
+        )
+        prompt = self._build_iteration_prompt(
+            node=root,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            task=self.task,
+            observation_text=observation_text,
+            iteration=iteration,
+        )
+        self._emit_reasoning_step(
+            root,
+            f"Planner prompt preview:\n\n{_preview_text(prompt, limit=1_000)}",
+            phase="prepare_prompt",
+            iteration=iteration,
+            label=f"prompt_iter_{iteration}",
+        )
+        self._emit_progress_status(
+            root,
+            f"Invoking planner model for iteration {iteration}.",
+            phase="llm_invoke",
+            iteration=iteration,
+        )
+        response_text = self.runner._invoke_lm(self.primary_lm, prompt)
+        root.prompt_previews.append(_preview_text(prompt))
+        root.response_previews.append(_preview_text(response_text))
+        self._emit_reasoning_step(
+            root,
+            f"Planner response preview:\n\n{_preview_text(response_text, limit=1_000)}",
+            phase="llm_invoke",
+            iteration=iteration,
+            label=f"planner_iter_{iteration}",
+        )
+        self._emit_progress_status(
+            root,
+            f"Extracting Python code for iteration {iteration}.",
+            phase="code_extract",
+            iteration=iteration,
+        )
+        return response_text
+
+    def _handle_missing_code_block(
+        self,
+        *,
+        root: AgentNode,
+        iteration: int,
+        response_text: str,
+    ) -> _IterationOutcome:
+        message = (
+            "The previous response did not include a Python code block. "
+            "Reply with exactly one Python code block and finalize "
+            "through SUBMIT(...)."
+        )
+        root.observations.append(
+            ExecutionObservation(
+                iteration=iteration,
+                code="",
+                error=message,
+            )
+        )
+        self._emit_progress_status(
+            root,
+            f"Iteration {iteration} needs a retry because no Python code block was returned.",
+            phase="retry",
+            iteration=iteration,
+        )
+        self._emit_trajectory_step(
+            root,
+            f"Iteration {iteration} needs a retry because no Python code block was returned.",
+            phase="retry",
+            iteration=iteration,
+            thought="The planner response did not contain executable Python.",
+            action="Retry with code-block guidance",
+            observation=message,
+        )
+        return _IterationOutcome(
+            completed=False,
+            observation_text=(
+                f"{message}\n\nPrevious model response preview:\n"
+                f"{_preview_text(response_text, limit=800)}"
+            ),
+            last_iteration=iteration,
+        )
+
+    def _execute_iteration_code(
+        self,
+        *,
+        root: AgentNode,
+        iteration: int,
+        code: str,
+    ) -> tuple[Any, ExecutionObservation]:
+        self._emit_progress_status(
+            root,
+            f"Executing iteration {iteration} code in the Daytona sandbox.",
+            phase="code_execute",
+            iteration=iteration,
+        )
+        response = self.session.execute_code(
+            code=code,
+            callback_handler=lambda request: self._handle_host_callback(
+                node=root,
+                request=request,
+            ),
+            timeout=self._remaining_timeout(),
+            submit_schema=_GUIDE_SUBMIT_SCHEMA,
+            cancel_check=self.runner.cancel_check,
+            progress_handler=lambda frame: self._handle_execution_progress(
+                node=root,
+                iteration=iteration,
+                frame=frame,
+            ),
+        )
+        self._emit_progress_status(
+            root,
+            f"Summarizing execution output for iteration {iteration}.",
+            phase="observation_build",
+            iteration=iteration,
+            extra_payload={
+                "duration_ms": response.duration_ms,
+                "callback_count": response.callback_count,
+            },
+        )
+        observation = ExecutionObservation(
+            iteration=iteration,
+            code=code,
+            stdout=_preview_text(response.stdout),
+            stderr=_preview_text(response.stderr),
+            error=_preview_text(response.error) if response.error else None,
+            duration_ms=response.duration_ms,
+            callback_count=response.callback_count,
+        )
+        root.observations.append(observation)
+        self._emit_reasoning_step(
+            root,
+            self._render_observation(observation),
+            phase="observation",
+            iteration=iteration,
+            label=f"observation_iter_{iteration}",
+            extra_payload={
+                "duration_ms": response.duration_ms,
+                "callback_count": response.callback_count,
+            },
+        )
+        self._emit_trajectory_step(
+            root,
+            f"Executed Daytona sandbox code for iteration {iteration}.",
+            phase="observation",
+            iteration=iteration,
+            thought=f"Sandbox execution completed for iteration {iteration}.",
+            action="Execute sandbox code",
+            observation=self._render_observation(observation),
+            extra_payload={
+                "duration_ms": response.duration_ms,
+                "callback_count": response.callback_count,
+            },
+        )
+        self._emit_progress_status(
+            root,
+            f"Iteration {iteration} executed in {response.duration_ms}ms.",
+            phase="observation",
+            iteration=iteration,
+            extra_payload={
+                "duration_ms": response.duration_ms,
+                "callback_count": response.callback_count,
+            },
+        )
+        return response, observation
+
+    def _handle_final_artifact_response(
+        self,
+        *,
+        root: AgentNode,
+        iteration: int,
+        response: Any,
+        observation: ExecutionObservation,
+    ) -> _IterationOutcome:
+        artifact = FinalArtifact.from_raw(response.final_artifact)
+        if (
+            not self.strict_finalization
+            or self.runner._root_finalization_candidate(artifact) is not None
+        ):
+            root.final_artifact = artifact
+            root.status = "completed"
+            self._emit_progress_status(
+                root,
+                "Node completed.",
+                phase="completed",
+                iteration=iteration,
+                extra_payload={"duration_ms": response.duration_ms},
+            )
+            self._emit_trajectory_step(
+                root,
+                f"Completed Daytona iteration {iteration}.",
+                phase="completed",
+                iteration=iteration,
+                thought="A final artifact was accepted for the root node.",
+                action="Complete run",
+                observation=self._build_result_preview(artifact),
+                extra_payload={"duration_ms": response.duration_ms},
+            )
+            return _IterationOutcome(
+                completed=True,
+                observation_text="",
+                last_iteration=iteration,
+                final_artifact=artifact,
+            )
+
+        self._emit_progress_status(
+            root,
+            f"Iteration {iteration} produced an intermediate artifact; retrying with synthesis guidance.",
+            phase="retry",
+            iteration=iteration,
+        )
+        self._emit_trajectory_step(
+            root,
+            f"Iteration {iteration} produced an intermediate artifact; retrying with synthesis guidance.",
+            phase="retry",
+            iteration=iteration,
+            thought="The returned artifact was not yet a readable synthesized answer.",
+            action="Retry with synthesis guidance",
+            observation=self._build_result_preview(artifact),
+        )
+        return _IterationOutcome(
+            completed=False,
+            observation_text=self._build_root_retry_observation(
+                artifact=artifact,
+                base_observation=(
+                    self._render_observation(observation)
+                    or "The previous SUBMIT result was rejected."
+                ),
+            ),
+            last_iteration=iteration,
+        )
+
+    def _handle_execution_error_response(
+        self,
+        *,
+        root: AgentNode,
+        iteration: int,
+        response: Any,
+        observation: ExecutionObservation,
+    ) -> _IterationOutcome:
+        self._emit_progress_status(
+            root,
+            f"Iteration {iteration} returned an execution error; retrying with the captured observation.",
+            phase="retry",
+            iteration=iteration,
+            extra_payload={"callback_count": response.callback_count},
+        )
+        self._emit_trajectory_step(
+            root,
+            f"Iteration {iteration} returned an execution error; retrying with the captured observation.",
+            phase="retry",
+            iteration=iteration,
+            thought="The sandbox returned an execution error.",
+            action="Retry after execution error",
+            observation=self._render_observation(observation),
+            extra_payload={"callback_count": response.callback_count},
+        )
+        return _IterationOutcome(
+            completed=False,
+            observation_text=self._render_observation(observation),
+            last_iteration=iteration,
+        )
+
+    def _handle_observation_response(
+        self,
+        *,
+        root: AgentNode,
+        iteration: int,
+        observation: ExecutionObservation,
+    ) -> _IterationOutcome:
+        observation_text = self._render_observation(observation)
+        recursive_results = self._maybe_auto_decompose(
+            node=root,
+            observation_text=observation_text,
+        )
+        if recursive_results:
+            self._emit_reasoning_step(
+                root,
+                f"Recursive child-result synthesis summary:\n\n{recursive_results}",
+                phase="recursive_decompose",
+                iteration=iteration,
+                label=f"recursive_results_iter_{iteration}",
+            )
+            self._emit_trajectory_step(
+                root,
+                f"Merged recursive child results into iteration {iteration}.",
+                phase="recursive_decompose",
+                iteration=iteration,
+                thought="Recursive children returned additional evidence for the parent node.",
+                action="Merge recursive child results",
+                observation=recursive_results,
+            )
+            observation_text = (
+                f"{observation_text}\n\nRecursive child results:\n{recursive_results}"
+            )
+        return _IterationOutcome(
+            completed=False,
+            observation_text=observation_text,
+            last_iteration=iteration,
+        )
+
+    def _resolve_iteration_outcome(
+        self,
+        *,
+        root: AgentNode,
+        iteration: int,
+        response: Any,
+        observation: ExecutionObservation,
+    ) -> _IterationOutcome:
+        if response.final_artifact is not None:
+            return self._handle_final_artifact_response(
+                root=root,
+                iteration=iteration,
+                response=response,
+                observation=observation,
+            )
+        if response.error:
+            return self._handle_execution_error_response(
+                root=root,
+                iteration=iteration,
+                response=response,
+                observation=observation,
+            )
+        return self._handle_observation_response(
+            root=root,
+            iteration=iteration,
+            observation=observation,
+        )
+
+    def _run_iterations(
+        self,
+        *,
+        root: AgentNode,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> _IterationOutcome:
         observation_text = "No execution has happened yet."
 
-        try:
-            for iteration in range(1, self.budget.max_iterations + 1):
-                self._assert_not_cancelled()
-                self._assert_time_budget()
-                self._active_iteration = iteration
-                root.iteration_count = iteration
-                self._emit_progress_status(
-                    root,
-                    f"Running Daytona iteration {iteration}.",
-                    phase="iteration",
-                    iteration=iteration,
-                )
-                self._emit_progress_status(
-                    root,
-                    f"Preparing prompt for iteration {iteration}.",
-                    phase="prepare_prompt",
-                    iteration=iteration,
-                )
-                prompt = self._build_iteration_prompt(
-                    node=root,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    task=self.task,
-                    observation_text=observation_text,
-                    iteration=iteration,
-                )
-                self._emit_progress_status(
-                    root,
-                    f"Invoking planner model for iteration {iteration}.",
-                    phase="llm_invoke",
-                    iteration=iteration,
-                )
-                response_text = self.runner._invoke_lm(self.primary_lm, prompt)
-                root.prompt_previews.append(_preview_text(prompt))
-                root.response_previews.append(_preview_text(response_text))
-                self._emit_progress_status(
-                    root,
-                    f"Extracting Python code for iteration {iteration}.",
-                    phase="code_extract",
-                    iteration=iteration,
-                )
-                code = self._extract_code(response_text)
-                if code is None:
-                    message = (
-                        "The previous response did not include a Python code block. "
-                        "Reply with exactly one Python code block and finalize "
-                        "through SUBMIT(...)."
-                    )
-                    root.observations.append(
-                        ExecutionObservation(
-                            iteration=iteration,
-                            code="",
-                            error=message,
-                        )
-                    )
-                    observation_text = (
-                        f"{message}\n\nPrevious model response preview:\n"
-                        f"{_preview_text(response_text, limit=800)}"
-                    )
-                    self._emit_progress_status(
-                        root,
-                        f"Iteration {iteration} needs a retry because no Python code block was returned.",
-                        phase="retry",
-                        iteration=iteration,
-                    )
-                    continue
-
-                self._emit_progress_status(
-                    root,
-                    f"Executing iteration {iteration} code in the Daytona sandbox.",
-                    phase="code_execute",
-                    iteration=iteration,
-                )
-                response = self.session.execute_code(
-                    code=code,
-                    callback_handler=lambda request: self._handle_host_callback(
-                        node=root,
-                        request=request,
-                    ),
-                    timeout=self._remaining_timeout(),
-                    submit_schema=_GUIDE_SUBMIT_SCHEMA,
-                    cancel_check=self.runner.cancel_check,
-                    progress_handler=lambda frame: self._handle_execution_progress(
-                        node=root,
-                        iteration=iteration,
-                        frame=frame,
-                    ),
-                )
-                self._emit_progress_status(
-                    root,
-                    f"Summarizing execution output for iteration {iteration}.",
-                    phase="observation_build",
-                    iteration=iteration,
-                    extra_payload={
-                        "duration_ms": response.duration_ms,
-                        "callback_count": response.callback_count,
-                    },
-                )
-                observation = ExecutionObservation(
-                    iteration=iteration,
-                    code=code,
-                    stdout=_preview_text(response.stdout),
-                    stderr=_preview_text(response.stderr),
-                    error=_preview_text(response.error) if response.error else None,
-                    duration_ms=response.duration_ms,
-                    callback_count=response.callback_count,
-                )
-                root.observations.append(observation)
-                self._emit_progress_status(
-                    root,
-                    f"Iteration {iteration} executed in {response.duration_ms}ms.",
-                    phase="observation",
-                    iteration=iteration,
-                    extra_payload={
-                        "duration_ms": response.duration_ms,
-                        "callback_count": response.callback_count,
-                    },
-                )
-
-                if response.final_artifact is not None:
-                    artifact = FinalArtifact.from_raw(response.final_artifact)
-                    if (
-                        not self.strict_finalization
-                        or self.runner._root_finalization_candidate(artifact)
-                        is not None
-                    ):
-                        final_artifact = artifact
-                        root.final_artifact = artifact
-                        root.status = "completed"
-                        self._emit_progress_status(
-                            root,
-                            "Node completed.",
-                            phase="completed",
-                            iteration=iteration,
-                            extra_payload={"duration_ms": response.duration_ms},
-                        )
-                        break
-                    observation_text = self._build_root_retry_observation(
-                        artifact=artifact,
-                        base_observation=(
-                            self._render_observation(observation)
-                            or "The previous SUBMIT result was rejected."
-                        ),
-                    )
-                    self._emit_progress_status(
-                        root,
-                        f"Iteration {iteration} produced an intermediate artifact; retrying with synthesis guidance.",
-                        phase="retry",
-                        iteration=iteration,
-                    )
-                    continue
-
-                if response.error:
-                    observation_text = self._render_observation(observation)
-                    self._emit_progress_status(
-                        root,
-                        f"Iteration {iteration} returned an execution error; retrying with the captured observation.",
-                        phase="retry",
-                        iteration=iteration,
-                        extra_payload={"callback_count": response.callback_count},
-                    )
-                    continue
-                observation_text = self._render_observation(observation)
-                recursive_results = self._maybe_auto_decompose(
-                    node=root,
-                    observation_text=observation_text,
-                )
-                if recursive_results:
-                    observation_text = (
-                        f"{observation_text}\n\nRecursive child results:\n"
-                        f"{recursive_results}"
-                    )
-            else:
-                termination_reason = "error"
-                error_text = (
-                    f"Exceeded max_iterations={self.budget.max_iterations} without "
-                    "SUBMIT()."
-                )
-                root.status = "error"
-                root.error = error_text
-                final_artifact = FinalArtifact(
-                    kind="error",
-                    value=error_text,
-                    finalization_mode="error",
-                )
-                root.final_artifact = final_artifact
-                self._emit_progress_status(
-                    root,
-                    "Node failed.",
-                    phase="error",
-                    iteration=iteration,
-                )
-            self._active_iteration = None
-        except DaytonaRunCancelled as exc:
-            self._active_iteration = None
-            termination_reason = "cancelled"
-            error_text = str(exc)
-            root.status = "cancelled"
-            root.error = error_text
-            self._emit_cancelled(root, error_text, phase="cancelled")
-        except TimeoutError as exc:
-            self._active_iteration = None
-            error_text = str(exc)
-            root.status = "error"
-            root.error = error_text
-            final_artifact = FinalArtifact(
-                kind="error",
-                value=error_text,
-                finalization_mode="error",
+        for iteration in range(1, self.budget.max_iterations + 1):
+            self._start_iteration(root=root, iteration=iteration)
+            response_text = self._invoke_iteration(
+                root=root,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                observation_text=observation_text,
+                iteration=iteration,
             )
-            root.final_artifact = final_artifact
-            self._emit_error(root, error_text, phase="timeout")
-            raise
-        except Exception as exc:
-            self._active_iteration = None
-            error_text = str(exc)
-            root.status = "error"
-            root.error = error_text
-            final_artifact = FinalArtifact(
-                kind="error",
-                value=error_text,
-                finalization_mode="error",
+            code = self._extract_code(response_text)
+            if code is None:
+                observation_text = self._handle_missing_code_block(
+                    root=root,
+                    iteration=iteration,
+                    response_text=response_text,
+                ).observation_text
+                continue
+            self._emit_reasoning_step(
+                root,
+                f"```python\n{_preview_text(code, limit=1_000)}\n```",
+                phase="code_extract",
+                iteration=iteration,
+                label=f"extracted_code_iter_{iteration}",
             )
-            root.final_artifact = final_artifact
-            self._emit_error(root, error_text, phase="error")
-            raise
 
+            response, observation = self._execute_iteration_code(
+                root=root,
+                iteration=iteration,
+                code=code,
+            )
+            outcome = self._resolve_iteration_outcome(
+                root=root,
+                iteration=iteration,
+                response=response,
+                observation=observation,
+            )
+            if outcome.completed:
+                return outcome
+            observation_text = outcome.observation_text
+
+        return _IterationOutcome(
+            completed=False,
+            observation_text=observation_text,
+            last_iteration=self.budget.max_iterations,
+        )
+
+    def _handle_max_iterations_exhausted(
+        self,
+        *,
+        root: AgentNode,
+        last_iteration: int,
+    ) -> _RunTerminalState:
+        error_text = (
+            f"Exceeded max_iterations={self.budget.max_iterations} without SUBMIT()."
+        )
+        final_artifact = FinalArtifact(
+            kind="error",
+            value=error_text,
+            finalization_mode="error",
+        )
+        root.status = "error"
+        root.error = error_text
+        root.final_artifact = final_artifact
+        self._emit_progress_status(
+            root,
+            "Node failed.",
+            phase="error",
+            iteration=last_iteration,
+        )
+        self._emit_trajectory_step(
+            root,
+            "Node failed after exhausting the iteration budget.",
+            phase="error",
+            iteration=last_iteration,
+            thought="The run never produced a terminal SUBMIT before max_iterations was reached.",
+            action="Fail run",
+            observation=error_text,
+        )
+        return _RunTerminalState(
+            termination_reason="error",
+            error_text=error_text,
+            final_artifact=final_artifact,
+        )
+
+    def _handle_cancelled_exception(
+        self,
+        *,
+        root: AgentNode,
+        exc: DaytonaRunCancelled,
+    ) -> _RunTerminalState:
+        error_text = str(exc)
+        root.status = "cancelled"
+        root.error = error_text
+        self._emit_cancelled(root, error_text, phase="cancelled")
+        self._emit_trajectory_step(
+            root,
+            "Daytona run cancelled.",
+            phase="cancelled",
+            iteration=self._active_iteration,
+            thought="The run was cancelled before completion.",
+            action="Cancel run",
+            observation=error_text,
+        )
+        return _RunTerminalState(
+            termination_reason="cancelled",
+            error_text=error_text,
+        )
+
+    def _handle_runtime_exception(
+        self,
+        *,
+        root: AgentNode,
+        exc: Exception,
+        phase: str,
+    ) -> _RunTerminalState:
+        error_text = str(exc)
+        final_artifact = FinalArtifact(
+            kind="error",
+            value=error_text,
+            finalization_mode="error",
+        )
+        root.status = "error"
+        root.error = error_text
+        root.final_artifact = final_artifact
+        self._emit_error(root, error_text, phase=phase)
+        self._emit_trajectory_step(
+            root,
+            "Daytona run failed.",
+            phase=phase,
+            iteration=self._active_iteration,
+            thought="The host-loop runtime raised an unrecoverable error.",
+            action="Fail run",
+            observation=error_text,
+        )
+        return _RunTerminalState(
+            termination_reason="error",
+            error_text=error_text,
+            final_artifact=final_artifact,
+        )
+
+    def _build_run_result(self, state: _RunTerminalState) -> DaytonaRunResult:
         summary = RolloutSummary(
             duration_ms=int((time.monotonic() - self.started_at) * 1000),
             sandboxes_used=1,
-            termination_reason=termination_reason,
-            error=error_text,
+            termination_reason=state.termination_reason,
+            error=state.error_text,
             warnings=list(dict.fromkeys(self.summary_warnings)),
             phase_timings_ms=self._event_emitter.phase_timings_ms(),
         )
@@ -1227,10 +1535,50 @@ class _HostLoopDaytonaRuntime:
             budget=self.budget,
             root_id=self.root_id,
             nodes=self.nodes,
-            final_artifact=final_artifact,
+            final_artifact=state.final_artifact,
             summary=summary,
             evaluation=self._evaluation,
         )
+
+    def run(self) -> DaytonaRunResult:
+        root = self._create_root_node()
+        self._emit_startup(root)
+        system_prompt, user_prompt = self._build_static_prompts()
+        state = _RunTerminalState()
+
+        try:
+            outcome = self._run_iterations(
+                root=root,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            if outcome.completed:
+                state.final_artifact = outcome.final_artifact
+            else:
+                state = self._handle_max_iterations_exhausted(
+                    root=root,
+                    last_iteration=outcome.last_iteration,
+                )
+        except DaytonaRunCancelled as exc:
+            state = self._handle_cancelled_exception(root=root, exc=exc)
+        except TimeoutError as exc:
+            state = self._handle_runtime_exception(
+                root=root,
+                exc=exc,
+                phase="timeout",
+            )
+            raise
+        except Exception as exc:
+            state = self._handle_runtime_exception(
+                root=root,
+                exc=exc,
+                phase="error",
+            )
+            raise
+        finally:
+            self._active_iteration = None
+
+        return self._build_run_result(state)
 
     def _handle_host_callback(
         self, *, node: AgentNode, request: HostCallbackRequest
@@ -1408,6 +1756,17 @@ class _HostLoopDaytonaRuntime:
             f"Spawning {len(task_specs)} recursive child tasks.",
             phase="recursive_decompose",
             iteration=self._active_iteration,
+            extra_payload={"count": len(task_specs)},
+        )
+        self._emit_trajectory_step(
+            node,
+            f"Spawning {len(task_specs)} recursive child tasks.",
+            phase="recursive_decompose",
+            iteration=self._active_iteration,
+            thought=str(getattr(decision, "decision_summary", "") or "").strip()
+            or "The recursive decomposer selected child tasks to gather more evidence.",
+            action="Spawn recursive child tasks",
+            observation=[task.to_dict() for task in task_specs],
             extra_payload={"count": len(task_specs)},
         )
         try:
@@ -1742,6 +2101,7 @@ class _HostLoopDaytonaRuntime:
         if not text.strip():
             return
         preview = _collapse_preview(text, limit=280)
+        bounded_text = _preview_text(text, limit=1_200)
         stream_name = frame.stream.lower() if frame.stream else "stdout"
         self._emit_progress_status(
             node,
@@ -1750,9 +2110,64 @@ class _HostLoopDaytonaRuntime:
             iteration=iteration,
             extra_payload={
                 "stream": stream_name,
-                "stream_text": text,
-                "truncated": frame.truncated,
+                "stream_text": bounded_text,
+                "truncated": frame.truncated or bounded_text != text.strip(),
             },
+        )
+
+    def _next_trajectory_step_index(self) -> int:
+        index = self._trajectory_step_index
+        self._trajectory_step_index += 1
+        return index
+
+    def _emit_reasoning_step(
+        self,
+        node: AgentNode,
+        text: str,
+        *,
+        phase: str,
+        iteration: int | None = None,
+        label: str | None = None,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> None:
+        content = str(text or "").strip()
+        if not content:
+            return
+        self._event_emitter.emit_reasoning_step(
+            node,
+            content,
+            phase=phase,
+            iteration=iteration,
+            label=label,
+            extra_payload=extra_payload,
+        )
+
+    def _emit_trajectory_step(
+        self,
+        node: AgentNode,
+        text: str,
+        *,
+        phase: str,
+        iteration: int | None = None,
+        thought: str | None = None,
+        action: str | None = None,
+        tool_name: str | None = None,
+        tool_input: Any | None = None,
+        observation: Any | None = None,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> None:
+        self._event_emitter.emit_trajectory_step(
+            node,
+            text,
+            phase=phase,
+            step_index=self._next_trajectory_step_index(),
+            iteration=iteration,
+            thought=thought,
+            action=action,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            observation=observation,
+            extra_payload=extra_payload,
         )
 
     @staticmethod

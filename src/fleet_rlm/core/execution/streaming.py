@@ -197,36 +197,39 @@ def _build_fallback_events(
     effective_max_iters: int,
     agent: RLMReActChatAgent,
     init_phase: bool,
+    ctx: StreamingContext,
 ) -> Iterable[StreamEvent]:
     prefix = "streaming unavailable" if init_phase else "stream error"
     yield StreamEvent(
         kind="status",
         text=f"{prefix}; fell back to non-streaming ({exc})",
-        payload={"fallback": True, "error_type": type(exc).__name__},
+        payload=ctx.enrich({"fallback": True, "error_type": type(exc).__name__}),
     )
     yield StreamEvent(
         kind="final",
         flush_tokens=True,
         text=str(fallback.get("assistant_response", "")),
-        payload=_build_final_payload(
-            final_prediction=None,
-            trajectory=cast(dict[str, Any], fallback.get("trajectory", {}) or {}),
-            history_turns=int(fallback.get("history_turns", agent.history_turns())),
-            guardrail_warnings=[],
-            turn_metrics={
-                "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
-                "delegate_fallback_count_turn": fallback.get(
-                    "delegate_fallback_count_turn", 0
+        payload=ctx.enrich(
+            _build_final_payload(
+                final_prediction=None,
+                trajectory=cast(dict[str, Any], fallback.get("trajectory", {}) or {}),
+                history_turns=int(fallback.get("history_turns", agent.history_turns())),
+                guardrail_warnings=[],
+                turn_metrics={
+                    "delegate_calls_turn": fallback.get("delegate_calls_turn", 0),
+                    "delegate_fallback_count_turn": fallback.get(
+                        "delegate_fallback_count_turn", 0
+                    ),
+                    "delegate_result_truncated_count_turn": fallback.get(
+                        "delegate_result_truncated_count_turn", 0
+                    ),
+                },
+                fallback=True,
+                fallback_error_type=type(exc).__name__,
+                effective_max_iters=int(
+                    fallback.get("effective_max_iters", effective_max_iters)
                 ),
-                "delegate_result_truncated_count_turn": fallback.get(
-                    "delegate_result_truncated_count_turn", 0
-                ),
-            },
-            fallback=True,
-            fallback_error_type=type(exc).__name__,
-            effective_max_iters=int(
-                fallback.get("effective_max_iters", effective_max_iters)
-            ),
+            )
         ),
     )
 
@@ -236,6 +239,7 @@ def _build_cancelled_event(
     agent: RLMReActChatAgent,
     message: str,
     assistant_chunks: list[str],
+    ctx: StreamingContext,
 ) -> StreamEvent:
     partial = "".join(assistant_chunks).strip()
     marked_partial = f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
@@ -243,10 +247,12 @@ def _build_cancelled_event(
     return StreamEvent(
         kind="cancelled",
         text=marked_partial,
-        payload={
-            "history_turns": agent.history_turns(),
-            **agent._turn_metrics(),
-        },
+        payload=ctx.enrich(
+            {
+                "history_turns": agent.history_turns(),
+                **agent._turn_metrics(),
+            }
+        ),
     )
 
 
@@ -272,18 +278,28 @@ def _process_stream_value(
     if isinstance(value, StreamResponse):
         if value.signature_field_name == "assistant_response":
             assistant_chunks.append(value.chunk)
-            yield StreamEvent(kind="assistant_token", text=value.chunk)
+            yield StreamEvent(
+                kind="assistant_token",
+                text=value.chunk,
+                payload=ctx.enrich({}) if ctx else {},
+            )
         elif value.signature_field_name == "next_thought" and trace:
             yield StreamEvent(
                 kind="reasoning_step",
                 text=value.chunk,
-                payload={"source": "next_thought"},
+                payload=ctx.enrich({"source": "next_thought"})
+                if ctx
+                else {"source": "next_thought"},
             )
         return
 
     if isinstance(value, StatusMessage):
         text = value.message
-        yield StreamEvent(kind="status", text=text)
+        yield StreamEvent(
+            kind="status",
+            text=text,
+            payload=ctx.enrich({"raw_status": text}) if ctx else {"raw_status": text},
+        )
 
         tool_call = parse_tool_call_status(text)
         if tool_call:
@@ -428,6 +444,7 @@ def iter_chat_turn_stream(
             effective_max_iters=effective_max_iters,
             agent=agent,
             init_phase=True,
+            ctx=ctx,
         )
         return
 
@@ -460,6 +477,7 @@ def iter_chat_turn_stream(
                         agent=agent,
                         message=message,
                         assistant_chunks=assistant_chunks,
+                        ctx=ctx,
                     )
                     return
 
@@ -490,6 +508,7 @@ def iter_chat_turn_stream(
             effective_max_iters=effective_max_iters,
             agent=agent,
             init_phase=False,
+            ctx=ctx,
         )
         return
     finally:
@@ -586,6 +605,7 @@ async def aiter_chat_turn_stream(
             effective_max_iters=effective_max_iters,
             agent=agent,
             init_phase=True,
+            ctx=ctx,
         ):
             yield event
         return
@@ -618,6 +638,7 @@ async def aiter_chat_turn_stream(
                     agent=agent,
                     message=message,
                     assistant_chunks=assistant_chunks,
+                    ctx=ctx,
                 )
                 return
 
@@ -651,6 +672,7 @@ async def aiter_chat_turn_stream(
             effective_max_iters=effective_max_iters,
             agent=agent,
             init_phase=False,
+            ctx=ctx,
         ):
             yield event
         return

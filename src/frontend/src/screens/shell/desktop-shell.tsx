@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils/cn";
 
 /* ── Transition applied to both panels for smooth open/close ────── */
 const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
-const OPEN_LAYOUT = { chat: 50, builder: 50 };
+const OPEN_LAYOUT = { chat: 64, builder: 36 };
 const CLOSED_LAYOUT = { chat: 100, builder: 0 };
 
 function DesktopShell() {
@@ -98,7 +98,7 @@ function DesktopShell() {
           className="flex-1 min-h-0"
         >
           {/* ── Chat / main content panel ─────────────────────────── */}
-          <Panel id="chat" minSize="35%" style={panelStyle}>
+          <Panel id="chat" minSize="40%" style={panelStyle}>
             <ShellRouteOutlet />
           </Panel>
 
@@ -117,7 +117,7 @@ function DesktopShell() {
             id="builder"
             collapsible
             collapsedSize="0%"
-            minSize="20%"
+            minSize="26%"
             style={panelStyle}
             onResize={({ asPercentage }) => setIsCanvasOpen(asPercentage > 0)}
           >

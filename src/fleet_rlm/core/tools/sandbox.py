@@ -15,10 +15,10 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from . import execute_submit
 from .delegate import build_rlm_delegate_tools
 from .memory_intelligence import build_memory_intelligence_tools
 from .sandbox_helpers import _resolve_volume_path
+from .shared import execute_submit
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent

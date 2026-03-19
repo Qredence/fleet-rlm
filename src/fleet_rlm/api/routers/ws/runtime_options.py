@@ -15,10 +15,12 @@ class DaytonaChatRequestOptions:
     repo_ref: str | None
     context_paths: list[str]
     batch_concurrency: int | None
+    workspace_id: str
 
 
 def normalize_daytona_chat_request(
     msg: WSMessage,
+    workspace_id: str,
 ) -> DaytonaChatRequestOptions | None:
     """Return a typed Daytona request payload when the turn targets Daytona."""
 
@@ -35,4 +37,5 @@ def normalize_daytona_chat_request(
         repo_ref=repo_ref,
         context_paths=context_paths,
         batch_concurrency=msg.batch_concurrency,
+        workspace_id=workspace_id,
     )

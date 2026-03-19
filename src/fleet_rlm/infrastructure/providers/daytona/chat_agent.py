@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,88 +11,17 @@ import dspy
 from fleet_rlm.core.models import StreamEvent
 from fleet_rlm.infrastructure.providers.daytona.runner import DaytonaRLMRunner
 
+from .chat_state import (
+    dedupe_paths,
+    history_messages,
+    normalized_context_sources,
+    normalized_history_messages,
+    normalize_history_turn,
+    render_cancelled_text,
+    render_final_text,
+)
 from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
 from .types import ContextSource, DaytonaRunCancelled, DaytonaRunResult, RolloutBudget
-
-
-def _render_final_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        for key in ("final_markdown", "summary", "text", "content", "message"):
-            candidate = value.get(key)
-            if isinstance(candidate, str) and candidate.strip():
-                return candidate
-        nested_value = value.get("value")
-        if nested_value is not value:
-            nested_text = _render_final_text(nested_value)
-            if nested_text:
-                return nested_text
-    try:
-        return json.dumps(value, indent=2, ensure_ascii=False)
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def _render_cancelled_text(result: DaytonaRunResult) -> str:
-    warnings = list(result.summary.warnings or [])
-    base = result.summary.error or "Daytona run cancelled."
-    if warnings:
-        return f"{base}\n\nWarnings:\n- " + "\n- ".join(warnings)
-    return str(base)
-
-
-def _dedupe_paths(paths: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for item in paths:
-        normalized = str(item or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        ordered.append(normalized)
-    return ordered
-
-
-def _history_messages(history: Any) -> list[dict[str, str]]:
-    messages = getattr(history, "messages", [])
-    if isinstance(messages, list):
-        return [item for item in messages if isinstance(item, dict)]
-    return []
-
-
-def _normalize_history_turn(raw: dict[str, Any]) -> dict[str, str] | None:
-    user_request = str(raw.get("user_request", "") or "").strip()
-    assistant_response = _render_final_text(raw.get("assistant_response", "")).strip()
-    if not user_request and not assistant_response:
-        return None
-    return {
-        "user_request": user_request,
-        "assistant_response": assistant_response,
-    }
-
-
-def _normalized_history_messages(history: Any) -> list[dict[str, str]]:
-    normalized: list[dict[str, str]] = []
-    for item in _history_messages(history):
-        turn = _normalize_history_turn(item)
-        if turn is not None:
-            normalized.append(turn)
-    return normalized
-
-
-def _normalized_context_sources(raw: Any) -> list[ContextSource]:
-    if not isinstance(raw, list):
-        return []
-    normalized: list[ContextSource] = []
-    for item in raw:
-        try:
-            normalized.append(ContextSource.from_raw(item))
-        except Exception:
-            continue
-    return normalized
 
 
 class DaytonaWorkbenchChatAgent(dspy.Module):
@@ -192,7 +120,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         return {"status": "ok", "history_turns": 0, "buffers_cleared": True}
 
     def history_turns(self) -> int:
-        return len(_history_messages(self.history))
+        return len(history_messages(self.history))
 
     def set_execution_mode(self, execution_mode: str) -> None:
         normalized = (
@@ -207,7 +135,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         normalized = str(path or "").strip()
         if not normalized:
             return
-        self.loaded_document_paths = _dedupe_paths(
+        self.loaded_document_paths = dedupe_paths(
             [*self.loaded_document_paths, normalized]
         )
 
@@ -220,7 +148,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
             else list(self._persisted_context_sources)
         )
         return {
-            "history": list(_normalized_history_messages(self.history)),
+            "history": list(normalized_history_messages(self.history)),
             "documents": document_map,
             "daytona": {
                 "repo_url": self.repo_url,
@@ -250,7 +178,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
             for item in history:
                 if not isinstance(item, dict):
                     continue
-                turn = _normalize_history_turn(item)
+                turn = normalize_history_turn(item)
                 if turn is not None:
                     normalized_history.append(turn)
         self.history = dspy.History(messages=normalized_history)
@@ -259,7 +187,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         daytona_state = raw_daytona if isinstance(raw_daytona, dict) else {}
         self.repo_url = cast(str | None, daytona_state.get("repo_url"))
         self.repo_ref = cast(str | None, daytona_state.get("repo_ref"))
-        self.context_paths = _dedupe_paths(
+        self.context_paths = dedupe_paths(
             [str(item) for item in daytona_state.get("context_paths", []) or []]
         )
         documents = state.get("documents", {})
@@ -268,13 +196,13 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
             str(item)
             for item in daytona_state.get("loaded_document_paths", []) or document_paths
         ]
-        self.loaded_document_paths = _dedupe_paths(loaded_document_paths)
+        self.loaded_document_paths = dedupe_paths(loaded_document_paths)
         self.execution_mode = str(daytona_state.get("execution_mode", "auto") or "auto")
         self._persisted_sandbox_id = cast(str | None, daytona_state.get("sandbox_id"))
         self._persisted_workspace_path = cast(
             str | None, daytona_state.get("workspace_path")
         )
-        self._persisted_context_sources = _normalized_context_sources(
+        self._persisted_context_sources = normalized_context_sources(
             daytona_state.get("context_sources", [])
         )
         self._session_source_key = None
@@ -292,7 +220,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
     def _effective_context_paths(
         self, extra_context_paths: list[str] | None = None
     ) -> list[str]:
-        return _dedupe_paths(
+        return dedupe_paths(
             [
                 *self.context_paths,
                 *self.loaded_document_paths,
@@ -306,6 +234,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         repo_url: str | None,
         repo_ref: str | None,
         context_paths: list[str],
+        volume_name: str | None = None,
     ) -> DaytonaSandboxSession:
         source_key = (repo_url, repo_ref, tuple(context_paths))
         if self._session is not None and self._session_source_key == source_key:
@@ -342,6 +271,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
             repo_url=repo_url,
             ref=repo_ref,
             context_paths=context_paths,
+            volume_name=volume_name,
         )
         self._session_source_key = source_key
         self._persist_session_snapshot()
@@ -369,8 +299,8 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         return str(message or "").strip()
 
     def _append_history(self, *, user_request: str, assistant_response: str) -> None:
-        messages = list(_normalized_history_messages(self.history))
-        turn = _normalize_history_turn(
+        messages = list(normalized_history_messages(self.history))
+        turn = normalize_history_turn(
             {
                 "user_request": user_request,
                 "assistant_response": assistant_response,
@@ -392,11 +322,13 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         budget: RolloutBudget,
         event_callback,
         cancel_check,
+        volume_name: str | None = None,
     ) -> DaytonaRunResult:
         session = self._ensure_session(
             repo_url=repo_url,
             repo_ref=repo_ref,
             context_paths=context_paths,
+            volume_name=volume_name,
         )
         runner = DaytonaRLMRunner(
             lm=self.planner_lm,
@@ -406,13 +338,14 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
             output_dir=self.output_dir,
             event_callback=event_callback,
             cancel_check=cancel_check,
+            volume_name=volume_name,
         )
         return runner.run(
             repo=repo_url,
             ref=repo_ref,
             context_paths=context_paths,
             task=self._build_task_prompt(message),
-            conversation_history=_normalized_history_messages(self.history),
+            conversation_history=normalized_history_messages(self.history),
             session=session,
         )
 
@@ -427,6 +360,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
+        volume_name: str | None = None,
     ):
         _ = trace
         if docs_path:
@@ -472,12 +406,14 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
                     "max_depth": budget.max_depth,
                     "effective_max_iters": budget.max_iterations,
                     "sandbox_active": False,
+                    "volume_name": volume_name,
                 },
                 "runtime_mode": "daytona_pilot",
                 "daytona_mode": "host_loop_rlm",
                 "repo_url": effective_repo_url,
                 "repo_ref": effective_repo_ref,
                 "context_paths": effective_context_paths,
+                "volume_name": volume_name,
             },
         )
 
@@ -492,6 +428,7 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
                     budget=budget,
                     event_callback=enqueue_event,
                     cancel_check=cancel_check,
+                    volume_name=volume_name,
                 )
                 result_box["result"] = result
             except Exception as exc:  # noqa: BLE001 - surfaced by tests
@@ -559,9 +496,9 @@ class DaytonaWorkbenchChatAgent(dspy.Module):
             "cancelled" if result.summary.termination_reason == "cancelled" else "final"
         )
         terminal_text = (
-            _render_cancelled_text(result)
+            render_cancelled_text(result)
             if terminal_kind == "cancelled"
-            else _render_final_text(
+            else render_final_text(
                 result.final_artifact.value if result.final_artifact else ""
             )
         )

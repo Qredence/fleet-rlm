@@ -188,6 +188,32 @@ function sandboxFromPayload(
   };
 }
 
+export function sandboxProgressPartFromStatus(
+  payload?: Record<string, unknown>,
+): ChatRenderPart | null {
+  if (!payload) return null;
+  const streamText = asOptionalText(payload.stream_text ?? payload.streamText);
+  if (!streamText) return null;
+  const phase = asOptionalText(payload.phase);
+  if (phase !== "sandbox_output") return null;
+
+  const streamName = asOptionalText(payload.stream)?.toLowerCase() ?? "stdout";
+  const stepIndex = asOptionalNumber(payload.iteration ?? payload.step_index ?? payload.stepIndex);
+  const runtimeContext = parseRuntimeContext(payload);
+  const isErrorStream = streamName === "stderr";
+
+  return {
+    kind: "sandbox",
+    title: `Sandbox ${streamName}`,
+    state: isErrorStream ? "output-error" : "running",
+    stepIndex,
+    output: streamText,
+    errorText: isErrorStream ? streamText : undefined,
+    language: "text",
+    ...(runtimeContext ? { runtimeContext } : {}),
+  };
+}
+
 function toolFromPayload(
   kind: "tool_call" | "tool_result",
   text: string,

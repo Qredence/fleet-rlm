@@ -244,7 +244,7 @@ class ExecutionStepBuilder:
         if kind == "assistant_token":
             return None
 
-        if kind == "status":
+        if kind in {"status", "warning"}:
             return self._build_status_step(
                 text=stripped_text,
                 payload_obj=payload_obj,

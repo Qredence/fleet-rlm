@@ -112,9 +112,80 @@ def test_runner_streams_sandbox_output_as_status_events(tmp_path: Path):
     assert len(output_events) == 1
     assert output_events[0].text == "Sandbox stdout: loading repository metadata"
     assert output_events[0].payload.get("stream") == "stdout"
-    assert (
-        output_events[0].payload.get("stream_text") == "loading repository metadata\n"
+    assert output_events[0].payload.get("stream_text") == "loading repository metadata"
+
+
+def test_runner_emits_live_reasoning_and_trajectory_events(tmp_path: Path):
+    summary = "The Daytona runner now emits live reasoning and trajectory steps."
+    emitted: list[StreamEvent] = []
+    session = FakeRunSession(
+        steps=[FakeStep(response=make_response(final_value={"summary": summary}))]
     )
+    runner = DaytonaRLMRunner(
+        lm=FakeLmSequence(
+            [code_block(f"summary = {summary!r}\nSUBMIT(summary=summary)")]
+        ),
+        runtime=FakeRuntime(session),
+        output_dir=tmp_path,
+        event_callback=emitted.append,
+    )
+
+    runner.run(repo="https://github.com/example/repo.git", task="emit live trace")
+
+    reasoning_events = [event for event in emitted if event.kind == "reasoning_step"]
+    reasoning_labels = [
+        event.payload.get("reasoning_label") for event in reasoning_events
+    ]
+    assert reasoning_labels == [
+        "prompt_iter_1",
+        "planner_iter_1",
+        "extracted_code_iter_1",
+        "observation_iter_1",
+    ]
+    assert "Planner prompt preview:" in reasoning_events[0].text
+    assert "Planner response preview:" in reasoning_events[1].text
+    assert reasoning_events[2].text.startswith("```python\n")
+    assert "Duration: 12ms" in reasoning_events[3].text
+
+    trajectory_events = [event for event in emitted if event.kind == "trajectory_step"]
+    trajectory_phases = [event.payload.get("phase") for event in trajectory_events]
+    assert trajectory_phases == ["iteration", "observation", "completed"]
+    assert (
+        trajectory_events[0].payload.get("step_data", {}).get("action") == "Iteration 1"
+    )
+    assert (
+        trajectory_events[1].payload.get("step_data", {}).get("action")
+        == "Execute sandbox code"
+    )
+    assert (
+        trajectory_events[2].payload.get("step_data", {}).get("action")
+        == "Complete run"
+    )
+
+
+def test_runner_includes_workspace_volume_name_in_runtime_payload(tmp_path: Path):
+    emitted: list[StreamEvent] = []
+    session = FakeRunSession(
+        steps=[FakeStep(response=make_response(final_value={"summary": "Done."}))]
+    )
+    runner = DaytonaRLMRunner(
+        lm=FakeLmSequence([code_block("SUBMIT(summary='Done.')")]),
+        runtime=FakeRuntime(session),
+        output_dir=tmp_path,
+        event_callback=emitted.append,
+        volume_name="tenant-a",
+    )
+
+    runner.run(repo="https://github.com/example/repo.git", task="emit runtime metadata")
+
+    runtime_payloads = [
+        event.payload.get("runtime")
+        for event in emitted
+        if isinstance(event.payload, dict)
+        and isinstance(event.payload.get("runtime"), dict)
+    ]
+    assert runtime_payloads
+    assert all(payload.get("volume_name") == "tenant-a" for payload in runtime_payloads)
 
 
 def test_runner_retries_after_raw_intermediate_output(tmp_path: Path):

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { PanelRight } from "lucide-react";
 import {
   Empty,
@@ -6,21 +7,69 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { useChatStore } from "@/screens/workspace/model/chat-store";
 import { RunWorkbench } from "@/screens/workspace/components/workbench/RunWorkbench";
 import { MessageInspectorPanel } from "@/screens/workspace/components/inspector/MessageInspectorPanel";
+import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
+import { useRunWorkbenchStore } from "@/screens/workspace/model/run-workbench-store";
 
 export function useWorkspaceCanvasTitle() {
-  const runtimeMode = useChatStore((state) => state.runtimeMode);
-
-  return runtimeMode === "daytona_pilot" ? "Run Workbench" : "Message Inspector";
+  return "Canvas";
 }
 
 export function WorkspaceCanvasPanel() {
-  const runtimeMode = useChatStore((state) => state.runtimeMode);
+  const selectedAssistantTurnId = useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
+  const runStatus = useRunWorkbenchStore((state) => state.status);
+  const runActivityCount = useRunWorkbenchStore((state) => state.activity.length);
+  const runIterationCount = useRunWorkbenchStore((state) => state.iterations.length);
+  const runCallbackCount = useRunWorkbenchStore((state) => state.callbacks.length);
+  const hasRunContent = useMemo(
+    () =>
+      runStatus !== "idle" ||
+      runActivityCount > 0 ||
+      runIterationCount > 0 ||
+      runCallbackCount > 0,
+    [runActivityCount, runCallbackCount, runIterationCount, runStatus],
+  );
+  const [activeTab, setActiveTab] = useState<"turn" | "run">(
+    hasRunContent && !selectedAssistantTurnId ? "run" : "turn",
+  );
 
-  return runtimeMode === "daytona_pilot" ? <RunWorkbench /> : <MessageInspectorPanel />;
+  useEffect(() => {
+    if (selectedAssistantTurnId) {
+      setActiveTab("turn");
+      return;
+    }
+    if (hasRunContent) {
+      setActiveTab("run");
+    }
+  }, [hasRunContent, selectedAssistantTurnId]);
+
+  return (
+    <Tabs
+      value={hasRunContent ? activeTab : "turn"}
+      onValueChange={(value) => setActiveTab(value as "turn" | "run")}
+      className="flex h-full min-h-0 flex-col gap-0 overflow-hidden"
+    >
+      <div className="border-b border-border-subtle/70 px-3 py-2">
+        <TabsList className="inline-flex rounded-lg border border-border-subtle/70 bg-muted/40 p-1">
+          <TabsTrigger value="turn">Turn</TabsTrigger>
+          {hasRunContent ? <TabsTrigger value="run">Run</TabsTrigger> : null}
+        </TabsList>
+      </div>
+
+      <TabsContent value="turn" className="mt-0 min-h-0 flex-1 overflow-hidden">
+        <MessageInspectorPanel />
+      </TabsContent>
+
+      {hasRunContent ? (
+        <TabsContent value="run" className="mt-0 min-h-0 flex-1 overflow-hidden px-3 py-3">
+          <RunWorkbench />
+        </TabsContent>
+      ) : null}
+    </Tabs>
+  );
 }
 
 export function WorkspaceCanvasUnavailablePanel() {

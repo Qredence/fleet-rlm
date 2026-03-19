@@ -286,7 +286,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
                     Runtime settings updates are disabled because APP_ENV is not local.
                   </FieldDescription>
                 </FieldContent>
-                <Badge variant="destructive-subtle">Read-only</Badge>
+                <Badge variant="destructive">Read-only</Badge>
               </Field>
             ) : null}
 

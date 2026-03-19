@@ -1,4 +1,4 @@
-"""Guide-native Daytona sandbox adapter for the experimental RLM pilot."""
+"""Daytona Python SDK sandbox adapter for the experimental RLM pilot."""
 
 from __future__ import annotations
 
@@ -18,11 +18,19 @@ from typing import Any
 from collections.abc import Callable
 
 try:
-    from daytona import Daytona, DaytonaConfig, SessionExecuteRequest
+    from daytona import (
+        Daytona,
+        DaytonaConfig,
+        SessionExecuteRequest,
+        VolumeMount,
+        CreateSandboxFromSnapshotParams,
+    )
 except ImportError as exc:  # pragma: no cover - exercised by runtime users
     Daytona = None  # type: ignore[assignment]
     DaytonaConfig = None  # type: ignore[assignment]
     SessionExecuteRequest = None  # type: ignore[assignment]
+    VolumeMount = None  # type: ignore[assignment]
+    CreateSandboxFromSnapshotParams = None  # type: ignore[assignment]
     _DAYTONA_IMPORT_ERROR = exc
 else:
     _DAYTONA_IMPORT_ERROR = None
@@ -42,6 +50,10 @@ from .protocol import (
     ShutdownRequest,
     decode_frame,
     encode_frame,
+)
+from .sdk import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+    build_daytona_client,
 )
 from .types import (
     ContextSource,
@@ -833,18 +845,26 @@ class DaytonaSandboxRuntime:
     """Factory for Daytona sandboxes used by the pilot."""
 
     def __init__(self, *, config: ResolvedDaytonaConfig | None = None) -> None:
-        DaytonaClient, DaytonaClientConfig, _ = _require_daytona_sdk()
+        _require_daytona_sdk()
         resolved = config or resolve_daytona_config()
-        self._client = DaytonaClient(
-            DaytonaClientConfig(
-                api_key=resolved.api_key,
-                api_url=resolved.api_url,
-                target=resolved.target,
-            )
+        self._client = build_daytona_client(
+            config=resolved if config is not None else None
         )
 
-    def _create_sandbox(self) -> Any:
+    def _create_sandbox(self, volume_name: str | None = None) -> Any:
         try:
+            if volume_name:
+                volume = self._client.volume.get(volume_name, create=True)
+                return self._client.create(
+                    CreateSandboxFromSnapshotParams(
+                        volumes=[
+                            VolumeMount(
+                                volume_id=volume.id,
+                                mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+                            )
+                        ]
+                    )
+                )
             return self._client.create()
         except Exception as exc:
             raise DaytonaDiagnosticError(
@@ -911,12 +931,13 @@ class DaytonaSandboxRuntime:
         repo_url: str | None,
         ref: str | None,
         context_paths: list[str] | None = None,
+        volume_name: str | None = None,
     ) -> DaytonaSandboxSession:
         timings = {"sandbox_create": 0, "repo_clone": 0, "context_stage": 0}
         sandbox: Any | None = None
         try:
             create_started = time.perf_counter()
-            sandbox = self._create_sandbox()
+            sandbox = self._create_sandbox(volume_name=volume_name)
             timings["sandbox_create"] = int(
                 (time.perf_counter() - create_started) * 1000
             )

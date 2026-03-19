@@ -18,7 +18,7 @@ import dspy
 from fleet_rlm.core.agent.rlm_agent import spawn_delegate_sub_agent_async
 from fleet_rlm.core.agent.tool_delegation import _sync_compatible_tool_callable
 
-from . import (
+from .shared import (
     build_trajectory_payload,
     chunk_text,
     chunk_to_text,

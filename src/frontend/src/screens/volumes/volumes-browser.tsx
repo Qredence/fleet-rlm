@@ -1,23 +1,23 @@
 /**
- * VolumesBrowser — Modal Volume filesystem browser.
+ * VolumesBrowser — provider-scoped runtime volume browser.
  *
- * Displays the real file tree of the configured Modal Volume
+ * Displays the real file tree of the configured Modal or Daytona volume
  * fetched from GET /api/v1/runtime/volume/tree.
- *
- * All shared state consumed from NavigationStore — zero props.
  */
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useReducedMotion } from "motion/react";
 import { Search, HardDrive, TriangleAlert, RefreshCw } from "lucide-react";
-import type { FsNode } from "@/screens/volumes/model/volumes-types";
+import type { FsNode, VolumeProvider } from "@/screens/volumes/model/volumes-types";
 import { useFilesystem } from "@/screens/volumes/hooks/use-volumes-filesystem";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useVolumesSelectionStore } from "@/screens/volumes/model/volumes-selection-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useRuntimeStatus } from "@/hooks/useRuntimeStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils/cn";
 import { FsItem } from "@/screens/volumes/volumes-browser-sections";
 import {
@@ -29,19 +29,38 @@ import {
 export function VolumesBrowser() {
   const openCanvas = useNavigationStore((state) => state.openCanvas);
   const selectFile = useVolumesSelectionStore((state) => state.selectFile);
+  const clearSelectedFile = useVolumesSelectionStore((state) => state.clearSelectedFile);
   const isMobile = useIsMobile();
+  const { data: runtimeStatus } = useRuntimeStatus();
+  const prefersReduced = useReducedMotion();
+  const defaultProvider: VolumeProvider =
+    runtimeStatus?.sandbox_provider === "daytona" ? "daytona" : "modal";
+  const [selectedProvider, setSelectedProvider] = useState<VolumeProvider | null>(null);
+  const activeProvider = selectedProvider ?? defaultProvider;
   const {
     volumes: filesystem,
     dataSource: filesystemDataSource,
     degradedReason: filesystemDegradedReason,
     isLoading,
     refetch,
-  } = useFilesystem();
-  const prefersReduced = useReducedMotion();
+  } = useFilesystem(activeProvider);
 
   // ── Filesystem state ──────────────────────────────────────────────
   const [fsExpanded, setFsExpanded] = useState<Set<string>>(new Set());
   const [fsSearch, setFsSearch] = useState("");
+  const previousProviderRef = useRef<VolumeProvider | null>(null);
+
+  useEffect(() => {
+    setSelectedProvider((current) => current ?? defaultProvider);
+  }, [defaultProvider]);
+
+  useEffect(() => {
+    if (previousProviderRef.current && previousProviderRef.current !== activeProvider) {
+      clearSelectedFile();
+      setFsExpanded(new Set());
+    }
+    previousProviderRef.current = activeProvider;
+  }, [activeProvider, clearSelectedFile]);
 
   // ── Handlers ──────────────────────────────────────────────────────
 
@@ -68,6 +87,12 @@ export function VolumesBrowser() {
     [openCanvas, selectFile],
   );
 
+  const handleProviderChange = useCallback((value: string) => {
+    if (value === "modal" || value === "daytona") {
+      setSelectedProvider(value);
+    }
+  }, []);
+
   // ── Filtered data ─────────────────────────────────────────────────
 
   const filteredFs = useMemo(() => filterFs(filesystem, fsSearch), [filesystem, fsSearch]);
@@ -83,15 +108,16 @@ export function VolumesBrowser() {
   );
 
   const isDegraded = filesystemDataSource === "fallback";
+  const providerLabel = activeProvider === "daytona" ? "Daytona" : "Modal";
 
   /* ── Header children ─────────────────────────────────────────────── */
   const headerChildren = (
     <div className={cn(isMobile && "px-4")}>
       {/* Expand / collapse + refresh */}
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-1 text-muted-foreground typo-helper">
+        <div className="flex items-center gap-2 text-muted-foreground typo-helper">
           <HardDrive className="w-3.5 h-3.5" />
-          <span>Modal Volume</span>
+          <span>{providerLabel} volume</span>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -129,6 +155,21 @@ export function VolumesBrowser() {
         </div>
       </div>
 
+      <ToggleGroup
+        type="single"
+        value={activeProvider}
+        onValueChange={handleProviderChange}
+        className="mb-3"
+        aria-label="Volume provider"
+      >
+        <ToggleGroupItem value="modal" aria-label="Browse Modal volume">
+          Modal
+        </ToggleGroupItem>
+        <ToggleGroupItem value="daytona" aria-label="Browse Daytona volume">
+          Daytona
+        </ToggleGroupItem>
+      </ToggleGroup>
+
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
         <Input
@@ -148,6 +189,9 @@ export function VolumesBrowser() {
       {!isMobile && (
         <div className="pt-4 md:pt-6 pb-4 border-b border-border-subtle shrink-0 max-w-200 w-full mx-auto px-6">
           <h2 className="mb-1 text-balance text-foreground typo-h3">Volume Browser</h2>
+          <p className="mb-3 text-muted-foreground typo-helper">
+            Browse the {providerLabel.toLowerCase()} runtime volume for this workspace.
+          </p>
           {headerChildren}
         </div>
       )}
@@ -158,6 +202,9 @@ export function VolumesBrowser() {
         {isMobile && (
           <div className="px-4 pt-2 pb-4 w-full">
             <h2 className="font-app text-foreground text-balance typo-h2 mb-3">Volume Browser</h2>
+            <p className="mb-3 text-muted-foreground typo-helper">
+              Browse the {providerLabel.toLowerCase()} runtime volume for this workspace.
+            </p>
             {headerChildren}
           </div>
         )}
@@ -166,17 +213,23 @@ export function VolumesBrowser() {
           {isDegraded ? (
             <Alert className={cn("mb-3", isMobile ? "mx-4" : "mx-6")}>
               <TriangleAlert className="text-muted-foreground" />
-              <AlertTitle className="typo-label">Volume API unavailable</AlertTitle>
+              <AlertTitle className="typo-label">{providerLabel} volume unavailable</AlertTitle>
               <AlertDescription className="typo-caption">
                 {filesystemDegradedReason ??
-                  "The backend volume endpoint is unavailable right now."}
+                  `The ${providerLabel.toLowerCase()} volume endpoint is unavailable right now.`}
               </AlertDescription>
             </Alert>
           ) : null}
 
           {isLoading && filesystem.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-muted-foreground typo-label">
-              Loading volume tree…
+              Loading {providerLabel.toLowerCase()} volume tree…
+            </div>
+          ) : filteredFs.length === 0 ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground typo-label">
+              {isDegraded
+                ? `No ${providerLabel.toLowerCase()} volume data available.`
+                : `No files found in the ${providerLabel.toLowerCase()} volume.`}
             </div>
           ) : (
             filteredFs.map((node) => (
@@ -198,7 +251,7 @@ export function VolumesBrowser() {
       {/* Footer */}
       <div className="px-4 md:px-6 py-3 border-t border-border-subtle shrink-0">
         <span className="text-muted-foreground typo-helper">
-          {fsStats.volumes} volumes · {fsStats.totalFiles} files
+          {providerLabel} · {fsStats.volumes} volumes · {fsStats.totalFiles} files
           {filesystemDataSource !== "mock" && filesystemDataSource !== "fallback" && <> · Live</>}
         </span>
       </div>

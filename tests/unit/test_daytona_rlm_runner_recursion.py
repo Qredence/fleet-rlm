@@ -211,9 +211,72 @@ def test_runner_uses_explicit_rlm_query_and_merges_child_nodes(tmp_path: Path):
     )
 
 
+def test_runner_reuses_workspace_volume_for_recursive_child_runs(tmp_path: Path):
+    callback = HostCallbackRequest(
+        callback_id="cb-1",
+        name="rlm_query",
+        payload={"task": {"task": "Inspect the README excerpt."}},
+    )
+    root_session = FakeRunSession(
+        steps=[
+            FakeStep(
+                callbacks=[callback],
+                response=make_response(
+                    final_value={"summary": "Root synthesis complete."}
+                ),
+            )
+        ],
+        sandbox_id="sbx-root",
+    )
+    child_session = FakeRunSession(
+        steps=[
+            FakeStep(response=make_response(final_value={"summary": "Child summary."}))
+        ],
+        sandbox_id="sbx-child",
+    )
+    runtime = FakeRuntime([root_session, child_session])
+    runner = DaytonaRLMRunner(
+        lm=FakeLmSequence(
+            [
+                code_block(
+                    "child = rlm_query({'task': 'Inspect the README excerpt.'})\n"
+                    "SUBMIT(summary='Root synthesis complete.')"
+                ),
+                code_block("SUBMIT(summary='Child summary.')"),
+            ]
+        ),
+        runtime=runtime,
+        output_dir=tmp_path,
+        volume_name="tenant-a",
+    )
+
+    result = runner.run(repo="https://github.com/example/repo.git", task="inspect repo")
+
+    root = result.nodes[result.root_id]
+    child_id = root.child_links[0].child_id
+    assert child_id is not None
+    assert root.sandbox_id == "sbx-root"
+    assert result.nodes[child_id].sandbox_id == "sbx-child"
+    assert runtime.workspace_call_details == [
+        {
+            "repo_url": "https://github.com/example/repo.git",
+            "ref": None,
+            "context_paths": None,
+            "volume_name": "tenant-a",
+        },
+        {
+            "repo_url": "https://github.com/example/repo.git",
+            "ref": None,
+            "context_paths": [],
+            "volume_name": "tenant-a",
+        },
+    ]
+
+
 def test_runner_auto_decomposes_successful_observation_between_iterations(
     tmp_path: Path,
 ):
+    emitted = []
     root_session = FakeRunSession(
         steps=[
             FakeStep(response=make_response(stdout="Need deeper evidence.")),
@@ -255,6 +318,7 @@ def test_runner_auto_decomposes_successful_observation_between_iterations(
         lm=fake_lm,
         runtime=FakeRuntime([root_session, child_session]),
         output_dir=tmp_path,
+        event_callback=emitted.append,
     )
     runner._spawn_policy = lambda **kwargs: SimpleNamespace(
         should_spawn=True,
@@ -298,6 +362,28 @@ def test_runner_auto_decomposes_successful_observation_between_iterations(
     assert evaluation["spawn_policy"][0]["should_spawn"] is True
     assert evaluation["spawn_policy"][0]["recommended_fanout"] == 3
     assert evaluation["decomposition"][0]["selected_task_count"] == 1
+    recursive_trajectory = [
+        event
+        for event in emitted
+        if event.kind == "trajectory_step"
+        and event.payload.get("phase") == "recursive_decompose"
+    ]
+    assert recursive_trajectory
+    assert (
+        recursive_trajectory[0].payload.get("step_data", {}).get("action")
+        == "Spawn recursive child tasks"
+    )
+    recursive_reasoning = [
+        event
+        for event in emitted
+        if event.kind == "reasoning_step"
+        and event.payload.get("reasoning_label") == "recursive_results_iter_1"
+    ]
+    assert recursive_reasoning
+    assert (
+        "Synthesized child summary from auto decomposition."
+        in recursive_reasoning[0].text
+    )
 
 
 def test_runner_auto_decomposition_respects_spawn_policy_false(tmp_path: Path):

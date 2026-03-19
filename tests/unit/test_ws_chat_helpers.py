@@ -77,6 +77,7 @@ class _RecordingWebSocket:
 
 class _LifecycleStub:
     def __init__(self) -> None:
+        self.run_id = "test-run"
         self.run_completed = False
         self.persist_error_checked = 0
         self.completed_with = None
@@ -95,12 +96,14 @@ class _LifecycleStub:
         status: Any,
         step: Any = None,
         error_json: Any = None,
+        summary: Any = None,
     ) -> None:
         self.run_completed = True
         self.completed_with = {
             "status": status,
             "step": step,
             "error_json": error_json,
+            "summary": summary,
         }
 
 
@@ -110,11 +113,13 @@ class _HangingTerminalLifecycle(_LifecycleStub):
         status: Any,
         step: Any = None,
         error_json: Any = None,
+        summary: Any = None,
     ) -> None:
         self.completed_with = {
             "status": status,
             "step": step,
             "error_json": error_json,
+            "summary": summary,
         }
         await asyncio.Future()
 
@@ -152,6 +157,7 @@ def test_emit_stream_event_translates_closed_send_runtime_error_to_disconnect() 
                 step_builder=cast(Any, _NoopStepBuilder()),
                 event=StreamEvent(kind="assistant_token", text="hi", timestamp=ts()),
                 persist_session_state=_noop_persist,
+                request_message="hello",
             )
         )
 
@@ -165,6 +171,7 @@ def test_handle_stream_error_ignores_closed_socket_during_error_send() -> None:
             lifecycle=cast(Any, lifecycle),
             step_builder=cast(Any, _NoopStepBuilder()),
             exc=RuntimeError("boom"),
+            request_message="hello",
         )
     )
 
@@ -183,6 +190,7 @@ def test_emit_stream_event_sends_terminal_error_before_run_completion() -> None:
                 step_builder=cast(Any, _NoopStepBuilder()),
                 event=StreamEvent(kind="error", text="invalid api key", timestamp=ts()),
                 persist_session_state=_noop_persist,
+                request_message="hello",
             )
         )
 
@@ -225,6 +233,7 @@ def test_emit_stream_event_persists_terminal_cancelled_and_error_events(
                 step_builder=cast(Any, _NoopStepBuilder()),
                 event=StreamEvent(kind=kind, text=f"{kind} turn", timestamp=ts()),
                 persist_session_state=persist_session_state,
+                request_message="hello",
             )
         )
 

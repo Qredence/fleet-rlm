@@ -28,7 +28,7 @@ from typing import Any, Callable, Iterator, Sequence
 
 import dspy
 import modal
-from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
+from dspy.primitives import CodeInterpreterError, FinalOutput
 
 from fleet_rlm.core.execution.core_driver import sandbox_driver
 

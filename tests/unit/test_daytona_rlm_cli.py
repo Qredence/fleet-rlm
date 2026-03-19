@@ -34,7 +34,7 @@ def test_daytona_rlm_cli_invokes_runner(monkeypatch, tmp_path: Path):
         return _FakeResult()
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.run_daytona_rlm_pilot",
+        "fleet_rlm.infrastructure.providers.daytona.run_daytona_rlm_pilot",
         _fake_run_daytona_rlm_pilot,
     )
 
@@ -84,7 +84,7 @@ def test_daytona_rlm_cli_accepts_context_paths_without_repo(
         return _FakeResult()
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.run_daytona_rlm_pilot",
+        "fleet_rlm.infrastructure.providers.daytona.run_daytona_rlm_pilot",
         _fake_run_daytona_rlm_pilot,
     )
 
@@ -146,7 +146,7 @@ def test_daytona_smoke_cli_invokes_runner(monkeypatch):
         return _FakeSmokeResult()
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.run_daytona_smoke",
+        "fleet_rlm.infrastructure.providers.daytona.run_daytona_smoke",
         _fake_run_daytona_smoke,
     )
     result = runner.invoke(
@@ -185,7 +185,7 @@ def test_daytona_smoke_cli_surfaces_preflight_errors_cleanly(monkeypatch):
         return _FailedSmokeResult()
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.run_daytona_smoke",
+        "fleet_rlm.infrastructure.providers.daytona.run_daytona_smoke",
         _fake_run_daytona_smoke,
     )
 

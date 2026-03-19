@@ -24,6 +24,7 @@ class DaytonaRuntimeEventEmitter:
         request_id: str,
         started_at: float,
         active_iteration_getter: Callable[[], int | None],
+        volume_name: str | None = None,
     ) -> None:
         self._emit_runtime_event = emit_runtime_event
         self._session = session
@@ -32,6 +33,7 @@ class DaytonaRuntimeEventEmitter:
         self._request_id = request_id
         self._started_at = started_at
         self._active_iteration_getter = active_iteration_getter
+        self._volume_name = volume_name
 
     def phase_timings_ms(self) -> dict[str, int]:
         timings = getattr(self._session, "phase_timings_ms", {}) or {}
@@ -53,6 +55,7 @@ class DaytonaRuntimeEventEmitter:
             "sandbox_id": node.sandbox_id,
             "execution_profile": "DAYTONA_PILOT_HOST_LOOP",
             "phase_timings_ms": self.phase_timings_ms(),
+            "volume_name": self._volume_name,
         }
 
     def progress_payload(
@@ -145,6 +148,69 @@ class DaytonaRuntimeEventEmitter:
 
     def emit_cancelled(self, node: AgentNode, text: str, *, phase: str) -> None:
         self.emit_frame(node=node, kind="cancelled", text=text, phase=phase)
+
+    def emit_reasoning_step(
+        self,
+        node: AgentNode,
+        text: str,
+        *,
+        phase: str,
+        iteration: int | None = None,
+        label: str | None = None,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> None:
+        payload = self.progress_payload(
+            iteration=iteration,
+            extra_payload=extra_payload,
+        )
+        if label is not None:
+            payload["reasoning_label"] = label
+        self.emit_frame(
+            node=node,
+            kind="reasoning_step",
+            text=text,
+            phase=phase,
+            extra_payload=payload,
+        )
+
+    def emit_trajectory_step(
+        self,
+        node: AgentNode,
+        text: str,
+        *,
+        phase: str,
+        step_index: int,
+        iteration: int | None = None,
+        thought: str | None = None,
+        action: str | None = None,
+        tool_name: str | None = None,
+        tool_input: Any | None = None,
+        observation: Any | None = None,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> None:
+        payload = self.progress_payload(
+            iteration=iteration,
+            extra_payload=extra_payload,
+        )
+        payload["step_index"] = step_index
+        step_data = {
+            "index": step_index,
+            "thought": thought,
+            "action": action,
+            "tool_name": tool_name,
+            "input": tool_input,
+            "observation": observation,
+        }
+        payload["step_data"] = {
+            key: value for key, value in step_data.items() if value is not None
+        }
+        self.emit_frame(
+            node=node,
+            kind="trajectory_step",
+            text=text,
+            phase=phase,
+            extra_payload=payload,
+        )
 
     def emit_tool_call(
         self, node: AgentNode, callback_name: str, tool_input: dict[str, Any]

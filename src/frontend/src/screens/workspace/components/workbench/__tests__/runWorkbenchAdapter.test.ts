@@ -152,6 +152,55 @@ describe("runWorkbenchAdapter", () => {
     expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
   });
 
+  it("hydrates execution_completed run_summary payloads without relying on chat final run_result", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Analyze the diligence corpus",
+    });
+
+    const next = applyFrameToRunWorkbenchState(started, {
+      type: "event",
+      data: {
+        kind: "final",
+        text: "Done",
+        payload: {
+          source_type: "execution_completed",
+          run_summary: {
+            run_id: "run-456",
+            runtime_mode: "modal_chat",
+            task: "Analyze the diligence corpus",
+            status: "completed",
+            final_artifact: {
+              kind: "markdown",
+              value: {
+                summary: "Modal execution summary",
+              },
+            },
+            summary: {
+              warnings: ["One warning"],
+              termination_reason: "final",
+            },
+            attachments: [
+              {
+                attachment_id: "attachment-1",
+                name: "result.md",
+              },
+            ],
+          },
+        },
+        event_id: "evt-execution-completed",
+        timestamp: "2026-03-10T12:00:00Z",
+      },
+    });
+
+    expect(next.runId).toBe("run-456");
+    expect(next.status).toBe("completed");
+    expect(next.finalArtifact?.value).toMatchObject({
+      summary: "Modal execution summary",
+    });
+    expect(next.summary?.warnings).toEqual(["One warning"]);
+    expect(next.attachments[0]?.name).toBe("result.md");
+  });
+
   it("tracks incremental iteration and callback activity before final hydration", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Analyze the repo",

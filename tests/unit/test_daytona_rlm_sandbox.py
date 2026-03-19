@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +19,10 @@ from fleet_rlm.infrastructure.providers.daytona.protocol import (
     ShutdownRequest,
     decode_frame,
     encode_frame,
+)
+from fleet_rlm.infrastructure.providers.daytona.sdk import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+    build_daytona_client,
 )
 from fleet_rlm.infrastructure.providers.daytona.sandbox import (
     DaytonaSandboxRuntime,
@@ -258,15 +263,148 @@ def _patch_daytona_sdk(
             assert sandbox_id == fake_sandbox.id
             return fake_sandbox
 
-    monkeypatch.setattr("fleet_rlm.daytona_rlm.sandbox.Daytona", _FakeDaytona)
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox.DaytonaConfig",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona",
+        _FakeDaytona,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig",
         _FakeDaytonaConfig,
     )
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.sandbox._DAYTONA_IMPORT_ERROR",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_daytona_client",
+        lambda config=None: _FakeDaytona(config),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
         None,
     )
+
+
+def test_build_daytona_client_uses_explicit_python_sdk_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeDaytonaConfig:
+        def __init__(self, **kwargs):
+            captured["config_kwargs"] = kwargs
+
+    class _FakeDaytona:
+        def __init__(self, config=None):
+            captured["client_config"] = config
+
+    monkeypatch.setitem(
+        sys.modules,
+        "daytona",
+        SimpleNamespace(Daytona=_FakeDaytona, DaytonaConfig=_FakeDaytonaConfig),
+    )
+
+    build_daytona_client(config=_resolved_config())
+
+    assert captured["config_kwargs"] == {
+        "api_key": "key",
+        "api_url": "https://api.daytona.example",
+        "target": None,
+    }
+    assert captured["client_config"] is not None
+
+
+def test_daytona_runtime_mounts_workspace_volume_via_python_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_sandbox = _FakeSandbox()
+    captured: dict[str, object] = {}
+
+    class _FakeVolume:
+        id = "vol-123"
+
+    class _FakeVolumeService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def get(self, name: str, create: bool = False):
+            self.calls.append((name, create))
+            return _FakeVolume()
+
+    class _FakeVolumeMount:
+        def __init__(
+            self,
+            *,
+            volume_id: str,
+            mount_path: str,
+            subpath: str | None = None,
+        ) -> None:
+            self.volume_id = volume_id
+            self.mount_path = mount_path
+            self.subpath = subpath
+
+    class _FakeCreateSandboxFromSnapshotParams:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    volume_service = _FakeVolumeService()
+
+    class _FakeDaytonaClient:
+        def __init__(self) -> None:
+            self.volume = volume_service
+
+        def create(self, params=None):
+            captured["create_params"] = params
+            return fake_sandbox
+
+        def get(self, sandbox_id: str):
+            assert sandbox_id == fake_sandbox.id
+            return fake_sandbox
+
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_daytona_client",
+        lambda config=None: _FakeDaytonaClient(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
+        object(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.VolumeMount",
+        _FakeVolumeMount,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox.CreateSandboxFromSnapshotParams",
+        _FakeCreateSandboxFromSnapshotParams,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
+        None,
+    )
+
+    runtime = DaytonaSandboxRuntime(config=_resolved_config())
+    runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        context_paths=None,
+        volume_name="tenant-a",
+    )
+
+    assert volume_service.calls == [("tenant-a", True)]
+    params = captured["create_params"]
+    assert isinstance(params, _FakeCreateSandboxFromSnapshotParams)
+    mounts = params.kwargs["volumes"]
+    assert len(mounts) == 1
+    assert mounts[0].volume_id == "vol-123"
+    assert mounts[0].mount_path == str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH)
 
 
 def test_daytona_sandbox_session_file_and_process_helpers():
