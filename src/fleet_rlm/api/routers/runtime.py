@@ -42,8 +42,6 @@ router = APIRouter(
     dependencies=[Depends(require_http_identity)],
 )
 
-_resolve_daytona_volume_name = resolve_daytona_volume_name
-
 
 @router.get("/settings", response_model=RuntimeSettingsSnapshot)
 async def get_runtime_settings(state: ServerStateDep) -> JSONResponse:
