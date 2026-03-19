@@ -20,13 +20,17 @@ class RLMInterpreterProtocol(Protocol):
     _llm_call_count: int
     execution_event_callback: Any
 
-    def start(self) -> None: ...
+    def start(self) -> None:
+        pass
 
-    async def astart(self) -> None: ...
+    async def astart(self) -> None:
+        pass
 
-    def shutdown(self) -> None: ...
+    def shutdown(self) -> None:
+        pass
 
-    async def ashutdown(self) -> None: ...
+    async def ashutdown(self) -> None:
+        pass
 
     def execute(
         self,
@@ -34,7 +38,8 @@ class RLMInterpreterProtocol(Protocol):
         variables: dict[str, Any] | None = None,
         *,
         execution_profile: ExecutionProfile | None = None,
-    ) -> str | FinalOutput: ...
+    ) -> str | FinalOutput:
+        pass
 
     async def aexecute(
         self,
@@ -42,13 +47,16 @@ class RLMInterpreterProtocol(Protocol):
         variables: dict[str, Any] | None = None,
         *,
         execution_profile: ExecutionProfile | None = None,
-    ) -> str | FinalOutput: ...
+    ) -> str | FinalOutput:
+        pass
 
     def execution_profile(
         self, profile: ExecutionProfile
-    ) -> AbstractContextManager[Any]: ...
+    ) -> AbstractContextManager[Any]:
+        pass
 
-    def build_delegate_child(self, *, remaining_llm_budget: int) -> Any: ...
+    def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
+        pass
 
 
 class StatefulWorkspaceInterpreterProtocol(RLMInterpreterProtocol, Protocol):
@@ -62,8 +70,11 @@ class StatefulWorkspaceInterpreterProtocol(RLMInterpreterProtocol, Protocol):
         context_paths: list[str] | None,
         volume_name: str | None,
         force_new_session: bool = False,
-    ) -> None: ...
+    ) -> None:
+        pass
 
-    def export_session_state(self) -> dict[str, Any]: ...
+    def export_session_state(self) -> dict[str, Any]:
+        pass
 
-    def import_session_state(self, state: dict[str, Any]) -> None: ...
+    def import_session_state(self, state: dict[str, Any]) -> None:
+        pass
