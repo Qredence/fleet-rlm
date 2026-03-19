@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 
 test("analyze chat container and canvas formatting", async ({ page }) => {
   test.setTimeout(180000); // 3 minutes for complex multi-step processing
