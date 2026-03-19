@@ -69,14 +69,18 @@ class StreamingContext:
 
         return cls(
             depth=agent.current_depth,
-            max_depth=agent._max_depth,
+            max_depth=getattr(agent, "max_depth", getattr(agent, "_max_depth")),
             execution_profile=profile_name,
             volume_name=getattr(interpreter, "volume_name", None),
             sandbox_active=getattr(interpreter, "_sandbox", None) is not None,
             effective_max_iters=(
                 effective_max_iters
                 if effective_max_iters is not None
-                else agent._current_effective_max_iters
+                else (
+                    getattr(agent, "current_effective_max_iters", None)
+                    or getattr(agent, "_current_effective_max_iters", None)
+                    or cls().effective_max_iters
+                )
             ),
             execution_mode=str(getattr(agent, "execution_mode", "auto") or "auto"),
             sandbox_id=None,

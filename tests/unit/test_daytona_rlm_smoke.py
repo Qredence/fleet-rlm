@@ -19,7 +19,7 @@ class _FakeSession:
         self.phase_timings_ms = {"sandbox_create": 2, "repo_clone": 4}
         self.driver_started = False
         self.deleted = False
-        self.counter = 0
+        self.state_value = 0
         self.execute_calls = 0
         self.prompt_counter = 0
         self.prompt_store: dict[str, str] = {}
@@ -34,7 +34,7 @@ class _FakeSession:
         del code, callback_handler, timeout, submit_schema
         self.execute_calls += 1
         if self.execute_calls == 1:
-            self.counter = 2
+            self.state_value = 2
             return type(
                 "_ExecResponse",
                 (),
@@ -48,7 +48,7 @@ class _FakeSession:
                 },
             )()
 
-        self.counter += 3
+        self.state_value += 3
         return type(
             "_ExecResponse",
             (),
@@ -58,7 +58,7 @@ class _FakeSession:
                 "error": None,
                 "final_artifact": {
                     "kind": "markdown",
-                    "value": {"output": self.counter},
+                    "value": {"output": self.state_value},
                     "finalization_mode": "SUBMIT",
                 },
                 "duration_ms": 1,
@@ -196,7 +196,7 @@ def test_run_daytona_smoke_reports_config_errors(monkeypatch):
         raise DaytonaConfigError("Missing DAYTONA_API_URL.")
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.smoke.DaytonaSandboxRuntime",
+        "fleet_rlm.infrastructure.providers.daytona.smoke.DaytonaSandboxRuntime",
         _broken_runtime,
     )
 

@@ -154,7 +154,12 @@ class DaytonaHostCallbackDispatcher:
             return []
 
         values = self._runner.run_semantic_tasks_batched(task_specs=task_specs)
-        for task_spec, value in zip(task_specs, values, strict=False):
+        if len(values) != len(task_specs):
+            raise ValueError(
+                "Batch LLM query length mismatch in llm_query_batched: expected "
+                f"{len(task_specs)} results but got {len(values)}"
+            )
+        for task_spec, value in zip(task_specs, values):
             node.child_links.append(
                 ChildLink(
                     child_id=None,
