@@ -26,10 +26,7 @@ export function WorkspaceCanvasPanel() {
   const runCallbackCount = useRunWorkbenchStore((state) => state.callbacks.length);
   const hasRunContent = useMemo(
     () =>
-      runStatus !== "idle" ||
-      runActivityCount > 0 ||
-      runIterationCount > 0 ||
-      runCallbackCount > 0,
+      runStatus !== "idle" || runActivityCount > 0 || runIterationCount > 0 || runCallbackCount > 0,
     [runActivityCount, runCallbackCount, runIterationCount, runStatus],
   );
   const [activeTab, setActiveTab] = useState<"turn" | "run">(

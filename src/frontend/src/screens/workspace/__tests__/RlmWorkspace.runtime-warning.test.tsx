@@ -86,12 +86,9 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
-  useRunWorkbenchStore: (selector: (state: {
-    status: "idle";
-    activity: [];
-    iterations: [];
-    callbacks: [];
-  }) => unknown) =>
+  useRunWorkbenchStore: (
+    selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+  ) =>
     selector({
       status: "idle",
       activity: [],

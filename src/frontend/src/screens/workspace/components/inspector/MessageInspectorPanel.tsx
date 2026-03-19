@@ -159,9 +159,7 @@ export function MessageInspectorPanel() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="border-b border-border-subtle/70 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 truncate text-sm font-medium text-foreground">
-            Assistant turn
-          </div>
+          <div className="min-w-0 truncate text-sm font-medium text-foreground">Assistant turn</div>
           <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
             {turnStatus.label}
           </Badge>

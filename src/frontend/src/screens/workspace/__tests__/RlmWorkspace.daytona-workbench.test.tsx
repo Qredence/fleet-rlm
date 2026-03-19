@@ -74,12 +74,7 @@ vi.mock("@/screens/workspace/model/chat-store", () => ({
 
 vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
   useRunWorkbenchStore: (
-    selector: (state: {
-      status: "idle";
-      activity: [];
-      iterations: [];
-      callbacks: [];
-    }) => unknown,
+    selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
   ) =>
     selector({
       status: "idle",

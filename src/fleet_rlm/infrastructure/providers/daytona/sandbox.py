@@ -57,7 +57,6 @@ from .protocol import (
 from .sdk import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     build_async_daytona_client,
-    build_daytona_client,
 )
 from .types import (
     ContextSource,

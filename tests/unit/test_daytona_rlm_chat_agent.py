@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import dspy
+from typing import Any, cast
 
 from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
     DaytonaWorkbenchChatAgent,
     _render_final_text,
 )
+
+
+def _build_agent() -> DaytonaWorkbenchChatAgent:
+    return DaytonaWorkbenchChatAgent(runtime=cast(Any, object()))
 
 
 def test_render_final_text_prefers_nested_summary_fields() -> None:
@@ -21,7 +26,7 @@ def test_render_final_text_prefers_nested_summary_fields() -> None:
 
 
 def test_export_session_state_normalizes_persisted_history() -> None:
-    agent = DaytonaWorkbenchChatAgent()
+    agent = _build_agent()
     agent.history = dspy.History(
         messages=[
             {
@@ -44,7 +49,7 @@ def test_export_session_state_normalizes_persisted_history() -> None:
 
 
 def test_build_task_prompt_keeps_current_request_primary() -> None:
-    agent = DaytonaWorkbenchChatAgent()
+    agent = _build_agent()
     agent.history = dspy.History(
         messages=[
             {

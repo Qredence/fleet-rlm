@@ -82,10 +82,7 @@ vi.mock("@/screens/settings/hooks/use-runtime-settings", () => ({
     },
     testAllConnections: vi.fn(),
   }),
-  computeRuntimeUpdates: (
-    current: Record<string, string>,
-    baseline: Record<string, string>,
-  ) => {
+  computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of Object.keys(current)) {
       if ((current[key] ?? "") !== (baseline[key] ?? "")) {

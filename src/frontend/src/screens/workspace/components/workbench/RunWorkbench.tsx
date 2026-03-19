@@ -1,9 +1,4 @@
-import {
-  FileQuestion,
-  MessagesSquare,
-  SearchSlash,
-  TriangleAlert,
-} from "lucide-react";
+import { FileQuestion, MessagesSquare, SearchSlash, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -229,7 +224,9 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
         {iteration.reasoningSummary ? (
           <Reasoning className="mb-0" defaultOpen>
             <ReasoningTrigger
-              getThinkingMessage={() => <span className="text-sm font-medium">Planner reasoning</span>}
+              getThinkingMessage={() => (
+                <span className="text-sm font-medium">Planner reasoning</span>
+              )}
             />
             <ReasoningContent className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">
               {iteration.reasoningSummary}
@@ -450,7 +447,7 @@ export function RunWorkbench() {
       data-testid="run-workbench"
     >
       {errorMessage ? (
-          <Alert variant="destructive" className="shrink-0 border-destructive/30 bg-destructive/5">
+        <Alert variant="destructive" className="shrink-0 border-destructive/30 bg-destructive/5">
           <AlertTitle>Run error</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>

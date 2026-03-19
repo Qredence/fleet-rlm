@@ -15,15 +15,11 @@ test("analyze chat container and canvas formatting", async ({ page }) => {
   );
   await page.press(inputSelector, "Enter");
 
-  console.log(
-    "Message sent. Waiting 2 minutes for multi-step processing and event rendering...",
-  );
+  console.log("Message sent. Waiting 2 minutes for multi-step processing and event rendering...");
   // We wait longer to ensure we see the sequence of events
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(20000);
-    console.log(
-      `Waited ${20 * (i + 1)} seconds. Capturing intermediate screenshot...`,
-    );
+    console.log(`Waited ${20 * (i + 1)} seconds. Capturing intermediate screenshot...`);
     await page.screenshot({
       path: `/tmp/phase_22_event_progress_${i}.png`,
       fullPage: true,
