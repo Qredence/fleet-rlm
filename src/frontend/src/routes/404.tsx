@@ -1,6 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { LazyRouteComponents } from "@/lib/perf/routePreload";
+import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/404")({
-  component: () => <LazyRouteComponents.NotFoundPage />,
+  component: lazyRouteComponent(
+    () => import("@/screens/shell/standalone/not-found-screen"),
+    "NotFoundScreen",
+  ),
 });

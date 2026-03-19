@@ -85,8 +85,10 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
             },
           ];
 
-          const chatStoreModule = await import("/src/stores/chatStore.ts");
+          const chatStoreModule = await import("/src/screens/workspace/model/chat-store.ts");
           const navigationStoreModule = await import("/src/stores/navigationStore.ts");
+          const workspaceUiStoreModule =
+            await import("/src/screens/workspace/model/workspace-ui-store.ts");
 
           chatStoreModule.useChatStore.setState({
             messages: [
@@ -155,6 +157,9 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
           navigationStoreModule.useNavigationStore.setState({
             activeNav: "workspace",
             isCanvasOpen: true,
+          });
+
+          workspaceUiStoreModule.useWorkspaceUiStore.setState({
             selectedAssistantTurnId: "assistant-1",
             activeInspectorTab: "graph",
           });

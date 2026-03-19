@@ -1,4 +1,4 @@
-import type { NavItem } from "@/lib/data/types";
+import type { NavItem } from "@/stores/navigation-types";
 
 // ── Nav section support ─────────────────────────────────────────────
 

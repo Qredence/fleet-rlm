@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { springs } from "@/lib/config/motion-config";
+import { springs } from "@/lib/utils/motion";
 import { cn } from "@/lib/utils/cn";
 
 // ── Types ───────────────────────────────────────────────────────────
