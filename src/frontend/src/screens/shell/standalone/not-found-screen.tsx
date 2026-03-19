@@ -33,9 +33,7 @@ export function NotFoundScreen() {
         </div>
         <div>
           <p className="text-muted-foreground mb-2 typo-display">404</p>
-          <h1 className="text-foreground mb-2 typo-h3" style={{ fontSize: "14px" }}>
-            Page not found
-          </h1>
+          <h1 className="mb-2 text-sm font-medium text-foreground">Page not found</h1>
           <p className="text-muted-foreground typo-caption">
             The page you&rsquo;re looking for doesn&rsquo;t exist or has been moved. Check the URL
             or head back home.

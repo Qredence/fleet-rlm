@@ -58,9 +58,7 @@ export function SettingsScreen() {
           </TooltipTrigger>
           <TooltipContent side="bottom">Go back</TooltipContent>
         </Tooltip>
-        <h1 className="text-foreground typo-h3" style={{ fontSize: "14px" }}>
-          Settings
-        </h1>
+        <h1 className="text-sm font-medium text-foreground">Settings</h1>
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">

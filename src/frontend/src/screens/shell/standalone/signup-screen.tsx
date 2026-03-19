@@ -67,9 +67,7 @@ function SignupScreen() {
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="w-8 h-3.75 text-foreground" />
             <div className="text-center">
-              <h1 className="text-foreground typo-h3" style={{ fontSize: "14px" }}>
-                Create your account
-              </h1>
+              <h1 className="text-sm font-medium text-foreground">Create your account</h1>
               <p className="text-muted-foreground mt-1 typo-caption">
                 Get started with Skill Fleet
               </p>
