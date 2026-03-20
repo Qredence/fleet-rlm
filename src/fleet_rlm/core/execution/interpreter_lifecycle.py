@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import queue
 import threading
+import logging
 from typing import TYPE_CHECKING, Any
 import logging
 
@@ -153,7 +154,7 @@ def shutdown(interpreter: "ModalInterpreter") -> None:
         try:
             interpreter._sandbox.terminate()
         except Exception:
-            pass
+            logging.exception("Error while terminating Modal sandbox during shutdown")
 
     interpreter._sandbox = None
     interpreter._proc = None
