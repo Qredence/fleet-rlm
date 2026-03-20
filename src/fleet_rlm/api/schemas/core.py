@@ -219,7 +219,7 @@ class RuntimeStatusResponse(BaseModel):
     write_enabled: bool
     ready: bool
     active_models: RuntimeActiveModels
-    sandbox_provider: str = "modal"
+    sandbox_provider: VolumeProvider = "modal"
     llm: dict[str, Any] = Field(default_factory=dict)
     modal: dict[str, Any] = Field(default_factory=dict)
     daytona: dict[str, Any] = Field(default_factory=dict)
