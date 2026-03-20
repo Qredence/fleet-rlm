@@ -32,6 +32,8 @@ The current implementation treats these Daytona docs as the normative baseline:
   - sandboxes attach that volume through `CreateSandboxFromSnapshotParams(... volumes=[VolumeMount(...)])`
 - Live REPL/session progress uses the documented async session-command log streaming path rather than a custom transport:
   - the repo uses Daytona process sessions plus `get_session_command_logs_async(...)` for stdout/stderr follow mode
+  - async session-command log streaming must stay on the owning request event loop; the runtime must not move the same `AsyncDaytona` client across loops or helper threads
+  - sync compatibility wrappers fall back to snapshot polling via `get_session_command_logs(...)` instead of cross-thread async streaming
 - Daytona-backed recursive work follows the guide's core invariants through the
   shared `dspy.RLM` path:
   - `RLMReActChatAgent` remains the top-level conversational runtime

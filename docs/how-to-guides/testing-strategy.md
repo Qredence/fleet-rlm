@@ -234,12 +234,14 @@ Install pre-commit hooks for automatic checks:
 
 ```bash
 uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 ```
 
 Run pre-commit manually:
 
 ```bash
 uv run pre-commit run --all-files
+uv run pre-commit run --hook-stage pre-push --all-files
 ```
 
 ## Test Anti-Patterns

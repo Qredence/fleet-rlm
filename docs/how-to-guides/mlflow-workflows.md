@@ -9,7 +9,7 @@ Use this guide when you want `fleet-rlm` to emit MLflow traces during live DSPy 
 make mlflow-server
 ```
 
-That starts an OSS MLflow tracking server on `http://127.0.0.1:5000` using `sqlite:///mlruns.db`.
+That starts an OSS MLflow tracking server on `http://127.0.0.1:5001` using `sqlite:///mlruns.db`.
 
 ## 2. Enable MLflow in fleet-rlm
 
@@ -18,7 +18,7 @@ Set the following environment variables before starting the server or running of
 ```bash
 # from repo root
 export MLFLOW_ENABLED=true
-export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 export MLFLOW_EXPERIMENT=fleet-rlm
 
 # optional model registry / deployment id
@@ -173,7 +173,7 @@ uv run --with "mlflow[mcp]>=3.10.0" mlflow mcp run
 If your MCP client supports per-server env vars, point it at the same tracking server:
 
 ```bash
-MLFLOW_TRACKING_URI=http://127.0.0.1:5000 \
+MLFLOW_TRACKING_URI=http://127.0.0.1:5001 \
 uv run --with "mlflow[mcp]>=3.10.0" mlflow mcp run
 ```
 

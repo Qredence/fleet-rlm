@@ -15,9 +15,9 @@ Please delete options that are not relevant.
 
 ## Checklist
 
-- [ ] Tests pass locally with `uv run pytest`
-- [ ] Code is formatted with `uv run ruff format .`
-- [ ] No linting errors with `uv run ruff check .`
+- [ ] Relevant local validation passed (`make test-fast` for backend-only work, `make quality-gate` for shared-contract work)
+- [ ] Frontend changes passed repo checks (`cd src/frontend && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && pnpm run build`)
+- [ ] Pre-commit and pre-push hooks are installed locally (`uv run pre-commit install` and `uv run pre-commit install --hook-type pre-push`)
 - [ ] Documentation updated (README, AGENTS.md, docstrings)
 - [ ] Commit messages follow conventions
 - [ ] PR description clearly explains the change

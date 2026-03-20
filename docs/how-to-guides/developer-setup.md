@@ -101,9 +101,11 @@ This command:
 
 ```bash
 uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 ```
 
-This ensures code quality checks run automatically before each commit.
+This installs both fast `pre-commit` hooks for each commit and stronger `pre-push`
+checks before code leaves your machine.
 
 ## 4. Configure Environment Variables
 
@@ -153,7 +155,7 @@ APP_ENV=local
 
 # MLflow Tracing (enabled by default)
 MLFLOW_ENABLED=true
-MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 MLFLOW_EXPERIMENT=fleet-rlm
 
 # PostHog Analytics
@@ -424,6 +426,7 @@ pnpm install --frozen-lockfile
 
 ```bash
 uv run pre-commit run --all-files
+uv run pre-commit run --hook-stage pre-push --all-files
 ```
 
 ## Next Steps

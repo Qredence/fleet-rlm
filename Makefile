@@ -30,7 +30,7 @@ help:
 	@echo "  make clean             - Remove caches and local generated artifacts"
 	@echo "  make sync-scaffold     - Sync .claude/ to src/fleet_rlm/_scaffold/"
 	@echo "  make release-check     - Run clean + quality-gate + security-check + build + twine checks"
-	@echo "  make precommit-install - Install pre-commit git hooks"
+	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run     - Run pre-commit on all files"
 	@echo "  make cli-help          - Show fleet-rlm CLI help"
 
@@ -101,7 +101,7 @@ quality-gate: lint format-check typecheck test-fast metadata-check docs-check fr
 check: quality-gate
 
 mlflow-server:
-	uv run mlflow server --backend-store-uri sqlite:///mlruns.db --port 5000
+	uv run mlflow server --backend-store-uri sqlite:///mlruns.db --port 5001
 
 sync-scaffold:
 	@echo "Syncing .claude/ to src/fleet_rlm/_scaffold/..."
@@ -137,6 +137,7 @@ clean:
 
 precommit-install:
 	uv run pre-commit install
+	uv run pre-commit install --hook-type pre-push
 
 precommit-run:
 	uv run pre-commit run --all-files
