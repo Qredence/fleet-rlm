@@ -107,9 +107,6 @@ def test_mlflow_integration_captures_real_trace(
         "fleet_rlm.features.analytics.mlflow_integration._INIT_IDENTITY", None
     )
     monkeypatch.setattr(
-        "fleet_rlm.features.analytics.mlflow_integration._INITIALIZED", False
-    )
-    monkeypatch.setattr(
         "fleet_rlm.features.analytics.mlflow_integration._ACTIVE_CONFIG", None
     )
 
