@@ -62,4 +62,5 @@ class ChatAgentProtocol(Protocol):
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
+        volume_name: str | None = None,
     ) -> AsyncIterator[StreamEvent]: ...

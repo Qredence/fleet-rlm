@@ -88,7 +88,6 @@ In the shared runtime contract:
 - Modal requests can include `execution_mode`.
 - Daytona requests can include `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
 - Daytona still uses the same websocket workspace and run-workbench flow, but it intentionally remains experimental.
-- `fleet-rlm daytona-rlm --max-depth` remains available only as a deprecated compatibility flag for the CLI pilot path.
 
 ## CLI Surfaces
 
@@ -118,12 +117,6 @@ uv run fleet-rlm init --list
 
 # Experimental Daytona validation
 uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
-
-# Experimental Daytona pilot
-uv run fleet-rlm daytona-rlm \
-  --repo https://github.com/qredence/fleet-rlm.git \
-  --task "Summarize the tracing architecture" \
-  --batch-concurrency 4
 ```
 
 ## HTTP and WebSocket Contract
@@ -187,7 +180,6 @@ Use this order for Daytona work:
 
 1. Set `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`.
 2. Run `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch-or-sha>]`.
-3. Only then run `uv run fleet-rlm daytona-rlm [--repo <url>] [--context-path <path> ...] --task <text> ...`.
 
 This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_URL` instead.
 

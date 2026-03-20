@@ -58,7 +58,7 @@ Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes remain in the rout
 Shared runtime contract:
 
 - `runtime_mode=modal_chat`: default product path
-- `runtime_mode=daytona_pilot`: experimental workbench path
+- `runtime_mode=daytona_pilot`: Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
 - `execution_mode`: Modal-only request option
 - Daytona-only request controls: `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`
 
@@ -85,8 +85,8 @@ Cross-stack source-of-truth boundaries:
 
 ## Agent Operating Rules
 
-- Keep Modal and Daytona responsibilities distinct. Daytona is integrated into the shared workspace flow, but it is still experimental and should not be treated as a generic `dspy.RLM` wrapper.
-- Daytona intentionally uses a custom recursive host-loop runner plus `dspy.Predict`-backed grounding/decomposition/synthesis modules; do not treat it as a `dspy.RLM` wrapper.
+- Keep Modal and Daytona responsibilities distinct, but keep them on the same conversational runtime architecture. `daytona_pilot` should stay on the shared ReAct + `dspy.RLM` backbone, with Daytona acting as the interpreter/sandbox backend.
+- Do not reintroduce Daytona-specific chat/runtime orchestration when the shared `RLMReActChatAgent` path can express the behavior. Daytona-specific logic belongs in the interpreter/provider layer.
 - Treat `openapi.yaml` as the canonical API contract. If you change backend request/response shapes or routes, update generated frontend API artifacts and verify drift with `pnpm run api:check`.
 - `fleet web` is the main local app entrypoint. It delegates into `fleet-rlm serve-api`.
 - Source checkouts prefer `src/frontend/dist` for UI serving. Packaged installs fall back to `src/fleet_rlm/ui/dist`.

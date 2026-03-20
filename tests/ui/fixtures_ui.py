@@ -245,8 +245,10 @@ def apply_ui_test_env(monkeypatch, tmp_path, *, planner: object = "fake-planner-
         "DSPY_DELEGATE_LM_SMALL_MODEL",
         "DAYTONA_API_KEY",
         "DAYTONA_API_URL",
+        "DAYTONA_TARGET",
         "MODAL_TOKEN_ID",
         "MODAL_TOKEN_SECRET",
+        "SANDBOX_PROVIDER",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("POSTHOG_ENABLED", "false")

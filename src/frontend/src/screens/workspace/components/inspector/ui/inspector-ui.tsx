@@ -130,7 +130,7 @@ export function sectionGroups(sections: ExecutionSection[]) {
 
 export function renderBadges(
   values: string[],
-  variant: "outline" | "secondary" | "warning" | "success" | "accent" = "secondary",
+  variant: "outline" | "secondary" | "default" | "destructive" = "secondary",
 ) {
   if (values.length === 0) return null;
   return (

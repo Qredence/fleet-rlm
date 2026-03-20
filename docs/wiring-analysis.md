@@ -123,7 +123,7 @@ REST calls use the standard `fetch` API with the base URL from
 | `runtime_mode` value | Product path | Agent backend |
 |----------------------|--------------|---------------|
 | `modal_chat` (default) | Standard RLM Workspace chat | DSPy-based Modal chat agent |
-| `daytona_pilot` | Experimental Daytona workbench | Custom recursive host-loop runner with `dspy.Predict`-backed modules |
+| `daytona_pilot` | Experimental Daytona workbench | Shared ReAct + `dspy.RLM` agent with Daytona interpreter backend |
 
 ### Frontend → Backend flow
 
@@ -140,7 +140,7 @@ REST calls use the standard `fetch` API with the base URL from
    `runtime_mode` is passed to `_build_chat_agent_context()` (in
    `chat_runtime.py`), which branches:
    - `"modal_chat"` → standard `ChatAgentProtocol` implementation.
-   - `"daytona_pilot"` → Daytona-specific agent cast to `ChatAgentProtocol`.
+   - `"daytona_pilot"` → Daytona-configured shared agent cast to `ChatAgentProtocol`.
 5. **Daytona-specific options** — `runtime_options.py` extracts `repo_url`,
    `repo_ref`, `context_paths`, and `batch_concurrency` from the message only
    when `runtime_mode == "daytona_pilot"`.

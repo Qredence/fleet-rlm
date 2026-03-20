@@ -23,6 +23,7 @@ import {
 import {
   appendToolLikePart,
   inferStatusTone,
+  sandboxProgressPartFromStatus,
 } from "@/screens/workspace/model/backend-chat-event-tool-parts";
 
 const DEFAULT_PHASE = 1 as const;
@@ -247,13 +248,16 @@ function appendReasoningEvent(
 ): ChatMessage[] {
   if (text.length === 0) return messages;
   const runtimeContext = parseRuntimeContext(payload);
+  const resolvedLabel = asOptionalText(
+    payload?.reasoning_label ?? payload?.reasoningLabel ?? payload?.label,
+  );
   return appendTracePart(
     messages,
     {
       kind: "reasoning",
       parts: [{ type: "text", text }],
       isStreaming: false,
-      label,
+      label: resolvedLabel ?? label,
       ...(runtimeContext ? { runtimeContext } : {}),
     },
     text,
@@ -528,8 +532,23 @@ function applyEvent(
       };
     }
     case "status": {
+      const sandboxPart = sandboxProgressPartFromStatus(payload);
+      if (sandboxPart) {
+        return {
+          messages: appendTracePart(messages, sandboxPart, text),
+          terminal: false,
+          errored: false,
+        };
+      }
       return {
         messages: appendStatusTrace(messages, text, inferStatusTone(text, payload), payload),
+        terminal: false,
+        errored: false,
+      };
+    }
+    case "warning": {
+      return {
+        messages: appendStatusTrace(messages, text, "warning", payload),
         terminal: false,
         errored: false,
       };

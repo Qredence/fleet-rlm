@@ -14,6 +14,14 @@ from fleet_rlm.core.execution.profiles import ExecutionProfile
 from fleet_rlm.core.execution.interpreter import ModalInterpreter
 from fleet_rlm.core.models.streaming import StreamEvent
 
+from .delegation_policy import (
+    build_child_interpreter,
+    claim_delegate_slot_or_error,
+    normalize_delegate_result,
+    record_delegate_fallback,
+    remaining_llm_budget,
+)
+
 # NOTE: fleet_rlm.core.models.rlm_runtime_modules is imported lazily inside
 # spawn_delegate_sub_agent_async to avoid the circular import:
 #   rlm_runtime_modules → core.agent.signatures → core.agent.__init__
@@ -29,117 +37,6 @@ if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent
 
 logger = logging.getLogger(__name__)
-
-
-def _claim_delegate_slot_or_error(agent: "RLMReActChatAgent") -> dict[str, Any] | None:
-    claim_slot = getattr(agent, "_claim_delegate_slot", None)
-    if not callable(claim_slot):
-        return None
-
-    claim_result = claim_slot()
-    if (
-        isinstance(claim_result, tuple)
-        and len(claim_result) == 2
-        and isinstance(claim_result[0], bool)
-    ):
-        allowed = bool(claim_result[0])
-        limit = int(claim_result[1])
-        if not allowed:
-            return {
-                "status": "error",
-                "error": (
-                    "Delegate call budget reached for this turn. "
-                    f"Maximum delegate calls per turn is {limit}."
-                ),
-                "delegate_max_calls_per_turn": limit,
-            }
-
-    return None
-
-
-def _remaining_llm_budget(agent: "RLMReActChatAgent") -> int:
-    interpreter = agent.interpreter
-    limit = max(1, int(getattr(interpreter, "max_llm_calls", 1)))
-    used = max(0, int(getattr(interpreter, "_llm_call_count", 0)))
-    return max(0, limit - used)
-
-
-def _share_llm_budget(
-    *, parent: ModalInterpreter, child: ModalInterpreter
-) -> ModalInterpreter:
-    """Route child sandbox sub-LLM accounting through the parent interpreter."""
-    setattr(
-        child,
-        "_check_and_increment_llm_calls",
-        parent._check_and_increment_llm_calls,
-    )
-    return child
-
-
-def _has_live_modal_sandbox(interpreter: ModalInterpreter) -> bool:
-    """Return True when the interpreter is already backed by a live sandbox."""
-    return getattr(interpreter, "_sandbox", None) is not None
-
-
-def _build_child_interpreter(
-    agent: "RLMReActChatAgent", *, remaining_llm_budget: int
-) -> Any:
-    parent = agent.interpreter
-    if not isinstance(parent, ModalInterpreter):
-        return parent
-    if _has_live_modal_sandbox(parent):
-        return parent
-
-    child = ModalInterpreter(
-        image=parent.image,
-        app=getattr(parent, "_app_obj", None),
-        secrets=list(parent.secrets),
-        timeout=parent.timeout,
-        idle_timeout=parent.idle_timeout,
-        execute_timeout=parent.execute_timeout,
-        app_name=getattr(parent, "_app_name", "dspy-rlm-interpreter"),
-        volume_name=parent.volume_name,
-        volume_mount_path=parent.volume_mount_path,
-        summarize_stdout=parent.summarize_stdout,
-        stdout_summary_threshold=parent.stdout_summary_threshold,
-        stdout_summary_prefix_len=parent.stdout_summary_prefix_len,
-        sub_lm=parent.sub_lm,
-        max_llm_calls=remaining_llm_budget,
-        llm_call_timeout=parent.llm_call_timeout,
-        default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-        async_execute=parent.async_execute,
-    )
-    return _share_llm_budget(parent=parent, child=child)
-
-
-def _normalize_delegate_result(
-    *,
-    agent: "RLMReActChatAgent",
-    raw_result: dict[str, Any],
-    fallback_used: bool,
-) -> dict[str, Any]:
-    result_copy = dict(raw_result)
-    result_copy.setdefault("status", "ok")
-
-    answer_text = str(
-        result_copy.get("answer") or result_copy.get("assistant_response") or ""
-    )
-    truncation_limit = int(getattr(agent, "delegate_result_truncation_chars", 8000))
-    if truncation_limit > 0 and len(answer_text) > truncation_limit:
-        truncated = answer_text[:truncation_limit].rstrip()
-        answer_text = f"{truncated}\n\n[truncated delegate output]"
-        result_copy["delegate_output_truncated"] = True
-        if callable(getattr(agent, "_record_delegate_truncation", None)):
-            agent._record_delegate_truncation()
-    else:
-        result_copy["delegate_output_truncated"] = False
-
-    result_copy["answer"] = answer_text
-    result_copy["assistant_response"] = answer_text
-    result_copy["depth"] = agent._current_depth + 1
-    result_copy.setdefault("sub_agent_history", 0)
-    result_copy["delegate_lm_fallback"] = fallback_used
-    return result_copy
 
 
 def _prediction_payload(prediction: dspy.Prediction) -> dict[str, Any]:
@@ -260,12 +157,15 @@ async def spawn_delegate_sub_agent_async(
             ),
         }
 
-    budget_error = _claim_delegate_slot_or_error(agent)
+    budget_error = claim_delegate_slot_or_error(
+        agent,
+        depth_error_suffix="Cannot spawn delegate sub-agent.",
+    )
     if budget_error is not None:
         return budget_error
 
-    remaining_llm_budget = _remaining_llm_budget(agent)
-    if isinstance(agent.interpreter, ModalInterpreter) and remaining_llm_budget <= 0:
+    remaining_budget = remaining_llm_budget(agent)
+    if isinstance(agent.interpreter, ModalInterpreter) and remaining_budget <= 0:
         return {
             "status": "error",
             "error": (
@@ -278,11 +178,11 @@ async def spawn_delegate_sub_agent_async(
     delegate_lm = getattr(agent, "delegate_lm", None)
     parent_lm = getattr(dspy.settings, "lm", None)
     fallback_used = delegate_lm is None
-    if fallback_used and callable(getattr(agent, "_record_delegate_fallback", None)):
-        agent._record_delegate_fallback()
+    if fallback_used:
+        record_delegate_fallback(agent)
 
-    child_interpreter = _build_child_interpreter(
-        agent, remaining_llm_budget=remaining_llm_budget
+    child_interpreter = build_child_interpreter(
+        agent, remaining_llm_budget=remaining_budget
     )
     effective_max_iters = max(1, int(getattr(agent, "rlm_max_iterations", 30)))
     effective_max_llm_calls = max(1, int(getattr(agent, "rlm_max_llm_calls", 50)))
@@ -372,15 +272,14 @@ async def spawn_delegate_sub_agent_async(
             raw_result = await _execute_child()
     except Exception:
         if delegate_lm is not None and parent_lm is not None:
-            if callable(getattr(agent, "_record_delegate_fallback", None)):
-                agent._record_delegate_fallback()
+            record_delegate_fallback(agent)
             fallback_used = True
             with dspy.context(lm=parent_lm):
                 raw_result = await _execute_child()
         else:
             raise
 
-    return _normalize_delegate_result(
+    return normalize_delegate_result(
         agent=agent,
         raw_result=raw_result,
         fallback_used=fallback_used,

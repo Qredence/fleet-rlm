@@ -4,61 +4,62 @@ from __future__ import annotations
 
 import os
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from dotenv import set_key
 
-DEFAULT_SETTINGS_KEYS: tuple[str, ...] = (
-    "DSPY_LM_MODEL",
-    "DSPY_DELEGATE_LM_MODEL",
-    "DSPY_DELEGATE_LM_SMALL_MODEL",
-    "DSPY_LLM_API_KEY",
-    "DSPY_LM_API_BASE",
-    "DSPY_LM_MAX_TOKENS",
-    "DAYTONA_API_KEY",
-    "DAYTONA_API_URL",
-    "DAYTONA_TARGET",
-    "MODAL_TOKEN_ID",
-    "MODAL_TOKEN_SECRET",
+
+@dataclass(frozen=True, slots=True)
+class RuntimeSettingDefinition:
+    """Single-source metadata for runtime settings surfaces."""
+
+    key: str
+    secret: bool = False
+    include_in_default_snapshot: bool = True
+    editable: bool = True
+
+
+_RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
+    RuntimeSettingDefinition("DSPY_LM_MODEL"),
+    RuntimeSettingDefinition("DSPY_DELEGATE_LM_MODEL"),
+    RuntimeSettingDefinition("DSPY_DELEGATE_LM_SMALL_MODEL"),
+    RuntimeSettingDefinition("DSPY_LLM_API_KEY", secret=True),
+    RuntimeSettingDefinition("DSPY_LM_API_BASE"),
+    RuntimeSettingDefinition("DSPY_LM_MAX_TOKENS"),
+    RuntimeSettingDefinition("DAYTONA_API_KEY", secret=True),
+    RuntimeSettingDefinition("DAYTONA_API_URL"),
+    RuntimeSettingDefinition("DAYTONA_TARGET"),
+    RuntimeSettingDefinition("MODAL_TOKEN_ID", secret=True),
+    RuntimeSettingDefinition("MODAL_TOKEN_SECRET", secret=True),
+    RuntimeSettingDefinition("SECRET_NAME", include_in_default_snapshot=False),
+    RuntimeSettingDefinition("VOLUME_NAME", include_in_default_snapshot=False),
+    RuntimeSettingDefinition("SANDBOX_PROVIDER"),
 )
 
-RUNTIME_SETTINGS_KEYS: tuple[str, ...] = (
-    "DSPY_LM_MODEL",
-    "DSPY_DELEGATE_LM_MODEL",
-    "DSPY_DELEGATE_LM_SMALL_MODEL",
-    "DSPY_LLM_API_KEY",
-    "DSPY_LM_API_BASE",
-    "DSPY_LM_MAX_TOKENS",
-    "DAYTONA_API_KEY",
-    "DAYTONA_API_URL",
-    "DAYTONA_TARGET",
-    "MODAL_TOKEN_ID",
-    "MODAL_TOKEN_SECRET",
-    "SECRET_NAME",
-    "VOLUME_NAME",
+_RUNTIME_SETTING_INDEX: dict[str, RuntimeSettingDefinition] = {
+    definition.key: definition for definition in _RUNTIME_SETTING_DEFINITIONS
+}
+
+DEFAULT_SETTINGS_KEYS: tuple[str, ...] = tuple(
+    definition.key
+    for definition in _RUNTIME_SETTING_DEFINITIONS
+    if definition.include_in_default_snapshot
+)
+
+RUNTIME_SETTINGS_KEYS: tuple[str, ...] = tuple(
+    definition.key for definition in _RUNTIME_SETTING_DEFINITIONS if definition.editable
 )
 
 RUNTIME_SETTINGS_ALLOWLIST: frozenset[str] = frozenset(RUNTIME_SETTINGS_KEYS)
 
-_SECRET_KEYS = {
-    "DSPY_LLM_API_KEY",
-    "DSPY_LM_API_KEY",
-    "DAYTONA_API_KEY",
-    "MODAL_TOKEN_SECRET",
-}
-
-_NON_SECRET_KEYS = {
-    "DSPY_LM_MODEL",
-    "DSPY_DELEGATE_LM_MODEL",
-    "DSPY_DELEGATE_LM_SMALL_MODEL",
-    "DSPY_LM_API_BASE",
-    "DSPY_LM_MAX_TOKENS",
-    "DAYTONA_API_URL",
-    "DAYTONA_TARGET",
-    "SECRET_NAME",
-    "VOLUME_NAME",
-}
+_LEGACY_SECRET_KEYS = frozenset({"DSPY_LM_API_KEY"})
+_NON_SECRET_KEYS = frozenset(
+    definition.key
+    for definition in _RUNTIME_SETTING_DEFINITIONS
+    if not definition.secret
+)
 
 _SENSITIVE_KEY_MARKERS = (
     "SECRET",
@@ -154,9 +155,12 @@ def mask_secret(value: str) -> str:
 def should_mask_key(key: str) -> bool:
     """Return True when a key should be treated as sensitive."""
     normalized = key.upper()
+    definition = _RUNTIME_SETTING_INDEX.get(normalized)
+    if definition is not None:
+        return definition.secret
     if normalized in _NON_SECRET_KEYS:
         return False
-    return key in _SECRET_KEYS or any(
+    return normalized in _LEGACY_SECRET_KEYS or any(
         marker in normalized for marker in _SENSITIVE_KEY_MARKERS
     )
 

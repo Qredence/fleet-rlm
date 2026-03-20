@@ -4,6 +4,7 @@ import {
   applyMockRuntimeUpdates,
   getMockLmTest,
   getMockModalTest,
+  getMockDaytonaTest,
   getMockRuntimeSettings,
   getMockRuntimeStatus,
 } from "@/lib/data/mock/runtime";
@@ -110,6 +111,18 @@ export const runtimeEndpoints = {
           signal,
         ),
       () => getMockLmTest(),
+    );
+  },
+
+  testDaytona(signal?: AbortSignal) {
+    return withRuntimeFallback(
+      () =>
+        rlmApiClient.post<RuntimeConnectivityTestResponse>(
+          "/api/v1/runtime/tests/daytona",
+          undefined,
+          signal,
+        ),
+      () => getMockDaytonaTest(),
     );
   },
 

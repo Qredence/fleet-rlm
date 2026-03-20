@@ -5,6 +5,7 @@ function isWsEventKind(value: string): value is WsEventKind {
     "assistant_token",
     "reasoning_step",
     "status",
+    "warning",
     "tool_call",
     "tool_result",
     "trajectory_step",
@@ -96,15 +97,27 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
   }
 
   if (frameType === "execution_completed") {
-    const payload = asRecord(parsed.payload);
+    const summary = asRecord(parsed.summary) ?? asRecord(parsed.payload);
+    const artifact = asRecord(summary?.final_artifact ?? summary?.finalArtifact);
+    const artifactValue = asRecord(artifact?.value);
     return {
       type: "event",
       data: {
         kind: "final",
-        text: asText(parsed.output ?? payload?.output ?? parsed.result ?? parsed.message),
+        text: asText(
+          parsed.output ??
+            artifactValue?.final_markdown ??
+            artifactValue?.summary ??
+            artifactValue?.text ??
+            artifactValue?.content ??
+            artifact?.value ??
+            summary?.output ??
+            parsed.result ??
+            parsed.message,
+        ),
         payload: {
           source_type: frameType,
-          ...payload,
+          ...(summary ? { run_summary: summary, ...summary } : {}),
           raw: parsed,
         },
         timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,

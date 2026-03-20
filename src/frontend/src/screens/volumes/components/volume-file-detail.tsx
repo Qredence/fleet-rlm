@@ -264,7 +264,7 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
     content: apiContent,
     isLoading: isContentLoading,
     error: contentError,
-  } = useFileContent(isText && !mock ? file.path : null);
+  } = useFileContent(isText && !mock ? file.path : null, file.provider ?? "modal");
 
   // Resolved content: mock map first, then API content, then null
   const resolvedContent = mockContent ?? (apiContent || null);
@@ -296,7 +296,7 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
                 <span className="typo-micro">{getMimeLabel(file.name, file.mime)}</span>
               </Badge>
               {file.skillId && (
-                <Badge variant="accent" className="rounded-full">
+                <Badge variant="secondary" className="rounded-full">
                   <span className="typo-micro">Linked to skill</span>
                 </Badge>
               )}

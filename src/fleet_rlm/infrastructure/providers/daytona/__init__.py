@@ -1,76 +1,47 @@
-"""Experimental Daytona-backed strict-RLM pilot."""
+"""Daytona provider surface with lazy exports to avoid heavy import cycles."""
 
-from .chat_agent import DaytonaWorkbenchChatAgent
-from .config import DaytonaConfigError, ResolvedDaytonaConfig, resolve_daytona_config
-from .diagnostics import DaytonaDiagnosticError
-from .dspy_modules import (
-    ChildResultSynthesisModule,
-    DaytonaConversationGroundingModule,
-    DaytonaConversationGroundingSignature,
-    RecursiveSpawnPolicyModule,
-    RecursiveSpawnPolicySignature,
-    RecursiveTaskDecompositionModule,
-    RecursiveTaskDecompositionSignature,
-)
-from .results import persist_result
-from fleet_rlm.infrastructure.providers.daytona.runner import (
-    DaytonaRLMRunner,
-    run_daytona_rlm_pilot,
-)
-from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
-from .smoke import run_daytona_smoke
-from .types import (
-    AgentNode,
-    ChildLink,
-    ChildTaskResult,
-    ContextSource,
-    DaytonaEvidenceRef,
-    DaytonaRunResult,
-    DaytonaSmokeResult,
-    ExecutionObservation,
-    FinalArtifact,
-    PromptHandle,
-    PromptManifest,
-    PromptSliceRef,
-    RecursiveTaskSpec,
-    RolloutBudget,
-    RolloutSummary,
-    TaskSourceProvenance,
-)
+from __future__ import annotations
 
-__all__ = [
-    "AgentNode",
-    "ChildResultSynthesisModule",
-    "ChildLink",
-    "ChildTaskResult",
-    "ContextSource",
-    "DaytonaConfigError",
-    "DaytonaConversationGroundingModule",
-    "DaytonaConversationGroundingSignature",
-    "DaytonaDiagnosticError",
-    "DaytonaEvidenceRef",
-    "DaytonaRLMRunner",
-    "DaytonaRunResult",
-    "DaytonaSandboxRuntime",
-    "DaytonaSandboxSession",
-    "DaytonaSmokeResult",
-    "DaytonaWorkbenchChatAgent",
-    "ExecutionObservation",
-    "FinalArtifact",
-    "PromptHandle",
-    "PromptManifest",
-    "PromptSliceRef",
-    "RecursiveSpawnPolicyModule",
-    "RecursiveSpawnPolicySignature",
-    "RecursiveTaskSpec",
-    "RecursiveTaskDecompositionModule",
-    "RecursiveTaskDecompositionSignature",
-    "ResolvedDaytonaConfig",
-    "RolloutBudget",
-    "RolloutSummary",
-    "TaskSourceProvenance",
-    "persist_result",
-    "resolve_daytona_config",
-    "run_daytona_rlm_pilot",
-    "run_daytona_smoke",
-]
+from importlib import import_module
+from typing import Any
+
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "DaytonaWorkbenchChatAgent": (".chat_agent", "DaytonaWorkbenchChatAgent"),
+    "DaytonaConfigError": (".config", "DaytonaConfigError"),
+    "ResolvedDaytonaConfig": (".config", "ResolvedDaytonaConfig"),
+    "resolve_daytona_config": (".config", "resolve_daytona_config"),
+    "DaytonaDiagnosticError": (".diagnostics", "DaytonaDiagnosticError"),
+    "DaytonaInterpreter": (".interpreter", "DaytonaInterpreter"),
+    "DaytonaSandboxRuntime": (".sandbox", "DaytonaSandboxRuntime"),
+    "DaytonaSandboxSession": (".sandbox", "DaytonaSandboxSession"),
+    "run_daytona_smoke": (".smoke", "run_daytona_smoke"),
+    "AgentNode": (".types", "AgentNode"),
+    "ChildLink": (".types", "ChildLink"),
+    "ChildTaskResult": (".types", "ChildTaskResult"),
+    "ContextSource": (".types", "ContextSource"),
+    "DaytonaEvidenceRef": (".types", "DaytonaEvidenceRef"),
+    "DaytonaRunResult": (".types", "DaytonaRunResult"),
+    "DaytonaSmokeResult": (".types", "DaytonaSmokeResult"),
+    "ExecutionObservation": (".types", "ExecutionObservation"),
+    "FinalArtifact": (".types", "FinalArtifact"),
+    "PromptHandle": (".types", "PromptHandle"),
+    "PromptManifest": (".types", "PromptManifest"),
+    "PromptSliceRef": (".types", "PromptSliceRef"),
+    "RecursiveTaskSpec": (".types", "RecursiveTaskSpec"),
+    "RolloutBudget": (".types", "RolloutBudget"),
+    "RolloutSummary": (".types", "RolloutSummary"),
+    "TaskSourceProvenance": (".types", "TaskSourceProvenance"),
+}
+
+__all__ = sorted(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name, attr_name = _EXPORTS[name]
+    except KeyError as exc:  # pragma: no cover - Python import protocol
+        raise AttributeError(name) from exc
+    module = import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value

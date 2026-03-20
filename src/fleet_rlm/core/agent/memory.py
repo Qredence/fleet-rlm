@@ -10,6 +10,7 @@ export_session_state / import_session_state.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -49,6 +50,27 @@ class CoreMemoryMixin:
         self._core_memory: dict[str, str] = dict(self._DEFAULT_CORE_MEMORY)
         self._core_memory_limits: dict[str, int] = dict(self._DEFAULT_MEMORY_LIMITS)
 
+    def _available_memory_sections(self) -> list[str]:
+        return list(self._core_memory.keys())
+
+    def _missing_section_error(self, section: str) -> str:
+        available = self._available_memory_sections()
+        return (
+            f"Error: Core memory block '{section}' does not exist. "
+            f"Available: {available}"
+        )
+
+    def _memory_limit(self, section: str) -> int:
+        return self._core_memory_limits.get(section, 1000)
+
+    def _normalize_memory_mapping(self, memory: Mapping[str, Any]) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        for key, value in memory.items():
+            if key is None or value is None:
+                continue
+            normalized[str(key)] = str(value)
+        return normalized
+
     def core_memory_append(self, section: str, content: str) -> str:
         """Append text to a specific Core Memory block.
 
@@ -60,11 +82,11 @@ class CoreMemoryMixin:
             Success message or error description
         """
         if section not in self._core_memory:
-            return f"Error: Core memory block '{section}' does not exist. Available: {list(self._core_memory.keys())}"
+            return self._missing_section_error(section)
 
         current_len = len(self._core_memory[section])
         new_len = current_len + len(content) + 1  # +1 for newline
-        limit = self._core_memory_limits.get(section, 1000)
+        limit = self._memory_limit(section)
 
         if new_len > limit:
             return f"Error: Appending content would exceed limit for '{section}' ({new_len} > {limit}). Please summarize or replace."
@@ -83,9 +105,9 @@ class CoreMemoryMixin:
             Success message or error description
         """
         if section not in self._core_memory:
-            return f"Error: Core memory block '{section}' does not exist. Available: {list(self._core_memory.keys())}"
+            return self._missing_section_error(section)
 
-        limit = self._core_memory_limits.get(section, 1000)
+        limit = self._memory_limit(section)
         if len(content) > limit:
             return f"Error: Content exceeds limit for '{section}' ({len(content)} > {limit})."
 
@@ -117,8 +139,8 @@ class CoreMemoryMixin:
         Args:
             memory: Dict mapping block names to content
         """
-        if isinstance(memory, dict):
-            self._core_memory = memory
+        if isinstance(memory, Mapping):
+            self._core_memory = self._normalize_memory_mapping(memory)
 
     def get_core_memory_keys(self) -> list[str]:
         """Return list of core memory block names.
@@ -126,4 +148,4 @@ class CoreMemoryMixin:
         Returns:
             List of block names
         """
-        return list(self._core_memory.keys())
+        return self._available_memory_sections()

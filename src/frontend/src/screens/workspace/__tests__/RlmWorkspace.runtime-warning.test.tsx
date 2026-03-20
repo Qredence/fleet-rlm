@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
 
@@ -84,6 +85,18 @@ vi.mock("@/lib/rlm-api", () => ({
   createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
+vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
+  useRunWorkbenchStore: (
+    selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+  ) =>
+    selector({
+      status: "idle",
+      activity: [],
+      iterations: [],
+      callbacks: [],
+    }),
+}));
+
 vi.mock("@/screens/workspace/components/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
 }));
@@ -97,6 +110,14 @@ vi.mock("@/screens/workspace/components/workspace-composer", () => ({
 }));
 
 describe("WorkspaceScreen runtime warning", () => {
+  function renderScreen() {
+    return renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceScreen />
+      </QueryClientProvider>,
+    );
+  }
+
   beforeEach(() => {
     chatStoreMockState.runtimeMode = "modal_chat";
     chatStoreMockState.setRuntimeMode.mockReset();
@@ -113,7 +134,7 @@ describe("WorkspaceScreen runtime warning", () => {
   });
 
   it("renders warning banner when runtime status is unhealthy", () => {
-    const html = renderToStaticMarkup(<WorkspaceScreen />);
+    const html = renderScreen();
     expect(html).toContain('data-slot="alert"');
     expect(html).toContain("Runtime warning");
     expect(html).toContain("Run Runtime tests from Settings -&gt; Runtime.");
@@ -128,7 +149,7 @@ describe("WorkspaceScreen runtime warning", () => {
         daytona: { configured: true, guidance: [] },
       },
     };
-    const html = renderToStaticMarkup(<WorkspaceScreen />);
+    const html = renderScreen();
     expect(html).not.toContain("Runtime warning:");
   });
 
@@ -145,7 +166,7 @@ describe("WorkspaceScreen runtime warning", () => {
       },
     };
 
-    const html = renderToStaticMarkup(<WorkspaceScreen />);
+    const html = renderScreen();
 
     expect(html).toContain("Daytona setup required");
     expect(html).toContain("Missing DAYTONA_API_KEY");

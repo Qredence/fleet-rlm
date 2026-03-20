@@ -56,6 +56,7 @@ class ExecutionEvent(BaseModel):
     user_id: str
     session_id: str
     step: ExecutionStep | None = None
+    summary: dict[str, Any] | None = None
 
 
 class ExecutionSubscription(BaseModel):

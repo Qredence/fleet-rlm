@@ -7,7 +7,7 @@ import { useChatStore } from "@/screens/workspace/model/chat-store";
 import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useRuntimeStatus } from "@/hooks/useRuntimeStatus";
+import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatus";
 import { cn } from "@/lib/utils/cn";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +20,10 @@ import { useWorkspaceRuntime } from "@/screens/workspace/hooks/use-workspace-run
 import { detectRepoContext } from "@/lib/utils/repoContext";
 import { detectContextPaths } from "@/lib/utils/sourceContext";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
-import type { WsExecutionMode } from "@/lib/rlm-api/wsTypes";
+import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useQueryClient } from "@tanstack/react-query";
 
 /**
  * WorkspaceScreen — chat-first DSPy.RLM runtime surface.
@@ -59,6 +61,33 @@ export function WorkspaceScreen() {
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
+  const queryClient = useQueryClient();
+
+  // ── Initialise runtimeMode from backend setting on first load ────────────
+  const didInitRuntimeMode = useRef(false);
+  useEffect(() => {
+    if (didInitRuntimeMode.current) return;
+    const provider = runtimeStatus.data?.sandbox_provider;
+    if (!provider) return;
+    didInitRuntimeMode.current = true;
+    const mapped: WsRuntimeMode = provider === "daytona" ? "daytona_pilot" : "modal_chat";
+    setRuntimeMode(mapped);
+  }, [runtimeStatus.data?.sandbox_provider, setRuntimeMode]);
+
+  // ── Keep backend SANDBOX_PROVIDER in sync when user switches dropdown ────
+  const handleRuntimeModeChange = useCallback(
+    (mode: WsRuntimeMode) => {
+      setRuntimeMode(mode);
+      const sandboxProvider = mode === "daytona_pilot" ? "daytona" : "modal";
+      runtimeEndpoints
+        .patchSettings({ updates: { SANDBOX_PROVIDER: sandboxProvider } })
+        .then(() => queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }))
+        .catch(() => {
+          // silent — settings PATCH failures don't block the chat
+        });
+    },
+    [setRuntimeMode, queryClient],
+  );
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
@@ -252,7 +281,7 @@ export function WorkspaceScreen() {
       isLoading={composerDisabled}
       isReceiving={isReceivingResponse}
       runtimeMode={runtimeMode}
-      onRuntimeModeChange={setRuntimeMode}
+      onRuntimeModeChange={handleRuntimeModeChange}
       executionMode={executionMode}
       onExecutionModeChange={setExecutionMode}
       className="w-full"

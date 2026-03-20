@@ -1,6 +1,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
 import type { Conversation } from "@/screens/workspace/model/chat-history-store";
@@ -64,6 +65,18 @@ vi.mock("@/hooks/useRuntimeStatus", () => ({
 vi.mock("@/lib/rlm-api", () => ({
   isRlmCoreEnabled: () => true,
   createBackendSessionId: vi.fn(() => "test-session-id"),
+}));
+
+vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
+  useRunWorkbenchStore: (
+    selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+  ) =>
+    selector({
+      status: "idle",
+      activity: [],
+      iterations: [],
+      callbacks: [],
+    }),
 }));
 
 vi.mock("@/screens/workspace/components/workspace-message-list", () => ({
@@ -137,7 +150,11 @@ describe("WorkspaceScreen requested conversation loading", () => {
     const root = createRoot(container);
 
     act(() => {
-      root.render(<WorkspaceScreen />);
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <WorkspaceScreen />
+        </QueryClientProvider>,
+      );
     });
 
     expect(backendRuntimeState.loadConversation).toHaveBeenCalledWith(conversation);

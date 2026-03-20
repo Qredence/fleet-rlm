@@ -45,6 +45,7 @@
   * [fleet-rlm Codebase Map](reference/codebase-map.md)
   * [Frontend Architecture](reference/frontend-architecture.md)
   * [Frontend ↔ Backend Integration](reference/frontend-backend-integration.md)
+  * [Daytona Runtime Architecture](reference/daytona-runtime-architecture.md)
   * [fleet-rlm v0.4.94 Release Notes](reference/release-notes-0.4.94.md)
   * [Architecture Decision Records](reference/adr/README.md)
     * [ADR-001: RLM Runtime Architecture](reference/adr/001-rlm-runtime-architecture.md)
@@ -58,7 +59,3 @@
   * [fleet-rlm Concepts](explanation/concepts.md)
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)
-
-## Internal Plans
-
-* [Post-Restructure Stabilization and Uncommitted Work Commit Plan](superpowers/plans/2026-03-16-post-restructure-stabilization.md)

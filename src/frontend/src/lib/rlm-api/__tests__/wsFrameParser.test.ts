@@ -49,4 +49,48 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.kind).toBe("command_reject");
     expect(frame.data.text).toContain("Denied");
   });
+
+  it("accepts warning stream events", () => {
+    const frame = parseWsServerFrame({
+      type: "event",
+      data: {
+        kind: "warning",
+        text: "Dataset was partially truncated",
+      },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.kind).toBe("warning");
+    expect(frame.data.text).toContain("truncated");
+  });
+
+  it("maps execution_completed summaries into run_summary payloads", () => {
+    const frame = parseWsServerFrame({
+      type: "execution_completed",
+      output: "Done",
+      timestamp: "2026-03-19T12:00:00.000Z",
+      summary: {
+        run_id: "run-123",
+        runtime_mode: "daytona_pilot",
+        final_artifact: {
+          value: {
+            summary: "Execution summary",
+          },
+        },
+        warnings: ["One warning"],
+      },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.kind).toBe("final");
+    expect(frame.data.payload?.source_type).toBe("execution_completed");
+    expect(frame.data.payload?.run_summary).toMatchObject({
+      run_id: "run-123",
+      runtime_mode: "daytona_pilot",
+      warnings: ["One warning"],
+    });
+    expect(frame.data.text).toBe("Done");
+  });
 });

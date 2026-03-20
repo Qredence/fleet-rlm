@@ -31,7 +31,6 @@ Use this alongside:
 | `src/fleet_rlm/ui/` | Packaged frontend assets for installed distributions | service-surface |
 | `src/fleet_rlm/utils/` | Shared helpers for modal/scaffold/regex/tool plumbing | support-layer |
 | `src/fleet_rlm/conf/` | Hydra config package and defaults | support-layer |
-| `src/fleet_rlm/daytona_rlm/` | CLI-facing Daytona pilot compatibility module | service-surface |
 | `src/fleet_rlm/analytics/` | Compatibility package for legacy analytics imports | support-layer |
 | `src/fleet_rlm/runners.py` | Compatibility wrapper over `fleet_rlm.cli.runners` | support-layer |
 | `src/fleet_rlm/scaffold.py` | Compatibility wrapper over `fleet_rlm.utils.scaffold` | support-layer |
@@ -58,7 +57,6 @@ Use this alongside:
   - `serve-mcp`
   - `init`
   - `daytona-smoke`
-  - `daytona-rlm`
 
 ### FastAPI server
 
@@ -163,7 +161,7 @@ Use this alongside:
 - `mcp/`
   - `server.py`: FastMCP server surface
 - `providers/daytona/`
-  - `chat_agent.py`, `runner.py`, `dspy_modules.py`, `config.py`, `protocol.py`
+  - `chat_agent.py`, `interpreter.py`, `sandbox.py`, `config.py`, `protocol.py`
 - `providers/modal/`
   - Modal provider helpers
 
@@ -222,7 +220,6 @@ Use this alongside:
 | `src/fleet_rlm/analytics/` | Keeps `fleet_rlm.analytics` imports working while real code lives in `features.analytics` |
 | `src/fleet_rlm/runners.py` | Keeps `fleet_rlm.runners` imports working while canonical code lives in `cli.runners` |
 | `src/fleet_rlm/scaffold.py` | Keeps `fleet_rlm.scaffold` imports working while canonical code lives in `utils.scaffold` |
-| `src/fleet_rlm/daytona_rlm/` | CLI-facing Daytona pilot compatibility surface |
 | `src/fleet_rlm/ui/` | Packaged frontend build artifacts |
 | `src/fleet_rlm/utils/` | Small shared helpers used across CLI/runtime tooling |
 
