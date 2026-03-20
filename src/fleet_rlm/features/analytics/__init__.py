@@ -6,7 +6,7 @@ import dspy
 
 from .client import flush_posthog_client, shutdown_posthog_client
 from .config import MlflowConfig, PostHogConfig
-from .mlflow_integration import (
+from .mlflow_runtime import (
     FleetMlflowTraceCallback,
     MlflowTraceRequestContext,
     capture_last_active_trace_id,
@@ -14,18 +14,20 @@ from .mlflow_integration import (
     flush_mlflow_traces,
     get_mlflow_config,
     initialize_mlflow,
-    log_trace_feedback,
     merge_trace_result_metadata,
     mlflow_request_context,
     new_client_request_id,
+    shutdown_mlflow,
+    update_current_mlflow_trace,
+)
+from .mlflow_traces import (
+    log_trace_feedback,
     resolve_trace,
     resolve_trace_by_client_request_id,
     search_annotated_trace_rows,
-    shutdown_mlflow,
-    trace_result_metadata,
     trace_to_dataset_row,
-    update_current_mlflow_trace,
 )
+from .mlflow_runtime import trace_result_metadata
 from .posthog_callback import PostHogLLMCallback
 from .scorers import (
     build_rlm_scorers,

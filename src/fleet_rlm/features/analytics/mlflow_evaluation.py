@@ -7,11 +7,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from .config import MlflowConfig
-from .mlflow_integration import (
-    get_mlflow_config,
-    initialize_mlflow,
-    search_annotated_trace_rows,
-)
+from .mlflow_runtime import get_mlflow_config, initialize_mlflow
+from .mlflow_traces import search_annotated_trace_rows
 
 
 def export_annotated_trace_rows(

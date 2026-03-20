@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.infrastructure.providers.daytona import resolve_daytona_config
-from fleet_rlm.infrastructure.providers.daytona.sdk import build_daytona_client
+from fleet_rlm.infrastructure.providers.daytona.sandbox.sdk import build_daytona_client
 from fleet_rlm.utils.modal import load_modal_config
 
 from ..dependencies import HTTPIdentityDep, ServerStateDep, require_http_identity

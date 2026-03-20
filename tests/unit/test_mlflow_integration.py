@@ -341,7 +341,8 @@ def test_resolve_trace_by_client_request_id_uses_server_filter(
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
     monkeypatch.setattr(
-        mlflow_integration, "_trace_experiment_ids", lambda config=None: ["exp-1"]
+        "fleet_rlm.features.analytics.mlflow_traces._trace_experiment_ids",
+        lambda config=None: ["exp-1"],
     )
 
     resolved = mlflow_integration.resolve_trace_by_client_request_id("req-123")

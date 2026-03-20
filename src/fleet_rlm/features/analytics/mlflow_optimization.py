@@ -10,7 +10,7 @@ import dspy
 
 from .config import MlflowConfig
 from .mlflow_evaluation import load_trace_rows, rows_with_expected_responses
-from .mlflow_integration import initialize_mlflow
+from .mlflow_runtime import initialize_mlflow
 
 
 def load_symbol(spec: str) -> Any:

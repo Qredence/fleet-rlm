@@ -6,7 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from fleet_rlm.features.analytics import MlflowConfig, log_trace_feedback, resolve_trace
+from fleet_rlm.features.analytics.config import MlflowConfig
+from fleet_rlm.features.analytics.mlflow_traces import (
+    log_trace_feedback,
+    resolve_trace,
+)
 
 from ..dependencies import HTTPIdentityDep
 from ..schemas.core import TraceFeedbackRequest, TraceFeedbackResponse

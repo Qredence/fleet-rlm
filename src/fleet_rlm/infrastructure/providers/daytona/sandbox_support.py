@@ -1,4 +1,4 @@
-"""Compatibility alias for Daytona sandbox SDK helpers."""
+"""Compatibility alias for Daytona SDK loading and async helpers."""
 
 from __future__ import annotations
 

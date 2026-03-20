@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.features.analytics import (
+from fleet_rlm.features.analytics.mlflow_runtime import (
     MlflowTraceRequestContext,
     new_client_request_id,
 )

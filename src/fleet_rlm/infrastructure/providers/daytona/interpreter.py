@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import threading
 import time
@@ -21,33 +20,14 @@ from fleet_rlm.core.execution.interpreter_events import (
 from fleet_rlm.core.execution.profiles import ExecutionProfile
 from fleet_rlm.core.tools.llm_tools import LLMQueryMixin
 
-from .chat_state import dedupe_paths, normalized_context_sources
-from .protocol import ExecutionEventFrame, HostCallbackRequest, HostCallbackResponse
+from .sandbox.protocol import (
+    ExecutionEventFrame,
+    HostCallbackRequest,
+    HostCallbackResponse,
+)
+from .sandbox.sdk import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH, _run_async_compat
 from .sandbox import DaytonaSandboxRuntime, DaytonaSandboxSession
-from .sdk import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
-
-
-def _run_async_compat(awaitable: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(awaitable)
-
-    result: list[Any] = []
-    error: list[BaseException] = []
-
-    def _runner() -> None:
-        try:
-            result.append(asyncio.run(awaitable))
-        except Exception as exc:  # pragma: no cover - thread boundary
-            error.append(exc)
-
-    thread = threading.Thread(target=_runner, daemon=True)
-    thread.start()
-    thread.join()
-    if error:
-        raise error[0]
-    return result[0] if result else None
+from .state import dedupe_paths, normalized_context_sources
 
 
 class DaytonaInterpreter(LLMQueryMixin):

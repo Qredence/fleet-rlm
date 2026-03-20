@@ -147,8 +147,9 @@ graph LR
 
 | From | To | Purpose |
 | --- | --- | --- |
-| `api/main.py` | `infrastructure/database/` | Database manager and repository setup |
-| `api/main.py` | `features/analytics/` | PostHog and MLflow lifecycle setup |
+| `api/main.py` | `api/bootstrap.py` | Runtime bootstrap lifecycle and service startup |
+| `api/bootstrap.py` | `infrastructure/database/` | Database manager and repository setup |
+| `api/bootstrap.py` | `features/analytics/` | PostHog and MLflow lifecycle setup |
 | `api/routers/ws/*` | `core/agent/` | Shared runtime execution |
 | `api/routers/ws/runtime_options.py` | `infrastructure/providers/daytona/` | Daytona-specific request normalization |
 | `api/execution/*` | `core/models/streaming.py` | Trace/event shaping |
@@ -159,9 +160,9 @@ graph LR
 | --- | --- | --- |
 | `infrastructure/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py` |
 | `infrastructure/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
-| `infrastructure/providers/daytona/` | Experimental Daytona interpreter backend | `chat_agent.py`, `interpreter.py`, `sandbox.py`, `config.py` |
-| `features/analytics/` | Telemetry and evaluation | `client.py`, `posthog_callback.py`, `mlflow_integration.py`, `trace_context.py` |
-| `features/terminal/` | Terminal chat UX | `chat.py`, `commands.py`, `settings.py`, `ui.py` |
+| `infrastructure/providers/daytona/` | Experimental Daytona interpreter backend | `agent.py`, `state.py`, `interpreter.py`, `sandbox/`, `volumes.py`, `config.py`, `smoke.py` |
+| `features/analytics/` | Telemetry and evaluation | `client.py`, `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
+| `features/terminal/` | Terminal chat UX | `chat.py`, `commands.py`, `settings.py`, `session_actions.py`, `session_view.py`, `ui.py` |
 | `features/scaffold/` | Packaged Codex/Claude assets | `skills/`, `agents/`, `hooks/`, `teams/` |
 
 ## Compatibility Surfaces

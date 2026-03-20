@@ -52,6 +52,14 @@ The current implementation treats these Daytona docs as the normative baseline:
   - Daytona uses `DaytonaInterpreter`
 - `DaytonaWorkbenchChatAgent` remains only as a thin compatibility wrapper that
   configures the shared agent with Daytona-specific workspace/session metadata.
+- The Daytona sandbox layer is now split internally:
+  - `sandbox/__init__.py` preserves the stable `...daytona.sandbox` import surface
+  - `sandbox/runtime.py` owns workspace bootstrap and context staging
+  - `sandbox/session.py` owns the persistent REPL/session lifecycle
+  - `sandbox/protocol.py` owns framed callback/event transport types
+  - `sandbox/driver.py` holds the sandbox-side REPL driver source
+  - `sandbox/sdk.py` owns Daytona SDK loading, client builders, and async/sync compatibility helpers
+- Daytona volume browsing now lives in `volumes.py`, while `agent.py` and `state.py` replace the older top-level `chat_agent.py` / `chat_state.py` pair.
 
 ## Project-Specific Extensions
 

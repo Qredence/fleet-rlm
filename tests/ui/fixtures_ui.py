@@ -212,15 +212,15 @@ def patch_runtime_lm_loaders(
     delegate: object = None,
 ) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.api.main.get_planner_lm_from_env",
+        "fleet_rlm.api.bootstrap.get_planner_lm_from_env",
         lambda *args, **kwargs: planner,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.main.get_delegate_lm_from_env",
+        "fleet_rlm.api.bootstrap.get_delegate_lm_from_env",
         lambda *args, **kwargs: delegate,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.main._emit_posthog_startup_event",
+        "fleet_rlm.api.bootstrap.emit_posthog_startup_event",
         lambda *args, **kwargs: False,
     )
     monkeypatch.setattr(

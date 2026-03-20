@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -13,34 +12,42 @@ from typing import Any, cast
 import dspy
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from rich.console import Console
-from rich.table import Table
 
 from fleet_rlm import runners
 from fleet_rlm.core.agent.commands import COMMAND_DISPATCH
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.core.models import TraceMode
 from fleet_rlm.infrastructure.config.env import AppConfig
-from fleet_rlm.utils.modal import get_default_volume_name, load_modal_config
 
-from . import (
-    _badge,
-    _bottom_toolbar,
-    _FleetCompleter,
-    _history_path,
-    _normalize_trace_mode,
-    _print_banner,
-    _prompt_label,
-    handle_slash_command,
-    run_long_context,
-    run_settings,
-    settings_llm,
-    settings_modal,
+from .commands import _normalize_trace_mode, handle_slash_command
+from .session_actions import (
+    authorize_command as _authorize_command_impl,
+    check_secret_action as _check_secret_impl,
+    check_secret_key_action as _check_secret_key_impl,
+    print_command_palette_action as _print_command_palette_impl,
+    print_permissions as _print_permissions_impl,
+    print_status as _print_status_impl,
+    print_unknown_command_action as _print_unknown_command_impl,
+    run_long_context_action as _run_long_context_impl,
+    run_settings_action as _run_settings_impl,
+    settings_llm_action as _settings_llm_impl,
+    settings_modal_action as _settings_modal_impl,
+    show_shortcuts as _show_shortcuts_impl,
 )
+from .session_view import (
+    append_transcript as _append_transcript_impl,
+    bottom_toolbar as _bottom_toolbar_impl,
+    print_banner as _print_banner_impl,
+    print_error as _print_error_impl,
+    print_result as _print_result_impl,
+    print_warning as _print_warning_impl,
+    render_shell as _render_shell_impl,
+)
+from .ui import _FleetCompleter, _history_path, _prompt_label
 
 
 @dataclass(slots=True)
@@ -322,240 +329,77 @@ class _TerminalChatSession:
         return handle_slash_command(self, agent, line)
 
     def _run_settings(self, section: str) -> None:
-        """Run settings configuration (delegates to terminal.settings module)."""
-        run_settings(self, section)
+        """Run settings configuration."""
+        _run_settings_impl(self, section)
 
     def _settings_llm(self, *, model_only: bool) -> None:
-        """Configure LLM settings (delegates to terminal.settings module)."""
-        settings_llm(self, model_only=model_only)
+        """Configure LLM settings."""
+        _settings_llm_impl(self, model_only=model_only)
 
     def _settings_modal(self) -> None:
-        """Configure Modal credentials (delegates to terminal.settings module)."""
-        settings_modal(self)
+        """Configure Modal credentials."""
+        _settings_modal_impl(self)
 
     def _run_long_context(self, arg_text: str) -> None:
-        """Run long-context task (delegates to terminal.settings module)."""
-        run_long_context(self, arg_text)
+        """Run long-context task."""
+        _run_long_context_impl(self, arg_text)
 
     def _check_secret(self) -> None:
-        """Check Modal secret (delegates to terminal.settings module)."""
-        from . import check_secret
-
-        check_secret(self)
+        """Check Modal secret."""
+        _check_secret_impl(self)
 
     def _check_secret_key(self, *, key: str) -> None:
-        """Check Modal secret key (delegates to terminal.settings module)."""
-        from . import check_secret_key
-
-        check_secret_key(self, key=key)
+        """Check Modal secret key."""
+        _check_secret_key_impl(self, key=key)
 
     def _print_status(self, agent: Any) -> None:
         """Print the current session and agent status."""
-        import os
-
-        has_model = bool(os.environ.get("DSPY_LM_MODEL"))
-        has_api_key = bool(
-            os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
-        )
-        llm_ready = has_model and has_api_key
-
-        modal_cfg = load_modal_config()
-        modal_from_env = bool(
-            os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET")
-        )
-        modal_from_profile = bool(
-            modal_cfg.get("token_id") and modal_cfg.get("token_secret")
-        )
-        modal_ready = modal_from_env or modal_from_profile
-
-        docs_result = agent.list_documents()
-        docs_loaded = len(docs_result.get("documents", []))
-        active_alias = str(docs_result.get("active_alias", ""))
-
-        secret_check: dict[str, Any]
-        secret_ok = False
-        try:
-            secret_check = runners.check_secret_presence(secret_name=self.secret_name)
-            if secret_check:
-                secret_ok = all(bool(v) for v in secret_check.values())
-        except Exception as exc:  # pragma: no cover - runtime path
-            secret_check = {"error": str(exc)}
-
-        table = Table(title="fleet status", show_lines=True)
-        table.add_column("Component", style="bold")
-        table.add_column("State", style="bold")
-        table.add_column("Details")
-
-        table.add_row(
-            "Planner LM",
-            _badge(llm_ready),
-            f"model={'set' if has_model else 'missing'}, api_key={'set' if has_api_key else 'missing'}",
-        )
-        table.add_row(
-            "Modal credentials",
-            _badge(modal_ready),
-            f"env={'yes' if modal_from_env else 'no'}, profile={'yes' if modal_from_profile else 'no'}",
-        )
-        table.add_row(
-            f"Modal secret ({self.secret_name})",
-            _badge(secret_ok),
-            ", ".join(
-                f"{k}={'yes' if bool(v) else 'no'}" for k, v in secret_check.items()
-            ),
-        )
-        table.add_row(
-            "Volume",
-            "[green]configured[/]",
-            f"configured={self.volume_name}, default={get_default_volume_name()}",
-        )
-        table.add_row(
-            "Documents",
-            "[green]ok[/]",
-            f"loaded={docs_loaded}, active={active_alias or 'none'}",
-        )
-        allowed = sorted(
-            command
-            for command, policy in self.command_permissions.items()
-            if policy == "allow"
-        )
-        denied = sorted(
-            command
-            for command, policy in self.command_permissions.items()
-            if policy == "deny"
-        )
-        table.add_row(
-            "Permissions",
-            "[green]ok[/]",
-            f"allow_session={len(allowed)}, denied={len(denied)}",
-        )
-
-        self.console.print(table)
-        if self.trace_mode == "verbose":
-            self._print_result(
-                {
-                    "secret_check": secret_check,
-                    "session_id": self.session_id,
-                    "trace_mode": self.trace_mode,
-                    "permissions": dict(sorted(self.command_permissions.items())),
-                },
-                title="status payload",
-            )
+        _print_status_impl(self, agent)
 
     def _print_command_palette(self, agent: Any) -> bool:
-        """Print command palette (delegates to terminal.commands module)."""
-        from . import print_command_palette
-
-        return print_command_palette(self, agent)
+        """Print the command palette."""
+        return _print_command_palette_impl(self, agent)
 
     def _print_unknown_command(self, command: str) -> None:
-        """Print unknown command error (delegates to terminal.commands module)."""
-        from . import _print_unknown_command
-
-        _print_unknown_command(self, command)
+        """Print unknown command error."""
+        _print_unknown_command_impl(self, command)
 
     def _print_result(self, result: dict[str, Any], *, title: str) -> None:
         """Print a result dictionary as JSON."""
-        rendered = json.dumps(result, indent=2, sort_keys=True, default=str)
-        self._append_transcript("result", f"{title}\n{rendered}")
-        self.last_status = f"{title} complete"
-        self._render_shell()
+        _print_result_impl(self, result, title=title)
 
     def _print_banner(self, *, planner_ready: bool) -> None:
         """Print the startup banner."""
-        _print_banner(
-            console=self.console,
-            session_id=self.session_id,
-            model=self.config.agent.model,
-            planner_ready=planner_ready,
-            workspace=Path.cwd(),
-        )
+        _print_banner_impl(self, planner_ready=planner_ready)
 
-    def _bottom_toolbar(self) -> HTML:
+    def _bottom_toolbar(self):
         """Return the bottom toolbar HTML."""
-        return _bottom_toolbar(is_processing=self.is_processing)
+        return _bottom_toolbar_impl(self)
 
     def _print_warning(self, message: str) -> None:
         """Print a warning message."""
-        self._append_transcript("warning", message)
-        self.last_status = "warning"
-        self._render_shell()
+        _print_warning_impl(self, message)
 
     def _print_error(self, message: str) -> None:
         """Print an error message."""
-        self._append_transcript("error", message)
-        self.last_status = "error"
-        self._render_shell()
+        _print_error_impl(self, message)
 
     def _print_permissions(self) -> None:
         """Print the current permission policies."""
-        table = Table(title="command permissions")
-        table.add_column("Command", style="cyan")
-        table.add_column("Policy", style="bold")
-        if not self.command_permissions:
-            table.add_row("*", "ask (default)")
-        else:
-            for command, policy in sorted(self.command_permissions.items()):
-                table.add_row(command, policy)
-        self.console.print(table)
+        _print_permissions_impl(self)
 
     def _authorize_command(self, *, command: str) -> bool:
         """Authorize a command based on session policy."""
-        from . import _prompt_choice
-
-        policy = self.command_permissions.get(command, "ask")
-        if policy == "deny":
-            self._print_error(f"Command denied by session policy: {command}")
-            return False
-        if policy == "allow":
-            return True
-
-        choice = _prompt_choice(
-            f"Allow command `{command}`?",
-            ["allow once", "allow for session", "deny"],
-            allow_freeform=False,
-        )
-        if choice == "allow once":
-            return True
-        if choice == "allow for session":
-            self.command_permissions[command] = "allow"
-            return True
-        if choice == "deny":
-            self.command_permissions[command] = "deny"
-            self._print_warning(f"Denied command: {command}")
-            return False
-        return False
+        return _authorize_command_impl(self, command=command)
 
     def _show_shortcuts(self) -> None:
         """Show keyboard shortcuts."""
-        self._append_transcript(
-            "status",
-            (
-                "Shortcuts: / opens command palette - @ mentions files - "
-                "Ctrl+C interrupts - /trace compact|verbose|off"
-            ),
-        )
-        self._render_shell()
+        _show_shortcuts_impl(self)
 
     def _append_transcript(self, role: str, content: str) -> None:
         """Append a message to the transcript."""
-        text = content.strip()
-        if not text:
-            return
-        self.transcript.append((role, text))
-        if len(self.transcript) > 200:
-            self.transcript = self.transcript[-200:]
+        _append_transcript_impl(self, role, content)
 
     def _render_shell(self, *, draft_assistant: str = "") -> None:
         """Render the shell UI layout."""
-        from . import _render_shell
-
-        _render_shell(
-            console=self.console,
-            session_id=self.session_id,
-            model=self.config.agent.model,
-            trace_mode=self.trace_mode,
-            last_status=self.last_status,
-            transcript=self.transcript,
-            is_processing=self.is_processing,
-            draft_assistant=draft_assistant,
-        )
+        _render_shell_impl(self, draft_assistant=draft_assistant)

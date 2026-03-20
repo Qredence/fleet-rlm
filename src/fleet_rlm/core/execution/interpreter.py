@@ -27,7 +27,7 @@ from dspy.primitives import FinalOutput
 
 from fleet_rlm.core.execution.profiles import ExecutionProfile  # noqa: F811
 from fleet_rlm.core.tools.llm_tools import LLMQueryMixin
-from fleet_rlm.core.tools.volume_ops import VolumeOpsMixin
+from fleet_rlm.core.tools.modal_volumes import VolumeOpsMixin
 
 from .interpreter_events import emit_execution_event as _emit_execution_event_impl
 from .interpreter_events import summarize_code as _summarize_code_impl

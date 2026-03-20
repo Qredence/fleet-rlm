@@ -265,27 +265,27 @@ def _patch_daytona_sdk(
             return fake_sandbox
 
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.Daytona",
         _FakeDaytona,
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.DaytonaConfig",
         _FakeDaytonaConfig,
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.SessionExecuteRequest",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_daytona_client",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.build_daytona_client",
         lambda config=None: _FakeDaytona(config),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_async_daytona_client",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.build_async_daytona_client",
         lambda config=None: _FakeDaytona(config),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support._DAYTONA_IMPORT_ERROR",
         None,
     )
 
@@ -400,35 +400,35 @@ def test_daytona_runtime_mounts_workspace_volume_via_python_sdk(
             return fake_sandbox
 
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_daytona_client",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.build_daytona_client",
         lambda config=None: _FakeDaytonaClient(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_async_daytona_client",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.build_async_daytona_client",
         lambda config=None: _FakeDaytonaClient(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.Daytona",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.DaytonaConfig",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.SessionExecuteRequest",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.VolumeMount",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.VolumeMount",
         _FakeVolumeMount,
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.CreateSandboxFromSnapshotParams",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.CreateSandboxFromSnapshotParams",
         _FakeCreateSandboxFromSnapshotParams,
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support._DAYTONA_IMPORT_ERROR",
         None,
     )
 
@@ -755,7 +755,7 @@ def test_daytona_runtime_clones_branch(monkeypatch: pytest.MonkeyPatch):
     fake_sandbox = _FakeSandbox()
     _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox._list_remote_refs",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_runtime._list_remote_refs",
         lambda repo_url: {"main"},
     )
 
@@ -810,7 +810,7 @@ def test_resolve_clone_ref_uses_longest_matching_remote_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox._list_remote_refs",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_runtime._list_remote_refs",
         lambda repo_url: {"main", "release/2026-03", "feature/foo"},
     )
 
@@ -920,35 +920,35 @@ async def test_daytona_async_runtime_uses_workspace_volume_and_resume_path(
             return fake_sandbox
 
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.build_async_daytona_client",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.build_async_daytona_client",
         lambda config=None: _FakeAsyncDaytonaClient(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.Daytona",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.AsyncDaytona",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.AsyncDaytona",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.DaytonaConfig",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.SessionExecuteRequest",
         object(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.VolumeMount",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.VolumeMount",
         _FakeVolumeMount,
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.CreateSandboxFromSnapshotParams",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.CreateSandboxFromSnapshotParams",
         _FakeCreateSandboxFromSnapshotParams,
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support._DAYTONA_IMPORT_ERROR",
         None,
     )
 
@@ -1003,7 +1003,7 @@ def test_daytona_runtime_stages_document_context_without_repo(
     doc_path.write_bytes(b"%PDF-1.7 fake")
     _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.read_document_content",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_runtime.read_document_content",
         lambda path: (
             f"Extracted {path.name}",
             {
@@ -1046,7 +1046,7 @@ def test_daytona_runtime_surfaces_ocr_required_for_scanned_pdf_context(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.read_document_content",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_runtime.read_document_content",
         _raise_scanned_pdf,
     )
 
@@ -1067,17 +1067,17 @@ def test_daytona_runtime_raises_helpful_error_when_sdk_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.Daytona", None
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.Daytona", None
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.DaytonaConfig", None
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.DaytonaConfig", None
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.SessionExecuteRequest",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support.SessionExecuteRequest",
         None,
     )
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox._DAYTONA_IMPORT_ERROR",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_support._DAYTONA_IMPORT_ERROR",
         ImportError("missing daytona"),
     )
 
@@ -1106,7 +1106,7 @@ def test_daytona_runtime_stages_directory_context_with_skipped_files(
 
     _patch_daytona_sdk(monkeypatch, fake_sandbox=fake_sandbox)
     monkeypatch.setattr(
-        "fleet_rlm.infrastructure.providers.daytona.sandbox.read_document_content",
+        "fleet_rlm.infrastructure.providers.daytona.sandbox_runtime.read_document_content",
         _fake_read_document_content,
     )
 

@@ -14,7 +14,6 @@ import dspy
 from dotenv import load_dotenv
 
 from fleet_rlm.infrastructure.config._env_utils import env_bool as _env_bool
-from fleet_rlm.features.analytics import MlflowConfig, initialize_mlflow
 
 load_dotenv()  # Load .env from current working directory by default
 logger = logging.getLogger(__name__)
@@ -115,7 +114,6 @@ def _prepare_env(*, env_file: Path | None = None) -> None:
     load_dotenv(dotenv_path, override=app_env == "local")
     _guard_modal_shadowing()
     configure_posthog_analytics_from_env()
-    initialize_mlflow(MlflowConfig.from_env())
 
 
 def _guard_modal_shadowing() -> None:
