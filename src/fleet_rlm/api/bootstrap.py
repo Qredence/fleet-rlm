@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
 import subprocess
-import time
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -61,7 +62,7 @@ def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
     )
 
 
-def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
+async def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
     """Start a local MLflow tracking server if configured and not already running."""
     mlflow_cfg = MlflowConfig.from_env()
 
@@ -101,8 +102,8 @@ def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
     try:
         proc = subprocess.Popen(
             [
-                "uv",
-                "run",
+                sys.executable,
+                "-m",
                 "mlflow",
                 "server",
                 "--backend-store-uri",
@@ -115,7 +116,7 @@ def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
 
         max_attempts = 20
         for attempt in range(max_attempts):
-            time.sleep(1)
+            await asyncio.sleep(1)
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
             try:
@@ -141,6 +142,22 @@ def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
             max_attempts,
         )
         proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "MLflow server process (pid=%d) did not exit after terminate(); "
+                "sending kill()",
+                proc.pid,
+            )
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "MLflow server process (pid=%d) did not exit promptly after kill()",
+                    proc.pid,
+                )
         return None
     except Exception:
         logger.warning("Failed to start MLflow tracking server", exc_info=True)
@@ -240,7 +257,7 @@ async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> 
     global _MLFLOW_SERVER_PROCESS
 
     prime_runtime_env(cfg)
-    _MLFLOW_SERVER_PROCESS = start_mlflow_server(cfg)
+    _MLFLOW_SERVER_PROCESS = await start_mlflow_server(cfg)
     initialize_mlflow(MlflowConfig.from_env())
     await initialize_persistence(state, cfg)
     initialize_lms(state, cfg)
@@ -257,16 +274,21 @@ async def shutdown_server_state(state: ServerState) -> None:
     shutdown_posthog_client()
 
     if _MLFLOW_SERVER_PROCESS is not None:
+        proc = _MLFLOW_SERVER_PROCESS
+        _MLFLOW_SERVER_PROCESS = None
         logger.info(
             "Stopping MLflow tracking server (pid=%d)...",
-            _MLFLOW_SERVER_PROCESS.pid,
+            proc.pid,
         )
-        _MLFLOW_SERVER_PROCESS.terminate()
         try:
-            _MLFLOW_SERVER_PROCESS.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _MLFLOW_SERVER_PROCESS.kill()
-        _MLFLOW_SERVER_PROCESS = None
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        except ProcessLookupError:
+            logger.debug("MLflow tracking server process already exited")
 
     if state.db_manager is not None:
         await state.db_manager.dispose()

@@ -8,7 +8,7 @@ agent:
   # We use OC env interpolation to respect user's existing .env setup.
   model: ${oc.env:DSPY_LM_MODEL,openai/gemini-3-flash-preview}
   temperature: 1
-  delegate_model: ${oc.env:DSPY_DELEGATE_LM_MODEL,openai/gemini-3-flash-preview}
+  delegate_model: ${oc.env:DSPY_DELEGATE_LM_MODEL,null}
   delegate_max_tokens: 64000
   rlm_max_iterations: 30
   guardrail_mode: "off"
@@ -18,7 +18,7 @@ interpreter:
   image: "python:3.13-slim-bookworm"
   timeout: 900
   secrets: ["LITELLM"]
-  volume_name: ${oc.env:VOLUME_NAME,daytona-volume}
+  volume_name: ${oc.env:VOLUME_NAME,null}
   async_execute: true
 
 memory:
