@@ -39,7 +39,7 @@ def _run_async_compat(awaitable: Any) -> Any:
     def _runner() -> None:
         try:
             result.append(asyncio.run(awaitable))
-        except BaseException as exc:  # pragma: no cover - thread boundary
+        except Exception as exc:  # pragma: no cover - thread boundary
             error.append(exc)
 
     thread = threading.Thread(target=_runner, daemon=True)
