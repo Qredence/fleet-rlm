@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 FRAME_PREFIX = "__fleet_rlm_daytona__:"
 
@@ -20,11 +23,23 @@ def encode_frame(payload: dict[str, Any]) -> str:
 
 
 def decode_frame(line: str) -> dict[str, Any] | None:
-    """Decode a protocol frame if the prefix matches."""
+    """Decode a protocol frame if the prefix matches.
+
+    Returns ``None`` if the line does not carry the protocol prefix or if the
+    JSON payload after the prefix is malformed, so callers can skip bad lines
+    without interrupting the log-drain loop.
+    """
 
     if not line.startswith(FRAME_PREFIX):
         return None
-    return _coerce_mapping(json.loads(line[len(FRAME_PREFIX) :]))
+    try:
+        return _coerce_mapping(json.loads(line[len(FRAME_PREFIX) :]))
+    except json.JSONDecodeError:
+        logger.debug(
+            "decode_frame: malformed JSON in protocol line (ignored): %r",
+            line[:200],
+        )
+        return None
 
 
 @dataclass(slots=True)
