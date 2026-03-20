@@ -27,7 +27,7 @@ def _build_daytona_client():
 
 
 def _mount_daytona_volume(volume_name: str):
-    from daytona import CreateSandboxFromSnapshotParams, VolumeMount
+    from .sandbox.sdk import CreateSandboxFromSnapshotParams, VolumeMount
 
     client = _build_daytona_client()
     volume = client.volume.get(volume_name, create=True)
@@ -63,6 +63,16 @@ def list_daytona_volume_tree(
     """List the file tree of a Daytona Volume mounted into a temporary sandbox."""
     max_depth = max(1, min(max_depth, 10))
     root_path = root_path.rstrip("/") or "/"
+
+    # Reject path traversal attempts.
+    parts = PurePosixPath(root_path).parts
+    if ".." in parts:
+        raise ValueError(f"Path traversal not allowed: {root_path!r}")
+
+    # Verify the resolved actual path stays within the mounted volume.
+    actual_root = PurePosixPath(_daytona_actual_path(root_path))
+    if not str(actual_root).startswith(str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH)):
+        raise ValueError(f"Path resolves outside mounted volume: {root_path!r}")
 
     client, sandbox = _mount_daytona_volume(volume_name)
     counters: dict[str, int] = {"files": 0, "dirs": 0}
