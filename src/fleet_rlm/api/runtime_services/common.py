@@ -37,6 +37,7 @@ def sanitize_error(exc: Exception) -> str:
         os.environ.get("MODAL_TOKEN_SECRET"),
         os.environ.get("MODAL_TOKEN_ID"),
         os.environ.get("DAYTONA_API_KEY"),
+        os.environ.get("DAYTONA_API_KEY"),
     ]
 
     for value in sensitive_values:
