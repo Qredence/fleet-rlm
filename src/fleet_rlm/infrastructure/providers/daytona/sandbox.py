@@ -5,27 +5,27 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import os
 import re
 import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
-import logging
 from pathlib import Path, PurePosixPath
 from typing import Any, TypeVar, cast
-from collections.abc import Callable
 
 try:
     from daytona import (
         AsyncDaytona,
+        CreateSandboxFromSnapshotParams,
         Daytona,
         DaytonaConfig,
         SessionExecuteRequest,
         VolumeMount,
-        CreateSandboxFromSnapshotParams,
     )
 except ImportError as exc:  # pragma: no cover - exercised by runtime users
     AsyncDaytona = None  # type: ignore[assignment]
@@ -57,6 +57,8 @@ from .protocol import (
 from .sdk import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     build_async_daytona_client,
+)
+from .sdk import (
     build_daytona_client as _build_daytona_client,
 )
 from .types import (
@@ -133,7 +135,10 @@ class _SessionLogStreamState:
     stderr_snapshot: str = ""
     frame_buffer: str = ""
     stdout_offset: int = 0
+    mode: str = "polling"
     has_async_stream: bool = False
+    task: asyncio.Task[None] | None = None
+    owning_loop: asyncio.AbstractEventLoop | None = None
     stream_error: str | None = None
     closed: bool = False
 
@@ -553,10 +558,22 @@ class DaytonaSandboxSession:
     def find_files(self, path: str = ".", pattern: str = "*") -> list[str]:
         return _run_async_compat(self.afind_files(path, pattern))
 
-    async def astart_driver(self, *, timeout: float = 30.0) -> None:
+    async def astart_driver(
+        self,
+        *,
+        timeout: float = 30.0,
+        prefer_async_log_stream: bool = True,
+    ) -> None:
         """Start the persistent sandbox-side driver once per sandbox."""
 
         if self._driver_started:
+            if self._driver_command_id is not None:
+                self._driver_log_stream = self._open_log_stream(
+                    session_id=self._driver_session_id,
+                    command_id=self._driver_command_id,
+                    prefer_async_log_stream=prefer_async_log_stream,
+                    existing=self._driver_log_stream,
+                )
             return
 
         started = time.perf_counter()
@@ -580,6 +597,7 @@ class DaytonaSandboxSession:
             self._driver_log_stream = self._open_log_stream(
                 session_id=self._driver_session_id,
                 command_id=self._driver_command_id,
+                prefer_async_log_stream=prefer_async_log_stream,
             )
             await self._aread_until(
                 predicate=lambda frame: frame.get("type") == DriverReady().type,
@@ -590,7 +608,7 @@ class DaytonaSandboxSession:
             self._driver_started = False
             self._stdout_offset = 0
             self._frame_buffer = ""
-            self._close_log_stream(self._driver_log_stream)
+            await self._aclose_log_stream(self._driver_log_stream)
             self._driver_log_stream = None
             raise DaytonaDiagnosticError(
                 f"Daytona driver handshake failure: {exc}",
@@ -603,7 +621,9 @@ class DaytonaSandboxSession:
             )
 
     def start_driver(self, *, timeout: float = 30.0) -> None:
-        _run_async_compat(self.astart_driver(timeout=timeout))
+        _run_async_compat(
+            self.astart_driver(timeout=timeout, prefer_async_log_stream=False)
+        )
 
     async def aexecute_code(
         self,
@@ -617,10 +637,14 @@ class DaytonaSandboxSession:
         execution_profile: str | None = None,
         cancel_check: Callable[[], bool] | None = None,
         progress_handler: Callable[[ExecutionEventFrame], None] | None = None,
+        prefer_async_log_stream: bool = True,
     ) -> ExecutionResponse:
         """Execute one code block through the persistent sandbox-side driver."""
 
-        await self.astart_driver(timeout=timeout)
+        await self.astart_driver(
+            timeout=timeout,
+            prefer_async_log_stream=prefer_async_log_stream,
+        )
         execute_started = time.perf_counter()
         request = ExecutionRequest(
             request_id=uuid.uuid4().hex,
@@ -690,6 +714,7 @@ class DaytonaSandboxSession:
                 execution_profile=execution_profile,
                 cancel_check=cancel_check,
                 progress_handler=progress_handler,
+                prefer_async_log_stream=False,
             )
         )
 
@@ -718,7 +743,7 @@ class DaytonaSandboxSession:
             try:
                 await self._aprocess_delete_session(self._driver_session_id)
             finally:
-                self._close_log_stream(self._driver_log_stream)
+                await self._aclose_log_stream(self._driver_log_stream)
                 self._driver_log_stream = None
                 self._driver_command_id = None
                 self._driver_started = False
@@ -914,18 +939,39 @@ class DaytonaSandboxSession:
         return _run_async_compat(self._adrain_frames())
 
     def _open_log_stream(
-        self, *, session_id: str, command_id: str
+        self,
+        *,
+        session_id: str,
+        command_id: str,
+        prefer_async_log_stream: bool,
+        existing: _SessionLogStreamState | None = None,
     ) -> _SessionLogStreamState:
-        state = _SessionLogStreamState(session_id=session_id, command_id=command_id)
+        state = existing or _SessionLogStreamState(
+            session_id=session_id,
+            command_id=command_id,
+        )
+        state.session_id = session_id
+        state.command_id = command_id
         stream_logs = getattr(
             self.sandbox.process, "get_session_command_logs_async", None
         )
-        if not callable(stream_logs):
+        if (
+            not prefer_async_log_stream
+            or not callable(stream_logs)
+            or state.has_async_stream
+        ):
             return state
 
-        state.has_async_stream = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return state
 
-        def _stream_logs() -> None:
+        state.mode = "async_task"
+        state.has_async_stream = True
+        state.owning_loop = loop
+
+        async def _stream_logs() -> None:
             try:
                 result = stream_logs(
                     session_id,
@@ -933,25 +979,58 @@ class DaytonaSandboxSession:
                     lambda chunk: self._append_log_stdout(state, chunk),
                     lambda chunk: self._append_log_stderr(state, chunk),
                 )
-                if asyncio.iscoroutine(result):
-                    asyncio.run(result)
+                await _maybe_await(result)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 with state.condition:
                     if not state.closed:
+                        state.mode = "polling"
                         state.has_async_stream = False
+                        state.task = None
+                        state.owning_loop = None
                         state.stream_error = str(exc)
                     state.condition.notify_all()
+            else:
+                with state.condition:
+                    if not state.closed:
+                        state.mode = "polling"
+                        state.has_async_stream = False
+                        state.task = None
+                        state.owning_loop = None
+                    state.condition.notify_all()
+            finally:
+                with state.condition:
+                    if state.task is not None and state.task.done():
+                        state.task = None
 
-        threading.Thread(target=_stream_logs, daemon=True).start()
+        state.task = loop.create_task(_stream_logs())
         return state
 
-    @staticmethod
-    def _close_log_stream(state: _SessionLogStreamState | None) -> None:
+    async def _aclose_log_stream(self, state: _SessionLogStreamState | None) -> None:
         if state is None:
             return
+        task: asyncio.Task[None] | None = None
         with state.condition:
             state.closed = True
+            state.has_async_stream = False
+            task = state.task
+            state.task = None
+            state.owning_loop = None
             state.condition.notify_all()
+        if task is None:
+            return
+        task_loop = task.get_loop()
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if task_loop is current_loop:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+            return
+        task_loop.call_soon_threadsafe(task.cancel)
 
     def _append_log_stdout(
         self, state: _SessionLogStreamState, chunk: str | bytes | None
@@ -1021,7 +1100,7 @@ class DaytonaSandboxSession:
     ) -> list[dict[str, Any]]:
         if state is None:
             return []
-        if not state.has_async_stream:
+        if state.mode != "async_task":
             await self._arefresh_log_snapshot(state)
         with state.condition:
             return self._decode_log_frames_locked(state)

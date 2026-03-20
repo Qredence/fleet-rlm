@@ -608,7 +608,9 @@ async def test_daytona_sandbox_execute_code_forwards_progress_events():
         ref="main",
         workspace_path="/workdir/workspace/repo",
     )
-    session.astart_driver = lambda timeout=1.0: asyncio.sleep(0)
+    session.astart_driver = lambda timeout=1.0, prefer_async_log_stream=True: (
+        asyncio.sleep(0)
+    )
     sent_frames: list[dict[str, object]] = []
     session._asend_frame = lambda payload: asyncio.sleep(
         0, result=sent_frames.append(payload)
@@ -645,15 +647,25 @@ async def test_daytona_sandbox_execute_code_forwards_progress_events():
     assert emitted[0].text == "loading repository\n"
 
 
-def test_daytona_sandbox_prefers_async_log_stream_when_available():
+@pytest.mark.asyncio
+async def test_daytona_async_log_stream_stays_on_request_loop():
     sandbox = _FakeSandbox()
+    stream_loop_ids: list[int] = []
+    send_loop_ids: list[int] = []
+
+    original_send = sandbox.process.send_session_command_input
+
+    async def _send_input(session_id: str, command_id: str, data: str) -> None:
+        send_loop_ids.append(id(asyncio.get_running_loop()))
+        original_send(session_id, command_id, data)
 
     async def _stream_logs(session_id: str, command_id: str, on_stdout, on_stderr):
         del session_id, on_stderr
+        stream_loop_ids.append(id(asyncio.get_running_loop()))
         driver = sandbox.process.driver_by_command[command_id]
         seen = 0
         idle_rounds = 0
-        while idle_rounds < 200:
+        while idle_rounds < 5000:
             current = driver.stdout
             if len(current) > seen:
                 on_stdout(current[seen:])
@@ -665,6 +677,42 @@ def test_daytona_sandbox_prefers_async_log_stream_when_available():
                 break
             await asyncio.sleep(0.001)
 
+    sandbox.process.send_session_command_input = _send_input
+    sandbox.process.get_session_command_logs_async = _stream_logs
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        workspace_path="/workdir/workspace/repo",
+    )
+
+    await session.astart_driver(timeout=1.0)
+    response = await session.aexecute_code(
+        code='SUBMIT(summary="hello from async logs")',
+        callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
+        timeout=1.0,
+        submit_schema=[{"name": "summary", "type": "str | None"}],
+    )
+    await session.aclose_driver(timeout=1.0)
+
+    assert response.final_artifact is not None
+    assert response.final_artifact["value"] == {"summary": "hello from async logs"}
+    assert stream_loop_ids
+    assert send_loop_ids
+    assert set(stream_loop_ids) == set(send_loop_ids)
+    assert len(set(stream_loop_ids)) == 1
+    assert sandbox.process.get_logs_calls <= 1
+
+
+def test_daytona_sync_wrappers_poll_logs_even_when_async_stream_exists():
+    sandbox = _FakeSandbox()
+    async_stream_calls = 0
+
+    async def _stream_logs(session_id: str, command_id: str, on_stdout, on_stderr):
+        del session_id, command_id, on_stdout, on_stderr
+        nonlocal async_stream_calls
+        async_stream_calls += 1
+
     sandbox.process.get_session_command_logs_async = _stream_logs
     session = DaytonaSandboxSession(
         sandbox=sandbox,
@@ -675,7 +723,7 @@ def test_daytona_sandbox_prefers_async_log_stream_when_available():
 
     session.start_driver(timeout=1.0)
     response = session.execute_code(
-        code='SUBMIT(summary="hello from async logs")',
+        code='SUBMIT(summary="hello from polled logs")',
         callback_handler=lambda request: pytest.fail(f"unexpected callback: {request}"),
         timeout=1.0,
         submit_schema=[{"name": "summary", "type": "str | None"}],
@@ -683,8 +731,9 @@ def test_daytona_sandbox_prefers_async_log_stream_when_available():
     session.close_driver(timeout=1.0)
 
     assert response.final_artifact is not None
-    assert response.final_artifact["value"] == {"summary": "hello from async logs"}
-    assert sandbox.process.get_logs_calls == 0
+    assert response.final_artifact["value"] == {"summary": "hello from polled logs"}
+    assert async_stream_calls == 0
+    assert sandbox.process.get_logs_calls > 0
 
 
 def test_daytona_sandbox_close_driver_cleans_up_process_session():
