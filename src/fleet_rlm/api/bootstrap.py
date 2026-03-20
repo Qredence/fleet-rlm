@@ -269,12 +269,10 @@ async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> 
 
     # Store the MLflow server process handle on the server state so it can be
     # accessed during shutdown without relying on a module-level global.
-    setattr(state, "mlflow_server_process", mlflow_proc)
-
-    initialize_mlflow(mlflow_cfg)
-    await initialize_persistence(state, cfg)
-    initialize_lms(state, cfg)
-    emit_posthog_startup_event(cfg)
+    try:
+        initialize_mlflow(MlflowConfig.from_env())
+    except Exception:
+        logger.warning("Failed to initialize MLflow", exc_info=True)
 
 
 async def shutdown_server_state(state: ServerState) -> None:
